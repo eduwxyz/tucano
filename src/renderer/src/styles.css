@@ -3292,6 +3292,12 @@ body.is-resizing webview {
   color: var(--danger);
   background: var(--danger-soft);
 }
+/* The same trash in the thread's own header, beside the summary and close buttons: in the row, always
+   visible, and armed by the same two presses. */
+.msg__delete--head {
+  position: static;
+  opacity: 1;
+}
 .msg:hover .msg__delete,
 .msg__delete:focus-visible {
   opacity: 1;

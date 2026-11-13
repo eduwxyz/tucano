@@ -100,5 +100,37 @@ console.log('agent replies left after it:', await win.locator('.msg--agent').cou
 await shot('06-nothing-of-it-came-back')
 await settle()
 
+// The thread's own header carries one too, beside close: the same two presses, and the panel closes
+// with the session it deleted.
+await send('e a thread do plano?')
+await settle()
+const tail = win.locator('.msg--agent').last()
+const tailId = await tail.getAttribute('data-id')
+await tail.hover()
+await win.waitForTimeout(200)
+await tail.locator('.msg__reply').first().click()
+await win.waitForTimeout(600)
+const head = win.locator('.side-panel--thread .side-panel__head .msg__delete')
+console.log('trash in the thread header:', await head.count(), 'title:', await head.getAttribute('title'))
+const headSpot = await win.evaluate(() => {
+  const b = (el) => {
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+  }
+  const h = document.querySelector('.side-panel--thread .side-panel__head')
+  return { trash: b(h?.querySelector('.msg__delete')), close: b(h?.querySelector('[aria-label="Fechar a thread"]')) }
+})
+console.log('header trash:', JSON.stringify(headSpot.trash), 'close:', JSON.stringify(headSpot.close))
+await shot('07-trash-in-the-thread-header')
+await head.click()
+await win.waitForTimeout(250)
+await shot('08-armed-in-the-header')
+console.log('armed in the header:', await head.getAttribute('title'))
+await head.click()
+await win.waitForTimeout(900)
+console.log('the reply went with the header press:', (await win.locator(`[data-id="${tailId}"]`).count()) === 0 ? 'yes' : 'no')
+console.log('the panel closed with it:', (await win.locator('.side-panel--thread').count()) === 0 ? 'yes' : 'no')
+await shot('09-panel-closed-with-the-session')
 console.log('page errors:', errors.length ? errors : 'none')
 await app.close()

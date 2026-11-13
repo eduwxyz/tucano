@@ -14,6 +14,7 @@ Object.assign(window, { innerWidth: 1280, innerHeight: 800 })
 Object.assign(globalThis, { ResizeObserver: class { observe(): void {} unobserve(): void {} disconnect(): void {} } })
 
 const deleted: string[] = []
+let closed = 0
 let fake: State
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
@@ -21,11 +22,12 @@ vi.mock('../src/renderer/src/store', async (original) => {
     ...real,
     useStore: <T,>(select: (s: State) => T): T => select(fake),
     deleteMessage: (id: string): void => void deleted.push(id),
+    openPanel: (): void => void (closed += 1),
     stopRun: (): void => {}
   }
 })
 const { getState } = await import('../src/renderer/src/store')
-const { MessageList } = await import('../src/renderer/src/components/Conversation')
+const { MessageList, DeleteSession } = await import('../src/renderer/src/components/Conversation')
 const { createRoot } = await import('react-dom/client')
 
 const said = (id: string, text: string, at = 1): Message => ({ id, conversationId: 'dm', author: { kind: 'person', id: 'ana' }, text, at })
@@ -54,6 +56,7 @@ const trash = (): HTMLElement | null => document.querySelector('.msg__delete')
 
 beforeEach(() => {
   deleted.length = 0
+  closed = 0
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(() => act(() => root.unmount()))
@@ -104,5 +107,19 @@ describe('the trash that deletes a session', () => {
   it('a prompt of mine has none either: only a reply is a session', async () => {
     await render([said('m1', 'corrige o login')])
     expect(trash()).toBeNull()
+  })
+
+  it("sits in the thread's own header, beside close, and takes the panel away with the session", async () => {
+    await act(async () => root.render(<DeleteSession message={reply('r1')} where="head" />))
+    const button = trash()!
+    expect(button.className).toContain('msg__delete--head')
+    expect(button.className).not.toContain('icon-btn--sm') // the header's own size, beside close
+    expect(button.getAttribute('title')).toBe('Apagar esta sessão')
+    await act(async () => button.click())
+    expect(deleted).toEqual([]) // the first press only arms it
+    expect(closed).toBe(0)
+    await act(async () => button.click())
+    expect(deleted).toEqual(['r1'])
+    expect(closed).toBe(1) // nothing is left to read in the panel
   })
 })

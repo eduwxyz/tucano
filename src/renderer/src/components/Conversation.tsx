@@ -676,7 +676,10 @@ const ARM_MS = 4000
 // the reply, with the thread it started and the answers it got there. A press anywhere else, Esc, or
 // four seconds without the second press disarms it. A reply still at work goes too: the press stops
 // it first, and the words it had written go with it, so the glyph says so.
-function DeleteSession({ message }: { message: Message }): ReactNode {
+// `where`: at the corner of a reply ('corner'), or in the thread's own header ('head'), where it sits
+// in the row beside the summary and close buttons and the panel closes with the session it deleted.
+export function DeleteSession({ message, where = 'corner' }: { message: Message; where?: 'corner' | 'head' }): ReactNode {
+  const head = where === 'head'
   const [armed, setArmed] = useState(false)
   const at = message.run?.status === 'working' // stopping is part of it, so say so before the second press
   useEffect(() => {
@@ -696,9 +699,18 @@ function DeleteSession({ message }: { message: Message }): ReactNode {
       window.removeEventListener('keydown', escape)
     }
   }, [armed])
+  const press = (): void => {
+    if (!armed) {
+      setArmed(true)
+      return
+    }
+    deleteMessage(message.id)
+    // The header's trash takes the panel's own session away: nothing is left to read there.
+    if (head) openPanel(null)
+  }
   return (
     <button
-      className={`icon-btn icon-btn--sm msg__delete ${armed ? 'is-armed' : ''}`}
+      className={`icon-btn ${head ? 'msg__delete--head' : 'icon-btn--sm'} msg__delete ${armed ? 'is-armed' : ''}`}
       title={
         armed
           ? at
@@ -708,9 +720,9 @@ function DeleteSession({ message }: { message: Message }): ReactNode {
       }
       aria-label={armed ? L('Confirmar: apagar a sessão', 'Confirm: delete the session') : L('Apagar esta sessão', 'Delete this session')}
       aria-pressed={armed}
-      onClick={() => (armed ? deleteMessage(message.id) : setArmed(true))}
+      onClick={press}
     >
-      <Icon name="trash" size={13} />
+      <Icon name="trash" size={head ? 14 : 13} />
     </button>
   )
 }
@@ -849,6 +861,10 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
             <Icon name="book" size={14} />
           </button>
         )}
+        {/* The session this thread hangs off can go from here too, beside the button that closes it:
+            one press arms it, the second deletes the reply and the thread with it, and the panel
+            closes because there is nothing left in it. */}
+        {root && root.author.kind === 'agent' && root.run && <DeleteSession message={root} where="head" />}
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>
