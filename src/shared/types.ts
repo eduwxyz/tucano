@@ -463,6 +463,7 @@ export interface Settings {
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own,
   dmOrder?: string[] // the person's order for the direct messages, by conversation id
   agentOrder?: string[] // the person's order for the agents, by agent id
+  navOrder?: string[] // the person's order for the sidebar's own screens (Approvals, Wiki…), by row id
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become

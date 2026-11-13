@@ -1,0 +1,115 @@
+// The sidebar's own screens (Approvals, Memory, Wiki…) sit in the order the person gave them: the
+// same hold, drop and Alt+arrow the lists under them have, kept as `navOrder` in the settings.
+import { parseHTML } from 'linkedom'
+import { act } from 'react'
+import type { Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Agent, Person } from '../src/shared/types'
+import type { State } from '../src/renderer/src/store'
+
+const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
+Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
+Object.assign(window, { tucano: {} })
+vi.mock('open-bot-avatar/dom', () => ({ mountAvatar: () => new Proxy({}, { get: () => () => {} }) }))
+
+let fake: State
+const saved: Record<string, unknown>[] = []
+vi.mock('../src/renderer/src/store', async (original) => {
+  const real = await original<typeof import('../src/renderer/src/store')>()
+  return {
+    ...real,
+    useStore: <T,>(select: (s: State) => T): T => select(fake),
+    updateSettings: (patch: Record<string, unknown>): void => void saved.push(patch)
+  }
+})
+const { getState } = await import('../src/renderer/src/store')
+const { createRoot } = await import('react-dom/client')
+const { Sidebar } = await import('../src/renderer/src/components/Sidebar')
+
+const ana: Person = { id: 'ana', name: 'Ana', role: 'owner', about: '' }
+const agent = (p: Partial<Agent>): Agent => ({ id: 'a1', name: 'Lia', handle: 'lia', role: 'Pesquisadora', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...p })
+
+type Setup = Partial<Omit<State, 'settings'>> & { settings?: Partial<State['settings']> }
+
+let root: Root
+const render = async (s: Setup = {}): Promise<void> => {
+  const base = getState()
+  fake = { ...base, ready: true, people: [ana], you: 'ana', ...s, settings: { ...base.settings, ...s.settings } } as State
+  await act(async () => root.render(<Sidebar />))
+}
+
+// The screens above the lists, in the order the sidebar draws them, and one of their buttons.
+const navOrder = (): string[] => [...document.querySelectorAll('.sidebar__scroll > [data-order-group="nav"]')].map((x) => x.getAttribute('data-order-id')!)
+const navButton = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-order-group="nav"][data-order-id="${id}"] .nav-item`)!
+
+// linkedom has no KeyboardEvent: a plain event carrying what React reads is the same shape a browser gives.
+const key = (node: HTMLElement, k: string, alt = true): void => {
+  const ev = new window.Event('keydown', { bubbles: true, cancelable: true })
+  for (const [name, value] of Object.entries({ key: k, altKey: alt })) Object.defineProperty(ev, name, { value })
+  act(() => {
+    node.dispatchEvent(ev)
+  })
+}
+
+// Two agents (so "Team" shows) and an owner (so "Report" does): every screen in the list.
+const team = { agents: [agent({}), agent({ id: 'a2', name: 'Rui', handle: 'rui' })] }
+
+beforeEach(() => (root = createRoot(document.getElementById('root')!)))
+afterEach(async () => {
+  await act(async () => root.unmount())
+  saved.length = 0
+  vi.clearAllMocks()
+})
+
+describe("the sidebar's own screens", () => {
+  it('stay in the core order until the person moves one', async () => {
+    await render(team)
+    expect(navOrder()).toEqual(['approvals', 'memory', 'wiki', 'routines', 'skills', 'org', 'report'])
+  })
+
+  it('follow in the saved order, and show a screen it does not name last', async () => {
+    await render({ ...team, settings: { navOrder: ['wiki', 'approvals'] } })
+    expect(navOrder()).toEqual(['wiki', 'approvals', 'memory', 'routines', 'skills', 'org', 'report'])
+  })
+
+  it('forget a screen the order names that is not there', async () => {
+    await render({ ...team, settings: { navOrder: ['wiki', 'gone', 'approvals'] } })
+    expect(navOrder()).toEqual(['wiki', 'approvals', 'memory', 'routines', 'skills', 'org', 'report'])
+  })
+
+  it('move one place down with Alt+ArrowDown, saving the list as it is shown', async () => {
+    await render(team)
+    key(navButton('wiki'), 'ArrowDown')
+    expect(saved).toEqual([{ navOrder: ['approvals', 'memory', 'routines', 'wiki', 'skills', 'org', 'report'] }])
+  })
+
+  it('move one place up with Alt+ArrowUp, from the saved order, not the core one', async () => {
+    await render({ ...team, settings: { navOrder: ['wiki', 'approvals'] } })
+    key(navButton('approvals'), 'ArrowUp')
+    expect(saved).toEqual([{ navOrder: ['approvals', 'wiki', 'memory', 'routines', 'skills', 'org', 'report'] }])
+  })
+
+  it('stay put at the ends of the list', async () => {
+    await render(team)
+    key(navButton('approvals'), 'ArrowUp')
+    key(navButton('report'), 'ArrowDown')
+    expect(saved).toEqual([
+      { navOrder: ['approvals', 'memory', 'wiki', 'routines', 'skills', 'org', 'report'] },
+      { navOrder: ['approvals', 'memory', 'wiki', 'routines', 'skills', 'org', 'report'] }
+    ])
+  })
+
+  it('leave the row where it is on an arrow without Alt', async () => {
+    await render(team)
+    key(navButton('wiki'), 'ArrowDown', false)
+    expect(saved).toEqual([])
+  })
+
+  it('keep the Tuca and the foot where they are: only the screens between them move', async () => {
+    await render({ ...team, settings: { navOrder: ['report', 'org'] } })
+    const scroll = document.querySelector('.sidebar__scroll')!
+    expect(scroll.firstElementChild!.textContent).toContain('Tuca')
+    expect(navOrder()).toEqual(['report', 'org', 'approvals', 'memory', 'wiki', 'routines', 'skills'])
+    expect(document.querySelector('.sidebar__foot .nav-item')).not.toBeNull()
+  })
+})

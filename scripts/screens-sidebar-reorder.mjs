@@ -41,8 +41,35 @@ try {
   assert.notDeepEqual(after, before, 'the drop must change the order')
   assert.equal(await win.locator('.agent-form').count(), 1, 'a drop must keep the agent page open')
   await win.screenshot({ path: join(output, '03-after-drop.png') })
+
+  // The screens above the lists (Approvals, Wiki…) move the same way: hold one, drop it on the one
+  // above, and the order it lands in is what the workspace keeps after a reload.
+  const navRows = win.locator('[data-order-group="nav"]')
+  assert.ok((await navRows.count()) >= 2, 'need two screens to reorder')
+  const navBefore = await navRows.evaluateAll((els) => els.map((el) => el.dataset.orderId))
+  const picked = await navRows.nth(1).boundingBox()
+  const landed = await navRows.nth(0).boundingBox()
+  assert.ok(picked && landed)
+  await win.mouse.move(picked.x + picked.width / 2, picked.y + picked.height / 2)
+  await win.mouse.down()
+  await win.waitForTimeout(450)
+  await win.mouse.move(landed.x + landed.width / 2, landed.y + landed.height / 2)
+  await win.waitForTimeout(150)
+  await win.screenshot({ path: join(output, '04-hold-a-screen.png') })
+  await win.mouse.up()
+  await win.waitForTimeout(250)
+  const navAfter = await navRows.evaluateAll((els) => els.map((el) => el.dataset.orderId))
+  assert.equal(navAfter[0], navBefore[1], 'the drop must move the screen to the top')
+  assert.equal(await win.locator('.agent-form').count(), 1, 'a drop must keep the page open')
+  await win.screenshot({ path: join(output, '05-screens-after-drop.png') })
+
+  await win.reload()
+  await win.waitForSelector('.sidebar')
+  const kept = await win.locator('[data-order-group="nav"]').evaluateAll((els) => els.map((el) => el.dataset.orderId))
+  assert.deepEqual(kept, navAfter, 'the screens must come back in the order they were left')
+
   assert.deepEqual(errors, [])
-  console.log(JSON.stringify({ data, before, after, errors }))
+  console.log(JSON.stringify({ data, before, after, navBefore, navAfter, errors }))
 } finally {
   await app.close()
 }

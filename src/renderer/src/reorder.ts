@@ -16,6 +16,7 @@ export interface HoldReorder {
   // A row that can be picked up and that a drop lands on (or before).
   rowProps: (id: string) => {
     'data-order-id': string
+    'data-order-group'?: string
     onPointerDown: (e: ReactPointerEvent) => void
     onPointerMove: (e: ReactPointerEvent) => void
     onPointerUp: () => void
@@ -25,10 +26,10 @@ export interface HoldReorder {
     style?: { touchAction: 'none' }
   }
   // A place that only receives a drop: a section's end, a group's name. Nothing to pick up there.
-  zoneProps: (id: string) => { 'data-order-id': string }
+  zoneProps: (id: string) => { 'data-order-id': string; 'data-order-group'?: string }
 }
 
-export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, before: string) => void; onNudge: (id: string, by: -1 | 1) => void }): HoldReorder {
+export function useHoldReorder({ onDrop, onNudge, group }: { onDrop: (id: string, before: string) => void; onNudge: (id: string, by: -1 | 1) => void; group?: string }): HoldReorder {
   const [picked, setPicked] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -59,13 +60,20 @@ export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, befor
   }, [])
 
   // The row under the pointer, by its own id: geometry, so it still works with the capture taken.
-  const rowAt = (x: number, y: number): string | null => document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-order-id]')?.dataset.orderId ?? null
+  const rowAt = (x: number, y: number): string | null => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-order-id]')
+    // A row of another list is not a place to drop: each list keeps its own order, so a drop that
+    // lands outside the one being carried goes nowhere rather than to the end of the wrong list.
+    if (el && group && el.dataset.orderGroup !== group) return null
+    return el?.dataset.orderId ?? null
+  }
 
   return {
     picked,
     over,
     rowProps: (id) => ({
       'data-order-id': id,
+      ...(group ? { 'data-order-group': group } : {}),
       // Only while a row is being carried: a permanent touch-action would stop the list scrolling.
       ...(picked ? { style: { touchAction: 'none' as const } } : {}),
       onPointerDown: (e) => {
@@ -120,6 +128,6 @@ export function useHoldReorder({ onDrop, onNudge }: { onDrop: (id: string, befor
         e.stopPropagation()
       }
     }),
-    zoneProps: (id) => ({ 'data-order-id': id })
+    zoneProps: (id) => ({ 'data-order-id': id, ...(group ? { 'data-order-group': group } : {}) })
   }
 }

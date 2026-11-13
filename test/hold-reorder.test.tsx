@@ -130,3 +130,58 @@ describe('picking a row up to move it', () => {
     expect(after.defaultPrevented).toBe(true)
   })
 })
+
+// The sidebar's screens and the lists under them each keep their own order: a row carried in one
+// list must not be dropped onto a row of another, or a stray drop sends it to the end of a list it
+// never belonged to.
+function Lists(): React.ReactNode {
+  const nav = useHoldReorder({ group: 'nav', onDrop: (id, before) => store.drops.push(`nav:${id}->${before}`), onNudge: () => {} })
+  const channels = useHoldReorder({ group: 'channels', onDrop: (id, before) => store.drops.push(`ch:${id}->${before}`), onNudge: () => {} })
+  return (
+    <div>
+      {['wiki', 'approvals'].map((id) => (
+        <div key={id} {...nav.rowProps(id)}>
+          <button>{id}</button>
+        </div>
+      ))}
+      <div {...channels.rowProps('geral')}>
+        <button>geral</button>
+      </div>
+    </div>
+  )
+}
+
+describe('a list of its own', () => {
+  // The row the pointer is over, as linkedom cannot lay anything out.
+  const over = (selector: string): (() => void) => {
+    const before = document.elementFromPoint
+    Object.assign(document, { elementFromPoint: () => container.querySelector(selector) })
+    return () => Object.assign(document, { elementFromPoint: before })
+  }
+  const carry = async (id: string): Promise<void> => {
+    press(id, 'pointerdown')
+    await act(async () => new Promise((ok) => setTimeout(ok, 420)))
+  }
+
+  beforeEach(async () => {
+    await act(async () => root.render(<Lists />))
+  })
+
+  it('moves a row onto another row of the same list', async () => {
+    await carry('wiki')
+    const restore = over('[data-order-id="approvals"] button')
+    press('wiki', 'pointermove')
+    press('wiki', 'pointerup')
+    restore()
+    expect(store.drops).toEqual(['nav:wiki->approvals'])
+  })
+
+  it('does nothing when the row is let go over a row of another list', async () => {
+    await carry('wiki')
+    const restore = over('[data-order-id="geral"] button')
+    press('wiki', 'pointermove')
+    press('wiki', 'pointerup')
+    restore()
+    expect(store.drops).toEqual([])
+  })
+})

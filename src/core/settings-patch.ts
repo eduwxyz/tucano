@@ -16,6 +16,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   orgLayout: { kind: 'object', max: 100_000, nullable: true },
   dmOrder: { kind: 'array', max: 100_000, nullable: true },
   agentOrder: { kind: 'array', max: 100_000, nullable: true },
+  navOrder: { kind: 'array', max: 100_000, nullable: true },
   browserJev: { kind: 'boolean', max: 10, nullable: true },
   memoryLearning: { kind: ['approve', 'auto', 'off'], max: 20 },
   wikiCapture: { kind: 'boolean', max: 10, nullable: true },

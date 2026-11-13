@@ -189,12 +189,32 @@ export function Sidebar(): ReactNode {
   const saveAgentOrder = (next: string[]): void => updateSettings({ agentOrder: next })
   // Press and hold a row to pick it up, then drop it where it goes; Alt+arrows move the row the
   // keyboard is on. Both start from the list as it is shown, so what's on screen is what's saved.
-  const dmsSort = useHoldReorder({ onDrop: (id, before) => saveDmOrder(moveBefore(dms, settings.dmOrder, id, before)), onNudge: (id, by) => saveDmOrder(nudge(dms, settings.dmOrder, id, by)) })
-  const agentsSort = useHoldReorder({ onDrop: (id, before) => saveAgentOrder(moveBefore(teamAgents, settings.agentOrder, id, before)), onNudge: (id, by) => saveAgentOrder(nudge(teamAgents, settings.agentOrder, id, by)) })
+  const dmsSort = useHoldReorder({ group: 'dms', onDrop: (id, before) => saveDmOrder(moveBefore(dms, settings.dmOrder, id, before)), onNudge: (id, by) => saveDmOrder(nudge(dms, settings.dmOrder, id, by)) })
+  const agentsSort = useHoldReorder({ group: 'agents', onDrop: (id, before) => saveAgentOrder(moveBefore(teamAgents, settings.agentOrder, id, before)), onNudge: (id, by) => saveAgentOrder(nudge(teamAgents, settings.agentOrder, id, by)) })
+  // The screens above the lists (Approvals, Memory, Wiki…) sort like the rows below them, so the
+  // ones this person opens every day can sit at the top. Each carries the id the order keeps.
+  const navRows: { id: string; item: ReactNode }[] = [
+    { id: 'approvals', item: <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} /> },
+    ...(parts.shows('memory') || suggestions > 0 ? [{ id: 'memory', item: <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} /> }] : []),
+    ...(parts.shows('wiki') ? [{ id: 'wiki', item: <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} /> }] : []),
+    ...(parts.shows('routines') ? [{ id: 'routines', item: <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} /> }] : []),
+    ...(parts.shows('skills') || proposals > 0 ? [{ id: 'skills', item: <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} fresh={fresh('skills')} /> }] : []),
+    ...(agents.filter(isTeam).length > 1 ? [{ id: 'org', item: <NavItem view={{ kind: 'org' }} icon="users" label={L('Time', 'Team')} /> }] : []),
+    ...(admin && parts.shows('report') ? [{ id: 'report', item: <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} /> }] : [])
+  ]
+  const navs = ordered(navRows, settings.navOrder)
+  const saveNavOrder = (next: string[]): void => updateSettings({ navOrder: next })
+  const navSort = useHoldReorder({ group: 'nav', onDrop: (id, before) => saveNavOrder(moveBefore(navs, settings.navOrder, id, before)), onNudge: (id, by) => saveNavOrder(nudge(navs, settings.navOrder, id, by)) })
+  // A screen's own menu: the two steps the keyboard has, for a pointer.
+  const navMenu = (id: string): MenuItem[] => [
+    { label: L('Mover para cima', 'Move up'), onClick: () => saveNavOrder(nudge(navs, settings.navOrder, id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), onClick: () => saveNavOrder(nudge(navs, settings.navOrder, id, 1)) }
+  ]
   // Channels sort the same way the DMs and the agents do: a hold picks the row up and the row under
   // the pointer draws the line it will land on. What it was let go on says where it goes, so a
   // channel dropped on another joins that one's group.
   const channelsSort = useHoldReorder({
+    group: 'channels',
     onDrop: (id, at) => {
       const next = moveChannelTo(channels, layout, id, at)
       if (next) saveLayout(next)
@@ -340,13 +360,11 @@ export function Sidebar(): ReactNode {
       )}
       <nav className="sidebar__scroll">
         <TucaItem />
-        <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
-        {(parts.shows('memory') || suggestions > 0) && <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} />}
-        {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
-        {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}
-        {(parts.shows('skills') || proposals > 0) && <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} fresh={fresh('skills')} />}
-        {agents.filter(isTeam).length > 1 && <NavItem view={{ kind: 'org' }} icon="users" label={L('Time', 'Team')} />}
-        {admin && parts.shows('report') && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} />}
+        {navs.map((r) => (
+          <div key={r.id} className={rowClass(navSort, r.id)} {...navSort.rowProps(r.id)} onContextMenu={(e) => open(e, navMenu(r.id))}>
+            {r.item}
+          </div>
+        ))}
 
         <Section
           id="channels"
