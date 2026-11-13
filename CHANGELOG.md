@@ -10,6 +10,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A connector whose sign-in server offers to stay signed in is asked for it, so it stops asking to authorize again every day.** Vercel's MCP server lists only its own scope (`openid`), while its authorization server also offers `offline_access`, the one that comes with a refresh token. The sign-in asked for the first list alone, got no refresh token, and lasted as long as the access token: the connector showed "needs authorization" again the next day. The app now reads what the authorization server offers and asks for `offline_access` when it is there, in the registration and in the authorization page. A connector signed in before this has to be authorized once more to get a sign-in that renews itself.
+
 - **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
 
 ## [0.2.28] - 2026-11-12
