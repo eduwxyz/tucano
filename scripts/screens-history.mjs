@@ -50,14 +50,15 @@ let lia = ''
   db.close()
 }
 
-// 3. Back up, on Settings › General, at its last card.
+// 3. Settings › General, at the danger area: Backups, the history, and the workspace delete.
 const { app, win } = await open()
 const shot = (name) => win.screenshot({ path: `${out}/${name}.png` })
 
 await win.locator('.nav-item', { has: win.locator('.nav-item__label') }).filter({ hasText: /^Settings$/ }).first().click()
 await win.waitForSelector('.tabs')
-const card = win.locator('.card--danger', { hasText: 'History' }).first()
-await card.scrollIntoViewIfNeeded()
+const area = win.locator('.workspace-danger').first()
+const card = area.locator('.workspace-danger__section', { hasText: 'History' }).first()
+await area.scrollIntoViewIfNeeded()
 await win.waitForTimeout(200)
 await shot('01-settings-history')
 
