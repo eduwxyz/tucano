@@ -72,6 +72,8 @@ import { Memories } from './memory'
 import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
+import { Initiative } from './initiative'
+import { Heartbeat } from './initiative-heartbeat'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { initializeWorkspace } from './seed'
@@ -138,6 +140,9 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
 // a new install fills it in, and a name changed in the settings changes theirs.
 const people = new People(db)
 if (!db.owner().name) db.renamePerson(db.ownerId(), db.getSettings(DEFAULTS).workspaceName, false)
+// A person's proactive coordinator (docs/autonomous-bots-plan.md in the fork): stored and validated
+// here, admitted by the runner in the next slice. Nothing runs while no one has one.
+const initiative = new Initiative(db, people)
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: L('Motor de teste', 'Test engine'), route: 'plan' })
 // TUCANO_FAKE_NO_AI: a computer with nothing set up yet, until the introduction's setup "signs in" (no network).
@@ -971,6 +976,21 @@ const runner = new Runner({
   }
 })
 runner.setPaused(!!settings().paused)
+// The clock behind initiative: one check-in at a time per person, admitted only while it is on, not
+// paused, due, and inside that person's reviews and allowance. Nothing runs until someone turns it on.
+const heartbeat = new Heartbeat({
+  db,
+  runner,
+  initiative,
+  settings,
+  people: () => db.people(),
+  // A report that reaches the conversation reaches the person the same way any reply does.
+  notify: (title, body, conversationId, to) => {
+    const who = notifyTo(conversationId, to)
+    toMain({ type: 'notify', title, body, conversationId, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
+    void push.send({ title, body, ...(conversationId ? { conversationId } : {}) }, who)
+  }
+})
 // Installs from before the Tuca get him at the first start after the introduction.
 void enginesReady.then(() => {
   if (settings().onboarding?.done) ensureTuca()
@@ -1063,6 +1083,7 @@ void ready.then(async () => {
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await enginesReady
   routines.start()
+  heartbeat.start()
   // A Tucano that had more people (or an invite out) before the heritage existed gets it now.
   if (db.people({ removed: true }).length > 1 || db.invites().length) inherit()
 }).catch((e: unknown) => {
@@ -2010,6 +2031,26 @@ const api: Handlers = {
     db.watchRoutine(id, ctx.person.id, on)
     emit({ type: 'routine', routine: db.routine(id)! })
   },
+  // A person's proactive coordinator (docs/autonomous-bots-plan.md in the fork): their own, and only
+  // ever the asking person's. It grants nothing Autonomy does not already allow. No review runs yet:
+  // these records and their checks are the whole of this slice.
+  initiative: (_, ctx) => initiative.view(ctx.person, Date.now(), runner.isPaused()),
+  saveInitiative: ({ config, expectedRevision }, ctx) => {
+    const saved = initiative.save(ctx.person, config, expectedRevision)
+    record(ctx, 'initiative.saved', saved.agentId, { enabled: saved.enabled, revision: saved.revision })
+    return saved
+  },
+  saveCommitment: ({ commitment }, ctx) => {
+    const saved = initiative.saveCommitment(ctx.person, commitment)
+    record(ctx, 'commitment.saved', saved.id, { agent: saved.agentId, state: saved.state })
+    return saved
+  },
+  // "Conferir agora": the person asking their coordinator to look right now, on the spot.
+  checkInNow: (_, ctx) => {
+    const started = heartbeat.startNow(ctx.person)
+    record(ctx, 'initiative.checkNow', undefined, { started: started.started, ...(started.why ? { why: started.why } : {}) })
+    return { ...started, running: heartbeat.running(ctx.person.id) }
+  },
   wiki: (_, ctx) => {
     const w = wikiFor(ctx)
     const owner = ctx.person.role === 'owner' && heritageAt() > 0
@@ -2470,6 +2511,7 @@ process.parentPort.on('message', (e) => {
 })
 
 process.on('exit', () => {
+  heartbeat.stop()
   for (const e of Object.values(engineImpls)) e.dispose?.() // the Claude Code processes kept open between replies
   db.close()
 })

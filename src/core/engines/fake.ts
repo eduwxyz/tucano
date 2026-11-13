@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L, locale } from '../../shared/lang'
+import { QUIET_MARKER } from '../../shared/initiative'
 import { memorySystem } from '../memory'
 import { curatorSystem } from '../wiki-curator'
 import { handoffSystem, routerSystem } from '../router'
@@ -182,6 +183,13 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
+      } else if (/Esta é uma conferida sua|This is your own check-in/.test(turn.prompt)) {
+        // A check-in: quiet when the brief asks for it, a short report otherwise. The brief is quoted
+        // inside <pedido>, so what a person typed is what decides.
+        const brief = /<pedido>\s*([\s\S]*?)\s*<\/pedido>/.exec(turn.prompt)?.[1] ?? ''
+        reply = /não me avise|don[’']?t (?:tell|warn) me/i.test(brief)
+          ? QUIET_MARKER
+          : L('Conferi: nada mudou desde a última vez. O cliente ainda não respondeu.', 'Checked: nothing has changed since last time. The client still has not answered.')
       } else {
         reply = `Resposta de teste (${id} · ${turn.model}). Recebi ${turn.prompt.length} caracteres de contexto.`
       }

@@ -11875,3 +11875,225 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+/* ---------- a bot's initiative (src/renderer/src/components/Initiative.tsx) ---------- */
+
+/* The line in a DM: what the person's coordinator is doing, in the topbar, without taking it over. */
+.initiative-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.initiative-line:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.initiative-line.is-waiting {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.initiative-line__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.initiative-line__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.initiative-line:not(.is-on) .initiative-line__dot {
+  background: var(--text-3);
+}
+.initiative-line__dot.is-live {
+  background: var(--accent);
+  animation: initiative-live 1.4s ease-in-out infinite;
+}
+.initiative-line__count {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--active);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes initiative-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The window: one column that stays readable narrow, and scrolls inside the card. */
+.initiative-modal {
+  max-width: 720px;
+}
+.initiative {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: min(72vh, 720px);
+  overflow: auto;
+}
+.initiative__state {
+  margin: 0;
+  font-size: 13px;
+}
+.initiative__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.initiative__actions .spacer {
+  flex: 1;
+}
+.initiative__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+.initiative__pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.initiative__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.initiative__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+.initiative__buttons {
+  display: flex;
+  gap: 8px;
+}
+.initiative__list,
+.initiative__runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.initiative__item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.initiative__item.is-closed {
+  opacity: 0.6;
+}
+.initiative__item-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.initiative__desc {
+  font-size: 13px;
+}
+.initiative__pill {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--active);
+  color: var(--text-2);
+}
+.initiative__pill.state-waiting_user {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.initiative__pill.state-waiting_external {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.initiative__pill.state-done,
+.initiative__pill.state-dismissed {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.initiative__item-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.initiative__run {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 2px 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.initiative__run:last-child {
+  border-bottom: 0;
+}
+.initiative__when {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.initiative__said {
+  grid-column: 2 / 3;
+  color: var(--text-2);
+}
+.initiative__cost {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.initiative__run.outcome-skipped .initiative__why {
+  color: var(--text-3);
+}
+.initiative__run.is-deduped .initiative__why {
+  color: var(--warn);
+}
+@media (max-width: 640px) {
+  .initiative__run {
+    grid-template-columns: 1fr auto;
+  }
+  .initiative__when {
+    grid-column: 1 / -1;
+  }
+  .initiative__said {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Model pickers need their own row so the hint keeps its width and controls stay inside the dialog. */
+.wk-settings .wk-setting--model { flex-direction: column; align-items: stretch; gap: 8px; }
+.wk-settings .wk-setting--model > .wk-row { width: 100%; min-width: 0; }
+.wk-settings .wk-setting--model .model-picker { min-width: 0; }
+.wk-settings .wk-setting--model .model-picker > .select { flex: 1 1 180px; min-width: 0; }
+
+/* Nobody has a coordinator yet: the way in, quieter than the chip that reports. */
+.initiative-line.is-off {
+  color: var(--text-3);
+  border-style: dashed;
+}
+.initiative-line.is-off .initiative-line__dot {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+.initiative-line.is-off:hover {
+  color: var(--text-2);
+  border-style: solid;
+}

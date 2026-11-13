@@ -4,6 +4,22 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **A bot can look after something for you between conversations.** Pick one bot and give it an
+  initiative: a brief in your own words, how often it checks, when it may interrupt you, the
+  conversations it may look at and the actions it may take. It then reads that work on its own clock,
+  in the DM it belongs to. A check-in that finds nothing leaves no trace at all: no message, no
+  unread, no notice. One that finds something writes in the conversation as any reply does, once.
+  The DM's header carries a line saying what it is doing (next check-in, waiting on you, checking
+  now, off), and opens the window holding the brief, the day's limits, what the bot is carrying
+  (each responsibility with the state its own work gives it) and what it did, newest first, with why
+  each check-in happened and what it cost. **Check now** asks for one on the spot and says what
+  stopped it when it cannot. An initiative grants nothing: every tool call is still decided by the
+  bot's Autonomy, and the scope you set can only narrow it. A report repeating the one before it
+  stays out of the conversation, its record saying so; a check-in the app did not survive is closed
+  as interrupted and nothing it may have done is replayed.
+
 ### Fixed
 
 - **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
@@ -43,8 +59,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
-
-
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**

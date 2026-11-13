@@ -3,6 +3,7 @@ import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
+import { InitiativeLine } from './Initiative'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
@@ -210,6 +211,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               </span>
             )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
+            {/* A DM whose bot looks after this person says what it is up to, and opens where it is set. */}
+            {dmAgent && <InitiativeLine conversationId={id} agentId={dmAgent.id} />}
           </div>
           <div className="topbar__actions">
             {conv.kind === 'channel' && (
