@@ -2370,6 +2370,7 @@ export function BackupCard(): ReactNode {
 }
 
 function WorkspaceDangerArea(): ReactNode {
+  const owner = useStore(amOwner)
   const name = useStore((s) => workspaceLabel(s.settings))
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   const [note, setNote] = useState('')
@@ -2393,7 +2394,8 @@ function WorkspaceDangerArea(): ReactNode {
         </div>
         {note && <p className="small muted">{note}</p>}
       </div>
-      {window.tucano.workspaces && <div className="workspace-danger__section">
+      <WorkspaceHistorySection />
+      {owner && window.tucano.workspaces && <div className="workspace-danger__section">
         <h3>{L('Excluir workspace', 'Delete workspace')}</h3>
         <p className="small muted">{defaultWorkspace ? L('O workspace padrão não pode ser excluído. Você ainda pode fazer backup ou duplicá-lo.', 'The default workspace cannot be deleted. You can still back it up or duplicate it.') : L(`Excluir “${name}” apaga também seus backups locais, agentes, conversas, memórias, credenciais e rotinas. Copie o backup para fora deste workspace antes. Os outros workspaces e suas pastas de projetos ficam intactos.`, `Deleting “${name}” also deletes its local backups, agents, conversations, memories, credentials and routines. Copy your backup outside this workspace first. Other workspaces and project folders are kept.`)}</p>
         <button className="btn btn--danger btn--sm" disabled={busy || defaultWorkspace} onClick={() => void remove()}>{busy ? L('Aguarde…', 'Please wait…') : L('Excluir workspace e todos os dados', 'Delete workspace and all data')}</button>
@@ -2608,7 +2610,8 @@ function VoiceCard(): ReactNode {
 
 // Settings › Geral's last card: a danger area. How long what was said is kept, and the button that takes
 // every bot's history away at once — the only way anything goes before its period says so.
-function HistoryCard(): ReactNode {
+// The workspace's history, as a section of the danger area: the period, and the wipe that is final.
+function WorkspaceHistorySection(): ReactNode {
   const kept = useStore((s) => cleanRetentionDays(s.settings.retentionDays) ?? 0)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
@@ -2635,14 +2638,9 @@ function HistoryCard(): ReactNode {
     }
   }
   return (
-    <Card
-      danger
-      title={L('Histórico', 'History')}
-      lead={L(
-        'O que fica guardado do que foi dito e respondido neste workspace. O prazo é conferido uma vez por dia; apagar na hora é o botão abaixo.',
-        'What is kept of what was said and answered in this workspace. The period is checked once a day; the button below deletes at once.'
-      )}
-    >
+    <div className="workspace-danger__section">
+      <h3>{L('Histórico', 'History')}</h3>
+      <p className="small muted">{L('O que fica guardado do que foi dito e respondido neste workspace. O prazo é conferido uma vez por dia; apagar na hora é o botão abaixo.', 'What is kept of what was said and answered in this workspace. The period is checked once a day; the button below deletes at once.')}</p>
       <Field
         label={L('Guardar por quantos dias', 'Keep for how many days')}
         hint={L(
@@ -2653,7 +2651,7 @@ function HistoryCard(): ReactNode {
         <NumberInput min={0} max={MAX_RETENTION_DAYS} step={1} value={kept} onChange={(n) => updateSettings({ retentionDays: cleanRetentionDays(n) ?? 0 })} className="input--short" />
       </Field>
       <div className="row">
-        <button className="btn btn--danger" disabled={busy} onClick={() => void wipe()}>
+        <button className="btn btn--danger btn--sm" disabled={busy} onClick={() => void wipe()}>
           {L('Apagar o histórico de todos os bots', 'Delete every bot’s history')}
         </button>
         {note && (
@@ -2662,7 +2660,7 @@ function HistoryCard(): ReactNode {
           </span>
         )}
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -2965,9 +2963,7 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
-        {pane('geral') && admin && <HistoryCard />}
-
-        {pane('geral') && owner && <WorkspaceDangerArea />}
+        {pane('geral') && admin && <WorkspaceDangerArea />}
       </div>
     </Page>
   )
