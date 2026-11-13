@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
+
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**
