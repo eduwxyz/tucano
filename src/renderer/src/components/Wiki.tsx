@@ -1141,7 +1141,7 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             <Toggle on={resolve} onChange={(v) => updateSettings({ wikiResolve: v })} />
           </div>
           {resolve && (
-            <div className="wk-setting">
+            <div className="wk-setting wk-setting--model">
               <span>
                 <b>{L('O modelo dele', 'Resolver model')}</b>
                 <small>{L('Vazio: o modelo da memória, e depois o Haiku.', 'Default: memory model, then Haiku.')}</small>
