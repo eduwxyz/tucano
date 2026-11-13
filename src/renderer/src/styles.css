@@ -12074,36 +12074,45 @@ button.agent-card__now:hover {
   padding: 0;
   list-style: none;
 }
-.route-row,
-.route-add {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+/* A step in a chain is a small card: the number and the three buttons on one line, then the harness,
+   the model and the thinking one under the other, each as wide as the card. A third of a row cuts a
+   model's name and its note short, and a list of cut-off names is a list of guesses. */
 .route-row {
-  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--bg);
 }
+.route-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+.route-row__fields,
+.route-add__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* The model field carries `.grow` from when the row was horizontal; in a column that would stretch it
+   down the card, so every field keeps its own height and the card is as tall as its three lines. */
+.route-row__fields > .select,
+.route-add__fields > .select {
+  flex: 0 0 auto;
+}
+.route-list > .route-row {
+  flex: 0 0 auto;
+}
 .route-row__n {
-  flex: none;
-  width: 18px;
   color: var(--text-3);
   font-size: 11px;
-  text-align: center;
-}
-.route-row__engine {
-  flex: none;
-  width: 132px;
-}
-.route-row__effort {
-  flex: none;
-  width: 108px;
-}
-.route-row__min {
-  flex: none;
-  width: 132px;
+  font-variant-numeric: tabular-nums;
 }
 .route-row__actions {
   display: flex;
@@ -12118,21 +12127,16 @@ button.agent-card__now:hover {
   cursor: default;
 }
 .route-add {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding-top: 4px;
 }
-/* The shared Select is width:100% by design; inside a row that steals the whole line from the model
-   field, so the selects here size themselves and the model takes what's left. */
-.route-row > .select,
-.route-add > .select {
-  width: auto;
-}
-.route-row .grow,
-.route-add .grow {
-  flex: 1 1 180px;
-}
-.route-row > .select:first-of-type,
-.route-add > .select:first-of-type {
-  width: 132px;
+/* The shared Select is width:100% by design, and here it keeps it: the card is the line. */
+.route-row__fields > .select,
+.route-add__fields > .select {
+  width: 100%;
 }
 
 /* ---------- the thin line over a reply ---------- */
@@ -12313,13 +12317,5 @@ button.agent-card__now:hover {
   }
   .routing__pool {
     flex: none;
-  }
-  .route-row,
-  .route-add {
-    flex-wrap: wrap;
-  }
-  .route-row__engine,
-  .route-row__effort {
-    width: auto;
   }
 }
