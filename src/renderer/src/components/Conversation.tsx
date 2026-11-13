@@ -531,13 +531,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
           </span>
         )}
-        {/* A prompt handed into the reply above, which reads it between two tool calls (runs.ts). It's
-            said here, so a message that gets no reply of its own never looks lost. */}
-        {message.sendMode === 'steer' && (
-          <span className="tag msg__queued" title={L('A resposta acima leu isto no meio do trabalho dela', 'The reply above read this in the middle of its work')}>
-            {L('Entregue à resposta acima', 'Handed to the reply above')}
-          </span>
-        )}
+        {/* A prompt handed into the reply above is not a message at all: the reply's own chain shows
+            the steer, in the person's words (runs.ts, `send`). Nothing of it is posted here. */}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
@@ -1438,16 +1433,22 @@ function SteerPill({ message }: { message: Message }): ReactNode {
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
-  // A steer in the chain isn't a tool call: it's what the person wrote while the reply ran, and it
-  // reads as their words under the step it was handed over with.
+  // A steer is not a prompt and not a tool: it is the person's direction for this reply, handed over
+  // between two calls. In the chain it reads as a call of its own — the row a call gets — and what it
+  // carries is their words, whole, two lines at a time and all of it on a click (runs.ts, `steerIn`).
   if (step.kind === 'steer')
     return (
-      <li className="step step--steer">
+      <li className={`step step--steer step--why step--${step.status}`}>
         <span className="step__icon">
-          <Icon name="pointer" size={12} />
+          {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'error' ? 'x' : 'pointer'} size={12} />}
         </span>
         <span className="step__label">{step.label}</span>
-        {step.detail && <span className="step__steer">{step.detail}</span>}
+        {step.input && (
+          <code className={`step__input${allInput ? ' is-whole' : ''}`} title={allInput ? undefined : L('Ver tudo', 'See all')} onClick={() => setAllInput(!allInput)}>
+            <span className="step__clamp">{step.input}</span>
+          </code>
+        )}
+        {step.error && <span className="step__output">{step.error}</span>}
       </li>
     )
   return (

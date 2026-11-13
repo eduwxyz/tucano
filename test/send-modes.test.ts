@@ -220,17 +220,18 @@ describe('a prompt that arrives while a reply is running', () => {
     expect(other[0]?.run?.status).toBe('done') // d2 was left alone
   })
 
-  it('steer: with a reply running there, no other one starts while it runs; the message says where it went', async () => {
+  it('steer: with a reply running there, no other one starts, and nothing of it is posted', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const r = runnerWith(fakeEngine('claude', { delayMs: 15 }))
     await r.send('d1', 'conte uma história, demore 2 s')
     await r.send('d1', 'mude de plano', [], undefined, undefined, { mode: 'steer' })
     expect(agentMessages()).toHaveLength(1) // no second reply: it went into the one running
-    expect(mine()).toHaveLength(2)
-    expect(mine()[1]?.text).toBe('mude de plano')
-    expect(mine()[1]?.sendMode).toBe('steer') // and the conversation says so, so it never looks unanswered
+    // A steer is not a prompt: no message of mine appears in the DM, and the reply's chain carries it.
+    expect(mine()).toHaveLength(1)
     await r.idle()
+    const row = db.message(agentMessages()[0]!.id)?.run?.steps.find((s) => s.kind === 'steer')
+    expect(row?.input).toBe('mude de plano')
   })
 })
 
@@ -375,11 +376,14 @@ describe('a steer reaches the agent between two tool calls', () => {
     expect(allText(results[1])).toContain('mude de plano') // handed over at the second call
     expect(allText(results[1])).toContain('escreveu isto enquanto você trabalhava')
     const reply = agentMessages()[0]!
-    const steerStep = reply.run?.steps.find((s) => s.label === 'Recebeu o que você escreveu')
+    const steerStep = reply.run?.steps.find((s) => s.kind === 'steer')
     expect(steerStep).toBeDefined()
-    // In the chain it reads as a steer, not as a tool call, and it carries what the person wrote.
-    expect(steerStep?.kind).toBe('steer')
-    expect(steerStep?.detail).toContain('mude de plano: só as abertas')
+    // A row of its own in the chain, carrying what the person wrote, whole, and it is done: the call
+    // that came after it is where the reply read it.
+    expect(steerStep?.input).toBe('mude de plano: só as abertas')
+    expect(steerStep?.status).toBe('done')
+    expect(steerStep?.label).toBe('Orientação')
+    expect(reply.run?.steps.filter((s) => s.kind === 'steer')).toHaveLength(1)
   })
 })
 
@@ -396,7 +400,7 @@ describe('a steer the reply ended without taking', () => {
     }
   }
 
-  it('is answered by a reply of its own, in the place it was written', async () => {
+  it('is not a prompt: the reply it was given to keeps it, and nothing is posted', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const rec: string[] = []
@@ -404,14 +408,20 @@ describe('a steer the reply ended without taking', () => {
     await r.send('d1', 'conte uma história, demore 1 s')
     await new Promise((res) => setTimeout(res, 120)) // the reply is running, with no tool call ahead of it
     await r.send('d1', 'mude de plano', [], undefined, undefined, { mode: 'steer' })
-    const steered = mine()[1]!
-    expect(steered.sendMode).toBe('steer') // it went into the reply that was running, and says so
+    // Not a message of mine: a steer is the running reply's, and only its chain carries it.
+    expect(mine()).toHaveLength(1)
+    // It is already there, carrying what the person wrote, while the reply is still working.
+    const working = agentMessages()[0]!
+    const row = working.run?.steps.find((s) => s.kind === 'steer')
+    expect(row?.input).toBe('mude de plano')
+    expect(row?.status).toBe('running')
     await r.idle()
-    const replies = agentMessages()
-    expect(replies).toHaveLength(2) // the one it went into, and the one that answers it: nothing is left silent
-    expect(replies[1]?.run?.replyTo).toBe(steered.id) // that reply answers my steered message, not another
-    expect(rec[1]).toContain('mude de plano') // the agent did read it, in the end
-    expect(db.message(steered.id)?.sendMode).toBeUndefined() // answered, so it no longer says it went into the reply above
+    // The reply ended before its next call: no prompt, no second reply, and the row says it wasn't read.
+    expect(agentMessages()).toHaveLength(1)
+    const left = db.message(working.id)!.run!.steps.find((s) => s.kind === 'steer')!
+    expect(left.status).toBe('error')
+    expect(left.input).toBe('mude de plano')
+    expect(rec).toHaveLength(1) // the agent was never handed it as a prompt of its own
   })
 
   it('never goes into a reply running in another thread, nor a thread, seen from the channel', async () => {

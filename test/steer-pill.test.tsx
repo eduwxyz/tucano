@@ -130,16 +130,31 @@ describe('the steer pill', () => {
     expect(sent).toHaveLength(1) // the escape sent nothing
   })
 
-  it("a steer in the chain reads as the person's words, not as a tool call", async () => {
-    const steer: Step = { id: 's1', kind: 'steer', label: 'Recebeu o que você escreveu', detail: 'Ana escreveu isto enquanto você trabalhava: só as abertas', status: 'done' }
-    await draw(reply('done', [step('a'), steer, step('b')]))
-    await act(async () => document.querySelector<HTMLElement>('.steps__toggle')!.click())
+  it("a steer in the chain is a row of its own, carrying the person's words whole", async () => {
+    // What `steerIn` puts in the chain the moment the person sends it; the words are the row's content.
+    const steer: Step = { id: 's1', kind: 'steer', label: 'Orientação', input: 'só as abertas, e o resto como está', status: 'running' }
+    await draw(reply('working', [step('a'), steer])) // open while it works: the rows are there to read
     const rows = [...document.querySelectorAll('.step')]
-    expect(rows).toHaveLength(3)
-    expect(rows[1]!.className).toBe('step step--steer')
-    expect(rows[1]!.textContent).toContain('Recebeu o que você escreveu')
-    expect(rows[1]!.textContent).toContain('só as abertas')
-    // No tick, no timing: it isn't a call that ran, so it doesn't wear a call's clothes.
-    expect(rows[1]!.querySelector('.step__icon')).not.toBeNull()
+    expect(rows).toHaveLength(2)
+    const row = rows[1]!
+    expect(row.className).toBe('step step--steer step--why step--running')
+    expect(row.querySelector('.step__label')?.textContent).toBe('Orientação')
+    // The row a call gets: its content sits in the call's own argument box, and the whole of it is a
+    // click away, so what the person steered is readable in the chain without becoming a prompt.
+    const said = row.querySelector('.step__input')
+    expect(said?.textContent).toContain('só as abertas')
+    expect(row.querySelector('.step__icon .spinner')).not.toBeNull() // still waiting for its next call
+    await act(async () => said!.dispatchEvent(new window.Event('click', { bubbles: true })))
+    expect(row.querySelector('.step__input')?.className).toContain('is-whole')
+  })
+
+  it('a steer the reply never read says so, in its own row', async () => {
+    const steer: Step = { id: 's1', kind: 'steer', label: 'Orientação', input: 'só as abertas', error: 'A resposta terminou antes de ler isto', status: 'error' }
+    await draw(reply('done', [step('a'), steer]))
+    await act(async () => document.querySelector<HTMLElement>('.steps__toggle')!.click())
+    const row = [...document.querySelectorAll('.step')][1]!
+    expect(row.className).toContain('step--error')
+    expect(row.textContent).toContain('só as abertas')
+    expect(row.textContent).toContain('A resposta terminou antes de ler isto')
   })
 })
