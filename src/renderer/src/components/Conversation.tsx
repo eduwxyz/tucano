@@ -1579,7 +1579,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </div>
         </form>
       ) : (
-        <div className="row">
+        <div className="row approval__buttons">
           {approval.highRisk ? (
             // The hold can't depend on the pointer staying inside the button: taking capture makes
             // the browser fire pointerout/pointerleave on the button at once, and a cursor that drifts
@@ -1606,13 +1606,13 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                 {L('Aprovar', 'Approve')}
               </button>
               {canAlways && (
-                <button className="btn" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+                <button className="btn approval__always" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
               {forGood && (
                 <button
-                  className="btn"
+                  className="btn approval__always"
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
                     `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call. Other actions still ask. You can take it back on its page.`
