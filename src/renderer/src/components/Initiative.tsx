@@ -123,7 +123,7 @@ export function InitiativeLine({ conversationId, agentId }: { conversationId?: s
 const DEFAULTS = (agentId: string, conversationId: string): InitiativeInput => ({
   agentId,
   conversationId,
-  enabled: true,
+  enabled: false,
   brief: '',
   observe: { conversations: [] },
   work: { conversations: [], kinds: [] },
@@ -185,7 +185,7 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
     try {
       const saved = await saveInitiative(inputOf(next), config?.revision ?? 0)
       setDraft({ ...saved })
-      setNote(L('Salvo.', 'Saved.'))
+      setNote(saved.enabled ? L('Salvo.', 'Saved.') : L('Salvo. Está desligada: nada roda até você ligar.', 'Saved. It is off: nothing runs until you turn it on.'))
       if (close) onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
@@ -195,6 +195,19 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
   }
 
   const patch = (p: Partial<InitiativeInput>): void => setDraft((d) => (d ? { ...d, ...p } : d))
+
+  // The switch is the state, so a refusal belongs under it: pressed from the footer the reason showed far
+  // below the press and read as a switch that does nothing. A check-in with nothing to look after is
+  // refused by the core, so it is refused here first, in the same words.
+  const setEnabled = (on: boolean): void => {
+    if (busy || !draft) return
+    if (on && !draft.brief.trim()) {
+      setError(L('Escreva o que ele deve cuidar, e ligue depois.', 'Write what it should look after, then turn it on.'))
+      return
+    }
+    setError(null)
+    void save({ ...draft, enabled: on })
+  }
   const toggleIn = <T extends string>(list: T[], id: T): T[] => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
 
   const reach = conversations.filter((c) => (c.kind === 'dm' ? c.members[0] !== agentId : true))
@@ -261,9 +274,19 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
               {L('Desligar', 'Turn off')}
             </button>
             <span className="spacer" />
-            <Toggle on={draft.enabled} onChange={(on) => void save({ ...draft, enabled: on })} />
+            <Toggle on={draft.enabled} onChange={setEnabled} />
             <span className="small">{draft.enabled ? L('ligada', 'on') : L('desligada', 'off')}</span>
           </div>
+
+          {error && (
+            <p className="initiative__error" role="alert">
+              {error}
+            </p>
+          )}
+          {!error && !draft.enabled && !draft.brief.trim() && (
+            <p className="hint">{L('Escreva o pedido para poder ligar.', 'Write the brief, then you can turn it on.')}</p>
+          )}
+          {!error && note && <p className="hint">{note}</p>}
 
           <Field label={L('O que ele cuida pra você', 'What it looks after for you')} hint={L('Nas suas palavras. É o que ele lê em cada conferida.', 'In your words. It is what it reads on every check-in.')}>
             <textarea className="input" rows={4} value={draft.brief} onChange={(e) => patch({ brief: e.target.value })} />
@@ -325,13 +348,6 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
               ))}
             </div>
           </Field>
-
-          {error && (
-            <p className="initiative__error" role="alert">
-              {error}
-            </p>
-          )}
-          {note && !error && <p className="hint">{note}</p>}
 
           <div className="initiative__buttons">
             <button className="btn btn--primary btn--sm" disabled={!!busy || !draft.brief.trim()} onClick={() => void save()}>

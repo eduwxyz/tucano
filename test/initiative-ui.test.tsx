@@ -265,6 +265,35 @@ describe('the window', () => {
     expect(saveInitiative.mock.calls[0]![0]).toMatchObject({ enabled: false })
   })
 
+  it('opens a coordinator nobody has set up with the switch off, not on', async () => {
+    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    await render(<InitiativeDialog onClose={() => {}} />)
+    const sw = document.querySelector('[role="switch"]') as HTMLElement
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    expect(text()).toContain('Desligada')
+  })
+
+  it('turns on from the switch, once there is something to look after', async () => {
+    fake.initiative = view({ config: config({ enabled: false }) })
+    await render(<InitiativeDialog onClose={() => {}} />)
+    expect((document.querySelector('[role="switch"]') as HTMLElement).getAttribute('aria-checked')).toBe('false')
+    await click(document.querySelector('[role="switch"]'))
+    expect(saveInitiative).toHaveBeenCalledTimes(1)
+    expect(saveInitiative.mock.calls[0]![0]).toMatchObject({ enabled: true, brief: 'Answer the client about the invoice.' })
+    expect(saveInitiative.mock.calls[0]![1]).toBe(3)
+  })
+
+  it('says why it cannot go up when there is no brief, at the switch rather than under the fields', async () => {
+    fake.initiative = view({ config: config({ enabled: false, brief: '' }) })
+    await render(<InitiativeDialog onClose={() => {}} />)
+    // The hint says what is missing before anything is pressed, on the line under the switch.
+    expect(text()).toContain('Escreva o pedido para poder ligar')
+    // Nothing is sent: the core would refuse an enabled check-in with nothing to go on.
+    await click(document.querySelector('[role="switch"]'))
+    expect(saveInitiative).not.toHaveBeenCalled()
+    expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/Escreva o que ele deve cuidar/)
+  })
+
   it('closes a responsibility by its own state, and never by its text', async () => {
     await render(<InitiativeDialog onClose={() => {}} />)
     await click(button('Dispensar'))
