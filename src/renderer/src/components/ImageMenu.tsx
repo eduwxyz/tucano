@@ -10,7 +10,7 @@ import { Icon, type IconName } from './ui'
 
 const LABEL = (folder: string): Record<ImageAction, string> => ({
   'save-here': folder ? L(`Salvar em ${folder}`, `Save to ${folder}`) : L('Salvar', 'Save'),
-  save: L('Salvar em…', 'Save to…'),
+  save: L('Salvar como…', 'Save as…'),
   clipboard: L('Copiar para a área de transferência', 'Copy to clipboard'),
   prompt: L('Enviar para o campo de mensagem', 'Send to prompt')
 })
@@ -55,6 +55,23 @@ export function ImageMenu(): ReactNode {
   const menu = useImageMenu()
   const ref = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState<{ left: number; top: number } | null>(null)
+  // The folder a first save goes into, from the system: the menu names it and saves there in one
+  // click, so even the very first picture needs no dialog. Saving anywhere else replaces it.
+  const [fallback, setFallback] = useState('')
+  useEffect(() => {
+    const api = window.tucano?.image
+    if (!api?.folder) return
+    let live = true
+    void api
+      .folder()
+      .then((r) => {
+        if (live && r?.folder) setFallback(r.folder)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
 
   // Where the menu goes: at the pointer, unless that would put it off the window, then inside.
   useLayoutEffect(() => {
@@ -103,11 +120,12 @@ export function ImageMenu(): ReactNode {
 
   if (!menu) return null
   const { target } = menu
-  // Where the last picture went, named as the folder is called. No folder remembered yet (the first
-  // save ever, or one cleared), so the menu offers only the dialog: it never guesses a folder.
+  // Where the picture goes in one click, named as the folder is called: the folder the last one went
+  // to, or the system's downloads folder until the person saves one somewhere else.
   const remembered = getState().settings.lastImageFolder ?? ''
-  const folder = folderLabel(remembered)
-  const actions = imageActions(target.surface, !!remembered)
+  const savedTo = remembered || fallback
+  const folder = folderLabel(savedTo)
+  const actions = imageActions(target.surface, !!savedTo)
 
   const run = async (action: ImageAction): Promise<void> => {
     closeImageMenu()
@@ -116,7 +134,7 @@ export function ImageMenu(): ReactNode {
       if (!api) return void saveInBrowser(target.url, target.title)
       const oneClick = action === 'save-here'
       let done = oneClick
-        ? await api.save(target.url, target.title, { dir: remembered })
+        ? await api.save(target.url, target.title, { dir: savedTo })
         : await api.save(target.url, target.title, { dir: remembered, dialog: true })
       // The folder is gone — deleted, a drive unplugged, a share down. Say it, and let the person
       // pick somewhere instead of the click doing nothing.

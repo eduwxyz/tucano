@@ -6,8 +6,9 @@ import { useSyncExternalStore } from 'react'
 // so it offers the two ways out of the app; a picture in a reply also offers going back in, attached
 // to what you're about to ask.
 export type ImageSurface = 'reply' | 'gallery'
-// `save-here` is the one click: into the folder the last picture went to, no dialog. It only exists
-// once something has been saved, because until then there is no folder to name in the entry.
+// `save-here` is the one click: into the folder the last picture went to, or the system's downloads
+// folder before anything has been saved, no dialog either way. It sits under the dialog entry, which
+// is the way to choose somewhere else.
 export type ImageAction = 'save-here' | 'save' | 'clipboard' | 'prompt'
 
 export interface MenuTarget {
@@ -24,7 +25,9 @@ export interface OpenImageMenu {
 }
 
 export const imageActions = (surface: ImageSurface, hasFolder = false): ImageAction[] => {
-  const saving: ImageAction[] = hasFolder ? ['save-here', 'save'] : ['save']
+  // The dialog first and the one click under it: choosing somewhere else comes before repeating the
+  // last place, which is the order a person looks for them in.
+  const saving: ImageAction[] = hasFolder ? ['save', 'save-here'] : ['save']
   return surface === 'gallery' ? [...saving, 'clipboard'] : [...saving, 'clipboard', 'prompt']
 }
 

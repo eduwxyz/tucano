@@ -31,14 +31,16 @@ describe('what a right-clicked picture offers', () => {
     expect(imageActions('gallery')).not.toContain('prompt')
   })
 
-  it('before anything was saved: only the dialog, never a folder it was not told', () => {
+  it('with no folder to name at all: only the dialog', () => {
     expect(imageActions('reply', false)).toEqual(['save', 'clipboard', 'prompt'])
     expect(imageActions('reply', false)).not.toContain('save-here')
   })
 
-  it('once a folder is remembered: one click into it, then the dialog, then the rest', () => {
-    expect(imageActions('reply', true)).toEqual(['save-here', 'save', 'clipboard', 'prompt'])
-    expect(imageActions('gallery', true)).toEqual(['save-here', 'save', 'clipboard'])
+  // The dialog first, the one click into the named folder under it: choosing somewhere else reads
+  // before repeating the last place.
+  it('with a folder to name: the dialog, that folder in one click, then the rest', () => {
+    expect(imageActions('reply', true)).toEqual(['save', 'save-here', 'clipboard', 'prompt'])
+    expect(imageActions('gallery', true)).toEqual(['save', 'save-here', 'clipboard'])
   })
 })
 
