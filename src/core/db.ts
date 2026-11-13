@@ -1,3 +1,4 @@
+import { teamUpAudiences } from '../shared/team-up-privacy'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { randomUUID } from 'node:crypto'
@@ -568,8 +569,21 @@ export class Db {
     this.db = new DatabaseSync(file)
     this.keepStatements()
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
-    try { this.migrate(file) }
+    try { this.migrate(file); this.protectTeamUpPrivacy() }
     catch (error) { this.db.close(); throw error }
+  }
+
+  private protectTeamUpPrivacy(): void {
+    const rooms = this.conversations()
+    if (!rooms.some((room) => room.teamUp)) return
+    const audiences = teamUpAudiences(rooms, this.ownerId())
+    this.tx(() => {
+      for (const room of rooms) {
+        const person = audiences.get(room.id)
+        if (!room.teamUp || !person || room.teamUp.privateTo === person) continue
+        this.db.prepare('UPDATE conversations SET team_up = ? WHERE id = ?').run(JSON.stringify({ ...room.teamUp, privateTo: person }), room.id)
+      }
+    })
   }
 
   close(): void {

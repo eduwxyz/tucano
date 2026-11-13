@@ -3211,11 +3211,12 @@ ${note}`,
         kind: 'channel',
         name: teamUpName(guests, (n) => db.conversations().some((c) => c.kind === 'channel' && c.name === n), wanted),
         topic: teamUpTopic(agent.name, source),
+        createdBy: dmOwner(conv, db.ownerId()) ?? conv.createdBy ?? db.ownerId(),
         // Everyone who was here, plus the ones called in: the room continues the work, it doesn't restart it.
         members: [...new Set([...conv.members, agent.id, ...guests.map((g) => g.id)])],
         // What agents say while they work together is theirs, not the wiki's to read afterwards.
         wikiCapture: false,
-        teamUp: { from: conv.id, title: source, by: agent.id, at: now }
+        teamUp: { from: conv.id, title: source, by: agent.id, at: now, ...(dmOwner(conv, db.ownerId()) ? { privateTo: dmOwner(conv, db.ownerId()) } : {}) }
       })
       team = db.conversation(id)!
       emit({ type: 'conversation', conversation: team })
