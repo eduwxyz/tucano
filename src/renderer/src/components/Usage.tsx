@@ -89,9 +89,11 @@ export function UsagePage(): ReactNode {
       ) : (
         <>
           <Quotas />
-          <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
+          {/* A subscription's own windows sit above the month's chart: they are what is left right
+              now, and the chart is the month's total. */}
           {billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
           {billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
+          <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
           <Agents u={u} />
           <div className="usage-grid">
             <Models u={u} />

@@ -128,6 +128,23 @@ const cells = (win) => win.locator('.usage-quota__cell').allInnerTexts()
   // The whole page, to show where the panel sits above the month.
   const sheet = win.locator('.sheet')
   console.log(`panel top at ${Math.round((await win.locator('.usage-quotas').boundingBox()).y)} px, month below at ${Math.round((await win.locator('.usage-month').boundingBox()).y)} px`)
+  // The page's own order, read as drawing order and as pixels: the providers panel, then the
+  // subscriptions' own windows, then the month with its chart. The chart is the month's, so the
+  // subscriptions sit above it.
+  const seq = await win.evaluate(() => {
+    const subs = [...document.querySelectorAll('.read-group')].find((el) => /Codex/.test(el.querySelector('h2')?.textContent ?? ''))
+    const items = [
+      ['providers', document.querySelector('.usage-card')],
+      ['codex subscription', subs],
+      ['month', document.querySelector('.usage-month')],
+      ['usage chart', document.querySelector('.usage-chart')]
+    ]
+    return items.map(([what, el]) => ({ what, drawn: el ? [...el.parentElement.children].indexOf(el) : null, top: el ? Math.round(el.getBoundingClientRect().top) : null }))
+  })
+  console.log(`page order: ${JSON.stringify(seq)}`)
+  console.log(`the subscription is above the chart: ${seq[1].top !== null && seq[3].top !== null && seq[1].top < seq[3].top}`)
+  await win.evaluate(() => window.scrollTo(0, 0))
+  await win.screenshot({ path: `${out}/03-page-order.png`, fullPage: true })
   console.log(`sideways scroll at 1280: ${await win.locator('.usage-quotas').evaluate((el) => el.scrollWidth - el.clientWidth)} px`)
   await win.setViewportSize({ width: 420, height: 900 })
   await win.waitForTimeout(400)
