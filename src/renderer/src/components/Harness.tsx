@@ -403,7 +403,7 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
   )
 }
 
-// More logins of Claude Code and Codex: a work account beside a personal one. Each lives in a
+// More logins of Claude Code, Codex and Grok: a work account beside a personal one. Each lives in a
 // folder of its own and is signed into through the CLI, in a terminal; an agent picks one on its page.
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])

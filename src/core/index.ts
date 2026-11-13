@@ -29,7 +29,7 @@ import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
-import { grokEngine } from './engines/grok'
+import { grokAccountEnv, grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
 import { hermesAppDir, hermesEngine } from './engines/hermes'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
@@ -257,7 +257,11 @@ const loginTerminal = new LoginTerminal({
   env: (e, account) => {
     if (account) {
       const dir = accountDir(dataDir, account)
-      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir, engines.codex.path)
+      return e === 'claude'
+        ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' }
+        : e === 'grok'
+          ? { ...grokAccountEnv(dir), DISABLE_AUTOUPDATER: '1' }
+          : codexEnv(dir, engines.codex.path)
     }
     return e === 'codex' ? codexEnv(codexHome, engines.codex.path) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
   },
@@ -302,8 +306,8 @@ const settings = (): Settings => {
   return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
 }
 
-// More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
-// the CLI's own status when the harnesses are, and every few seconds after a sign-in.
+// More logins of Claude Code, Codex and Grok (Settings › Accounts): each in its own folder, checked
+// with the CLI's own status when the harnesses are, and every few seconds after a sign-in.
 const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>(Object.entries(engineCheck.current.accounts ?? {}))
 const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
 // `only`: that account; `engine`: that harness's accounts.
@@ -2348,11 +2352,13 @@ const api: Handlers = {
     engineSetup.cancel()
   },
 
-  // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.
+  // Another login of Claude Code, Codex or Grok: a folder of its own, signed into in a terminal like
+  // the first.
   addAccount: ({ engine, name }) => {
-    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code ou do Codex.', 'Only Claude Code or Codex can have another account.'))
+    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code, do Codex ou do Grok.', 'Only Claude Code, Codex or Grok can have another account.'))
     const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
-    mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
+    // Codex keeps its login in .codex inside the folder; Claude Code and Grok in the folder itself.
+    mkdirSync(engine === 'codex' ? join(accountDir(dataDir, account.id), '.codex') : accountDir(dataDir, account.id), { recursive: true })
     db.setSettings({ accounts: [...savedAccounts(), account] })
     bg(
       checkAccounts(account.id).then(() => {
@@ -2371,7 +2377,14 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
-    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
+    return openLogin(
+      a.engine,
+      a.engine === 'claude'
+        ? { CLAUDE_CONFIG_DIR: dir }
+        : a.engine === 'grok'
+          ? { GROK_HOME: dir, GROK_AUTH_PATH: join(dir, 'auth.json') }
+          : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) }
+    )
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
   removeAccount: ({ id }) => {

@@ -819,7 +819,7 @@ export const loginEngine = async (engine: keyof Settings['engines']): Promise<{ 
   if (r.screen) showLogin(r.screen)
   return r
 }
-// More logins of Claude Code and Codex, each signed into in a terminal.
+// More logins of Claude Code, Codex and Grok, each signed into in a terminal.
 export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
 export const loginAccount = async (id: string): Promise<{ opened: boolean; command: string }> => {
   const r = await call('loginAccount', { id, screen: true })
