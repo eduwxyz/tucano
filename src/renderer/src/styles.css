@@ -11865,3 +11865,8 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+/* Model pickers need their own row so the hint keeps its width and controls stay inside the dialog. */
+.wk-settings .wk-setting--model { flex-direction: column; align-items: stretch; gap: 8px; }
+.wk-settings .wk-setting--model > .wk-row { width: 100%; min-width: 0; }
+.wk-settings .wk-setting--model .model-picker { min-width: 0; }
+.wk-settings .wk-setting--model .model-picker > .select { flex: 1 1 180px; min-width: 0; }
