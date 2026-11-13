@@ -319,3 +319,54 @@ Measured examples: the 256-character Dictation hint takes three lines; the 122-c
 | With the guard below on, what can’t be undone after reading something from outside asks too. | The external-content guard still requires approval for consequential actions. | Keep the additional guard exception visible. |
 | The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off. | Export agents, skills, channels, and routines as Markdown, without credentials or chats. Import OpenBot or Grok Bot agents with connectors and search off. | Keep export content, exclusions, and safe import defaults. |
 | Kept in the system’s vault. | Stored in the system vault. | Use standard storage terminology. |
+
+## Wider interface pass
+
+Reviewed all localized strings in renderer components and shared UI helpers. Model-facing starter prompts, user-authored content, and provider setup procedures are outside this copy edit. Long provider instructions retain their steps and security warnings. Additional replacements below were recorded before implementation.
+
+| Location | Current English | Proposed English |
+| --- | --- | --- |
+| AgentModelsPanel.tsx:52 | When switching harnesses, the agent uses its default login. The reserve model stays the same. | Switching runtimes uses the default login. The fallback model stays unchanged. |
+| Dialogs.tsx:144 | One line at the top of the channel saying what it is for. Empty, it goes away. | One-line channel description. Leave empty to hide it. |
+| Dialogs.tsx:264 | 2. After you allow it, come back here: Tucano connects on its own and this closes. | 2. After authorization, return here. Tucano connects and closes this dialog. |
+| Dialogs.tsx:272 | After you allow it, the browser goes to an address starting with http://127.0.0.1 and says the page can’t be reached. That’s expected: Tucano is on the server. Copy the whole address from the bar and paste it here. | After authorization, a 127.0.0.1 page may fail to load because Tucano runs on a server. Copy the full address and paste it here. |
+| Harness.tsx:291 | Installing in the terminal that opened. Once it finishes, it shows up here on its own. | Complete installation in the terminal. Tucano detects it automatically. |
+| People.tsx:140 | Who has access to this Tucano and what each one can do. Each person’s DMs are theirs alone. | Manage workspace access and roles. Each person’s DMs remain private. |
+| People.tsx:305 | The link works once, for 7 days. Whoever uses it comes in with their own name, in the browser or the app. | A single-use link, valid for 7 days. Invitees join under their own name in the browser or app. |
+| People.tsx:529 | While you’re away, someone answers the questions and decides the approvals that would be yours. | Choose who handles your questions and approvals while you are away. |
+| People.tsx:654 | Who did what in this Tucano. What’s said in DMs never shows here. | Workspace activity. Private DM content is excluded. |
+| Servers.tsx:44 | Only this computer forgets the access. The Tucano on the server stays there, with everything. | Remove access from this computer. The server and its data stay unchanged. |
+| Servers.tsx:55 | A Tucano running on a server, always on, opened right here: pick it in the list at the top of the sidebar, and come back from the bar above it. The agents and conversations are the server’s; nothing on this computer goes to it. | Open a server workspace from the sidebar switcher; return with the bar above it. Its data stays on the server. Your local workspace is not uploaded. |
+| Servers.tsx:87 | Paste the connection link the server gave you (tucano://connect…, or the browser sign-in link, with ?code=). Whoever has the link controls the agents there: paste only links of your own or from someone you trust. | Paste a trusted tucano://connect… or ?code= sign-in link. Anyone with it can control the server’s agents. |
+| Update.tsx:83 | Couldn’t update on its own. Download the new version from Releases. | Automatic update failed. Download the latest version from Releases. |
+| Update.tsx:85 | No internet to look for a new version. Tucano tries again on its own later. | Could not check for updates while offline. Tucano will retry automatically. |
+| Update.tsx:76 | Looking for a new version… | Checking for updates… |
+| WorkspaceManager.tsx:11 | The text that goes in every conversation: who you are, what you do, what matters. | Shared instructions included in every conversation. |
+| WorkspaceManager.tsx:12 | The same wiki, not a copy: what one workspace keeps the other reads. Without it, it starts with an empty wiki. | Share the same wiki folder across both workspaces. Otherwise, start with an empty wiki. |
+| Conversation.tsx:876 | Once the thread is quiet for a few minutes, what was said becomes a summary here, and the memories about you come from it. | After a few quiet minutes, this thread is summarized and personal memories are extracted. |
+| Conversation.tsx:955 | its own note | agent note |
+| Conversation.tsx:984 | waiting on an answer | awaiting an answer |
+| Conversation.tsx:1001 | what this thread ends with goes back to whoever asked | The final result is returned to the requester. |
+| Pages.tsx:1891 | Reserve model | Fallback model |
+| Pages.tsx:1909 | Reserve account | Fallback account |
+| Pages.tsx:1927 |  Pick another one under “Reserve account”. |  Choose another account under “Fallback account”. |
+| Pages.tsx:596 | A Chrome of its own: opens pages, clicks, fills in and reads like a person, with logins separate from yours (you sign in via Take over). A click that buys, publishes, sends or deletes asks for your approval. | A separate Chrome profile for browsing and forms. Sign in via Take over. Buying, publishing, sending, or deleting requires approval. |
+| Pages.tsx:637 | Your apps (Notes, Calendar, Mail…) it may use like a person, without moving your mouse. For each, read only or also change things; a click that sends, pays, publishes or deletes asks for your approval. | Set read or write access per app. Agents work without moving your mouse; sending, paying, publishing, and deleting require approval. |
+| Pages.tsx:1033 | Lend a folder… | Share a folder… |
+| Pages.tsx:1056 | Give back | Remove access |
+| Pages.tsx:1037 | Lend it a project folder to work in. It changes the real files, so use git to be able to undo. | Share a project folder. Changes affect real files; use Git to keep them reversible. |
+| Pages.tsx:1061 | Lending or giving back restarts the computer: services stop, what it installed stays. With no credentials inside, publishing the code and putting it live stay with you. | Changing shared folders restarts the computer and stops services; installed software stays. Without credentials, you must publish and deploy. |
+| Pages.tsx:1475 | The services your agents work with. You sign in through the browser and the access stays on this computer (except for those that go through a third party, like Composio); every call the agents make goes through permissions and approvals. | Connect services through your browser. Access stays local except with third-party providers such as Composio. Permission and approval rules apply to every call. |
+
+## Notification recovery pass
+
+The measured blocked-notification hint took four lines at 900 px. Keep recovery first and shorten the alternatives. Desktop/iPhone setup remains available from navigation.
+
+| Current English | Proposed English |
+| --- | --- |
+| To be told, use the Tucano app on your computer (Settings › Servers), the iPhone app or Telegram (Settings › Phone). | Alternatives: desktop, iPhone, or Telegram (Settings › Phone). |
+| Browsers don't show notifications from an address without HTTPS (like Tailscale's, http://100.…).  | Browser notifications require HTTPS.  |
+| The browser blocked notifications from this address. Allow them in the site’s permissions and reload the page.  | Allow notifications in site settings and reload.  |
+| Notifications can't be shown here.  | Notifications are unavailable here.  |
+| Sent one. If it didn’t show, check System Settings › Notifications › Tucano (allowed, with Banners or Alerts) and whether a Focus is on. | Test sent. If missing, allow Tucano banners or alerts in System Settings › Notifications, and check Focus. |
+| Sent one. If it didn’t show, check the system’s and the browser’s notification settings for Tucano, and Do Not Disturb. | Test sent. If missing, check Tucano’s system/browser notification settings and Do Not Disturb. |

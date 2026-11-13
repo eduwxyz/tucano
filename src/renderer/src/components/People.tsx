@@ -137,7 +137,7 @@ export function PeoplePane(): ReactNode {
 
       <Card
         title={L(`Pessoas ${team ? `de ${team}` : 'do Tucano'}`, `People ${team ? `of ${team}` : 'in this Tucano'}`)}
-        lead={L('Quem tem acesso a este Tucano e o que cada um pode fazer. As DMs de cada pessoa são só dela.', 'Who has access to this Tucano and what each one can do. Each person’s DMs are theirs alone.')}
+        lead={L('Quem tem acesso a este Tucano e o que cada um pode fazer. As DMs de cada pessoa são só dela.', "Manage workspace access and roles. Each person’s DMs remain private.")}
         action={
           admin && !inviting ? (
             <button className="btn btn--primary btn--sm" onClick={() => setInviting(true)}>
@@ -302,7 +302,7 @@ function InviteCard({ onClose, owner }: { onClose: () => void; owner: boolean })
       (e: unknown) => setError(message(e))
     )
   return (
-    <Card title={L('Convidar alguém', 'Invite someone')} lead={L('O link vale uma vez, por 7 dias. Quem usa entra com o próprio nome, no navegador ou no app.', 'The link works once, for 7 days. Whoever uses it comes in with their own name, in the browser or the app.')}>
+    <Card title={L('Convidar alguém', 'Invite someone')} lead={L('O link vale uma vez, por 7 dias. Quem usa entra com o próprio nome, no navegador ou no app.', "A single-use link, valid for 7 days. Invitees join under their own name in the browser or app.")}>
       <div className="grid2">
         <Field label={L('Papel', 'Role')} hint={role === 'admin' ? L('Admins mexem em agentes, conectores, skills, configurações e pessoas.', 'Admins handle agents, connectors, skills, settings and people.') : L('Membros conversam, criam canais e rotinas pra si.', 'Members chat, create channels and their own routines.')}>
           <select value={role} disabled={!!link} onChange={(e) => setRoleChoice(e.target.value as 'member' | 'admin')}>
@@ -526,7 +526,7 @@ function MeCard(): ReactNode {
             <p className="muted small">
               {covering
                 ? L(`${covering.name} responde e aprova por você até ${time(me.delegateUntil!)}.`, `${covering.name} answers and approves for you until ${time(me.delegateUntil!)}.`)
-                : L('Enquanto você estiver fora, alguém responde às perguntas e decide as aprovações que seriam suas.', 'While you’re away, someone answers the questions and decides the approvals that would be yours.')}
+                : L('Enquanto você estiver fora, alguém responde às perguntas e decide as aprovações que seriam suas.', "Choose who handles your questions and approvals while you are away.")}
             </p>
             {!covering && (
               <div className="row row--center cover-row">
@@ -651,7 +651,7 @@ export function ActivityPane(): ReactNode {
   useEffect(() => void removedPeople().then((r) => setRemoved(new Map(r.map((p) => [p.id, p.name]))), () => {}), [])
   const name = (id?: string): string => (id ? (personById(s, id)?.name ?? removed.get(id) ?? L('Alguém', 'Someone')) : 'Tucano')
   return (
-    <Card title={L('Atividade', 'Activity')} lead={L('Quem fez o quê no Tucano. O que se diz nas DMs nunca aparece aqui.', 'Who did what in this Tucano. What’s said in DMs never shows here.')}>
+    <Card title={L('Atividade', 'Activity')} lead={L('Quem fez o quê no Tucano. O que se diz nas DMs nunca aparece aqui.', "Workspace activity. Private DM content is excluded.")}>
       <div className="row activity-filters">
         <select value={personId} aria-label={L('Pessoa', 'Person')} onChange={(e) => setPersonId(e.target.value)}>
           <option value="">{L('Todas as pessoas', 'Everyone')}</option>
