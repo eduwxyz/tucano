@@ -61,7 +61,7 @@ describe.skipIf(!enabled)('Hermes agents at the same time', () => {
 
     const settings: Settings = {
       workspaceName: 'Marina', context: '',
-      engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready },
+      engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, copilot: ready },
       routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000,
       approvalTtlHours: 24, theme: 'system', language: 'en'
     }
@@ -77,7 +77,7 @@ describe.skipIf(!enabled)('Hermes agents at the same time', () => {
 
     const runner = new Runner({
       db,
-      engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: hermesEngine(() => bin, root) },
+      engines: { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: hermesEngine(() => bin, root), copilot: fakeEngine('copilot') },
       settings: async () => settings,
       emit: () => {},
       workDir: join(dir, 'work'),

@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **GitHub Copilot CLI.** Os agentes podem rodar no Copilot CLI, no seu plano do Copilot, com a mesma governança dos outros harnesses: só as ferramentas do Tucano chegam ao modelo.
+
+### Added
+
+- **GitHub Copilot CLI.** Agents can run on [GitHub Copilot CLI](https://github.com/features/copilot/cli), on your Copilot plan, with the same governance as the other harnesses: only Tucano's tools reach the model (plus page reading when the agent has the web), so Copilot's own shell, file tools and skills stay off. Each reply runs with a `COPILOT_HOME` of its own and hooks off, so your settings, MCP servers, plugins and hooks don't load; the login stays in your system's credential store, and git's search stops at the reply's folder, so a repository around Tucano's data folder can't bring its instructions in. The card says the login isn't checked (no command does it without spending a request): a missing login shows on the first reply, as the sign-in error. The model list is the one `copilot help config` gives, and a model that takes no reasoning effort runs without one. Spend comes from the usage file Copilot writes at the end of each reply, so the per-reply budget can't pause a Copilot reply midway (Copilot's own `--max-ai-credits` caps in AI credits, which the budget's tokens don't convert to). Images attached in the chat go along with the message.
+
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**

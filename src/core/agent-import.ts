@@ -232,7 +232,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
 
 // The same CLI keeps the model; a provider Tucano doesn't run leaves the agent on the default.
 function openBotModel(provider: string, model: string): { modelId?: string; note?: string } {
-  const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', antigravity: 'antigravity', cursor: 'cursor' }
+  const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', antigravity: 'antigravity', cursor: 'cursor', copilot: 'copilot' }
   const engine = engines[provider]
   if (engine === 'claude') return { modelId: /opus/i.test(model) ? 'opus' : /haiku/i.test(model) ? 'haiku' : 'sonnet' }
   if (engine === 'codex') return model ? { modelId: codexValue(model) } : {}

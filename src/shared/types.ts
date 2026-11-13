@@ -8,7 +8,7 @@ import { L, lang, locale, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'copilot'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -646,7 +646,8 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
   cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' },
-  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' },
+  copilot: { label: 'GitHub Copilot', cli: 'copilot', login: 'copilot login', install: 'npm install -g @github/copilot', site: 'https://github.com/features/copilot/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

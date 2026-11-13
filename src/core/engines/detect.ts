@@ -14,6 +14,7 @@ import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
 import { readClineLogins } from './cline'
 import { hermesAppDir, userHermesProviders, warmHermes } from './hermes'
+import { parseCopilotModels } from './copilot'
 
 // The app waits for these answers before anything can run, so the limit has to hold whatever the
 // command does. execFile's own timeout only sends SIGTERM, which an interactive zsh ignores, and it
@@ -419,17 +420,41 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   return { status, models }
 }
 
+// GitHub Copilot CLI. Its models are the ones `copilot help config` lists
+// (offline). The login lives in the system's credential store (or a token in
+// the environment), which no command checks without spending a request, so an
+// installed CLI is taken as signed in, and the card says the login wasn't checked.
+// A missing login then shows on the first turn, as the sign-in error.
+export async function detectCopilot(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('copilot')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const [v, help] = await Promise.all([run(path, ['--version']), run(path, ['help', 'config'])])
+  const models = parseCopilotModels(help.stdout)
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: models.length > 0,
+      ...(models.length
+        ? { route: 'plan' as const, account: `GitHub Copilot · ${models.length} ${L('modelos', 'models')} · ${L('login não conferido', 'login not checked')}` }
+        : { account: L('Sem modelos: atualize o Copilot CLI (copilot update)', 'No models: update Copilot CLI (copilot update)') })
+    },
+    models
+  }
+}
+
 export async function detectEngines(codexHome: string, clineLogin: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, antigravity, cursor, grok, cline, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok(), detectCline(clineLogin), detectHermes()])
+  const [claude, codex, opencode, pi, antigravity, cursor, grok, cline, hermes, copilot] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok(), detectCline(clineLogin), detectHermes(), detectCopilot()])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status, cline: cline.status, hermes: hermes.status },
-    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, cline: cline.models, hermes: hermes.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status, cline: cline.status, hermes: hermes.status, copilot: copilot.status },
+    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, cline: cline.models, hermes: hermes.models, copilot: copilot.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }

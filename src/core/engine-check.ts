@@ -4,7 +4,7 @@
 // whoever asks while one runs shares it instead of starting another.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { ENGINE_IDS, type EngineId, type EngineStatus } from '../shared/types'
-import { codexModels, detectClaude, detectCodex, detectCursor, detectAntigravity, detectGrok, detectCline, detectHermes, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
+import { codexModels, detectClaude, detectCodex, detectCursor, detectAntigravity, detectGrok, detectCline, detectHermes, detectCopilot, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
 import { withInstallDirs } from './platform'
 
 export interface AccountLogin {
@@ -148,6 +148,8 @@ export async function detectEngine(engine: EngineId, codexHome: string, clineLog
       return found(await detectCline(clineLogin))
     case 'hermes':
       return found(await detectHermes())
+    case 'copilot':
+      return found(await detectCopilot())
   }
 }
 const found = (r: { status: EngineStatus; models: string[] }): OneFinding => ({ status: r.status, listed: r.models })
