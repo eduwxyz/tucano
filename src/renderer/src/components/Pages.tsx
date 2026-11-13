@@ -289,16 +289,16 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
 // How a reply's steps read, in the order they go from "everything" to "nothing": the labels carry
 // the number the person chose, since that is what "the latest few" means on this computer.
 const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: string }[] => [
-  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Every step, the way it always was.') },
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Show every step.') },
   {
     value: 'latest',
     label: L(`Últimos ${keep}`, `Last ${keep}`),
-    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'A reply shows only the newest, in a window that scrolls itself; the oldest fade out at the top.')
+    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'Show recent steps in an auto-scrolling panel. Older steps fade out.')
   },
   {
     value: 'one-line',
     label: L('Uma linha', 'One line'),
-    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One line with the current step and its target. Click to open the details. Good for a busy channel with several agents at once.')
+    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'Show the current step and target on one line. Click to expand.')
   }
 ]
 
@@ -914,6 +914,32 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </Row>
                 )
               })}
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
+              title={L('Passos na resposta', 'Steps in a reply')}
+              help={L(
+                'Como as respostas deste agente mostram os passos: todos, só os últimos, ou uma linha com a atividade atual. O padrão é a configuração do app.',
+                'Show all steps, recent steps, or a single activity line. Default follows app settings.'
+              )}
+            >
+              <Row label={L('Passos na resposta', 'Steps in a reply')} className="lrow--wide">
+                <StepsModePick
+                  value={draft.steps}
+                  keep={stepsKeep(stepsLatest)}
+                  follow
+                  label={L(`Como as respostas de ${draft.name || 'o agente'} mostram os passos`, `How ${draft.name || 'the agent'}'s replies show their steps`)}
+                  onChange={(v) => (isNew ? patch({ steps: v }) : (setDraft((d) => ({ ...d, steps: v })), patchAgent(draft.id, { steps: v })))}
+                />
+              </Row>
+              <p className="hint">
+                {L(
+                  'Uma linha não esconde o trabalho: o botão de parar e o tempo continuam ali. Abrir a lista dos passos vale para a resposta, não fica salvo.',
+                  'One line doesn’t hide the work: the stop button and the time stay there. Opening the steps list is per reply, not saved.'
+                )}
+              </p>
             </Section>
           )}
 
@@ -3289,22 +3315,22 @@ export function SettingsPage(): ReactNode {
             <div className="key-row">
               <Icon name="menu" />
               <div className="grow">
-                <strong>{L('Os passos da resposta', 'A reply’s steps')}</strong>
+                <strong>{L('Os passos da resposta', 'Reply steps')}</strong>
                 <p className="muted small">{STEPS_CHOICES(stepsKeep(settings.stepsLatest)).find((c) => c.value === (settings.steps ?? 'all'))!.hint}</p>
                 <StepsModePick
                   value={settings.steps ?? 'all'}
                   keep={stepsKeep(settings.stepsLatest)}
-                  label={L('Como a resposta mostra os passos', 'How a reply shows its steps')}
+                  label={L('Como a resposta mostra os passos', 'Step display')}
                   onChange={(v) => updateSettings({ steps: v ?? 'all' })}
                 />
                 {settings.steps === 'latest' && (
                   <label className="row row--center steps-keep">
-                    <span className="muted small">{L('Quantos passos mostrar', 'How many steps to show')}</span>
+                    <span className="muted small">{L('Quantos passos mostrar', 'Visible steps')}</span>
                     <NumberInput
                       min={STEPS_LATEST_MIN}
                       max={STEPS_LATEST_MAX}
                       value={stepsKeep(settings.stepsLatest)}
-                      aria-label={L('Quantos passos mostrar na janela', 'How many steps the window shows')}
+                      aria-label={L('Quantos passos mostrar na janela', 'Number of visible steps')}
                       onChange={(n) => updateSettings({ stepsLatest: stepsKeep(n) })}
                     />
                   </label>
