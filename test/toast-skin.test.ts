@@ -29,11 +29,14 @@ it('declares the toast surfaces in every theme, so the dark one cannot fall back
 })
 
 const launch = async () => {
+  // A cold Chrome takes a few seconds on a CI runner, and the launch is part of the reading, not
+  // the thing being measured; a browser that isn't there is refused at once, before it is spawned.
+  const started = { headless: true, timeout: 20_000 }
   try {
-    return await chromium.launch({ headless: true })
+    return await chromium.launch(started)
   } catch {
     // No browser of playwright's own: use the Chrome on the machine, and skip where there is none.
-    return await chromium.launch({ headless: true, channel: 'chrome' }).catch(() => null)
+    return await chromium.launch({ ...started, channel: 'chrome' }).catch(() => null)
   }
 }
 
@@ -86,4 +89,6 @@ it('draws a white toast in the light theme and a raised dark one in the dark the
   } finally {
     await browser.close()
   }
-})
+  // Two launches at worst, two theme readings and a 277 KB stylesheet in one page: the same budget
+  // the repo's other tests that drive a real Chrome take.
+}, 60_000)
