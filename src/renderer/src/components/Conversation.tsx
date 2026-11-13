@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { isReplyShortcut } from '../../../shared/reply-shortcut'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { sectorName } from '../../../shared/org'
 import { withMessage } from '../../../shared/attach'
@@ -327,6 +328,26 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     document.addEventListener('selectionchange', changed)
     return () => document.removeEventListener('selectionchange', changed)
   }, [])
+
+  // ⌘L (Ctrl+L off a Mac) on a selection replies to that excerpt, so it takes one keystroke instead
+  // of hunting for the button on the message. The setting only decides whether the key is heard:
+  // off, it does nothing, and the reply button stays the way to answer an excerpt.
+  const mac = useStore((s) => s.platform === 'mac')
+  const shortcut = useStore((s) => s.settings.replyShortcut !== false)
+  useEffect(() => {
+    if (!shortcut) return
+    const keys = (e: KeyboardEvent): void => {
+      if (!isReplyShortcut(e, mac)) return
+      const row = selectionRow(ref.current)
+      const message = row?.dataset.id ? messages.find((m) => m.id === row.dataset.id) : undefined
+      const quote = row ? selectedQuote(row) : undefined
+      if (!message || !quote || message.run?.status === 'working') return
+      e.preventDefault()
+      startReply(message, quote, conversationId)
+    }
+    window.addEventListener('keydown', keys)
+    return () => window.removeEventListener('keydown', keys)
+  }, [mac, messages, conversationId, shortcut])
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
   // later, from further back. Folded into a routine's line, the line opens on it and is what flashes.
