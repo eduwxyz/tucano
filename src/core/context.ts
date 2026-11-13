@@ -501,8 +501,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
           : L('pelo app', 'by the app')
   // A thread is a conversation of its own: the others reach it only when looked up.
   const lookUp = L(
-    `Se ${me} falar de outra conversa, ou de algo combinado antes que não está aqui nem nas memórias, procure com buscar_threads e leia com ler_thread.`,
-    `If ${me} mentions another conversation, or something agreed before that isn't here or in the memories, look it up with buscar_threads and read it with ler_thread.`
+    `Se ${me} falar de outra conversa ou thread, pedir como ela está, ou citar algo combinado antes que não está aqui nem nas memórias, procure com buscar_threads (sem palavras, ela traz as mais recentes) e leia com ler_thread antes de responder.`,
+    `If ${me} mentions another conversation or thread, asks how it's going, or brings up something agreed before that isn't here or in the memories, look it up with buscar_threads (with no words, it brings the latest ones) and read it with ler_thread before answering.`
   )
   const apart = searchable
     ? thread
@@ -550,18 +550,17 @@ export const BUSCAR_THREADS: ToolDef = {
   name: 'buscar_threads',
   get description() {
     return L(
-      'Procura nas outras threads das conversas em que você está (canais e DMs), por palavras que estariam nelas. Devolve as que mais batem, com o id de cada uma pra ler inteira com ler_thread. Sem resultado, o assunto não foi tratado nas conversas recentes: não invente.',
-      "Searches the other threads of the conversations you're in (channels and DMs), by words that would be in them. Returns the best matches, each with its id to read in full with ler_thread. With no result, the subject wasn't covered in the recent conversations: don't make it up."
+      'Procura nas outras threads das conversas em que você está (canais e DMs), por palavras que estariam nelas; sem palavras, traz as mais recentes. Devolve as que mais batem, com quem está nelas agora e o id de cada uma pra ler inteira com ler_thread. Sem resultado, o assunto não foi tratado nas conversas recentes: não invente.',
+      "Searches the other threads of the conversations you're in (channels and DMs), by words that would be in them; with no words, it brings the latest ones. Returns the best matches, with who is on them now and each one's id to read in full with ler_thread. With no result, the subject wasn't covered in the recent conversations: don't make it up."
     )
   },
   get inputSchema() {
     return {
       type: 'object' as const,
       properties: {
-        busca: { type: 'string', description: L('Palavras-chave, ex.: "calendário rotinas PR".', 'Keywords, e.g. "calendar routines PR".') },
+        busca: { type: 'string', description: L('Palavras-chave, ex.: "calendário rotinas PR". Deixe de fora pra ver as threads mais recentes.', 'Keywords, e.g. "calendar routines PR". Leave it out to see the latest threads.') },
         limite: { type: 'number', description: L('Quantas trazer, de 1 a 10. Padrão: 5.', 'How many to bring, 1 to 10. Default: 5.') }
-      },
-      required: ['busca']
+      }
     }
   }
 }
