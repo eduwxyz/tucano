@@ -10,11 +10,11 @@ Make settings and related screens quicker to scan with explicit labels, consiste
 
 - [x] Inventory English copy in Settings, agent profiles, Wiki, Memory, Skills, Routines, and onboarding.
 - [x] Draft exact replacements with their reason and source location.
-- [ ] Measure baseline and candidate wrapping in the built interface.
-- [ ] Implement and verify upstream-compatible replacements.
-- [ ] Review fork-only settings and Wiki resolver copy separately.
-- [ ] Publish upstream issue and PR with immutable screenshots.
-- [ ] Integrate, install, and verify TucanoNext.
+- [x] Measure baseline and candidate wrapping in the built interface.
+- [x] Implement and verify upstream-compatible replacements.
+- [x] Review additional controls on their existing feature PRs.
+- [x] Publish the issue and PR with immutable screenshots.
+- [x] Validate the built interface with scratch data and fake engines.
 
 ## Writing rules
 
