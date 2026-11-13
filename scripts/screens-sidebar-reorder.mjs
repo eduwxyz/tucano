@@ -73,6 +73,29 @@ try {
   const kept = await win.locator('[data-order-group="nav"]').evaluateAll((els) => els.map((el) => el.dataset.orderId))
   assert.deepEqual(kept, navAfter, 'the screens must come back in the order they were left')
 
+  // A bot DM's right-click menu offers the two steps the keyboard has, and each wears the arrow it
+  // means: the row goes the way the arrow points. The seed has no DM yet, so the agent's own menu
+  // writes one first.
+  await win.locator('[data-order-group="agents"][data-order-id]').filter({ hasText: 'Lia' }).first().click({ button: 'right' })
+  await win.waitForSelector('.menu')
+  await win.locator('.menu__item', { hasText: 'Send a message' }).first().click()
+  const dmRow = win.locator('[data-order-group="dms"][data-order-id]').first()
+  await dmRow.waitFor()
+  await dmRow.click({ button: 'right' })
+  await win.waitForSelector('.menu')
+  const arrows = await win
+    .locator('.menu__item')
+    .filter({ hasText: /^Move (up|down)$/ })
+    .evaluateAll((els) => els.map((el) => el.querySelector('svg path')?.getAttribute('d') ?? null))
+  assert.equal(arrows.length, 2, 'the menu must offer both steps')
+  assert.ok(
+    arrows.every(Boolean),
+    'each step must wear a glyph'
+  )
+  assert.notEqual(arrows[0], arrows[1], 'the two arrows must point different ways')
+  await win.screenshot({ path: join(output, '06-dm-menu-glyphs.png') })
+  await win.keyboard.press('Escape')
+
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({ data, before, after, navBefore, navAfter, errors }))
 } finally {
