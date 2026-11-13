@@ -231,6 +231,16 @@ export interface Run {
   delegations?: DelegationRef[] // the work this reply handed to the agents below its author
   routineAsk?: string // a routine's run: the message the routine posted, which this reply answers
   noNews?: true // a routine's run that found nothing new (it answered only noNewsPhrase): the conversation folds these into one line
+  initiative?: InitiativeRun // set on a check-in: the person's coordinator looking at their work on its own
+}
+
+// A check-in by someone's proactive coordinator (docs/autonomous-bots-plan.md): a reply the person did
+// not ask for. It stays out of the conversation while it works and when it finds nothing to say; what
+// it says, and what came of every attempt, is in the person's own record.
+export interface InitiativeRun {
+  wake: string // the record of this attempt (initiative_wakes)
+  personId: string
+  revision: number // the configuration it was admitted under: an edit after that, and it stops
 }
 
 // Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.
@@ -486,6 +496,7 @@ export interface Message {
   text: string
   at: number
   run?: Run
+  hidden?: boolean // a check-in still working, or one that found nothing: kept out of the conversation
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered

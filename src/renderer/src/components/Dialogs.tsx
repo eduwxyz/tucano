@@ -9,6 +9,7 @@ import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
 import { LoginHost } from './LoginTerminal'
 import { FeedbackDialog } from './Feedback'
+import { InitiativeDialog } from './Initiative'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
@@ -96,6 +97,8 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
   if (dialog?.kind === 'feedback') return <FeedbackDialog {...(dialog.image ? { image: dialog.image } : {})} {...(dialog.draft ? { draft: dialog.draft } : {})} {...(dialog.from ? { from: dialog.from } : {})} onClose={close} />
+  // The person's own coordinator: it is theirs, not a conversation's, so it opens without one.
+  if (dialog?.kind === 'initiative') return <InitiativeDialog onClose={close} agentId={dialog.agentId} conversationId={dialog.conversationId} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
   if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />

@@ -5,6 +5,7 @@ import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
+import type { Commitment, CommitmentInput, InitiativeConfig, InitiativeInput, InitiativeView } from './initiative'
 import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
 import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from './vault'
 
@@ -271,6 +272,10 @@ export interface Api {
   survey(p: { lang?: Lang }): Promise<SurveyView | null>
   // A choice (kept the moment it's clicked), the same choice with its comment, or dismiss: "Não quero responder".
   answerSurvey(p: { survey: string; choice?: string; comment?: string; dismiss?: boolean; lang?: Lang }): Promise<void>
+  initiative(): InitiativeView // my own proactive coordinator and its responsibilities, and no one else's
+  saveInitiative(p: { config: InitiativeInput; expectedRevision: number }): InitiativeConfig // expectedRevision: what the page read; 0 creates
+  saveCommitment(p: { commitment: CommitmentInput }): Commitment // one responsibility: its provenance, scope and links
+  checkInNow(): { started: boolean; why?: string; running: boolean } // "Conferir agora": my coordinator looking on the spot
 }
 
 // A survey as the app shows it, already in the person's language (core/feedback.ts).
