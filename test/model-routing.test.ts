@@ -178,6 +178,36 @@ describe('the capability tier a reading asks for', () => {
     expect(empty.notes.join(' ')).toMatch(/model/)
   })
 
+  it('keeps the reading at tier 3 when tier 4 is switched off, and lets a floor lift it there', () => {
+    const dear = judgment({ complexity: 3, capability: 2, deepReasoning: 0.5 }) // a t4 demand
+    const off = poolFor(dear, config({ allowTier4: false }))
+    expect(off.requested).toBe('t3')
+    expect(off.notes.join(' ')).toMatch(/tier 4/)
+    // A floor is the person's own call, so it still reaches tier 4 with the switch off.
+    const floored = poolFor(judgment({ role: 'plan', complexity: 0, capability: 0, deepReasoning: 0.1 }), config({ allowTier4: false, roleFloor: { plan: 't4' } }))
+    expect(floored.policy).toBe('t4')
+    // The switch alone does not stop a floor, and it is the switch that is off, not the pool.
+    expect(poolFor(dear, config()).requested).toBe('t4') // open by default
+  })
+
+  it('never spends tier 5 while tier 4 is switched off', () => {
+    const top = judgment({ complexity: 3, capability: 3, deepReasoning: 1, roleConfidence: 0.9 })
+    const both = config({ allowTier4: false, allowTier5: true })
+    expect(poolFor(top, both).requested).toBe('t3')
+    expect(poolFor(top, both).notes.join(' ')).toMatch(/tier 4/)
+    // With tier 4 open, the same read and switch reach tier 5.
+    expect(poolFor(top, config({ allowTier5: true })).requested).toBe('t5')
+  })
+
+  it('parses the tier 4 switch as open unless a setup says otherwise', () => {
+    const base = defaultRouting()
+    expect(base.allowTier4).toBe(true)
+    expect(normalizeRouting({ ...base, allowTier4: false }).allowTier4).toBe(false)
+    const { allowTier4: _drop, ...without } = base as unknown as Record<string, unknown>
+    expect(normalizeRouting(without).allowTier4).toBe(true) // a setup written before the switch existed
+    expect(validateRouting({ ...base, allowTier4: 'yes' }).ok).toBe(false)
+  })
+
   it('caps an unsure read at tier 2, and an unknown confidence the same way', () => {
     const top = judgment({ complexity: 3, capability: 3, deepReasoning: 1 })
     expect(poolFor({ ...top, roleConfidence: 0.1 }, config({ allowTier5: true })).policy).toBe('t2')

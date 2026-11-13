@@ -77,6 +77,11 @@ export interface RoutingConfig {
    * 0: no cap. A confidence TypeSafe leaves out is unknown, never zero.
    */
   confidenceFloor: number
+  /**
+   * Whether the reading may reach tier 4 on its own. Off, it stops at tier 3; a role's floor still
+   * lifts the reply there, because the switch is about Jev deciding on its own, not about the floor.
+   */
+  allowTier4: boolean
   /** Tier 5 runs only when it is also switched on here, has a chain, and the read qualifies. */
   allowTier5: boolean
   /** Used when a good read finds nothing eligible. Unset: the reply is not sent, and says so. */
@@ -128,6 +133,7 @@ export function defaultRouting(): RoutingConfig {
     roleFloor: { plan: 't3', review: 't3' },
     free: { policy: 'prefer' },
     confidenceFloor: 0.34,
+    allowTier4: true, // open by default: the reading has always been able to reach it
     allowTier5: false // an explicit switch: qualifying work may then reach the dearest pool on its own
   }
 }
@@ -306,6 +312,8 @@ export function normalizeRouting(raw: unknown): RoutingConfig {
     roleFloor,
     free: { policy },
     confidenceFloor: confidence === undefined ? base.confidenceFloor : Math.min(1, Math.max(0, confidence)),
+    // Absent in a setup written before this switch existed, and open then as it is now.
+    allowTier4: raw.allowTier4 !== false,
     allowTier5: raw.allowTier5 === true,
     ...(typeof raw.fallbackTargetId === 'string' && raw.fallbackTargetId ? { fallbackTargetId: raw.fallbackTargetId.slice(0, 300) } : {})
   }
@@ -395,6 +403,7 @@ export function validateRouting(raw: unknown): RoutingValidation {
   if (policy !== undefined && policy !== 'prefer' && policy !== 'fallback' && policy !== 'off')
     problems.push({ path: 'free.policy', message: L('o pool grátis é prefer, fallback ou off', 'the free pool is prefer, fallback or off') })
 
+  if (raw.allowTier4 !== undefined && typeof raw.allowTier4 !== 'boolean') problems.push({ path: 'allowTier4', message: L('tem que ser sim ou não', 'must be on or off') })
   if (raw.allowTier5 !== undefined && typeof raw.allowTier5 !== 'boolean') problems.push({ path: 'allowTier5', message: L('tem que ser sim ou não', 'must be on or off') })
   if (raw.fallbackTargetId !== undefined && raw.fallbackTargetId !== null && !text(raw.fallbackTargetId, 300))
     problems.push({ path: 'fallbackTargetId', message: L('modelo de reserva em branco', 'the reserve model is empty') })
