@@ -615,7 +615,7 @@ export interface Settings {
   // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
   showThinking?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
-  accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  accounts?: Account[] // more logins of a harness, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
   tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
@@ -631,9 +631,10 @@ export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, soun
 // Another login of a harness (a work account beside a personal one), in a folder of its own
 // in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
 // CODEX_HOME, Antigravity's home (HOME) with no keychain in it, where agy keeps the login in a file
-// (only on a Mac: elsewhere its login goes to the system's store, whatever the home).
-// The person signs in through the CLI itself; the app never sees the credentials.
-export const ACCOUNT_ENGINES = ['claude', 'codex', 'antigravity'] as const satisfies readonly EngineId[]
+// (only on a Mac: elsewhere its login goes to the system's store, whatever the home), and Grok's
+// GROK_HOME with its auth.json. The person signs in through the CLI itself; the app never sees the
+// credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex', 'antigravity', 'grok'] as const satisfies readonly EngineId[]
 // Where a harness may have another account: Antigravity's only on a Mac.
 export const accountsOn = (engine: AccountEngine, os: Os): boolean => engine !== 'antigravity' || os === 'mac'
 export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]

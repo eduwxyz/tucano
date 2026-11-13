@@ -248,6 +248,16 @@ export function grokTurnEnv(base: NodeJS.ProcessEnv, home: string, authFile?: st
   return env
 }
 
+// Another login of Grok (Settings › Accounts), in a folder of its own: GROK_HOME is that folder and
+// its auth.json is the login. An API key in the environment is dropped, so a signed-out account
+// can't quietly bill a key in the login's place. Used for its status, its sign-in and its turns.
+export function grokAccountEnv(dir: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, GROK_HOME: dir, GROK_AUTH_PATH: join(dir, 'auth.json') }
+  delete env['XAI_API_KEY']
+  delete env['GROK_CODE_XAI_API_KEY']
+  return env
+}
+
 export interface GrokTurnDirs {
   root: string
   work: string
@@ -308,8 +318,10 @@ export function grokEngine(bin: () => string | undefined, shellEnv: () => Promis
       writeFileSync(join(dirs.root, 'config.toml'), grokConfig(turn))
       // The shell may hold an API key the app, opened from Finder, doesn't.
       const shell = await shellEnv()
-      const auth = join(userGrokHome({ ...process.env, ...shell }), 'auth.json')
-      const env = grokTurnEnv({ ...process.env, ...shell }, dirs.root, existsSync(auth) ? auth : undefined)
+      // An account of its own (Settings › Accounts): its folder holds that login, signed in or not,
+      // so a signed-out account fails as one instead of billing an API key in its place.
+      const auth = turn.account ? join(turn.account, 'auth.json') : join(userGrokHome({ ...process.env, ...shell }), 'auth.json')
+      const env = grokTurnEnv({ ...process.env, ...shell }, dirs.root, turn.account || existsSync(auth) ? auth : undefined)
       try {
         const sent = turn.system.length + turn.prompt.length
         yield* runCli({
