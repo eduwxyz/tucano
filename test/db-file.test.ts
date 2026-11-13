@@ -28,7 +28,14 @@ describe('the file behind everything', () => {
     const { db, file } = fresh()
     const s = db.size()
     expect(s.bytes).toBeGreaterThan(0)
-    expect(s.free).toBe(0)
+    // A migration can rebuild an empty table and leave reusable pages even in a new file.
+    // Compare against an independent connection, including any such free pages.
+    const probe = new DatabaseSync(file, { readOnly: true })
+    try {
+      const page = Number(probe.prepare('PRAGMA page_size').get()!['page_size'])
+      expect(s.free).toBe(Number(probe.prepare('PRAGMA freelist_count').get()!['freelist_count']) * page)
+      expect(s.bytes).toBe(Number(probe.prepare('PRAGMA page_count').get()!['page_count']) * page)
+    } finally { probe.close() }
     // The page count is the file's own arithmetic, not a second opinion about the size.
     expect(Math.abs(s.bytes - statSync(file).size)).toBeLessThan(1024 * 1024)
     db.close()
