@@ -108,10 +108,13 @@ describe('the record', () => {
   })
 
   it('says what it did, what is waiting on the person, and what is left of today', () => {
-    const saved = initiative.save(me, config({ dailyReviews: 4 }), 0)
+    // A day is the config's own timezone, so the moment is held rather than read: just after local
+    // midnight a wake seeded a minute ago is yesterday's, and the count it belongs to is a different one.
+    const at = Date.UTC(2026, 10, 13, 10, 0, 0)
+    const saved = initiative.save(me, config({ dailyReviews: 4 }), 0, at)
     initiative.saveCommitment(me, commitment())
     const waiting = initiative.saveCommitment(me, commitment({ description: 'Ask the client which number.', state: 'waiting_user' }))
-    const now = Date.now()
+    const now = at + 10 * 60_000
     initiative.settle(me, now, [], now) // one tick passed: nothing moved
     db.saveWake({ id: 'w1', personId: me.id, agentId: 'orion', revision: saved.revision, at: now - 60_000, endedAt: now - 59_000, outcome: 'reported', text: 'Answered the client.', tokens: 1_200 })
     db.saveWake({ id: 'w2', personId: me.id, agentId: 'orion', revision: saved.revision, at: now - 120_000, endedAt: now - 119_000, outcome: 'quiet', text: '[[quiet]]', tokens: 300 })
