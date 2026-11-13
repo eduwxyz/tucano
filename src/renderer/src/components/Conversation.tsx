@@ -1,7 +1,7 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
-import { runnerRules } from '../../../shared/classify'
+import { ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
@@ -1415,7 +1415,11 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const runner = isRunner(approval.tool)
   const actions = runner ? innerActions(approval.tool, approval.args) : undefined
   // What "always allow" covers there: each inner tool that asked, on its own (none for a raw request or code).
-  const forGood = runner ? runnerRules(approval.connectorId, approval.tool, approval.args)?.map((r) => r.slice(r.indexOf(':') + 1)) : undefined
+  const forGood = runner
+    ? runnerRules(approval.connectorId, approval.tool, approval.args)
+        ?.map(ruleTool)
+        .map(({ tool, account }) => (account ? `${tool} (${L('conta', 'account')} ${account})` : tool))
+    : undefined
   // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
   // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
   // Letting go drains the fill back and clears the timer. Space or Enter hold too.
