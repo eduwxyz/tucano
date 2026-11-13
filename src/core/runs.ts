@@ -329,8 +329,10 @@ type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: stri
 // reads it with its next tool result. A reply that ends before taking one leaves it here, and it goes
 // as a prompt of its own (see `steerLeftovers`), so nothing written to an agent is ever swallowed.
 type SteerNote = { messageId: string; who: string; text: string; threadId?: string }
-// A reply waiting for its agent to finish there. Only a send the person marked as queued waits: a
-// message of theirs starts its own reply, side by side with whatever runs there.
+// A reply waiting for its agent to finish there. Only a send the person marked as queued waits, and
+// what isn't a prompt typed into the conversation (an approval's outcome, a question's refusal, a
+// browser hand-back): a message of theirs, a routine and a retry start their own reply, beside
+// whatever runs there.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = {
   ctl: AbortController
@@ -367,8 +369,8 @@ export class Runner {
   private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
   // What came back from an agent's team while it was replying where it asked: told when that reply ends.
   private tells = new Map<string, () => void>()
-  // Every other reply asked for while the agent replies there (a person's mention or DM, a routine,
-  // an approval's outcome, a retry), in the order they came: they wait here, off the queue (startReply).
+  // What waits for the agent to finish there: a prompt the person marked as queued, an approval's
+  // outcome, a question's refusal, a browser hand-back. In the order they came, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
   // Replies running in each conversation, and the prompts a person marked as queued behind them: one of
   // those starts when nothing runs there any more (see `runIn`, `settleIn`).
@@ -546,10 +548,9 @@ export class Runner {
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
     // How it joins a reply already running here (the window says which): alongside it, after it,
     // handed to it between tool calls, or in place of it. With nothing running, all four are the same.
-    // No mode at all (the phone, an approval's outcome, a routine, a retry) is the way replies have
-    // always gone here: one at a time per agent and thread, a person's newer message taking over.
-    // No mode means a message of the person's own: it starts its own reply beside whatever runs
-    // there. Only `queue` waits, and a steer or an interrupt acts on the reply already running.
+    // No mode at all (the phone) means a message of the person's own: it starts its own reply beside
+    // whatever runs there, as a routine and a retry do (neither comes through here). Only `queue`
+    // waits, and a steer or an interrupt acts on the reply already running.
     const mode = opts.mode ?? 'parallel'
     const queued = mode === 'queue' && this.busyIn(conv.id)
     if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
@@ -797,7 +798,8 @@ export class Runner {
     c.ctl.abort()
   }
 
-  // Runs the same agent again in place of a reply that didn't finish.
+  // Runs the same agent again in place of a reply that didn't finish. Beside whatever replies there,
+  // not after it: asking again is an answer to what the person did, and waiting made it look lost.
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
@@ -806,7 +808,7 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true })
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true, parallel: true })
   }
 
   // A reply paused at its budget goes on in a new reply that knows what it did:
@@ -861,7 +863,9 @@ export class Runner {
     db.saveMessage(ask)
     emit({ type: 'message', message: ask })
 
-    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true })
+    // Beside whatever replies there, like a message of the person's: a routine that waits its turn
+    // arrives after the reply the person is already reading, and reads as an answer to it.
+    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true }, { parallel: true })
   }
 
   // A routine's reply that failed, run again in place with the same request.
@@ -873,7 +877,8 @@ export class Runner {
     const agent = db.agent(r.agentId)
     if (!msg?.run || msg.run.status !== 'failed' || !conv || !agent || agent.archived) return undefined
     const me = (await this.deps.settings()).workspaceName
-    return this.startReply(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true })
+    // Beside whatever replies there, for the same reason a retry is: asking again doesn't wait its turn.
+    return this.startReply(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }, { parallel: true })
   }
 
   // `me`: the owner, by the workspace's name; a person's routine reads with theirs, and the team's as the channel's.
