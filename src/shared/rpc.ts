@@ -1,5 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
+import type { NoticeFeed } from './notice'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
@@ -211,6 +212,9 @@ export interface Api {
   leave(): void // someone (not the owner) leaves on their own: access ends, and their DMs, memories and own routines go now
   activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)
   inbox(): Inbox
+  // The window over every window (src/main/notice.ts) reads only this: how its cards are set, what
+  // waits on me with the buttons to decide it, and the names to say where each card happened.
+  noticeFeed(): NoticeFeed
   answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent

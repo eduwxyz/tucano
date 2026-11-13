@@ -31,6 +31,22 @@ declare global {
       // Settings › General › Notifications: one sent now ('shown'), or why none can come here
       // (a browser: blocked by the person, or a page without HTTPS, where browsers show none).
       testNotify?: () => Promise<NotifyState | 'shown'>
+      // The cards over every window (src/main/notice.ts): what the main process sends, where the
+      // pointer is, how many cards there are, and a click that opens the app.
+      notice: {
+        onPush: (cb: (p: unknown) => void) => void
+        onClear: (cb: () => void) => void
+        onPlace: (cb: (p: { up: boolean; dark: boolean; accent: string }) => void) => void
+        pick: () => void
+        demo: () => void
+        onDemo: (cb: () => void) => void
+        onPick: (cb: (rect: { x: number; y: number; w: number; h: number; up: boolean }) => void) => void
+        areaDone: () => void
+        areaCancel: () => void
+        hit: (inside: boolean) => void
+        count: (n: number) => void
+        open: (to: { conversationId?: string; threadId?: string; page?: 'skills' }) => void
+      }
       notifyState?: () => NotifyState // a browser only: where its notifications stand now
       updateState: () => Promise<UpdateState>
       onUpdate: (cb: (state: UpdateState) => void) => void

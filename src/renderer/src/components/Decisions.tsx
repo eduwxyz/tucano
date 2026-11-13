@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isRecommended, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { answerDecision, submitDecisions, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
@@ -287,7 +287,10 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
               <button key={i} role={multiple ? 'checkbox' : 'radio'} aria-checked={on} className={`ask-option ${on ? 'is-on' : ''} ${focus === i ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(i)} onClick={() => pick(i)}>
                 <span className="ask-option__key">{i + 1}</span>
                 <span className="ask-option__text">
-                  <span className="ask-option__label">{o.label}</span>
+                  <span className="ask-option__label">
+                    {o.label}
+                    {isRecommended(o) && <span className="tag tag--agent ask-option__rec">{L('recomendado', 'recommended')}</span>}
+                  </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
                 <span className={`ask-option__mark ${multiple ? 'is-box' : ''}`} aria-hidden>

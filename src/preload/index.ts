@@ -59,6 +59,34 @@ contextBridge.exposeInMainWorld('tucano', {
       return () => ipcRenderer.removeListener('home-phone', listener)
     }
   },
+  // The cards over every window (src/main/notice.ts): what arrives, what to do with it, and where
+  // the pointer is, so the window can let the click through everywhere there's no card.
+  notice: {
+    onPush: (cb: (p: unknown) => void): void => {
+      ipcRenderer.on('notice:push', (_e, p: unknown) => cb(p))
+    },
+    onClear: (cb: () => void): void => {
+      ipcRenderer.on('notice:clear', () => cb())
+    },
+    // The rectangle the cards sit in, and which way they grow: main owns the window, the page draws.
+    onPlace: (cb: (p: { up: boolean; dark: boolean; accent: string }) => void): void => {
+      ipcRenderer.on('notice:place', (_e, p: { up: boolean; dark: boolean; accent: string }) => cb(p))
+    },
+    // The rectangle, drawn on screen (Settings › Notifications › Where).
+    pick: (): void => ipcRenderer.send('notice:pick'),
+    demo: (): void => ipcRenderer.send('notice:demo'),
+    onDemo: (cb: () => void): void => {
+      ipcRenderer.on('notice:demo', () => cb())
+    },
+    onPick: (cb: (rect: { x: number; y: number; w: number; h: number; up: boolean }) => void): void => {
+      ipcRenderer.on('notice:pick', (_e, rect: { x: number; y: number; w: number; h: number; up: boolean }) => cb(rect))
+    },
+    areaDone: (): void => ipcRenderer.send('notice:area-done'),
+    areaCancel: (): void => ipcRenderer.send('notice:area-cancel'),
+    hit: (inside: boolean): void => ipcRenderer.send('notice:hit', inside),
+    count: (n: number): void => ipcRenderer.send('notice:count', n),
+    open: (p: { conversationId?: string; threadId?: string; page?: 'skills' }): void => ipcRenderer.send('notice:open', p)
+  },
   // Tucanos on servers, shown in this window over the app (Settings › Servers, the workspace list).
   servers: {
     list: (): Promise<unknown> => ipcRenderer.invoke('servers:list'),

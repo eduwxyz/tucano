@@ -1530,6 +1530,11 @@ export class Db {
     return (this.db.prepare('SELECT * FROM artifacts ORDER BY created_at').all() as Row[]).map((r) => this.toArtifact(r))
   }
 
+  // What one reply showed: the card over the desktop shows its pictures.
+  artifactsOf(messageId: string): Artifact[] {
+    return (this.db.prepare('SELECT * FROM artifacts WHERE message_id = ? ORDER BY created_at').all(messageId) as Row[]).map((r) => this.toArtifact(r))
+  }
+
   artifact(id: string): Artifact | undefined {
     const r = this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as Row | undefined
     return r && this.toArtifact(r)
