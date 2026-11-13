@@ -18,6 +18,7 @@ import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
 import { overlongSkillNote } from '../shared/skills'
+import { instructionLengthNote } from '../shared/instructions'
 import { skillName } from './skills'
 import type { Zip } from './zip'
 
@@ -53,7 +54,6 @@ export interface ForeignTeam {
 
 const MAX_MANIFEST = 20_000_000
 const MAX_TEXT = 1_000_000
-const MAX_INSTRUCTIONS = 32_000
 const MAX_PICTURE_BYTES = 145_000 // as a data URL it stays under cleanLook's cap
 const MAX_MEMORY = 300
 // What one file brings at most; the rest is counted in the summary.
@@ -182,10 +182,12 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
   // The standing rules live in the workspace's AGENTS.md (or CLAUDE.md), only there when the export took the files.
   const files = inside(a['files'], prefix)
   const fromFile = files
-    ? attempt(() => ['AGENTS.md', 'CLAUDE.md'].map((f) => zip.read(`${files}/${f}`, MAX_TEXT)).find(Boolean)?.toString('utf8').trim() ?? '', '', L('o AGENTS.md (não deu pra ler)', "AGENTS.md (it couldn't be read)"), notes)
+    ? attempt(() => ['AGENTS.md', 'CLAUDE.md'].map((f) => zip.read(`${files}/${f}`, MAX_TEXT)).find(Boolean)?.toString('utf8') ?? '', '', L('o AGENTS.md (não deu pra ler)', "AGENTS.md (it couldn't be read)"), notes)
     : ''
-  const description = str(a['description'], 2_000)
-  const instructions = (fromFile || description).slice(0, MAX_INSTRUCTIONS)
+  const description = typeof a['description'] === 'string' ? a['description'] : ''
+  const instructions = fromFile || description
+  const longPrompt = instructionLengthNote(instructions.length)
+  if (longPrompt) notes.push(longPrompt)
   if (!fromFile) notes.push(description ? L('as instruções (só veio a descrição: exporte com os arquivos)', 'the instructions (only the description came: export with the files)') : L('as instruções (exporte com os arquivos)', 'the instructions (export with the files)'))
   if (files) notes.push(L('os outros arquivos do workspace', 'the other workspace files'))
 
@@ -343,7 +345,9 @@ function tucanoAgent(zip: Zip, a: Record<string, unknown>, source: string): Fore
   if (!OUR_KEY.test(key) || !name) return undefined
   const prefix = `agents/${key}/`
   const notes: string[] = []
-  const instructions = str(a['instructions'], MAX_INSTRUCTIONS)
+  const instructions = typeof a['instructions'] === 'string' ? a['instructions'] : ''
+  const longPrompt = instructionLengthNote(instructions.length)
+  if (longPrompt) notes.push(longPrompt)
   if (!instructions) notes.push(L('as instruções (não vieram no arquivo)', "the instructions (they weren't in the file)"))
   notes.push(L(`o modelo do ${source} (ficou o modelo padrão)`, `the ${source} model (it got the default model)`))
 

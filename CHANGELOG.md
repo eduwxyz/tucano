@@ -11,6 +11,72 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **GitHub Copilot CLI.** Agents can run on [GitHub Copilot CLI](https://github.com/features/copilot/cli), on your Copilot plan, with the same governance as the other harnesses: only Tucano's tools reach the model (plus page reading when the agent has the web), so Copilot's own shell, file tools and skills stay off. Each reply runs with a `COPILOT_HOME` of its own and hooks off, so your settings, MCP servers, plugins and hooks don't load; the login stays in your system's credential store, and git's search stops at the reply's folder, so a repository around Tucano's data folder can't bring its instructions in. The card says the login isn't checked (no command does it without spending a request): a missing login shows on the first reply, as the sign-in error. The model list is the one `copilot help config` gives, and a model that takes no reasoning effort runs without one. Spend comes from the usage file Copilot writes at the end of each reply, so the per-reply budget can't pause a Copilot reply midway (Copilot's own `--max-ai-credits` caps in AI credits, which the budget's tokens don't convert to). Images attached in the chat go along with the message.
 
+## [0.2.28] - 2026-11-12
+
+> **Em português:**
+> - **Novo:** a tela **Time**, com o organograma dos seus agentes. Um agente pode **responder a** outro: você fala com um só, ele divide o pedido entre quem está abaixo dele e fecha o assunto com você. Cada pedido vira uma thread no canal de quem faz (ou na DM dele, quando o assunto não é de canal nenhum); onde você pediu aparece um aviso de que ele respondeu, com a resposta a um clique. Quem responde ao mesmo agente também pode pedir um ao outro. A tela é um quadro: puxe uma linha de um cartão a outro pra ligar, arraste pra arrumar, e veja a linha acender enquanto um pedido anda. Uma linha tem no máximo três agentes, e toda mudança tem **Desfazer**. O guia tem a página "Time".
+> - **Novo:** o **Hermes** entra como motor, ao lado de Claude Code, Codex e os outros.
+> - **Novo:** os limites da sua assinatura do Codex aparecem em **Uso e limites**; uma rotina ganha o botão **Duplicar**; o **Keenable** (busca na web) entra na loja de conectores.
+> - **Correção:** um agente responde uma mensagem por vez numa conversa ou thread, venha ela de onde vier. Instruções longas de um agente não são mais cortadas. Limite mensal 0 aparece como "sem limite" em todas as telas. O mapa da wiki não desmonta quando a wiki cresce. Um agente que só lê pelo Composio consegue ligar uma conta. O Tucano no navegador reabre onde você estava, e no celular o teclado não sobe sozinho ao abrir uma conversa. No Linux, o agente lê e usa o Chrome dado em Apps.
+> - **Mudou:** num canal que responde em threads, a mensagem que você manda já abre a thread dela. Na página Memória, as suas memórias se chamam "Você".
+
+### Added
+
+- **An org chart: agents that answer to other agents.** Agents only talked to each other inside a channel they shared, so a person with several agents had to carry each piece of a job to the right one and bring the answers together. Now an agent can **answer to** another. The one above hands work to anyone below it: each request becomes a thread in the channel of whoever does it, in the asker's name, and when that thread ends the conversation where it was asked gets a line saying who answered, with the whole answer one click away; the asker then replies once, when everything has come back, saying what came of it. Agents that answer to the same agent can ask each other too; nobody asks upward, across branches, or back to whoever is waiting on the same work. A request goes to the channel whose topic covers the subject, or to the agent's DM with you when it belongs to no channel (or the agent is in none). Questions from whoever does the work go to the asker, not to you; approvals stay each agent's own, and a request held on one of yours does not hold the others back. Requests can be cancelled, have deadlines, and report failures to whoever asked. Limits: a line holds three agents, a reply makes five requests, an agent keeps twelve open, and one piece of work stacks three.
+- **The Time screen** (Team, in English), in the sidebar with two or more agents: a board that pans and zooms, one card per agent. Pull a line from one card to another to say who answers to whom, click a line to remove it, drag cards where you want them (**Organizar** tidies them again), and ask an agent from the box at the bottom. Open requests are listed under **Agora** and light the line they travel. Every change shows **Desfazer** (⌘Z). The same setting is on each agent's page, under **Responde a**, and travels in a team file.
+
+- **Hermes as a harness.** [Hermes](https://hermes-agent.nousresearch.com) (0.22.0 or later) joins Claude Code, Codex and the others: install it, run `hermes setup`, and pick one of its models for an agent.
+
+- **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
+
+- **Duplicate a routine.** A routine's card has a copy button next to Edit: it opens the form with the same agent, place, schedule and instructions, named "(copy)", to change what differs and save as a new routine of your own. The copy starts off, so it doesn't run next to the original until you turn it on, and a webhook routine's copy gets its own address. Thanks, jonatas-caram-ifood! (#362)
+
+- **Keenable in the connector store.** Web search and pages read as Markdown, from [Keenable](https://docs.keenable.ai/mcp-server)'s official server, in Research next to Exa. It needs no account or key, so one click connects it; the searches and the pages an agent asks for go to Keenable. Thanks, ilya-bogin-keenable! (#291)
+
+### Fixed
+
+- **An agent's page opens in the first seconds after the app starts.** The list of harnesses the app starts from, before its first check ends, was written out by hand and left Hermes out: a screen that read each harness's status found none for it, and the agent's page (or the harness list) came up blank until the check finished. The list is now every harness the app knows, also over a check kept by an older version.
+
+- **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.) Thanks, brunolellis! (#357)
+
+- **A monthly limit of 0 reads as no limit on every screen.** The runner already treated 0 as no ceiling, but the screens didn't: every agent without a limit had a red *Hit the monthly limit* dot in the sidebar, a reply stopped at the limit offered to raise a limit that doesn't exist instead of *Try again*, the agent page said "of 0 tokens", and the Tuca's change card and workspace summary printed 0 and 0%. They now say there is no monthly limit, and the dots and *Raise the limit* only come for an agent with a real one. Thanks, apoapostolov! (#351)
+
+- **Long agent instructions are kept whole.** An agent's instructions were cut without a word when the Tuca proposed a new agent (at 4,000 characters), proposed a change to one (at 8,000, so proposing any change could shorten a long prompt that was already there), or when a team was imported (at 32,000). They now come through whole, and a prompt over 32,000 characters gets a warning instead. Thanks, GianCdM! (#364)
+
+- **An agent answers one message at a time in a conversation or thread, whatever started it.** Only routed messages and hand-offs waited for the agent's reply in progress in the same place; an @mention, a DM, a routine, a retry or an approval's outcome started a second reply next to it, so the same agent could answer twice at once and the two replies stepped on each other. Every reply now waits its turn in that place. Thanks, eialanjones! (#358)
+
+- **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
+
+- **Tucano in a browser opens where you left it.** On a phone, putting the tab away and coming back reloads the page, and it always opened on the first channel. Now the screen you're on rides in the page's address (`#/c/<conversation>`, `#/settings`, `#/wiki/page/<title>`…), so a reload, a bookmark or a pasted link opens that screen; a conversation or agent that's gone falls back to the first channel. The desktop app is unchanged.
+
+- **On Linux, an agent given Chrome in Apps can read and use it.** Chrome only joins the accessibility bus when started with `ACCESSIBILITY_ENABLED=1` (GNOME keeps `org.a11y.Status IsEnabled` off without a screen reader), so its window was invisible; Chromium apps are now started with it. A launcher script under another name (Arch's `google-chrome-stable` starts `chrome`) is followed to the program it runs, so the app is found and an open one is brought forward instead of opened again. The agents' own headless Chrome, which sits on the bus under the same name, is left out, so reads, keys and focus go to the person's window.
+
+- **Big web pages in Apps read whole on Linux.** A snapshot gets 15 seconds instead of agent-desktop's 3, so a page with a thousand elements is read before its elements are judged unique; a list longer than one screen has pages (`pagina`) with the same numbers; an area is numbered after the list it came from, which stays good; and an area that repeats in the window (a table row) is read from the last whole read instead of failing.
+
+- **Keys on Wayland say what to do.** No program can bring a window forward there: a key now goes only when the app's window is in front, and otherwise the agent is told to ask the person to click it.
+
+- **The keyboard stays down when you open a conversation on a phone.** Opening a conversation or a thread, attaching a file or dictating put the focus in the message field, and on a touch screen that raised the keyboard over the messages you came to read. On a phone or tablet the field now takes the focus only when you tap it. On a computer it still does, as before.
+
+### Changed
+
+- **A message in a channel that answers in threads opens its thread.** There, each message you write in the channel starts a thread of its own, where the answers go, and you had to find its link under the message to follow them. Now the thread opens on the side as soon as your message is sent (full screen on a phone). A reply written in a thread, a channel that answers in the conversation, or a message from another of your devices leaves the panel as it was. Thanks, b7s! (#347)
+
+- **Your own memories are named "You" on the Memory page.** The tab read "About you" ("Sobre você"), which wrapped to two lines once a few agents had notes of their own and the tab strip got crowded. It now reads "You" ("Você"), and so does the heading inside it. Only the name changed: the memories and where they're kept are the same. Thanks, apoapostolov! (#296)
+
+## [0.2.27] - 2026-11-10
+
+> **Em português:**
+> - **Novo:** a barra lateral e o painel da direita têm largura ajustável. Arraste a borda entre a barra lateral e a página, ou a borda esquerda do painel (thread, imagem, documento, página, navegador do agente), pra alargar ou estreitar; dois cliques na borda voltam ao padrão. A largura fica guardada no computador.
+> - **Correção:** o navegador de um agente tem 90 segundos pra abrir na primeira vez, não 30: numa máquina lenta ou ocupada ele abria, mas o Tucano já tinha desistido.
+
+### Added
+
+- **Drag the sidebar and the right-hand panel to the width you want.** The sidebar was 248 px wide and a panel on the right took a fixed share of the window, so long channel and agent names were cut and a document or an agent's browser couldn't be given more room. The edge between the sidebar and the page, and the left edge of a panel (a thread, an image, a document, a page, an agent's browser), can now be dragged; a double click goes back to the default, and with the edge focused the arrow keys change it and Home resets it. The sidebar goes from 200 to 480 px and never past half the window; a panel keeps at least 360 px and leaves at least 320 px for the conversation. Each width is remembered on that computer (one for the sidebar, one for every kind of panel). A drag goes on while a reply streams into the thread and over a page inside a panel. On a phone nothing changes: the sidebar is a drawer and a panel takes the screen.
+
+### Fixed
+
+- **An agent's Chrome gets 90 seconds to open the first time.** A cold Chrome with a new profile took more than 30 seconds on a slow or busy machine (a small server, CI), and the app called it failed while it was still starting; the next open on the same machine took a few seconds. Thanks, apoapostolov! (#316)
+
 ## [0.2.26] - 2026-11-10
 
 > **Em português:**
@@ -598,6 +664,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.28]: https://github.com/eduwxyz/tucano/compare/v0.2.27...v0.2.28
+[0.2.27]: https://github.com/eduwxyz/tucano/compare/v0.2.26...v0.2.27
 [0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26
 [0.2.25]: https://github.com/eduwxyz/tucano/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24

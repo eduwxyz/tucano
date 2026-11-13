@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { codexAppInput, codexAppParser, KEEP_IDLE_MS, leftThreads, MAX_IDLE } from '../src/core/engines/codex-app'
-import { CODEX_DISABLED_FEATURES, codexAppArgs, codexEngine, codexIsolated, codexThread } from '../src/core/engines/codex'
+import { CODEX_DISABLED_FEATURES, codexAppArgs, codexEngine, codexIsolated, codexQuota, codexThread } from '../src/core/engines/codex'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
 
 const isWin = process.platform === 'win32'
@@ -288,6 +288,12 @@ describe('Codex app-server process', () => {
     expect(requests().some((r) => r.argv)).toBe(false)
   }, 20_000)
 
+  it("reads the subscription's windows from a short-lived app-server, and lets it go", async () => {
+    const q = await make().planUsage!()
+    expect(q).toMatchObject({ plan: 'plus', windows: [{ minutes: 10_080, utilization: 0.09, resetsAt: 1794567151000 }] })
+    expect(requests().some((r) => r.method === 'account/rateLimits/read')).toBe(true)
+  })
+
   it("cleans the threads an earlier run left, of the agents' folders only", async () => {
     const day = join(home, '.codex', 'sessions', '2026', '11', '06')
     mkdirSync(day, { recursive: true })
@@ -315,3 +321,16 @@ function isAlive(pid: number): boolean {
     return false
   }
 }
+
+describe('Codex subscription windows', () => {
+  it('reads each window, shortest first, as a fraction, with its reset in ms', () => {
+    const r = { rateLimits: { primary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: 2000 }, secondary: { usedPercent: 120, windowDurationMins: 300, resetsAt: 1000 }, planType: 'pro' } }
+    expect(codexQuota(r, 5)).toEqual({ windows: [{ minutes: 300, utilization: 1, resetsAt: 1_000_000 }, { minutes: 10_080, utilization: 0.4, resetsAt: 2_000_000 }], plan: 'pro', at: 5 })
+  })
+
+  it('has nothing to say with no windows (an API key) or an answer it does not know', () => {
+    expect(codexQuota({ rateLimits: { primary: null, secondary: null } })).toBeUndefined()
+    expect(codexQuota({ rateLimits: { primary: { usedPercent: '9' } } })).toBeUndefined()
+    expect(codexQuota(undefined)).toBeUndefined()
+  })
+})

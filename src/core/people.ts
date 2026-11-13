@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
-import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
+import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
@@ -329,6 +329,8 @@ export class People {
         return { type: 'computer', computer: this.computerFor(person, event.computer) }
       case 'inbox':
         return { type: 'inbox', inbox: this.inbox(person) }
+      case 'delegations':
+        return { type: 'delegations', delegations: this.delegations(person) }
       case 'settings':
         return { type: 'settings', settings: this.settingsFor(person, event.settings) }
       // Gone from a DM (or someone's own memory): only its person hears of it (its id is no one else's to know).
@@ -438,6 +440,11 @@ export class People {
   // Approvals this person can decide, and the questions waiting on them: asked to them (or to
   // someone they cover for), a DM's question waiting on their yes, or one past its deadline that
   // they had asked for. A question from a DM that isn't theirs comes without where it was asked.
+  // Work handed down the tree that is open, or ended in the last day, in channels this person sees.
+  delegations(person: Person, now = Date.now()): Delegation[] {
+    return this.db.liveDelegations(now - 86_400_000).filter((d) => this.canSeeConversation(person, this.conversationOf(d.conversationId)))
+  }
+
   inbox(person: Person, now = Date.now()): Inbox {
     const approvals = this.db.approvals().filter((a) => a.state === 'pending' && this.canDecide(person, a) && this.canSeeApproval(person, a))
     // A question from a DM that isn't theirs comes without where it was asked.
@@ -482,7 +489,7 @@ export class People {
   }
 
   // The snapshot as this person gets it: no one else's DMs, their messages or their memories.
-  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox'>, opts: { server?: boolean } = {}): Snapshot {
+  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations'>, opts: { server?: boolean } = {}): Snapshot {
     const conversations = this.db.conversations(person.id).filter((c) => this.canSeeConversation(person, c))
     const seen = new Set(conversations.map((c) => c.id))
     const theirs = base.messages.filter((m) => seen.has(m.conversationId))
@@ -509,6 +516,7 @@ export class People {
       ...(this.db.formerPeople().length ? { former: this.db.formerPeople() } : {}),
       you: person.id,
       inbox: this.inbox(person),
+      delegations: this.delegations(person),
       ...(opts.server && person.role === 'owner' && !this.db.ownerNamed() ? { needsName: true } : {})
     }
   }

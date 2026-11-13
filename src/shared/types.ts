@@ -8,7 +8,7 @@ import { L, lang, locale, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'copilot'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'copilot'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -93,6 +93,7 @@ export interface Agent {
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
+  reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -196,6 +197,43 @@ export interface Run {
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
+  delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back
+  delegations?: DelegationRef[] // the work this reply handed to the agents below its author
+}
+
+// Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.
+export interface DelegationRef {
+  id: string
+  to: string // the agent doing it
+  conversationId: string
+  rootId: string
+  back?: 'result' // on the message that brought the answer back to where it was asked: shown folded there
+}
+
+// A piece of work an agent handed to one below it (src/shared/org.ts), in that one's channel: a thread
+// there, opened by `rootId`. What it ends with goes back to where it was asked from, and whoever asked
+// gets the turn again. `asking`: the one doing it left a question, which goes up to whoever asked.
+export interface Delegation {
+  id: string
+  from: string // the agent that asked
+  to: string // the agent asked
+  conversationId: string // where the work is done
+  rootId: string // the message that opened its thread there
+  originConversationId: string // where it was asked from
+  originThreadId?: string
+  originMessageId: string // the reply that asked
+  requestedBy: string // the person that reply was for
+  text: string // what to do
+  done?: string // what counts as finished
+  dueAt?: number
+  state: 'open' | 'done' | 'failed' | 'cancelled'
+  asking?: string // the message whose question waits for whoever asked
+  askingTold?: boolean // whoever asked has heard of that question
+  result?: string // the message it ended with
+  told?: boolean // whoever asked has heard how it ended
+  lateTold?: boolean // whoever asked has heard it's past its deadline
+  createdAt: number
+  endedAt?: number
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -422,6 +460,7 @@ export interface Settings {
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
   voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
+  orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
@@ -445,6 +484,7 @@ export interface Settings {
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
+  codexQuota?: CodexQuota // the Codex subscription's, read when the usage page is open
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
@@ -541,6 +581,14 @@ export interface Quota {
   at: number
 }
 
+// The Codex subscription's windows, as its app-server tells (account/rateLimits/read): how long
+// each is depends on the plan (Plus has only the week).
+export interface CodexQuota {
+  windows: { minutes: number; utilization: number; resetsAt: number }[] // 0..1, ms
+  plan?: string // "plus", "pro"…
+  at: number
+}
+
 // Whether `now` falls in the quiet hours (which may cross midnight).
 export function inQuietHours(q: Settings['quietHours'], now = new Date()): boolean {
   if (!q || !validTime(q.from) || !validTime(q.to) || q.from === q.to) return false
@@ -589,7 +637,7 @@ export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number;
   Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
-export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; site: string }> = {
+export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; min?: string; windows?: string; site: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
@@ -598,6 +646,7 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
   cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' },
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' },
   copilot: { label: 'GitHub Copilot', cli: 'copilot', login: 'copilot login', install: 'npm install -g @github/copilot', site: 'https://github.com/features/copilot/cli' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
