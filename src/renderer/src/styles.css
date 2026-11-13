@@ -11469,6 +11469,7 @@ button.agent-card__now:hover {
 }
 .org-zone__tag {
   position: absolute;
+  z-index: 1; /* above the lines, so a line entering the zone runs under the sector's name */
   left: 22px;
   top: 16px;
   right: 22px;
