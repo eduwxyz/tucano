@@ -259,16 +259,16 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
 // How a reply's steps read, in the order they go from "everything" to "nothing": the labels carry
 // the number the person chose, since that is what "the latest few" means on this computer.
 const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: string }[] => [
-  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Every step, the way it always was.') },
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Show every step.') },
   {
     value: 'latest',
     label: L(`Últimos ${keep}`, `Last ${keep}`),
-    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'A reply shows only the newest, in a window that scrolls itself; the oldest fade out at the top.')
+    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'Show recent steps in an auto-scrolling panel. Older steps fade out.')
   },
   {
     value: 'one-line',
     label: L('Uma linha', 'One line'),
-    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'One line with the current step and its target. Click to open the details. Good for a busy channel with several agents at once.')
+    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'Show the current step and target on one line. Click to expand.')
   }
 ]
 
@@ -635,7 +635,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               title={L('Passos na resposta', 'Steps in a reply')}
               lead={`${L(
                 'Como as respostas deste agente mostram os passos: todos, só os últimos, ou uma linha com a atividade atual. O padrão é a configuração do app.',
-                'How this agent’s replies show their steps: all of them, only the latest few, or one line with the current activity. The default is the app’s setting.'
+                'Show all steps, recent steps, or a single activity line. Default follows app settings.'
               )}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
             >
               <StepsModePick
@@ -2693,15 +2693,15 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('geral') && (
-          <Card title={L('A conversa', 'The conversation')}>
+          <Card title={L('A conversa', 'Conversation')}>
             <div className="key-row">
               <Icon name="spark" />
               <div className="grow">
-                <strong>{L('O que o modelo pensa', 'What the model is thinking')}</strong>
+                <strong>{L('O que o modelo pensa', 'Show reasoning')}</strong>
                 <p className="muted small">
                   {L(
                     'Enquanto um agente responde, o raciocínio dele aparece em letra pequena e apagada, embaixo dos passos, e fica ali depois que a resposta acaba. Desligado, você vê só os passos e a resposta. Por enquanto, só os agentes que rodam no Pi mandam o raciocínio.',
-                    'While an agent replies, its reasoning shows in small, dim text under the steps, and it stays there once the reply ends. Off, you see only the steps and the answer. For now only agents running on Pi send their reasoning.'
+                    'Show reasoning below the steps, including after completion. Available for Pi agents only.'
                   )}
                 </p>
               </div>
@@ -2712,22 +2712,22 @@ export function SettingsPage(): ReactNode {
             <div className="key-row">
               <Icon name="menu" />
               <div className="grow">
-                <strong>{L('Os passos da resposta', 'A reply’s steps')}</strong>
+                <strong>{L('Os passos da resposta', 'Reply steps')}</strong>
                 <p className="muted small">{STEPS_CHOICES(stepsKeep(settings.stepsLatest)).find((c) => c.value === (settings.steps ?? 'all'))!.hint}</p>
                 <StepsModePick
                   value={settings.steps ?? 'all'}
                   keep={stepsKeep(settings.stepsLatest)}
-                  label={L('Como a resposta mostra os passos', 'How a reply shows its steps')}
+                  label={L('Como a resposta mostra os passos', 'Step display')}
                   onChange={(v) => updateSettings({ steps: v ?? 'all' })}
                 />
                 {settings.steps === 'latest' && (
                   <label className="row row--center steps-keep">
-                    <span className="muted small">{L('Quantos passos mostrar', 'How many steps to show')}</span>
+                    <span className="muted small">{L('Quantos passos mostrar', 'Visible steps')}</span>
                     <NumberInput
                       min={STEPS_LATEST_MIN}
                       max={STEPS_LATEST_MAX}
                       value={stepsKeep(settings.stepsLatest)}
-                      aria-label={L('Quantos passos mostrar na janela', 'How many steps the window shows')}
+                      aria-label={L('Quantos passos mostrar na janela', 'Number of visible steps')}
                       onChange={(n) => updateSettings({ stepsLatest: stepsKeep(n) })}
                     />
                   </label>
