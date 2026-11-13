@@ -2605,7 +2605,7 @@ export function SettingsPage(): ReactNode {
             <div className="key-row">
               <div className="grow">
                 <strong>{L('Retomar respostas interrompidas', 'Resume interrupted replies')}</strong>
-                <p className="muted small">{L('Continue o trabalho que estava em andamento quando o Tucano fechou ou travou. Respostas paradas por você continuam paradas. Se os agentes estiverem pausados, o trabalho espera você retomar.', 'Continue work that was running when Tucano quit or crashed. Replies you stopped stay stopped. If agents are paused, work waits until you resume them.')}</p>
+                <p className="muted small">{L('Continue o trabalho que estava em andamento quando o Tucano fechou ou travou. Respostas paradas por você continuam paradas. Se os agentes estiverem pausados, o trabalho espera você retomar.', 'Resume work after a quit or crash, unless you stopped it. Paused agents wait until resumed.')}</p>
               </div>
               <Toggle on={settings.resumeInterrupted !== false} onChange={(v) => updateSettings({ resumeInterrupted: v })} />
             </div>
