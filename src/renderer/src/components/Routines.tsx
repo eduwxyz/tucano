@@ -185,7 +185,7 @@ export function RoutinesPage(): ReactNode {
             <>
               {' · '}
               <button className="text-btn" onClick={() => setWeek(startOfWeek(Date.now()))}>
-                {L('voltar pra esta semana', 'back to this week')}
+                {L('voltar pra esta semana', "Back to this week")}
               </button>
             </>
           )}
@@ -194,7 +194,7 @@ export function RoutinesPage(): ReactNode {
       actions={
         <>
           {people.length > 1 && (
-            <div className="cal-people" role="group" aria-label={L('Mostrar só as de um agente', 'Show only one agent’s')}>
+            <div className="cal-people" role="group" aria-label={L('Mostrar só as de um agente', "Filter routines by agent")}>
               {people.map((a) => (
                 <button key={a.id} className={only === a.id ? 'is-on' : only ? 'is-dim' : ''} title={only === a.id ? L('Mostrar todas', 'Show all') : L(`Só as de ${a.name}`, `Only ${a.name}'s`)} onClick={() => setOnly(only === a.id ? null : a.id)}>
                   <AgentAvatar agent={a} size={22} />
@@ -221,7 +221,7 @@ export function RoutinesPage(): ReactNode {
     >
       {watching.length > 0 && (
         <div className="cal-watch">
-          <span className="cal-watch__label">{L('De olho, sem horário', 'Watching, no set time')}</span>
+          <span className="cal-watch__label">{L('De olho, sem horário', "Event-triggered routines")}</span>
           {watching.map((r) => {
             const a = agents.find((x) => x.id === r.agentId)
             return (
