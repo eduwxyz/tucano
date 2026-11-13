@@ -8033,7 +8033,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 }
 .toast {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   width: 100%;
   padding: 10px 8px 10px 14px;
@@ -8044,7 +8044,6 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
      on white (5.09:1); the dark ink is the dark accent as it is (6.33:1). */
   background: var(--toast-bg);
   color: var(--toast-ink);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   box-shadow: var(--shadow-lg);
   font-size: 13px;
   line-height: 1.4;
@@ -8057,7 +8056,6 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .toast__text {
   flex: 1;
   min-width: 0;
-  padding-top: 2px;
   overflow-wrap: anywhere;
 }
 .toast__close {
