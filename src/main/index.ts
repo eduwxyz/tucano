@@ -785,11 +785,11 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
 })
 // Settings › Notifications › Where: the rectangle the cards go in, drawn on screen.
 ipcMain.on('notice:pick', (e) => {
-  if (fromApp(e)) notices.pick()
+  if (!process.argv.includes('--qa-background') && fromApp(e)) notices.pick()
 })
 // Settings › Notifications › Test every kind: a card of each, so the person sees the whole set.
 ipcMain.on('notice:demo', (e) => {
-  if (fromApp(e)) notices.demo()
+  if (!process.argv.includes('--qa-background') && fromApp(e)) notices.demo()
 })
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.
