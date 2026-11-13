@@ -2,7 +2,7 @@
 
 Source: `5428b24aa68f3c43ef0c608e71d8c71f7f1822dd`, based on upstream main
 `73b724bec8a576d316a5dd5f46a07e3bf83cbe75`. The proposal was committed before the
-application strings changed. This pass replaces 264 English occurrences in 15 source files.
+application strings changed. This pass replaces 267 English occurrences in 15 source files.
 An AST comparison confirms that Portuguese arguments and executable behavior are unchanged.
 
 ## What fits in two lines
