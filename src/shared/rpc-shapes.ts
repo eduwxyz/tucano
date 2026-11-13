@@ -142,6 +142,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   hermesPreview: { path: 's?' },
   importHermes: { path: 's', profiles: 'S' },
   backupNow: {},
+  dbHealth: {},
+  optimizeDb: {},
   exportBackup: {},
   restoreCheck: { path: 's' },
   restoreApply: {},
