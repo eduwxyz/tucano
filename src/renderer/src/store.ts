@@ -133,7 +133,7 @@ export interface State {
   panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
-  replyTo: Record<string, ReplyTarget | undefined> // selected message per conversation, kept with its draft
+  replyTo: Record<string, ReplyTarget | undefined> // selected message per conversation or thread, kept with its draft
   demoServer?: { command: string; args: string[] }
   toasts: Toast[] // short notes at the bottom: an action that didn't go through
   coreDown: boolean // the core's process ended; a banner offers to reopen
@@ -149,7 +149,7 @@ export interface Toast {
 export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string }; draft?: FeedbackDraft; from?: string } // image: the window, taken before it opened; draft: what the Tuca wrote, from his message `from`
 
 // `thread`: the replies to a message (its id), next to the conversation.
-export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
+export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string; message?: string }
 
 export const initials = (name: string): string =>
   name
@@ -1067,16 +1067,23 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started. `mode` 'steer': from a running reply's own pill, for it (`steerTo`).
 // `reply`: the message, or the excerpt of it, this answer is to (src/shared/types.ts: ReplyTarget).
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: 'steer', steerTo?: string, reply?: ReplyTarget): void => {
-  if (!(text.trim() || images.length || files.length)) return
+// True once the core took it: a reply the core refuses leaves the field, and the quote, as they were.
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: 'steer', steerTo?: string, reply?: ReplyTarget): Promise<boolean> => {
+  if (!(text.trim() || images.length || files.length)) return Promise.resolve(false)
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}), ...(steerTo ? { steerTo } : {}), ...(reply ? { reply } : {}) })
+  return call('sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}), ...(steerTo ? { steerTo } : {}), ...(reply ? { reply } : {}) }).then(
+    () => true,
+    (e: unknown) => {
+      if (openNext?.conversationId === conversationId) openNext = null
+      if (!state.coreDown) toast(`${L('Não consegui enviar a mensagem.', "I couldn't send the message.")} ${e instanceof Error ? e.message : L('Tente de novo.', 'Try again.')}`)
+      return false
+    }
+  )
 }
 
-// What the composer answers in that conversation, or nothing: the quote above the field.
-export const setReplyTo = (conversationId: string, reply?: ReplyTarget): void => set((s) => ({ ...s, replyTo: { ...s.replyTo, [conversationId]: reply } }))
-
+// What the composer answers where it is written, or nothing: the quote above the field.
+export const setReplyTo = (key: string, reply?: ReplyTarget): void => set((s) => ({ ...s, replyTo: { ...s.replyTo, [key]: reply } }))
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
@@ -1151,7 +1158,7 @@ export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
 // The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
 export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
-export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
+export const openThread = (messageId: string, message?: string): void => openPanel({ kind: 'thread', id: messageId, ...(message ? { message } : {}) })
 // I've seen this thread up to now (it's open, or was just closed).
 export const seeThread = (rootId: string): void =>
   set((s) => {

@@ -1997,7 +1997,9 @@ const api: Handlers = {
   sendMessage: ({ conversationId, text, images, files, threadId, mode, steerTo, reply }, ctx) => {
     reach(ctx, conversationId)
     // `mode` 'steer': written in a running reply's own pill, for that reply (`steerTo`), not a prompt.
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(mode === 'steer' ? { mode } : {}), ...(steerTo ? { steerTo } : {}), ...(reply ? { reply } : {}) }), 'sendMessage')
+    // The reply this answers was checked here, before a message of mine exists: the core refuses one it
+    // can't stand behind, and the field keeps what was written.
+    return runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(mode === 'steer' ? { mode } : {}), ...(steerTo ? { steerTo } : {}), ...(reply ? { reply } : {}) })
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
