@@ -34,4 +34,6 @@ it('does not start a queued thread reply after its parent session is deleted', a
   await client.call('deleteMessage', { messageId: parent!.id })
   await until(() => core.toMain.slice(before).some((event) => event.type === 'busy' && event.busy === false))
   expect((await messages()).some((m) => m.threadId === parent!.id)).toBe(false)
-})
+  // Six replies of 3 s each, a real core to boot, and a wait for the queue to drain: 5 s is
+  // the default that a fast box fits into and a CI runner does not (5.015 s on macOS).
+}, 30_000)

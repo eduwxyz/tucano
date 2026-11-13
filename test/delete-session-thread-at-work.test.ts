@@ -27,4 +27,5 @@ it('stops an active thread reply when its completed parent session is deleted', 
   expect(await client.call<string[]>('deleteMessage', { messageId: parent!.id })).toContain(child!.id)
   await until(() => core.toMain.slice(before).some((event) => event.type === 'busy' && event.busy === false))
   expect((await messages()).some((m) => m.id === child!.id || m.threadId === parent!.id)).toBe(false)
-})
+  // Same shape as its queued sibling: a core booted, a 3 s reply, and the queue drained by hand.
+}, 30_000)
