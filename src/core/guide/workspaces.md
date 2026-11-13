@@ -20,7 +20,7 @@ Clique no nome no topo da barra lateral. O menu lista os workspaces com as não 
    - **Rotinas**: só com os agentes; as ligadas rodam no novo também, com endereços de gatilho novos.
 4. Sem nada marcado, começa vazio, com a introdução. Com os agentes, um workspace já configurado pula a introdução.
 
-Nunca vêm: mensagens, memórias, resumos, aprovações, histórico de uso, arquivos dos computadores, sessões do navegador e as contas extras do Claude Code e do Codex (os agentes usam o login padrão). Conectores com OAuth podem pedir login de novo.
+Nunca vêm: mensagens, memórias, resumos, aprovações, histórico de uso, arquivos dos computadores, sessões do navegador e as contas extras do Claude Code, do Codex e do Grok (os agentes usam o login padrão). Conectores com OAuth podem pedir login de novo.
 
 ## Gerenciar
 A engrenagem no menu abre **Gerenciar workspaces**: trocar, pausar ou retomar cada um (ou **Pausar todos**), duplicar (abre o mesmo formulário com tudo marcado) e excluir.
