@@ -565,7 +565,9 @@ export class Db {
   constructor(private file: string) {
     this.db = new DatabaseSync(file)
     this.keepStatements()
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
+    // A lock is waited for rather than failed on: the file has one writer, and a backup or a
+    // checkpoint overlapping a turn is a wait of milliseconds, not an error worth showing.
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;')
     try { this.migrate(file) }
     catch (error) { this.db.close(); throw error }
   }
@@ -1985,6 +1987,56 @@ export class Db {
   // log emptied (a purge's deletes would otherwise linger on disk until overwritten). Rare: a purge.
   scrub(): void {
     this.db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);')
+  }
+
+  // ---------- the file itself ----------
+
+  // What the file takes on disk, and how much of that is pages nothing will reuse: the number a
+  // person sees beside the size, and the one that explains why deleting never made the file smaller.
+  size(): { bytes: number; free: number } {
+    const page = Number((this.db.prepare('PRAGMA page_size').get() as Row)['page_size'])
+    const pages = Number((this.db.prepare('PRAGMA page_count').get() as Row)['page_count'])
+    const free = Number((this.db.prepare('PRAGMA freelist_count').get() as Row)['freelist_count'])
+    return { bytes: pages * page, free: free * page }
+  }
+
+  // Whether every page and index reads back consistent: 20 ms at 23 MB, so it can be asked at every
+  // start. Not `integrity_check`, which says the same about a bare file but takes the same road.
+  check(): { sound: boolean; said: string } {
+    const said = String(Object.values((this.db.prepare('PRAGMA quick_check').get() as Row | undefined) ?? {})[0] ?? '')
+    return { sound: said === 'ok', said }
+  }
+
+  // The query planner's statistics, refreshed: milliseconds, and the only thing that keeps the
+  // planner honest while the tables change size all day.
+  statistics(): void {
+    this.db.exec('PRAGMA optimize')
+  }
+
+  // Hands freed pages back to the disk in slices, so a daily tick never carries a whole rewrite:
+  // only when the file was switched to incremental auto-vacuum (see `rebuild`), and never more than
+  // `pages` of them at a time. Returns the pages that actually went.
+  trim(pages = 1000): number {
+    const mode = Number((this.db.prepare('PRAGMA auto_vacuum').get() as Row)['auto_vacuum'])
+    if (mode !== 2) return 0
+    const before = Number((this.db.prepare('PRAGMA freelist_count').get() as Row)['freelist_count'])
+    if (!before) return 0
+    this.db.exec(`PRAGMA incremental_vacuum(${Math.max(1, Math.floor(pages))})`)
+    return before - Number((this.db.prepare('PRAGMA freelist_count').get() as Row)['freelist_count'])
+  }
+
+  // Empties the write-ahead log and rebuilds the file: rows that are gone stop taking space, and
+  // every index is rebuilt tightly. `incremental` (not `full`) auto-vacuum keeps a page map that
+  // costs nothing to write and lets `trim` hand pages back later; switching it on takes effect with
+  // this VACUUM, which is the only place it can. Holds the connection for the whole rewrite: 3.5 s
+  // at 23 MB, so whoever calls this decides when, never a read.
+  rebuild(): void {
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    const mode = Number((this.db.prepare('PRAGMA auto_vacuum').get() as Row)['auto_vacuum'])
+    if (mode === 0) this.db.exec('PRAGMA auto_vacuum = INCREMENTAL')
+    this.db.exec('VACUUM')
+    this.db.exec('PRAGMA optimize')
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   }
 
   // ---------- questions ----------

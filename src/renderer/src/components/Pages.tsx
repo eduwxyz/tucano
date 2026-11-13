@@ -35,6 +35,8 @@ import {
   importAgents,
   importTeam,
   backupNow,
+  dbHealth,
+  optimizeDb,
   openBackups,
   type TelegramInfo,
   useStore,
@@ -2127,6 +2129,60 @@ function TeamCard(): ReactNode {
   )
 }
 
+// The file everything lives in, as a section of the danger area: what it takes, how much of that
+// nothing will reuse, and a rebuild on demand. The check runs when the card opens, because it costs
+// less than a frame at this size.
+function WorkspaceFileSection(): ReactNode {
+  const admin = useStore(amAdmin)
+  const [health, setHealth] = useState<{ bytes: number; free: number; sound: boolean; said: string } | null>(null)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (admin) void dbHealth().then(setHealth).catch(() => {})
+  }, [admin])
+  if (!admin) return null
+  const size = (n: number): string => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
+  const now = health
+    ? health.free >= 100_000
+      ? L(`${size(health.bytes)}, dos quais ${size(health.free)} são páginas livres que nada vai reaproveitar.`, `${size(health.bytes)}, of which ${size(health.free)} are free pages nothing will reuse.`)
+      : L(`${size(health.bytes)}, sem páginas livres presas.`, `${size(health.bytes)}, with no free pages held.`)
+    : ''
+  const check = health ? (health.sound ? L('O arquivo está íntegro.', 'The file is sound.') : L(`O arquivo não passou na verificação: ${health.said}`, `The file did not pass its check: ${health.said}`)) : ''
+  const run = (): void => {
+    setBusy(true)
+    setNote(L('Reescrevendo o arquivo…', 'Rebuilding the file…'))
+    optimizeDb()
+      .then((r) => {
+        setHealth({ bytes: r.after, free: r.free, sound: r.sound, said: r.said })
+        const went = r.before > r.after ? L(`${size(r.before)} → ${size(r.after)}.`, `${size(r.before)} → ${size(r.after)}.`) : L(`Continua em ${size(r.after)}, já estava compacto.`, `Still ${size(r.after)}, it was already compact.`)
+        setNote(`${went} ${r.sound ? L('O arquivo está íntegro.', 'The file is sound.') : L(`O arquivo não passou na verificação: ${r.said}`, `The file did not pass its check: ${r.said}`)}`)
+      })
+      .catch((e: unknown) => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="workspace-danger__section">
+      <h3>{L('O arquivo do workspace', 'The workspace file')}</h3>
+      <p className="small muted">
+        {L('Tudo o que este Tucano sabe mora num arquivo só. Ele cresce a cada conversa e não devolve sozinho o espaço do que foi apagado.', 'Everything this Tucano knows lives in one file. It grows with every conversation, and it does not give back the space of what was deleted on its own.')}
+        {now ? ` ${now} ${check}` : ''}
+      </p>
+      <div className="row">
+        <button className="btn btn--sm" disabled={busy} onClick={run}>
+          {busy ? L('Otimizando…', 'Optimizing…') : L('Otimizar', 'Optimize')}
+        </button>
+        {note && <span className="small muted" role="status">{note}</span>}
+      </div>
+      <p className="small muted">
+        {L(
+          'Esvazia o log de escrita, reescreve o arquivo e atualiza as estatísticas do planejador: leva segundos e nada se perde. Não roda com uma resposta trabalhando, e o app fica ocupado até terminar.',
+          'Empties the write-ahead log, rebuilds the file and refreshes the planner’s statistics: it takes seconds and nothing is lost. It does not run while a reply is at work, and the app stays busy until it finishes.'
+        )}
+      </p>
+    </div>
+  )
+}
+
 // A whole Tucano, taken somewhere else: the desktop app exports it in one .zip, and a Tucano on a
 // server (its owner) restores it, replacing what's there (src/core/restore.ts).
 export function BackupCard(): ReactNode {
@@ -2285,6 +2341,7 @@ export function BackupCard(): ReactNode {
 }
 
 function WorkspaceDangerArea(): ReactNode {
+  const owner = useStore(amOwner)
   const name = useStore((s) => workspaceLabel(s.settings))
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   const [note, setNote] = useState('')
@@ -2308,7 +2365,8 @@ function WorkspaceDangerArea(): ReactNode {
         </div>
         {note && <p className="small muted">{note}</p>}
       </div>
-      {window.tucano.workspaces && <div className="workspace-danger__section">
+      <WorkspaceFileSection />
+      {owner && window.tucano.workspaces && <div className="workspace-danger__section">
         <h3>{L('Excluir workspace', 'Delete workspace')}</h3>
         <p className="small muted">{defaultWorkspace ? L('O workspace padrão não pode ser excluído. Você ainda pode fazer backup ou duplicá-lo.', 'The default workspace cannot be deleted. You can still back it up or duplicate it.') : L(`Excluir “${name}” apaga também seus backups locais, agentes, conversas, memórias, credenciais e rotinas. Copie o backup para fora deste workspace antes. Os outros workspaces e suas pastas de projetos ficam intactos.`, `Deleting “${name}” also deletes its local backups, agents, conversations, memories, credentials and routines. Copy your backup outside this workspace first. Other workspaces and project folders are kept.`)}</p>
         <button className="btn btn--danger btn--sm" disabled={busy || defaultWorkspace} onClick={() => void remove()}>{busy ? L('Aguarde…', 'Please wait…') : L('Excluir workspace e todos os dados', 'Delete workspace and all data')}</button>
@@ -2820,7 +2878,7 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
-        {pane('geral') && owner && <WorkspaceDangerArea />}
+        {pane('geral') && admin && <WorkspaceDangerArea />}
       </div>
     </Page>
   )
