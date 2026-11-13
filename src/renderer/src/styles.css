@@ -11878,6 +11878,13 @@ button.agent-card__now:hover {
 /* ---------- a bot's initiative (src/renderer/src/components/Initiative.tsx) ---------- */
 
 /* The line in a DM: what the person's coordinator is doing, in the topbar, without taking it over. */
+/* The switch on a bot's own page: the same record as the line in its DM, seen from settings. */
+.initiative-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .initiative-line {
   display: inline-flex;
   align-items: center;

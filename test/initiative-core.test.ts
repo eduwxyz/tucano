@@ -13,6 +13,9 @@ let ana: Client // the owner
 type Snap = { agents: Agent[]; conversations: Conversation[] }
 const err = async (p: Promise<unknown>): Promise<string> => p.then(() => 'ok', (e: Error) => e.message)
 
+// A person can give several bots something to look after: this one's entry, out of their own list.
+const mine = async (): Promise<InitiativeView | undefined> => (await ana.call<InitiativeView[]>('initiative')).find((v) => v.config?.agentId === bot)
+
 let bot: string
 let dm: string
 let channel: string
@@ -49,37 +52,37 @@ const config = (over: Partial<InitiativeInput> = {}): InitiativeInput => ({
 
 describe('over the API', () => {
   it('has nothing to show until someone asks for it', async () => {
-    expect(await ana.call<InitiativeView>('initiative')).toEqual({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    expect(await ana.call<InitiativeView[]>('initiative')).toEqual([])
     // "Conferir agora" with nothing set up says so instead of starting anything.
-    expect(await ana.call('checkInNow')).toEqual({ started: false, why: 'off', running: false })
+    expect(await ana.call('checkInNow', { agentId: bot })).toEqual({ started: false, why: 'off', running: false })
   })
 
   it('saves the brief against the revision the page read, and refuses an older one', async () => {
     const saved = await ana.call<{ revision: number; enabled: boolean }>('saveInitiative', { config: config(), expectedRevision: 0 })
     expect(saved).toMatchObject({ revision: 1, enabled: true })
-    expect((await ana.call<InitiativeView>('initiative')).config).toMatchObject({ brief: config().brief, revision: 1 })
+    expect((await mine())!.config).toMatchObject({ brief: config().brief, revision: 1 })
     const second = await ana.call<{ revision: number }>('saveInitiative', { config: config({ cadenceMinutes: 30 }), expectedRevision: 1 })
     expect(second.revision).toBe(2)
     expect(await err(ana.call('saveInitiative', { config: config({ brief: 'other words' }), expectedRevision: 1 }))).toMatch(/Reload|Recarregue/)
-    expect((await ana.call<InitiativeView>('initiative')).config).toMatchObject({ brief: config().brief, cadenceMinutes: 30 })
+    expect((await mine())!.config).toMatchObject({ brief: config().brief, cadenceMinutes: 30 })
   })
 
   it('tells a page what is missing instead of storing it', async () => {
-    const revision = (await ana.call<InitiativeView>('initiative')).config!.revision
+    const revision = (await mine())!.config!.revision
     expect(await err(ana.call('saveInitiative', { config: config({ agentId: 'nope' }), expectedRevision: revision }))).toMatch(/no longer exists|não existe/)
     expect(await err(ana.call('saveInitiative', { config: config({ brief: '' }), expectedRevision: revision }))).toMatch(/Write what it should look after|Escreva/)
     expect(await err(ana.call('saveInitiative', { config: config({ cadenceMinutes: 1 }), expectedRevision: revision }))).toMatch(/interval|intervalo/)
     // Junk at the door reaches the shape check, and the core goes on.
     expect(await err(ana.call('saveInitiative', { config: {}, expectedRevision: revision }))).not.toBe('ok')
     expect(await err(ana.call('saveCommitment', { commitment: {} }))).not.toBe('ok')
-    expect((await ana.call<InitiativeView>('initiative')).config!.brief).toBe(config().brief)
+    expect((await mine())!.config!.brief).toBe(config().brief)
   })
 
   it('turns off without losing what was written, and a review stops being allowed', async () => {
-    const revision = (await ana.call<InitiativeView>('initiative')).config!.revision
+    const revision = (await mine())!.config!.revision
     const off = await ana.call<{ enabled: boolean; revision: number; brief: string }>('saveInitiative', { config: config({ enabled: false }), expectedRevision: revision })
     expect(off).toMatchObject({ enabled: false, revision: revision + 1, brief: config().brief })
-    expect((await ana.call<InitiativeView>('initiative')).config!.enabled).toBe(false)
+    expect((await mine())!.config!.enabled).toBe(false)
   })
 
   it('keeps a responsibility with its provenance, and refuses one that points nowhere', async () => {
@@ -87,7 +90,7 @@ describe('over the API', () => {
       commitment: { agentId: bot, conversationId: dm, by: 'person', description: 'Answer the client about the invoice.', scope: { conversations: [channel], kinds: ['send'] } }
     })
     expect(saved).toMatchObject({ conversationId: dm, state: 'open' })
-    expect((await ana.call<InitiativeView>('initiative')).commitments.map((c) => c.id)).toContain(saved.id)
+    expect((await mine())!.commitments.map((c) => c.id)).toContain(saved.id)
     expect(await err(ana.call('saveCommitment', { commitment: { agentId: bot, conversationId: dm, by: 'person', description: 'x', scope: { conversations: [channel], kinds: ['send'] }, links: [{ kind: 'approval', id: 'gone' }] } }))).toMatch(/no longer exists|não existe/)
     const done = await ana.call<{ state: string; closedAt?: number }>('saveCommitment', {
       commitment: { id: saved.id, agentId: bot, conversationId: dm, by: 'person', description: 'Answer the client about the invoice.', scope: { conversations: [channel], kinds: ['send'] }, state: 'done' }

@@ -2034,7 +2034,7 @@ const api: Handlers = {
   // A person's proactive coordinator (docs/autonomous-bots-plan.md in the fork): their own, and only
   // ever the asking person's. It grants nothing Autonomy does not already allow. No review runs yet:
   // these records and their checks are the whole of this slice.
-  initiative: (_, ctx) => initiative.view(ctx.person, Date.now(), runner.isPaused()),
+  initiative: (_, ctx) => initiative.views(ctx.person, Date.now(), runner.isPaused()),
   saveInitiative: ({ config, expectedRevision }, ctx) => {
     const saved = initiative.save(ctx.person, config, expectedRevision)
     record(ctx, 'initiative.saved', saved.agentId, { enabled: saved.enabled, revision: saved.revision })
@@ -2046,10 +2046,10 @@ const api: Handlers = {
     return saved
   },
   // "Conferir agora": the person asking their coordinator to look right now, on the spot.
-  checkInNow: (_, ctx) => {
-    const started = heartbeat.startNow(ctx.person)
-    record(ctx, 'initiative.checkNow', undefined, { started: started.started, ...(started.why ? { why: started.why } : {}) })
-    return { ...started, running: heartbeat.running(ctx.person.id) }
+  checkInNow: ({ agentId }, ctx) => {
+    const started = heartbeat.startNow(ctx.person, agentId)
+    record(ctx, 'initiative.checkNow', agentId, { started: started.started, ...(started.why ? { why: started.why } : {}) })
+    return { ...started, running: heartbeat.running(ctx.person.id, agentId) }
   },
   wiki: (_, ctx) => {
     const w = wikiFor(ctx)

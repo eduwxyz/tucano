@@ -605,6 +605,33 @@ export const MIGRATIONS = [
     at INTEGER NOT NULL,
     PRIMARY KEY (person_id, link_kind, link_id)
   );
+  `,
+  // One coordinator per bot (a person can give several of theirs something to look after). The table was
+  // keyed by person alone, so it is rebuilt once and its rows carried over: a bot already on stays on.
+  `
+  DROP TABLE IF EXISTS initiative_by_bot;
+  CREATE TABLE IF NOT EXISTS initiative_by_bot (
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    brief TEXT NOT NULL DEFAULT '',
+    observe TEXT NOT NULL DEFAULT '{"conversations":[]}',
+    work TEXT NOT NULL DEFAULT '{"conversations":[],"kinds":[]}',
+    cadence_minutes INTEGER NOT NULL,
+    notify TEXT NOT NULL DEFAULT 'material',
+    daily_reviews INTEGER NOT NULL,
+    daily_tokens INTEGER NOT NULL,
+    timezone TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (person_id, agent_id)
+  );
+  INSERT INTO initiative_by_bot (person_id, agent_id, conversation_id, enabled, brief, observe, work, cadence_minutes, notify, daily_reviews, daily_tokens, timezone, revision, created_at, updated_at)
+    SELECT person_id, agent_id, conversation_id, enabled, brief, observe, work, cadence_minutes, notify, daily_reviews, daily_tokens, timezone, revision, created_at, updated_at FROM initiative;
+  DROP TABLE initiative;
+  ALTER TABLE initiative_by_bot RENAME TO initiative;
   `
 ]
 
@@ -1781,10 +1808,18 @@ export class Db {
 
   // ---------- a person's coordinator ----------
 
-  // Their own: nobody else reads another person's brief, scope or commitments.
-  initiative(personId: string): InitiativeConfig | undefined {
-    const r = this.db.prepare('SELECT * FROM initiative WHERE person_id = ?').get(personId) as Row | undefined
-    if (!r) return undefined
+  // Their own, one per bot: nobody else reads another person's brief, scope or commitments.
+  initiative(personId: string, agentId: string): InitiativeConfig | undefined {
+    const r = this.db.prepare('SELECT * FROM initiative WHERE person_id = ? AND agent_id = ?').get(personId, agentId) as Row | undefined
+    return r && this.toInitiative(r)
+  }
+
+  // Every bot this person has given something to look after, oldest first so a page reads the same each time.
+  initiatives(personId: string): InitiativeConfig[] {
+    return (this.db.prepare('SELECT * FROM initiative WHERE person_id = ? ORDER BY created_at, agent_id').all(personId) as Row[]).map((r) => this.toInitiative(r))
+  }
+
+  private toInitiative(r: Row): InitiativeConfig {
     const notify = str(r['notify'])
     return {
       personId: str(r['person_id']),
@@ -1810,7 +1845,7 @@ export class Db {
       .prepare(
         `INSERT INTO initiative (person_id, agent_id, conversation_id, enabled, brief, observe, work, cadence_minutes, notify, daily_reviews, daily_tokens, timezone, revision, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (person_id) DO UPDATE SET agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, enabled = excluded.enabled,
+         ON CONFLICT (person_id, agent_id) DO UPDATE SET conversation_id = excluded.conversation_id, enabled = excluded.enabled,
            brief = excluded.brief, observe = excluded.observe, work = excluded.work, cadence_minutes = excluded.cadence_minutes, notify = excluded.notify,
            daily_reviews = excluded.daily_reviews, daily_tokens = excluded.daily_tokens, timezone = excluded.timezone, revision = excluded.revision, updated_at = excluded.updated_at`
       )
@@ -1935,9 +1970,15 @@ export class Db {
   }
 
   // Newest first: what this person's coordinator did, and what it cost. `since`: only those after.
-  wakes(personId: string, opts: { since?: number; limit?: number } = {}): InitiativeWake[] {
+  wakes(personId: string, opts: { since?: number; limit?: number; agentId?: string } = {}): InitiativeWake[] {
     const since = opts.since ?? 0
     const limit = opts.limit ?? 50
+    if (opts.agentId)
+      return (
+        this.db
+          .prepare('SELECT * FROM initiative_wakes WHERE person_id = ? AND agent_id = ? AND at >= ? ORDER BY at DESC LIMIT ?')
+          .all(personId, opts.agentId, since, limit) as Row[]
+      ).map(this.toWake)
     return (this.db.prepare('SELECT * FROM initiative_wakes WHERE person_id = ? AND at >= ? ORDER BY at DESC LIMIT ?').all(personId, since, limit) as Row[]).map(this.toWake)
   }
 

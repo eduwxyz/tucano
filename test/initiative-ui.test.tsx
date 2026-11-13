@@ -10,10 +10,10 @@ import { setLang } from '../src/shared/lang'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 
-let fake: { initiative: InitiativeView | null; agents: Agent[]; conversations: Conversation[]; you: string }
+let fake: { initiative: InitiativeView[] | null; agents: Agent[]; conversations: Conversation[]; you: string }
 const saveInitiative = vi.fn(async (config: InitiativeInput, expectedRevision: number) => ({ ...config, personId: 'ana', revision: expectedRevision + 1, createdAt: 1, updatedAt: 2 }) as InitiativeConfig)
 const saveCommitment = vi.fn(async (c: unknown) => c)
-const checkInNow = vi.fn(async (): Promise<{ started: boolean; why?: string; running: boolean }> => ({ started: true, running: true }))
+const checkInNow = vi.fn(async (_agentId: string): Promise<{ started: boolean; why?: string; running: boolean }> => ({ started: true, running: true }))
 const refreshInitiative = vi.fn(async () => {})
 const opened: unknown[] = []
 const went: unknown[] = []
@@ -21,7 +21,7 @@ vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: typeof fake) => unknown) => select(fake),
   saveInitiative: (config: InitiativeInput, expectedRevision: number) => saveInitiative(config, expectedRevision),
   saveCommitment: (c: unknown) => saveCommitment(c),
-  checkInNow: () => checkInNow(),
+  checkInNow: (agentId: string) => checkInNow(agentId),
   refreshInitiative: () => refreshInitiative(),
   openDialog: (d: unknown) => opened.push(d),
   navigate: (v: unknown) => went.push(v)
@@ -46,7 +46,7 @@ vi.mock('../src/renderer/src/components/Pages', () => ({
 }))
 
 const { createRoot } = await import('react-dom/client')
-const { InitiativeDialog, InitiativeLine } = await import('../src/renderer/src/components/Initiative')
+const { InitiativeDialog, InitiativeLine, InitiativeSwitch } = await import('../src/renderer/src/components/Initiative')
 
 let root: ReturnType<typeof createRoot> | null = null
 const lia: Agent = { id: 'lia', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
@@ -112,7 +112,7 @@ const view = (over: Partial<InitiativeView> = {}): InitiativeView => ({
 
 beforeEach(() => {
   setLang('pt')
-  fake = { initiative: view(), agents: [lia, sol], conversations: [dm('dm-lia', 'lia', 'Lia'), dm('dm-sol', 'sol', 'Sol'), channel], you: 'ana' }
+  fake = { initiative: [view()], agents: [lia, sol], conversations: [dm('dm-lia', 'lia', 'Lia'), dm('dm-sol', 'sol', 'Sol'), channel], you: 'ana' }
   saveInitiative.mockClear()
   saveCommitment.mockClear()
   checkInNow.mockClear()
@@ -148,18 +148,19 @@ describe('the line in the DM', () => {
   })
 
   it('says when it is waiting on the person, and stays away from a DM whose bot does not look after them', async () => {
-    fake.initiative = view({ status: { ...view().status, waitingOnPerson: 1 } })
+    fake.initiative = [view({ status: { ...view().status, waitingOnPerson: 1 } })]
     await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
     expect(text()).toContain('espera você')
     expect(document.querySelector('.initiative-line')?.className).toContain('is-waiting')
-    // Another DM with another bot: no line at all, not an empty one.
+    // Another bot's DM says nothing about this one: it offers its own way in, not lia's waiting.
     await render(<InitiativeLine conversationId="dm-sol" agentId="sol" />)
-    expect(document.querySelector('.initiative-line')).toBeNull()
+    expect(document.querySelector('.initiative-line')?.className).toContain('is-off')
+    expect(text()).not.toContain('espera você')
   })
 
   it('offers the way in from a DM whose bot has no coordinator yet', async () => {
     // Nobody has one: this DM is where a person turns it on, and it opens on this bot and this DM.
-    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    fake.initiative = [view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })]
     await render(<InitiativeLine conversationId="dm-sol" agentId="sol" />)
     const line = document.querySelector('.initiative-line')
     expect(line?.className).toContain('is-off')
@@ -170,27 +171,37 @@ describe('the line in the DM', () => {
 
   it('turns from the way in to the line itself when the person saves one', async () => {
     // The same line, on the same page, before and after a save: the hooks it runs cannot depend on which.
-    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    fake.initiative = [view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })]
     await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
     expect(document.querySelector('.initiative-line')?.className).toContain('is-off')
-    fake.initiative = view()
+    fake.initiative = [view()]
     await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
     expect(document.querySelector('.initiative-line')?.className).toContain('is-on')
     expect(text()).toMatch(/próxima em/)
     // And back again, when it is turned off entirely.
-    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    fake.initiative = [view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })]
     await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
     expect(document.querySelector('.initiative-line')?.className).toContain('is-off')
   })
 
-  it('stays out of a DM that is not where the coordinator lives', async () => {
-    // One per person, in one DM: another bot's DM says nothing, not even that it is off.
+  it("speaks for one bot, so a second bot's DM offers its own way in beside the first's line", async () => {
+    // A person can give several bots something to look after: lia has one, sol does not, and each DM
+    // answers for the bot it belongs to.
+    await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
+    expect(document.querySelector('.initiative-line')?.className).toContain('is-on')
     await render(<InitiativeLine conversationId="dm-sol" agentId="sol" />)
-    expect(document.querySelector('.initiative-line')).toBeNull()
+    expect(document.querySelector('.initiative-line')?.className).toContain('is-off')
+    // And once sol has one of its own, its line is its own, next to lia's rather than instead of it.
+    fake.initiative = [...(fake.initiative ?? []), view({ config: config({ agentId: 'sol', conversationId: 'dm-sol' }), commitments: [], wakes: [] })]
+    await render(<InitiativeLine conversationId="dm-sol" agentId="sol" />)
+    expect(document.querySelector('.initiative-line')?.className).toContain('is-on')
+    await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
+    expect(document.querySelector('.initiative-line')?.className).toContain('is-on')
+    expect(text()).toMatch(/próxima em/)
   })
 
   it('says the app is paused rather than pretending the clock is running', async () => {
-    fake.initiative = view({ status: { ...view().status, paused: true } })
+    fake.initiative = [view({ status: { ...view().status, paused: true } })]
     await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
     expect(text()).toContain('tudo pausado')
   })
@@ -221,7 +232,7 @@ describe('the window', () => {
   })
 
   it('starts from the DM it was opened from when nobody has a coordinator yet', async () => {
-    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    fake.initiative = [view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })]
     await render(<InitiativeDialog onClose={() => {}} agentId="sol" conversationId="dm-sol" />)
     await click(button('Salvar')) // disabled, but the draft it would send is what matters
     expect(saveInitiative).not.toHaveBeenCalled()
@@ -231,7 +242,7 @@ describe('the window', () => {
 
   it('does not offer to save a brief with nothing in it, and offers the narrow defaults for a new one', async () => {
     // A coordinator nobody has set up yet: no brief, nothing to look at, nothing it may do outside.
-    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    fake.initiative = [view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })]
     await render(<InitiativeDialog onClose={() => {}} />)
     expect(button('Salvar')?.disabled).toBe(true)
     expect((document.querySelector('select') as HTMLSelectElement).value).toBe('15')
@@ -250,10 +261,10 @@ describe('the window', () => {
   })
 
   it('cannot ask while one is running, nor while the app is paused', async () => {
-    fake.initiative = view({ wakes: [wake({ endedAt: undefined, outcome: 'interrupted' })] })
+    fake.initiative = [view({ wakes: [wake({ endedAt: undefined, outcome: 'interrupted' })] })]
     await render(<InitiativeDialog onClose={() => {}} />)
     expect(button('Conferindo…')?.disabled).toBe(true)
-    fake.initiative = view({ status: { ...view().status, paused: true } })
+    fake.initiative = [view({ status: { ...view().status, paused: true } })]
     await render(<InitiativeDialog onClose={() => {}} />)
     expect(button('Conferir agora')?.disabled).toBe(true)
     expect(text()).toContain('nada roda até você despausar')
@@ -266,7 +277,7 @@ describe('the window', () => {
   })
 
   it('opens a coordinator nobody has set up with the switch off, not on', async () => {
-    fake.initiative = view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    fake.initiative = [view({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })]
     await render(<InitiativeDialog onClose={() => {}} />)
     const sw = document.querySelector('[role="switch"]') as HTMLElement
     expect(sw.getAttribute('aria-checked')).toBe('false')
@@ -274,7 +285,7 @@ describe('the window', () => {
   })
 
   it('turns on from the switch, once there is something to look after', async () => {
-    fake.initiative = view({ config: config({ enabled: false }) })
+    fake.initiative = [view({ config: config({ enabled: false }) })]
     await render(<InitiativeDialog onClose={() => {}} />)
     expect((document.querySelector('[role="switch"]') as HTMLElement).getAttribute('aria-checked')).toBe('false')
     await click(document.querySelector('[role="switch"]'))
@@ -284,7 +295,7 @@ describe('the window', () => {
   })
 
   it('says why it cannot go up when there is no brief, at the switch rather than under the fields', async () => {
-    fake.initiative = view({ config: config({ enabled: false, brief: '' }) })
+    fake.initiative = [view({ config: config({ enabled: false, brief: '' }) })]
     await render(<InitiativeDialog onClose={() => {}} />)
     // The hint says what is missing before anything is pressed, on the line under the switch.
     expect(text()).toContain('Escreva o pedido para poder ligar')
@@ -308,13 +319,13 @@ describe('the window', () => {
   })
 
   it('says what it did, why it did not appear, and what it cost', async () => {
-    fake.initiative = view({
+    fake.initiative = [view({
       wakes: [
         wake({ id: 'w2', outcome: 'reported', text: '**The invoice is still unpaid.**', tokens: 1_200, at: Date.UTC(2026, 10, 13, 10, 0), endedAt: Date.UTC(2026, 10, 13, 10, 1) }),
         wake({ id: 'w1', outcome: 'reported', deduped: true, text: 'The invoice is still unpaid.', tokens: 10, at: Date.UTC(2026, 10, 13, 9, 30), endedAt: Date.UTC(2026, 10, 13, 9, 31) }),
         wake({ id: 'w0', outcome: 'skipped', why: 'revision', at: Date.UTC(2026, 10, 13, 9, 0) })
       ]
-    })
+    })]
     await render(<InitiativeDialog onClose={() => {}} />)
     expect(text()).toContain('escreveu na conversa')
     expect(text()).toContain('The invoice is still unpaid.')
@@ -325,7 +336,7 @@ describe('the window', () => {
 
   it('shows the last six and hands over the rest, however long the history', async () => {
     const many = Array.from({ length: 20 }, (_, i) => wake({ id: `w${i}`, at: Date.UTC(2026, 10, 13, 10, 0) - i * 60_000 }))
-    fake.initiative = view({ wakes: many })
+    fake.initiative = [view({ wakes: many })]
     await render(<InitiativeDialog onClose={() => {}} />)
     expect(document.querySelectorAll('.initiative__run')).toHaveLength(6)
     await click(button('Mostrar tudo (20)'))
@@ -334,7 +345,7 @@ describe('the window', () => {
   })
 
   it('names a conversation it can no longer reach, and offers only what it can', async () => {
-    fake.initiative = view({ config: config({ observe: { conversations: ['clientes'] }, work: { conversations: [], kinds: [] } }) })
+    fake.initiative = [view({ config: config({ observe: { conversations: ['clientes'] }, work: { conversations: [], kinds: [] } }) })]
     await render(<InitiativeDialog onClose={() => {}} />)
     const boxes = [...document.querySelectorAll('.initiative__check input')] as HTMLInputElement[]
     // Every conversation the person can see is offered once, and the marked one is the one saved.
@@ -359,11 +370,44 @@ describe('the window', () => {
 
 describe('a page that cannot read the record', () => {
   it('says it is reading instead of showing an empty coordinator', async () => {
+    // Nothing has been read yet: an empty list is an answer (no bot has one), null is not.
     fake.initiative = null
     await render(<InitiativeDialog onClose={() => {}} />)
     expect(text()).toContain('Lendo…')
     // And the line in the DM is not there at all, rather than claiming it is off.
     await render(<InitiativeLine conversationId="dm-lia" agentId="lia" />)
     expect(document.querySelector('.initiative-line')).toBeNull()
+  })
+})
+
+describe("the switch on a bot's own page", () => {
+  it('shows a bot nobody has set up as off, and opens the window to write the brief', async () => {
+    fake.initiative = []
+    await render(<InitiativeSwitch agentId="sol" />)
+    expect(document.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false')
+    expect(text()).toContain('sem pedido ainda')
+    // Nothing is sent: there is no brief to turn on, so the press is the way into the window.
+    await click(document.querySelector('[role="switch"]'))
+    expect(saveInitiative).not.toHaveBeenCalled()
+    expect(opened).toEqual([{ kind: 'initiative', agentId: 'sol', conversationId: 'dm-sol' }])
+  })
+
+  it('turns this bot on, against the revision it read, and leaves the other one alone', async () => {
+    fake.initiative = [view({ config: config({ enabled: false }) }), view({ config: config({ agentId: 'sol', conversationId: 'dm-sol', revision: 7 }), commitments: [], wakes: [] })]
+    await render(<InitiativeSwitch agentId="lia" />)
+    await click(document.querySelector('[role="switch"]'))
+    expect(saveInitiative).toHaveBeenCalledTimes(1)
+    expect(saveInitiative.mock.calls[0]![0]).toMatchObject({ agentId: 'lia', enabled: true, brief: 'Answer the client about the invoice.' })
+    expect(saveInitiative.mock.calls[0]![1]).toBe(3)
+  })
+
+  it('turns one off from the page, and says when it is waiting on the person', async () => {
+    await render(<InitiativeSwitch agentId="lia" />)
+    expect(text()).toMatch(/próxima em/)
+    await click(document.querySelector('[role="switch"]'))
+    expect(saveInitiative.mock.calls[0]![0]).toMatchObject({ agentId: 'lia', enabled: false })
+    fake.initiative = [view({ status: { ...view().status, waitingOnPerson: 1 } })]
+    await render(<InitiativeSwitch agentId="lia" />)
+    expect(text()).toContain('espera você')
   })
 })

@@ -6,7 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
-- **A bot can look after something for you between conversations.** Pick one bot and give it an
+- **A bot can look after something for you between conversations.** Give any of your bots an
   initiative: a brief in your own words, how often it checks, when it may interrupt you, the
   conversations it may look at and the actions it may take. It then reads that work on its own clock,
   in the DM it belongs to. A check-in that finds nothing leaves no trace at all: no message, no
@@ -14,9 +14,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
   The DM's header carries a line saying what it is doing (next check-in, waiting on you, checking
   now, off), and opens the window holding the brief, the day's limits, what the bot is carrying
   (each responsibility with the state its own work gives it) and what it did, newest first, with why
-  each check-in happened and what it cost. **Check now** asks for one on the spot and says what
-  stopped it when it cannot. An initiative grants nothing: every tool call is still decided by the
-  bot's Autonomy, and the scope you set can only narrow it. A report repeating the one before it
+  each check-in happened and what it cost. Every bot has its own: its own switch on its own page,
+  its own brief, scope and daily allowance, and its own line in its own DM, so a second bot joins
+  rather than replaces the first. **Check now** asks for one on the spot and says what stopped it
+  when it cannot. An initiative grants nothing: every tool call is still decided by
+  the bot's Autonomy, and the scope you set can only narrow it. A report repeating the one before it
   stays out of the conversation, its record saying so; a check-in the app did not survive is closed
   as interrupted and nothing it may have done is replayed.
 

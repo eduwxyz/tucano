@@ -217,10 +217,10 @@ export interface Api {
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
-  initiative(): InitiativeView // my own proactive coordinator and its responsibilities, and no one else's
+  initiative(): InitiativeView[] // my own proactive coordinators, one per bot, and no one else's
   saveInitiative(p: { config: InitiativeInput; expectedRevision: number }): InitiativeConfig // expectedRevision: what the page read; 0 creates
   saveCommitment(p: { commitment: CommitmentInput }): Commitment // one responsibility: its provenance, scope and links
-  checkInNow(): { started: boolean; why?: string; running: boolean } // "Conferir agora": my coordinator looking on the spot
+  checkInNow(p: { agentId: string }): { started: boolean; why?: string; running: boolean } // "Conferir agora": one of my bots looking on the spot
 }
 
 export type Method = keyof Api

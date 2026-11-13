@@ -95,7 +95,7 @@ export interface State {
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
   inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
-  initiative: InitiativeView | null // my own proactive coordinator: the brief, what it holds, what it did
+  initiative: InitiativeView[] | null // my own proactive coordinators, one per bot: null until read, then every one
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
   models: Model[]
@@ -787,7 +787,7 @@ export function dismissToast(id: number): void {
 
 // ---------- the proactive coordinator ----------
 
-// My own, read fresh: the brief, what it holds, what it did, and what is left of today.
+// My own, read fresh: each bot's brief, what it holds, what it did, and what is left of today.
 export const refreshInitiative = async (): Promise<void> => {
   try {
     const view = await call('initiative')
@@ -800,7 +800,8 @@ export const refreshInitiative = async (): Promise<void> => {
 // A configuration edit, against the revision the page read: another window's save is not overwritten.
 export const saveInitiative = (config: InitiativeInput, expectedRevision: number): Promise<InitiativeConfig> =>
   call('saveInitiative', { config, expectedRevision }).then((saved) => {
-    set((s) => (s.initiative ? { ...s, initiative: { ...s.initiative, config: saved } } : s))
+    // The saved bot's own entry, in place: a settings page saving one bot does not blank another's.
+    set((s) => ({ ...s, initiative: (s.initiative ?? []).map((v) => (v.config?.agentId === saved.agentId ? { ...v, config: saved } : v)) }))
     void refreshInitiative()
     return saved
   })
@@ -812,8 +813,8 @@ export const saveCommitment = (commitment: CommitmentInput): Promise<Commitment>
   })
 
 // "Conferir agora": it returns once the check-in has started, so the page can watch the record fill in.
-export const checkInNow = (): Promise<{ started: boolean; why?: string; running: boolean }> =>
-  call('checkInNow').then((r) => {
+export const checkInNow = (agentId: string): Promise<{ started: boolean; why?: string; running: boolean }> =>
+  call('checkInNow', { agentId }).then((r) => {
     void refreshInitiative()
     return r
   })
