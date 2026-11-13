@@ -1981,7 +1981,7 @@ export class Db {
   // team's log. Returns the DMs deleted, their routines, and the files (artifacts) to delete from disk.
   purgePerson(personId: string, now = Date.now()): { dms: string[]; routines: { id: string; conversationId: string }[]; artifacts: { id: string; name: string }[] } {
     return this.tx(() => {
-      const dms = (this.db.prepare("SELECT id FROM conversations WHERE kind = 'dm' AND owner = ?").all(personId) as Row[]).map((r) => str(r['id']))
+      const dms = (this.db.prepare("SELECT id FROM conversations WHERE (kind = 'dm' AND owner = ?) OR json_extract(team_up, '$.privateTo') = ?").all(personId, personId) as Row[]).map((r) => str(r['id']))
       const inDms = `(${dms.map(() => '?').join(', ') || "''"})`
       const artifacts = (this.db.prepare(`SELECT id, name FROM artifacts WHERE conversation_id IN ${inDms}`).all(...dms) as Row[]).map((r) => ({ id: str(r['id']), name: str(r['name']) }))
       const routines = (this.db.prepare(`SELECT id, conversation_id FROM routines WHERE conversation_id IN ${inDms}`).all(...dms) as Row[]).map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']) }))

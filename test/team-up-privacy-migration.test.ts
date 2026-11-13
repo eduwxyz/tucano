@@ -47,3 +47,21 @@ it('persists the recovered audience before a legacy DM can be deleted', () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('purges private team-up context with its person while preserving shared rooms', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tucano-team-up-purge-'))
+  const db = new Db(join(root, 'core.db'))
+  try {
+    db.createConversation({ id: 'dm', kind: 'dm', owner: 'bia', name: 'agent', members: [] })
+    const { unread: _privateUnread, ...privateRoom } = room('private', 'dm')
+    db.createConversation({ ...privateRoom, teamUp: { ...privateRoom.teamUp!, privateTo: 'bia' } })
+    const { unread: _sharedUnread, ...sharedRoom } = room('shared', 'public')
+    db.createConversation(sharedRoom)
+    expect(db.purgePerson('bia').dms.sort()).toEqual(['dm', 'private'])
+    expect(db.conversation('private')).toBeUndefined()
+    expect(db.conversation('shared')).toBeDefined()
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
