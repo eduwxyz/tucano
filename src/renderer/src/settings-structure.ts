@@ -32,7 +32,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'language'], scope: 'mixed', visible: true },
     { id: 'app-notifications', page: 'geral', label: L('Notificações', 'Notifications'), icon: 'bell', color: 'var(--c-rose)', keys: ['sounds'], scope: 'personal', visible: true },
     { id: 'app-dictation', page: 'geral', label: L('Ditado', 'Dictation'), icon: 'mic', color: 'var(--c-sky)', keys: ['voice'], scope: 'mixed', visible: admin },
-    { id: 'app-conversation', page: 'geral', label: L('Conversas', 'Conversations'), icon: 'thread', color: 'var(--c-indigo)', keys: ['stepsOpen', 'showThinking'], scope: 'personal', visible: true },
+    { id: 'app-conversation', page: 'geral', label: L('Conversas', 'Conversations'), icon: 'thread', color: 'var(--c-indigo)', keys: ['stepsOpen', 'showThinking', 'replyShortcut'], scope: 'personal', visible: true },
     { id: 'agents-permissions', page: 'agentes', label: L('Autonomia', 'Autonomy'), icon: 'shield', color: 'var(--accent)', keys: ['autonomy', 'actionRules', 'outsideGuard'], scope: 'workspace', visible: admin },
     { id: 'agents-replies', page: 'agentes', label: L('Respostas', 'Replies'), icon: 'send', color: 'var(--c-sky)', keys: ['repliesAtOnce'], scope: 'workspace', visible: admin },
     { id: 'agents-limits', page: 'agentes', label: L('Limites', 'Limits'), icon: 'gauge', color: 'var(--c-amber)', keys: ['defaultLimit', 'runBudgetPct', 'runStallMinutes', 'approvalTtlHours', 'autoContinue'], scope: 'workspace', visible: admin },

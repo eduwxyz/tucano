@@ -3609,6 +3609,8 @@ function SettingsSearchField({ value, onChange }: { value: string; onChange: (va
 
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
+  // The shortcut as the person's own keyboard writes it: the reply key, not a Mac's glyph elsewhere.
+  const key = useStore((s) => (s.platform === 'mac' ? '⌘L' : 'Ctrl+L'))
   const packaged = useStore((s) => s.packaged)
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
@@ -3777,6 +3779,19 @@ export function SettingsPage(): ReactNode {
                   </p>
                 </div>
                 <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
+              </div>
+              <div className="key-row">
+                <Icon name="reply" />
+                <div className="grow">
+                  <strong>{L(`Responder ao trecho com ${key}`, `Reply to the excerpt with ${key}`)}</strong>
+                  <p className="muted small">
+                    {L(
+                      `Com um trecho selecionado numa mensagem, ${key} começa uma resposta a ele, sem procurar o botão. Desligado, o atalho não faz nada e o botão da mensagem responde ao trecho do mesmo jeito.`,
+                      `With text selected in a message, ${key} starts a reply to that excerpt without hunting for the button. Off, the shortcut does nothing and the message’s own button still replies to it.`
+                    )}
+                  </p>
+                </div>
+                <Toggle on={settings.replyShortcut !== false} onChange={(v) => updateSettings({ replyShortcut: v })} />
               </div>
             </Card>
             <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>
