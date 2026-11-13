@@ -51,7 +51,7 @@ export class Retention {
       if (ownCutoff === undefined) continue
       for (const m of this.db.botMessagesBefore(agent.id, ownCutoff)) took.set(m.id, m.conversationId)
     }
-    const gone = this.take([...took.keys()])
+    const gone = this.take([...took.keys()], false)
     this.db.setMeta(LAST, String(this.now()))
     return gone
   }
@@ -69,9 +69,9 @@ export class Retention {
     return gone
   }
 
-  private take(ids: string[]): number {
+  private take(ids: string[], cascade = true): number {
     if (!ids.length) return 0
-    const { conversations, gone } = this.db.forget(ids)
+    const { conversations, gone } = this.db.forget(ids, cascade)
     // The sessions that saw those words go with them, so the next reply doesn't go on from them.
     for (const id of conversations) this.hooks.forgetSessions({ conversationId: id })
     this.hooks.cleared(conversations)

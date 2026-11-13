@@ -4,6 +4,7 @@ import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { cleanRetentionDays } from '../shared/retention'
+import { retentionSelection } from './retention-selection'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
 import { dirname, join } from 'node:path'
 import {
@@ -564,7 +565,7 @@ export type Said = { id: string; conversationId: string }
 const said = (r: Row): Said => ({ id: str(r['id']), conversationId: str(r['conversation_id']) })
 
 // Still a run writing into it, or one waiting on the person: never taken away from under either.
-const AT_WORK = `(run IS NULL OR json_extract(run, '$.status') NOT IN ('working', 'waiting_approval'))`
+const AT_WORK = `(run IS NULL OR json_extract(run, '$.status') NOT IN ('working', 'waiting_approval', 'waiting_input'))`
 // node:sqlite takes a bounded number of parameters, so a bulk delete goes a chunk at a time.
 const CHUNK = 400
 const marks = (chunk: readonly unknown[]): string => chunk.map(() => '?').join(', ')
@@ -1239,24 +1240,33 @@ export class Db {
   // notifications follow by foreign key. What a reply spent stays in the receipts, which is what Usage
   // and the monthly limit count, and the artifacts stay too (their files are on disk). A question waiting
   // in a thread whose first message went is closed: there's nothing left to show it under.
-  forget(ids: string[]): { conversations: string[]; gone: number } {
+  forget(ids: string[], cascade = true): { conversations: string[]; gone: number } {
     if (!ids.length) return { conversations: [], gone: 0 }
     return this.tx(() => {
       // id → the conversation it was said in, grown until no reply is left hanging under a thread.
       const gone = new Map<string, string>()
+      const parents = new Map<string, string | undefined>()
       for (const chunk of inChunks(ids)) {
-        for (const r of this.db.prepare(`SELECT id, conversation_id FROM messages WHERE id IN (${marks(chunk)})`).all(...chunk) as Row[]) gone.set(str(r['id']), str(r['conversation_id']))
+        for (const r of this.db.prepare(`SELECT id, conversation_id, thread_id FROM messages WHERE id IN (${marks(chunk)})`).all(...chunk) as Row[]) {
+          gone.set(str(r['id']), str(r['conversation_id']))
+          parents.set(str(r['id']), r['thread_id'] ? str(r['thread_id']) : undefined)
+        }
       }
       for (let roots = [...gone.keys()]; roots.length; ) {
         const replies = new Map<string, string>()
         for (const chunk of inChunks(roots)) {
-          for (const r of this.db.prepare(`SELECT id, conversation_id FROM messages WHERE thread_id IN (${marks(chunk)})`).all(...chunk) as Row[]) {
+          for (const r of this.db.prepare(`SELECT id, conversation_id, thread_id FROM messages WHERE thread_id IN (${marks(chunk)})`).all(...chunk) as Row[]) {
             const id = str(r['id'])
+            parents.set(id, str(r['thread_id']))
             if (!gone.has(id)) replies.set(id, str(r['conversation_id']))
           }
         }
         for (const [id, conversationId] of replies) gone.set(id, conversationId)
         roots = [...replies.keys()]
+      }
+      if (!cascade) {
+        const eligible = retentionSelection(new Set(ids), parents)
+        for (const id of gone.keys()) if (!eligible.has(id)) gone.delete(id)
       }
       for (const chunk of inChunks([...gone.keys()])) {
         this.db.prepare(`DELETE FROM approvals WHERE message_id IN (${marks(chunk)})`).run(...chunk)
