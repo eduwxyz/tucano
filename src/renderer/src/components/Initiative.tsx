@@ -71,9 +71,13 @@ const tokens = (n: number): string =>
 
 // A DM whose bot looks after this person: what it is doing, when it is next, and the way in.
 export function InitiativeLine({ conversationId, agentId }: { conversationId?: string; agentId?: string }): ReactNode {
-  const view = useStore((s) => s.initiative)
-  const config = view?.config
-  const mine = !!config && config.conversationId === conversationId && config.agentId === agentId
+  const views = useStore((s) => s.initiative)
+  // This bot's own entry: a person can give several of their bots something to look after, and each DM
+  // speaks for the bot it belongs to rather than for whichever one was set up first. Nothing at all
+  // until the core has answered: a DM is not told its bot is off before anyone has looked.
+  const view = views?.find((v) => v.config?.agentId === agentId && v.config?.conversationId === conversationId) ?? null
+  const config = view?.config ?? null
+  const mine = !!config
   // It keeps itself current while the conversation is open: a person watching sees the countdown move.
   // Every hook of this component sits above its returns, so a save that turns the line on cannot change
   // how many of them this render has.
@@ -82,11 +86,9 @@ export function InitiativeLine({ conversationId, agentId }: { conversationId?: s
     const t = setInterval(() => void refreshInitiative(), 60_000)
     return () => clearInterval(t)
   }, [mine])
-  if (!view) return null
-  // Nobody has a coordinator yet: this DM offers the way to set one up. Once it lives somewhere, it
-  // speaks only from where it lives, and the other DMs stay quiet.
-  if (!mine) {
-    if (config || !conversationId || !agentId) return null
+  if (!view || !mine) {
+    // This bot has nothing to look after yet: its DM offers the way in, and every bot gets one.
+    if (!views || !conversationId || !agentId) return null
     const start = L('Ligar a iniciativa deste bot', "Turn on this bot's initiative")
     return (
       <button className="initiative-line is-off" title={start} aria-label={start} onClick={() => openDialog({ kind: 'initiative', agentId, conversationId })}>
@@ -115,6 +117,75 @@ export function InitiativeLine({ conversationId, agentId }: { conversationId?: s
       <span className="initiative-line__text">{says}</span>
       {st.open > 0 && <span className="initiative-line__count">{st.open}</span>}
     </button>
+  )
+}
+
+// ---------- the switch on a bot's own page ----------
+
+// The same record the line in its DM shows, seen from settings: one switch per bot, and the way into the
+// window that writes what it looks after. Turning it on is the person's act and needs a brief, so a press
+// with nothing written opens the window instead of failing quietly.
+export function InitiativeSwitch({ agentId }: { agentId: string }): ReactNode {
+  const views = useStore((s) => s.initiative)
+  const conversations = useStore((s) => s.conversations)
+  const view = views?.find((v) => v.config?.agentId === agentId) ?? null
+  const config = view?.config ?? null
+  const dm = conversations.find((c) => c.kind === 'dm' && c.members[0] === agentId)?.id
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const open = (): void => openDialog({ kind: 'initiative', agentId, ...(dm ? { conversationId: dm } : {}) })
+  const flip = async (on: boolean): Promise<void> => {
+    if (!config || (on && !config.brief.trim())) {
+      open()
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await saveInitiative(inputOf({ ...config, enabled: on }), config.revision)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const st = view?.status
+  const running = !!view?.wakes[0] && !view.wakes[0]!.endedAt
+  const says = !config
+    ? L('sem pedido ainda', 'nothing yet')
+    : st?.paused
+      ? L('tudo pausado', 'everything paused')
+      : running
+        ? L('conferindo agora…', 'checking now…')
+        : !config.enabled
+          ? L('desligada', 'off')
+          : st?.waitingOnPerson
+            ? L('espera você', 'waits on you')
+            : st?.dueAt
+              ? L(`próxima em ${until(st.dueAt - Date.now())}`, `next in ${until(st.dueAt - Date.now())}`)
+              : L('ligada', 'on')
+  return (
+    <div className="initiative-setting">
+      <div className="row">
+        <Toggle on={!!config?.enabled} onChange={(on) => void flip(on)} />
+        <span>{says}</span>
+        {busy && <span className="muted small">{L('salvando…', 'saving…')}</span>}
+      </div>
+      <p className="hint">
+        {L(
+          'Ligada, ele confere sozinho entre as conversas, no intervalo e dentro do que você autorizou, e só aparece quando tem algo que valha a pena.',
+          'Once on, it looks between conversations at the interval you set, inside what you allowed, and only appears when it found something worth saying.'
+        )}
+      </p>
+      <button className="btn btn--ghost btn--sm" onClick={open}>
+        {config ? L('Abrir a iniciativa', 'Open the initiative') : L('Preparar a iniciativa', 'Set up the initiative')}
+      </button>
+      {error && (
+        <p className="initiative__error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -152,23 +223,27 @@ const inputOf = (d: InitiativeInput): InitiativeInput => ({
 })
 
 export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: fromConversation }: { onClose: () => void; agentId?: string; conversationId?: string }): ReactNode {
-  const view = useStore((s) => s.initiative)
+  const views = useStore((s) => s.initiative)
   const agents = useStore((s) => s.agents)
   const conversations = useStore((s) => s.conversations)
-  const config = view?.config ?? null
   const [draft, setDraft] = useState<InitiativeInput | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<null | 'save' | 'check' | 'stop'>(null)
   const [note, setNote] = useState<string | null>(null)
 
-  // The agent whose coordinator this is: the configured one, or the first bot this person has a DM with.
+  // The bot this page is about: the one it was opened for, else the one the entry belongs to, else the
+  // first bot this person has a DM with. Its entry is the only one this page reads or writes.
   const dmOf = (id: string): string | undefined => conversations.find((c) => c.kind === 'dm' && c.members[0] === id)?.id
-  const agentId = config?.agentId ?? fromAgent ?? agents.find((a) => dmOf(a.id))?.id ?? ''
-  const conversationId = config?.conversationId ?? fromConversation ?? dmOf(agentId) ?? ''
+  const agentId = fromAgent ?? views?.find((v) => v.config?.conversationId === fromConversation)?.config?.agentId ?? agents.find((a) => dmOf(a.id))?.id ?? ''
+  const view = views?.find((v) => v.config?.agentId === agentId) ?? null
+  const config = view?.config ?? null
+  const conversationId = fromConversation ?? config?.conversationId ?? dmOf(agentId) ?? ''
 
+  // A bot with nothing set up still gets its fields: the draft starts from the narrow defaults, and this
+  // page is where the person writes them. Only 'not read yet' holds it back.
   useEffect(() => {
-    if (view && !draft) setDraft(draftOf(view.config, agentId, conversationId))
-  }, [view, draft, agentId, conversationId])
+    if (views && !draft) setDraft(draftOf(view?.config ?? null, agentId, conversationId))
+  }, [views, view, draft, agentId, conversationId])
 
   // While a check-in is under way, the record is read again until it ends: the page shows what it did.
   const running = !!view?.wakes[0] && !view.wakes[0].endedAt
@@ -216,7 +291,7 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
 
   return (
     <Modal title={L('Iniciativa do bot', "Your bot's initiative")} onClose={onClose} className="initiative-modal">
-      {!view || !draft ? (
+      {!views || !draft ? (
         <p className="muted">{L('Lendo…', 'Reading…')}</p>
       ) : (
         <div className="initiative">
@@ -250,7 +325,7 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
               onClick={() => {
                 setBusy('check')
                 setError(null)
-                void checkInNow()
+                void checkInNow(agentId)
                   .then((r) => {
                     if (!r.started) setError(whyNot(r.why))
                     else setNote(L('Conferindo…', 'Checking…'))
@@ -359,14 +434,14 @@ export function InitiativeDialog({ onClose, agentId: fromAgent, conversationId: 
           </div>
 
           <Commitments
-            items={view.commitments}
+            items={view?.commitments ?? []}
             onSave={(c) => void saveCommitment(c).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))}
             onOpen={(id) => {
               openDialog(null)
               navigate({ kind: 'conversation', id })
             }}
           />
-          <Activity wakes={view.wakes} />
+          <Activity wakes={view?.wakes ?? []} />
         </div>
       )}
     </Modal>

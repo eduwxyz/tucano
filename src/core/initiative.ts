@@ -45,18 +45,18 @@ export class Initiative {
   // What this person's page shows: their own records, what their coordinator did, and what is left of
   // today. A page is where a person asks why the bot woke, so the work behind each responsibility is
   // read fresh here too: a state written by a tick that has not happened yet would be a stale answer.
-  view(person: Person, now = Date.now(), paused = false): InitiativeView {
-    const config = this.db.initiative(person.id) ?? null
-    const commitments = this.db.commitments(person.id)
-    const wakes = this.db.wakes(person.id, { limit: 30 })
+  view(person: Person, agentId: string, now = Date.now(), paused = false): InitiativeView {
+    const config = this.db.initiative(person.id, agentId) ?? null
+    const commitments = this.mine(person, agentId)
+    const wakes = this.db.wakes(person.id, { limit: 30, agentId })
     if (!config) return { config, commitments, wakes, status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused } }
-    const fresh = this.refresh(person, now)
+    const fresh = this.refresh(person, now, agentId)
     const open = commitments.filter((c) => !isClosed(c.state))
     const today = dayStartIn(config.timezone, now)
     const ran = attemptsOf(wakes).filter((w) => w.at >= today)
     return {
       config,
-      commitments: this.db.commitments(person.id),
+      commitments: this.mine(person, agentId),
       wakes,
       status: {
         dueAt: dueAt(config, attemptsOf(wakes)[0]?.at, quietStreakOf(wakes), this.floorMinutes(config, fresh.waitingUser)),
@@ -68,15 +68,29 @@ export class Initiative {
     }
   }
 
+  // Every bot this person has given something to look after, each with what it holds and what is left of
+  // today. One page per bot reads its own entry; the settings of a workspace read all of them.
+  views(person: Person, now = Date.now(), paused = false): InitiativeView[] {
+    return this.db.initiatives(person.id).map((c) => this.view(person, c.agentId, now, paused))
+  }
+
+  // One bot's responsibilities, out of everything the person's bots hold between them: a bot never reads
+  // what another took on, and none of them inherits another's plate.
+  private mine(person: Person, agentId: string): Commitment[] {
+    return this.db.commitments(person.id).filter((c) => c.agentId === agentId)
+  }
+
   // A configuration edit, against the revision the page read. A save in between is refused instead
   // of overwriting what the other window wrote: a queued review must never apply an old brief.
   save(person: Person, input: InitiativeInput, expectedRevision: number, at = Date.now()): InitiativeConfig {
-    const prev = this.db.initiative(person.id)
-    if ((prev?.revision ?? 0) !== expectedRevision) throw new Error(staleRevision())
     const clean = cleanInitiative(input)
     const why = initiativeError(clean)
     if (why) throw new Error(why)
+    // What it names comes first: a bot that is gone is not a page that went stale, and saying "reload"
+    // would send the person looking for the wrong problem.
     this.targets(person, clean)
+    const prev = this.db.initiative(person.id, clean.agentId)
+    if ((prev?.revision ?? 0) !== expectedRevision) throw new Error(staleRevision())
     const now = at
     const saved: InitiativeConfig = {
       ...clean,
@@ -95,7 +109,8 @@ export class Initiative {
     const prev = clean.id ? this.db.commitment(clean.id) : undefined
     // Someone else's record is not this person's to know exists, whatever else they have set up.
     if (prev && prev.personId !== person.id) throw new Error(gone())
-    const config = this.db.initiative(person.id)
+    const target = prev?.agentId ?? clean.agentId
+    const config = (target ? this.db.initiative(person.id, target) : undefined) ?? this.db.initiatives(person.id)[0]
     if (!config) throw new Error(L('Ligue a iniciativa de um bot primeiro.', 'Turn on initiative for a bot first.'))
     const why = commitmentError(clean)
     if (why) throw new Error(why)
@@ -112,7 +127,7 @@ export class Initiative {
     this.pieces(person, clean)
     const now = Date.now()
     // A coordinator holds a plate, not a backlog.
-    const others = this.db.commitments(person.id).filter((c) => c.id !== prev?.id && !isClosed(c.state))
+    const others = this.mine(person, agentId).filter((c) => c.id !== prev?.id && !isClosed(c.state))
     if (!prev && others.length >= MAX_COMMITMENTS) throw new Error(L('Já são responsabilidades demais. Feche uma antes de abrir outra.', 'That is as many responsibilities as one bot can keep. Close one before adding another.'))
     // What the work behind it says now: a page shows the honest state from the first render, not only
     // after the next check-in. A person's own state wins, and a closed one stays closed on an edit.
@@ -164,9 +179,10 @@ export class Initiative {
   // is bounded instead of repeated.
   refresh(
     person: Person,
-    now = Date.now()
+    now = Date.now(),
+    agentId?: string
   ): { due: LinkSnapshot[]; links: Map<string, LinkSnapshot[]>; waitingUser: boolean; stalled: Commitment[]; narrowed: Commitment[] } {
-    const config = this.db.initiative(person.id)
+    const config = (agentId ? this.db.initiative(person.id, agentId) : undefined) ?? this.db.initiatives(person.id)[0]
     if (!config) return { due: [], links: new Map(), waitingUser: false, stalled: [], narrowed: [] }
     const reachable = new Set([config.conversationId, ...config.observe.conversations, ...config.work.conversations])
     const due: LinkSnapshot[] = []
@@ -174,7 +190,7 @@ export class Initiative {
     const stalled: Commitment[] = []
     const narrowed: Commitment[] = []
     let waitingUser = false
-    for (const c of this.db.commitments(person.id)) {
+    for (const c of this.mine(person, config.agentId)) {
       if (isClosed(c.state)) continue
       const links = c.links.map((l) => dependencyOf(this.db, l.kind, l.id)).filter((l): l is LinkSnapshot => l !== undefined)
       linksOf.set(c.id, links)
@@ -209,7 +225,7 @@ export class Initiative {
     }
     // Read from what is stored now, so a state this refresh wrote is the one that counts. Something
     // waiting on the person is not stalled: they are the one who has not moved.
-    for (const c of this.db.commitments(person.id)) {
+    for (const c of this.mine(person, config.agentId)) {
       if (!isClosed(c.state) && c.state !== 'waiting_user' && c.unchangedFor >= STALL_AFTER) stalled.push(c)
     }
     return { due, links: linksOf, waitingUser, stalled, narrowed }
@@ -218,9 +234,9 @@ export class Initiative {
   // After a check-in: the work it read is recorded as seen, so the same news never wakes it twice, and
   // each responsibility it found exactly where it was counts one more check-in without progress. A
   // change the check-in itself made (a new note, a closed one) starts that count again.
-  settle(person: Person, since: number, links: LinkSnapshot[], now = Date.now()): void {
+  settle(person: Person, since: number, links: LinkSnapshot[], now = Date.now(), agentId?: string): void {
     for (const l of links) this.db.markResume(person.id, l.kind, l.id, l.version, now)
-    for (const c of this.db.commitments(person.id)) {
+    for (const c of agentId ? this.mine(person, agentId) : this.db.commitments(person.id)) {
       if (isClosed(c.state)) continue
       const unchangedFor = c.updatedAt > since ? 0 : Math.min(c.unchangedFor + 1, STALL_AFTER * 2)
       if (unchangedFor === c.unchangedFor) continue

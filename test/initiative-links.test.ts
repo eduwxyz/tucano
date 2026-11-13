@@ -207,7 +207,7 @@ describe('the work behind a responsibility', () => {
     const stalled = refresh().stalled
     expect(stalled.map((x) => x.id)).toEqual([c.id])
     // The request names it, and asks for one concrete step or a close.
-    const task = heartbeatTask(db.initiative(db.ownerId())!, db.commitments(db.ownerId()), 'Ana', { stalled: stalled.map((x) => x.description) })
+    const task = heartbeatTask(db.initiative(db.ownerId(), 'lia')!, db.commitments(db.ownerId()), 'Ana', { stalled: stalled.map((x) => x.description) })
     expect(task).toMatch(/Sem avanço|No progress/)
     // A person's own change is progress again.
     initiative.saveCommitment(db.owner(), commitment({ id: c.id, description: 'Send the number, this time with the contract.' }))

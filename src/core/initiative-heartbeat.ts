@@ -70,23 +70,31 @@ export class Heartbeat {
     this.timer = undefined
   }
 
-  // Everyone whose check-in is due, one after another: a person's own review never runs beside
-  // another of theirs, and a tick that finds one under way leaves it alone.
+  // Everyone whose check-in is due, one bot after another: two check-ins never run beside each other,
+  // whoever they are for, and a tick that finds one under way leaves that bot alone.
   async tick(now = this.now()): Promise<InitiativeWake[]> {
     const settings = this.deps.settings()
     const quietHours = inQuietHours(settings.quietHours)
     const ran: InitiativeWake[] = []
     for (const person of this.deps.people()) {
-      const config = this.deps.db.initiative(person.id)
-      if (!config) continue
+      const configs = this.deps.db.initiatives(person.id)
+      if (configs.length === 0) continue
       // Delivery retries alone: a report recorded before the app closed is shown now, without running the
       // check-in again. A run the app did not survive is closed for the same reason.
       this.deliverPending(person, now)
       for (const w of this.deps.db.staleWakes(now - ORPHAN_MINUTES * 60_000).filter((w) => w.personId === person.id)) {
         this.deps.db.saveWake({ ...w, endedAt: now, outcome: 'interrupted', why: 'error' })
-        this.deps.initiative.refresh(person, now)
+        this.deps.initiative.refresh(person, now, w.agentId)
       }
-      const wakes = this.deps.db.wakes(person.id, { limit: 60 })
+      // Every bot of theirs in turn: one bot's check-in never blocks another's, and each has its own brief,
+      // its own plate and what is left of its own allowance.
+      for (const config of configs) await this.one(person, config, settings, quietHours, now, ran)
+    }
+    return ran
+  }
+
+  private async one(person: Person, config: InitiativeConfig, settings: Settings, quietHours: boolean, now: number, ran: InitiativeWake[]): Promise<void> {
+      const wakes = this.deps.db.wakes(person.id, { limit: 60, agentId: config.agentId })
       const attempts = attemptsOf(wakes)
       const lastAt = attempts[0]?.at
       const quietStreak = quietStreakOf(wakes)
@@ -95,7 +103,7 @@ export class Heartbeat {
       // A DM where the person had the last word and has not been answered yet: their turn comes first.
       const last = this.deps.db.lastAuthor(config.conversationId)
       // What the work behind each responsibility says now: a link that moved is what a resume is for.
-      const fresh = this.deps.initiative.refresh(person, now)
+      const fresh = this.deps.initiative.refresh(person, now, config.agentId)
       const verdict = admit({
         config,
         now,
@@ -103,35 +111,33 @@ export class Heartbeat {
         quietStreak,
         reviewsToday: todayRuns.length,
         tokensToday: todayRuns.reduce((n, w) => n + w.tokens, 0),
-        busy: this.claims.has(person.id),
+        busy: this.claims.has(this.key(person, config.agentId)),
         paused: this.deps.runner.isPaused(),
         quietHours,
         resume: fresh.due.length > 0,
         floorMinutes: this.deps.initiative.floorMinutes(config, fresh.waitingUser),
         personTalking: last?.kind === 'person'
       })
-      if (!verdict.run) continue
+      if (!verdict.run) return
       // The claim is taken here, before the first await: a second tick cannot pass this line.
-      this.claims.add(person.id)
+      this.claims.add(this.key(person, config.agentId))
       try {
         const wake = await this.run(person, config, settings, now, fresh)
         if (wake) ran.push(wake)
       } finally {
-        this.claims.delete(person.id)
+        this.claims.delete(this.key(person, config.agentId))
       }
-    }
-    return ran
   }
 
   // "Conferir agora": the person asking for one, on the spot. Their cadence and their quiet hours are
   // theirs to skip; the caps, the pause, the allowance and one-at-a-time are not. It returns as soon
   // as the check-in has started, so a page can watch the record fill in instead of freezing.
-  startNow(person: Person): { started: boolean; why?: Refusal } {
-    const config = this.deps.db.initiative(person.id)
+  startNow(person: Person, agentId: string): { started: boolean; why?: Refusal } {
+    const config = this.deps.db.initiative(person.id, agentId)
     if (!config) return { started: false, why: 'off' }
     const now = this.now()
-    const work = this.deps.initiative.refresh(person, now)
-    const wakes = this.deps.db.wakes(person.id, { limit: 60 })
+    const work = this.deps.initiative.refresh(person, now, agentId)
+    const wakes = this.deps.db.wakes(person.id, { limit: 60, agentId })
     const attempts = attemptsOf(wakes)
     const today = dayStartIn(config.timezone, now)
     const todayRuns = attempts.filter((w) => w.at >= today)
@@ -142,30 +148,34 @@ export class Heartbeat {
       quietStreak: quietStreakOf(wakes),
       reviewsToday: todayRuns.length,
       tokensToday: todayRuns.reduce((n, w) => n + w.tokens, 0),
-      busy: this.claims.has(person.id),
+      busy: this.claims.has(this.key(person, agentId)),
       paused: this.deps.runner.isPaused(),
       quietHours: false,
       manual: true
     })
     if (!verdict.run) return { started: false, why: verdict.why }
-    this.claims.add(person.id)
+    this.claims.add(this.key(person, agentId))
     void this.run(person, config, this.deps.settings(), now, work)
       .catch((e: unknown) => console.error('[initiative]', e))
-      .finally(() => this.claims.delete(person.id))
+      .finally(() => this.claims.delete(this.key(person, agentId)))
     return { started: true }
   }
 
-  // Whether one of this person's check-ins is under way, for a page that asks.
-  running(personId: string): boolean {
-    return this.claims.has(personId)
+  // Whether one of this person's check-ins is under way, for a page that asks: one bot's, or any of them.
+  running(personId: string, agentId?: string): boolean {
+    return agentId ? this.claims.has(`${personId}:${agentId}`) : [...this.claims].some((k) => k.startsWith(`${personId}:`))
+  }
+
+  private key(person: Person, agentId: string): string {
+    return `${person.id}:${agentId}`
   }
 
   // When this person's next check-in is due: what a page shows, and what a test reads. While something
   // of the bot's waits on the person, that is the longer wait, not the cadence.
   dueAtFor(person: Person, config: InitiativeConfig): number | undefined {
     if (!config.enabled) return undefined
-    const wakes = this.deps.db.wakes(person.id, { limit: 60 })
-    const fresh = this.deps.initiative.refresh(person, this.now())
+    const wakes = this.deps.db.wakes(person.id, { limit: 60, agentId: config.agentId })
+    const fresh = this.deps.initiative.refresh(person, this.now(), config.agentId)
     return dueAt(config, attemptsOf(wakes)[0]?.at, quietStreakOf(wakes), this.deps.initiative.floorMinutes(config, fresh.waitingUser))
   }
 
@@ -189,7 +199,7 @@ export class Heartbeat {
     if (!conversation || conversation.kind !== 'dm') return this.skip(person, config, 'dm', now)
     // An edit since admission stops it: the check-in was admitted under the brief the person has
     // since changed, and a review of the old one is not what they asked for.
-    const fresh = db.initiative(person.id)
+    const fresh = db.initiative(person.id, config.agentId)
     if (!fresh || !fresh.enabled || fresh.revision !== config.revision) return this.skip(person, config, fresh?.enabled ? 'revision' : 'off', now)
 
     const id = randomUUID()
@@ -202,7 +212,12 @@ export class Heartbeat {
       wake: id,
       agent,
       conversation,
-      task: heartbeatTask(fresh, db.commitments(person.id), me, { links: work.links, moved: work.due, stalled: work.stalled.map((c) => c.description) })
+      task: heartbeatTask(
+        fresh,
+        db.commitments(person.id).filter((c) => c.agentId === config.agentId),
+        me,
+        { links: work.links, moved: work.due, stalled: work.stalled.map((c) => c.description) }
+      )
     })
     if (result.outcome === 'skipped') return this.skip(person, config, result.why ?? 'error', now, id)
     // The app may have closed this one while it was away (a restart, a kill): what came back is late, and
@@ -213,12 +228,12 @@ export class Heartbeat {
     // without progress: news wakes the coordinator once, and a cycle with nothing in it is bounded. Only a
     // run that finished counts: one cut short has read nothing to the end, so the news it came for must
     // still be able to wake the coordinator again.
-    if (result.outcome === 'quiet' || result.outcome === 'reported') this.deps.initiative.settle(person, now, [...work.links.values()].flat(), this.now())
+    if (result.outcome === 'quiet' || result.outcome === 'reported') this.deps.initiative.settle(person, now, [...work.links.values()].flat(), this.now(), config.agentId)
     const message = result.message
     const said = (message?.text.trim() || message?.run?.error?.trim() || '').trim()
     // Saying the same thing twice is not an intervention: the report stays in its record, out of the
     // conversation, and a page can say why it was not delivered.
-    const deduped = result.outcome === 'reported' && this.repeats(person, said, now)
+    const deduped = result.outcome === 'reported' && this.repeats(person, config.agentId, said, now)
     const wake: InitiativeWake = {
       id,
       personId: person.id,
@@ -289,12 +304,12 @@ export class Heartbeat {
 
   // The last thing it said, word for word. Compared without the markdown that wraps it, since the same
   // finding is often bolded in one check-in and plain in the next.
-  private repeats(person: Person, said: string, now: number): boolean {
+  private repeats(person: Person, agentId: string, said: string, now: number): boolean {
     if (!said) return false
     const plain = (t: string): string => t.replace(/[*_`#>]/g, '').replace(/\s+/g, ' ').trim()
     const mine = plain(said)
     return this.deps.db
-      .wakes(person.id, { limit: 20 })
+      .wakes(person.id, { limit: 20, agentId })
       .filter((w) => w.outcome === 'reported' && !w.deduped && w.text && now - w.at < REPEAT_WINDOW)
       .some((w) => plain(w.text!) === mine)
   }

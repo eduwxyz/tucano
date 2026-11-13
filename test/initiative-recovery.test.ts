@@ -60,7 +60,7 @@ const arm = async (): Promise<Rig> => {
     heartbeat,
     dm: 'dm',
     set: (over) => {
-      const saved = initiative.save(db.owner(), { agentId: 'lia', conversationId: 'dm', enabled: true, brief: 'Watch the invoice thread.', observe: { conversations: [] }, work: { conversations: [], kinds: [] }, cadenceMinutes: 15, notify: 'material', dailyReviews: 24, dailyTokens: 2_000_000, timezone: 'Europe/Sofia', ...over }, db.initiative(db.ownerId())?.revision ?? 0)
+      const saved = initiative.save(db.owner(), { agentId: 'lia', conversationId: 'dm', enabled: true, brief: 'Watch the invoice thread.', observe: { conversations: [] }, work: { conversations: [], kinds: [] }, cadenceMinutes: 15, notify: 'material', dailyReviews: 24, dailyTokens: 2_000_000, timezone: 'Europe/Sofia', ...over }, db.initiative(db.ownerId(), over.agentId ?? 'lia')?.revision ?? 0)
       return { due: saved.updatedAt + (over.cadenceMinutes ?? 15) * 60_000 + 1 }
     },
     at: (n) => {
@@ -98,7 +98,7 @@ describe('what the app did not survive', () => {
     // Idempotent: a second start of the app has nothing left to close.
     expect(rig.heartbeat.recover(now)).toBe(0)
     // And a page reading the record sees nothing "checking now" from it.
-    const view = rig.initiative.view(rig.db.owner(), now)
+    const view = rig.initiative.view(rig.db.owner(), 'lia', now)
     expect(view.wakes.find((w) => w.id === 'lost')?.endedAt).toBe(now)
   })
 
@@ -107,7 +107,7 @@ describe('what the app did not survive', () => {
     rig.set({})
     let finish: (v: { outcome: 'quiet' }) => void = () => {}
     vi.spyOn(rig.runner, 'checkIn').mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)))
-    expect(rig.heartbeat.startNow(rig.db.owner())).toEqual({ started: true })
+    expect(rig.heartbeat.startNow(rig.db.owner(), 'lia')).toEqual({ started: true })
     const started = rig.db.wakes(rig.db.ownerId())[0]!
     expect(started.endedAt).toBeUndefined()
     // The app closed it in the meantime: a restart, a kill, an orphan sweep.
@@ -215,20 +215,21 @@ describe('one clock, whatever happens to the app', () => {
     expect(rig.turns).toHaveLength(1)
   })
 
-  it('follows a replaced coordinator, and leaves what the old one took on with the old one', async () => {
+  it('gives a second bot its own plate, so neither inherits nor closes what the other took on', async () => {
     const rig = await arm()
     rig.set({})
     const taken = rig.initiative.saveCommitment(rig.db.owner(), { agentId: 'lia', conversationId: rig.dm, by: 'person', description: 'Send the number.', scope: { conversations: [], kinds: [] } })
-    // Another bot takes over the brief, in its own DM.
+    // A second bot of the same person, with its own DM and its own brief: it joins, it does not replace.
     rig.db.saveAgent({ id: 'sol', name: 'Sol', handle: 'sol', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 10_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
     rig.db.createConversation({ id: 'dm-sol', kind: 'dm', name: 'sol', members: ['sol'], owner: rig.db.ownerId() })
     const { due } = rig.set({ agentId: 'sol', conversationId: 'dm-sol' })
     rig.reply('[[quiet]]')
     rig.at(due)
     const ran = await rig.heartbeat.tick(due)
-    expect(ran.map((w) => w.agentId)).toEqual(['sol'])
-    // What the first one took on stays with it: the new coordinator cannot close it as its own.
-    expect(rig.initiative.view(rig.db.owner()).commitments.find((c) => c.id === taken.id)!.agentId).toBe('lia')
+    expect(ran.map((w) => w.agentId).sort()).toEqual(['lia', 'sol'])
+    // What each took on stays with it: one bot's plate is not the other's to read or close.
+    expect(rig.initiative.view(rig.db.owner(), 'lia').commitments.map((c) => c.id)).toEqual([taken.id])
+    expect(rig.initiative.view(rig.db.owner(), 'sol').commitments).toEqual([])
   })
 
   it('stops for a person who left, and for a bot that was archived', async () => {
@@ -238,9 +239,9 @@ describe('one clock, whatever happens to the app', () => {
     if ('error' in bia) throw new Error(bia.error)
     rig.db.createConversation({ id: 'dm-bia', kind: 'dm', name: 'lia', members: ['lia'], owner: bia.person.id })
     rig.initiative.save(bia.person, { agentId: 'lia', conversationId: 'dm-bia', enabled: true, brief: 'Watch the invoices.', observe: { conversations: [] }, work: { conversations: [], kinds: [] }, cadenceMinutes: 15, notify: 'material', dailyReviews: 24, dailyTokens: 2_000_000, timezone: 'Europe/Sofia' }, 0)
-    expect(rig.db.initiative(bia.person.id)!.enabled).toBe(true)
+    expect(rig.db.initiative(bia.person.id, 'lia')!.enabled).toBe(true)
     rig.db.removePerson(bia.person.id)
-    expect(rig.db.initiative(bia.person.id)).toMatchObject({ enabled: false, revision: 2 })
+    expect(rig.db.initiative(bia.person.id, 'lia')).toMatchObject({ enabled: false, revision: 2 })
 
     // The bot itself is archived: the owner's coordinator runs nothing through it.
     const { due } = rig.set({})

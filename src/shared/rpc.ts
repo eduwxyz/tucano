@@ -272,10 +272,10 @@ export interface Api {
   survey(p: { lang?: Lang }): Promise<SurveyView | null>
   // A choice (kept the moment it's clicked), the same choice with its comment, or dismiss: "Não quero responder".
   answerSurvey(p: { survey: string; choice?: string; comment?: string; dismiss?: boolean; lang?: Lang }): Promise<void>
-  initiative(): InitiativeView // my own proactive coordinator and its responsibilities, and no one else's
+  initiative(): InitiativeView[] // my own proactive coordinators, one per bot, and no one else's
   saveInitiative(p: { config: InitiativeInput; expectedRevision: number }): InitiativeConfig // expectedRevision: what the page read; 0 creates
   saveCommitment(p: { commitment: CommitmentInput }): Commitment // one responsibility: its provenance, scope and links
-  checkInNow(): { started: boolean; why?: string; running: boolean } // "Conferir agora": my coordinator looking on the spot
+  checkInNow(p: { agentId: string }): { started: boolean; why?: string; running: boolean } // "Conferir agora": one of my bots looking on the spot
 }
 
 // A survey as the app shows it, already in the person's language (core/feedback.ts).

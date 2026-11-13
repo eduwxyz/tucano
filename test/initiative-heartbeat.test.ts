@@ -207,7 +207,7 @@ describe('a check-in', () => {
     for (let i = 0; i < 5; i++) expect(await heartbeat.tick(due + i * 1_000)).toEqual([])
     expect(db.wakes(db.ownerId()).filter((w) => w.outcome !== 'skipped')).toHaveLength(1)
     // A quiet one doubled the wait: 30 minutes, not 15.
-    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId())!)!
+    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId(), 'lia')!)!
     expect(next).toBe(due + 30 * 60_000)
     expect(await heartbeat.tick(next - 1)).toEqual([])
     expect((await heartbeat.tick(next + 1)).length).toBe(1)
@@ -218,7 +218,7 @@ describe('a check-in', () => {
     reply = 'Something worth reading.'
     clock = due
     expect((await heartbeat.tick(due)).length).toBe(1)
-    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId())!)!
+    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId(), 'lia')!)!
     // The next is due, but today's one review is spent.
     expect(await heartbeat.tick(next + 1)).toEqual([])
     expect(db.wakes(db.ownerId())).toHaveLength(1)
@@ -255,7 +255,7 @@ describe('a check-in', () => {
     clock = due
     expect((await heartbeat.tick(due)).length).toBe(1)
     runner.forgetSessions({ conversationId: dm })
-    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId())!)!
+    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId(), 'lia')!)!
     clock = next
     expect((await heartbeat.tick(next)).length).toBe(1)
     expect(db.wakes(db.ownerId()).filter((w) => w.outcome === 'quiet')).toHaveLength(2)
@@ -363,7 +363,7 @@ describe('a check-in', () => {
     await heartbeat.tick(due)
     expect(told).toEqual([])
     reply = '**The invoice is still unpaid.** I asked the client for the number.'
-    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId())!)!
+    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId(), 'lia')!)!
     clock = next
     await heartbeat.tick(next)
     expect(told).toHaveLength(1)
@@ -381,7 +381,7 @@ describe('a check-in', () => {
     expect(visible()).toHaveLength(1)
     // The same finding, wrapped differently: not news, so not delivered.
     reply = '**The invoice is still unpaid.**'
-    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId())!)!
+    const next = heartbeat.dueAtFor(db.owner(), db.initiative(db.ownerId(), 'lia')!)!
     clock = next
     const ran = await heartbeat.tick(next)
     expect(ran[0]).toMatchObject({ outcome: 'reported', deduped: true })
@@ -401,21 +401,21 @@ describe('a check-in', () => {
     // Nothing is due for fifteen minutes, and the person asks anyway.
     clock = saved.updatedAt + 60_000
     expect(await heartbeat.tick(clock)).toEqual([])
-    expect(heartbeat.startNow(db.owner())).toEqual({ started: true })
+    expect(heartbeat.startNow(db.owner(), 'lia')).toEqual({ started: true })
     // One at a time: the button refuses while that one is still going.
-    expect(heartbeat.startNow(db.owner())).toEqual({ started: false, why: 'busy' })
+    expect(heartbeat.startNow(db.owner(), 'lia')).toEqual({ started: false, why: 'busy' })
     await runner.idle()
     await new Promise((r) => setTimeout(r, 20))
     expect(db.wakes(db.ownerId()).map((w) => w.outcome)).toEqual(['quiet'])
     expect(heartbeat.running(db.ownerId())).toBe(false)
     // Paused: nothing starts, and the reason is the one a person can act on.
     runner.setPaused(true)
-    expect(heartbeat.startNow(db.owner())).toEqual({ started: false, why: 'paused' })
+    expect(heartbeat.startNow(db.owner(), 'lia')).toEqual({ started: false, why: 'paused' })
     runner.setPaused(false)
     // The day's reviews spent: it says so instead of spending more.
-    const cap = db.initiative(db.ownerId())!
+    const cap = db.initiative(db.ownerId(), 'lia')!
     initiative.save(db.owner(), { ...cap, enabled: true, dailyReviews: 1 } as unknown as InitiativeInput, cap.revision)
-    expect(heartbeat.startNow(db.owner())).toEqual({ started: false, why: 'cap' })
+    expect(heartbeat.startNow(db.owner(), 'lia')).toEqual({ started: false, why: 'cap' })
   })
 
   it('keeps a failed one out of the conversation, and says so in its record', async () => {

@@ -82,7 +82,7 @@ const commitment = (over: Partial<CommitmentInput> = {}): CommitmentInput => ({
 
 describe('the record', () => {
   it('starts with nothing, and reads as off: a fresh workspace and an upgraded one alike', () => {
-    expect(initiative.view(me)).toEqual({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    expect(initiative.view(me, 'orion')).toEqual({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
     // An install from before this build: every migration but the last, then opened as it would be.
     const old = join(mkdtempSync(join(tmpdir(), 'ad-initiative-')), 'old.db')
     const before = MIGRATIONS.length - 1
@@ -92,7 +92,7 @@ describe('the record', () => {
     raw.exec(`PRAGMA user_version = ${before}`)
     raw.close()
     const upgraded = new Db(old)
-    expect(upgraded.initiative(upgraded.ownerId())).toBeUndefined()
+    expect(upgraded.initiative(upgraded.ownerId(), 'orion')).toBeUndefined()
     // A build from before the link ledger: the table it reads is added on this open, and a
     // responsibility saved here reads with a fresh progress count.
     const peopleUp = new People(upgraded)
@@ -118,7 +118,7 @@ describe('the record', () => {
     initiative.settle(me, now, [], now) // one tick passed: nothing moved
     db.saveWake({ id: 'w1', personId: me.id, agentId: 'orion', revision: saved.revision, at: now - 60_000, endedAt: now - 59_000, outcome: 'reported', text: 'Answered the client.', tokens: 1_200 })
     db.saveWake({ id: 'w2', personId: me.id, agentId: 'orion', revision: saved.revision, at: now - 120_000, endedAt: now - 119_000, outcome: 'quiet', text: '[[quiet]]', tokens: 300 })
-    const view = initiative.view(me, now)
+    const view = initiative.view(me, 'orion', now)
     // Newest first, and the person's own bookkeeping: what ran today, what it cost, what is left.
     expect(view.wakes.map((w) => w.id)).toEqual(['w1', 'w2'])
     expect(view.status.today).toEqual({ reviews: 2, tokens: 1_500 })
@@ -126,7 +126,7 @@ describe('the record', () => {
     expect(view.status.waitingOnPerson).toBe(1)
     expect(view.status.paused).toBe(false)
     expect(view.status.dueAt).toBe(now - 60_000 + 15 * 60_000) // the cadence after its last attempt
-    expect(initiative.view(me, now, true).status.paused).toBe(true)
+    expect(initiative.view(me, 'orion', now, true).status.paused).toBe(true)
     expect(view.commitments.map((c) => c.id)).toContain(waiting.id)
   })
 
@@ -134,13 +134,13 @@ describe('the record', () => {
     const saved = initiative.save(me, config(), 0)
     db.close()
     const again = new Db(file)
-    expect(again.initiative(saved.personId)).toEqual(saved)
+    expect(again.initiative(saved.personId, 'orion')).toEqual(saved)
     again.close()
   })
 
   it('refuses words it would only cut, instead of storing less than the person wrote', () => {
     expect(() => initiative.save(me, config({ brief: 'x'.repeat(INITIATIVE_LIMITS.brief + 1) }), 0)).toThrow(/characters|caracteres/)
-    expect(db.initiative(me.id)).toBeUndefined()
+    expect(db.initiative(me.id, 'orion')).toBeUndefined()
   })
 
   it('refuses a save carrying a revision someone else already moved past', () => {
@@ -150,7 +150,7 @@ describe('the record', () => {
     expect(second.revision).toBe(2)
     // A page that read revision 1 still open: its save would overwrite the 30 minutes unread.
     expect(() => initiative.save(me, config({ brief: 'something else' }), 1)).toThrow(/Reload|Recarregue/)
-    expect(db.initiative(me.id)?.brief).toBe('Watch the client thread, and answer what waits on me.')
+    expect(db.initiative(me.id, 'orion')?.brief).toBe('Watch the client thread, and answer what waits on me.')
   })
 })
 
@@ -158,7 +158,7 @@ describe('whose it is', () => {
   it("is invisible to anyone else, down to not knowing it exists", () => {
     initiative.save(me, config(), 0)
     const mine = initiative.saveCommitment(me, commitment())
-    expect(initiative.view(bia)).toEqual({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
+    expect(initiative.view(bia, 'orion')).toEqual({ config: null, commitments: [], wakes: [], status: { open: 0, waitingOnPerson: 0, today: { reviews: 0, tokens: 0 }, paused: false } })
     // Bia cannot reach my responsibility by its id, and cannot write one on my behalf either,
     // whether or not she has a coordinator of her own.
     expect(() => initiative.saveCommitment(bia, commitment({ id: mine.id, description: 'not mine', conversationId: 'dm-bia-orion', scope: { conversations: [], kinds: [] } }))).toThrow(/no longer exists|não existe/)
@@ -168,20 +168,20 @@ describe('whose it is', () => {
     // Her own is hers: her own DM, her own agent.
     const hers = initiative.saveCommitment(bia, commitment({ conversationId: 'dm-bia-orion', scope: { conversations: [], kinds: ['send'] } }))
     expect(hers.personId).toBe(bia.id)
-    expect(initiative.view(me).commitments.map((c) => c.id)).toEqual([mine.id])
+    expect(initiative.view(me, 'orion').commitments.map((c) => c.id)).toEqual([mine.id])
   })
 
   it('follows a removed person out, and takes their records with a purge', () => {
     initiative.save(me, config(), 0)
     initiative.saveCommitment(me, commitment())
     db.removePerson(me.id) // the owner cannot be removed: nothing changes
-    expect(db.initiative(me.id)?.enabled).toBe(true)
+    expect(db.initiative(me.id, 'orion')?.enabled).toBe(true)
     // A member's own coordinator stops when their access ends.
     const hers = initiative.save(bia, config({ conversationId: 'dm-bia-orion', observe: { conversations: [] }, work: { conversations: [], kinds: [] } }), 0)
     db.removePerson(bia.id)
-    expect(db.initiative(bia.id)).toMatchObject({ enabled: false, revision: hers.revision + 1 })
+    expect(db.initiative(bia.id, 'orion')).toMatchObject({ enabled: false, revision: hers.revision + 1 })
     db.purgePerson(bia.id)
-    expect(db.initiative(bia.id)).toBeUndefined()
+    expect(db.initiative(bia.id, 'orion')).toBeUndefined()
   })
 })
 
@@ -256,7 +256,7 @@ describe('a copy and a restore', () => {
     const copy = join(mkdtempSync(join(tmpdir(), 'ad-initiative-')), 'copy.db')
     db.duplicateTo(copy, 'Copia')
     const copied = new Db(copy)
-    expect(copied.initiative(me.id)).toMatchObject({ enabled: false, revision: 2 })
+    expect(copied.initiative(me.id, 'orion')).toMatchObject({ enabled: false, revision: 2 })
     expect(copied.commitments(me.id)).toEqual([])
     copied.close()
   })
@@ -265,7 +265,7 @@ describe('a copy and a restore', () => {
     initiative.save(me, config(), 0)
     initiative.saveCommitment(me, commitment())
     expect(db.adoptRestore()).toBeGreaterThanOrEqual(0)
-    expect(db.initiative(me.id)).toMatchObject({ enabled: false, revision: 2 })
+    expect(db.initiative(me.id, 'orion')).toMatchObject({ enabled: false, revision: 2 })
     // What was written survives: only what may run changes.
     expect(db.commitments(me.id)).toHaveLength(1)
   })
