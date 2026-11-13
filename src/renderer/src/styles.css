@@ -7772,6 +7772,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-canvas__edges line.is-hot { stroke: var(--accent); stroke-width: 2; }
 .wk-canvas__edges line.is-dim { opacity: 0.18; }
 .wk-node { cursor: pointer; transition: opacity var(--dur-enter) var(--ease-out); animation: fade var(--dur-data) var(--ease-out) both; animation-delay: calc(var(--i) * 22ms); }
+/* A big map arrives in one fade. Each node carries its own opacity animation for the stagger, and an
+   animated element is a layer of its own: eighty of them at once is a first frame the compositor can
+   leave unpainted until something else invalidates it. */
+.wk-canvas.is-many .wk-node { animation: none; }
+.wk-canvas.is-many > svg { animation: fade var(--dur-data) var(--ease-out) both; }
 .wk-node__hit { fill: transparent; }
 .wk-node__dot { fill: var(--k); stroke: var(--bg); stroke-width: 2.5; }
 .wk-node__halo { fill: var(--k); opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
