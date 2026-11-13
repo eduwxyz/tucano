@@ -1384,6 +1384,18 @@ const api: Handlers = {
     }
   },
 
+  // Only reveals: opening a file of any other type could run an app or a script.
+  // And only on the computer's own window: a paired device (it comes with a device key) or a member would open a Finder on a screen they can't see.
+  revealArtifact: ({ id }, ctx) => {
+    if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
+    const a = db.artifact(id)
+    if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
+    const folder = resolve(dataDir, 'artifacts', a.id)
+    const file = resolve(folder, a.name)
+    if (!file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
+    toMain({ type: 'open_local', path: file, how: 'reveal' })
+  },
+
   snapshot: (_, ctx) => people.snapshotFor(ctx.person, {
     webhookPort: runtimePorts.webhook,
     defaultWorkspace,
