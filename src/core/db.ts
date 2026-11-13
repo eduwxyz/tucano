@@ -1196,6 +1196,10 @@ export class Db {
 
   // ---------- history: what a period no longer keeps, and what a wipe takes away ----------
 
+  historyRevision(conversationId: string): number {
+    return Number(this.meta(`history:revision:${conversationId}`) ?? 0)
+  }
+
   // Everything said before `cutoff`, with its conversation: what the Tucano's period takes away. A reply
   // still at work or waiting on an approval stays — its run would write into a row that's gone — and so
   // does every word of a bot that has a period of its own (`own`), which decides for its DMs too.
@@ -1272,8 +1276,16 @@ export class Db {
         this.db.prepare(`DELETE FROM approvals WHERE message_id IN (${marks(chunk)})`).run(...chunk)
         this.db.prepare(`DELETE FROM messages WHERE id IN (${marks(chunk)})`).run(...chunk)
       }
+      const conversations = [...new Set(gone.values())]
+      for (const id of conversations) {
+        // Summaries can contain removed words too. Invalidate pending model output before it
+        // can save those words again; future summaries use only the surviving history.
+        this.setMeta(`history:revision:${id}`, String(this.historyRevision(id) + 1))
+        this.db.prepare('UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL WHERE id = ?').run(id)
+        this.db.prepare('UPDATE messages SET thread_summary = NULL WHERE conversation_id = ? AND thread_summary IS NOT NULL').run(id)
+      }
       this.db.prepare(`UPDATE questions SET state = 'closed' WHERE state = 'open' AND thread_id IS NOT NULL AND thread_id NOT IN (SELECT id FROM messages)`).run()
-      return { conversations: [...new Set(gone.values())], gone: gone.size, ids: [...gone.keys()] }
+      return { conversations, gone: gone.size, ids: [...gone.keys()] }
     })
   }
 
