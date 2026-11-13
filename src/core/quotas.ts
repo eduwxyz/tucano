@@ -166,9 +166,12 @@ const httpGet: HttpGet = async (url, headers) => {
 
 // Reading from files instead of the network: one JSON per provider, named after its route.
 // Used to prove the panel in the built app without spending anyone's quota.
-export function fixtureRequest(dir: string): HttpGet {
+export function fixtureRequest(dir: string, delayMs = Number(process.env['TUCANO_QUOTA_FIXTURE_DELAY']) || 0): HttpGet {
   const name = (url: string): string => url.replace(/^https?:\/\//, '').replace(/[^a-z0-9]+/gi, '-').replace(/-+$/, '').toLowerCase()
   return async (url) => {
+    // `TUCANO_QUOTA_FIXTURE_DELAY` stands in for a provider that takes its time: it is how the panel's
+    // first paint is shown to happen before the answer, not after it.
+    if (delayMs > 0) await new Promise((ok) => setTimeout(ok, delayMs))
     const path = join(dir, `${name(url)}.json`)
     try {
       const body = readFileSync(path, 'utf8')

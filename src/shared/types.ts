@@ -600,6 +600,13 @@ export interface QuotaWindow {
   resetsAt?: number
 }
 
+// The last read of every provider's quota, and when it was taken: what the panel draws the moment it
+// opens, before the read behind it answers.
+export interface QuotasSnapshot {
+  list: ProviderQuota[]
+  at: number
+}
+
 // A provider whose quota Tucano read from the person's own logins: the CLI's, or the ones
 // Pi and Hermes are signed in to. One column in Usage and limits.
 export interface ProviderQuota {

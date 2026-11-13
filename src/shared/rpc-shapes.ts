@@ -119,6 +119,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   report: { week: 'n?' },
   usage: {},
   quotas: {},
+  quotasRefresh: {},
   removeRoutine: { id: 's' },
   runRoutine: { id: 's' },
   wiki: {},

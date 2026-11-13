@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **What each provider has left, read from the logins already on this computer.** Usage and limits gains a column per provider that answers for a quota, with its own windows in its own unit: a percentage left for a subscription, the money left in a wallet, requests against a cap, and when each window resets. A provider whose login expired says so in its own column instead of hiding the others. The core reads them once as it comes up and every twenty minutes after that, and keeps the last reading, so the panel is on screen the moment the page opens: what it draws is the reading the core already holds, and when the fresh one lands the figures count from the old value to the new one instead of jumping. **Read again** forces a read, and the line above the panel says when the numbers were taken.
+
 ### Fixed
 
 - **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
@@ -43,7 +47,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
-
 
 ## [0.2.28] - 2026-11-12
 
