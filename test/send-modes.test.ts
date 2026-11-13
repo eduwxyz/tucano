@@ -343,9 +343,13 @@ describe('a queued prompt outlives a restart', () => {
 })
 
 describe('a steer reaches the agent between two tool calls', () => {
-  it('hands it over with the next tool result, and says so in a step', async () => {
-    // Two calls, with a pause between them: the person writes during the pause.
+  it('hands it over with the next tool result, as a row of the chain', async () => {
+    // Two calls, and the person writes in the gap between them. That gap is made of the run itself,
+    // not of a clock: the engine holds the second call until the steer's row is in the chain, so a
+    // slow machine hands it over with a call the test still knows (the first one is already done).
     const results: unknown[] = []
+    const between: string[] = []
+    const steered = (): boolean => db.messages().some((m) => m.run?.steps.some((s) => s.kind === 'steer'))
     const engine: Engine = {
       id: 'claude',
       async *run(turn: Turn) {
@@ -355,7 +359,8 @@ describe('a steer reaches the agent between two tool calls', () => {
           await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
           const list = (await client.listTools()).tools.map((t) => t.name).find((n) => n.endsWith('__list_tasks'))!
           results.push(await client.callTool({ name: list, arguments: {} }))
-          await new Promise((res) => setTimeout(res, 400))
+          between.push('waiting') // the first call is answered: this is the gap
+          for (let i = 0; i < 500 && !steered(); i++) await new Promise((res) => setTimeout(res, 10))
           results.push(await client.callTool({ name: list, arguments: {} }))
           await client.close()
           reply = 'vi as tarefas'
@@ -368,7 +373,8 @@ describe('a steer reaches the agent between two tool calls', () => {
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const r = runnerWith(engine)
     await r.send('d1', 'quais tarefas?')
-    await new Promise((res) => setTimeout(res, 150)) // inside the pause between the two calls
+    for (let i = 0; i < 500 && !between.length; i++) await new Promise((res) => setTimeout(res, 10))
+    expect(between).toHaveLength(1) // the run got to the gap, whatever the machine's speed
     await r.send('d1', 'mude de plano: só as abertas', [], undefined, undefined, { mode: 'steer' })
     await r.idle()
     expect(results).toHaveLength(2)
