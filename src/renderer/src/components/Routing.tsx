@@ -100,7 +100,7 @@ const readerHasKey = (settings: { classifierKeys?: Record<string, boolean>; jevK
   !!reader && (settings.classifierKeys?.[reader.id] ?? false)
 const readerWarning = (reader: ClassifierConfig | undefined, hasKey: boolean): string =>
   !reader
-    ? L('Nenhum classificador lê os pedidos: escolha um em Classifiers, no trabalho “Qual modelo responde”, ou o roteamento não escolhe modelo nenhum.', 'No classifier reads the prompts: pick one in Classifiers, under “Which model answers”, or routing picks no model at all.')
+    ? L('Nenhum classificador lê os pedidos: escolha um em Classifiers, no trabalho “Qual modelo responde”, ou o roteamento não escolhe modelo nenhum.', 'Assign a classifier in Classifiers › Model routing to enable routing.')
     : hasKey
       ? ''
       : L(`Falta a chave do ${providerSpec(reader.provider).label} pra começar a rotear.`, `Add the ${providerSpec(reader.provider).label} key to start routing.`)
@@ -127,11 +127,11 @@ export function SmartRoutingRow(): ReactNode {
         routing
           ? L(
               'Um classificador lê cada pedido e escolhe o modelo nos seus pools, pra todo agente que não tiver a própria chave em Ligado ou Desligado. Um agente em Desligado na página dele usa o próprio modelo. Quem lê é o classificador de “Qual modelo responde”, aqui em cima.',
-              'A classifier reads each prompt and picks the model from your pools, for every agent that hasn’t set its own switch to On or Off. An agent set to Off on its page uses its own model. Who reads is the classifier set on “Which model answers”, above.'
+              'Route prompts through model pools by default. Per-agent On/Off overrides this setting; choose the classifier under Model routing.'
             )
           : L(
               'Desligado: cada agente usa o próprio modelo, menos os que estiverem em Ligado na página deles.',
-              'Off: every agent uses its own model, except the ones set to On on their own page.'
+              'Off: agents use their own models unless routing is enabled on their page.'
             )
       }
     >
@@ -217,7 +217,7 @@ export function RoutingPane(): ReactNode {
       </div>
 
       {active && !readerReady && (
-        <Card title={L('Quem lê os pedidos', 'Who reads the requests')} lead={L('O roteamento inteligente é uma pergunta fechada por resposta, e quem a responde é o classificador escolhido em Classifiers, no trabalho “Qual modelo responde”.', 'Smart routing is one closed question per reply, and the classifier chosen in Classifiers, under “Which model answers”, is what answers it.')}>
+        <Card title={L('Quem lê os pedidos', 'Routing classifier')} lead={L('O roteamento inteligente é uma pergunta fechada por resposta, e quem a responde é o classificador escolhido em Classifiers, no trabalho “Qual modelo responde”.', 'Classify each reply using the provider assigned in Classifiers › Model routing.')}>
           <p className="hint hint--warn">{readerWarning(reader, readerReady)}</p>
         </Card>
       )}
@@ -306,8 +306,8 @@ export function RoutingPane(): ReactNode {
             label={role ? L(`Modelos só do papel ${roleName(role)}`, `Models for ${roleName(role)} only`) : L(`Modelos do ${poolName(pool)}`, `${poolName(pool)} models`)}
             note={
               role
-                ? L('Tentados antes dos do pool, quando o pedido cai num tier igual ou acima do piso do papel.', 'Tried before the pool’s, when the prompt lands on a tier at or above the role’s floor.')
-                : L('Na ordem. O primeiro que existir e estiver logado responde.', 'In order. The first that exists and is signed in answers.')
+                ? L('Tentados antes dos do pool, quando o pedido cai num tier igual ou acima do piso do papel.', 'Try these before pool models at or above the role’s minimum tier.')
+                : L('Na ordem. O primeiro que existir e estiver logado responde.', 'Try in order; use the first available, signed-in model.')
             }
             chain={chain}
             onChange={setChain}
@@ -339,7 +339,7 @@ function PoolEditor({
   const [draft, setDraft] = useState<string | null>(null)
   return (
     <div className="routing__pool-editor">
-      <Field label={L('Descrição', 'Descriptor')} hint={L('Para que serve este pool, nas suas palavras. É só pra você: quem decide é o tier do Jev.', 'What this pool is for, in your words. It’s for you: Jev’s tier is what decides.')}>
+      <Field label={L('Descrição', 'Descriptor')} hint={L('Para que serve este pool, nas suas palavras. É só pra você: quem decide é o tier do Jev.', 'A note for you. The classifier’s tier determines routing.')}>
         <input
           value={draft ?? setting.descriptor}
           maxLength={400}
@@ -355,7 +355,7 @@ function PoolEditor({
           label={L('Quando usar os grátis', 'When to use free')}
           hint={L(
             'Os grátis ficam fora dos tiers: o tier que o Jev pediu continua registrado, mesmo quando um grátis responde.',
-            'Free sits outside the tiers: the tier Jev asked for stays on the record even when a free model answers.'
+            'Free models have a separate pool. The requested tier remains recorded.'
           )}
         >
           <Select
@@ -372,7 +372,7 @@ function PoolEditor({
       {pool === 't5' && (
         <div className="field">
           <div className="row row--between">
-            <span className="field__label">{L('Deixar o Jev chegar aqui sozinho', 'Let Jev reach tier 5 on its own')}</span>
+            <span className="field__label">{L('Deixar o Jev chegar aqui sozinho', 'Allow automatic tier 5')}</span>
             <Toggle on={allowTier5} onChange={onAllowTier5} />
           </div>
           <span className="hint">
@@ -385,8 +385,8 @@ function PoolEditor({
       )}
       <p className="hint">
         {pool === 'free'
-          ? L('Os grátis ficam fora dos tiers: são um pool à parte, com corrente própria.', 'Free sits outside the tiers: its own pool, with a chain of its own.')
-          : L('Sem modelo que possa rodar aqui, a resposta desce para o tier de baixo. Nunca sobe.', 'When nothing here can run, the reply walks down to the tier below. It never walks up.')}
+          ? L('Os grátis ficam fora dos tiers: são um pool à parte, com corrente própria.', 'Free models use a separate pool and model chain.')
+          : L('Sem modelo que possa rodar aqui, a resposta desce para o tier de baixo. Nunca sobe.', 'If no model is available, try a lower tier. Never move to a higher tier.')}
       </p>
     </div>
   )
@@ -397,12 +397,12 @@ function RoleEditor({ role, setting, floor, pool, onDescriptor, onFloor }: { rol
   return (
     <div className="routing__pool-editor">
       <Field
-        label={L('O que é este papel', 'What this role is')}
-        hint={L('É o critério que o Jev lê para escolher este papel. Muda como ele classifica; não muda o preço.', 'This is the criterion Jev reads to pick the role. It changes how it classifies; not the price.')}
+        label={L('O que é este papel', 'Role criteria')}
+        hint={L('É o critério que o Jev lê para escolher este papel. Muda como ele classifica; não muda o preço.', 'The classifier uses this description to select a role. It does not set the price.')}
       >
         <textarea rows={2} value={draft ?? setting.descriptor} maxLength={400} onChange={(e) => setDraft(e.target.value)} onBlur={() => { if (draft !== null && draft !== setting.descriptor) onDescriptor(draft); setDraft(null) }} />
       </Field>
-      <Field label={L('Nunca abaixo de', 'Never below')} hint={L('Um piso para o tier deste papel: revisão e plano não descem de um modelo forte.', 'A floor for this role’s tier: review and planning don’t drop to a weak model.')}>
+      <Field label={L('Nunca abaixo de', 'Minimum tier')} hint={L('Um piso para o tier deste papel: revisão e plano não descem de um modelo forte.', 'Prevent this role from using a lower-tier model.')}>
         <Select
           value={floor ?? 'none'}
           onChange={(v) => onFloor(v === 'none' ? null : v)}
@@ -450,7 +450,7 @@ function ChainEditor({
         <strong>{label}</strong>
         <span className="muted small">{note}</span>
       </div>
-      {chain.length === 0 && <p className="hint">{L('Vazio. Acrescente o primeiro modelo abaixo.', 'Empty. Add the first model below.')}</p>}
+      {chain.length === 0 && <p className="hint">{L('Vazio. Acrescente o primeiro modelo abaixo.', 'No models yet. Add one below.')}</p>}
       <ol className="route-list">
         {chain.map((t, i) => (
           <TargetRow
@@ -632,7 +632,7 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
         <div className="route-line__detail">
           {reading && (
             <div className="route-line__group">
-              <span className="route-line__label">{L('Julgamento', 'Judgment')}</span>
+              <span className="route-line__label">{L('Julgamento', 'Classification')}</span>
               {/* The three criteria, each with its own bar, and the one weight they add up to. */}
               <Scores reading={reading} combined={route.rawDemand} />
               <ul>
@@ -650,7 +650,7 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
                   ))}
                 {route.demand !== undefined && Math.abs(route.demand - route.rawDemand) > 0.05 && (
                   <li>
-                    {L('Exigência em vigor', 'Demand in force')}: {route.demand.toFixed(2)}/3
+                    {L('Exigência em vigor', 'Effective demand')}: {route.demand.toFixed(2)}/3
                   </li>
                 )}
                 {reading.ms > 0 && <li className="muted small">{reading.ms} ms</li>}
@@ -661,13 +661,13 @@ export function RouteLine({ route }: { route: RouteTrace }): ReactNode {
             <span className="route-line__label">{L('Rota', 'Route')}</span>
             <ul>
               <li>{L('Tier julgado', 'Judged tier')}: {poolName(pool)}</li>
-              {route.policy !== pool && <li>{L('Tier aplicado', 'Tier in force')}: {poolName(route.policy)}</li>}
+              {route.policy !== pool && <li>{L('Tier aplicado', 'Effective tier')}: {poolName(route.policy)}</li>}
               {route.effective && route.effective !== pool && (
                 <li>
-                  {L('De onde veio o modelo', 'Where the model came from')}: {poolName(route.effective)}
+                  {L('De onde veio o modelo', 'Model source')}: {poolName(route.effective)}
                 </li>
               )}
-              {route.source === 'role' && <li>{L('Veio da corrente do papel', 'Came from the role’s own chain')}</li>}
+              {route.source === 'role' && <li>{L('Veio da corrente do papel', 'Selected from the role’s model chain')}</li>}
               <li>
                 {L('Modelo', 'Model')}: {targetLabel(target)}
               </li>

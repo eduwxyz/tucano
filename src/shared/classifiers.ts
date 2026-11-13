@@ -91,27 +91,27 @@ export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'listen', '
 
 export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
   ({
-    routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
-    listen: { pt: 'Quem escuta entra', en: 'Which listener joins' },
-    recommend: { pt: 'A opção sugerida na pergunta', en: 'The option suggested on a question' },
+    routing: { pt: 'Quem responde no canal', en: 'Channel replies' },
+    listen: { pt: 'Quem escuta entra', en: 'Listening agents' },
+    recommend: { pt: 'A opção sugerida na pergunta', en: 'Suggested answers' },
     nextSteps: { pt: 'Quais próximos passos fazer', en: 'Which next steps are worth doing' },
-    smart: { pt: 'Qual modelo responde', en: 'Which model answers' },
-    browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
+    smart: { pt: 'Qual modelo responde', en: 'Model routing' },
+    browser: { pt: 'O que o agente clica na página', en: 'Browser controls' }
   })[job]
 
 export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
   ({
     routing: {
       pt: 'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador. Cada mensagem sem @menção vai pro provedor escolhido.',
-      en: 'Reads the conversation and picks who replies, in place of the router’s small model. Every message without an @mention goes to the chosen provider.'
+      en: 'Choose channel responders. Messages without @mentions go to the selected provider.'
     },
     listen: {
       pt: 'Um agente em modo escuta fica fora da conversa até esta pergunta dizer que a mensagem precisa do que só ele faz.',
-      en: 'An agent in listen mode stays out of the conversation until this question says the message needs what only it does.'
+      en: 'Invite listening agents when a message needs their expertise.'
     },
     recommend: {
       pt: 'Marca a melhor opção no card de uma pergunta do agente. “Nenhuma” é resposta de verdade: o gosto da pessoa não é decisão de modelo.',
-      en: 'Marks the best option on an agent’s question card. “None” is a real answer: the person’s taste is not a model’s call.'
+      en: 'Suggest an answer on question cards. May select none when the choice is personal.'
     },
     nextSteps: {
       pt: 'Os próximos passos de uma resposta começam todos marcados; esta pergunta decide quais ficam.',
@@ -119,11 +119,11 @@ export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
     },
     smart: {
       pt: 'Lê o pedido e escolhe a cadeia de modelos do roteamento inteligente: o papel, o tamanho do trabalho e a capacidade que ele merece.',
-      en: 'Reads the request and picks the smart routing chain: the role, how hard the work is, and the capability it deserves.'
+      en: 'Choose a model chain based on role, task complexity, and required capability.'
     },
     browser: {
       pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
-      en: 'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
+      en: 'Find page controls for agents. Only TypeSafe supports screenshot matching.'
     }
   })[job]
 

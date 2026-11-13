@@ -2593,7 +2593,7 @@ export function ClassifiersCard(): ReactNode {
     <>
       {list.length === 0 && (
         <p className="muted small">
-          {L('Nenhum classificador ainda. Adicione um e escolha, abaixo, o que ele responde: quem fala no canal, quem escuta entra, a opção sugerida, os próximos passos, qual modelo responde, o que o agente clica.', 'No classifier yet. Add one and choose, below, what it answers: who speaks in a channel, which listener joins, the suggested option, the next steps, which model answers, what an agent clicks.')}
+          {L('Nenhum classificador ainda. Adicione um e escolha, abaixo, o que ele responde: quem fala no canal, quem escuta entra, a opção sugerida, os próximos passos, qual modelo responde, o que o agente clica.', 'Add a classifier, then assign it to tasks below.')}
         </p>
       )}
       {list.map((c) => {
@@ -2662,10 +2662,10 @@ export function ClassifiersCard(): ReactNode {
           <Field label={L('Provedor', 'Provider')}>
             <Select value={provider} onChange={(v) => pickProvider(v as ClassifierProvider)} options={PROVIDERS.map((p) => ({ value: p.provider, label: p.label, hint: p.model }))} />
           </Field>
-          <Field label={L('Nome', 'Name')} hint={L('Como ele aparece nas escolhas abaixo.', 'How it reads in the choices below.')}>
+          <Field label={L('Nome', 'Name')} hint={L('Como ele aparece nas escolhas abaixo.', 'Display name in task assignments.')}>
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label={L('Modelo', 'Model')} hint={L('O par de modelos que responde. Fixar a versão mantém as probabilidades que você já calibrou.', 'The model pair that answers. Pinning a version keeps the probabilities you already tuned.')}>
+          <Field label={L('Modelo', 'Model')} hint={L('O par de modelos que responde. Fixar a versão mantém as probabilidades que você já calibrou.', 'Model pair used for decisions. Pin a version to preserve your calibration.')}>
             <input value={model} onChange={(e) => setModel(e.target.value)} />
           </Field>
           <div className="row">
@@ -2688,7 +2688,7 @@ export function ClassifiersCard(): ReactNode {
 
       {list.length > 0 && (
         <>
-          <h3 className="h3">{L('Onde cada um é usado', 'Where each one is used')}</h3>
+          <h3 className="h3">{L('Onde cada um é usado', 'Task assignments')}</h3>
           {CLASSIFIER_JOBS.map((job) => (
             <Field key={job} label={jobLabel(job)[lang()]} hint={jobAbout(job)[lang()]}>
               <Select
@@ -2737,7 +2737,7 @@ export function ClassifiersCard(): ReactNode {
       {!jobs.routing && (
         <Field
           label={L('Modelo do roteador', 'Router model')}
-          hint={L('Sem classificador em “Quem responde no canal”, é este modelo pequeno que lê cada mensagem e decide quem responde. Prefira um rápido: ele roda antes de cada resposta num canal.', 'With no classifier on “Who replies in a channel”, this small model reads each message and decides who replies. Go for a fast one: it runs before every reply in a channel.')}
+          hint={L('Sem classificador em “Quem responde no canal”, é este modelo pequeno que lê cada mensagem e decide quem responde. Prefira um rápido: ele roda antes de cada resposta num canal.', 'Choose a fast fallback model for channel replies when no classifier is assigned.')}
         >
           <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} />
         </Field>
@@ -2976,7 +2976,7 @@ export function SettingsPage(): ReactNode {
             title="Classifiers"
             lead={L(
               'Modelos que respondem perguntas fechadas — uma opção entre várias, um sim/não, uma nota — em menos de um segundo e com a probabilidade de cada resposta. O Jev, do TypeSafe, foi o primeiro; a Luna, da OpenAI, e a Decision 1, do Google, fazem o mesmo trabalho, e o Jev também é vendido pelo OpenRouter. Cada um serve um trabalho: quem responde num canal, quem escuta entra, a opção sugerida numa pergunta, quais próximos passos fazer, qual modelo responde, o que o agente clica numa página.',
-              'Models that answer closed questions — one option out of several, a yes/no, a score — in under a second and with each answer’s probability. TypeSafe’s Jev was the first; OpenAI’s Luna and Google’s Decision 1 do the same job, and Jev is also sold through OpenRouter. Each one serves a job: who replies in a channel, which listener joins, the option suggested on a question, which next steps are worth doing, which model answers, what an agent clicks in a page.'
+              'Fast models for routing, suggestions, and browser controls. Assign a provider to each task below.'
             )}
           >
             <ClassifiersCard />
@@ -3005,33 +3005,33 @@ export function SettingsPage(): ReactNode {
                 <strong>{browserClassifier ? classifierLabel(browserClassifier) : L('Só pelo texto da página', 'Only by the page’s text')}</strong>
                 <p className="muted small">
                   {browserClassifier
-                    ? L('Acha o elemento em menos de 1 segundo, até sem texto quando o classificador lê o print da tela. Cada clique que o texto não resolve manda a lista de elementos da página, e às vezes o print dela, pro provedor escolhido, inclusive em áreas logadas.', 'Finds the element in under 1 second, even without text when the classifier reads the screenshot. Every click text can’t resolve sends the page’s element list, and sometimes its screenshot, to the chosen provider, including signed-in areas.')
-                    : L('De graça e resolve a maioria: o agente usa o texto e, quando não acha, o número do elemento.', 'Free, and it handles most cases: the agent uses the text and, when it can’t find it, the element’s number.')}
+                    ? L('Acha o elemento em menos de 1 segundo, até sem texto quando o classificador lê o print da tela. Cada clique que o texto não resolve manda a lista de elementos da página, e às vezes o print dela, pro provedor escolhido, inclusive em áreas logadas.', 'When text matching fails, the provider receives page elements and may receive screenshots, including signed-in content.')
+                    : L('De graça e resolve a maioria: o agente usa o texto e, quando não acha, o número do elemento.', 'Match page text for free; use element numbers when no match is found.')}
                 </p>
               </div>
             </div>
             <p className="hint">
-              <Icon name="sliders" size={13} /> {L('Quem acha o clique é escolhido em Classifiers, no trabalho “O que o agente clica na página”.', 'Who finds the click is chosen in Classifiers, under “What an agent clicks in a page”.')}
+              <Icon name="sliders" size={13} /> {L('Quem acha o clique é escolhido em Classifiers, no trabalho “O que o agente clica na página”.', 'Choose a provider in Classifiers › Browser controls.')}
             </p>
           </Card>
         )}
 
         {pane('agentes') && (
           <Card
-            title={L('As perguntas dos agentes', 'The agents’ questions')}
+            title={L('As perguntas dos agentes', 'Agent suggestions')}
             lead={L(
               'Um classificador lê a pergunta fechada de um agente — qual opção escolher, qual passo fazer agora — e responde em menos de um segundo com a probabilidade de cada opção. Quem responde cada um dos dois trabalhos é escolhido em Classifiers.',
-              'A classifier reads an agent’s closed question — which option to pick, which step to do now — and answers in under a second with each option’s probability. Which one serves each of the two jobs is chosen in Classifiers.'
+              'Suggest answers and next steps using the providers assigned in Classifiers.'
             )}
           >
             <div className="key-row">
               <Icon name="spark" />
               <div className="grow">
-                <strong>{L('Marcar a opção recomendada', 'Mark the recommended option')}</strong>
+                <strong>{L('Marcar a opção recomendada', 'Suggest answers')}</strong>
                 <p className="muted small">
                   {L(
                     `Desligado por padrão. Ligado, cada pergunta de agente com duas ou mais opções vai pro ${recommendClassifier ? recommendClassifier.name : 'classificador deste trabalho'} com o texto e as opções, e volta com a sugestão. É só uma sugestão: quem escolhe continua sendo você, e "Outra coisa" nunca é sugerida.`,
-                    `Off by default. On, every agent question with two or more options goes to ${recommendClassifier ? recommendClassifier.name : 'this job’s classifier'} with its text and options, and comes back with a suggestion. It is only a suggestion: you still choose, and "Something else" is never suggested.`
+                    `Off by default. Send questions and options to ${recommendClassifier ? recommendClassifier.name : 'the classifier'} for suggestions. You choose; “Something else” is never suggested.`
                   )}
                 </p>
               </div>
@@ -3040,11 +3040,11 @@ export function SettingsPage(): ReactNode {
             <div className="key-row">
               <Icon name="spark" />
               <div className="grow">
-                <strong>{L('Marcar só os próximos passos que importam', 'Tick only the next steps worth doing')}</strong>
+                <strong>{L('Marcar só os próximos passos que importam', 'Suggest next steps')}</strong>
                 <p className="muted small">
                   {L(
                     `Desligado por padrão. Ligado, cada passo de um card de próximos passos vai pro ${stepsClassifier ? stepsClassifier.name : 'classificador deste trabalho'} com o que o agente disse antes, e só os que ele consideraria pra agora começam marcados; o resto espera no card, a um clique. Nunca deixa a lista vazia: se nenhum for marcado, todos ficam.`,
-                    `Off by default. On, every step of a next-steps card goes to ${stepsClassifier ? stepsClassifier.name : 'this job’s classifier'} with what the agent said before it, and only the ones it would do now start ticked; the rest waits in the card, one click away. It never empties the list: if none is picked, all of them stay ticked.`
+                    `Send steps and reply context to ${stepsClassifier ? stepsClassifier.name : 'the classifier'} to check suggested tasks. Others stay available; if none is chosen, all stay checked. Off by default.`
                   )}
                 </p>
               </div>
@@ -3055,12 +3055,12 @@ export function SettingsPage(): ReactNode {
             )}
             {(settings.jevRecommend || settings.jevNextSteps) && (
               <p className="hint">
-                <Icon name="sliders" size={13} /> {L('Sem chave no classificador, as duas chaves acima não fazem nada: a pergunta fica sem selo e os passos começam todos marcados.', 'With no key on the classifier, the two switches above do nothing: the question shows no pill and every step starts ticked.')}
+                <Icon name="sliders" size={13} /> {L('Sem chave no classificador, as duas chaves acima não fazem nada: a pergunta fica sem selo e os passos começam todos marcados.', 'A classifier key is required. Without it, answers are not suggested and all next steps stay checked.')}
               </p>
             )}
             {(settings.jevRecommend || settings.jevNextSteps) && (
               <p className="hint">
-                <Icon name="sliders" size={13} /> {L('Quem responde é escolhido em Classifiers: “A opção sugerida na pergunta” e “Quais próximos passos fazer”.', 'Who answers is chosen in Classifiers: “The option suggested on a question” and “Which next steps are worth doing”.')}
+                <Icon name="sliders" size={13} /> {L('Quem responde é escolhido em Classifiers: “A opção sugerida na pergunta” e “Quais próximos passos fazer”.', 'Assign providers in Classifiers › Suggested answers and Suggested next steps.')}
               </p>
             )}
           </Card>
