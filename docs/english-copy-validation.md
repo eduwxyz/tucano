@@ -30,8 +30,8 @@ space available to the words.
 | Example | Original characters | Original lines | Revised characters | Revised lines |
 | --- | --- | --- | --- | --- |
 | Wiki edit policy | 126 | 3 | 84 | 2 |
-| Consecutive agent replies, at 900 px | 122 | 3 | 48 | 2 |
-| Dictation, at 900 px | 256 | 3 | 130 | 2 |
+| Consecutive agent replies, at 900 px | 122 | 3 | 48 | 1 |
+| Dictation, at 900 px | 256 | 3 | 135 | 2 |
 
 At 900 px, ten of the original measured hints exceeded two lines. The replacement set leaves one:
 the full-backup replacement warning. That text retains the affected data, replacement consequence,
