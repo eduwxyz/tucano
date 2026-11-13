@@ -88,8 +88,9 @@ import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
+import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
-import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
+import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -529,10 +530,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <div className="always">
                   <span className="small muted">{L('Sempre permitido, sem pedir:', 'Always allowed, without asking:')}</span>
                   {draft.autoApprove!.map((rule) => {
-                    const [cid, tool] = rule.split(':')
+                    const cid = rule.slice(0, rule.indexOf(':'))
+                    const { tool, account } = ruleTool(rule)
                     return (
                       <span key={rule} className="chip is-on always__rule">
-                        {connectors.find((c) => c.id === cid)?.name ?? L('conector', 'connector')} · {toolWords(tool ?? '')}
+                        {connectors.find((c) => c.id === cid)?.name ?? L('conector', 'connector')} · {accountLabel(toolWords(tool), account)}
                         {admin && (
                           <button
                             className="always__x"

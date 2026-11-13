@@ -76,6 +76,7 @@ describe('what a Composio call runs, and its class', () => {
   it('knows which account an item runs as, and a read runs the same with or without it', () => {
     expect(innerActions(MULTI_EXECUTE, withAccount('GMAIL_FETCH_EMAILS', 'work'))).toEqual([{ kind: 'tool', slug: 'GMAIL_FETCH_EMAILS', account: 'work' }])
     expect(of(withAccount('GMAIL_FETCH_EMAILS', 'work'))).toBe('read')
+    expect(innerActions(MULTI_EXECUTE, withAccount('GMAIL_FETCH_EMAILS', ' work '))).toEqual([{ kind: 'tool', slug: 'GMAIL_FETCH_EMAILS', account: ' work ' }]) // verbatim, as it runs
     expect(of(withAccount('GMAIL_CREATE_EMAIL_DRAFT', 'work'))).toBe('write')
     expect(of(withAccount('GMAIL_SEND_EMAIL', 'work'))).toBe('sensitive')
   })
@@ -321,6 +322,7 @@ describe('a Composio call through the runner', () => {
     expect(runnerRules(CID, MULTI_EXECUTE, withAccount('GMAIL_FETCH_EMAILS', 'work'))).toBeUndefined() // a read has nothing to allow
     expect(runnerAllowed(CID, MULTI_EXECUTE, work, [`${CID}:GMAIL_SEND_EMAIL@work`])).toBe(true)
     expect(runnerAllowed(CID, MULTI_EXECUTE, work, [`${CID}:GMAIL_SEND_EMAIL@personal`])).toBe(false)
+    expect(runnerAllowed(CID, MULTI_EXECUTE, withAccount('GMAIL_SEND_EMAIL', ' work '), [`${CID}:GMAIL_SEND_EMAIL@work`])).toBe(false) // no trimming to match
     expect(runnerAllowed(CID, MULTI_EXECUTE, work, [`${CID}:GMAIL_SEND_EMAIL`])).toBe(false) // a rule without account doesn't cover an account
     expect(runnerAllowed(CID, MULTI_EXECUTE, batch('GMAIL_SEND_EMAIL'), [`${CID}:GMAIL_SEND_EMAIL@work`])).toBe(false) // nor the other way round
     expect(runnerAllowed(CID, MULTI_EXECUTE, batch('GMAIL_SEND_EMAIL'), [`${CID}:GMAIL_SEND_EMAIL`])).toBe(true) // saved before accounts existed

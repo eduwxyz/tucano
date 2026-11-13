@@ -44,7 +44,7 @@ const nonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.t
 const toolOf = (o: unknown): InnerAction | undefined => {
   if (!plainObject(o) || !only(o, ['tool_slug', 'arguments', 'account']) || typeof o['tool_slug'] !== 'string' || !SLUG.test(o['tool_slug']) || !plainObject(o['arguments'])) return undefined
   if ('account' in o && !nonEmptyString(o['account'])) return undefined
-  return { kind: 'tool', slug: o['tool_slug'], ...(nonEmptyString(o['account']) ? { account: o['account'].trim() } : {}) }
+  return { kind: 'tool', slug: o['tool_slug'], ...(nonEmptyString(o['account']) ? { account: o['account'] } : {}) }
 }
 
 // What a runner's call runs; undefined when its arguments aren't one of the documented shapes.

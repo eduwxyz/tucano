@@ -120,6 +120,8 @@ export const toolWords = (name: string): string =>
     .trim()
     .toLowerCase()
 
+export const accountLabel = (label: string, account?: string): string => (account ? `${label} (${L('conta', 'account')} ${account})` : label)
+
 // An approval's arguments a person can read at a glance: the plain values, named in words.
 // Nested ones stay in the exact details.
 function argSummary(args: Record<string, unknown>): { shown: [string, string][]; more: boolean } {
@@ -1418,7 +1420,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const forGood = runner
     ? runnerRules(approval.connectorId, approval.tool, approval.args)
         ?.map(ruleTool)
-        .map(({ tool, account }) => (account ? `${tool} (${L('conta', 'account')} ${account})` : tool))
+        .map(({ tool, account }) => accountLabel(tool, account))
     : undefined
   // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
   // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
@@ -1502,7 +1504,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <p className="muted">{L(`${actions.length === 1 ? 'Ação' : `${actions.length} ações`} que esta chamada roda:`, `${actions.length === 1 ? 'The action' : `${actions.length} actions`} this call runs:`)}</p>
               {actions.map((a, i) => (
                 <p key={i}>
-                  <code>{actionLabel(a)}</code>
+                  <code>{accountLabel(actionLabel(a), a.kind === 'tool' ? a.account : undefined)}</code>
                 </p>
               ))}
             </>
