@@ -1240,6 +1240,14 @@ h3 {
   white-space: pre-wrap;
   color: var(--text-3);
 }
+/* On my own message the bubble is the text, not the body, so the quote carries one of its own:
+   same corner, same tint, so it reads as part of what I sent instead of something floating above it. */
+.msg--me .reply-quote {
+  background: var(--bubble);
+  border: 0;
+  border-left: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+}
 .composer__reply {
   display: flex;
   align-items: flex-start;
