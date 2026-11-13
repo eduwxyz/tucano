@@ -582,6 +582,10 @@ async function plainSnapshot(bin: string, root: string, gitDir: string, ref: str
     if ((await git(bin, root, ['init', '-q'], env)).code !== 0) return undefined
     await git(bin, root, ['config', 'core.autocrlf', 'false'], env)
   }
+  // Tucano's own repositories, when they sit in the folder (a lent folder holding Tucano's data):
+  // copying them into themselves would make every snapshot bigger than the last.
+  const ours = real(dirname(gitDir))
+  if (inside(ours, root) && ours !== root) left.add(`${relative(root, ours).split(sep).join('/')}/`)
   const exclude = join(gitDir, 'info', 'exclude')
   const write = (): void => {
     mkdirSync(dirname(exclude), { recursive: true })

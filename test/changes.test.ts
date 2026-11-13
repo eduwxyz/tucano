@@ -268,6 +268,8 @@ describe('the daily sweep', () => {
     const gone = await make('deleted')
     const fresh = await make('fresh')
     for (const r of rows.values()) if (r.messageId === 'old') rows.set(r.id, { ...r, createdAt: now - 31 * 86_400_000 })
+    // Tucano's data folder sits in the agent's folder here: it's never part of what's followed.
+    expect([...rows.values()].filter((r) => r.gitDir).every((r) => r.files.every((f) => !f.path.startsWith('data/')))).toBe(true)
     const expired = await swept.sweep(now)
     expect(expired.map((e) => e.messageId)).toEqual(['old', 'old'])
     const refs = sh(repo, 'for-each-ref', '--format=%(refname)', 'refs/tucano')
