@@ -559,9 +559,9 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
   )
 }
 
-// More logins of Claude Code, Codex and Antigravity (that one on a Mac): a work account beside a
-// personal one. Each lives in a folder of its own and is signed into through the CLI, in a terminal;
-// an agent picks one on its page.
+// More logins of a harness (Antigravity's on a Mac): a work account beside a personal one. Each lives
+// in a folder of its own and is signed into through the CLI, in a terminal; an agent picks one on its
+// page.
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])
   const engines = useStore((s) => s.settings.engines)
