@@ -27,7 +27,7 @@ vi.mock('../src/renderer/src/store', () => ({
   openTuca: () => go('tuca'),
   workingOn: () => busy
 }))
-vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, MeAvatar: () => null, Icon: () => null, ago: () => 'há 2 min' }))
+vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, MeAvatar: () => null, Icon: () => null, ago: () => 'há 2 min', ownColor: () => ({}) }))
 vi.mock('../src/renderer/src/components/Select', () => ({ Select: ({ value, onChange, options, disabled }: { value: string | null; onChange: (v: string) => void; options: { value: string; label: string }[]; disabled?: boolean }) => <select aria-label="Responde a" disabled={disabled} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> }))
 vi.mock('../src/renderer/src/components/Pages', () => ({ Sheet: ({ children, lede, actions }: { children: unknown; lede?: unknown; actions?: unknown }) => <main><p>{lede as never}</p>{actions as never}{children as never}</main> }))
 const { createRoot } = await import('react-dom/client')
@@ -331,4 +331,41 @@ it('starts a tree in a click when no one answers to anyone', async () => {
   expect(document.querySelector('.org-undo span')?.textContent).toBe('Todos respondem a lia agora.')
   await click(document.querySelector('.org-undo button')!)
   expect(save.mock.calls.slice(2).map((c) => [c[0].id, c[0].reportsTo])).toEqual([['nina', undefined], ['theo', undefined]])
+})
+
+it('tints each sector behind its branch, names it in its panel, and draws a request between two heads', async () => {
+  // Two trees, two sectors: Orion's (unnamed) and Mira's, named, with Lino below it.
+  fake = { ...fake, agents: [...fake.agents, bot('mira', undefined, { sectorName: 'Financeiro', sectorDoes: 'Cobranças' }), bot('lino', 'mira')], delegations: [ask('x1', 'mira', 'orion'), ask('u1', 'lino', 'mira')] }
+  await render()
+  expect([...document.querySelectorAll('.org-zone__name')].map((z) => z.textContent)).toEqual(['Setor de orion', 'Financeiro'])
+  expect(document.querySelector('.org-zone__does.is-empty')?.textContent).toBe('Diga o que este setor resolve') // wide enough, with nothing written yet; Mira's is too narrow for that line
+  expect(card('orion').textContent).toContain('Chefe do setor')
+  expect(card('lino').textContent).not.toContain('Chefe do setor')
+  const lede = document.querySelector('main > p')?.textContent
+  expect(lede).toContain('2 setores')
+  expect(lede).toContain('1 pedido entre setores')
+  // Mira asked Orion: a dashed line between the two heads, named for the sector it went to.
+  expect(document.querySelectorAll('.org-xline')).toHaveLength(1)
+  expect(document.querySelector('.org-xlabel')?.textContent).toContain('Pedido para Setor de orion')
+  // Lino passed it up to Mira: the line between them flows up.
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-up')).toHaveLength(1)
+  // A click on the sector's name opens its panel, with what came from other sectors. A name typed is
+  // saved even when the panel closes before the field is left (a press on the board).
+  await click(document.querySelector('.org-zone__name')!)
+  const side = document.querySelector('.org-side')!
+  expect(side.querySelector('h3')?.textContent).toBe('Setor de orion')
+  expect(side.textContent).toContain('Pedido de mira')
+  await type(side.querySelector('input')!, 'Técnico')
+  expect(document.querySelector('.org-side h3')?.textContent).toBe('Técnico')
+  await ptr(document.querySelector('.orgb')!, 'pointerdown')
+  await ptr(document, 'pointerup')
+  expect(document.querySelector('.org-side')).toBeNull()
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'orion', sectorName: 'Técnico', sectorDoes: '' })
+  // A member only looks.
+  admin = false
+  await render()
+  await click(document.querySelector('.org-zone__name')!)
+  expect(document.querySelector('.org-side h3')).not.toBeNull()
+  expect(document.querySelector('.org-side input')).toBeNull()
 })

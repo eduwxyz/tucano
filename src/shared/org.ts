@@ -1,6 +1,8 @@
 // Who answers to whom. An agent may answer to another (Agent.reportsTo), which makes a tree: an agent
 // hands work to anyone below it, and to those who answer to the same agent as it does, in that one's
-// own channel, and what comes of it goes back to it. Never up, nor to another branch.
+// own channel, and what comes of it goes back to it. Up, only one step: to its own boss, with what isn't
+// its sector's or it can't do. Each tree is a sector (its top agent is the head): only heads ask other
+// sectors, and only their heads, who pass it down their own branch.
 // With no one answering to anyone there is no tree, and everything works as it always did.
 import type { Agent, Conversation } from './types'
 
@@ -48,10 +50,40 @@ export function peersOf<T extends Node>(agents: T[], id: string): T[] {
   return boss ? directReports(agents, boss.id).filter((a) => a.id !== id) : []
 }
 
-// Everyone `id` may hand work to: those below it, then its colleagues.
+// The sector heads: those who answer to no agent and have someone below (the tops of the trees), Tuca aside.
+export const headsOf = <T extends Node>(agents: T[]): T[] => agents.filter((a) => !a.archived && a.kind !== 'tuca' && !bossOf(agents, a) && directReports(agents, a.id).length > 0)
+
+// The head of the sector `id` is in (itself, when it is one); none when it is in no tree.
+export function sectorOf<T extends Node>(agents: T[], id: string): T | undefined {
+  const me = agents.find((a) => a.id === id)
+  if (!me || me.archived) return undefined
+  let top: T = me
+  const seen = new Set([me.id])
+  for (let up = bossOf(agents, me); up && !seen.has(up.id); up = bossOf(agents, up)) (seen.add(up.id), (top = up))
+  return headsOf(agents).find((h) => h.id === top.id)
+}
+
+// A sector's name as people read it: the one given on its head, or "Setor de <head>".
+export const sectorName = (head: Pick<Agent, 'name'> & Partial<Pick<Agent, 'sectorName'>>, of = 'Setor de'): string => head.sectorName?.trim() || `${of} ${head.name}`
+
+// Everyone `id` may hand work to: those below it, its colleagues, its own boss (one step up), and, when
+// it heads a sector, the other sectors' heads. Nearest first, each once.
 export const reachOf = <T extends Node>(agents: T[], id: string): T[] => {
-  const below = reportsOf(agents, id)
-  return [...below, ...peersOf(agents, id).filter((p) => !below.some((b) => b.id === p.id))]
+  const me = agents.find((a) => a.id === id)
+  const boss = me && !me.archived ? bossOf(agents, me) : undefined
+  const isHead = headsOf(agents).some((h) => h.id === id)
+  const all = [...reportsOf(agents, id), ...peersOf(agents, id), ...(boss ? [boss] : []), ...(isHead ? headsOf(agents).filter((h) => h.id !== id) : [])]
+  return all.filter((a, i) => all.findIndex((b) => b.id === a.id) === i)
+}
+
+// How `from` asking `to` goes: down its branch, to a colleague, up to its own boss, or to another sector's head.
+export type AskKind = 'down' | 'peer' | 'up' | 'sector'
+export function askKind(agents: Node[], from: string, to: string): AskKind {
+  if (reportsOf(agents, from).some((a) => a.id === to)) return 'down'
+  if (peersOf(agents, from).some((a) => a.id === to)) return 'peer'
+  const me = agents.find((a) => a.id === from)
+  if (me && bossOf(agents, me)?.id === to) return 'up'
+  return 'sector'
 }
 
 // The most requests one piece of work stacks up, each made inside the thread of the one before.
