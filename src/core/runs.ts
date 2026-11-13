@@ -261,7 +261,6 @@ export interface Connectors {
 }
 
 type Exposed = { connector: Connector; tool: ConnectorTool & { inputSchema: Record<string, unknown> } }
-type SendOptions = { reply?: ReplyTarget }
 
 // Tool names the CLI sees: "<connector>__<tool>", unique per turn.
 function exposedName(connector: Connector, tool: string, taken: Set<string>): string {
@@ -489,7 +488,7 @@ export class Runner {
   }
 
   // Saves the human message and decides who answers it: mentioned agents
-  // first, then whoever asked a pending question, then the DM agent or the
+  // first, then the quoted agent or whoever asked a pending question, then the DM agent or the
   // only agent in the channel, and otherwise the router. The answers, and
   // everything else it sets off, go in its thread (`threadId`, or its own when
   // the conversation answers in threads) or else in the conversation.
@@ -503,14 +502,14 @@ export class Runner {
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
+    const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // What this message answers, with the quote it showed. Checked here, before anything is
     // saved: a reply to a message that is gone, elsewhere, or still being written is refused.
     const original = opts.reply ? db.message(opts.reply.messageId) : undefined
-    if (opts.reply && (!original || original.conversationId !== conv.id || (original.author.kind !== 'person' && original.author.kind !== 'agent') || original.run?.status === 'working'))
+    if (opts.reply && (!original || original.conversationId !== conv.id || !new People(db).visibleAt(writer, original) || (original.author.kind !== 'person' && original.author.kind !== 'agent') || original.run?.status === 'working'))
       throw new Error(L('Escolha uma mensagem desta conversa para responder.', 'Choose a message in this conversation to reply to.'))
-    if (opts.reply?.quote !== undefined && (!opts.reply.quote.trim() || opts.reply.quote.length > MAX_QUOTE_CHARS))
+    if (opts.reply?.quote !== undefined && (typeof opts.reply.quote !== 'string' || !opts.reply.quote.trim() || opts.reply.quote.length > MAX_QUOTE_CHARS))
       throw new Error(L('Selecione um trecho de até 32.000 caracteres para citar.', 'Select an excerpt of up to 32,000 characters to quote.'))
-    const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
     const root = threadId ? db.message(threadId) : undefined
@@ -560,6 +559,7 @@ export class Runner {
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
+    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(typed, db.people({ removed: true }), db.agents()))
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
@@ -567,7 +567,7 @@ export class Runner {
     // A reply calls the agent it answers, ahead of the router: they wrote what is being answered,
     // so the decision is not left to the router guessing from the text.
     const replyAgent = mine.reply?.agentId
-    if (!responders.length && replyAgent && members.some((a) => a.id === replyAgent)) responders = members.filter((a) => a.id === replyAgent)
+    if (!responders.length && !toPeople && replyAgent && members.some((a) => a.id === replyAgent)) responders = members.filter((a) => a.id === replyAgent)
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -610,7 +610,6 @@ export class Runner {
     }
     // Written to a person (@Ana) and to no agent: it's for them, not the agents. No router, no
     // reply; a line says who heard about it. So with one who left, or yourself: no one to tell.
-    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(typed, db.people({ removed: true }), db.agents()))
     if (responders.length === 0 && toPeople && conv.kind !== 'dm') {
       const names = calledPeople.map((p) => `**${p.name}**`).join(L(' e ', ' and '))
       // Someone who left, yourself, or a name two people share: whoever wrote it learns no one heard.
@@ -632,7 +631,7 @@ export class Runner {
   private quotedAuthor(message: Message): string {
     const { db } = this.deps
     if (message.author.kind === 'agent') return db.agent(message.author.id)?.name ?? L('Agente removido', 'Removed agent')
-    if (message.author.kind === 'person') return db.person(message.author.id)?.name ?? L('Alguém', 'Someone')
+    if (message.author.kind === 'person') return db.person(message.author.id)?.name ?? db.formerPeople().find((p) => message.author.kind === 'person' && p.id === message.author.id)?.name ?? L('Alguém', 'Someone')
     return message.author.kind === 'routine' ? L('Rotina', 'Routine') : L('Tucano', 'Tucano')
   }
 

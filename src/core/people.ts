@@ -222,7 +222,7 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
+    const { sounds: _s, replyShortcut: _r, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
     return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 

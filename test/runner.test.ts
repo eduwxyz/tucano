@@ -10,6 +10,7 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import type { Answer } from '../src/shared/questions'
 import { Runner } from '../src/core/runs'
+import { People } from '../src/core/people'
 
 const ready = { installed: true, loggedIn: true }
 
@@ -121,6 +122,31 @@ describe('Runner', () => {
     await r.idle()
     expect(db.message('question')?.run?.status).toBe('done')
     expect(claude.turns).toHaveLength(1)
+  })
+
+  it('refuses to quote history that the writer cannot read', async () => {
+    const people = new People(db)
+    const joined = people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    db.setMeta('heritageAt', '200')
+    db.saveMessage({ id: 'heritage', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Owner-only history.', at: 100 })
+    const r = runner()
+    await expect(r.send('c1', 'Explain.', [], undefined, joined.person.id, { reply: { messageId: 'heritage' } })).rejects.toThrow()
+    expect(db.messages().filter((m) => m.author.kind === 'person')).toEqual([])
+    r.setPaused(true)
+    await r.send('c1', 'Share this quote.', [], undefined, db.ownerId(), { reply: { messageId: 'heritage' } })
+    expect(db.messages().find((m) => m.reply)?.reply?.text).toBe('Owner-only history.')
+  })
+
+  it('keeps a mention of a person ahead of the quoted agent', async () => {
+    const people = new People(db)
+    people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Ready.', at: Date.now() })
+    const r = runner()
+    await r.send('c1', '@Bia could you review this?', [], undefined, undefined, { reply: { messageId: 'quoted' } })
+    await r.idle()
+    expect(claude.turns).toHaveLength(0)
+    expect(agentMessages().map((m) => m.id)).toEqual(['quoted'])
   })
 
   it('answers in a DM, streams deltas and records a receipt that matches the agent usage', async () => {

@@ -19,6 +19,7 @@ import { canEditChannel,
   messagesIn,
   attachedTo,
   conversationIndex,
+  getState,
   initials,
   isMine,
   personName,
@@ -54,6 +55,7 @@ import { canEditChannel,
   countedTokens,
   sendMessage,
   typing,
+  toast,
   setTab,
   setReplyTo,
   stopRun,
@@ -255,10 +257,11 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+export function MessageList({ messages: all, replies, older, conversationId, threadId, empty, focus, lead, divider }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; threadId?: string; empty?: boolean; focus?: string; lead?: Message; divider?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  const replyKey = threadId ?? conversationId
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -298,15 +301,15 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const keys = (e: KeyboardEvent): void => {
       if (!isReplyShortcut(e, mac)) return
       const row = selectionRow(ref.current)
-      const message = row?.dataset.messageId ? messages.find((m) => m.id === row.dataset.messageId) : undefined
+      const message = row?.dataset.messageId === lead?.id ? lead : messages.find((m) => m.id === row?.dataset.messageId)
       const quote = row ? selectedQuote(row) : undefined
       if (!message || !quote || message.run?.status === 'working') return
       e.preventDefault()
-      startReply(message, quote)
+      startReply(message, quote, replyKey)
     }
     window.addEventListener('keydown', keys)
     return () => window.removeEventListener('keydown', keys)
-  }, [mac, messages, shortcut])
+  }, [mac, messages, lead, replyKey, shortcut])
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
   // later, from further back.
@@ -428,7 +431,12 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
       }}
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
-      {lead}
+      {lead && (
+        <div className="thread__lead">
+          <MessageRow message={lead} grouped={false} replyKey={replyKey} quote={selection?.messageId === lead.id ? selection.quote : undefined} />
+          {divider}
+        </div>
+      )}
       {messages.map((m, i) => {
         const prev = messages[i - 1]
         const grouped =
@@ -440,7 +448,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} quote={selection?.messageId === m.id ? selection.quote : undefined} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} replyKey={replyKey} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} quote={selection?.messageId === m.id ? selection.quote : undefined} />
       })}
       {farFromBottom && (
         <div className="messages__jump">
@@ -463,7 +471,7 @@ const NO_ATTACHED: Artifact[] = []
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies, quote }: { message: Message; grouped: boolean; replies?: Message[]; quote?: string }): ReactNode {
+const MessageRow = memo(function MessageRow({ message, grouped, replies, quote, replyKey }: { message: Message; grouped: boolean; replies?: Message[]; quote?: string; replyKey: string }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
@@ -628,7 +636,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, quote }
               title={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
               aria-label={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
               onPointerDown={(e) => e.preventDefault()}
-              onClick={() => startReply(message, quote)}
+              onClick={() => startReply(message, quote, replyKey)}
             >
               <Icon name="reply" size={16} />
               {quote && <span>{L('Responder ao trecho', 'Reply to selection')}</span>}
@@ -657,15 +665,27 @@ function selectionRow(container: HTMLElement | null): HTMLElement | undefined {
   return row && container?.contains(row) ? row : undefined
 }
 
-function startReply(message: Message, quote?: string): void {
-  setReplyTo(message.conversationId, { messageId: message.id, quote })
+function startReply(message: Message, quote: string | undefined, replyKey: string): void {
+  setReplyTo(replyKey, { messageId: message.id, quote })
   window.getSelection()?.removeAllRanges()
 }
 
 function ReplyQuote({ reply, conversationId }: { reply: NonNullable<Message['reply']>; conversationId: string }): ReactNode {
-  const exists = useStore((s) => messagesIn(s, conversationId).some((m) => m.id === reply.messageId))
+  const [loading, setLoading] = useState(false)
+  const showOriginal = async (): Promise<void> => {
+    setLoading(true)
+    try {
+      if (!messageById(getState(), reply.messageId, conversationId)) await loadThread(reply.messageId)
+      const original = messageById(getState(), reply.messageId, conversationId)
+      if (!original) return toast(L('Essa mensagem não está mais aqui.', 'That message is no longer here.'))
+      navigate({ kind: 'conversation', id: conversationId, message: original.threadId ?? original.id })
+      if (original.threadId) openThread(original.threadId, original.id)
+    } finally {
+      setLoading(false)
+    }
+  }
   return (
-    <button className="reply-quote" disabled={!exists} onClick={() => navigate({ kind: 'conversation', id: conversationId, message: reply.messageId })}>
+    <button className="reply-quote" disabled={loading} onClick={() => void showOriginal()}>
       <strong>{reply.excerpt ? L(`Trecho de ${reply.author}`, `Excerpt from ${reply.author}`) : L(`Em resposta a ${reply.author}`, `In reply to ${reply.author}`)}</strong>
       <span>{reply.text || L('Anexo', 'Attachment')}</span>
     </button>
@@ -825,6 +845,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 // field that answers there.
 function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
+  const focus = useStore((s) => s.panel?.kind === 'thread' && s.panel.id === rootId ? s.panel.message : undefined)
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
   const [looked, setLooked] = useState<string | null>(null)
@@ -851,18 +872,15 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-  const lead = root && (
-    <div className="thread__lead">
-      <MessageRow message={root} grouped={false} />
-      <div className="thread__divider">
-        {replying.length > 0 ? (
-          <span key="replying" className="shimmer">
-            {L(`${replying.join(' e ')} ${replying.length === 1 ? 'está' : 'estão'} respondendo…`, `${replying.join(' and ')} ${replying.length === 1 ? 'is' : 'are'} replying…`)}
-          </span>
-        ) : (
-          <span key={said}>{said > 0 ? repliesLabel(said) : L('Ainda sem respostas', 'No replies yet')}</span>
-        )}
-      </div>
+  const divider = (
+    <div className="thread__divider">
+      {replying.length > 0 ? (
+        <span key="replying" className="shimmer">
+          {L(`${replying.join(' e ')} ${replying.length === 1 ? 'está' : 'estão'} respondendo…`, `${replying.join(' and ')} ${replying.length === 1 ? 'is' : 'are'} replying…`)}
+        </span>
+      ) : (
+        <span key={said}>{said > 0 ? repliesLabel(said) : L('Ainda sem respostas', 'No replies yet')}</span>
+      )}
     </div>
   )
   return (
@@ -891,7 +909,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       {root?.conversationId === conv.id ? (
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
-          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} threadId={rootId} focus={focus} lead={root} divider={divider} />
           <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
@@ -2069,10 +2087,13 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const [images, setImages] = useState<Attached[]>(() => drafts.get(key)?.images ?? [])
   const [note, setNote] = useState('')
   const [sending, setSending] = useState(false)
-  const replyTarget = useStore((s) => s.replyTo[conversationId])
+  const submitting = useRef(false)
+  const currentKey = useRef(key)
+  currentKey.current = key
+  const replyTarget = useStore((s) => s.replyTo[key])
   const replyId = replyTarget?.messageId
   const reply = useStore((s) => messagesIn(s, conversationId).find((m) => m.id === replyId))
-  const replyAuthor = useStore((s) => reply?.author.kind === 'agent' ? agentById(s, reply.author.id)?.name ?? L('Agente removido', 'Removed agent') : s.me.name)
+  const replyAuthor = useStore((s) => reply?.author.kind === 'agent' ? agentById(s, reply.author.id)?.name ?? L('Agente removido', 'Removed agent') : reply?.author.kind === 'person' ? personName(s, reply.author.id) : s.me.name)
   const replyLabel = !reply ? L('Mensagem removida', 'Removed message') : replyTarget?.quote
     ? L(`Respondendo ao trecho de ${replyAuthor}`, `Replying to an excerpt from ${replyAuthor}`)
     : L(`Respondendo a ${replyAuthor}`, `Replying to ${replyAuthor}`)
@@ -2104,8 +2125,6 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
   const live = useRef({ text, images })
   live.current = { text, images }
-  const currentConversation = useRef(conversationId)
-  currentConversation.current = conversationId
   useEffect(() => {
     const save = (): void => keepForReload({ key, text: live.current.text })
     window.addEventListener('tucano:reloading', save)
@@ -2296,23 +2315,33 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
-  const submit = (): void => {
-    if (!text.trim() && images.length === 0) return
-    sendMessage(
-      conversationId,
-      text,
-      images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
-      threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data })),
-      replyTarget
-    )
-    setReplyTo(conversationId)
-    drafts.delete(key)
-    live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
-    setText('')
-    setImages([])
-    setNote('')
-    setMention(null)
+  const submit = async (): Promise<void> => {
+    if (submitting.current || (!text.trim() && images.length === 0)) return
+    submitting.current = true
+    setSending(true)
+    try {
+      const sent = await sendMessage(
+        conversationId,
+        text,
+        images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
+        threadId,
+        images.filter(isFile).map(({ name, data }) => ({ name, data })),
+        replyTarget
+      )
+      if (!sent) return
+      if (getState().replyTo[key] === replyTarget) setReplyTo(key)
+      drafts.delete(key)
+      if (currentKey.current !== key) return
+      live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
+      setText('')
+      setImages([])
+      setNote('')
+      setMention(null)
+    } finally {
+      submitting.current = false
+      setSending(false)
+      if (currentKey.current === key && !touchScreen()) requestAnimationFrame(() => ref.current?.focus())
+    }
   }
 
   return (
@@ -2360,7 +2389,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               <strong>{replyLabel}</strong>
               <span>{replyTarget?.quote ?? (reply?.text || L('Anexo', 'Attachment'))}</span>
             </div>
-            <button className="icon-btn icon-btn--sm" title={L('Cancelar resposta', 'Cancel reply')} aria-label={L('Cancelar resposta', 'Cancel reply')} disabled={sending} onClick={() => setReplyTo(conversationId)}><Icon name="x" size={14} /></button>
+            <button className="icon-btn icon-btn--sm" title={L('Cancelar resposta', 'Cancel reply')} aria-label={L('Cancelar resposta', 'Cancel reply')} disabled={sending} onClick={() => setReplyTo(key)}><Icon name="x" size={14} /></button>
           </div>
         )}
         {images.length > 0 && (
@@ -2392,6 +2421,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           </div>
           <textarea
             ref={ref}
+            disabled={sending}
             rows={1}
             onScroll={followField}
             value={text}

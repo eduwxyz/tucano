@@ -98,8 +98,20 @@ describe('display preferences per person', () => {
 
   it('members may change only their own display preferences', () => {
     const { bia } = team()
-    for (const k of ['theme', 'sounds', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
+    for (const k of ['theme', 'sounds', 'replyShortcut', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
     for (const k of ['workspaceName', 'context', 'paused', 'routerModel', 'approvalTtlHours']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(false)
+  })
+
+  it('keeps the reply shortcut personal, with its own default for each member', () => {
+    const { db, people, ana, bia, dani } = team()
+    const ownerSettings = { ...base, replyShortcut: false }
+    expect(people.settingsFor(ana, ownerSettings).replyShortcut).toBe(false)
+    expect(people.settingsFor(bia, ownerSettings).replyShortcut).toBeUndefined()
+    expect(people.takePrefs(bia, { replyShortcut: false })).toEqual({})
+    expect(db.prefs(bia.id).replyShortcut).toBe(false)
+    expect(people.settingsFor(bia, base).replyShortcut).toBe(false)
+    expect(people.settingsFor(dani, base).replyShortcut).toBeUndefined()
+    expect(base.replyShortcut).toBeUndefined()
   })
 
   it("each one's settings event and snapshot carry their own preferences", () => {
