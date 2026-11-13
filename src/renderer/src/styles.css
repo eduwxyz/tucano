@@ -3298,6 +3298,12 @@ body.is-resizing webview {
   position: static;
   opacity: 1;
 }
+/* A routine's post has no run to ride, so its trash takes the row's own corner, 24 px under the
+   reply-in-thread button that holds the first place there. */
+.msg__delete--post {
+  top: 28px;
+  right: 4px;
+}
 .msg:hover .msg__delete,
 .msg__delete:focus-visible {
   opacity: 1;

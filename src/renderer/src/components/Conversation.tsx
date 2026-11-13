@@ -622,6 +622,9 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
         <div className="md">
           <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
         </div>
+        {/* The post can go from here: two presses, the same as a session's trash. The routine keeps its
+            slot and posts again next time; only this one lands out of the room. */}
+        <DeleteSession message={message} where="post" />
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
@@ -678,10 +681,22 @@ const ARM_MS = 4000
 // it first, and the words it had written go with it, so the glyph says so.
 // `where`: at the corner of a reply ('corner'), or in the thread's own header ('head'), where it sits
 // in the row beside the summary and close buttons and the panel closes with the session it deleted.
-export function DeleteSession({ message, where = 'corner' }: { message: Message; where?: 'corner' | 'head' }): ReactNode {
+export function DeleteSession({ message, where = 'corner' }: { message: Message; where?: 'corner' | 'head' | 'post' }): ReactNode {
   const head = where === 'head'
+  const post = where === 'post'
   const [armed, setArmed] = useState(false)
-  const at = message.run?.status === 'working' // stopping is part of it, so say so before the second press
+  // Stopping is part of it only when something runs under the row, so the wording says so.
+  const at = message.run?.status === 'working'
+  // A routine's post is not a session: nothing ran under it, and the routine goes on posting after it
+  // is gone. The wording says post, so the press reads as removing the post rather than ending work.
+  const routine = post || message.author.kind === 'routine'
+  const label = routine ? L('Apagar esta publicação', 'Delete this post') : L('Apagar esta sessão', 'Delete this session')
+  const armedLabel = at
+    ? L('Clique de novo para parar e apagar a sessão', 'Click again to stop and delete the session')
+    : routine
+      ? L('Clique de novo para apagar a publicação', 'Click again to delete the post')
+      : L('Clique de novo para apagar a sessão', 'Click again to delete the session')
+  const confirmLabel = routine ? L('Confirmar: apagar a publicação', 'Confirm: delete the post') : L('Confirmar: apagar a sessão', 'Confirm: delete the session')
   useEffect(() => {
     if (!armed) return
     const timer = setTimeout(() => setArmed(false), ARM_MS)
@@ -710,15 +725,9 @@ export function DeleteSession({ message, where = 'corner' }: { message: Message;
   }
   return (
     <button
-      className={`icon-btn ${head ? 'msg__delete--head' : 'icon-btn--sm'} msg__delete ${armed ? 'is-armed' : ''}`}
-      title={
-        armed
-          ? at
-            ? L('Clique de novo para parar e apagar a sessão', 'Click again to stop and delete the session')
-            : L('Clique de novo para apagar a sessão', 'Click again to delete the session')
-          : L('Apagar esta sessão', 'Delete this session')
-      }
-      aria-label={armed ? L('Confirmar: apagar a sessão', 'Confirm: delete the session') : L('Apagar esta sessão', 'Delete this session')}
+      className={`icon-btn ${head ? 'msg__delete--head' : 'icon-btn--sm'} msg__delete ${post ? 'msg__delete--post' : ''} ${armed ? 'is-armed' : ''}`}
+      title={armed ? armedLabel : label}
+      aria-label={armed ? confirmLabel : label}
       aria-pressed={armed}
       onClick={press}
     >

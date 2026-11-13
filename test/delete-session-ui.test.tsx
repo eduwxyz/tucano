@@ -31,6 +31,14 @@ const { MessageList, DeleteSession } = await import('../src/renderer/src/compone
 const { createRoot } = await import('react-dom/client')
 
 const said = (id: string, text: string, at = 1): Message => ({ id, conversationId: 'dm', author: { kind: 'person', id: 'ana' }, text, at })
+const routine = (id: string): Message => ({
+  id,
+  conversationId: 'dm',
+  author: { kind: 'routine', id: 'rot1' },
+  text: 'Boletim do dia',
+  at: 3,
+  routine: { name: 'Boletim', scheduledAt: 3 } as Message['routine']
+})
 const reply = (id: string, status: 'working' | 'done' = 'done'): Message => ({
   id,
   conversationId: 'dm',
@@ -121,5 +129,18 @@ describe('the trash that deletes a session', () => {
     await act(async () => button.click())
     expect(deleted).toEqual(['r1'])
     expect(closed).toBe(1) // nothing is left to read in the panel
+  })
+
+  it("a routine's post carries the trash too, and says it deletes the post rather than a session", async () => {
+    deleted.length = 0
+    await render([routine('p1')])
+    const button = trash()!
+    expect(button.className).toContain('msg__delete--post')
+    expect(button.getAttribute('title')).toBe('Apagar esta publicação')
+    await act(async () => button.click())
+    expect(deleted).toEqual([]) // the first press only arms it
+    expect(button.getAttribute('title')).toBe('Clique de novo para apagar a publicação')
+    await act(async () => button.click())
+    expect(deleted).toEqual(['p1'])
   })
 })

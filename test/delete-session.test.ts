@@ -102,6 +102,24 @@ describe('deleting a session over the API', () => {
     expect((await ana.call<Snap>('snapshot')).messages.some((m) => m.id === session.id)).toBe(false)
   })
 
+  it("a routine's post goes too: nothing ran under it, and the routine itself stays", async () => {
+    // A routine posts as an ask in the room, without a run of its own, so it is put here the way the
+    // scheduler writes it. Deleting it takes the post out; the routine keeps its slot and posts again.
+    const db = new DatabaseSync(join(core.dataDir, 'tucano.db'))
+    try {
+      db.prepare('INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at) VALUES (?, ?, ?, ?, ?, ?)').run('rot-post-1', dm, 'routine', 'rot1', 'Boletim do dia', Date.now())
+    } finally {
+      db.close()
+    }
+    expect(await ana.call<string[]>('deleteMessage', { messageId: 'rot-post-1' })).toEqual(['rot-post-1'])
+    const after = new DatabaseSync(join(core.dataDir, 'tucano.db'))
+    try {
+      expect(after.prepare('SELECT id FROM messages WHERE id = ?').get('rot-post-1')).toBeUndefined()
+    } finally {
+      after.close()
+    }
+  })
+
   it('a prompt is not a session: deleting one changes nothing', async () => {
     const prompt = (await ana.call<Snap>('snapshot')).messages.find((m) => m.conversationId === dm && m.author.kind === 'person')!
     expect(await ana.call<string[]>('deleteMessage', { messageId: prompt.id })).toEqual([])
