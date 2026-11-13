@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import { customModel, type Agent, type EngineId, type GrantLevel, type Message, type Settings } from '../src/shared/types'
 import { ConnectorManager } from '../src/core/connectors'
@@ -22,6 +22,12 @@ import { Gateway } from '../src/core/gateway'
 import { routerSystem } from '../src/core/router'
 import { MAX_CONCURRENT_URGENT, Runner } from '../src/core/runs'
 import { plainCipher, Secrets } from '../src/core/secrets'
+
+// These drive the real runner with engines that take real time (a reply held for a second, a step every
+// 120 ms, a few messages past the session limit at once), so several take seconds on this box and more on
+// a shared runner. The suite's cap is 5 s everywhere but Windows, and `the limit of sessions running at
+// once` crossed it on both macOS and Linux CI: 30 s here, so only a real hang is a failure.
+vi.setConfig({ testTimeout: 30_000 })
 
 const DEMO = join(import.meta.dirname, '..', 'scripts', 'demo-mcp-server.mjs')
 const ready = { installed: true, loggedIn: true }
