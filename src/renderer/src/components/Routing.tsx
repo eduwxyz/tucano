@@ -501,7 +501,23 @@ function TargetRow({
   }, [options, target.model])
   return (
     <li className="route-row">
-      <span className="route-row__n" aria-hidden="true">{ordinal}</span>
+      <div className="route-row__head">
+        <span className="route-row__n" aria-hidden="true">{ordinal}</span>
+        <span className="route-row__actions">
+          <button type="button" className="icon-btn" aria-label={L('Subir', 'Move up')} disabled={first} onClick={onUp}>
+            <Icon name="chevron" size={12} />
+          </button>
+          <button type="button" className="icon-btn route-row__down" aria-label={L('Descer', 'Move down')} disabled={last} onClick={onDown}>
+            <Icon name="chevron" size={12} />
+          </button>
+          <button type="button" className="icon-btn" aria-label={L('Tirar', 'Remove')} onClick={onRemove}>
+            <Icon name="x" size={12} />
+          </button>
+        </span>
+      </div>
+      {/* One under the other, each as wide as the card: a model's name and its note do not fit a third
+          of a row, and a list that cuts them off is a list of guesses. */}
+      <div className="route-row__fields">
       <Select
         className="route-row__engine"
         value={target.engine}
@@ -510,7 +526,7 @@ function TargetRow({
         onChange={(v) => v && onChange(withIdentity({ ...target, engine: v as EngineId }))}
       />
       <Select
-        className="route-row__model grow"
+        className="route-row__model"
         value={target.model}
         searchable
         aria-label={L('Modelo', 'Model')}
@@ -534,17 +550,7 @@ function TargetRow({
           onChange={(v) => onMinTier(v && v !== 'any' && isTier(v) ? v : undefined)}
         />
       )}
-      <span className="route-row__actions">
-        <button type="button" className="icon-btn" aria-label={L('Subir', 'Move up')} disabled={first} onClick={onUp}>
-          <Icon name="chevron" size={12} />
-        </button>
-        <button type="button" className="icon-btn route-row__down" aria-label={L('Descer', 'Move down')} disabled={last} onClick={onDown}>
-          <Icon name="chevron" size={12} />
-        </button>
-        <button type="button" className="icon-btn" aria-label={L('Tirar', 'Remove')} onClick={onRemove}>
-          <Icon name="x" size={12} />
-        </button>
-      </span>
+      </div>
     </li>
   )
 }
@@ -560,9 +566,11 @@ function AddTarget({ onAdd }: { onAdd: (t: RouteTarget) => void }): ReactNode {
   const models = options.length ? options.map((o) => ({ value: o.value, label: o.hint ? `${o.label} · ${o.hint}` : o.label })) : [{ value: chosen, label: chosen || L('Sem lista de modelos', 'No model list') }]
   return (
     <div className="route-add">
+      <div className="route-add__fields">
       <Select value={engine} aria-label={L('Harness', 'Harness')} options={engines.map((e) => ({ value: e, label: engineLabel(e) }))} onChange={(v) => { if (v) { setEngine(v as EngineId); setModel('') } }} />
       <Select className="grow" value={chosen || null} searchable aria-label={L('Modelo', 'Model')} options={models} placeholder={L('Escolha o modelo', 'Pick the model')} onChange={(v) => setModel(v ?? '')} />
       <Select value={effort} aria-label={L('Raciocínio', 'Thinking')} options={thinkingOptions()} onChange={(v) => v && setEffort(v as Effort)} />
+      </div>
       <button type="button" className="btn btn--sm" disabled={!chosen} onClick={() => { onAdd(withIdentity({ id: '', engine, model: chosen, effort })); setModel('') }}>
         {L('Acrescentar', 'Add')}
       </button>
