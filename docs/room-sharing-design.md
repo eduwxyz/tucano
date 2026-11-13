@@ -21,6 +21,34 @@ purpose. The proposal must name the room, its audience and agent read policy. Th
 applies the proposal. Widening visibility requires a clear confirmation that existing history
 and files will become visible to the workspace. Tuca must not silently apply that change.
 
+## Enforcement map before enabling private rooms
+
+The current product treats channels as shared. Adding a private flag requires changing the
+paths that rely on that assumption together; filtering the sidebar is insufficient.
+
+| Path | Required boundary |
+| --- | --- |
+| `Db.conversationOwner`, `People.canSeeConversation` | Carry the channel's creator and visibility through the lightweight checks used by RPC and events. |
+| Snapshots, paging, search and direct IDs | Check the current audience, then apply existing message-level history restrictions. An agent's retrieval grant cannot bypass either check. |
+| Unread counts, notifications and push | Select recipients from the room's current audience; do not broadcast private activity to all workspace people. |
+| Memory and wiki consolidation | Preserve private-room provenance in learned notes, page holds and summaries. Recheck it before publishing pending model output. |
+| Activity, exports, artifacts and links | Apply the source room's visibility to derived records and files, including direct-ID requests. |
+| Approvals | Preserve the existing approval-decider contract without granting access to the surrounding private transcript. Explain any required disclosure when the action is proposed. |
+| Revocation | Remove cached messages, thread pages, summaries, unread counts and artifacts from connected clients. Discard responses from reads started before revocation. |
+| Tuca proposals | Validate the room creator's authority at application time. Applying a group of proposals must not bypass the confirmation for sharing existing history. |
+
+The team-up audience rules in #274 must survive integration. A private source remains
+private when work moves to a team-up; a missing source must not become evidence that it
+was shared. Explicitly sharing an inherited room requires the same history confirmation.
+
+The per-bot initiative proposed in #435 must use the same requesting-person boundary for
+observation and work scopes. A saved scope is not permanent authorization: each check-in,
+retrieval, retry and resumed session must respect revocation and avoid carrying old private
+context into a newly shared destination.
+
+Keep user-facing creation paths unchanged until these checks are implemented together.
+Persisting a field or passing the shared policy tests alone must not enable private defaults.
+
 ## Planned interface copy
 
 | Surface | Exact English |
