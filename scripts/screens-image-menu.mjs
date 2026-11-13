@@ -1,6 +1,6 @@
 // Screenshots and measurements for the right-click menu on a picture: in a reply and in the album,
 // saving for real (the dialog is answered by this script), the one-click save into the folder the
-// last picture went to, copying to the clipboard, and back into the prompt as an attachment.
+// last picture went to, copying to the clipboard, and sending the picture to the prompt below.
 // Fresh data, fake engines.
 // Run after `npm run build`: node scripts/screens-image-menu.mjs [out-dir]
 import { _electron as electron } from 'playwright'
@@ -62,8 +62,8 @@ const rightClick = async () => {
   await win.waitForTimeout(150)
 }
 
-// 1. Right-click the picture in the reply. Nothing has been saved yet, so there is no folder to
-//    name: the menu offers the dialog alone.
+// 1. Right-click the picture in the reply. Nothing has been saved yet, so the one-click entry names
+//    the system's downloads folder, which is where a first save goes without a dialog.
 await rightClick()
 await shot('01-right-click-a-reply')
 console.log('items before anything was saved:', JSON.stringify(await items()))
@@ -80,19 +80,19 @@ await win.keyboard.press('Escape')
 await win.waitForTimeout(120)
 console.log('closed by Esc:', (await menu().count()) === 0)
 
-// 2. Save to… — this script answers the dialog, and the file is checked on disk afterwards.
+// 2. Save as… — this script answers the dialog, and the file is checked on disk afterwards.
 await app.evaluate(async ({ dialog }, path) => {
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: path, bookmark: '' })
 }, saveTo)
 await rightClick()
-await menu().getByText(/Save to/i).first().click()
+await menu().getByText(/Save as/i).click()
 await win.waitForSelector('.toast')
 await win.waitForTimeout(300)
 const saved = existsSync(saveTo) ? readFileSync(saveTo) : null
 console.log('saved where the dialog said:', !!saved, 'same bytes as the picture:', !!saved && saved.equals(Buffer.from(png, 'base64')), 'toast:', await win.locator('.toast__text').last().textContent())
 await shot('02-saved')
 
-// 3. The folder the file landed in is the one the menu names now, first, above the dialog.
+// 3. The folder the file landed in is the one the menu names now, under Save as….
 await rightClick()
 console.log('items once a folder is remembered:', JSON.stringify(await items()))
 const withFolder = await menu().evaluate((el) => {
@@ -143,7 +143,7 @@ const held = await app.evaluate(async ({ clipboard }) => {
 })
 console.log('the clipboard now holds:', JSON.stringify(held), 'toast:', await win.locator('.toast__text').last().textContent())
 
-// 8. Copy to prompt: the picture comes back as an attachment to the field below.
+// 8. Send to prompt: the picture comes back as an attachment to the field below.
 await rightClick()
 await menu().getByText(/prompt/i).click()
 await win.waitForTimeout(600)
