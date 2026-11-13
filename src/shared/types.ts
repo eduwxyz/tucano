@@ -153,7 +153,40 @@ export interface Step {
   output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
+  change?: { added: number; removed: number } // what a write or an edit did to its file, in lines
 }
+
+// A file a reply changed, in a repository of the person's (src/core/changes.ts).
+export interface FileChange {
+  path: string // from the repository's root
+  from?: string // renamed: where it was
+  kind: 'added' | 'modified' | 'deleted' | 'renamed'
+  added: number // lines
+  removed: number
+  binary?: boolean
+}
+
+// What a reply changed in one repository: the counts and the first files. The rest, and each
+// file's diff, are asked for when they're opened.
+export interface ChangeSet {
+  id: string
+  root: string // the repository, as the agent sees it
+  branch?: string // the branch it was on when the reply ended (a detached HEAD: its short commit)
+  fromBranch?: string // the reply moved it to `branch`: the branch it was on before
+  total: number // files
+  added: number
+  removed: number
+  files: FileChange[] // the first CHANGE_FILES_SHOWN
+  plain?: boolean // a folder without git: its snapshots are kept in Tucano's own repository
+  review?: Record<string, FileReview> // what the person decided of each file, by path
+  expired?: boolean // past the days its snapshots are kept: the counts stay, the diffs and undo don't
+}
+
+// A reply's snapshots are kept this long; then its diffs and undo go (its counts stay).
+export const CHANGES_KEEP_DAYS = 30
+
+// A file the person looked at: kept as the reply left it, or put back as it was before.
+export type FileReview = 'kept' | 'undone'
 
 export interface Receipt {
   model: string
@@ -169,6 +202,7 @@ export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done
 export interface Run {
   status: RunStatus
   steps: Step[]
+  changes?: ChangeSet[] // what it changed in the person's code, one per repository
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string

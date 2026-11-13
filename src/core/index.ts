@@ -15,7 +15,7 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type ChangeSet, type FileReview, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
@@ -68,6 +68,7 @@ import { Browser, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
+import { Changes } from './changes'
 import { Memories } from './memory'
 import { loginEnv } from './mac'
 import { findLocalSkills } from './local-skills'
@@ -795,6 +796,22 @@ gateway.route('/oauth/callback', oauthCallback)
 const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
+const changes = new Changes({
+  saveChangeSet: (c) => db.saveChangeSet(c),
+  changeSet: (id) => db.changeSet(id),
+  staleChangeSets: (before) => db.staleChangeSets(before),
+  dropChangeSet: (id, orphan) => db.dropChangeSet(id, orphan),
+  dir: join(dataDir, 'changes'),
+  log: (line) => console.log(line)
+})
+// A changeset of a message, changed (reviewed, expired) where the message keeps it, for everyone who sees it.
+function patchChangeSet(messageId: string, id: string, patch: (c: ChangeSet) => ChangeSet): void {
+  const m = db.message(messageId)
+  if (!m?.run?.changes?.some((c) => c.id === id)) return
+  const updated: Message = { ...m, run: { ...m.run, changes: m.run.changes.map((c) => (c.id === id ? patch(c) : c)) } }
+  db.saveMessage(updated)
+  emit({ type: 'message', message: updated })
+}
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -949,6 +966,7 @@ const runner = new Runner({
   connectors,
   memory,
   computers,
+  changes,
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
@@ -1047,6 +1065,11 @@ void ready.then(async () => {
     } catch (e) {
       console.error('[backup]', e)
     }
+    // Snapshots of what replies changed, past the days they're kept: out of the repositories.
+    changes
+      .sweep()
+      .then((gone) => gone.forEach((g) => patchChangeSet(g.messageId, g.id, (c) => ({ ...c, expired: true }))))
+      .catch((e: unknown) => console.error('[changes]', e))
     // People removed over 30 days ago: their DMs and memories go (checked hourly, due once a day at most).
     try {
       purged(people.sweep())
@@ -1416,6 +1439,48 @@ const api: Handlers = {
     // Past the heritage, to a member, there's nothing more to read.
     return { messages, since: messages.length < page.messages.length ? 0 : page.since }
   },
+  // What a reply changed in a repository: the files past the first ones its message carries, and
+  // one file's diff, read from the repository when it's opened.
+  changeFiles: ({ id, offset }, ctx) => {
+    const set = db.changeSet(id)
+    if (!set) return []
+    reachMessage(ctx, set.messageId)
+    return changes.files(id, offset) ?? []
+  },
+  changeDiff: async ({ id, path }, ctx) => {
+    const set = db.changeSet(id)
+    if (!set) return { error: 'gone' as const }
+    reachMessage(ctx, set.messageId)
+    return changes.diff(id, path)
+  },
+  // Keeping is only a mark; undoing writes the files back on the agent's computer, so it's for
+  // whoever decides the agent's approvals.
+  reviewChange: async ({ id, decision, paths, force }, ctx) => {
+    const set = db.changeSet(id)
+    if (!set) return { error: 'gone' as const }
+    reachMessage(ctx, set.messageId)
+    must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, set.agentId) })
+    const shown = db.message(set.messageId)?.run?.changes?.find((c) => c.id === id)
+    const before = shown?.review ?? {}
+    // Undone is final; kept can still be undone.
+    const asked = (paths ?? set.files.map((f) => f.path).filter((p) => !before[p])).filter((p) => before[p] !== 'undone' && set.files.some((f) => f.path === p))
+    let done = asked
+    let changed: string[] = []
+    let failed: string[] = []
+    if (decision === 'undo' && asked.length) {
+      const r = await changes.undo(id, asked, force)
+      if ('error' in r) return r
+      ;({ undone: done, changed, failed } = r)
+    }
+    const mark: FileReview = decision === 'keep' ? 'kept' : 'undone'
+    const review = { ...before, ...Object.fromEntries(done.map((p) => [p, mark])) }
+    if (done.length) {
+      patchChangeSet(set.messageId, id, (c) => ({ ...c, review }))
+      record(ctx, decision === 'keep' ? 'changes.kept' : 'changes.undone', set.messageId, { root: set.shown, files: done.length })
+    }
+    return { review, changed, failed }
+  },
+
   threadMessages: ({ rootId }, ctx) => {
     const root = db.message(rootId)
     if (!root) return []

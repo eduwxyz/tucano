@@ -33,6 +33,20 @@ const PATHS: Record<string, ReactNode> = {
   ),
   x: <path d="M6 6l12 12M18 6 6 18" />,
   chevron: <path d="m9 6 6 6-6 6" />,
+  undo: (
+    <>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+    </>
+  ),
+  branch: (
+    <>
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="7" r="2" />
+      <path d="M6 7v10M18 9a6 6 0 0 1-6 6H6" />
+    </>
+  ),
   caret: <path d="m6 9 6 6 6-6" />,
   shield: <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" />,
   chart: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
