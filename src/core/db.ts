@@ -1240,8 +1240,8 @@ export class Db {
   // notifications follow by foreign key. What a reply spent stays in the receipts, which is what Usage
   // and the monthly limit count, and the artifacts stay too (their files are on disk). A question waiting
   // in a thread whose first message went is closed: there's nothing left to show it under.
-  forget(ids: string[], cascade = true): { conversations: string[]; gone: number } {
-    if (!ids.length) return { conversations: [], gone: 0 }
+  forget(ids: string[], cascade = true): { conversations: string[]; gone: number; ids: string[] } {
+    if (!ids.length) return { conversations: [], gone: 0, ids: [] }
     return this.tx(() => {
       // id → the conversation it was said in, grown until no reply is left hanging under a thread.
       const gone = new Map<string, string>()
@@ -1273,7 +1273,7 @@ export class Db {
         this.db.prepare(`DELETE FROM messages WHERE id IN (${marks(chunk)})`).run(...chunk)
       }
       this.db.prepare(`UPDATE questions SET state = 'closed' WHERE state = 'open' AND thread_id IS NOT NULL AND thread_id NOT IN (SELECT id FROM messages)`).run()
-      return { conversations: [...new Set(gone.values())], gone: gone.size }
+      return { conversations: [...new Set(gone.values())], gone: gone.size, ids: [...gone.keys()] }
     })
   }
 

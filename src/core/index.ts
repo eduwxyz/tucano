@@ -976,7 +976,7 @@ runner.setPaused(!!settings().paused)
 // Keeping the history only as long as its period says (Settings › History), and the two wipes a person asks
 // for: the whole workspace's, or one bot's. What a reply spent stays in the receipts.
 const retention = new Retention(db, settings, {
-  stop: (id) => runner.stop(id),
+  deleted: (ids) => ids.forEach((id) => runner.drop(id)),
   forgetSessions: (of) => runner.forgetSessions(of),
   cleared: (conversationIds) => {
     emit({ type: 'history_wiped', conversationIds })

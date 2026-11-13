@@ -20,7 +20,7 @@ function world(first: Partial<Settings> = {}) {
     db,
     () => settings,
     {
-      stop: (id) => calls.stopped.push(id),
+      deleted: (ids) => calls.stopped.push(...ids),
       forgetSessions: (of) => calls.forgotten.push(of),
       cleared: (ids) => calls.cleared.push(ids)
     },
@@ -184,7 +184,7 @@ describe('the two wipes a person asks for', () => {
     const w = twoBots()
     w.db.saveMessage({ id: 'a1-working', conversationId: 'ch', author: { kind: 'agent', id: 'a1' }, text: 'x', at: NOW, run: { status: 'working', steps: [] } })
     expect(w.retention.wipe('a1')).toBe(4)
-    expect(w.calls.stopped).toEqual(['a1-working'])
+    expect(w.calls.stopped).toContain('a1-working')
     expect(w.db.message('a1-working')).toBeUndefined()
   })
 })
