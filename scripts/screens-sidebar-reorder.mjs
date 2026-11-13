@@ -8,9 +8,14 @@ import { _electron as electron } from 'playwright'
 const output = process.argv[2] ?? 'frames/sidebar-reorder'
 mkdirSync(output, { recursive: true })
 const data = mkdtempSync(join(tmpdir(), 'tucano-sidebar-reorder-'))
+// TUCANO_ELECTRON runs the installed app instead of this checkout's build: same flow, against the
+// bundle a person has. A packaged app takes no project path, so only the checkout gets the '.', and
+// both get their own Electron profile so a second instance never races the one on screen.
+const installed = process.env.TUCANO_ELECTRON
+const profile = `--user-data-dir=${join(data, 'electron')}`
 const app = await electron.launch({
-  args: ['.', `--user-data-dir=${join(data, 'electron')}`],
-  ...(process.env.TUCANO_ELECTRON ? { executablePath: process.env.TUCANO_ELECTRON } : {}),
+  args: installed ? [profile] : ['.', profile],
+  ...(installed ? { executablePath: installed } : {}),
   env: { ...process.env, TUCANO_DATA: data, TUCANO_SEED: '1', TUCANO_FAKE_ENGINES: '1', TUCANO_LOCALE: 'en-US' }
 })
 try {
