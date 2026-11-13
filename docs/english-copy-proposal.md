@@ -370,3 +370,13 @@ The measured blocked-notification hint took four lines at 900 px. Keep recovery 
 | Notifications can't be shown here.  | Notifications are unavailable here.  |
 | Sent one. If it didn’t show, check System Settings › Notifications › Tucano (allowed, with Banners or Alerts) and whether a Focus is on. | Test sent. If missing, allow Tucano banners or alerts in System Settings › Notifications, and check Focus. |
 | Sent one. If it didn’t show, check the system’s and the browser’s notification settings for Tucano, and Do Not Disturb. | Test sent. If missing, check Tucano’s system/browser notification settings and Do Not Disturb. |
+
+## Update status copy
+
+The off state must describe its actual state rather than imply that installation enables updates.
+
+| Current | Proposed |
+| --- | --- |
+| 'Updates work in the installed app.' | 'Automatic updates are off.' |
+| 'Couldn’t look for a new version just now. Try again later.' | 'Could not check for updates. Try again later.' |
+| `Tucano ${u.next} is ready. It goes in when you restart or quit the app.` | `Tucano ${u.next} is ready. Restart or quit to install.` |
