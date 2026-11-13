@@ -101,6 +101,30 @@ const rail = win.locator('.routing__rail').first()
 await shoot(win, '04-rail-free-selected', rail)
 await shoot(win, '05-routing-body', win.locator('.routing__body').first())
 
+// Each step of a chain is a card with its fields one under the other: the harness, the model and the
+// thinking get the card's whole width, so a model's name and its note are not cut to a third of it.
+const rows = () =>
+  win.evaluate(() => {
+    const card = document.querySelector('.route-row')
+    if (!card) return null
+    const box = card.getBoundingClientRect()
+    const fields = [...card.querySelectorAll('.route-row__fields > .select')]
+    const model = card.querySelector('.route-row__model')
+    const label = model?.querySelector('.select__trigger__value')
+    return {
+      card: Math.round(box.width),
+      cardHeight: Math.round(box.height),
+      fields: fields.length,
+      widths: fields.map((f) => Math.round(f.getBoundingClientRect().width)),
+      heights: fields.map((f) => Math.round(f.getBoundingClientRect().height)),
+      stacked: fields.every((f, i) => i === 0 || f.getBoundingClientRect().top >= fields[i - 1].getBoundingClientRect().bottom - 1),
+      modelText: label?.textContent?.replace(/\s+/g, ' ').trim(),
+      modelClipped: label ? label.scrollWidth > label.clientWidth + 1 : null,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    }
+  })
+console.log('chain rows:', JSON.stringify(await rows()))
+
 await win.locator('.routing__pool', { hasText: 'Tier 3' }).first().click()
 await win.waitForTimeout(500)
 await shoot(win, '06-routing-tier3')
