@@ -978,11 +978,18 @@ export class Runner {
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
-  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message | undefined> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
     this.followups.start(key, reserved)
+    // A queued reply has no message to drop yet, but its deleted parent is marked.
+    if ((threadId && this.gone.has(threadId)) || (opts.existing && this.gone.has(opts.existing.id))) {
+      this.followups.end(key)
+      this.followups.take(key)
+      this.startWaiting(key)
+      return undefined
+    }
     let msg: Message
     try {
       msg = await this.reply(agent, conv, rest)

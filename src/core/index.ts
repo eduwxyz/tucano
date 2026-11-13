@@ -1452,8 +1452,9 @@ const api: Handlers = {
     const routine = m?.author.kind === 'routine'
     if (!m || (!run && !routine)) return []
     manage(ctx, m.conversationId)
-    if (m.run?.status === 'working') runner.drop(messageId) // stopped here, so it isn't written to while it goes
     const gone = db.deleteMessage(messageId)
+    // A completed parent may still have replies running in its thread.
+    for (const id of gone) runner.drop(id)
     for (const id of gone) emit({ type: 'message_removed', id, conversationId: m.conversationId })
     const who = m.author.kind === 'agent' || m.author.kind === 'routine' ? m.author.id : undefined
     record(ctx, 'session.deleted', m.conversationId, { message: messageId, agent: who, routine, went: gone.length })
