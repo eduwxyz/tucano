@@ -1,6 +1,6 @@
 // The connectors the app offers ready to add: official remote MCP servers that an app it has never
 // met (Tucano) can sign in to by itself, through the browser (OAuth with dynamic registration and
-// PKCE), or that need no sign-in at all. Each was probed on 2026-11-05; a server that only takes an
+// PKCE), or that need no sign-in at all. Each was probed on 2026-11-05 (Supabase on 2026-11-13); a server that only takes an
 // app registered ahead of time (HubSpot, Box, Asana's current one; Outlook and Teams) isn't here:
 // it's added by hand. Some ask a few things first (the address of your own instance, a token) or run
 // the service's official server on this computer. Google's and Slack's sign-in take no app they haven't
@@ -107,6 +107,7 @@ export const CATALOG: CatalogEntry[] = [
   e('vercel', 'Vercel', 'https://mcp.vercel.com', 'dev', 'Deploys, logs e projetos', 'Deploys, logs and projects'),
   e('cloudflare', 'Cloudflare', 'https://mcp.cloudflare.com/mcp', 'dev', 'Workers, DNS e armazenamento', 'Workers, DNS and storage'),
   e('neon', 'Neon', 'https://mcp.neon.tech/mcp', 'dev', 'Bancos Postgres, branches e migrações', 'Postgres databases, branches and migrations'),
+  e('supabase', 'Supabase', 'https://mcp.supabase.com/mcp', 'dev', 'Bancos Postgres, tabelas, migrações e Edge Functions', 'Postgres databases, tables, migrations and Edge Functions'),
   e('prisma', 'Prisma', 'https://mcp.prisma.io/mcp', 'dev', 'Bancos Prisma Postgres', 'Prisma Postgres databases'),
   e('netlify', 'Netlify', 'https://netlify-mcp.netlify.app/mcp', 'dev', 'Sites, deploys e logs', 'Sites, deploys and logs'),
   e('railway', 'Railway', 'https://mcp.railway.com', 'dev', 'Serviços, deploys e logs', 'Services, deploys and logs'),

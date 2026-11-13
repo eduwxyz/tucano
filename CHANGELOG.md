@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Supabase in the connector store.** Your Supabase projects from [Supabase](https://supabase.com/docs/guides/getting-started/mcp)'s official server, in Development next to Neon: tables, SQL, migrations, logs and Edge Functions. One click opens Supabase's sign-in in the browser, where you choose the organization the agents may reach. Its tools that write (running SQL, applying a migration, deploying a function) come in under the same classes and approvals as any connector's.
+
 ### Fixed
 
 - **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
