@@ -24,7 +24,7 @@ Várias mudanças pedidas juntas chegam num grupo (**1 de 5**), cada uma com **A
 - ⌘K (Ctrl+K fora do Mac) abre **Ir pra um canal, agente ou tela…**.
 
 ## Configurações
-- **Geral** (General): nome do workspace, como os agentes te chamam, idioma, **Contexto** (o que todo agente lê antes de cada resposta), ditado, notificações, atualizações, time e backup, área de perigo.
-- **Modelos** (Models): os harnesses e as contas, o **Roteador** (Router) e o modelo da **Memória**.
+- **Geral** (General): nome do workspace, como os agentes te chamam, idioma, **Contexto** (o que todo agente lê antes de cada resposta), notificações, atualizações, time e backup, área de perigo.
+- **Modelos** (Models), com dois botões no topo: **Modelos dos agentes** (os harnesses e as contas, o **Roteador** (Router) e o modelo da **Memória**) e **Modelos locais** (rodam no computador, desligados até ativar: **Áudio**, o ditado com Whisper; **Imagens e PDFs**, ler texto com PP-OCRv6, elementos de tela com OmniParser v2 e objetos com DEIMv2-N).
 - **Agentes** (Agents): navegador dos agentes, rotinas (abrir ao ligar, horário de silêncio) e limites.
 - **Celular** (Phone): o bot do Telegram.

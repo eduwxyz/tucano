@@ -133,6 +133,7 @@ describe('G. every event reaches only who may see what it is about', () => {
     // hidden: Bruno gets nothing. shown: as it is. own: something of his own instead (his settings, his inbox, a view without the secret).
     const cases: Record<CoreEvent['type'], { event: CoreEvent; is: 'hidden' | 'shown' | 'own' }> = {
       voice: { event: { type: 'voice' }, is: 'shown' },
+      local_models: { event: { type: 'local_models' }, is: 'shown' },
       message: { event: { type: 'message', message }, is: 'hidden' },
       delta: { event: { type: 'delta', id: 'm-dm', text: 'segredo' }, is: 'hidden' },
       agent: { event: { type: 'agent', agent: db.agent('a1')! }, is: 'shown' },

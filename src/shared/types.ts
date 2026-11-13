@@ -445,6 +445,40 @@ export interface VoiceStatus {
   error?: string // the last download failed
 }
 
+// The image models the app runs on this computer (onnxruntime). Downloaded once to a folder every
+// workspace shares; each workspace turns each one on for itself. Off until the person turns it on.
+export type LocalModelId = 'ocr' | 'ui' | 'objects'
+export const LOCAL_MODEL_IDS: LocalModelId[] = ['ocr', 'ui', 'objects']
+// Advanced: a model of one's own, in place of the one the app downloads (absolute paths). The same
+// kind of model: a PP-OCR detector/recognizer (and its characters, the inference.yml or a .txt with one
+// a line), a YOLOv8-style element detector, an object detector in ONNX (DEIMv2, D-FINE, RT-DETR or YOLO).
+export type LocalModelPath = 'ocrDet' | 'ocrRec' | 'ocrDict' | 'ui' | 'objects'
+// types: added to LOCAL_TYPES_ALWAYS. offline: an image never goes to the AI, only what the models read.
+export type LocalModelsSettings = Partial<Record<LocalModelId, boolean>> & { paths?: Partial<Record<LocalModelPath, string>>; types?: string[]; offline?: boolean }
+// "Never send images to the AI" holds only while a model is on to read them: with none on, it's off.
+export const localOnly = (m: LocalModelsSettings | undefined): boolean => !!m?.offline && LOCAL_MODEL_IDS.some((id) => m[id])
+
+// The file types the local models read, as the person names them (extensions). Matched against what
+// the file is (its first bytes), never its name or the type it came with: a paste is "image.png"
+// whatever it is, and a photo from the phone often has no name at all. JPG, PNG, WebP and PDF are
+// always read; the others, when the person adds them.
+export const LOCAL_TYPE_FORMATS: Record<string, string> = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', webp: 'webp', avif: 'avif', gif: 'gif', bmp: 'bmp', tif: 'tiff', tiff: 'tiff', pdf: 'pdf' }
+export const LOCAL_TYPES_ALWAYS = ['jpg', 'png', 'webp', 'pdf']
+export const LOCAL_TYPES_EXTRA = ['avif', 'gif', 'bmp', 'tiff'] // what can be added (tif and jpeg are other names for these)
+export const localTypeOn = (types: string[] | undefined, format: string | undefined): boolean => !!format && [...LOCAL_TYPES_ALWAYS, ...(types ?? [])].some((t) => LOCAL_TYPE_FORMATS[t] === format)
+
+export interface LocalModelsStatus {
+  downloaded: LocalModelId[] // on this computer, for any workspace
+  stored: LocalModelId[] // with any file of it here (all, part of it, or an earlier version's): what turning it off deletes
+  ready: LocalModelId[] // usable here: downloaded, or every file given by a path that exists
+  devices: Partial<Record<LocalModelId, string>> // where each one ran last: CPU or which GPU
+  gpu?: string // the GPU this computer has that the models may use
+  downloading?: { model: LocalModelId; received: number; total: number }
+  waiting?: LocalModelId[] // turned on while another downloads: they come next, in order
+  error?: { model: LocalModelId; message: string } // the last download failed
+  queued: number // attachments waiting their turn to be read (one at a time)
+}
+
 export interface LocalInfo {
   kind: 'image' | 'video' | 'pdf' | 'folder' | 'file'
   url?: string // to see it here: images and videos
@@ -459,6 +493,7 @@ export interface Settings {
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
   voice?: VoiceSettings
+  localModels?: LocalModelsSettings // which image models read what I attach, instead of the AI seeing it
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
@@ -899,6 +934,8 @@ export interface ImageUpload {
   data: string // base64
 }
 export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+// What may be attached as an image: these too, turned into WebP by the core (the AI doesn't take them).
+export const IMAGE_INPUT_MIMES = [...IMAGE_MIMES, 'image/avif', 'image/bmp', 'image/x-ms-bmp', 'image/tiff']
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // what the models take per image
 export const MAX_IMAGES_PER_MESSAGE = 10
 

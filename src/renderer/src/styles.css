@@ -11795,3 +11795,46 @@ button.agent-card__now:hover {
 .orgb:has(.org-undo) .org-hint {
   visibility: hidden;
 }
+
+/* Settings › Local models: a card per group (audio, images), a bordered row per model with its switch. */
+.local-facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; padding: 0; list-style: none; }
+.local-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 6px; background: var(--hover); font-size: 11.5px; font-weight: 500; color: var(--text-2); vertical-align: 1px; }
+/* The bigger button group that picks a page's view (Settings › Models: the agents' or local ones). */
+.segmented--tabs { display: flex; width: fit-content; max-width: 100%; margin-bottom: 4px; padding: 3px; border-radius: 10px; }
+.segmented--tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 16px; font-size: 13.5px; font-weight: 500; border-radius: 8px; }
+.local-facts li { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: var(--hover); font-size: 12px; color: var(--text-2); }
+.local-models { display: grid; gap: 10px; }
+.local-models > p { margin: 0; }
+.local-models__queue { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.local-model { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); transition: border-color var(--dur-base, 0.15s); }
+.local-model.is-on { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.local-model__head { display: flex; align-items: flex-start; gap: 12px; }
+.local-model__head > div { flex: 1; min-width: 0; }
+.local-model__head p { margin: 2px 0 0; line-height: 1.45; }
+.local-model__head .toggle { flex: none; margin-top: 2px; }
+.local-model__icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--hover); color: var(--text-2); }
+.local-model.is-on .local-model__icon { background: var(--accent-soft); color: var(--accent); }
+.local-model__state { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-left: 44px; font-size: 12px; }
+.local-model__state:empty { display: none; }
+.local-model .voice-setup { padding-left: 44px; }
+.toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+.local-license { border: 0; font: inherit; font-size: 11.5px; font-weight: 500; cursor: pointer; }
+.local-license:hover { color: var(--text); text-decoration: underline; }
+.local-license.is-other { background: var(--warn-soft); color: var(--warn); }
+.local-model__memory { margin: 2px 0 0 !important; font-size: 12px; opacity: 0.85; }
+.local-models__memory { margin: -2px 0 0; }
+.local-model__license { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0 !important; color: var(--text-2); }
+.local-model__license svg { flex: none; margin-top: 2px; color: var(--warn); }
+.local-model.is-off-limits { border-style: dashed; }
+.local-model.is-off-limits .local-model__head b { color: var(--text-2); }
+.card > .voice-setup + .voice-prefs { margin-top: 14px; }
+
+/* The file types the local models read: removable chips, and a field to add one in the same box. */
+.type-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.type-chips:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.type-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 6px; background: var(--hover); font-size: 12.5px; font-weight: 500; }
+.type-chip.is-fixed { gap: 5px; padding-right: 8px; color: var(--text-2); }
+.type-chip.is-fixed .icon { color: var(--text-3); }
+.type-chip button { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--text-3); }
+.type-chip button:hover { background: var(--border); color: var(--text); }
+.type-chips__input { flex: 1; min-width: 90px; border: 0 !important; outline: 0; box-shadow: none !important; background: transparent; padding: 3px 2px !important; font-size: 13px; }

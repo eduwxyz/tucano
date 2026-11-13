@@ -56,6 +56,8 @@ import {
   type LocalInfo,
   type VoiceModelId,
   type VoiceStatus,
+  type LocalModelId,
+  type LocalModelsStatus,
   type ProposalsResult,
   type BackupSummary
 } from '../../shared/types'
@@ -112,6 +114,7 @@ export interface State {
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
+  localModelsRev: number // the same, for the image models (and their queue)
   platform: Os
   packaged: boolean
   isolatedComputers: boolean
@@ -159,6 +162,7 @@ let state: State = {
   threadSeen: loadSeen(),
   wikiRev: 0,
   voiceRev: 0,
+  localModelsRev: 0,
   navOpen: false,
   view: null,
   me: { name: 'Eu', initials: 'EU' },
@@ -600,6 +604,8 @@ function apply(e: CoreEvent): void {
         return { ...s, wikiRev: s.wikiRev + 1 }
       case 'voice':
         return { ...s, voiceRev: s.voiceRev + 1 }
+      case 'local_models':
+        return { ...s, localModelsRev: s.localModelsRev + 1 }
       case 'people':
         return withMe({ ...s, people: e.people, ...(e.former ? { former: e.former } : {}) })
       case 'inbox':
@@ -810,6 +816,10 @@ export const voiceStatus = (): Promise<VoiceStatus> => call('voiceStatus')
 export const voiceDownload = (model: VoiceModelId): Promise<void> => call('voiceDownload', { model })
 export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownload')
 export const voiceRemoveModel = (model: VoiceModelId): Promise<void> => call('voiceRemoveModel', { model })
+export const localModelsStatus = (): Promise<LocalModelsStatus> => call('localModelsStatus')
+export const localModelDownload = (model: LocalModelId): Promise<void> => call('localModelDownload', { model })
+export const localModelCancelDownload = (model?: LocalModelId): Promise<void> => call('localModelCancelDownload', model ? { model } : {})
+export const localModelRemove = (model: LocalModelId): Promise<void> => call('localModelRemove', { model })
 export const transcribe = async (id: string, audio: string): Promise<string> => (await call('transcribe', { id, audio })).text
 export const cancelTranscribe = (id: string): Promise<void> => call('cancelTranscribe', { id })
 // On a server, the sign-in runs in its own terminal and shows here (LoginTerminal.tsx): screen comes

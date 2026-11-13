@@ -195,4 +195,28 @@ describe('ver_imagem', () => {
     expect(lists[0]).not.toContain('ver_imagem')
     expect(lists[1]).toContain('ver_imagem')
   })
+
+  it('is blocked with "never send images to the AI" on (and a local model on): no image goes at all', async () => {
+    settings = { ...settings, localModels: { ocr: true, offline: true } }
+    gateway = new Gateway()
+    await gateway.start()
+    const lists: string[][] = []
+    let tried: unknown
+    const r = runner({
+      gateway,
+      before: async (t) => {
+        if (!t.mcpUrl || !t.blocks) return
+        lists.push(await toolNames(t.mcpUrl))
+        tried = await callTool(t.mcpUrl, 'ver_imagem', { nome: 'print.png' }).catch((e: unknown) => e)
+      }
+    })
+    await r.send('d1', 'olha', [{ name: 'print.png', mime: 'image/png', data: png(10) }])
+    await r.idle()
+    await r.send('d1', 'mostra de novo o print')
+    await r.idle()
+    expect(lists.every((l) => !l.includes('ver_imagem'))).toBe(true)
+    expect(JSON.stringify(tried)).not.toContain('"type":"image"')
+    expect(agentTurns().every((t) => (t.images ?? []).length === 0)).toBe(true)
+    expect(agentTurns()[0]!.prompt).toContain('não vão para a IA')
+  })
 })

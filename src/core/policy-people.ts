@@ -236,6 +236,10 @@ export const NEEDS: Record<Method, Need> = {
   voiceDownload: 'admin',
   voiceCancelDownload: 'admin',
   voiceRemoveModel: 'admin',
+  localModelsStatus: 'admin',
+  localModelDownload: 'admin',
+  localModelCancelDownload: 'admin',
+  localModelRemove: 'admin',
   // what an agent's page shows about the apps, read-only (a server has none: it says so)
   desktopStatus: 'anyone',
   installedApps: 'anyone',

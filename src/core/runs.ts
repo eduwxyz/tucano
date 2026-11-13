@@ -6,7 +6,8 @@ import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_INPUT_MIMES, localOnly, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { forAgents, MAX_IMAGE_INPUT_BYTES } from './images'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -131,6 +132,13 @@ export const LER_ANEXO: ToolDef = {
 const FILE_TEXT_INLINE = 100_000
 const FILES_TEXT_TURN = 150_000
 const FILE_TEXT_NAME = '.texto.json' // beside the file in its artifact folder: { text } or { error }
+const IMAGE_TEXT_NAME = '.local.json' // beside an image the local models read: { text }, what goes in its place
+// With "never send images to the AI" on, an image the models couldn't read goes as this, never as itself.
+const NOT_SENT = (name: string): string =>
+  L(
+    `[imagem anexada: ${name}. Os modelos locais deste computador não acharam nada nela, e neste espaço de trabalho imagens não vão para a IA: você não tem como vê-la. Se precisar saber o que tem nela, peça uma descrição em texto.]`,
+    `[attached image: ${name}. The local models on this computer found nothing in it, and in this workspace images don't go to the AI: you can't see it. If you need to know what's in it, ask for a description in text.]`
+  )
 
 // A file's text from `de`, at most `max` characters, saying where it goes on when cut.
 export function fileChunk(name: string, text: string, de = 0, max = FILE_TEXT_INLINE): string {
@@ -251,6 +259,9 @@ export interface RunnerDeps {
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
+  // The image models on this computer, those turned on: what an image I attach says, as text for
+  // the agents in its place, and the text of a scanned PDF. `null`: they couldn't, the image goes as it is.
+  vision?: { image(name: string, data: Buffer): Promise<string | null>; pdf(data: Buffer): Promise<string | null> }
 }
 
 // What the runner needs from the connector manager.
@@ -498,7 +509,7 @@ export class Runner {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
-    const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
+    const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_INPUT_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
@@ -531,8 +542,7 @@ export class Runner {
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
-    for (const img of pictures) this.keepImage(mine, img)
-    const reading = docs.map((f) => this.keepFile(mine, f))
+    const reading = [...pictures.map((img) => this.keepImage(mine, img)), ...docs.map((f) => this.keepFile(mine, f))]
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
@@ -569,7 +579,7 @@ export class Runner {
         }
     }
 
-    // What the files say, before anyone answers (after the question is taken: nothing else waits here).
+    // What the files and images say, before anyone answers (after the question is taken: nothing else waits here).
     if (reading.length) await Promise.all(reading)
 
     if (members.length === 0) {
@@ -599,12 +609,19 @@ export class Runner {
     for (const agent of responders) void this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
   }
 
-  // An image I attached, kept in the artifact store with my message (no agent made it).
-  private keepImage(message: Message, img: ImageUpload): void {
-    const data = Buffer.from(img.data, 'base64')
-    if (data.length === 0 || data.length > MAX_IMAGE_BYTES) return
+  // An image I attached, kept in the artifact store with my message (no agent made it). With the
+  // image models on, read here: what they found goes to the agents in its place. When they can't
+  // (or find nothing), the image goes as always: the message never waits on them for good.
+  // A format the AI doesn't take (AVIF, BMP, TIFF), or one over its size, is kept as a WebP.
+  // With "never send images to the AI" on, an image they can't read goes as a note that it's there.
+  private async keepImage(message: Message, img: ImageUpload): Promise<void> {
+    const raw = Buffer.from(img.data, 'base64')
+    if (raw.length === 0 || raw.length > MAX_IMAGE_INPUT_BYTES) return
+    const ready = await forAgents(raw, img.name, img.mime).catch(() => null)
+    if (!ready) return
+    const { data } = ready
     const id = randomUUID()
-    const ext = img.mime.split('/')[1]!.replace('jpeg', 'jpg')
+    const ext = ready.mime.split('/')[1]!.replace('jpeg', 'jpg')
     const base = img.name.replace(/\.[a-z0-9]+$/i, '').replace(/[^\p{L}\p{N} _-]+/gu, '').trim().slice(0, 60) || 'imagem'
     const name = `${base}.${ext}`
     const dir = join(this.deps.dataDir!, 'artifacts', id)
@@ -613,6 +630,10 @@ export class Runner {
     const artifact: Artifact = { id, agentId: '', conversationId: message.conversationId, messageId: message.id, kind: 'image', name, title: name, source: 'anexo', size: data.length, createdAt: message.at }
     this.deps.db.saveArtifact(artifact)
     this.deps.emit({ type: 'artifact', artifact })
+    // The models read the original: a conversion only loses detail.
+    const text = await this.deps.vision?.image(name, raw).catch(() => null)
+    const only = localOnly((await this.deps.settings()).localModels)
+    if (text || only) writeFileSync(join(dir, IMAGE_TEXT_NAME), JSON.stringify({ text: text || NOT_SENT(name) }))
   }
 
   // A file I attached that isn't an image, kept with my message; what it says is read once, here,
@@ -633,9 +654,11 @@ export class Runner {
     try {
       read = { text: await extractFile(name, data) }
     } catch (e) {
+      // A PDF with no text is a scan: the OCR on this computer reads it, when it's on.
+      const scanned = /\.pdf$/i.test(name) ? await this.deps.vision?.pdf(data).catch(() => null) : null
       // Not a kind the wiki reads: plain text (code, a config, a log) still is, as it is.
       const head = data.subarray(0, 8192)
-      read = !head.includes(0) && !head.toString('utf8').includes('\uFFFD') ? { text: data.toString('utf8') } : { error: e instanceof Error ? e.message : String(e) }
+      read = scanned ? { text: scanned } : !head.includes(0) && !head.toString('utf8').includes('\uFFFD') ? { text: data.toString('utf8') } : { error: e instanceof Error ? e.message : String(e) }
     }
     writeFileSync(join(dir, FILE_TEXT_NAME), JSON.stringify(read))
   }
@@ -1302,7 +1325,9 @@ ${note}`,
     const answered = history.reduce((at, m, i) => (m.id !== msg.id && m.author.kind === 'agent' && m.author.id === agent.id && m.run?.status === 'done' ? i : at), -1)
     const unanswered = new Set(history.slice(answered + 1).map((m) => m.id))
     const fresh = attached.filter((a) => unanswered.has(a.messageId))
-    const canSeeImages = !!this.deps.gateway && attached.length > 0
+    // "Never send images to the AI" (with a local model on): no image goes, and no tool shows one.
+    const imagesStayHere = localOnly(settings.localModels)
+    const canSeeImages = !imagesStayHere && !!this.deps.gateway && attached.length > 0
     // Files I attached, the same way: their text goes in until this agent has answered them; then by name.
     const filed = this.deps.dataDir ? db.artifacts().filter((a) => a.agentId === '' && a.kind !== 'image' && a.conversationId === conv.id && ids.has(a.messageId)) : []
     const fileNames = new Map<string, string[]>()
@@ -2212,12 +2237,30 @@ ${note}`,
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
     const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    // An image the local models read goes as their text, after its message's block; the rest, as images.
+    const readHere = (a: Artifact): string | undefined => {
+      try {
+        return (JSON.parse(readFileSync(join(this.deps.dataDir!, 'artifacts', a.id, IMAGE_TEXT_NAME), 'utf8')) as { text: string }).text
+      } catch {
+        return undefined
+      }
+    }
+    // With images kept here, one with no read (attached before the option was on) goes as a note.
+    const asText = new Map(fresh.flatMap((a) => (blockOf.has(a.messageId) ? [[a.id, readHere(a) ?? (imagesStayHere ? NOT_SENT(a.name) : undefined)] as const] : [])).filter((e): e is readonly [string, string] => !!e[1]))
     const images: TurnImage[] = fresh
+      .filter((a) => !imagesStayHere && !asText.has(a.id))
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
     // The text of the files not answered yet goes after its message's block, in what is sent only:
     // the blocks a kept session compares stay as they are. The newest first, while there's room.
     const withFiles = [...blocks]
+    for (const a of fresh) {
+      const text = asText.get(a.id)
+      if (text) withFiles[blockOf.get(a.messageId)!] += `\n\n${text}${canSeeImages ? `\n${L('(Para olhar a imagem em si: ver_imagem.)', '(To look at the image itself: ver_imagem.)')}` : ''}`
+    }
+    // Said on the reply, so the person sees the image went as text, read on their computer.
+    if (asText.size)
+      addSteps({ id: randomUUID(), label: L('Leu no computador', 'Read on this computer'), detail: L(`${asText.size} imagem(ns) anexada(s), com os modelos locais: foi o texto, não a imagem`, `${asText.size} attached image(s), with the local models: the text went, not the image`), status: 'done' })
     let room = FILES_TEXT_TURN
     for (const a of filed.filter((f) => unanswered.has(f.messageId)).reverse()) {
       const at = blockOf.get(a.messageId)

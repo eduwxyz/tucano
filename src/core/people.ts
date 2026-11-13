@@ -345,6 +345,7 @@ export class People {
       case 'connector':
         return { type: 'connector', connector: this.connectorFor(person, event.connector) }
       case 'voice':
+      case 'local_models':
       case 'agent':
       case 'connector_removed':
       case 'skill':

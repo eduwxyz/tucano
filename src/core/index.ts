@@ -1,7 +1,8 @@
 // The core runs in an Electron utility process: database, engines and runs
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
-import { voiceRefusal } from '../shared/voice'
+import { localModelsRefusal, voiceRefusal } from '../shared/voice'
+import { describeRead, LOCAL_MODELS, LocalVision } from './local-vision'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
@@ -730,10 +731,18 @@ const chrome =
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
+// The models the app downloads (dictation's, the image ones) live in one folder every workspace
+// shares, given by the main process: downloaded in one, they're there in all.
+const sharedModels = process.env['TUCANO_MODELS'] || join(dataDir, 'models')
 const transcriber = new Transcriber()
-// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads.
-const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(dataDir, 'voice') }
-const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
+// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads
+// (and this workspace's own, where they went before).
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(sharedModels, 'voice'), legacy: join(dataDir, 'voice') }
+const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)), voicePlaces.legacy)
+const localVision = new LocalVision(join(sharedModels, 'image'), () => emit({ type: 'local_models' }))
+// A read that takes longer than this lets the image go to the AI as it is: a message never waits for good.
+const VISION_TIMEOUT_MS = 2 * 60_000
+const inTime = <T,>(p: Promise<T | null>): Promise<T | null> => Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), VISION_TIMEOUT_MS).unref())])
 const dictation = async () => {
   const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)
   return { ...s, ...(modelDownload.progress ? { downloading: modelDownload.progress } : {}), ...(modelDownload.error ? { error: modelDownload.error } : {}) }
@@ -955,6 +964,10 @@ const runner = new Runner({
   skills,
   wiki,
   wikiCurator: curator,
+  vision: {
+    image: async (name, data) => describeRead(name, await inTime(localVision.read(data, settings().localModels))),
+    pdf: (data) => inTime(localVision.readPdf(data, settings().localModels))
+  },
   models: () => availableModels(settings(), listed),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
   notify: (title, body, conversationId, kind, threadId, to) => {
@@ -1823,6 +1836,16 @@ const api: Handlers = {
     bg(modelDownload.start(model), 'voiceDownload')
   },
   voiceCancelDownload: () => modelDownload.cancel(),
+  localModelsStatus: async () => localVision.status(settings().localModels?.paths),
+  localModelDownload: ({ model }) => {
+    if (!Object.hasOwn(LOCAL_MODELS, model)) throw new Error(L('Esse modelo não existe.', "That model doesn't exist."))
+    bg(localVision.download(model), 'localModelDownload')
+  },
+  localModelCancelDownload: ({ model }) => localVision.cancel(model && Object.hasOwn(LOCAL_MODELS, model) ? model : undefined),
+  localModelRemove: ({ model }) => {
+    if (!Object.hasOwn(LOCAL_MODELS, model)) throw new Error(L('Esse modelo não existe.', "That model doesn't exist."))
+    localVision.remove(model)
+  },
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
@@ -1847,7 +1870,7 @@ const api: Handlers = {
     // Someone else's display preferences are theirs: kept on them, the rest is the Tucano's.
     const patch = people.takePrefs(ctx.person, all)
     if (Object.keys(patch).length === 0) return void emit({ type: 'settings', settings: settings() })
-    const why = voiceRefusal(patch.voice)
+    const why = voiceRefusal(patch.voice) ?? localModelsRefusal(patch.localModels)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
     db.setSettings(patch)
