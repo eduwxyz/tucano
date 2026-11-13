@@ -141,7 +141,7 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
           </span>
           <span className="hint">
             {editable
-              ? L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')
+              ? L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', "One-line channel description. Leave empty to hide it.")
               : L('O nome, o tema e os agentes, quem muda é quem criou o canal ou um admin.', 'The name, topic and agents are changed by whoever created the channel or an admin.')}
           </span>
         </label>
@@ -261,7 +261,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
         </a>
       </p>
       {automatic ? (
-        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', '2. After you allow it, come back here: Tucano connects on its own and this closes.')}</p>
+        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', "2. After authorization, return here. Tucano connects and closes this dialog.")}</p>
       ) : (
         <label className="field">
           <span className="field__label">{L('2. Cole aqui o endereço em que ela terminou', '2. Paste the address it ended on')}</span>
@@ -271,7 +271,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
           <span className="hint">
             {L(
               'Depois de permitir, o navegador vai pra um endereço que começa com http://127.0.0.1 e mostra que a página não abre. É normal: o Tucano está no servidor. Copie o endereço inteiro da barra e cole aqui.',
-              'After you allow it, the browser goes to an address starting with http://127.0.0.1 and says the page can’t be reached. That’s expected: Tucano is on the server. Copy the whole address from the bar and paste it here.'
+              "After authorization, a 127.0.0.1 page may fail to load because Tucano runs on a server. Copy the full address and paste it here."
             )}
           </span>
         </label>

@@ -41,7 +41,7 @@ export function ServersCard(): ReactNode {
   const forget = async (s: Server): Promise<void> => {
     const ok = await confirmDialog({
       title: L(`Esquecer o Tucano em ${s.name}?`, `Forget the Tucano at ${s.name}?`),
-      body: L('Só este computador esquece o acesso. O Tucano do servidor continua lá, com tudo.', 'Only this computer forgets the access. The Tucano on the server stays there, with everything.'),
+      body: L('Só este computador esquece o acesso. O Tucano do servidor continua lá, com tudo.', "Remove access from this computer. The server and its data stay unchanged."),
       confirm: L('Esquecer', 'Forget'),
       danger: true
     })
@@ -54,7 +54,7 @@ export function ServersCard(): ReactNode {
         title={L('Servidores', 'Servers')}
         lead={L(
           'Um Tucano que roda num servidor, ligado o tempo todo, aberto aqui mesmo: escolha na lista do topo da barra lateral, e volte pela faixa de cima. Os agentes e as conversas são os de lá; nada deste computador vai pra ele.',
-          'A Tucano running on a server, always on, opened right here: pick it in the list at the top of the sidebar, and come back from the bar above it. The agents and conversations are the server’s; nothing on this computer goes to it.'
+          "Open a server workspace from the sidebar switcher; return with the bar above it. Its data stays on the server. Your local workspace is not uploaded."
         )}
       >
         <div className="key-row">
@@ -86,7 +86,7 @@ export function ServersCard(): ReactNode {
         title={L('Conectar a um servidor', 'Connect to a server')}
         lead={L(
           'Cole o link de conexão que o servidor deu (tucano://connect…, ou o link de entrada do navegador, com ?code=). Quem tem o link controla os agentes de lá: cole só links seus ou de quem você confia.',
-          'Paste the connection link the server gave you (tucano://connect…, or the browser sign-in link, with ?code=). Whoever has the link controls the agents there: paste only links of your own or from someone you trust.'
+          "Paste a trusted tucano://connect… or ?code= sign-in link. Anyone with it can control the server’s agents."
         )}
       >
         <form
