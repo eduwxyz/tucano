@@ -343,6 +343,12 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
   return [...before, ...since, anchor]
 }
 
+// The name an engine is given for a model. Settings hold a model as `<harness>:<name>` (an agent's own
+// pick, and a chain entry built from the same picker); the engine takes `<name>`.
+const bareModelFor = (engine: EngineId, model: string): string => {
+  const info = modelInfo(model)
+  return info && info.engine === engine ? info.id : model
+}
 export class Runner {
   private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
@@ -1139,11 +1145,14 @@ export class Runner {
       const picked = routed.trace.selected
       if (picked && routed.trace.state !== 'unavailable') {
         modelId = agent.modelId // the baseline stays the agent's own: what the trace compares against
-        modelName = picked.model
+        // A chain entry may name a model the way an agent's page does, with its harness in front
+        // ("pi:opencode-go/deepseek-v4.1-flash"). The engines take the bare name: with the prefix left
+        // on, pi answered `Model "pi:opencode-go/deepseek-v4.1-flash" not found` and the reply died.
+        modelName = bareModelFor(picked.engine, picked.model)
         engineId = picked.engine
         effort = picked.effort
         routedAccountId = picked.accountId
-        engineLabel = `${ENGINES[engineId].label} · ${picked.model}`
+        engineLabel = `${ENGINES[engineId].label} · ${modelName}`
         msg.run.steps = msg.run.steps.map((st) => (st.status === 'running' ? { ...st, detail: engineLabel } : st))
       }
     }

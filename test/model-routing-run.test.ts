@@ -82,6 +82,22 @@ describe('routing a reply', () => {
     expect(trace.baseline).toEqual(target('claude', 'sonnet', 'low'))
   })
 
+  it('hands the engine the bare name of a chain entry written with its harness in front', async () => {
+    // A pool built with the same picker an agent's page uses stores "pi:opencode-go/…". Passed on as
+    // it was stored, pi answered `Model "pi:opencode-go/deepseek-v4.1-flash" not found` and the reply
+    // died, which is what a routed bot hit as soon as the switch was on.
+    const entry = target('pi', customModel('pi', 'opencode-go/deepseek-v4.1-flash'), 'high')
+    settings.routing = routed({ pools: { ...routed().pools, t2: { descriptor: 't2', chain: [entry] } } })
+    const r = runner({ jev: { key: async () => 'k-1', fetch: (async () => Response.json(answer())) as unknown as typeof fetch } })
+    await r.send('d1', 'ajusta o readme')
+    await r.idle()
+
+    expect(turns.at(-1)).toMatchObject({ model: 'opencode-go/deepseek-v4.1-flash', effort: 'high' })
+    expect(replies()[0]?.run?.status).toBe('done')
+    // The trace keeps the entry as the person wrote it, so the line over the reply still explains itself.
+    expect(replies()[0]?.run?.route?.selected?.model).toBe('pi:opencode-go/deepseek-v4.1-flash')
+  })
+
   it('makes no classifier call at all for an agent set to off by itself', async () => {
     settings.routing = routed()
     db.saveAgent(agent('a1', 'lia', { smartRouting: false }))
