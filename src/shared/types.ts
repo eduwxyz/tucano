@@ -6,6 +6,7 @@ import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
 import type { PageSigns } from './wall'
+import type { NoticeSettings } from './notice'
 import { L, lang, locale, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -618,6 +619,7 @@ export interface Settings {
   // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
   // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
   showThinking?: boolean
+  notice?: NoticeSettings // the cards over the window (src/shared/notice.ts); unset: on, as the system's notification is today
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   primaryAccounts?: Partial<Record<AccountEngine, string>> // the primary login of a harness with accounts (its id, or unset: the usual login); the reply goes there first

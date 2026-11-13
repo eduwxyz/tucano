@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, isRecommended, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { covers } from '../../../shared/access'
 import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
