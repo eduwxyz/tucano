@@ -148,6 +148,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const [, nome, quando_usar, receita] = /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.exec(last)!
         const r = await callTool(turn.mcpUrl, 'propor_skill', { nome, quando_usar, receita, motivo: 'Faço isso sempre do mesmo jeito.' })
         reply = textOf(r)
+      } else if (turn.mcpUrl && /(?:anote|escreva) na wiki:\s*(.+)/is.test(last)) {
+        // "anote na wiki: Página | o que entra nela": an agent set to read and write keeps the wiki itself.
+        const spec = /(?:anote|escreva) na wiki:\s*(.+?)\s*\|\s*(.+)/is.exec(last)
+        const r = spec ? await callTool(turn.mcpUrl, 'wiki_escrever', { pagina: spec[1]!.trim(), texto: spec[2]!.trim() }).catch((e: unknown) => `Erro: ${(e as Error).message}`) : 'Faltou a página e o texto.'
+        reply = typeof r === 'string' ? r : textOf(r).toLowerCase().includes('erro') || textOf(r).toLowerCase().includes('error') ? textOf(r) : L('Anotei na wiki.', 'I noted it in the wiki.')
       } else if (/gaste (\d+) tokens/i.test(last)) {
         spend = Number(/gaste (\d+) tokens/i.exec(last)![1])
         reply = 'Instalei o Swift e li o módulo de sorteio. Falta rodar os testes do Core e conferir o filtro de questões recentes.'
