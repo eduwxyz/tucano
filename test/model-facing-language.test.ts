@@ -5,15 +5,17 @@
 // language at all (a Portuguese id in a link it is taught to write, a Portuguese page title in the
 // index it carries on every message), and a Portuguese word that slipped into an English description.
 //
-// Deliberately out of scope, so nobody thinks this covers everything: the guide's page *bodies* are
-// still Portuguese (23 pages, a decision for the person who owns the words), and the tool argument
-// names the agents must emit are Portuguese (habilitado, pedido, dias…). Both are real leaks of the
-// same family; neither is a string this test can fix by itself.
+// The guide's pages are written twice, Portuguese and English (src/core/guide/ and
+// src/core/guide/en/), so in an English workspace both the index and the page a model reads are
+// English, and the check below reads the bodies the same way it reads the index.
+//
+// Deliberately out of scope, so nobody thinks this covers everything: the tool argument names the
+// agents must emit are Portuguese (habilitado, pedido, dias…), which is a real leak of the same
+// family and not a string this test can fix by itself.
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import { SCREEN_ALIASES, SCREENS } from '../src/shared/screens'
 import { GUIDE, LER_GUIA, guideHead, guideIndex, readGuide } from '../src/core/guide'
-import { GUIDE_EN } from '../src/core/guide-i18n'
 import { PROPOR_AGENTE, PROPOR_TIME, helperSection, tucaInstructions } from '../src/core/tuca'
 import { PROPOR_AJUSTE, PROPOR_CANAL, PROPOR_ROTINA, VER_ESTADO } from '../src/core/tuca-help'
 import { LER_SKILL, PROPOR_SKILL } from '../src/core/skills'
@@ -29,6 +31,14 @@ const PT =
 // model is taught are the ids after it. Stripped here, and named in the PR as the one Portuguese
 // piece left in a link.
 const nominal = (text: string): string => text.replace(/#abrir\//g, '#')
+
+// A page's file name is a slug, not vocabulary: an English page still says "see **aprovacoes**"
+// because that is what ler_guia takes. The slugs come out before a body is read for Portuguese, the
+// same way the index's own lines are skipped above.
+const SLUGS = /\b(agentes|aprovacoes|backup|celular|comecar|composio|computadores|conectores|conversas|google|limites|memoria|motores|organograma|problemas|rede|rotinas|servidor|skills|slack|time|wiki-git|wiki|workspaces)\b/gi
+// A command inside backticks is a name, not prose either: `tailscale serve` is a flag, not the
+// Portuguese "serve".
+const withoutSlugs = (text: string): string => nominal(text).replace(SLUGS, '').replace(/`[^`]*`/g, '')
 
 const leak = (label: string, text: string): void => {
   const m = PT.exec(nominal(text))
@@ -62,19 +72,21 @@ describe('an English workspace, and what a model reads in it', () => {
     leak("the Tuca's prompt", lines.join('\n'))
   })
 
-  it("gives the Tuca's guide index in English, and keeps every page's English heading in step", () => {
+  it("gives the Tuca's guide in English, index and pages alike", () => {
     setLang('en')
-    expect(Object.keys(GUIDE_EN).sort()).toEqual(GUIDE.map((p) => p.slug).sort()) // no page without a translation, none extra
+    expect(GUIDE.filter((p) => !p.en)).toEqual([]) // every page has its English twin
     for (const p of GUIDE) {
       const h = guideHead(p)
       leak(`guide index "${p.slug}"`, `${h.title}. ${h.summary}`)
       expect(h.title.trim()).not.toBe('')
       expect(h.summary.trim()).not.toBe('')
+      // The page a model reads is English too: a Portuguese body in an English workspace is the leak
+      // this whole test is about, and the one a model copies labels out of.
+      leak(`guide page "${p.slug}" (English)`, withoutSlugs(readGuide(p.slug).text))
     }
     const index = guideIndex()
     expect(index).toContain('- agentes: Agents. ')
-    expect(index).toContain("The body of a guide page is written in Portuguese")
-    // A page read in English is headed in English; its body under it is still the Portuguese one.
+    expect(index).not.toContain('written in Portuguese')
     expect(readGuide('agentes').text.split('\n')[0]).toBe('# Agents')
     expect(readGuide('nope').text).toContain("There's no such page")
   })
