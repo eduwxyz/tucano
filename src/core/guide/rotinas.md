@@ -1,7 +1,7 @@
 # Rotinas
 > Um agente trabalhando sozinho: num horário, quando aparece algo novo num conector, ou quando chamado neste computador.
 
-Uma rotina é um pedido que o app manda pra um agente sozinho, numa DM ou num canal em que ele está. A resposta aparece na conversa, marcada como rotina.
+Uma rotina é um pedido que o app manda pra um agente sozinho, numa DM ou num canal em que ele está; a resposta aparece na conversa, marcada como rotina. Sem nada a contar, ele responde só **[SILENT]**: fica uma linha discreta, *Nada a informar*, sem notificação nem marca de não lida.
 
 ## Criar
 1. Abra **Rotinas** (Routines). A tela é um calendário da semana; clique num horário ou em **Nova rotina** (N).
@@ -9,14 +9,14 @@ Uma rotina é um pedido que o app manda pra um agente sozinho, numa DM ou num ca
 3. **Quando roda**:
    - **Num horário**: **Horário**, na hora do seu computador, e como repete:
      - **Repete**: nos **Dias da semana** escolhidos (seg a sex, todo dia ou escolhidos), toda semana.
-     - **Uma vez**: no próximo dia marcado em que o horário ainda não passou; depois de rodar, desliga sozinha.
-     - **Numa data**: num dia do calendário (ex.: 17/11 às 9h), mesmo daqui a semanas ou meses. Roda uma vez só, nesse dia, e desliga. Uma data que já passou é recusada.
-     - **Todo mês**: num dia do mês (ex.: todo dia 5). Num mês sem esse dia (31 em novembro), roda no último.
+     - **Uma vez**: no próximo dia marcado em que o horário ainda não passou; depois desliga sozinha.
+     - **Numa data**: num dia do calendário (ex.: 17/11 às 9h). Roda uma vez só e desliga; uma data que já passou é recusada.
+     - **Todo mês**: num dia do mês (ex.: todo dia 5); num mês sem ele (31 em novembro), roda no último.
    - **Quando aparece algo novo**: escolha um **Conector**, uma **Ferramenta de leitura**, os **Argumentos (JSON)** (o filtro da busca) e de quanto em quanto tempo olhar (**Olhar a cada**). O que já existe agora não dispara: roda uma vez pra cada item novo, um de cada vez. **Testar agora** mostra o que ela vê.
    - **Quando chamada neste computador**: depois de salvar, a rotina ganha um endereço que só este computador acessa. Um script, um hook do git ou uma fase de build chama com `curl -d "o que aconteceu" <endereço>`, e o texto chega pro agente. Uma chamada por vez: se ainda estiver rodando, a próxima é recusada.
 4. **Onde postar** e **Criar rotina**.
 
-Os próprios agentes também agendam pra si mesmos quando você pede algo pra depois ("daqui a 10 minutos", "toda segunda", "dia 17 às 9h", "todo dia 5"); uma data, mesmo daqui a semanas, eles conseguem marcar. Na conversa aparece **Agendou:** com **Desfazer**.
+Os próprios agentes também agendam pra si mesmos quando você pede algo pra depois ("daqui a 10 minutos", "toda segunda", "dia 17 às 9h", "todo dia 5"). Na conversa aparece **Agendou:** com **Desfazer**.
 
 ## No calendário
 Clique numa rotina pra ver **Rodou** / **Vai rodar**, **Rodar agora**, **Ver a resposta**, **Editar** e **Apagar**. Setas ← → trocam a semana, T volta pra esta. **Mostrar só as de um agente** filtra.
@@ -31,6 +31,6 @@ Clique numa rotina pra ver **Rodou** / **Vai rodar**, **Rodar agora**, **Ver a r
 - Cada agente tem um máximo de rotinas ligadas (**Máx. rotinas ligadas** na página dele, 10 por padrão).
 
 ## Quando dá errado
-- Não rodou: o app estava fechado por mais de 12 h, estava em horário de silêncio, os agentes estavam pausados, ou o agente está arquivado (arquivar desliga as rotinas).
+- Não rodou: app fechado por mais de 12 h, horário de silêncio, agentes pausados, ou agente arquivado (arquivar desliga as rotinas).
 - "Não deu pra ler o conector": o conector está desconectado ou pede login (veja **conectores**).
 - Ficou esperando aprovação: decida em **Aprovações** ou pelo Telegram.

@@ -49,7 +49,7 @@ export interface StateInput {
   routines: Routine[]
   approvals: Approval[]
   failures: { agentId: string; conversationId: string; at: number; status: string; error?: string }[]
-  lastRun: (r: Routine) => { status?: string; error?: string } | undefined // the routine's last reply, how it ended
+  lastRun: (r: Routine) => { status?: string; error?: string; silent?: boolean } | undefined // the routine's last reply, how it ended
   now: number
 }
 
@@ -105,7 +105,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
       const last = x.lastRun(r)
       const t = r.trigger
       const kind = t?.kind === 'webhook' ? L('chamada local (webhook)', 'local call (webhook)') : t?.kind === 'poll' ? L(`quando aparece algo em ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, a cada ${t.everyMinutes} min`, `when something new shows in ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, every ${t.everyMinutes} min`) : `${r.schedule.date ?? (r.schedule.monthDay !== undefined ? L(`dia ${r.schedule.monthDay} de todo mês`, `day ${r.schedule.monthDay} of every month`) : r.schedule.days.join(','))} ${r.schedule.time}${r.schedule.once ? L(' (uma vez)', ' (once)') : ''}`
-      return `- ${r.name} (${agentName(r.agentId)}, ${where(r.conversationId)}): ${r.enabled ? L('ligada', 'on') : L('desligada', 'off')} · ${kind} · ${L('próxima', 'next')} ${r.enabled && r.nextAt ? when(r.nextAt, x.now) : '—'} · ${L('última', 'last')} ${when(r.lastAt, x.now)}${last?.status ? ` (${last.status}${last.error ? `: ${last.error}` : ''})` : ''}${t?.kind === 'poll' && t.error ? L(` · erro ao checar: ${t.error}`, ` · check error: ${t.error}`) : ''}`
+      return `- ${r.name} (${agentName(r.agentId)}, ${where(r.conversationId)}): ${r.enabled ? L('ligada', 'on') : L('desligada', 'off')} · ${kind} · ${L('próxima', 'next')} ${r.enabled && r.nextAt ? when(r.nextAt, x.now) : '—'} · ${L('última', 'last')} ${when(r.lastAt, x.now)}${last?.silent ? ` (${L('nada a informar', 'nothing to report')})` : last?.status ? ` (${last.status}${last.error ? `: ${last.error}` : ''})` : ''}${t?.kind === 'poll' && t.error ? L(` · erro ao checar: ${t.error}`, ` · check error: ${t.error}`) : ''}`
     })
     out.push(`## ${L('Rotinas', 'Routines')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
   }
