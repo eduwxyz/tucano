@@ -6,6 +6,7 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Message, Step } from '../src/shared/types'
+import type { State } from '../src/renderer/src/store'
 
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
@@ -22,11 +23,13 @@ Object.assign(globalThis, {
 
 // What the pill sends: the same call the composer makes, with the send mode that hands it to the run.
 const sent = vi.hoisted(() => [] as { conversationId: string; text: string; mode?: string }[])
+// The app's own state, so a selector that reads a setting reads the one the app ships with.
+let fake: State
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
   return {
     ...real,
-    useStore: <T,>(select: (s: unknown) => T): T => select({}),
+    useStore: <T,>(select: (s: State) => T): T => select(fake),
     sendMessage: (conversationId: string, text: string, _images?: unknown, _threadId?: string, _files?: unknown, mode?: string): void => {
       sent.push({ conversationId, text, mode })
     },
@@ -35,6 +38,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 
 const { createRoot } = await import('react-dom/client')
+const { getState } = await import('../src/renderer/src/store')
 const { RunBlock } = await import('../src/renderer/src/components/Conversation')
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({ id, label: `read ${id}.ts`, status: 'done', ms: 120, ...extra })
@@ -51,6 +55,7 @@ const reply = (status: Message['run'] extends undefined ? never : NonNullable<Me
 let root: Root
 beforeEach(() => {
   sent.length = 0
+  fake = { ...getState() }
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(() => act(() => root.unmount()))
