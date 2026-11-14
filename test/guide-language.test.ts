@@ -1,39 +1,44 @@
-// The guide is the app's own manual, and it is written in Portuguese only. In an English workspace
-// the Tuca's prompt carries it, so the model has to be told where that Portuguese comes from — and
-// dates in the prompts that write the wiki go through locale(), like every other date the app shows.
+// The guide is the app's own manual, and it is written twice: Portuguese in src/core/guide/ and
+// English in src/core/guide/en/. What the Tuca's prompt carries, and what ler_guia hands him, is the
+// page in the language of the workspace — never the other language, which a model would copy into an
+// answer. Dates in the prompts that write the wiki go through locale(), like every other date.
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import { guideIndex, GUIDE } from '../src/core/guide'
+import { GUIDE, guideIndex, readGuide } from '../src/core/guide'
 
 afterEach(() => setLang('pt'))
 
 describe("the guide in the Tuca's prompt", () => {
-  it('lists every page, one line each', () => {
-    const lines = guideIndex().split('\n')
-    expect(lines).toHaveLength(GUIDE.length)
-    expect(lines[0]).toMatch(/^- agentes: /)
-    expect(lines.every((l) => l.startsWith('- ') && l.includes(': '))).toBe(true)
-  })
+  it('lists every page, one line each, in the language of the workspace', () => {
+    const pt = guideIndex().split('\n')
+    expect(pt).toHaveLength(GUIDE.length)
+    expect(pt[0]).toMatch(/^- agentes: Agentes\. /)
+    expect(pt.every((l) => l.startsWith('- ') && l.includes(': '))).toBe(true)
 
-  it('says in an English workspace that the pages are Portuguese, and not to copy their labels', () => {
     setLang('en')
-    const text = guideIndex()
-    expect(text).toContain('written in Portuguese')
-    expect(text).toContain('never copy its Portuguese labels')
-    // Still every page, after the note.
-    expect(text.split('\n')).toHaveLength(GUIDE.length + 1)
+    const en = guideIndex().split('\n')
+    expect(en).toHaveLength(GUIDE.length)
+    expect(en[0]).toMatch(/^- agentes: Agents\. /)
   })
 
-  it('says nothing about it in a Portuguese workspace: there the guide is simply the guide', () => {
+  it('hands over the page itself in the language of the workspace', () => {
+    setLang('en')
+    const english = readGuide('aprovacoes').text
+    expect(english.split('\n')[0]).toBe('# Approvals')
+    expect(english).toContain('Nothing sensitive happens without you')
+    expect(english).not.toContain('Aprovações')
+
     setLang('pt')
-    expect(guideIndex()).not.toContain('Portuguese')
-    expect(guideIndex().split('\n')).toHaveLength(GUIDE.length)
+    const portuguese = readGuide('aprovacoes').text
+    expect(portuguese.split('\n')[0]).toBe('# Aprovações')
+    expect(portuguese).toContain('Nada sensível acontece sem você')
+    expect(portuguese).not.toContain('Nothing sensitive happens')
   })
 
-  it('keeps the pages themselves Portuguese: this is the list, not a translation', () => {
+  it('answers a page that does not exist in the right language too', () => {
     setLang('en')
-    const page = GUIDE.find((p) => p.slug === 'aprovacoes')!
-    expect(page.title).toBe('Aprovações')
-    expect(page.body.length).toBeGreaterThan(100)
+    expect(readGuide('nope').text).toContain("There's no such page")
+    setLang('pt')
+    expect(readGuide('nope').text).toContain('Não existe essa página')
   })
 })
