@@ -12,7 +12,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
   return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake), useLiveThought: () => thought }
 })
 const { getState } = await import('../src/renderer/src/store')
-const { Thought } = await import('../src/renderer/src/components/Conversation')
+const { Thought, followsTheEnd } = await import('../src/renderer/src/components/Conversation')
 const { settingsPatchError } = await import('../src/core/settings-patch')
 const { People } = await import('../src/core/people')
 const { PERSONAL_SETTINGS } = await import('../src/core/policy-people')
@@ -50,6 +50,18 @@ describe("the model's thinking on screen", () => {
     thought = undefined
     fake = { ...fake, settings: { ...fake.settings, showThinking: true } }
     expect(drawn()).toBe('')
+  })
+
+  // The block follows the stream at its end only: someone reading a passage further up keeps that
+  // place while the rest arrives below it (scripts/screens-thinking.mjs proves it in the window).
+  it('counts the end as where the person is reading, not where the stream stopped', () => {
+    const box = (scrollTop: number): { scrollHeight: number; scrollTop: number; clientHeight: number } => ({ scrollHeight: 900, scrollTop, clientHeight: 240 })
+    // At the end, and inside the last line: the block keeps taking what arrives.
+    expect(followsTheEnd(box(660))).toBe(true)
+    expect(followsTheEnd(box(646))).toBe(true)
+    // Scrolled up to read: the place stays, further than a line from the end.
+    expect(followsTheEnd(box(620))).toBe(false)
+    expect(followsTheEnd(box(0))).toBe(false)
   })
 })
 

@@ -205,7 +205,22 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           'checking the version in the repository ',
           'and only then saying what to do. ',
           'If the test fails the same on a clean main, it is not the build. ',
-          'Better to say that with the number in hand. '
+          'Better to say that with the number in hand. ',
+          'This machine may not have the branch the test was written on, ',
+          'so a failure here says nothing about the build yet. ',
+          'First the file, then whether the same test fails on a clean main. ',
+          'If it does, the machine and the build are both fine. ',
+          'If it passes there, something in this checkout changed under it. ',
+          'Also worth checking the Node version the runner used, ',
+          'since the suite pins nothing and this machine may run another one. ',
+          'That is the whole plan: two runs, one comparison, and the number. ',
+          'One more thing before the run: the suite reads its fixtures from the repository, ',
+          'so a checkout that is behind would fail for a reason that has nothing to do with the code. ',
+          'Worth printing the commit first as well. ',
+          'Then the two runs against that same commit, one here and one on a clean main. ',
+          'If the numbers agree the machine is out of it entirely. ',
+          'If they differ, the difference is the answer and it needs to be said the same way. ',
+          'No guessing before the runs: a wrong cause costs more than the minute they take.'
         ]
         for (const piece of thoughts) {
           if (turn.signal.aborted) return

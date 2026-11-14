@@ -139,6 +139,90 @@ console.log('off again:', JSON.stringify({ thoughtBlocksSeen: seenOff, finished 
 await win.waitForTimeout(1000)
 await shot('07-off-again-nothing-shown')
 
+// 7. Reading further up while the rest arrives: the block keeps the place the person is reading,
+// instead of pulling them to the end with every piece that lands, and it takes the stream up again
+// once they are back at the end. A narrow window, so a turn's reasoning already scrolls.
+// The block of the turn running now: the only one that says "Thinking", since every block of an
+// earlier turn says "Thought". The list unmounts rows that scroll out of view, so counting blocks
+// is not a place to stand.
+const RUNNING = '.thought:has(.thought__label:text-is("Thinking"))'
+const scroller = () =>
+  win.evaluate(() => {
+    const t = [...document.querySelectorAll('.thought')].filter((b) => b.querySelector('.thought__label')?.textContent === 'Thinking').at(-1)
+    const box = t?.querySelector('.thought__text')
+    if (!box) return null
+    const hidden = box.scrollHeight - box.clientHeight
+    return {
+      label: t.querySelector('.thought__label')?.textContent ?? null,
+      chars: box.textContent?.length ?? 0,
+      top: Math.round(box.scrollTop),
+      hidden,
+      atTheEnd: hidden - Math.round(box.scrollTop) < 24,
+      scrollable: hidden > 20,
+      working: !!document.querySelector('.steps__stop')
+    }
+  })
+const grew = async (from) => {
+  for (let i = 0; i < 40; i++) {
+    const s = await scroller()
+    if (s && s.chars > from) return s
+    await win.waitForTimeout(100)
+  }
+  return scroller()
+}
+const scrollBlock = (where) =>
+  win.evaluate((w) => {
+    const t = [...document.querySelectorAll('.thought')].filter((b) => b.querySelector('.thought__label')?.textContent === 'Thinking').at(-1)
+    const box = t?.querySelector('.thought__text')
+    if (box) box.scrollTop = w === 'end' ? box.scrollHeight : 0
+  }, where)
+
+await win.setViewportSize({ width: 900, height: 880 })
+await settings()
+await win.locator(`${card} .toggle`).click()
+await win.waitForTimeout(300)
+await ask()
+let arrived = null
+for (let i = 0; i < 120; i++) {
+  arrived = await scroller()
+  if (arrived?.label === 'Thinking' && arrived.scrollable) break
+  await win.waitForTimeout(100)
+}
+console.log('following, at the end:', JSON.stringify(arrived))
+
+// A wheel up over the block, the way a person reads back into it.
+const place = await win.locator(RUNNING).last().locator('.thought__text').boundingBox()
+await win.mouse.move(place.x + place.width / 2, place.y + place.height / 2)
+await win.mouse.wheel(0, -260)
+await win.waitForTimeout(120)
+const reading = await scroller()
+const landing = await grew(reading.chars)
+const held = await scroller()
+console.log('reading above the stream:', JSON.stringify({ reading, landing, held }))
+await shot('08-reading-above-the-stream')
+
+// Back at the end by hand: the block follows the rest of what arrives.
+await scrollBlock('end')
+await win.waitForTimeout(120)
+const back = await scroller()
+const after = await grew(back.chars)
+await win.waitForTimeout(200)
+const following = await scroller()
+console.log('back at the end:', JSON.stringify({ back, after, following }))
+await shot('09-back-at-the-end')
+
+const fails = []
+if (!arrived?.scrollable) fails.push('the block never scrolled, so there was nothing to hold')
+if (!arrived?.atTheEnd) fails.push('the block did not open at the end of the reasoning')
+if (reading.top === 0 && reading.hidden === 0) fails.push('the wheel over the block moved nothing')
+if (held.chars <= reading.chars) fails.push('no reasoning arrived while the block was read further up')
+if (held.top !== reading.top) fails.push(`the block moved from ${reading.top} to ${held.top} while it was read further up`)
+if (!back.atTheEnd) fails.push('the block did not take the end back when scrolled there')
+if (following.chars <= back.chars) fails.push('no reasoning arrived after the block was back at the end')
+if (!following.atTheEnd) fails.push('the block stopped following after it was taken back to the end')
+console.log('scroll check:', fails.length === 0 ? 'ok' : JSON.stringify(fails))
+if (fails.length > 0) process.exitCode = 1
+
 console.log('thinking text seen while it worked:', thoughtSoFar)
 console.log('errors:', JSON.stringify(errors))
 await app.close()
