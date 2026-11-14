@@ -26,7 +26,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
   return {
     ...real,
-    useStore: <T,>(select: (s: unknown) => T): T => select({}),
+    useStore: <T,>(select: (s: unknown) => T): T => select({ settings: {} }),
     sendMessage: (conversationId: string, text: string, _images?: unknown, _threadId?: string, _files?: unknown, mode?: string): void => {
       sent.push({ conversationId, text, mode })
     },
