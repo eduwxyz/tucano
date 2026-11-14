@@ -60,6 +60,8 @@ const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones 
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
 const DELTA_FLUSH_MS = 40
+// How much thinking is worth one wake-up of the window: it is read, not parsed.
+const THOUGHT_FLUSH = 240
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
 // or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
@@ -1020,6 +1022,9 @@ export class Runner {
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
+    // What the model is thinking, streamed to the window and never added to the reply: it is shown
+    // as it goes and dropped when the turn ends, since the run column is rewritten whole each step.
+    let thought = ''
     let narration: string | undefined
     const said = (): string | undefined => {
       const text = msg.text.trim()
@@ -1221,6 +1226,10 @@ export class Runner {
     const flush = (): void => {
       if (timer) clearTimeout(timer)
       timer = null
+      if (thought) {
+        emit({ type: 'thinking', id: msg.id, text: thought })
+        thought = ''
+      }
       if (!pending) return
       emit({ type: 'delta', id: msg.id, text: pending })
       pending = ''
@@ -2292,6 +2301,12 @@ ${note}`,
               msg.text += ev.delta
               pending += ev.delta
               timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+            } else if (ev.type === 'thinking') {
+              if (ev.delta) {
+                thought += ev.delta
+                if (thought.length > THOUGHT_FLUSH) flush()
+                else timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+              }
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))

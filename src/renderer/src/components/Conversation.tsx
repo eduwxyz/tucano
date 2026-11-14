@@ -29,6 +29,7 @@ import { canEditChannel,
   repliesOf,
   timelineOf,
   useLiveText,
+  useLiveThought,
   workingIds,
   openDialog,
   decideApproval,
@@ -1341,6 +1342,69 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
             <StepRow key={st.id} step={st} />
           ))}
         </ol>
+      )}
+      <Thought message={message} working={working} />
+    </div>
+  )
+}
+
+// How close to the end of the block counts as reading its end: a little over one line, so a wheel's
+// fraction of a line and a subpixel scroll still count as the end.
+const THOUGHT_END = 24
+
+// Whether the block sits at the end of what it shows: the place a person is reading, not where the
+// stream stopped. Content arriving below it does not move that place.
+export function followsTheEnd(box: { scrollHeight: number; scrollTop: number; clientHeight: number }): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < THOUGHT_END
+}
+
+// What the model is thinking, dim and small, as it arrives: not what it said, and not a step. It
+// sits under the steps of the run it belongs to, and above whatever the reply offers at its bottom.
+// It follows the reply: open and scrolling while it works, and once that is over, folded to the last
+// line it thought — the whole of it one click away. The window keeps it in memory so it can be read
+// back. Off unless the person turned it on in Settings: a reply's reasoning is its own, and most
+// people want the answer.
+export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
+  const on = useStore((s) => s.settings.showThinking === true)
+  const thought = useLiveThought(message.id, STREAM_MS)
+  // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
+  const [asked, setAsked] = useState<boolean | null>(null)
+  const open = asked ?? working
+  const box = useRef<HTMLDivElement>(null)
+  // The block follows what arrives only while the person is at its end. Someone who scrolled up to
+  // read an earlier passage keeps that place while the rest streams in below it, and the block takes
+  // the stream up again by itself once they are back at the end. Opened by a click, it starts there.
+  const follow = useRef(true)
+  useEffect(() => {
+    if (open) follow.current = true
+  }, [open])
+  useEffect(() => {
+    const el = box.current
+    if (open && working && follow.current && el) el.scrollTop = el.scrollHeight
+  }, [thought, open, working])
+  if (!on || !thought) return null
+  // Folded, it carries the line it is on now: what it is thinking, cut to the width of the block.
+  const last = thought.trimEnd().split(/\r?\n/).filter((l) => l.trim() !== '').pop() ?? ''
+  return (
+    <div className={`thought${open ? ' is-open' : ''}${working ? ' is-working' : ''}`} aria-label={L('O que o agente está pensando', 'What the agent is thinking')}>
+      <button
+        type="button"
+        className="thought__head"
+        aria-expanded={open}
+        title={open ? L('Recolher o que ele pensou', 'Fold what it thought') : L('Ler o que ele pensou', 'Read what it thought')}
+        onClick={() => setAsked(!open)}
+      >
+        <Icon name="chevron" size={11} />
+        <span className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</span>
+        {!open && <span className="thought__last">{last}</span>}
+      </button>
+      {open && (
+        <div ref={box} className="thought__text" onScroll={(e) => {
+          follow.current = followsTheEnd(e.currentTarget)
+        }}>
+          {thought}
+          {working && <span className="thought__caret" aria-hidden="true" />}
+        </div>
       )}
     </div>
   )
