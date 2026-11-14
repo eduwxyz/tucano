@@ -35,6 +35,8 @@ export class Notices {
   private cards = 0 // how many the page has on screen now
   private loaded = false
   private waiting: (NoticePush & { demo?: boolean })[] = [] // what arrived before the page could draw
+  private interactiveOn = false
+  private pollTimer: ReturnType<typeof setInterval> | null = null
 
   // `open`: brings the app's window back on a conversation (and its thread), or on a screen.
   constructor(private deps: { open: (conversationId?: string, page?: 'skills', threadId?: string) => void }) {
@@ -191,6 +193,7 @@ export class Notices {
   clear(): void {
     this.waiting = []
     this.cards = 0
+    this.stopPoll()
     if (this.win && !this.win.isDestroyed() && this.loaded) this.win.webContents.send('notice:clear')
     this.hide()
   }
@@ -230,6 +233,7 @@ export class Notices {
     })
     this.win = win
     this.loaded = false
+    this.interactiveOn = false
     // Everything that isn't a card lets the click through to the window behind it.
     win.setIgnoreMouseEvents(true, { forward: true })
     // Above the app's own windows, and above most of what the system draws over them.
@@ -303,11 +307,13 @@ export class Notices {
     // Wherever the app's window is now, the cards follow it: a second screen has its own corner.
     this.place()
     if (!win.isVisible()) win.showInactive()
+    this.startPoll()
   }
 
   private hide(): void {
     const win = this.win
     if (!win || win.isDestroyed()) return
+    this.stopPoll()
     if (win.isVisible()) win.hide()
     this.interactive(false)
   }
@@ -315,8 +321,33 @@ export class Notices {
   private interactive(on: boolean): void {
     const win = this.win
     if (!win || win.isDestroyed()) return
+    if (this.interactiveOn === on) return
+    this.interactiveOn = on
     // Still forwarding the pointer's moves while it passes through: that's how the page knows it
     // came back over a card.
     win.setIgnoreMouseEvents(!on, { forward: true })
+  }
+
+  // The page's pointer tracking is fast but misses the case where a card appears under a pointer
+  // that is not moving: the click then passes through to the window behind it. Poll the cursor
+  // while cards are on screen so the whole notification rectangle becomes clickable whenever the
+  // pointer is in it, and transparent again once it leaves.
+  private startPoll(): void {
+    if (this.pollTimer) return
+    this.pollTimer = setInterval(() => {
+      const win = this.win
+      if (!win || win.isDestroyed()) return this.stopPoll()
+      const point = screen.getCursorScreenPoint()
+      const b = win.getBounds()
+      const inside = point.x >= b.x && point.x < b.x + b.width && point.y >= b.y && point.y < b.y + b.height
+      this.interactive(inside)
+    }, 80)
+  }
+  private stopPoll(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = null
+    }
+    this.interactive(false)
   }
 }
