@@ -2144,8 +2144,8 @@ function WorkspaceFileSection(): ReactNode {
   const size = (n: number): string => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
   const now = health
     ? health.free >= 100_000
-      ? L(`${size(health.bytes)}, dos quais ${size(health.free)} são páginas livres que nada vai reaproveitar.`, `${size(health.bytes)}, of which ${size(health.free)} are free pages nothing will reuse.`)
-      : L(`${size(health.bytes)}, sem páginas livres presas.`, `${size(health.bytes)}, with no free pages held.`)
+      ? L(`${size(health.bytes)}, dos quais ${size(health.free)} são páginas livres que nada vai reaproveitar.`, `${size(health.bytes)}; ${size(health.free)} unused.`)
+      : L(`${size(health.bytes)}, sem páginas livres presas.`, `${size(health.bytes)}; no unused pages.`)
     : ''
   const check = health ? (health.sound ? L('O arquivo está íntegro.', 'The file is sound.') : L(`O arquivo não passou na verificação: ${health.said}`, `The file did not pass its check: ${health.said}`)) : ''
   const run = (): void => {
@@ -2162,9 +2162,9 @@ function WorkspaceFileSection(): ReactNode {
   }
   return (
     <div className="workspace-danger__section">
-      <h3>{L('O arquivo do workspace', 'The workspace file')}</h3>
+      <h3>{L('O arquivo do workspace', 'Database storage')}</h3>
       <p className="small muted">
-        {L('Tudo o que este Tucano sabe mora num arquivo só. Ele cresce a cada conversa e não devolve sozinho o espaço do que foi apagado.', 'Everything this Tucano knows lives in one file. It grows with every conversation, and it does not give back the space of what was deleted on its own.')}
+        {L('Tudo o que este Tucano sabe mora num arquivo só. Ele cresce a cada conversa e não devolve sozinho o espaço do que foi apagado.', 'Chat history and workspace records are stored in this database. Deleted data can leave unused space.')}
         {now ? ` ${now} ${check}` : ''}
       </p>
       <div className="row">
@@ -2176,7 +2176,7 @@ function WorkspaceFileSection(): ReactNode {
       <p className="small muted">
         {L(
           'Esvazia o log de escrita, reescreve o arquivo e atualiza as estatísticas do planejador: leva segundos e nada se perde. Não roda com uma resposta trabalhando, e o app fica ocupado até terminar.',
-          'Empties the write-ahead log, rebuilds the file and refreshes the planner’s statistics: it takes seconds and nothing is lost. It does not run while a reply is at work, and the app stays busy until it finishes.'
+          'Reclaim unused space without deleting records. Available while agents are idle; the app waits until maintenance finishes.'
         )}
       </p>
     </div>
