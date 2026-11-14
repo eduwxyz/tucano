@@ -179,19 +179,31 @@ describe('work handed down the tree', () => {
 
   it('does not hold the answers back for a request that waits on an approval of mine', async () => {
     const r = runner()
-    await r.send('dm', 'delegue a clara: fale com o Gabriel\ndelegue a nico: demore 2 s')
-    await until(() => db.liveDelegations(0).some((d) => d.to === 'clara' && d.state === 'done'))
-    // Clara is done, Nico still at it: Orion waits to tell it all at once.
-    expect(by('orion', 'dm')).toHaveLength(1)
-    // Nico's reply stops at an approval. That is mine to give, whenever: Clara's answer shouldn't sit behind it.
-    const nico = by('nico', 'eng').at(-1)!
-    db.saveMessage({ ...nico, run: { ...nico.run!, status: 'waiting_approval' } })
-    r.sweepDelegations()
-    await until(() => by('orion', 'dm').length === 2)
-    const told = codex.turns.at(-1)!.prompt
-    expect(told).toMatch(/Clara, #clientes: terminou/)
-    expect(told).toMatch(/Ainda em andamento: \[\w{8}\] Nico, #engenharia \(parado numa aprovação que espera Edu\)/)
-    expect(told).toContain('e o que espera uma aprovação dele')
+    // Nico stays in flight until the assertion, regardless of how busy the test host is.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const run = claude.run
+    claude.run = async function* (turn) {
+      if (turn.system.startsWith('Você é Nico')) await held
+      yield* run(turn)
+    }
+    try {
+      await r.send('dm', 'delegue a clara: fale com o Gabriel\ndelegue a nico: outra tarefa')
+      await until(() => db.liveDelegations(0).some((d) => d.to === 'clara' && d.state === 'done'))
+      // Clara is done, Nico still at it: Orion waits to tell it all at once.
+      expect(by('orion', 'dm')).toHaveLength(1)
+      // Nico's reply stops at an approval. That is mine to give, whenever: Clara's answer shouldn't sit behind it.
+      const nico = by('nico', 'eng').at(-1)!
+      db.saveMessage({ ...nico, run: { ...nico.run!, status: 'waiting_approval' } })
+      r.sweepDelegations()
+      await until(() => by('orion', 'dm').length === 2)
+      const told = codex.turns.at(-1)!.prompt
+      expect(told).toMatch(/Clara, #clientes: terminou/)
+      expect(told).toMatch(/Ainda em andamento: \[\w{8}\] Nico, #engenharia \(parado numa aprovação que espera Edu\)/)
+      expect(told).toContain('e o que espera uma aprovação dele')
+    } finally {
+      release()
+    }
     // When Nico's work does end, Orion hears of it, alone this time.
     await r.idle()
     expect(by('orion', 'dm')).toHaveLength(3)

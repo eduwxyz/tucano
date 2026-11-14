@@ -218,10 +218,10 @@ export function contextWindow(
   until = 0
 ): { messages: Message[]; threads: ThreadDigest[]; summary?: string; before?: Message[] } {
   const here = (m: Message): boolean => m.id !== before.id && m.at <= before.at && m.at > until
-  if (!before.threadId) return { messages: db.recentMessages(before.conversationId, limit + 40, null).filter(here).slice(-limit), threads: [] }
-  const recent = db.recentMessages(before.conversationId, limit + 40).filter(here)
+  if (!before.threadId) return { messages: db.recentMessages(before.conversationId, limit + 40, null, before.at + 1).filter(here).slice(-limit), threads: [] }
+  const recent = db.recentMessages(before.conversationId, limit + 40, undefined, before.at + 1).filter(here)
   const root = db.message(before.threadId)
-  const replies = db.recentMessages(before.conversationId, limit + 2, before.threadId).filter((m) => m.id !== before.id && m.at <= before.at)
+  const replies = db.recentMessages(before.conversationId, limit + 2, before.threadId, before.at + 1).filter((m) => m.id !== before.id && m.at <= before.at)
   const omitted = replies.length > limit
   const above = root ? onScreen(db, root) : []
   return {
@@ -376,8 +376,10 @@ export class Memories {
   // What a turn sees of the conversation (contextWindow): in a thread, the thread and its own
   // summary; outside threads, the conversation's summary and what came after it.
   window(conv: Conversation, before: Message): { summary?: string; messages: Message[]; threads: ThreadDigest[]; before?: Message[] } {
-    const w = contextWindow(this.deps.db, before, MAX_AFTER, conv.summaryUntil ?? 0)
-    return before.threadId ? w : { ...w, summary: conv.summary }
+    // Retrying an older reply must not read a summary of things that happened after it.
+    const summarized = (conv.summaryUntil ?? 0) < before.at
+    const w = contextWindow(this.deps.db, before, MAX_AFTER, summarized ? conv.summaryUntil : 0)
+    return before.threadId || !summarized ? w : { ...w, summary: conv.summary }
   }
 
   // ---------- short term: consolidation ----------

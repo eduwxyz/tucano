@@ -186,7 +186,8 @@ describe('a reply with a kept session', () => {
     expect(second!.blocks![0]).toMatch(/^\[Edu · .*\]\ne o job de ontem\?$/)
     expect(second!.prompt).not.toContain('Resposta de teste') // its own reply is in the session already
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
-  })
+    // Two replies through a real Db and the scheduler: 1.6 s here, 13.2 s on a loaded ubuntu runner.
+  }, 30_000)
 
   it('keeps one session per thread', async () => {
     db.createConversation({ id: 'c2', kind: 'channel', name: 'dados', members: ['a1'], threads: true })
