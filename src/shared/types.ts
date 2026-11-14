@@ -507,6 +507,7 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
 }

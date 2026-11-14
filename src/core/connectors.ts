@@ -215,6 +215,7 @@ interface Live {
 // What happened to the renewals of one connection attempt.
 interface Renewal {
   failed?: boolean // the token endpoint didn't answer, or answered with a server error: the sign-in may still be good
+  offline?: boolean // the authorization server offers `offline_access`: a sign-in that renews itself has to ask for it
 }
 
 type Answer = { status: number; statusText: string; headers: [string, string][]; body: string }
@@ -484,7 +485,7 @@ export class ConnectorManager {
           const token = await this.deps.secrets.get(key(id, 'token'))
           if (token) headers['Authorization'] = `Bearer ${await resolveOp(token, this.deps.readOp)}`
         }
-        const provider = c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined
+        const provider = c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own, renewal) : undefined
         const fetchFn = c.auth === 'oauth' ? this.renewingFetch(renewal) : undefined
         const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
           requestInit: { headers },
@@ -735,6 +736,25 @@ export class ConnectorManager {
   // server refused, and one that failed without saying the sign-in is bad (no answer, a server error).
   private renewingFetch(renewal: Renewal): typeof fetch {
     return async (input, init) => {
+      const address = input instanceof Request ? input.url : String(input)
+      // What the authorization server offers: read on its way to the SDK, which picks the scopes from the
+      // MCP server's own list and never looks here.
+      if (/\/\.well-known\/(oauth-authorization-server|openid-configuration)/.test(address)) {
+        const r = await fetch(input, init)
+        const meta = (await r.clone().json().catch(() => undefined)) as { scopes_supported?: unknown } | undefined
+        if (Array.isArray(meta?.scopes_supported) && meta.scopes_supported.includes('offline_access')) renewal.offline = true
+        return r
+      }
+      // Registering the app: the same scopes the sign-in will ask for.
+      if (renewal.offline && init?.method === 'POST' && typeof init.body === 'string') {
+        try {
+          const b = JSON.parse(init.body) as { redirect_uris?: unknown; scope?: unknown }
+          const scopes = typeof b.scope === 'string' ? b.scope.split(' ').filter(Boolean) : []
+          if (Array.isArray(b.redirect_uris) && !scopes.includes('offline_access')) init = { ...init, body: JSON.stringify({ ...b, scope: [...scopes, 'offline_access'].join(' ') }) }
+        } catch {
+          // not a registration: it goes as it is
+        }
+      }
       const form = init?.body instanceof URLSearchParams ? init.body : undefined
       const refreshToken = form?.get('grant_type') === 'refresh_token' ? form.get('refresh_token') : null
       if (!refreshToken) return fetch(input, init)
@@ -794,7 +814,7 @@ export class ConnectorManager {
   }
 
   // `own`: a server that signs in with the person's own app (Google's, Slack's) instead of registering one.
-  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app']): OAuthClientProvider {
+  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app'], renewal?: Renewal): OAuthClientProvider {
     const { secrets } = this.deps
     const redirectUrl = own ? this.redirectFor(own.provider) : this.deps.oauthCallbackUrl()
     // Signing in again (someone clicked Authorize) goes on past a saved value the system's key won't open:
@@ -847,6 +867,14 @@ export class ConnectorManager {
       codeVerifier: async () => (await secrets.get(key(id, 'oauth_verifier'))) ?? '',
       redirectToAuthorization: (page) => {
         if (!interactive) return // never pop a browser on a background reconnect
+        // A server that lists only its own scopes (Vercel's: "openid") gets a sign-in with no refresh token,
+        // which lasts as long as the access token: a day. Where the authorization server offers to stay
+        // signed in, the request asks for it.
+        if (!own && renewal?.offline) {
+          const scopes = (page.searchParams.get('scope') ?? '').split(' ').filter(Boolean)
+          if (!scopes.includes('offline_access')) page.searchParams.set('scope', [...scopes, 'offline_access'].join(' '))
+          if (!page.searchParams.has('prompt')) page.searchParams.set('prompt', 'consent')
+        }
         const url = own ? ownAuthorization(page, own) : page
         this.oauthStates.set(state || url.searchParams.get('state') || '', { connectorId: id, transport: transport() })
         this.authUrls.set(id, url.toString())
