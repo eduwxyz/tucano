@@ -247,10 +247,38 @@ describe('work handed down the tree', () => {
     await r.idle()
     expect(by('bento', 'eng').some((m) => m.text.includes('Clara já está esperando por este pedido'))).toBe(true)
     expect(by('bento', 'clientes')).toHaveLength(1) // only what came back: nothing was asked of Clara
-    // Nico answers to Bento: Duda is a colleague, Clara (Bento's own colleague) is out of reach.
+    // Nico answers to Bento: Duda is a colleague and Bento is one step up; Clara (Bento's own colleague) is out of reach.
     await r.send('dn', 'delegue a clara: qualquer coisa')
     await r.idle()
-    expect(by('nico', 'dn')[0]?.text).toContain('Você não alcança ninguém chamado "clara". Quem você alcança: @duda.')
+    expect(by('nico', 'dn')[0]?.text).toContain('Você não alcança ninguém chamado "clara". Quem você alcança: @duda, @bento.')
+  })
+
+  it('passes up to its own boss, and only heads ask another sector, through its head', async () => {
+    // Two sectors: Orion's (named Técnico) and Mira's (Financeiro) with Lino below it.
+    db.saveAgent(agent('orion', { modelId: 'gpt-5.6-luna', sectorName: 'Técnico', sectorDoes: 'Bugs e código' }))
+    db.saveAgent(agent('mira', { sectorName: 'Financeiro', sectorDoes: 'Cobranças' }))
+    db.saveAgent(agent('lino', { reportsTo: 'mira' }))
+    db.createConversation({ id: 'dl', kind: 'dm', name: 'lino', members: ['lino'] })
+    const r = runner()
+    // Lino can't reach the other sector: only its boss.
+    await r.send('dl', 'delegue a orion: veja o boleto')
+    await r.idle()
+    expect(by('lino', 'dl')[0]?.text).toContain('Você não alcança ninguém chamado "orion". Quem você alcança: @mira.')
+    expect(claude.turns[0]!.prompt).toContain('## Seu chefe\n@mira · Mira')
+    // Lino passes it up to Mira, told whose it is and what other sectors there are.
+    await r.send('dl', 'delegue a mira: veja o boleto')
+    await r.idle()
+    const mira = claude.turns.find((t) => t.prompt.includes('de Lino, do seu time, que passou isto a você'))!.prompt
+    expect(mira).toContain('## Seu setor\nSeu setor: Financeiro · resolve: Cobranças')
+    expect(mira).toContain('- @orion · Técnico · resolve: Bugs e código')
+    expect(by('lino', 'dl').at(-1)?.text).toBe('Pronto: o time terminou o que pedi.')
+    // Mira, a head, takes it to the Técnico's head, who is told it comes from the Financeiro.
+    db.createConversation({ id: 'dmira', kind: 'dm', name: 'mira', members: ['mira'] })
+    await r.send('dmira', 'delegue a orion: veja o boleto')
+    await r.idle()
+    expect(codex.turns.some((t) => t.prompt.includes('um pedido do Financeiro, via Mira: decida quem do seu setor faz'))).toBe(true)
+    expect(by('mira', 'dmira').at(-1)?.text).toBe('Pronto: o time terminou o que pedi.')
+    expect(db.openDelegations()).toEqual([])
   })
 
   it('stops a piece of work from stacking more than three requests', async () => {

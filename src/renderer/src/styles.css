@@ -763,6 +763,10 @@ h3 {
 .messages > :nth-last-child(-n + 3) .avatar__eyes i {
   animation-name: blink;
 }
+/* A still face (org chart cards) doesn't blink, so an idle board costs nothing. */
+.avatar.is-still .avatar__eyes i {
+  animation: none;
+}
 /* At work: the eyes read, left to right, and come back. */
 .avatar.is-busy .avatar__eyes {
   animation: read 1.8s var(--ease-out) infinite;
@@ -11479,6 +11483,206 @@ button.agent-card__now:hover {
   justify-content: center;
   border-radius: 10px;
 }
+/* Sectors: a tinted zone behind each head's branch, the head's badge, and the requests between heads. */
+.org-zone {
+  --z: var(--agent);
+  position: absolute;
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--z) 7%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--z) 28%, transparent);
+  pointer-events: none;
+  transition: background var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+.org-zone.is-picked {
+  background: color-mix(in srgb, var(--z) 11%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--z) 60%, transparent);
+}
+.org-zone__tag {
+  position: absolute;
+  z-index: 1; /* above the lines, so a line entering the zone runs under the sector's name */
+  left: 22px;
+  top: 16px;
+  right: 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  pointer-events: none;
+}
+.org-zone__name {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--z);
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: filter var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+.org-zone__name:hover {
+  filter: brightness(1.08);
+}
+.org-zone__name:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--z);
+}
+/* Amber is light: white text is unreadable on it, so dark text instead (zone name and side-panel mark). */
+.org-zone.c-amber .org-zone__name,
+.org-sector__mark.c-amber {
+  color: #1d1a16;
+  text-shadow: none;
+}
+.org-zone__does {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-2);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.org-zone__does b {
+  font-weight: 500;
+  color: var(--text);
+}
+.org-zone__does:not(.is-empty) {
+  pointer-events: auto; /* the title tooltip shows the full text */
+}
+.org-zone__does.is-empty {
+  color: var(--text-3);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.org-zone__does.is-empty:hover {
+  color: var(--text-2);
+  text-decoration: underline;
+}
+.org-card__head {
+  position: absolute;
+  top: -10px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--agent);
+  box-shadow: 0 0 0 2px var(--panel);
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  pointer-events: none;
+}
+.org-xline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 7 7;
+  animation: org-xflow 1s linear infinite;
+}
+@keyframes org-xflow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+.org-xlabel {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-lg);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.org-now__sector {
+  font-weight: 600;
+  color: var(--accent);
+}
+.org-now__boss {
+  color: var(--text-3);
+}
+.org-sector__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--agent);
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+}
+.org-sector__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.org-sector__head strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.org-sector__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.org-sector__text.is-calm {
+  color: var(--text-3);
+}
+.org-sector__saved {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 16px;
+  margin-top: -8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ok);
+}
+.org-sector__saved.is-on {
+  animation: org-side var(--dur-base) var(--ease-out);
+}
+.org-side .field {
+  margin-bottom: 14px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .org-xline,
+  .org-sector__saved.is-on {
+    animation: none;
+  }
+  .org-zone,
+  .org-zone__name {
+    transition: none;
+  }
+}
+
 .org-side {
   position: absolute;
   top: 16px;
