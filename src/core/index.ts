@@ -1439,6 +1439,28 @@ const api: Handlers = {
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
 
+  // The session behind a reply goes, and with it the thread that reply started (the answers it
+  // got) and any approval asked under it. Who may is whoever may manage the conversation: a DM's
+  // person, a channel's maker and the admins. A reply still at work is stopped first, and nothing
+  // it had written lands afterwards: it goes whole. What it spent stays in the receipts.
+  // A routine's post goes the same way. It is nobody's reply, so there is no run to stop: the ask it
+  // carried simply stops being in the room. The routine itself stays, and posts again next time.
+  deleteMessage: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
+    const m = db.message(messageId)
+    const run = m?.author.kind === 'agent' && m.run
+    const routine = m?.author.kind === 'routine'
+    if (!m || (!run && !routine)) return []
+    manage(ctx, m.conversationId)
+    const gone = db.deleteMessage(messageId)
+    // A completed parent may still have replies running in its thread.
+    for (const id of gone) runner.drop(id)
+    for (const id of gone) emit({ type: 'message_removed', id, conversationId: m.conversationId })
+    const who = m.author.kind === 'agent' || m.author.kind === 'routine' ? m.author.id : undefined
+    record(ctx, 'session.deleted', m.conversationId, { message: messageId, agent: who, routine, went: gone.length })
+    return gone
+  },
+
   setAgentModels: ({ agentIds, modelId }, ctx) => {
     const value = modelId.trim()
     const model = modelInfo(value)

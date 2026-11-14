@@ -49,6 +49,7 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  deleteMessage,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -583,6 +584,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {replies && <ThreadLink message={message} replies={replies} />}
+        {agent && message.run && <DeleteSession message={message} />}
       </div>
     </article>
   )
@@ -620,6 +622,9 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
         <div className="md">
           <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(message.text)}</MessageMarkdown>
         </div>
+        {/* The post can go from here: two presses, the same as a session's trash. The routine keeps its
+            slot and posts again next time; only this one lands out of the room. */}
+        <DeleteSession message={message} where="post" />
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
@@ -663,6 +668,71 @@ function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): Rea
         return <MeAvatar key={a.kind === 'person' ? a.id : 'me'} initials={other ? initials(other) : me.initials} size={18} />
       })}
     </span>
+  )
+}
+
+// How long the first press of the trash counts: the second has to come while the glyph is still red.
+const ARM_MS = 4000
+
+// A session's reply can be deleted from the room: the trash under the thread button, in two presses.
+// The first arms it — the glyph goes red and says what the next press does — and the second deletes
+// the reply, with the thread it started and the answers it got there. A press anywhere else, Esc, or
+// four seconds without the second press disarms it. A reply still at work goes too: the press stops
+// it first, and the words it had written go with it, so the glyph says so.
+// `where`: at the corner of a reply ('corner'), or in the thread's own header ('head'), where it sits
+// in the row beside the summary and close buttons and the panel closes with the session it deleted.
+export function DeleteSession({ message, where = 'corner' }: { message: Message; where?: 'corner' | 'head' | 'post' }): ReactNode {
+  const head = where === 'head'
+  const post = where === 'post'
+  const [armed, setArmed] = useState(false)
+  // Stopping is part of it only when something runs under the row, so the wording says so.
+  const at = message.run?.status === 'working'
+  // A routine's post is not a session: nothing ran under it, and the routine goes on posting after it
+  // is gone. The wording says post, so the press reads as removing the post rather than ending work.
+  const routine = post || message.author.kind === 'routine'
+  const label = routine ? L('Apagar esta publicação', 'Delete this post') : L('Apagar esta sessão', 'Delete this session')
+  const armedLabel = at
+    ? L('Clique de novo para parar e apagar a sessão', 'Click again to stop and delete the session')
+    : routine
+      ? L('Clique de novo para apagar a publicação', 'Click again to delete the post')
+      : L('Clique de novo para apagar a sessão', 'Click again to delete the session')
+  const confirmLabel = routine ? L('Confirmar: apagar a publicação', 'Confirm: delete the post') : L('Confirmar: apagar a sessão', 'Confirm: delete the session')
+  useEffect(() => {
+    if (!armed) return
+    const timer = setTimeout(() => setArmed(false), ARM_MS)
+    const away = (e: MouseEvent): void => {
+      if (!(e.target instanceof Element && e.target.closest('.msg__delete'))) setArmed(false)
+    }
+    const escape = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setArmed(false)
+    }
+    window.addEventListener('mousedown', away)
+    window.addEventListener('keydown', escape)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('mousedown', away)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [armed])
+  const press = (): void => {
+    if (!armed) {
+      setArmed(true)
+      return
+    }
+    deleteMessage(message.id)
+    // The header's trash takes the panel's own session away: nothing is left to read there.
+    if (head) openPanel(null)
+  }
+  return (
+    <button
+      className={`icon-btn ${head ? 'msg__delete--head' : 'icon-btn--sm'} msg__delete ${post ? 'msg__delete--post' : ''} ${armed ? 'is-armed' : ''}`}
+      title={armed ? armedLabel : label}
+      aria-label={armed ? confirmLabel : label}
+      aria-pressed={armed}
+      onClick={press}
+    >
+      <Icon name="trash" size={head ? 14 : 13} />
+    </button>
   )
 }
 
@@ -800,6 +870,10 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
             <Icon name="book" size={14} />
           </button>
         )}
+        {/* The session this thread hangs off can go from here too, beside the button that closes it:
+            one press arms it, the second deletes the reply and the thread with it, and the panel
+            closes because there is nothing left in it. */}
+        {root && root.author.kind === 'agent' && root.run && <DeleteSession message={root} where="head" />}
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>

@@ -307,6 +307,8 @@ export class People {
         const c = this.db.messageConversation(event.id)
         return c && conversation(c) && this.visibleAt(person, this.db.message(event.id) ?? { conversationId: c, at: Infinity }) ? event : undefined
       }
+      case 'message_removed':
+        return conversation(event.conversationId) ? event : undefined
       case 'conversation': {
         if (!this.canSeeConversation(person, event.conversation)) return undefined
         const mine = this.db.conversation(event.conversation.id, person.id)
