@@ -15,7 +15,7 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type CodexQuota, type Quota, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
@@ -76,6 +76,9 @@ import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
+import { checkKey, loginsOf, quotaWindows, spentQuota } from '../shared/accounts'
+import { readQuota } from './account-check'
+import { outOfQuota } from './engines/cli'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
 import { companyNetwork } from './network'
@@ -296,10 +299,13 @@ const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
 
+// Checks of a login's windows (key: login id, '' the usual one): the one running, or the last that failed.
+const accountChecks = new Map<string, { state: 'checking' | 'failed'; at: number }>()
+const lastCheck = new Map<string, number>()
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })), ...(accountChecks.size ? { accountChecks: Object.fromEntries(accountChecks) } : {}) }
 }
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
@@ -317,6 +323,7 @@ async function checkAccounts(only?: string, engine?: EngineId): Promise<void> {
         else accountLogins.set(a.id, bin ? await accountStatus(a.engine, bin, accountDir(dataDir, a.id)) : { loggedIn: false })
       })
   )
+  if (settings().accountUse === 'balance') checkLogins() // a login just seen signed in gets its check
 }
 let watchingAccount: NodeJS.Timeout | null = null
 function watchAccount(id: string): void {
@@ -350,6 +357,102 @@ function refreshCodexQuota(): void {
 // A harness that moved since it was found (an update to another folder) is looked for again.
 function moved(id: EngineId): Parameters<typeof relocating>[1] {
   return { path: () => engines[id].path, label: ENGINES[id].label, redetect: () => detect().then(() => undefined) }
+}
+
+// What a login reported, or that it hit its limit, kept under its id ('' / undefined: the usual one).
+function storeQuota(accountId: string | undefined, quota: Quota | CodexQuota): void {
+  if (!accountId) db.setSettings('windows' in quota ? { codexQuota: quota } : { quota })
+  else if (savedAccounts().some((a) => a.id === accountId)) db.setSettings({ accountQuota: { ...(settings().accountQuota ?? {}), [accountId]: quota } })
+  emit({ type: 'settings', settings: settings() })
+}
+function storeSpent(accountId?: string): void {
+  const now = Date.now()
+  const prev = accountId ? settings().accountQuota?.[accountId] : settings().quota
+  if (prev && 'windows' in prev) return // Codex's windows aren't Claude's
+  if (!accountId) db.setSettings({ quota: spentQuota(prev, now) })
+  else if (savedAccounts().some((a) => a.id === accountId)) db.setSettings({ accountQuota: { ...(settings().accountQuota ?? {}), [accountId]: spentQuota(prev, now) } })
+  emit({ type: 'settings', settings: settings() })
+}
+
+// A login that never reported its windows gets a check before it is ever chosen: a minimal turn on
+// Claude, the app-server's own read on Codex. One at a time, so two CLIs never run together.
+let checkChain: Promise<void> = Promise.resolve()
+// A check's result is kept only while its login is still there: an account removed meanwhile leaves no entry.
+const stillSignedIn = (id: string): boolean => !id || savedAccounts().some((a) => a.id === id)
+async function runCheck(engine: 'claude' | 'codex', id: string): Promise<void> {
+  const account = id ? accountDir(dataDir, id) : undefined
+  const key = checkKey(engine, id)
+  const failed = (): void => {
+    if (stillSignedIn(id)) accountChecks.set(key, { state: 'failed', at: Date.now() })
+  }
+  try {
+    if (engine === 'codex') {
+      const quota = await engineImpls.codex.planUsage?.(account)
+      if (!quota || !quotaWindows(quota)) return failed()
+      storeQuota(id, quota)
+      return void accountChecks.delete(key)
+    }
+    const m = usable(modelInfo(settings().routerModel))
+    const model = m && m.engine === 'claude' ? m.id : (modelInfo('haiku')?.id ?? 'haiku')
+    const cwd = join(dataDir, 'agents', 'accounts')
+    mkdirSync(cwd, { recursive: true })
+    const started = Date.now()
+    const r = await readQuota(engineImpls.claude, { model, cwd, ...(account ? { account } : {}) })
+    if (r.usage) db.addReceipt({ ...r.usage, model, ms: Date.now() - started, messageId: randomUUID(), agentId: 'accounts', engine: 'claude', at: Date.now() })
+    // A reply without windows says nothing about the limits: it is a failure, not a quota.
+    if (r.quota && quotaWindows(r.quota)) {
+      storeQuota(id || undefined, r.quota)
+      accountChecks.delete(key)
+    } else if (r.error && outOfQuota(r.error)) {
+      storeSpent(id || undefined) // out for now is an answer too
+      accountChecks.delete(key)
+    } else {
+      failed()
+    }
+  } catch {
+    failed()
+  }
+}
+// `id` '' is the usual login. No-op when it isn't signed in or is already being checked. A check that
+// hangs is given up after 90 seconds, so the checks behind it still run.
+function checkLogin(engine: 'claude' | 'codex', id: string): Promise<void> {
+  const key = checkKey(engine, id)
+  if (accountChecks.get(key)?.state === 'checking' || !loginsOf(settings(), engine).some((l) => l.id === id)) return Promise.resolve()
+  accountChecks.set(key, { state: 'checking', at: Date.now() })
+  lastCheck.set(key, Date.now())
+  emit({ type: 'settings', settings: settings() })
+  const bounded = (): Promise<void> => {
+    let timer: NodeJS.Timeout
+    return Promise.race([runCheck(engine, id), new Promise<void>((done) => {
+      timer = setTimeout(() => {
+        if (stillSignedIn(id)) accountChecks.set(key, { state: 'failed', at: Date.now() })
+        done()
+      }, 90_000)
+    })]).finally(() => clearTimeout(timer))
+  }
+  const run = checkChain.then(bounded).finally(() => emit({ type: 'settings', settings: settings() }))
+  checkChain = run.catch(() => {})
+  return run
+}
+// Automatic checks (not `force`) only run when the agents may run (not paused, out of quiet hours). Each
+// login without windows is checked at most every 10 minutes, and one whose check failed waits 6 hours.
+// The usual login of a harness is checked only on a ChatGPT or Claude plan: an API key reports no windows.
+// `force` ignores all of that. Only for a harness with more than one login, unless forced.
+function checkLogins(force = false): void {
+  const s0 = settings()
+  if (!force && (s0.paused || inQuietHours(s0.quietHours))) return
+  for (const engine of ['claude', 'codex'] as const) {
+    const s = settings()
+    const logins = loginsOf(s, engine)
+    if (logins.length < 2 && !force) continue
+    for (const l of logins) {
+      if (!force && l.id === '' && s.engines[engine]?.route !== 'plan') continue
+      const key = checkKey(engine, l.id)
+      const since = Date.now() - (lastCheck.get(key) ?? 0)
+      if (!force && (l.windows?.length || since < 10 * 60_000 || (accountChecks.get(key)?.state === 'failed' && since < 6 * 60 * 60_000))) continue
+      void checkLogin(engine, l.id).catch(() => {})
+    }
+  }
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
@@ -965,15 +1068,14 @@ const runner = new Runner({
   },
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
-  onQuota: (quota) => {
-    db.setSettings({ quota })
-    emit({ type: 'settings', settings: settings() })
-  }
+  onQuota: (quota, accountId) => storeQuota(accountId, quota),
+  onSpent: storeSpent
 })
 runner.setPaused(!!settings().paused)
 // Installs from before the Tuca get him at the first start after the introduction.
 void enginesReady.then(() => {
   if (settings().onboarding?.done) ensureTuca()
+  if (settings().accountUse === 'balance') checkLogins()
 })
 
 if (defaultWorkspace) telegram = new Telegram({
@@ -1758,6 +1860,7 @@ const api: Handlers = {
   report: ({ week }) => report(db, Date.now(), week),
   usage: () => {
     refreshCodexQuota()
+    checkLogins()
     return usage(db)
   },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
@@ -1862,6 +1965,7 @@ const api: Handlers = {
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })
+    if (patch.accountUse === 'balance') checkLogins()
   },
 
   // Validation errors come back to the form; connecting continues in the background.
@@ -2373,10 +2477,19 @@ const api: Handlers = {
     watchAccount(a.id)
     return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
   },
+  // Reads that login's windows now, whatever the last check said.
+  checkAccount: ({ id, engine }) => {
+    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error('Invalid engine')
+    void checkLogin(engine, id).catch(() => {}) // it runs on; the settings events tell how it goes
+  },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
   removeAccount: ({ id }) => {
-    db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
+    const quotas = { ...(settings().accountQuota ?? {}) }
+    delete quotas[id]
+    db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id), accountQuota: quotas })
     accountLogins.delete(id)
+    accountChecks.delete(id)
+    lastCheck.delete(id)
     for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
       const rest = { ...agent }
       if (rest.accountId === id) delete rest.accountId

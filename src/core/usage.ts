@@ -2,7 +2,7 @@
 import { countedTokens, type EngineId, type UsageReport } from '../shared/types'
 import { monthStart, type Db } from './db'
 
-const APP = new Set(['router', 'memory']) // the app's own turns, not replies
+const APP = new Set(['router', 'memory', 'accounts']) // the app's own turns, not replies
 
 export function usage(db: Db, now = new Date()): UsageReport {
   const start = monthStart(now)

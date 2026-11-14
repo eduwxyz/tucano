@@ -23,6 +23,7 @@ import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
+import { leftOf, loginsOf, pickLogin, USUAL_LOGIN } from '../shared/accounts'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
@@ -247,7 +248,8 @@ export interface RunnerDeps {
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
-  onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
+  onQuota?: (q: Quota, accountId?: string) => void // the subscription's windows, as the CLI reports them; accountId unset: the usual login's
+  onSpent?: (accountId?: string) => void // a Claude login just hit its limit; accountId unset: the usual login
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
@@ -345,6 +347,7 @@ export class Runner {
   private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
   private routing = 0
+  private lastLogin = new Map<string, string>() // agent id → the login its last reply ran on, when balancing
   private controllers = new Map<string, Control>()
   private held = new Map<string, Promise<void>>() // by agent: its replies on an engine that keeps the MCP connection
   private paused = false // "Pausar tudo": nobody starts working until it's off
@@ -1048,6 +1051,15 @@ export class Runner {
 
     // Another login of this harness (Settings › Accounts), when the agent has one.
     let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    // Balancing: the signed-in login with the most left, not the agent's own (its own wins a tie).
+    const balancing = settings.accountUse === 'balance'
+    if (balancing) {
+      const logins = loginsOf(settings, engineId)
+      if (logins.length > 1) {
+        account = pickLogin(logins, { now: Date.now(), current: this.lastLogin.get(agent.id), prefer: agent.accountId ?? USUAL_LOGIN })?.account
+        this.lastLogin.set(agent.id, account?.id ?? USUAL_LOGIN)
+      }
+    }
     if (account && !account.loggedIn) {
       save({
         run: {
@@ -2248,7 +2260,8 @@ ${note}`,
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
-    let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
+    let lost: SessionPlan | undefined // given up on in the middle (the reserve, or another login, took the reply)
+    const failed = new Set<string>() // the logins that hit their limit in this reply
     // An engine whose daemon holds the MCP connection between turns keeps the URL it was given
     // (Hermes): its token is the agent's, not the turn's. Every other engine gets a fresh one, or
     // the token of the session it keeps.
@@ -2302,7 +2315,7 @@ ${note}`,
                 if (counted > budget * BUDGET_OVERRUN) halt('budget')
               }
             } else if (ev.type === 'quota') {
-              if (!account) this.deps.onQuota?.(ev.quota) // the windows shown are the usual login's
+              this.deps.onQuota?.(ev.quota, account?.id)
             } else if (ev.type === 'web') {
               // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
               acted = true
@@ -2321,13 +2334,48 @@ ${note}`,
         }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
-        const reserve = !onReserve && !result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
+        const quotaOut = !!(!result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error))
+        // Balancing: a Claude login that hit its limit sits out for a while, once per reply.
+        if (balancing && quotaOut && engineId === 'claude' && !failed.has(account?.id ?? USUAL_LOGIN)) {
+          failed.add(account?.id ?? USUAL_LOGIN)
+          this.deps.onSpent?.(account?.id)
+        }
+        // Balancing: another login of the same harness takes the reply on the same model first. Each login once.
+        if (balancing && !onReserve && quotaOut) {
+          failed.add(account?.id ?? USUAL_LOGIN)
+          const now = Date.now()
+          const next = pickLogin(loginsOf(settings, engineId).filter((l) => leftOf(l, now) > 0), { now, skip: failed, prefer: agent.accountId ?? USUAL_LOGIN })
+          if (next) {
+            const nameOf = (a: Account | undefined): string => a?.name ?? L('de sempre', 'usual')
+            const was = nameOf(account)
+            flush()
+            msg.text = ''
+            lost = plan ?? lost
+            plan = undefined
+            input = whole
+            account = next.account
+            this.lastLogin.set(agent.id, next.id)
+            addSteps({
+              id: randomUUID(),
+              label: L('Foi pra outra conta', 'Moved to another account'),
+              detail: L(`A conta ${was} está sem limite agora; segue na conta ${nameOf(account)}`, `The ${was} account is out of quota for now; going on with the ${nameOf(account)} account`),
+              status: 'done'
+            })
+            error = null
+            thrown = undefined
+            progress = { tokens: 0, cacheRead: 0 }
+            continue
+          }
+        }
+        const found = !onReserve && quotaOut ? this.reserveFor(agent, settings, account) : undefined
+        // Not on a login that already hit its limit in this reply.
+        const reserve = found && found.model.engine === engineId && failed.has(found.account?.id ?? USUAL_LOGIN) && found.model.id === modelId ? undefined : found
         if (!reserve) break
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
         msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text
         // The reserve starts from the whole conversation: the session stays with the main model.
-        lost = plan
+        lost = plan ?? lost
         plan = undefined
         input = whole
         onReserve = true

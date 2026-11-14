@@ -6,6 +6,7 @@ import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, messageB
 import { Sheet } from './Pages'
 import { AdminOnly } from './People'
 import { AgentAvatar, duration, Icon, tokens, usd } from './ui'
+import { AccountsQuota, useManyLogins } from './UsageAccounts'
 
 const DAY = 86_400_000
 const APP = 'app' // the chart's one color for the app's own turns: router, memory, the Tuca
@@ -58,6 +59,8 @@ export function UsagePage(): ReactNode {
   const admin = useStore(amAdmin)
   useEffect(() => void (admin && loadUsage().then(setU)), [count, admin])
   const billing = useBilling(u)
+  const manyClaude = useManyLogins('claude')
+  const manyCodex = useManyLogins('codex')
   const allPlan = billing.length > 0 && billing.every((b) => b.status.route === 'plan')
 
   const subtitle = (
@@ -89,8 +92,8 @@ export function UsagePage(): ReactNode {
       ) : (
         <>
           <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
-          {billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
-          {billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
+          {manyClaude ? <AccountsQuota engine="claude" /> : billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
+          {manyCodex ? <AccountsQuota engine="codex" /> : billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
           <Agents u={u} />
           <div className="usage-grid">
             <Models u={u} />
@@ -275,7 +278,7 @@ function CodexQuota(): ReactNode {
   )
 }
 
-const windowLabel = (minutes: number): string =>
+export const windowLabel = (minutes: number): string =>
   minutes === 10_080
     ? L('Semana', 'Week')
     : minutes === 1440
@@ -286,7 +289,7 @@ const windowLabel = (minutes: number): string =>
         ? L(`Janela de ${minutes / 60} horas`, `${minutes / 60}-hour window`)
         : L(`Janela de ${minutes} min`, `${minutes}-minute window`)
 
-function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt: number } }): ReactNode {
+export function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt: number } }): ReactNode {
   const pct = Math.min(1, Math.max(0, w.utilization))
   const r = 22
   const c = 2 * Math.PI * r
@@ -430,9 +433,10 @@ function Backstage({ u }: { u: UsageReport }): ReactNode {
   const of = (id?: string): number => (id ? (u.who.find((w) => w.id === id)?.tokens ?? 0) : 0)
   const rows = [
     { key: 'router', name: L('Roteador', 'Router'), what: L('escolhe quem responde nos canais', 'picks who replies in channels'), tokens: of('router') },
+    { key: 'accounts', name: L('Teste das contas', 'Account checks'), what: L('lê quanto cada conta ainda tem', 'reads how much each account has left'), tokens: of('accounts') },
     { key: 'memory', name: L('Memória', 'Memory'), what: L('resume conversas e sugere memórias', 'summarizes conversations and suggests memories'), tokens: of('memory') },
     ...(tuca ? [{ key: 'tuca', name: 'Tuca', what: L('te ajuda com o Tucano e monta agentes', 'helps you with Tucano and builds agents'), tokens: of(tuca.id) }] : [])
-  ]
+  ].filter((r) => r.key !== 'accounts' || r.tokens > 0)
   const total = rows.reduce((a, r) => a + r.tokens, 0)
   return (
     <section className="read-group usage-card">

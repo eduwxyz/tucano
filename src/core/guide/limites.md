@@ -23,6 +23,13 @@ O botão de pausa no topo da barra lateral pausa o workspace: nenhum agente come
 ## Horário de silêncio
 Em **Configurações › Agentes** › **Rotinas** › **Horário de silêncio**: rotinas e gatilhos esperam e rodam quando ele acaba. O que você mandar continua sendo respondido.
 
+## Como usar as contas
+Em **Configurações › Modelos › Contas** fica **Como usar as contas**, com duas opções:
+- **Cada agente na conta dele**: cada agente roda na conta dele; o **Modelo reserva** assume quando ela acaba.
+- **Equilibrar entre as contas**: cada resposta vai pra conta já conectada, do motor do agente, que tem mais sobrando. Ela continua na mesma conta enquanto a diferença é pequena, porque trocar de conta reenvia a conversa inteira. Quando uma bate no limite, a resposta passa pra próxima conta; só quando todas acabam entra o modelo reserva.
+
+**Uso e limites** mostra as janelas de cada conta. Uma conta só é escolhida depois que o Tucano sabe quanto ela tem: ao ligar **Equilibrar entre as contas** ou abrir **Uso e limites**, ele testa cada conta sem dados com uma mensagem mínima (no Codex, sem gastar nada) e mostra o resultado. Se o teste falhar, dá pra **Testar de novo** ali.
+
 ## Quando dá errado
 - "Parou no limite": suba o limite do agente ou espere o mês virar.
 - A assinatura do Claude ou do ChatGPT acabou: o agente para; um **Modelo reserva** em outra conta ou outro motor assume (veja **motores**).
