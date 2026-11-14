@@ -192,7 +192,7 @@ export function CardView({ card, feed, full, open, act, onOpen, onClose, onDecid
         </div>
       )}
 
-      {act && card.kind === 'approval' && approval && (
+      {(act || card.preview) && card.kind === 'approval' && approval && (
         <div className="nc__actions" onClick={stop}>
           <HoldApprove onApprove={() => onDecide(card, 'approved')} />
           <button className="btn btn--xs" onClick={() => onDecide(card, 'refused')}>
@@ -210,7 +210,7 @@ export function CardView({ card, feed, full, open, act, onOpen, onClose, onDecid
         </div>
       )}
 
-      {act && card.kind === 'ask' && card.ask?.decisions?.length ? (
+      {(act || card.preview) && card.kind === 'ask' && card.ask?.decisions?.length ? (
         <div className="nc__block nc__block--ask" onClick={stop}>
           {/* The app's own card: the decisions one at a time, its options, the arrows, and Send. */}
           <AskCard id={card.ask.id} questions={card.ask.decisions} saved={card.ask.answers} mode="answer" badge={L('Esperando você', 'Waiting for you')} />
