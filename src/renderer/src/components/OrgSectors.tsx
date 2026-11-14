@@ -4,11 +4,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { askKind, channelsOf, headsOf, reportsOf, sectorName, type AskKind } from '../../../shared/org'
-import { BOARD, boundsOf, type Point } from '../../../shared/org-layout'
+import { BOARD, boundsOf, ZONE_PAD, type Point } from '../../../shared/org-layout'
 import { navigate, openDm, openThread, saveAgent, useStore, type Agent, type Delegation } from '../store'
 import { ago, AgentAvatar, Icon, ownColor } from './ui'
 
-const PAD_SIDE = 32 // what a zone keeps around its cards
+const PAD_SIDE = ZONE_PAD // what a zone keeps around its cards; the board leaves room for two of them between sectors
 const PAD_TOP = 68 // above the head card: the chip fits there
 const PAD_BOTTOM = 32
 const DOES_ROOM = 520 // a zone this wide has room for what it solves, beside the chip

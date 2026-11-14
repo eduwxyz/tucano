@@ -14,6 +14,8 @@ export interface OrgSizes {
   stackGap: number // between stacked cards
   indent: number // how far a stack sits to the right of its boss's left edge
   r: number // the corner of a line
+  rootGap?: number // between the trees at the top (each a sector, with its zone around it); unset: gapX
+  rootDrop?: number // more room between me and the tops, for the top of their zones; unset: none
 }
 export const ORG_SIZES: OrgSizes = { w: 220, h: 72, gapX: 28, gapY: 48, stackGap: 12, indent: 34, r: 10 }
 
@@ -54,7 +56,7 @@ export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgS
     return `M${x1} ${y1}V${mid - r}Q${x1} ${mid} ${x1 + dir * r} ${mid}H${x2 - dir * r}Q${x2} ${mid} ${x2} ${mid + r}V${y2}`
   }
   // Places the branch in the box starting at (x, y); returns the middle of its own card, for the line from above.
-  const place = (id: string, kids: OrgNode<T>[], pile: boolean, x: number, y: number, width: number): number => {
+  const place = (id: string, kids: OrgNode<T>[], pile: boolean, x: number, y: number, width: number, gap = s.gapX): number => {
     if (!kids.length) {
       nodes.push({ id, x, y })
       return x + s.w / 2
@@ -71,22 +73,23 @@ export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgS
       return x + s.w / 2
     }
     const sizes = kids.map(size)
-    const total = sizes.reduce((a, k) => a + k.w, 0) + s.gapX * (kids.length - 1)
-    const ky = y + s.h + s.gapY
+    const total = sizes.reduce((a, k) => a + k.w, 0) + gap * (kids.length - 1)
+    const ky = y + s.h + s.gapY + (id === ME ? s.rootDrop ?? 0 : 0)
     let kx = x + (width - total) / 2
     const anchors = kids.map((k, i) => {
       const at = place(k.agent.id, k.kids, stacked(k), kx, ky, sizes[i]!.w)
-      kx += sizes[i]!.w + s.gapX
+      kx += sizes[i]!.w + gap
       return at
     })
     const cx = (anchors[0]! + anchors.at(-1)!) / 2
     nodes.push({ id, x: cx - s.w / 2, y })
-    anchors.forEach((at, i) => edges.push({ from: id, to: kids[i]!.agent.id, d: elbow(cx, y + s.h, at, ky, y + s.h + s.gapY / 2) }))
+    anchors.forEach((at, i) => edges.push({ from: id, to: kids[i]!.agent.id, d: elbow(cx, y + s.h, at, ky, y + s.h + (ky - y - s.h) / 2) }))
     return cx
   }
   const sizes = roots.map(size)
-  const width = Math.max(s.w, sizes.reduce((a, k) => a + k.w, 0) + s.gapX * Math.max(0, roots.length - 1))
-  place(ME, roots, false, 0, 0, width)
+  const rootGap = s.rootGap ?? s.gapX
+  const width = Math.max(s.w, sizes.reduce((a, k) => a + k.w, 0) + rootGap * Math.max(0, roots.length - 1))
+  place(ME, roots, false, 0, 0, width, rootGap)
   // A lone card sits in the middle of nothing; with roots, its place came from theirs.
   const left = Math.min(...nodes.map((n) => n.x))
   if (left < 0) for (const n of nodes) n.x -= left
@@ -109,7 +112,11 @@ export function pathBetween(bossOfId: (id: string) => string | undefined, from: 
 }
 
 // ---------- the board: cards anywhere, a view that pans and zooms ----------
-export const BOARD: OrgSizes = { w: 248, h: 92, gapX: 36, gapY: 76, stackGap: 0, indent: 0, r: 0 }
+// What a sector's zone keeps around its cards, at the sides (OrgSectors.tsx draws it).
+export const ZONE_PAD = 32
+// Two sectors side by side stay a branch's gap apart once each has its zone around it: the zones never overlap.
+// And I sit clear of the top of the zones, where each sector's name is.
+export const BOARD: OrgSizes = { w: 248, h: 92, gapX: 36, gapY: 76, stackGap: 0, indent: 0, r: 0, rootGap: 36 + ZONE_PAD * 2, rootDrop: 48 }
 
 export interface Point {
   x: number
