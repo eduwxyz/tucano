@@ -2076,7 +2076,7 @@ export function BackupCard(): ReactNode {
       `${n(s.agents, 'agente', 'agentes')}, ${n(s.channels, 'canal', 'canais')}, ${n(s.messages, 'mensagem', 'mensagens')}, ${n(s.memories, 'memória', 'memórias')}, ${n(s.wikiPages, 'página da wiki', 'páginas da wiki')} e ${n(s.files, 'arquivo', 'arquivos')}`,
       `${n(s.agents, 'agent', 'agents')}, ${n(s.channels, 'channel', 'channels')}, ${n(s.messages, 'message', 'messages')}, ${n(s.memories, 'memory', 'memories')}, ${n(s.wikiPages, 'wiki page', 'wiki pages')} and ${n(s.files, 'file', 'files')}`
     )
-  const day = (at: number): string => new Date(at).toLocaleDateString(L('pt-BR', 'en'))
+  const day = (at: number): string => new Date(at).toLocaleDateString(locale())
   const exportAll = (): void => {
     setBusy(true)
     setNote(L('Preparando o arquivo…', 'Preparing the file…'))
@@ -2154,8 +2154,8 @@ export function BackupCard(): ReactNode {
       {web && info && (
         <p className="small" style={{ whiteSpace: 'pre-line' }}>
           {L(
-            `Backup restaurado em ${new Date(info.at).toLocaleString('pt-BR')}. Falta:\n• conferir se a sua IA está conectada aqui (Configurações › Modelos)\n• reconectar os conectores (Conectores)${info.routines ? `\n• ligar as rotinas que quiser aqui (${info.routines} chegaram desligadas, pra não rodarem em dobro com o computador)` : ''}`,
-            `Backup restored on ${new Date(info.at).toLocaleString('en')}. Left to do:\n• check that your AI is signed in here (Settings › Models)\n• reconnect the connectors (Connectors)${info.routines ? `\n• turn on the routines you want here (${info.routines} came in off, so they don't run twice with your computer)` : ''}`
+            `Backup restaurado em ${new Date(info.at).toLocaleString(locale())}. Falta:\n• conferir se a sua IA está conectada aqui (Configurações › Modelos)\n• reconectar os conectores (Conectores)${info.routines ? `\n• ligar as rotinas que quiser aqui (${info.routines} chegaram desligadas, pra não rodarem em dobro com o computador)` : ''}`,
+            `Backup restored on ${new Date(info.at).toLocaleString(locale())}. Left to do:\n• check that your AI is signed in here (Settings › Models)\n• reconnect the connectors (Connectors)${info.routines ? `\n• turn on the routines you want here (${info.routines} came in off, so they don't run twice with your computer)` : ''}`
           )}
         </p>
       )}
