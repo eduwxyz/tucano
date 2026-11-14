@@ -703,6 +703,15 @@ h3 {
   width: 20px;
   height: 20px;
 }
+.icon-btn:disabled {
+  color: var(--text-3);
+  opacity: 0.4;
+  cursor: default;
+}
+.icon-btn:disabled:hover {
+  background: none;
+  color: var(--text-3);
+}
 
 /* ---------- avatars ---------- */
 .avatar {

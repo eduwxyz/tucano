@@ -111,6 +111,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   back: <path d="M19 12H5M11 6l-6 6 6 6" />,
+  forward: <path d="M5 12h14M13 6l6 6-6 6" />,
   hand: <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5-2.7L3 15.5a1.6 1.6 0 0 1 2.6-1.8L8 16" />,
   expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />,
   users: (
