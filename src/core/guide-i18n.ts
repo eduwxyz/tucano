@@ -75,6 +75,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Routines',
     summary: 'An agent working on its own: at a time, when something new appears in a connector, or when called on this computer.'
   },
+  setores: {
+    title: "Sectors (when the subject is another area's)",
+    summary: 'Each team on the board is a sector with a head. How to name it, say what it solves and how a request passes from one sector to another.'
+  },
   servidor: {
     title: 'Tucano on a server',
     summary: 'Running Tucano on a server of your own (a VPS or a machine at home) and using it through the browser: installing, reaching it, keeping it running and what changes.'

@@ -1479,6 +1479,15 @@ const api: Handlers = {
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
+    // A sector's name and what it solves (on its head): trimmed and capped; empty clears it. Absent keeps the stored one (other callers don't send them).
+    const sectorName = (clean.sectorName === undefined ? db.agent(clean.id)?.sectorName : clean.sectorName)
+    const nameNext = typeof sectorName === 'string' ? sectorName.trim().slice(0, 40) : ''
+    if (nameNext) clean.sectorName = nameNext
+    else delete clean.sectorName
+    const sectorDoes = (clean.sectorDoes === undefined ? db.agent(clean.id)?.sectorDoes : clean.sectorDoes)
+    const doesNext = typeof sectorDoes === 'string' ? sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
+    if (doesNext) clean.sectorDoes = doesNext
+    else delete clean.sectorDoes
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)

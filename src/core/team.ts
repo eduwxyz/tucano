@@ -34,6 +34,8 @@ interface TeamFile {
     computer: boolean
     grants: Record<string, GrantLevel> // by connector name
     reportsTo?: string // the handle of the agent it answers to (src/shared/org.ts)
+    sectorName?: string // a sector head's name for its sector
+    sectorDoes?: string // and what the sector solves
   }[]
   skills: { name: string; description: string; body: string; agents: string[] }[] // agents by handle
   channels: { name: string; topic?: string; members: string[] }[]
@@ -69,7 +71,9 @@ export function exportTeam(db: Db, by = db.ownerId()): string {
       web: a.web !== false,
       computer: a.computer,
       grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : []))),
-      ...(bossOf(agents, a) ? { reportsTo: bossOf(agents, a)!.handle } : {})
+      ...(bossOf(agents, a) ? { reportsTo: bossOf(agents, a)!.handle } : {}),
+      ...(a.sectorName ? { sectorName: a.sectorName } : {}),
+      ...(a.sectorDoes ? { sectorDoes: a.sectorDoes } : {})
     })),
     skills: db.skills().filter((k) => k.state === 'active').map((k) => ({ name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((id) => handle(id) ?? []) })),
     channels: channels.map((c) => ({ name: c.name, topic: c.topic, members: c.members.flatMap((id) => handle(id) ?? []) })),
@@ -158,7 +162,9 @@ export function importTeam(db: Db, text: string, defaultLimit: number, by = db.o
       memory: 'auto',
       computer: false, // turned on by hand: it downloads a system
       web: a.web,
-      archived: false
+      archived: false,
+      ...(typeof a.sectorName === 'string' && a.sectorName.trim() ? { sectorName: a.sectorName.trim().slice(0, 40) } : {}),
+      ...(typeof a.sectorDoes === 'string' && a.sectorDoes.trim() ? { sectorDoes: a.sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) } : {})
     }
     db.saveAgent(cleanLook(agent))
     added.agents++

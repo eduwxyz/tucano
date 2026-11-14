@@ -13,7 +13,7 @@ Em **Time**, na barra lateral (com dois ou mais agentes). Cada agente é um cart
 Clicar num agente mostra canais, time e pedidos. **Agora** lista os abertos; a linha de cada um acende.
 
 Ou na página do agente, em **Canais e skills**: **Responde a**.
-- Um agente responde a um só. Ele pede a todos abaixo dele e aos colegas (quem responde ao mesmo agente); nunca pra cima, nem a outro ramo. Uma linha tem no máximo três agentes.
+- Um agente responde a um só. Ele pede a quem está abaixo, aos colegas (quem responde ao mesmo agente) e ao próprio chefe; a outro setor, só pelos chefes. Uma linha tem no máximo três agentes.
 - Não vale quem está abaixo dele, nem o Tuca.
 - Arquivado um agente, o time dele responde a quem está acima.
 

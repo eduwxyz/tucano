@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bossOf, channelsOf, depthBelow, directReports, loops, MAX_LINE, orgTree, overLine, peersOf, possibleBosses, rankOf, reachOf, reportsOf, type OrgNode } from '../src/shared/org'
+import { askKind, bossOf, channelsOf, depthBelow, directReports, headsOf, loops, MAX_LINE, orgTree, overLine, peersOf, possibleBosses, rankOf, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
 
 const a = (id: string, reportsTo?: string, extra: { archived?: boolean; kind?: 'tuca' } = {}): { id: string; reportsTo?: string; archived?: boolean; kind?: 'tuca' } => ({ id, ...(reportsTo ? { reportsTo } : {}), ...extra })
 const ids = (list: { id: string }[]): string[] => list.map((x) => x.id)
@@ -90,10 +90,45 @@ describe('who answers to whom', () => {
     expect(ids(peersOf(gone, 'nico'))).toEqual(['atlas', 'clara', 'vera'])
   })
 
-  it('reaches those below first, then colleagues, never up nor across', () => {
-    expect(ids(reachOf(team, 'bento'))).toEqual(['nico', 'vera', 'atlas', 'clara'])
-    expect(ids(reachOf(team, 'nico'))).toEqual(['vera'])
+  it('reaches those below first, then colleagues, then its own boss: one step up, never across', () => {
+    expect(ids(reachOf(team, 'bento'))).toEqual(['nico', 'vera', 'atlas', 'clara', 'orion'])
+    expect(ids(reachOf(team, 'nico'))).toEqual(['vera', 'bento'])
+    expect(ids(reachOf(team, 'otto'))).toEqual(['clara'])
     expect(ids(reachOf(team, 'orion'))).toEqual(['atlas', 'bento', 'clara', 'nico', 'vera', 'otto'])
     expect(reachOf(team, 'solo')).toEqual([])
+  })
+})
+
+// Two trees, two sectors: orion's and mira's (mira ← lino ← tito). Solo heads none: no one is below it.
+const sectors = [...team, a('mira'), a('lino', 'mira'), a('tito', 'lino'), a('tuca', undefined, { kind: 'tuca' }), a('old', undefined, { archived: true }), a('gil', 'old')]
+
+describe('sectors', () => {
+  it('makes a sector of each tree, headed by its top, the Tuca and the lone aside', () => {
+    expect(ids(headsOf(sectors))).toEqual(['orion', 'mira'])
+    expect(sectorOf(sectors, 'nico')?.id).toBe('orion')
+    expect(sectorOf(sectors, 'tito')?.id).toBe('mira')
+    expect(sectorOf(sectors, 'mira')?.id).toBe('mira')
+    expect(sectorOf(sectors, 'solo')).toBeUndefined()
+    expect(sectorOf(sectors, 'gil')).toBeUndefined() // its boss is archived and it heads no one
+  })
+
+  it('lets only heads reach another sector, and only its head', () => {
+    expect(ids(reachOf(sectors, 'orion'))).toEqual(['atlas', 'bento', 'clara', 'nico', 'vera', 'otto', 'mira'])
+    expect(ids(reachOf(sectors, 'mira'))).toEqual(['lino', 'tito', 'orion'])
+    expect(ids(reachOf(sectors, 'lino'))).toEqual(['tito', 'mira']) // up to its head, not across
+    expect(ids(reachOf(sectors, 'tito'))).toEqual(['lino'])
+  })
+
+  it('tells how a request goes', () => {
+    expect(askKind(sectors, 'orion', 'nico')).toBe('down')
+    expect(askKind(sectors, 'nico', 'vera')).toBe('peer')
+    expect(askKind(sectors, 'tito', 'lino')).toBe('up')
+    expect(askKind(sectors, 'mira', 'orion')).toBe('sector')
+  })
+
+  it('names a sector by what it was given, or by its head', () => {
+    expect(sectorName({ name: 'Rafa', sectorName: ' Técnico ' })).toBe('Técnico')
+    expect(sectorName({ name: 'Teo' })).toBe('Setor de Teo')
+    expect(sectorName({ name: 'Teo', sectorName: '  ' }, 'Sector of')).toBe('Sector of Teo')
   })
 })
