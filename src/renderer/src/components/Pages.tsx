@@ -96,6 +96,9 @@ import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
+import { WikiSettingsProvider, WikiSettingsSection } from './Wiki'
+import { SettingsLayout } from './SettingsLayout'
+import { settingsDestination, settingsStructure, type SettingsSectionId } from '../settings-structure'
 import type { NotifyState } from '../rpc'
 import { hasServers, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
@@ -1778,21 +1781,6 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
 // ---------- tabs ----------
 
 type TabList = readonly (readonly [string, string])[]
-// With a team, Pessoas (everyone) and Atividade (admins); a member sees only what's theirs to change.
-// The phone (Telegram) is the owner's alone.
-export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList => [
-  ['geral', L('Geral', 'General')],
-  ...(admin
-    ? ([
-        ['modelos', L('Modelos', 'Models')],
-        ['agentes', L('Agentes', 'Agents')],
-        ...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])
-      ] as [string, string][])
-    : []),
-  ...(team ? [['pessoas', L('Pessoas', 'People')] as [string, string]] : []),
-  ...(team && admin ? [['atividade', L('Atividade', 'Activity')] as [string, string]] : []),
-  ...(admin && hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
-]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
   ['canais', L('Canais e skills', 'Channels and skills')],
@@ -2143,7 +2131,7 @@ export function BackupCard(): ReactNode {
         web
           ? L(
               'Trouxe o Tucano do seu computador? No app do computador, use Exportar tudo (Configurações › Geral) e envie o arquivo aqui: agentes, conversas, memórias, wiki e arquivos substituem os deste Tucano. Um backup diário (.db, da pasta de backups) também serve, só com o banco.',
-              "Bringing the Tucano from your computer? In the desktop app, use Export everything (Settings › General) and send the file here: agents, conversations, memories, wiki and files replace this Tucano's. A daily backup (.db, from the backups folder) works too, with the database only."
+              "Export everything from Workspace › Backups in the desktop app. Restore replaces agents, chats, memory, Wiki, and files. A .db backup restores only the database."
             )
           : L(
               'Tudo deste Tucano num arquivo .zip: agentes, conversas, memórias, wiki e arquivos, pra levar pra um Tucano num servidor (como o Tucano Pro). As senhas dos conectores e os logins de IA não vão: eles ficam presos a este computador.',
@@ -2459,24 +2447,17 @@ export function SettingsPage(): ReactNode {
   const team = useStore(teamMode)
   const admin = useStore(amAdmin)
   const owner = useStore(amOwner)
-  const tabs = SETTINGS_TABS(team, admin, owner)
-  const tab = useTab('settings', tabs)
-  const pane = (t: string): boolean => tab === t
-  return (
-    <Page title={L('Configurações', 'Settings')}>
-      <Tabs page="settings" tabs={tabs} />
-      <div className="agent-form">
-        {pane('pessoas') && <PeoplePane />}
-        {pane('atividade') && admin && <ActivityPane />}
-        {/* A member's own: the language, the theme and the sounds (their name is in Pessoas). */}
-        {pane('geral') && !admin && (
-          <Card title={L('Pra você', "Your preferences")} lead={L('Como o Tucano aparece pra você. Muda só pra você.', "These appearance settings apply only to you.")}>
-            <div className="field">
+  const requested = useStore((s) => s.tabs.settings)
+  const sections = settingsStructure({ team, admin, owner, servers: hasServers() })
+  const content: Record<SettingsSectionId, ReactNode> = {
+    'app-appearance': (
+      <Card title={L('Aparência', 'Appearance')} >
+<div className="field">
               <span className="field__label">Idioma · Language</span>
               <LanguagePicker />
-              <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', "Your interface language. Agents use the workspace language.")}</span>
+              <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', "Language for the interface; admins also set the workspace’s agent language.")}</span>
             </div>
-            <div className="field">
+<div className="field">
               <span className="field__label">{L('Tema', 'Theme')}</span>
               <div className="segmented" role="radiogroup" aria-label={L('Tema', 'Theme')}>
                 {(['system', 'light', 'dark'] as const).map((t) => (
@@ -2486,11 +2467,44 @@ export function SettingsPage(): ReactNode {
                 ))}
               </div>
             </div>
-            <AdminOnly>{L('Só um admin muda os modelos, os agentes, o contexto e as outras configurações do Tucano.', "Only admins can change models, agents, context, and workspace settings.")}</AdminOnly>
+</Card>
+    ),
+    'app-notifications': (
+      <Card title={L('Notificações', 'Notifications')}>
+            <div className="key-row">
+              <Icon name="volume" />
+              <div className="grow">
+                <strong>{L('Sons', 'Sounds')}</strong>
+                <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', "Play a sound when agents need you or finish. Notifications remain visible when muted.")}</p>
+              </div>
+              <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
+            </div>
+            <NotifyTest />
           </Card>
-        )}
-        {pane('geral') && admin && (
-          <Card title="Workspace">
+    ),
+    'app-dictation': (
+      <VoiceCard />
+    ),
+    'app-startup': (
+      <Card title={L('Inicialização', 'Startup')} >
+<div className="key-row">
+              <Icon name="clock" />
+              <div className="grow">
+                <strong>{L('Abrir ao ligar o computador', "Launch at login")}</strong>
+                <p className="muted small">{packaged ? L('Assim nenhuma rotina depende de você lembrar de abrir o app.', "Start Tucano automatically so routines can run.") : L('Só no app instalado. Rodando com npm run dev, fica desligado.', "Available in the installed app; disabled in development.")}</p>
+              </div>
+              <Toggle on={!!settings.openAtLogin && packaged && defaultWorkspace} onChange={(v) => packaged && defaultWorkspace && updateSettings({ openAtLogin: v })} />
+            </div>
+{!defaultWorkspace && <p className="muted small">{L('Abrir ao ligar o computador é uma configuração do app: ajuste no workspace padrão. Todos os workspaces iniciam juntos.', "Change login startup in the default workspace. All workspaces start together.")}</p>}
+</Card>
+    ),
+    'app-updates': (
+      <Card title={L('Atualizações', 'Updates')}>
+            <UpdateSettings />
+          </Card>
+    ),
+    'workspace-context': (
+      <Card title={L('Contexto do workspace', 'Workspace context')}>
             <p className="muted small">{L('Agentes, conversas, conectores e memórias ficam neste workspace. Os logins do Claude Code e OpenCode continuam compartilhados no computador. Um workspace não é uma sandbox do sistema.', "Workspace data is separate; Claude Code and OpenCode logins are shared. Workspaces are not sandboxes.")}</p>
             {window.tucano.workspaces && (
               <Field label={L('Nome do workspace', 'Workspace name')}>
@@ -2502,11 +2516,7 @@ export function SettingsPage(): ReactNode {
                 <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
               </Field>
             )}
-            <div className="field">
-              <span className="field__label">Idioma · Language</span>
-              <LanguagePicker />
-              <span className="hint">{L('O idioma do app e o que os agentes usam pra responder.', "Language for the interface and agent replies.")}</span>
-            </div>
+
             <Field label={L('Contexto', 'Context')} hint={L('Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.', "Shared with every agent: your role, priorities, and rules.")}>
               <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
             </Field>
@@ -2527,35 +2537,116 @@ export function SettingsPage(): ReactNode {
               )}
             </div>
           </Card>
-        )}
+    ),
+    'workspace-people': (
+      <PeoplePane />
+    ),
+    'workspace-activity': (
+      <ActivityPane />
+    ),
+    'workspace-transfer': (
+      <TeamCard />
+    ),
+    'workspace-backups': (
+      <BackupCard />
+    ),
+    'workspace-danger': (
+      <WorkspaceDangerArea />
+    ),
+    'agents-replies': (
+      <Card title={L('Respostas dos agentes', 'Agent replies')} >
+<Field label={L('Respostas seguidas entre agentes', "Consecutive agent replies")} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', "Allow 1–10 agent replies before waiting for you.")}>
+                <NumberInput
+                  min={1}
+                  max={MAX_CHAIN_DEPTH}
+                  value={chainDepthCap(settings.chainDepth)}
+                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
+                />
+              </Field>
+</Card>
+    ),
+    'agents-recovery': (
+      <Card title={L('Recuperação', 'Recovery')} >
+<Field label={L('Considerar travado após (min sem sinal)', "Inactivity timeout (minutes)")} hint={L('Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.', "Stop after no text or completed tools. Work that shows progress continues.")}>
+                <NumberInput
+                  min={5}
+                  value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
+                  onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
+                />
+              </Field>
+</Card>
+    ),
+    'agents-permissions': (
+      <Card
+            title={L('Autonomia', 'Autonomy')}
+            lead={L(
+              'Pra todos os agentes: até onde eles vão sozinhos e o que pede sua aprovação antes, com um botão na conversa. Na página de cada agente dá pra mudar só pra ele. Ler e investigar nunca pede.',
+              "Default approval rules for all agents; override them on each agent’s page. Reading never needs approval."
+            )}
+          >
+            <AutonomyControls own={{ autonomy: settings.autonomy, actionRules: settings.actionRules, outsideGuard: settings.outsideGuard }} onChange={(p) => updateSettings(p)} />
+          <div className="settings-followup"><Field label={L('Expiração de aprovações', 'Approvals expire after')}>
+                <Select
+                  value={settings.approvalTtlHours ? String(settings.approvalTtlHours) : null}
+                  onChange={(v) => { if (v) updateSettings({ approvalTtlHours: Number(v) }) }}
+                  options={[
+                    { value: '1', label: L('1 hora', '1 hour') },
+                    { value: '24', label: L('24 horas', '24 hours') },
+                    { value: '168', label: L('7 dias', '7 days') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
+              </Field></div>
+</Card>
+    ),
+    'agents-limits': (
+      <Card title={L('Limites de uso', 'Usage limits')} >
+<div className="grid2"><Field label={L('Limite padrão por agente (milhões de tokens/mês)', "Monthly limit per agent (million tokens)")}>
+                <NumberInput
+                  min={0}
+                  step={0.5}
+                  value={settings.defaultLimit / 1_000_000}
+                  onChange={(n) => updateSettings({ defaultLimit: Math.max(0, Math.round(n * 1_000_000)) })}
+                />
+              </Field>
+<Field label={L('Limite por resposta (% do limite do mês)', "Reply limit (% of monthly limit)")} hint={L('Chegou nele, o agente pausa e você decide se continua.', "Pause at the limit and ask you whether to continue.")}>
+                <NumberInput
+                  min={1}
+                  max={100}
+                  value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
+                  onChange={(n) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(n))) })}
+                />
+              </Field></div>
+</Card>
+    ),
+    'agents-automation': (
+      <Card title={L('Automação', 'Automation')} lead={L('As rotinas rodam enquanto o app está aberto, mesmo com a janela fechada.', "Routines require Tucano to keep running, even with its window closed.")}>
 
-        {pane('geral') && admin && <VoiceCard />}
 
-        {pane('geral') && (
-          <Card title={L('Notificações', 'Notifications')}>
             <div className="key-row">
-              <Icon name="volume" />
+              <Icon name="moon" />
               <div className="grow">
-                <strong>{L('Sons', 'Sounds')}</strong>
-                <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', "Play a sound when agents need you or finish. Notifications remain visible when muted.")}</p>
+                <strong>{L('Horário de silêncio', 'Quiet hours')}</strong>
+                <p className="muted small">{L('Rotinas e gatilhos esperam e rodam quando ele acaba (como atrasados). O que você mandar continua sendo respondido.', "Defer routines and triggers until quiet hours end. Direct messages still get replies.")}</p>
+                {settings.quietHours && (
+                  <div className="row row--center quiet">
+                    <span className="small">{L('das', 'from')}</span>
+                    <input type="time" value={settings.quietHours.from} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, from: e.target.value } })} />
+                    <span className="small">{L('às', 'to')}</span>
+                    <input type="time" value={settings.quietHours.to} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, to: e.target.value } })} />
+                  </div>
+                )}
               </div>
-              <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
+              <Toggle on={!!settings.quietHours} onChange={(v) => updateSettings({ quietHours: v ? { from: '22:00', to: '07:00' } : null })} />
             </div>
-            <NotifyTest />
           </Card>
-        )}
-
-        {pane('geral') && admin && (
-          <Card title={L('Atualizações', 'Updates')}>
-            <UpdateSettings />
-          </Card>
-        )}
-
-        {pane('modelos') && admin && <AgentModelsPanel />}
-
-        {pane('modelos') && (
-          <Card
-            title="Harnesses"
+    ),
+    'models-agents': (
+      <AgentModelsPanel />
+    ),
+    'models-runtimes': (
+      <Card
+            title={L('Runtimes', 'Runtimes')}
             lead={L(
               'Os programas em que os agentes rodam, cada um como você configurou: no seu plano, no gateway da empresa ou nos seus provedores. O Tucano nunca vê nem guarda as suas credenciais.',
               "Run agents through your existing plans, gateway, or providers. Tucano does not access or store harness credentials."
@@ -2568,10 +2659,9 @@ export function SettingsPage(): ReactNode {
           >
             <HarnessList />
           </Card>
-        )}
-
-        {pane('modelos') && (
-          <Card
+    ),
+    'models-accounts': (
+      <Card
             title={L('Contas', 'Accounts')}
             lead={L(
               'Mais de um login do Claude Code ou do Codex, como a conta do trabalho e a pessoal. Cada agente escolhe a conta na página dele. O login acontece no próprio CLI: o Tucano não vê nem guarda a senha.',
@@ -2580,32 +2670,16 @@ export function SettingsPage(): ReactNode {
           >
             <AccountsCard />
           </Card>
-        )}
-
-        {pane('modelos') && (
-          <Card title={L('Roteador', 'Router')} lead={L('Modelo pequeno que lê a conversa e decide quem responde nos canais. Não concede permissão nenhuma.', "Choose who replies in channels. The router cannot grant permissions.")}>
+    ),
+    'models-classifiers': (
+      <><Card title={L('Roteador', 'Router')} lead={L('Modelo pequeno que lê a conversa e decide quem responde nos canais. Não concede permissão nenhuma.', "Choose who replies in channels. The router cannot grant permissions.")}>
             <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', "Use a fast model; it runs before each channel reply.")}>
               <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
             </Field>
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
             {settings.routerModel === 'jev' && work && <OutsideGateway what={L('cada mensagem sem @menção vai pra TypeSafe escolher quem responde.', 'every message without an @mention goes to TypeSafe to pick who replies.')} />}
           </Card>
-        )}
-
-        {pane('agentes') && (
-          <Card
-            title={L('Autonomia', 'Autonomy')}
-            lead={L(
-              'Pra todos os agentes: até onde eles vão sozinhos e o que pede sua aprovação antes, com um botão na conversa. Na página de cada agente dá pra mudar só pra ele. Ler e investigar nunca pede.',
-              "Default approval rules for all agents; override them on each agent’s page. Reading never needs approval."
-            )}
-          >
-            <AutonomyControls own={{ autonomy: settings.autonomy, actionRules: settings.actionRules, outsideGuard: settings.outsideGuard }} onChange={(p) => updateSettings(p)} />
-          </Card>
-        )}
-
-        {pane('agentes') && (
-          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', "Find controls by page text at no cost. If no match is found, agents use element numbers.")}>
+<Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', "Find controls by page text at no cost. If no match is found, agents use element numbers.")}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
               {[false, true].map((v) => (
                 <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
@@ -2623,15 +2697,10 @@ export function SettingsPage(): ReactNode {
                 )}
               />
             )}
-          </Card>
-        )}
-
-        {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && window.tucano.phone && <HomePhoneCard />}
-        {pane('integracoes') && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
-
-        {pane('modelos') && (
-          <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', "Summarize older messages and extract lasting facts about you.")}>
+          </Card></>
+    ),
+    'knowledge-memory': (
+      <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', "Summarize older messages and extract lasting facts about you.")}>
             <div className="grid2">
               <Field label={L('Modelo da memória', 'Memory model')} hint={L('Roda a cada ~20 mensagens numa conversa longa.', "Runs about every 20 messages in long conversations.")}>
                 <ModelSelect value={settings.memoryModel} onChange={(memoryModel) => updateSettings({ memoryModel })} />
@@ -2650,94 +2719,33 @@ export function SettingsPage(): ReactNode {
               </Field>
             </div>
           </Card>
-        )}
-
-        {pane('agentes') && (
-          <Card title={L('Rotinas', 'Routines')} lead={L('As rotinas rodam enquanto o app está aberto, mesmo com a janela fechada.', "Routines require Tucano to keep running, even with its window closed.")}>
-            <div className="key-row">
-              <Icon name="clock" />
-              <div className="grow">
-                <strong>{L('Abrir ao ligar o computador', "Launch at login")}</strong>
-                <p className="muted small">{packaged ? L('Assim nenhuma rotina depende de você lembrar de abrir o app.', "Start Tucano automatically so routines can run.") : L('Só no app instalado. Rodando com npm run dev, fica desligado.', "Available in the installed app; disabled in development.")}</p>
-              </div>
-              <Toggle on={!!settings.openAtLogin && packaged && defaultWorkspace} onChange={(v) => packaged && defaultWorkspace && updateSettings({ openAtLogin: v })} />
-            </div>
-            {!defaultWorkspace && <p className="muted small">{L('Abrir ao ligar o computador é uma configuração do app: ajuste no workspace padrão. Todos os workspaces iniciam juntos.', "Change login startup in the default workspace. All workspaces start together.")}</p>}
-            <div className="key-row">
-              <Icon name="moon" />
-              <div className="grow">
-                <strong>{L('Horário de silêncio', 'Quiet hours')}</strong>
-                <p className="muted small">{L('Rotinas e gatilhos esperam e rodam quando ele acaba (como atrasados). O que você mandar continua sendo respondido.', "Defer routines and triggers until quiet hours end. Direct messages still get replies.")}</p>
-                {settings.quietHours && (
-                  <div className="row row--center quiet">
-                    <span className="small">{L('das', 'from')}</span>
-                    <input type="time" value={settings.quietHours.from} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, from: e.target.value } })} />
-                    <span className="small">{L('às', 'to')}</span>
-                    <input type="time" value={settings.quietHours.to} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, to: e.target.value } })} />
-                  </div>
-                )}
-              </div>
-              <Toggle on={!!settings.quietHours} onChange={(v) => updateSettings({ quietHours: v ? { from: '22:00', to: '07:00' } : null })} />
-            </div>
-          </Card>
-        )}
-
-
-        {pane('geral') && admin && <TeamCard />}
-        {pane('geral') && <BackupCard />}
-        {pane('servidores') && <ServersCard />}
-
-        {pane('agentes') && (
-          <Card title={L('Limites', 'Limits')}>
-            <div className="grid2">
-              <Field label={L('Limite padrão por agente (milhões de tokens/mês)', "Monthly limit per agent (million tokens)")}>
-                <NumberInput
-                  min={0}
-                  step={0.5}
-                  value={settings.defaultLimit / 1_000_000}
-                  onChange={(n) => updateSettings({ defaultLimit: Math.max(0, Math.round(n * 1_000_000)) })}
-                />
-              </Field>
-              <Field label={L('Limite por resposta (% do limite do mês)', "Reply limit (% of monthly limit)")} hint={L('Chegou nele, o agente pausa e você decide se continua.', "Pause at the limit and ask you whether to continue.")}>
-                <NumberInput
-                  min={1}
-                  max={100}
-                  value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
-                  onChange={(n) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(n))) })}
-                />
-              </Field>
-              <Field label={L('Considerar travado após (min sem sinal)', "Inactivity timeout (minutes)")} hint={L('Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.', "Stop after no text or completed tools. Work that shows progress continues.")}>
-                <NumberInput
-                  min={5}
-                  value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
-                  onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
-                />
-              </Field>
-              <Field label={L('Respostas seguidas entre agentes', "Consecutive agent replies")} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', "Allow 1–10 agent replies before waiting for you.")}>
-                <NumberInput
-                  min={1}
-                  max={MAX_CHAIN_DEPTH}
-                  value={chainDepthCap(settings.chainDepth)}
-                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
-                />
-              </Field>
-              <Field label={L('Expiração de aprovações', 'Approvals expire after')}>
-                <Select
-                  value={settings.approvalTtlHours ? String(settings.approvalTtlHours) : null}
-                  onChange={(v) => { if (v) updateSettings({ approvalTtlHours: Number(v) }) }}
-                  options={[
-                    { value: '1', label: L('1 hora', '1 hour') },
-                    { value: '24', label: L('24 horas', '24 hours') },
-                    { value: '168', label: L('7 dias', '7 days') }
-                  ]}
-                  placeholder={L('Escolha', 'Pick')}
-                />
-              </Field>
-            </div>
-          </Card>
-        )}
-        {pane('geral') && owner && <WorkspaceDangerArea />}
-      </div>
+    ),
+    'knowledge-wiki-capture': (
+      <WikiSettingsSection part="curator" />
+    ),
+    'knowledge-wiki-storage': (
+      <WikiSettingsSection part="storage" />
+    ),
+    'knowledge-wiki-import': (
+      <WikiSettingsSection part="import" />
+    ),
+    'knowledge-wiki-rules': (
+      <WikiSettingsSection part="rules" />
+    ),
+    'connections-phone': (
+      <>{work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
+{window.tucano.phone && <HomePhoneCard />}
+{defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />}</>
+    ),
+    'connections-servers': (
+      <ServersCard />
+    )
+  }
+  return (
+    <Page title={L('Configurações', 'Settings')}>
+      <WikiSettingsProvider active={settingsDestination(requested, sections).page === 'knowledge'}>
+        <SettingsLayout requested={requested} sections={sections} content={content} onNavigate={destination => setTab('settings', destination)} />
+      </WikiSettingsProvider>
     </Page>
   )
 }
