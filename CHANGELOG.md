@@ -4,6 +4,14 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Settings grouped by task.** App, Workspace, Agents, Models, Knowledge and Connections organize the existing controls. Section links stay visible while scrolling, support keyboard navigation and reduced motion, and bring Memory and Wiki configuration together. Sections use plain headings and dividers.
+
+### Fixed
+
+- **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences. (#409)
+
 ## [0.2.29] - 2026-11-13
 
 > **Em português:**
@@ -27,7 +35,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
 
 
-- **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences. (#409)
 
 - **A long reply no longer keeps wiki access that changed after it started.** A reply read the wiki with the access it had when its prompt was built: an agent whose wiki access was removed, or a page that became one person's while the reply was still working, could still be read until the reply ended. Each wiki call now checks the agent's access and the held pages again.
 

@@ -161,7 +161,7 @@ describe('settings section navigation', () => {
     await render()
     expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('App')
     expect([...document.querySelectorAll('[role="tab"]')].map(el => el.textContent)).toEqual(['App', 'Workspace'])
-    expect(document.querySelector('[data-settings-section="app-notifications"]')).toBeNull()
+    expect(document.querySelector('[data-settings-section="app-dictation"]')).toBeNull()
   })
 
   it('preserves normal modified-link behavior and cancels pending frames on unmount', async () => {

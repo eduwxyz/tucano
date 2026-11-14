@@ -11818,19 +11818,21 @@ button.agent-card__now:hover {
 .settings-pages > button { flex: 0 0 auto; padding: 10px 13px; border-bottom: 2px solid transparent; white-space: nowrap; color: var(--text-2); font-size: 13px; }
 .settings-pages > button[aria-selected="true"] { color: var(--text); border-color: var(--accent); font-weight: 600; }
 .settings-sections { gap: 4px; padding-top: 9px; }
-.settings-sections > a { flex: 0 0 auto; padding: 6px 10px; border-radius: 7px; white-space: nowrap; text-decoration: none; color: var(--text-2); font-size: 12px; }
+.settings-sections > a { flex: 0 0 auto; padding: 6px 10px; border-radius: 0; white-space: nowrap; text-decoration: none; color: var(--text-2); font-size: 12px; }
 .settings-sections > a[aria-current="location"] { color: var(--text); background: var(--active); font-weight: 600; }
 .settings-pages > button:hover, .settings-sections > a:hover { color: var(--text); background: var(--hover); }
 .settings-pages > button:focus-visible, .settings-sections > a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .settings-panel { min-width: 0; container-type: inline-size; }
-.settings-content { gap: 20px; max-width: none; }
-.settings-content > section { min-width: 0; outline: none; }
+.settings-content { gap: 28px; max-width: none; }
+.settings-content > section { min-width: 0; outline: none; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+.settings-content > section:last-child { border-bottom: 0; }
+.settings-content .card { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .settings-content > section:not([data-settings-section="models-agents"]):not([data-settings-section="models-routing"]) { max-width: 720px; width: 100%; }
 .settings-content > section[data-settings-section="models-routing"] > .card:first-child { max-width: 720px; }
 .settings-followup { margin-top: 14px; }
-.settings-content > section:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: var(--radius-lg); }
+.settings-content > section:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
 .settings-content > section:last-child { min-height: var(--settings-last-height, 240px); }
-.settings-content > section > .card + .card { margin-top: 14px; }
+.settings-content > section > .card + .card { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
 @container (max-width: 520px) {
   .settings-content .grid2 { grid-template-columns: minmax(0, 1fr); }
   .settings-content .key-row { flex-wrap: wrap; }
@@ -11895,3 +11897,12 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+
+/* Inline Wiki settings share the page's flat section hierarchy; the contextual dialog keeps its own surface. */
+.settings-content .wk-settings--inline { width: 100%; max-height: none; overflow: visible; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; }
+.settings-content .wk-settings--inline h2 { font-size: 14px; }
+.settings-content .wk-settings--inline > header { margin-bottom: 12px; }
+.settings-content .wk-settings--inline > section { border-top: 0; padding: 0; }
+
+.settings-content .wk-git { padding: 16px 0 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
+.settings-content .route-row { padding: 14px 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
