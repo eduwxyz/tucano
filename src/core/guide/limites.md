@@ -28,7 +28,7 @@ Em **Configurações › Modelos › Contas** fica **Como usar as contas**, com 
 - **Cada agente na conta dele**: cada agente roda na conta dele; o **Modelo reserva** assume quando ela acaba.
 - **Equilibrar entre as contas**: cada resposta vai pra conta já conectada, do motor do agente, que tem mais sobrando. Ela continua na mesma conta enquanto a diferença é pequena, porque trocar de conta reenvia a conversa inteira. Quando uma bate no limite, a resposta passa pra próxima conta; só quando todas acabam entra o modelo reserva.
 
-**Uso e limites** mostra as janelas de cada conta. Equilibrar usa as janelas que o Claude Code informa, e só uma conta do Claude fica de fora depois de bater no limite; uma conta do Codex sem essa informação conta como livre.
+**Uso e limites** mostra as janelas de cada conta. Uma conta só é escolhida depois que o Tucano sabe quanto ela tem: ao ligar **Equilibrar entre as contas** ou abrir **Uso e limites**, ele testa cada conta sem dados com uma mensagem mínima (no Codex, sem gastar nada) e mostra o resultado. Se o teste falhar, dá pra **Testar de novo** ali.
 
 ## Quando dá errado
 - "Parou no limite": suba o limite do agente ou espere o mês virar.

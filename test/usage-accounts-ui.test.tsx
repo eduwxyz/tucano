@@ -8,13 +8,14 @@ Object.assign(document, { oninput: null })
 let fake: { settings: Partial<Settings> }
 let admin = true
 const update = vi.fn()
+const check = vi.fn((_id: string, _engine: string) => Promise.resolve())
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(fake),
   amAdmin: () => admin,
   updateSettings: (p: unknown) => update(p),
   ACCOUNT_ENGINES: ['claude', 'codex'],
   ENGINE_IDS: ['claude', 'codex'],
-  addAccount: vi.fn(), loginAccount: vi.fn(), removeAccount: vi.fn(),
+  addAccount: vi.fn(), loginAccount: vi.fn(), removeAccount: vi.fn(), checkAccount: (id: string, engine: string) => check(id, engine),
   ENGINES: { claude: { label: 'Claude Code' }, codex: { label: 'Codex' } }
 }))
 vi.mock('../src/renderer/src/components/Usage', () => ({
@@ -39,6 +40,7 @@ beforeEach(() => {
   fake = base({})
   admin = true
   update.mockReset()
+  check.mockClear()
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(async () => { await act(async () => root.unmount()) })
@@ -63,13 +65,53 @@ it('marks a login at 100% as out for now', async () => {
   expect(row.querySelector('.is-out')?.textContent).toBe('Acabou por agora')
   expect(document.querySelectorAll('.is-out')).toHaveLength(1)
 })
-it('when balancing, flags the login with the most left as next in line', async () => {
+it('when balancing, flags the login with the most left among those with data as next in line', async () => {
   fake = base({ accountUse: 'balance' })
   await mount(<AccountsQuota engine="claude" />)
   expect(text()).toContain('equilibrando entre as contas')
   const next = document.querySelectorAll('.is-next')
   expect(next).toHaveLength(1)
-  expect(next[0]!.closest('.usage-account')?.getAttribute('data-login')).toBe('a2')
+  expect(next[0]!.closest('.usage-account')?.getAttribute('data-login')).toBe('usual')
+  const waiting = document.querySelector('[data-login="a2"]')!
+  expect(waiting.textContent).toContain('Aguardando o teste')
+  expect(waiting.querySelector('.is-next')).toBeNull()
+})
+it('shows no next chip when balancing and no login has data', async () => {
+  fake = base({ accountUse: 'balance', quota: undefined, accountQuota: {} })
+  await mount(<AccountsQuota engine="claude" />)
+  expect(document.querySelectorAll('.is-next')).toHaveLength(0)
+  expect(text()).toContain('Aguardando o teste')
+})
+it('hides the waiting chip while a login is being checked', async () => {
+  fake = base({ accountUse: 'balance', accountChecks: { a2: { state: 'checking', at: Date.now() } } })
+  await mount(<AccountsQuota engine="claude" />)
+  const row = document.querySelector('[data-login="a2"]')!
+  expect(row.textContent).toContain('Testando a conta…')
+  expect(row.textContent).not.toContain('Aguardando o teste')
+})
+it('offers to check a login without data, for an admin only', async () => {
+  await mount(<AccountsQuota engine="claude" />)
+  const row = document.querySelector('[data-login="a2"]')!
+  expect(row.textContent).toContain('Ainda sem dados')
+  const btn = row.querySelector('button')!
+  expect(btn.textContent).toBe('Testar agora')
+  await click(btn)
+  expect(check).toHaveBeenCalledWith('a2', 'claude')
+  admin = false
+  await mount(<AccountsQuota engine="claude" />)
+  expect(document.querySelector('[data-login="a2"]')!.querySelector('button')).toBeNull()
+})
+it('shows the checking and failed states of a login', async () => {
+  fake = base({ accountChecks: { a2: { state: 'checking', at: Date.now() } } })
+  await mount(<AccountsQuota engine="claude" />)
+  let row = document.querySelector('[data-login="a2"]')!
+  expect(row.textContent).toContain('Testando a conta…')
+  expect(row.querySelector('button')).toBeNull()
+  fake = base({ accountChecks: { a2: { state: 'failed', at: Date.now() } } })
+  await mount(<AccountsQuota engine="claude" />)
+  row = document.querySelector('[data-login="a2"]')!
+  expect(row.textContent).toContain('Não deu pra ler o uso desta conta.')
+  expect(row.querySelector('button')!.textContent).toBe('Testar de novo')
 })
 it('renders nothing with a single login', async () => {
   fake = base({ accounts: [] })

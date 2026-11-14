@@ -5849,8 +5849,8 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 4px 12px;
-  padding: 6px 4px;
+  gap: 8px 16px;
+  padding: 12px 18px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -5860,16 +5860,25 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  padding: 8px 14px;
   min-width: 0;
 }
 .usage-account__rings {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 12px 28px;
 }
 .usage-account > p {
-  padding: 8px 14px;
+  padding: 0;
+  margin: 0;
+}
+.usage-account .usage-ring {
+  padding: 4px 0;
+}
+.usage-account__check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
 }
 .usage-account__chip {
   padding: 2px 9px;

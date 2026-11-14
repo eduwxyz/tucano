@@ -8,7 +8,7 @@ const win = (utilization: number, resetsAt = NOW + 3_600_000) => [{ minutes: 300
 const login = (id: string, used?: number): Login => ({ id, ...(used === undefined ? {} : { windows: win(used) }) })
 
 describe('leftOf', () => {
-  it('counts a login that never reported as full', () => {
+  it('counts a login that never reported as full (pickLogin still waits for its check)', () => {
     expect(leftOf({}, NOW)).toBe(1)
     expect(leftOf({ windows: [] }, NOW)).toBe(1)
   })
@@ -68,6 +68,28 @@ describe('pickLogin', () => {
   it('gives the current one up when another has SWITCH_GAP more, or it is nearly out', () => {
     expect(pickLogin([login('a', 0.5), login('b', 0.5 - SWITCH_GAP - 0.01)], { now: NOW, current: 'a' })!.id).toBe('b')
     expect(pickLogin([login('a', 1 - NEARLY_OUT + 0.01), login('b', 1 - NEARLY_OUT)], { now: NOW, current: 'a' })!.id).toBe('b')
+  })
+
+  it('does not pick a login without windows while another has reported, even a nearly full one', () => {
+    expect(pickLogin([login('a'), login('b', 0.97)], { now: NOW })!.id).toBe('b')
+    expect(pickLogin([login('a'), login('b', 0.97)], { now: NOW, prefer: 'a', current: 'a' })!.id).toBe('b')
+  })
+
+  it('picks one without windows when none has reported, the preferred one first', () => {
+    expect(pickLogin([login('a'), login('b')], { now: NOW })!.id).toBe('a')
+    expect(pickLogin([login('a'), login('b')], { now: NOW, prefer: 'b' })!.id).toBe('b')
+  })
+
+  it('picks one that never reported over a known one that is out', () => {
+    expect(pickLogin([login('a', 1), login('b')], { now: NOW })!.id).toBe('b')
+  })
+
+  it('returns a spent known login when nothing else is left', () => {
+    expect(pickLogin([login('a', 1)], { now: NOW })!.id).toBe('a')
+  })
+
+  it('falls back to a login without windows when every known one is skipped', () => {
+    expect(pickLogin([login('a'), login('b', 0.2)], { now: NOW, skip: new Set(['b']) })!.id).toBe('a')
   })
 
   it('passes over the ones to skip, and is undefined when none is left', () => {

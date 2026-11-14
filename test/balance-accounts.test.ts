@@ -120,6 +120,25 @@ describe('balancing the accounts', () => {
     expect(claude.turns.at(-1)!.account).toBe(dir('w1'))
   })
 
+  it('keeps the reply on the login that reported while another has not been checked yet', async () => {
+    settings = { ...settings, quota: used(0.97), accountQuota: {} } // the usual login reported, nearly full; w1 and p1 never did
+    const claude = claudeOutOn([])
+    const r = runner(claude)
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(reply().run?.status).toBe('done')
+    expect(claude.turns.map((t) => t.account)).toEqual([undefined])
+  })
+
+  it('runs the reply on the account that never reported, not on the usual login that is out', async () => {
+    settings = { ...settings, accounts: [work], quota: used(1), accountQuota: {} }
+    const claude = claudeOutOn([])
+    const r = runner(claude)
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(claude.turns.map((t) => t.account)).toEqual([dir('w1')])
+  })
+
   it('does not fail for an unsigned-in agent account when another login was picked', async () => {
     db.saveAgent(agent({ accountId: 'w1' }))
     settings = { ...settings, accounts: [{ ...work, loggedIn: false }, personal] }

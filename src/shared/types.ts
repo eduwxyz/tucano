@@ -507,7 +507,9 @@ export interface Settings {
   // How a harness's logins are used: 'order' (unset) keeps each agent on its own and moves on when it
   // runs out; 'balance' gives each reply to the one with the most left (see shared/accounts.ts).
   accountUse?: AccountUse
-  accountQuota?: Record<string, Quota> // by account id: a Claude account's windows, from its last reply
+  accountQuota?: Record<string, Quota | CodexQuota> // by account id: the account's windows, from its last reply or the last check
+  // Computed, by checkKey (the account's id, or "usual:<engine>"): a check of its windows that is running, or the last one that failed.
+  accountChecks?: Record<string, { state: 'checking' | 'failed'; at: number }>
 }
 export type AccountUse = 'order' | 'balance'
 
