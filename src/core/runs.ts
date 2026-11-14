@@ -71,8 +71,10 @@ const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, 
 const USAGE_ALERT = 0.8
 // An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
 // reply that keeps making progress would never be cut. The percentage then has
-// no month to apply to, so it is taken over this base instead.
-const NO_LIMIT_REPLY_BASE = 1_000_000
+// no month to apply to, so it is taken over this base instead: at the default
+// 10%, a million tokens a reply. (It was a tenth of that, less than an agent
+// with the default monthly limit gets: "no limit" paused sooner than a limit.)
+export const NO_LIMIT_REPLY_BASE = 10_000_000
 
 // The month's ceiling for an agent: 0 (or anything that isn't a positive
 // number) is no ceiling, so every comparison against it is false. The rule

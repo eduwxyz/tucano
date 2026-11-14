@@ -559,7 +559,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         )}
         {message.run?.status === 'paused' && (
           <>
-            <div className="note">{L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}</div>
+            <div className="note">
+              {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
+              <span className="muted">{L('O teto por resposta muda em Configurações › Agentes › Limites; não é o limite mensal do agente.', 'The ceiling per reply is set in Settings › Agents › Limits; it isn’t the agent’s monthly limit.')}</span>
+            </div>
             <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
               {L('Continuar', 'Continue')}
             </button>
