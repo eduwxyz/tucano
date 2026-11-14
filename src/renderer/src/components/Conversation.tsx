@@ -30,6 +30,7 @@ import { canEditChannel,
   timelineOf,
   useLiveText,
   workingIds,
+  allWorkingIds,
   openDialog,
   decideApproval,
   decideMemory,
@@ -52,6 +53,7 @@ import { canEditChannel,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  updateSettings,
   typing,
   setTab,
   stopRun,
@@ -68,6 +70,7 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
+  type SendMode,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -159,6 +162,14 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const { replies } = useStore((s) => conversationIndex(s, id))
   const older = useStore((s) => !!s.history[id])
   const focus = useStore((s) => (s.view?.kind === 'conversation' && s.view.id === id ? s.view.message : undefined))
+  // A press in the work drawer: the same scroll-and-flash as `focus`, but it has to happen again for
+  // a message already jumped to, hence the count. A reply that lives in a thread is reached by
+  // opening that thread and handing it the press.
+  const [jump, setJump] = useState<{ id: string; rootId?: string; n: number } | null>(null)
+  const jumpTo = (messageId: string, threadId?: string): void => {
+    if (threadId) openThread(threadId)
+    setJump((j) => ({ id: messageId, ...(threadId ? { rootId: threadId } : {}), n: (j?.n ?? 0) + 1 }))
+  }
   // Opened on a message from before what's here (a routine's run, a report): it comes first.
   const focusHere = !!focus && timeline.some((m) => m.id === focus)
   useEffect(() => {
@@ -238,10 +249,25 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={jump?.rootId ? focus : jump?.id ?? focus} focusKey={jump?.n} />
+        <Composer
+          conversationId={id}
+          members={members}
+          placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)}
+          onJump={jumpTo}
+        />
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+      {thread ? (
+        <ThreadPanel
+          rootId={thread}
+          conv={conv}
+          title={conv.kind === 'channel' ? `#${title}` : title}
+          members={members}
+          {...(jump && jump.rootId === thread ? { focus: jump.id, focusKey: jump.n } : {})}
+        />
+      ) : (
+        <SidePanel />
+      )}
     </div>
   )
 }
@@ -253,7 +279,7 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+export function MessageList({ messages: all, replies, older, conversationId, empty, focus, focusKey, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; focusKey?: number; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
@@ -284,7 +310,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, conversationId, focusAt >= 0])
+  }, [focus, conversationId, focusAt >= 0, focusKey])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -520,6 +546,20 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ))}
           </div>
         )}
+        {/* A prompt of mine waiting its turn behind the reply above (the mode on the message, runs.ts):
+            it says so until its own reply starts, and then the mark goes. */}
+        {message.sendMode === 'queue' && (
+          <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
+            {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
+          </span>
+        )}
+        {/* A prompt handed into the reply above, which reads it between two tool calls (runs.ts). It's
+            said here, so a message that gets no reply of its own never looks lost. */}
+        {message.sendMode === 'steer' && (
+          <span className="tag msg__queued" title={L('A resposta acima leu isto no meio do trabalho dela', 'The reply above read this in the middle of its work')}>
+            {L('Entregue à resposta acima', 'Handed to the reply above')}
+          </span>
+        )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
@@ -739,7 +779,9 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+// `focus` / `focusKey`: a press in the work drawer for a reply that lives in this thread — the reply
+// to scroll to and flash, and a count so pressing the same row again moves again.
+function ThreadPanel({ rootId, conv, title, members, focus, focusKey }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focus?: string; focusKey?: number }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -807,7 +849,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       {root?.conversationId === conv.id ? (
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
-          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} {...(focus ? { focus, focusKey } : {})} />
           <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
@@ -1978,8 +2020,180 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
   return typed.split(/\r?\n/).every((line) => names.has(line.trim().split('/').pop() ?? '')) ? usable : []
 }
 
-// `threadId`: it answers in the thread that message started, not in the conversation.
-export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
+// What the drawer keeps about one conversation while the app is open: whether it is open, and the
+// replies that ended here. Those stay as rows, marked with how they ended, until someone takes them
+// off the list. Per conversation, so each DM and channel keeps its own and coming back to one finds
+// it as it was left: none of it is shared across the rest of Tucano.
+interface DrawerMemory {
+  open?: boolean
+  done: string[]
+}
+const drawerMemory = new Map<string, DrawerMemory>()
+const drawerFor = (conversationId: string): DrawerMemory => {
+  const had = drawerMemory.get(conversationId)
+  if (had) return had
+  const made: DrawerMemory = { done: [] }
+  drawerMemory.set(conversationId, made)
+  return made
+}
+// A reply that ended, as the drawer shows it: how it ended, in a glyph, a word and a tone.
+const endedAs = (status: string): { icon: 'check' | 'x' | 'pause'; tone: 'ok' | 'bad' | 'off'; said: string } =>
+  status === 'done'
+    ? { icon: 'check', tone: 'ok', said: L('Concluída', 'Done') }
+    : status === 'failed' || status === 'limit_reached'
+      ? { icon: 'x', tone: 'bad', said: L('Falhou', 'Failed') }
+      : { icon: 'pause', tone: 'off', said: L('Interrompida', 'Stopped') }
+// What counts as ended: a reply waiting on a person (a question, an approval) is still in flight.
+const ENDED = ['done', 'stopped', 'interrupted', 'failed', 'limit_reached', 'paused']
+
+// The work this conversation is carrying, attached above the field: the replies running right now,
+// each with the prompt that started it and a way to stop it, the prompts marked as queued waiting
+// their turn, and the replies that already ended here — kept, marked with how they ended, so they
+// can still be jumped to until their row is taken off. A reply inside one of this conversation's
+// threads counts as work here too: its row says which thread it is in and opens that thread on it.
+// It opens by itself when it gains something to show — a queued prompt, or a second reply running at
+// once — and can be closed; with nothing in it, it isn't there at all. Each conversation has its own.
+export function WorkDrawer({ conversationId, onJump }: { conversationId: string; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
+  // Ids, not the messages: a step streaming into one reply shouldn't redraw the list around it.
+  const ids = useStore((s) => allWorkingIds(s, conversationId))
+  const messages = useStore((s) => messagesIn(s, conversationId))
+  const remember = drawerFor(conversationId)
+  const running = messages.filter((m) => ids.includes(m.id))
+  const queued = messages.filter((m) => m.sendMode === 'queue')
+  const busy = queued.length > 0 || running.length > 1
+  const [open, setOpen] = useState<boolean>(remember.open ?? busy)
+  const [ended, setEnded] = useState<string[]>(remember.done)
+  const oneLine = (text: string, max: number): string => {
+    const flat = text.replace(/\s+/g, ' ').trim()
+    return flat.length > max ? `${flat.slice(0, max)}…` : flat
+  }
+  // Which thread a row belongs to: the message that started it, in its own words. Nothing outside
+  // threads has one, and those rows say nothing about threads.
+  const threadRoot = (m: Message): Message | undefined => (m.threadId ? messages.find((x) => x.id === m.threadId) : undefined)
+  const where = (m: Message, max: number): ReactNode => {
+    const root = threadRoot(m)
+    if (!root) return null
+    const label = oneLine(root.text, max) || L('numa thread', 'in a thread')
+    return (
+      <span className="work-row__thread" title={L(`Numa thread desta conversa: ${oneLine(root.text, 120) || 'sem texto'}`, `In a thread here: ${oneLine(root.text, 120) || 'no text'}`)}>
+        <Icon name="thread" size={10} />
+        <span className="work-row__thread-text">{label}</span>
+      </span>
+    )
+  }
+  // What it says about a reply: the prompt it answers, not its own words.
+  const asked = (m: Message): string => {
+    const mine = m.run?.replyTo ? messages.find((x) => x.id === m.run?.replyTo) : undefined
+    return oneLine(mine?.text ?? m.run?.work ?? '', 90) || L('sem o que dizer', 'nothing to say')
+  }
+  const paint = (next: boolean): void => {
+    remember.open = next
+    setOpen(next)
+  }
+  const keep = (list: string[]): void => {
+    remember.done = list
+    setEnded(list)
+  }
+  const was = useRef(busy)
+  useEffect(() => {
+    if (busy && !was.current) paint(true) // it just got something to show
+    was.current = busy
+  }, [busy])
+  // A reply that leaves the working list here has ended: it stays as a row of its own, so it can
+  // still be jumped to, and only the trash glyph in that row takes it off.
+  const working = ids.join(',')
+  const watched = useRef(working)
+  useEffect(() => {
+    const before = watched.current ? watched.current.split(',') : []
+    const now = working ? working.split(',') : []
+    watched.current = working
+    const over = before.filter((id) => !now.includes(id) && !remember.done.includes(id))
+    if (over.length) keep([...remember.done, ...over])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [working])
+  const finished = ended.map((id) => messages.find((m) => m.id === id)).filter((m): m is Message => !!m?.run && ENDED.includes(m.run.status))
+  if (!running.length && !queued.length && !finished.length) return null
+  const counts = [
+    running.length > 0 ? L(`${running.length} respondendo`, `${running.length} replying`) : '',
+    queued.length > 0 ? L(`${queued.length} na fila`, `${queued.length} queued`) : '',
+    finished.length > 0 ? L(`${finished.length} terminada${finished.length === 1 ? '' : 's'}`, `${finished.length} finished`) : ''
+  ]
+    .filter((part) => part !== '')
+    .join(' · ')
+  return (
+    <div className={`work-drawer ${open ? 'is-open' : ''}`}>
+      <button className="work-drawer__head" onClick={() => paint(!open)} aria-expanded={open}>
+        <Icon name="layers" size={13} />
+        <span className="work-drawer__count">{counts}</span>
+        <Icon name={open ? 'down' : 'up'} size={13} />
+      </button>
+      {open && (
+        <div className="work-drawer__list">
+          {running.map((m) => (
+            <div className="work-row" key={m.id}>
+              <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
+                <span className="work-row__dot" aria-hidden />
+                <span className="work-row__text">{asked(m)}</span>
+                {where(m, 24)}
+              </button>
+              <button
+                className="icon-btn icon-btn--sm work-row__stop"
+                title={L('Parar esta resposta', 'Stop this reply')}
+                aria-label={L('Parar esta resposta', 'Stop this reply')}
+                onClick={() => stopRun(m.id)}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+          ))}
+          {queued.length > 0 && (
+            <>
+              <div className="work-drawer__group">{L('Na fila', 'Queued')}</div>
+              {queued.map((m) => (
+                <div className="work-row work-row--queued" key={m.id}>
+                  <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para este pedido', 'Go to this prompt')}>
+                    <Icon name="clock" size={11} />
+                    <span className="work-row__text">{oneLine(m.text, 90) || L('sem texto', 'no text')}</span>
+                    {where(m, 24)}
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+          {finished.length > 0 && (
+            <>
+              <div className="work-drawer__group">{L('Terminadas', 'Finished')}</div>
+              {finished.map((m) => {
+                const how = endedAs(m.run?.status ?? 'done')
+                return (
+                  <div className="work-row work-row--done" key={m.id}>
+                    <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
+                      <span className={`work-row__state work-row__state--${how.tone}`} title={how.said}>
+                        <Icon name={how.icon} size={11} />
+                      </span>
+                      <span className="work-row__text">{asked(m)}</span>
+                      {where(m, 24)}
+                    </button>
+                    <button
+                      className="icon-btn icon-btn--sm work-row__remove"
+                      title={L('Tirar da lista', 'Remove from the list')}
+                      aria-label={L('Tirar da lista', 'Remove from the list')}
+                      onClick={() => keep(remember.done.filter((x) => x !== m.id))}
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Composer({ conversationId, threadId, members, placeholder, onJump }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2203,14 +2417,18 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
-  const submit = (): void => {
+  const sendMode = useStore((st) => st.settings?.sendMode ?? 'parallel')
+  // How this one joins a reply that's already running here: the setting says what Enter does, and
+  // the modifier keys say the rest (see `send` in src/core/runs.ts). Nothing running: all the same.
+  const submit = (mode?: SendMode): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data }))
+      images.filter(isFile).map(({ name, data }) => ({ name, data })),
+      mode ?? sendMode
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2258,6 +2476,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           )}
         </div>
       )}
+      {!threadId && <WorkDrawer key={conversationId} conversationId={conversationId} {...(onJump ? { onJump } : {})} />}
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
@@ -2316,9 +2535,17 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
                 if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
                 if (e.key === 'Escape') return setMention(null)
               }
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              // Enter as the setting says; the modifiers pick a mode whatever the setting says. Ctrl+Enter
+              // keeps the line break, which Shift+Enter used to be before these four modes took it.
+              if (e.key === 'Enter' && e.nativeEvent.isComposing) return
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault()
-                submit()
+                insert('\n')
+                return
+              }
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                submit(e.altKey && e.shiftKey ? 'interrupt' : e.altKey ? 'steer' : e.shiftKey ? 'queue' : undefined)
               }
             }}
           />
@@ -2341,12 +2568,24 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
             {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
+          {sendMode !== 'parallel' ? (
+            <button
+              className="btn btn--sm btn--ghost composer__mode"
+              onClick={() => updateSettings({ sendMode: 'parallel' })}
+              title={L(
+                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Shift+Enter fila, Alt+Enter entrega, Shift+Alt+Enter interrompe).',
+                'While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Shift+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts).'
+              )}
+            >
+              {sendMode === 'queue' ? L('Enter: na fila', 'Enter: queued') : sendMode === 'steer' ? L('Enter: entregue à resposta', 'Enter: into the reply') : L('Enter: interrompe', 'Enter: interrupts')}
+            </button>
+          ) : null}
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={() => submit()} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>

@@ -1236,6 +1236,13 @@ h3 {
   color: var(--text-3);
   font-size: 11.5px;
 }
+/* A prompt of mine waiting its turn behind the reply above: it goes when that one ends. */
+.msg__queued {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-style: italic;
+}
 .md > :first-child {
   margin-top: 0;
 }
@@ -1748,6 +1755,132 @@ h3 {
   max-width: 860px;
   margin: 0 auto;
 }
+/* The work above the field: the replies running now, and the prompts queued behind them. It sits
+   inside the composer's wrapper, so it is attached to the box it belongs to. */
+.work-drawer {
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.work-drawer__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.work-drawer__head:hover {
+  background: var(--hover);
+}
+.work-drawer__count {
+  flex: 1;
+  text-align: left;
+}
+.work-drawer__list {
+  display: grid;
+  gap: 1px;
+  padding: 2px 6px 6px;
+  border-top: 1px solid var(--border);
+}
+.work-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.work-row__go {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.work-row__go:hover {
+  background: var(--hover);
+}
+.work-row__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-row--queued .work-row__text {
+  color: var(--text-2);
+}
+/* A reply that ended: the glyph says how, and its row stays until the trash takes it off. */
+.work-row__state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--text-3);
+}
+.work-row__state--ok {
+  color: var(--ok);
+}
+.work-row__state--bad {
+  color: var(--danger);
+}
+.work-row--done .work-row__text {
+  color: var(--text-2);
+}
+.work-row .icon-btn:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.work-row__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: fade-pulse 1.6s ease-in-out infinite;
+}
+/* The rows of a reply that lives in one of this conversation's threads: a quiet chip saying which
+   thread, in the thread's own words, where the press opens it. */
+.work-row__thread {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  max-width: 46%;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+.work-row__thread-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-row__go:hover .work-row__thread {
+  border-color: var(--border-strong);
+}
+.work-drawer__group {
+  padding: 4px 6px 2px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .composer {
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -1805,6 +1938,14 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 4px 8px 8px 14px;
+}
+/* How Enter sends while a reply runs here, when it isn't the plain one: short, quiet, and one click
+   back to the plain one (see the send-mode setting and the composer in Conversation.tsx). */
+.composer__mode {
+  flex: 0 0 auto;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent-soft);
 }
 .composer__hint {
   flex: 1;

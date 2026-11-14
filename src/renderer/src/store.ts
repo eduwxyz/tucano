@@ -39,6 +39,7 @@ import {
   delegating,
   type Routine,
   type RoutineInput,
+  type SendMode,
   type Settings,
   type SetupEngine,
   type SetupState,
@@ -360,6 +361,12 @@ export const isWorking = (s: State, conversationId: string): boolean => conversa
 export const workingIds = (s: State, conversationId: string, threadId?: string): string[] =>
   conversationIndex(s, conversationId)
     .working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
+    .map((m) => m.id)
+// Every reply at work in a place, threads included: a reply inside a thread is still work the
+// conversation is carrying, and the drawer shows it rather than only what's outside threads.
+export const allWorkingIds = (s: State, conversationId: string): string[] =>
+  conversationIndex(s, conversationId)
+    .working.filter((m) => m.author.kind === 'agent')
     .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
 export const lastBrowserIn = (s: State, conversationId: string, agentId: string): string | undefined => conversationIndex(s, conversationId).browser.get(agentId)
@@ -953,11 +960,11 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: SendMode): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
