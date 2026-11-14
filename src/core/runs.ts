@@ -27,6 +27,7 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
@@ -245,7 +246,10 @@ export interface RunnerDeps {
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
-  jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
+  // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
+  // `target` are asked per job, so the same seam serves the jobs Apo's own branches add (listening,
+  // the recommended option, the next steps): a job with no classifier is off.
+  jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
@@ -480,7 +484,7 @@ export class Runner {
       const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
     }
-    if (opened || settings.routerModel === JEV_MODEL) return
+    if (opened || settings.routerModel === JEV_MODEL || classifierFor(settings, 'routing')) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -818,13 +822,16 @@ export class Runner {
         team: db.people().length > 1
       }
 
-      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+      // A classifier first when one is chosen for this job; if it fails, Haiku decides, so the
+      // channel never goes quiet.
       let fellBack = ''
-      if (settings.routerModel === JEV_MODEL) {
-        const key = await this.deps.jev?.key()
-        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
+      const routing = classifierFor(settings, 'routing')
+      if (routing) {
+        const key = await this.deps.jev?.key('routing')
+        const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
+        const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
         if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
-        fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
+        fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!

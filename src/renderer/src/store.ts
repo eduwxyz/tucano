@@ -1045,6 +1045,7 @@ export const openExternal = (url: string): void =>
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
+export const setClassifierKey = (id: string, key: string | null): Promise<void> => call('setClassifierKey', { id, key })
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
