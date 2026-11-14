@@ -341,6 +341,11 @@ export class People {
         const { for: _f, ...rest } = event
         return rest
       }
+      // History went: each person is told of the conversations they can see, and reads them again.
+      case 'history_wiped': {
+        const seen = event.conversationIds.filter(conversation)
+        return seen.length ? { type: 'history_wiped', conversationIds: seen } : undefined
+      }
       // The team's own things, and signals that carry nothing: everyone (each reads the details over the API, checked there).
       case 'connector':
         return { type: 'connector', connector: this.connectorFor(person, event.connector) }

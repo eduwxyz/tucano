@@ -90,6 +90,7 @@ export interface Agent {
   autonomy?: Autonomy // how far it goes on its own (src/shared/actions.ts); unset: Settings' level
   outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
+  retentionDays?: number // how long its history is kept: its replies and its own DMs; unset: the Tucano's period, and 0 keeps everything
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
@@ -470,6 +471,7 @@ export interface Settings {
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
+  retentionDays?: number // how long every conversation keeps what was said, in days; 0 or unset: everything, for good (an agent's own page may say otherwise)
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
   actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
   autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)

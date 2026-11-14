@@ -327,7 +327,7 @@ export interface RoutineEvent {
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = { ctl: AbortController; msg: Message; deleted?: boolean; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
 // it (what was already said, its own earlier one too), and its message last.
@@ -642,6 +642,15 @@ export class Runner {
     writeFileSync(join(dir, FILE_TEXT_NAME), JSON.stringify(read))
   }
 
+  // Removed history must not return when an aborted or queued reply settles.
+  drop(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c) return
+    c.deleted = true
+    c.reason = 'stopped'
+    c.ctl.abort()
+  }
+
   stop(messageId: string): void {
     const c = this.controllers.get(messageId)
     if (!c) return
@@ -789,6 +798,7 @@ export class Runner {
   }
 
   private update(m: Message, patch: Partial<Message>): void {
+    if (this.controllers.get(m.id)?.deleted) return
     Object.assign(m, patch)
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: { ...m } })
@@ -965,11 +975,17 @@ export class Runner {
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
-  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message | undefined> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
     this.followups.start(key, reserved)
+    if ((threadId && !this.deps.db.message(threadId)) || (opts.existing && !this.deps.db.message(opts.existing.id))) {
+      this.followups.end(key)
+      this.followups.take(key)
+      this.startWaiting(key)
+      return undefined
+    }
     let msg: Message
     try {
       msg = await this.reply(agent, conv, rest)
@@ -2360,6 +2376,7 @@ ${note}`,
         ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
+    if (control.deleted) return msg
     const usedNow = db.usedThisMonth(agent.id)
     // Only an agent with a ceiling has a share of it to warn about.
     if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
