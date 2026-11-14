@@ -1286,9 +1286,9 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   // A manual choice lasts through completion: finishing must not close what someone is reading.
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  // One line is the whole point of 'one-line': there is nothing to open.
-  const opens = mode !== 'one-line'
-  const open = opens && (toggled ?? (working && stepsOpen))
+  // One line is what shows while the agent works, but a click always opens the steps: the person
+  // asked. A manual choice beats both the setting and the mode.
+  const open = toggled ?? (working && mode !== 'one-line' && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
