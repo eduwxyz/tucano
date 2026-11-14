@@ -318,7 +318,8 @@ describe('the curator and replies that overlap', () => {
     await curator.read('c')
     expect(calls).toHaveLength(2)
     db.close()
-  })
+    // Boots a core and drives two overlapping replies: 0.2 s here, past 5 s on a loaded ubuntu runner.
+  }, 30_000)
 
   it("isn't thrown off by a reply too short to read", async () => {
     const { db, curator, calls, overlap, end } = world('ok')
