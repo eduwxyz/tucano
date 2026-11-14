@@ -23,6 +23,21 @@ contextBridge.exposeInMainWorld('tucano', {
   },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
+  // A picture right-clicked in a conversation: saved where the person says, or into the clipboard.
+  image: {
+    save: (
+      url: string,
+      title: string,
+      opts?: { dir?: string; dialog?: boolean }
+    ): Promise<{ result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }> =>
+      ipcRenderer.invoke('image:save', { url, title, ...(opts ?? {}) }) as Promise<
+        { result: 'saved'; path: string; folder: string } | { result: 'missing_folder'; folder: string } | { result: 'cancelled' | 'failed' }
+      >,
+    copy: (url: string): Promise<boolean> => ipcRenderer.invoke('image:clipboard', { url }) as Promise<boolean>,
+    read: (url: string): Promise<{ mime: string; data: string } | null> => ipcRenderer.invoke('image:read', { url }) as Promise<{ mime: string; data: string } | null>,
+    // Where a picture goes in one click before the person has saved one themselves.
+    folder: (): Promise<{ folder: string } | null> => ipcRenderer.invoke('image:folder') as Promise<{ folder: string } | null>
+  },
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
   // A click on a notification opens its conversation, and the thread it's about.

@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
+import { openImageMenu } from '../image-menu'
 import { agentById, amAdmin, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
@@ -35,7 +36,16 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   if (!a) return null
   if (a.kind === 'image')
     return (
-      <button className="artifact-image" onClick={() => showImages(a)} title={a.title}>
+      <button
+        className="artifact-image"
+        onClick={() => showImages(a)}
+        title={a.title}
+        // Right-click: save it, copy it, or put it back in the prompt below as an attachment.
+        onContextMenu={(e) => {
+          e.preventDefault()
+          openImageMenu({ url: artifactUrl(a), title: a.title, surface: 'reply', conversationId: a.conversationId }, { x: e.clientX, y: e.clientY })
+        }}
+      >
         <img src={artifactUrl(a)} alt={a.title} />
         <span className="artifact-image__caption">{a.title}</span>
       </button>

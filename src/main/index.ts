@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
-import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
@@ -11,6 +11,7 @@ import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
 import { serverNote } from '../shared/servers'
+import { artifactImagePath, fileNameFor, freeName, imageBytesOf, mimeOfImage } from './image-bytes'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -650,6 +651,105 @@ ipcMain.handle('pick-folder', async (event) => {
   const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
+})
+
+// A picture right-clicked in a conversation: saved where the person says, or taken to the clipboard.
+// The page names it by the URL it was shown from; the bytes are read here (src/main/image-bytes.ts),
+// so a page never gets to ask for a file of its choosing.
+// A picture a reply links to on this computer, signed for the window by the core (src/core/local-paths).
+const localImagePath = (url: string): string | null => {
+  try {
+    return verifyLocalUrl(localKey, new URL(url))
+  } catch {
+    return null
+  }
+}
+const imageBytes = (url: unknown): Promise<Buffer | null> =>
+  typeof url === 'string' && url.length <= 8192
+    ? imageBytesOf(url, (u) => artifactImagePath(registry.selected().dataDir, u) ?? localImagePath(u))
+    : Promise.resolve(null)
+
+ipcMain.handle('image:save', async (event, arg: unknown) => {
+  if (!fromApp(event)) return null
+  const { url, title, dir, dialog: wantsDialog } = (arg ?? {}) as { url?: unknown; title?: unknown; dir?: unknown; dialog?: unknown }
+  const bytes = await imageBytes(url)
+  if (!bytes) return { result: 'failed' as const }
+  const name = fileNameFor(typeof title === 'string' ? title : '', String(url))
+  const folder = typeof dir === 'string' ? dir : ''
+  const win = BrowserWindow.fromWebContents(event.sender)
+  // One click, no dialog: into the folder the last picture went to. A folder that has gone is said
+  // out loud (a drive unplugged, a share down) so the page can open the dialog instead of saving
+  // into nowhere, and a name already there gets a number rather than replacing it.
+  if (folder && wantsDialog !== true) {
+    if (!isFolder(folder)) return { result: 'missing_folder' as const, folder }
+    try {
+      const target = join(folder, freeName(name, (candidate) => existsSync(join(folder, candidate))))
+      writeFileSync(target, bytes)
+      return { result: 'saved' as const, path: target, folder }
+    } catch {
+      return { result: 'failed' as const }
+    }
+  }
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  const opts = {
+    title: L('Salvar imagem', 'Save image'),
+    // The dialog opens where the last picture went, so choosing another folder is one step from there.
+    defaultPath: folder ? join(folder, name) : join(app.getPath('downloads'), name),
+    buttonLabel: L('Salvar', 'Save'),
+    filters: [{ name: L('Imagem', 'Image'), extensions: [ext] }]
+  }
+  const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+  if (r.canceled || !r.filePath) return { result: 'cancelled' as const }
+  try {
+    writeFileSync(r.filePath, bytes)
+    // Where it landed is where the next one goes in one click — a folder made in the dialog too.
+    return { result: 'saved' as const, path: r.filePath, folder: dirname(r.filePath) }
+  } catch {
+    return { result: 'failed' as const }
+  }
+})
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// "Send to prompt": the picture goes back into the field as an attachment, so the page needs its bytes.
+ipcMain.handle('image:read', async (event, arg: unknown) => {
+  if (!fromApp(event)) return null
+  const { url } = (arg ?? {}) as { url?: unknown }
+  const bytes = await imageBytes(url)
+  const mime = bytes ? mimeOfImage(bytes) : null
+  if (!bytes || !mime) return null
+  return { mime, data: bytes.toString('base64') }
+})
+
+// Where a picture goes in one click before the person has saved one themselves: the folder the system
+// keeps downloads in. The page names it in the menu, so a first save needs no dialog either.
+ipcMain.handle('image:folder', (event) => {
+  if (!fromApp(event)) return null
+  try {
+    return { folder: app.getPath('downloads') }
+  } catch {
+    return null
+  }
+})
+
+ipcMain.handle('image:clipboard', async (event, arg: unknown) => {
+  if (!fromApp(event)) return false
+  const { url } = (arg ?? {}) as { url?: unknown }
+  const bytes = await imageBytes(url)
+  const mime = bytes ? mimeOfImage(bytes) : null
+  if (!bytes || !mime) return false
+  try {
+    await clipboard.write([new ClipboardItem({ [mime]: new Blob([new Uint8Array(bytes)], { type: mime }) })])
+    return true
+  } catch {
+    return false
+  }
 })
 
 function createWindow(): BrowserWindow {
