@@ -49,6 +49,8 @@ import {
   type SkillVersion,
   type Report,
   type UsageReport,
+  type ProviderQuota,
+  type QuotasSnapshot,
   type Trigger,
   type ImageUpload,
   type FileUpload,
@@ -1072,6 +1074,9 @@ export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
 export const loadUsage = (): Promise<UsageReport> => call('usage')
+// The last quota read, which arrives before any network does, then a read of its own.
+export const loadQuotas = (): Promise<QuotasSnapshot> => call('quotas')
+export const refreshQuotas = (): Promise<QuotasSnapshot> => call('quotasRefresh')
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
 // People: who I am, who comes in (admins), who covers for me.
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })
