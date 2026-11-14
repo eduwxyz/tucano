@@ -757,6 +757,10 @@ h3 {
 .messages > :nth-last-child(-n + 3) .avatar__eyes i {
   animation-name: blink;
 }
+/* A still face (org chart cards) doesn't blink, so an idle board costs nothing. */
+.avatar.is-still .avatar__eyes i {
+  animation: none;
+}
 /* At work: the eyes read, left to right, and come back. */
 .avatar.is-busy .avatar__eyes {
   animation: read 1.8s var(--ease-out) infinite;

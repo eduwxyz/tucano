@@ -616,7 +616,7 @@ function Card({
         </span>
       )}
       {admin && <span className="org-port org-port--in" title={L('Puxe até quem ele vai responder', 'Pull onto whoever it will answer to')} onPointerDown={onPort('in')} />}
-      <AgentAvatar agent={agent} size={40} busy={!!live} />
+      <AgentAvatar agent={agent} size={40} busy={!!live} still />
       <span className="org-card__who">
         <strong>{agent.name}</strong>
         {agent.role && <span>{agent.role}</span>}
