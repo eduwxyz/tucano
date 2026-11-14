@@ -11008,6 +11008,24 @@ button.agent-card__now:hover {
 .agent-models__row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
 .agent-models__identity { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
 .agent-models__choice { display: grid; gap: 6px; flex: 2 1 300px; min-width: 0; }
+/* The model on its own line, the thinking under it: beside each other the thinking took the width the
+   model's name needs, and the name was what got cut. */
+.agent-models__picks { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; }
+/* A row's picks are the same three, flush in the same way. */
+.agent-models__row .model-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; }
+.agent-models__row .model-picker > .select,
+.agent-models__row .model-picker > input { width: 100%; min-width: 0; }
+/* Flush, the three of them: harness, model and thinking in one column, the same width, on top of
+   each other with no gap. Nothing is captioned - the thinking's own placeholder says what it is -
+   so each name gets the whole line, which is the room the model's name lost when it shared one. */
+.agent-models__picks--bulk { grid-template-columns: minmax(0, 1fr); gap: 0; }
+/* The model picker's own two picks are cells of that column, not a row of their own. */
+.agent-models__picks--bulk .model-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; }
+.agent-models__picks--bulk .model-picker > .select,
+.agent-models__picks--bulk .model-picker > input { width: 100%; min-width: 0; }
+.agent-models__pick { display: grid; gap: 6px; min-width: 0; }
+/* A short list of efforts: under a full-width model it does not need the whole line to itself. */
+.agent-models__pick--effort { width: 100%; }
 .agent-models [role="status"]:not(:empty) { margin-top: 12px; }
 
 /* The intro of a Tucano on a server: a computer's backup brought in from the first screen. */

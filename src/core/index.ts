@@ -1439,24 +1439,29 @@ const api: Handlers = {
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
 
-  setAgentModels: ({ agentIds, modelId }, ctx) => {
-    const value = modelId.trim()
-    const model = modelInfo(value)
-    if (!model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
+  setAgentModels: ({ agentIds, modelId, effort }, ctx) => {
+    // The model, the reasoning effort, or both: whichever is left out stays as the agent has it.
+    const value = modelId?.trim() ?? ''
+    const model = value ? modelInfo(value) : undefined
+    if (value && !model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
+    if (!value && !effort) throw new Error(L('Escolha um modelo ou um esforço.', 'Choose a model or an effort.'))
     const agents = [...new Set(agentIds)].map((id) => {
       const agent = db.agent(id)
       if (!agent) throw new Error(L('Um dos agentes não existe mais. Atualize a lista.', 'An agent no longer exists. Refresh the list.'))
       return agent
     })
-    const changed = agents.filter((a) => a.modelId !== value).map((a): Agent => ({
-      ...a,
-      modelId: value,
-      ...(modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
-    }))
+    const changed = agents
+      .filter((a) => (!!value && a.modelId !== value) || (!!effort && a.effort !== effort))
+      .map((a): Agent => ({
+        ...a,
+        ...(value ? { modelId: value } : {}),
+        ...(effort ? { effort } : {}),
+        ...(value && model && modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
+      }))
     db.tx(() => {
       for (const agent of changed) {
         db.saveAgent(agent)
-        record(ctx, 'agent.updated', agent.id, { name: agent.name, modelId: value })
+        record(ctx, 'agent.updated', agent.id, { name: agent.name, ...(value ? { modelId: value } : {}), ...(effort ? { effort } : {}) })
       }
     })
     for (const agent of changed) emit({ type: 'agent', agent: db.agent(agent.id)! })
