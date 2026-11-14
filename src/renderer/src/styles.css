@@ -12,6 +12,7 @@
   --text: #1d1a16;
   --text-2: #5f584e;
   --text-3: #948b7f;
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23948b7f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); /* the caret of the Select component, as an image */
   --accent: #d9581a;
   --accent-soft: rgba(228, 99, 28, 0.12);
   --accent-text: #ffffff;
@@ -76,6 +77,7 @@
     --text: #efeae2;
     --text-2: #aaa39a;
     --text-3: #7a746b;
+    --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a746b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); /* the caret of the Select component, as an image */
     --accent: #ff8a3d;
     --accent-soft: rgba(255, 138, 61, 0.14);
     --accent-text: #1a1917;
@@ -109,6 +111,7 @@
   --text: #efeae2;
   --text-2: #aaa39a;
   --text-3: #7a746b;
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a746b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); /* the caret of the Select component, as an image */
   --accent: #ff8a3d;
   --accent-soft: rgba(255, 138, 61, 0.14);
   --accent-text: #1a1917;
@@ -175,6 +178,16 @@ select {
   width: 100%;
   outline: none;
   transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+/* The system's arrow sits flush against the right edge, and a padding doesn't move it. Ours keeps the
+   field's own inset from the edge and wears the theme's color. */
+select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: var(--select-caret);
+  background-position: right 10px center;
+  background-size: 14px;
+  background-repeat: no-repeat;
 }
 input:focus,
 textarea:focus,
@@ -2283,7 +2296,7 @@ h3 {
   border-top: 1px solid var(--border);
 }
 .tools__row select {
-  padding: 3px 8px;
+  padding: 3px 28px 3px 8px;
   font-size: 12.5px;
 }
 .tools__row.is-off code {
