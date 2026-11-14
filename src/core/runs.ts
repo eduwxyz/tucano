@@ -6,7 +6,7 @@ import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, isTeam, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -25,6 +25,8 @@ import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
+import { EQUIPE, equipeCall } from './roster'
+import { carriedText, fitTeamUpName, TEAM_UP_GUESTS, TEAM_UP_MESSAGES, TEAM_UP_NAME_MAX, TEAM_UP_REUSE_MS, teamUpName, teamUpTask, teamUpTopic } from './team-up'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
@@ -203,6 +205,36 @@ export const askUserFor = (names: string[]): ToolDef =>
         }
       }
 
+// The way an agent opens a team-up itself, with a name it chose. An @mention of an agent outside the
+// room still opens one (that is where the feature came from); this is the same thing said out loud,
+// except that the channel is called what the work is instead of what the handles are.
+export const CHAMAR_TIME: ToolDef = {
+  name: 'chamar_time',
+  get description() {
+    return L(
+      `Abre um time-up: chama de 1 a ${TEAM_UP_GUESTS} agentes que não estão nesta conversa pra trabalharem com você num canal novo, que leva junto o que já foi feito aqui. Dê a esse canal um nome curto que diga do que é o trabalho: duas a quatro palavras, até ${TEAM_UP_NAME_MAX} caracteres, tipo "auditar-retry" ou "cartao-da-wiki". Nunca os nomes dos agentes nem a palavra time-up: quem olha a barra lateral tem que reconhecer o assunto, não quem está na sala. Depois de chamar, encerre a resposta.`,
+      `Opens a team-up: calls 1 to ${TEAM_UP_GUESTS} agents who aren't in this conversation to work with you in a new channel that carries what was already done here. Give that channel a short name saying what the work is about: two to four words, at most ${TEAM_UP_NAME_MAX} characters, like "retry-audit" or "wiki-card". Never the agents' names and never the words team-up: whoever reads the sidebar has to recognise the subject, not who is in the room. After calling it, end your reply.`
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        quem: {
+          type: 'array',
+          items: { type: 'string' },
+          description: L(`Os handles de quem chamar, de 1 a ${TEAM_UP_GUESTS}, com ou sem @ (a ferramenta equipe lista o time).`, `The handles of who to call, 1 to ${TEAM_UP_GUESTS} of them, with or without @ (the equipe tool lists the team).`)
+        },
+        nome: {
+          type: 'string',
+          description: L(`O nome do canal, até ${TEAM_UP_NAME_MAX} caracteres: do que é o trabalho, não de quem foi chamado.`, `The channel's name, at most ${TEAM_UP_NAME_MAX} characters: what the work is about, not who was called.`)
+        }
+      },
+      required: ['quem']
+    }
+  }
+}
+
 // A DM's person saying the agent may ask someone else ("sim", "pode", "yes"); anything else is a no.
 const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\b/i
 
@@ -236,6 +268,7 @@ export interface RunnerDeps {
   workDir: string // per-agent empty directories live here
   dataDir?: string // the app's data: images I attach are kept in its artifact store; without it, they're dropped
   gateway?: Gateway // without it, agents get no tools at all
+  gatewayReady?: Promise<unknown> // listening; a reply that starts earlier gets a URL with no port (see the run)
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
@@ -1148,6 +1181,10 @@ export class Runner {
     const handed = this.handedIn(msg)
     const boss = handed ? db.agent(handed.from) : undefined
     const delegated: DelegationRef[] = []
+    // A `pedir` this reply was refused (the target is out of reach, the channel isn't theirs, the chain is
+    // full): the reply explains a failure, it doesn't invite anyone. Marked from the tool result itself, never
+    // from the reply's words, and it turns off the mention path for what is left of the reply.
+    let refusedHandOff = false
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
@@ -1169,6 +1206,9 @@ export class Runner {
     }
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
+    // The team, to look at: the prompt names only the agents of this conversation, so a DM's agent has
+    // no way to know who else there is (nor their handles) without asking.
+    const roster = !!this.deps.gateway && isTeam(agent)
 
     const control: Control = { ctl: new AbortController(), msg }
     this.controllers.set(msg.id, control)
@@ -1231,12 +1271,14 @@ export class Runner {
     let askedTo: Person = requester // whom the question is for
     let confirming = false // in a DM, a question to someone else waits for the DM's person's yes first
     let approval: Approval | undefined
+    // The agents this reply called by tool (chamar_time), with the name it gave the channel: opened where it ends.
+    let teamUpCall: { guests: Agent[]; name?: string } | undefined
     const memoryIds: string[] = []
     const artifactIds: string[] = []
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, CHAMAR_TIME.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1325,6 +1367,8 @@ ${note}`,
     const others = db.people()
     const ownTools: ToolDef[] = [
       askUserFor(others.map((p) => (p.id === db.ownerId() ? ownerName || p.name : p.name))),
+      // Only where calling someone is possible at all: it is the team it calls.
+      ...(roster ? [CHAMAR_TIME] : []),
       ...(accessTool ? [accessTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(canSearch ? [BUSCAR_MEMORIAS] : []),
@@ -1339,7 +1383,8 @@ ${note}`,
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
-      ...(wiki ? WIKI_TOOLS : [])
+      ...(wiki ? WIKI_TOOLS : []),
+      ...(roster ? [EQUIPE] : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
     const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
@@ -1671,6 +1716,27 @@ ${note}`,
           msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
           addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
           return textResult(r.reply)
+        }
+
+        if (name === EQUIPE.name && roster) {
+          const r = equipeCall({ agents: db.agents(), me: agent.id, here: conv.members, busca: typeof args['busca'] === 'string' ? args['busca'] : undefined })
+          addSteps({ id: randomUUID(), label: L('Olhou o time', 'Looked at the team'), detail: r.count === 1 ? L('1 agente', '1 agent') : L(`${r.count} agentes`, `${r.count} agents`), status: 'done' })
+          return textResult(r.text)
+        }
+
+        if (name === CHAMAR_TIME.name && roster) {
+          const r = this.calledByTool(agent, conv, args)
+          if ('error' in r) return textResult(r.error, true)
+          teamUpCall = { guests: r.guests, ...(r.name ? { name: r.name } : {}) }
+          const who = r.guests.map((g) => `@${g.handle}`).join(', ')
+          const called = r.name ? `#${fitTeamUpName(r.name)}` : L('um canal novo', 'a new channel')
+          addSteps({ id: randomUUID(), label: L('Chamou o time', 'Called the team'), detail: `${who} · ${called}`, status: 'done' })
+          return textResult(
+            L(
+              `Vou abrir ${called} com ${who} e o que já foi feito aqui. Encerre a resposta agora com no máximo uma frase.`,
+              `I'll open ${called} with ${who} and what was already done here. End your reply now with one sentence at most.`
+            )
+          )
         }
 
         if (wiki && WIKI_TOOL_NAMES.has(name)) {
@@ -2158,6 +2224,8 @@ ${note}`,
         sign()
         try {
           const r = await runTool(name, args)
+          // A refused hand-off is a failure being explained, not an invitation (see refusedHandOff).
+          if (name === PEDIR.name && r.isError) refusedHandOff = true
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2209,6 +2277,7 @@ ${note}`,
       routines: routines?.forAgent(agent.id).filter((r) => visible(r.conversationId)),
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
+      roster,
       connectors: exposed.size > 0,
       github,
       people,
@@ -2255,8 +2324,13 @@ ${note}`,
     const unhold = engines[engineId].keepsMcp ? await this.holdAgent(agent.id) : undefined
     inFlight--
     sign()
+    // The gateway listens on a port it only learns once it's up: a reply that starts before that (a message
+    // at boot, a routine fired on opening, a test) would hand its tools a URL with no port, and every call
+    // would come back as "no internet". Waiting here costs nothing once it's up.
+    if (this.deps.gateway && this.deps.gatewayReady) await this.deps.gatewayReady
     const token = plan?.token ?? (engines[engineId].keepsMcp ? this.deps.gateway?.agentToken(agent.id) : undefined)
     const session = this.deps.gateway?.open(tools, token)
+
     const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
     // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
@@ -2445,6 +2519,15 @@ ${note}`,
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
         const next = this.mentions(agent, conv, msg).filter((a) => a.id !== handedNow?.from)
+        // Agents the reply calls that aren't in this conversation: this room can't take them, so they get
+        // one of their own, with what was already done here in front of them (team-up.ts).
+        const called = teamUpCall?.guests ?? []
+        // A reply that was refused a hand-off opens no room from a mention: the handles it lists in the
+        // refusal ("who you reach: @clara, @bento") name people to ask with `pedir`, not guests. The tool's
+        // own call is a deliberate team-up and stays untouched.
+        const implicit = refusedHandOff ? [] : this.guests(agent, conv, msg)
+        const guests = [...called, ...implicit.filter((g) => !called.some((c) => c.id === g.id))].slice(0, TEAM_UP_GUESTS)
+        if (guests.length) this.openTeamUp(agent, conv, msg, guests, opts.depth, chainDepthCap(settings.chainDepth), teamUpCall?.name)
         if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
         else finished()
       }
@@ -3059,6 +3142,112 @@ ${note}`,
   private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
     if (this.paused) return []
     return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+  }
+
+  // chamar_time, read: the agents it names, checked against the same rules as a mention (never the one
+  // talking, the Tuca, an archived agent, never someone already here — that one is an ordinary @), and
+  // the name it wants the channel to have.
+  private calledByTool(agent: Agent, conv: Conversation, args: Record<string, unknown>): { guests: Agent[]; name?: string } | { error: string } {
+    const raw = args['quem']
+    const listed = (Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : []).map((h) => String(h ?? '').trim().replace(/^@/, '').toLowerCase()).filter(Boolean)
+    if (!listed.length) return { error: L('Faltou dizer quem chamar em quem, com os handles (a ferramenta equipe lista o time).', 'Missing who to call in quem, with their handles (the equipe tool lists the team).') }
+    const here = new Set(conv.members)
+    const elsewhere = this.deps.db.agents().filter((a) => a.id !== agent.id && isTeam(a))
+    const guests: Agent[] = []
+    const already: string[] = []
+    const unknown: string[] = []
+    for (const handle of listed) {
+      const found = elsewhere.find((a) => a.handle.toLowerCase() === handle)
+      if (!found) unknown.push(`@${handle}`)
+      else if (here.has(found.id)) already.push(`@${found.handle}`)
+      else if (!guests.some((g) => g.id === found.id)) guests.push(found)
+    }
+    if (!guests.length)
+      return {
+        error: already.length
+          ? L(`${already.join(', ')} já está nesta conversa: chame com @ na sua resposta, que é um turno aqui mesmo, sem canal novo.`, `${already.join(', ')} is already in this conversation: call them with @ in your reply — that's a turn here, no new channel.`)
+          : L(`Não achei ${unknown.join(', ')} no time. A ferramenta equipe lista os handles.`, `I couldn't find ${unknown.join(', ')} on the team. The equipe tool lists the handles.`)
+      }
+    const name = typeof args['nome'] === 'string' ? args['nome'].trim() : ''
+    return { guests: guests.slice(0, TEAM_UP_GUESTS), ...(name ? { name } : {}) }
+  }
+
+  // The agents a reply calls that aren't in this conversation: no turn to hand them here, so they get a
+  // team-up. Never the agent talking, the Tuca, an archived one, one the person can't have, or one the reply
+  // can already reach down the tree (org.ts): those are asked with `pedir`, in their own thread, with the
+  // answer coming back where it was asked — a mention that reads like a call is no way round the tree.
+  // A refusal lists them with @ ("Quem você alcança: @clara, @bento"), so it opens no room of its own.
+  private guests(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+    if (this.paused) return []
+    const here = new Set(conv.members)
+    const all = this.deps.db.agents()
+    const reach = new Set(reachOf(all, agent.id).map((a) => a.id))
+    const elsewhere = all.filter((a) => a.id !== agent.id && isTeam(a) && !here.has(a.id) && !reach.has(a.id))
+    return mentioned(msg.text, elsewhere).slice(0, TEAM_UP_GUESTS)
+  }
+
+  // A channel for the agents just called, carrying what was already done here: the calling agent posts
+  // it as its own hand-off, each guest is told why it's here, and this conversation gets one line
+  // saying where the work went. The same call again within the day is the room it already has.
+  private openTeamUp(agent: Agent, conv: Conversation, msg: Message, guests: Agent[], depth: number, limit: number, wanted?: string): void {
+    const { db, emit } = this.deps
+    const said = msg.text.trim()
+    const source = conv.kind === 'dm' ? (db.agent(conv.name)?.name ?? L('uma conversa', 'a conversation')) : `#${conv.name}`
+    const handles = guests.map((g) => `@${g.handle}`)
+    const names = handles.join(L(' e ', ' and '))
+    if (depth >= limit) {
+      this.post(conv.id, msg.threadId, L(`${agent.name} chamou ${names}, mas parei aqui: já foram ${limit} respostas seguidas. Mande uma mensagem para continuar.`, `${agent.name} called ${names} in, but I stopped here: that was ${limit} replies in a row. Send a message to go on.`))
+      return
+    }
+    const now = Date.now()
+    const existing = db.conversations().find(
+      (c) => !!c.teamUp && c.teamUp.from === conv.id && now - c.teamUp.at < TEAM_UP_REUSE_MS && guests.every((g) => c.members.includes(g.id))
+    )
+    let team = existing
+    if (!team) {
+      const id = randomUUID()
+      db.createConversation({
+        id,
+        kind: 'channel',
+        name: teamUpName(guests, (n) => db.conversations().some((c) => c.kind === 'channel' && c.name === n), wanted),
+        topic: teamUpTopic(agent.name, source),
+        createdBy: dmOwner(conv, db.ownerId()) ?? conv.createdBy ?? db.ownerId(),
+        // Everyone who was here, plus the ones called in: the room continues the work, it doesn't restart it.
+        members: [...new Set([...conv.members, agent.id, ...guests.map((g) => g.id)])],
+        // What agents say while they work together is theirs, not the wiki's to read afterwards.
+        wikiCapture: false,
+        teamUp: { from: conv.id, title: source, by: agent.id, at: now, ...(dmOwner(conv, db.ownerId()) ? { privateTo: dmOwner(conv, db.ownerId()) } : {}) }
+      })
+      team = db.conversation(id)!
+      emit({ type: 'conversation', conversation: team })
+    }
+    // What was already said here, named as the person would read it: the guest's context, not a log.
+    const people = new Map(db.people({ removed: true }).map((p) => [p.id, p.name]))
+    const carried = db
+      .recentMessages(conv.id, TEAM_UP_MESSAGES * 3, msg.threadId ?? null)
+      .reverse()
+      .map((m) => ({
+        name: m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? L('agente', 'agent')) : m.author.kind === 'person' ? (people.get(m.author.id) ?? L('a pessoa', 'the person')) : L('sistema', 'system'),
+        text: m.run?.status === 'failed' ? '' : m.text,
+        at: m.at
+      }))
+    const handoff: Message = {
+      id: randomUUID(),
+      conversationId: team.id,
+      author: { kind: 'agent', id: agent.id },
+      text: carriedText({ by: agent.name, guests: guests.map((g) => g.handle), source, messages: carried, said }),
+      at: Date.now()
+    }
+    db.saveMessage(handoff)
+    emit({ type: 'message', message: handoff })
+    this.post(conv.id, msg.threadId, L(`${agent.name} chamou ${names} em #${team.name}.`, `${agent.name} called ${names} into #${team.name}.`))
+    // Only the ones just called work now: the rest are there to be read and called again.
+    const task = teamUpTask({ by: agent.name, source, channel: team.name, said })
+    for (const g of guests) {
+      const key = replyKey(g.id, team.id)
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(g, team!, { depth: depth + 1, work: msg.run?.work, task, reserved: true }))
+    }
   }
 
   // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the

@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
-import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
+import type { Agent, Conversation, EngineId, Message, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
-import { fakeEngine } from '../src/core/engines/fake'
+import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
@@ -218,6 +218,9 @@ describe('work handed down the tree', () => {
     await r.send('dm', 'delegue a clara em #engenharia: qualquer coisa')
     await r.idle()
     expect(by('orion', 'dm')[1]?.text).toContain('Clara não está em "engenharia". Os canais dele: #clientes, #vendas.')
+    // Nothing is handed into a channel, and the refusal opens no room either: it lists the three agents
+    // Orion already reaches ("who you reach: @clara, @bento, @nico"), and those are asked with `pedir`.
+    expect(db.conversations().filter((c) => c.teamUp)).toEqual([])
     expect(db.messages().filter((m) => m.conversationId !== 'dm')).toEqual([])
   })
 
@@ -395,5 +398,84 @@ describe('work handed down the tree', () => {
     await r.idle()
     expect(db.delegationAt(root!.id)).toMatchObject({ state: 'failed', told: true })
     expect(by('orion', 'dm').at(-1)?.text).toBe('Não deu certo: o pedido não terminou.')
+  })
+})
+
+// An engine that does exactly what the test says: some tool calls through the app's own gateway, then the
+// words of the reply. The fake one is scripted by what the person wrote; this one is scripted by us.
+const scripted = (id: EngineId, calls: [string, Record<string, unknown>][], say: string): Engine => ({
+  id,
+  async *run(turn: Turn) {
+    for (const [tool, args] of calls) if (turn.mcpUrl) await callTool(turn.mcpUrl, tool, args)
+    yield { type: 'done', text: say, usage: { inputTokens: 10, cacheReadTokens: 0, outputTokens: 5 } }
+  }
+})
+
+function runnerScripted(codex: Engine): Runner {
+  const engines: Record<EngineId, Engine> = {
+    claude: fakeEngine('claude', { delayMs: 1 }),
+    codex,
+    opencode: fakeEngine('opencode'),
+    pi: fakeEngine('pi'),
+    antigravity: fakeEngine('antigravity'),
+    cursor: fakeEngine('cursor'),
+    grok: fakeEngine('grok'),
+    cline: fakeEngine('cline'),
+    hermes: fakeEngine('hermes')
+  }
+  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway })
+}
+
+// A mention that reads like a call is no way round the tree, and a refusal is no invitation: a team-up is
+// the room for agents a reply can't reach, and the one it asks for on purpose (chamar_time).
+describe('who a mention may open a room for', () => {
+  const rooms = (): Conversation[] => db.conversations().filter((c) => c.teamUp)
+
+  it('opens none for an agent the reply can already reach: that one is asked with pedir', async () => {
+    const r = runnerScripted(scripted('codex', [], '@clara, dá uma olhada nisto?'))
+    await r.send('dm', 'veja o painel')
+    await r.idle()
+    // Clara answers to Orion: a mention names a target of `pedir`, in her own thread, not a room.
+    expect(rooms()).toEqual([])
+    expect(by('orion', 'dm')).toHaveLength(1)
+  })
+
+  it('opens none from a refusal, even one that echoes an agent out of reach', async () => {
+    // A alone would open a room here: `solo` is nobody Orion reaches, so it would read as a guest. The
+    // refused `pedir` is what says this reply explains a failure and invites no one.
+    const r = runnerScripted(scripted('codex', [['pedir', { para: 'solo', pedido: 'revise o build' }]], 'Não alcancei @solo: ele não responde a mim. Falo com ele pelo Edu?'))
+    await r.send('dm', 'peça pro solo revisar o build')
+    await r.idle()
+    expect(rooms()).toEqual([])
+    expect(by('orion', 'dm')).toHaveLength(1)
+    expect(db.openDelegations()).toEqual([])
+  })
+
+  it('still opens one for an agent out of reach, called by name', async () => {
+    const r = runnerScripted(scripted('codex', [], '@solo, pode revisar isto comigo?'))
+    await r.send('dm', 'veja o painel')
+    await r.idle()
+    const [team] = rooms()
+    // No name given, the handles name it; everyone who was here, plus the one called in.
+    expect(team?.name).toBe('team-up-solo')
+    expect(team?.members.sort()).toEqual(['orion', 'solo'])
+  })
+
+  it('lets chamar_time open one for an agent in reach: the deliberate call is never filtered', async () => {
+    const r = runnerScripted(scripted('codex', [['chamar_time', { quem: ['clara'], nome: 'auditar-retry' }]], 'Chamei a Clara.'))
+    await r.send('dm', 'audite o retry')
+    await r.idle()
+    const [team] = rooms()
+    expect(team?.name).toBe('auditar-retry')
+    expect(team?.members.sort()).toEqual(['clara', 'orion'])
+  })
+
+  it('keeps the deliberate call even in a reply that was refused a hand-off', async () => {
+    const r = runnerScripted(
+      scripted('codex', [['pedir', { para: 'solo', pedido: 'revise o build' }], ['chamar_time', { quem: ['clara'], nome: 'auditar-retry' }]], '@solo não dá. Chamei a Clara.')
+    )
+    await r.send('dm', 'audite o retry')
+    await r.idle()
+    expect(rooms().map((c) => c.name)).toEqual(['auditar-retry'])
   })
 })

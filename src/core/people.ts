@@ -26,7 +26,7 @@ export const newInviteCode = (): string => randomBytes(24).toString('base64url')
 export const hashSecret = (secret: string): string => createHash('sha256').update(secret).digest('base64url')
 
 // A DM is its person's (one without an owner, from before people, is the Tucano owner's); a channel is everyone's.
-export const dmOwner = (c: Pick<Conversation, 'kind' | 'owner'>, ownerId: string): string | undefined => (c.kind === 'dm' ? (c.owner ?? ownerId) : undefined)
+export const dmOwner = (c: Pick<Conversation, 'kind' | 'owner' | 'teamUp'>, ownerId: string): string | undefined => (c.kind === 'dm' ? (c.owner ?? ownerId) : c.teamUp?.privateTo)
 
 // The person an agent belongs to (its approvals are theirs), while they have access.
 export const agentOwner = (db: Db, agentId: string): Person | undefined => {
@@ -235,7 +235,7 @@ export class People {
     return Object.fromEntries(Object.entries(patch).filter(([k]) => !isPersonalSetting(k))) as Partial<T>
   }
 
-  canSeeConversation(person: Person, c: Pick<Conversation, 'kind' | 'owner'> | undefined): boolean {
+  canSeeConversation(person: Person, c: Pick<Conversation, 'kind' | 'owner' | 'teamUp'> | undefined): boolean {
     if (!c) return false
     const dm = dmOwner(c, this.db.ownerId())
     return dm === undefined || dm === person.id

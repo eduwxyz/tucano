@@ -215,7 +215,7 @@ export function Sidebar(): ReactNode {
       onContextMenu={(e) => open(e, channelMenu(c))}
       {...dropOn({ group, before: c.id })}
     >
-      <ChannelItem id={c.id} name={c.name} unread={c.unread} />
+      <ChannelItem id={c.id} name={c.name} unread={c.unread} teamUp={!!c.teamUp} />
     </div>
   )
   // The wiki's curator reads every conversation; one can be kept out (a personal DM, say).
@@ -240,22 +240,39 @@ export function Sidebar(): ReactNode {
     { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
     ...(admin ? channelDelete(c) : [])
   ]
+  // A team-up closes instead of being deleted: same thing underneath (its messages go, the conversation
+  // that opened it stays whole), said in the words that fit a room an agent put together for one job.
   const channelDelete = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
-    {
-      label: L('Excluir canal…', 'Delete channel…'),
-      icon: 'trash',
-      danger: true,
-      onClick: () =>
-        void confirmDialog({
-          title: L(`Excluir #${c.name}?`, `Delete #${c.name}?`),
-          body: L('As mensagens e as rotinas que postam nele vão junto. Os agentes continuam no time. Não dá pra desfazer.', "Its messages and the routines that post in it go too. The agents stay on the team. This can't be undone."),
-          confirm: L(`Excluir #${c.name}`, `Delete #${c.name}`),
-          danger: true
-        }).then((ok) => {
-          if (ok) void deleteConversation(c.id)
-        })
-    }
+    c.teamUp
+      ? {
+          label: L('Fechar equipe…', 'Close team-up…'),
+          icon: 'users',
+          danger: true,
+          onClick: () =>
+            void confirmDialog({
+              title: L(`Fechar #${c.name}?`, `Close #${c.name}?`),
+              body: L('As mensagens dela vão junto. A conversa que a abriu continua inteira, e os agentes continuam no time. Não dá pra desfazer.', "Its messages go with it. The conversation that opened it stays whole, and the agents stay on the team. This can't be undone."),
+              confirm: L(`Fechar #${c.name}`, `Close #${c.name}`),
+              danger: true
+            }).then((ok) => {
+              if (ok) void deleteConversation(c.id)
+            })
+        }
+      : {
+          label: L('Excluir canal…', 'Delete channel…'),
+          icon: 'trash',
+          danger: true,
+          onClick: () =>
+            void confirmDialog({
+              title: L(`Excluir #${c.name}?`, `Delete #${c.name}?`),
+              body: L('As mensagens e as rotinas que postam nele vão junto. Os agentes continuam no time. Não dá pra desfazer.', "Its messages and the routines that post in it go too. The agents stay on the team. This can't be undone."),
+              confirm: L(`Excluir #${c.name}`, `Delete #${c.name}`),
+              danger: true
+            }).then((ok) => {
+              if (ok) void deleteConversation(c.id)
+            })
+        }
   ]
   const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
     { label: L(`Ver ${agentName}`, `See ${agentName}`), icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },
@@ -458,13 +475,13 @@ export function Sidebar(): ReactNode {
   )
 }
 
-const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
+const ChannelItem = memo(function ChannelItem({ id, name, unread, teamUp }: { id: string; name: string; unread?: number; teamUp?: boolean }): ReactNode {
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
   const waiting = useWaitingTitle(id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
-      <Icon name="hash" />
+      {teamUp ? <span title={L('Equipe montada por um agente', 'A team an agent put together')}><Icon name="users" /></span> : <Icon name="hash" />}
       <span className="nav-item__label">{name}</span>
       {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
       {unread ? <span key={unread} className="badge badge--soft">{unread}</span> : null}

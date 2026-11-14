@@ -1,3 +1,4 @@
+import { teamUpAudiences } from '../shared/team-up-privacy'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { randomUUID } from 'node:crypto'
@@ -544,7 +545,9 @@ const COLUMNS: [string, string, string][] = [
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // A channel an agent opened to work with agents called in from another conversation.
+  ['conversations', 'team_up', 'TEXT']
 ]
 
 
@@ -566,8 +569,21 @@ export class Db {
     this.db = new DatabaseSync(file)
     this.keepStatements()
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
-    try { this.migrate(file) }
+    try { this.migrate(file); this.protectTeamUpPrivacy() }
     catch (error) { this.db.close(); throw error }
+  }
+
+  private protectTeamUpPrivacy(): void {
+    const rooms = this.conversations()
+    if (!rooms.some((room) => room.teamUp)) return
+    const audiences = teamUpAudiences(rooms, this.ownerId())
+    this.tx(() => {
+      for (const room of rooms) {
+        const person = audiences.get(room.id)
+        if (!room.teamUp || !person || room.teamUp.privateTo === person) continue
+        this.db.prepare('UPDATE conversations SET team_up = ? WHERE id = ?').run(JSON.stringify({ ...room.teamUp, privateTo: person }), room.id)
+      }
+    })
   }
 
   close(): void {
@@ -895,6 +911,7 @@ export class Db {
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
       ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
       ...(r['threads'] === 1 ? { threads: true } : {}),
+      ...(r['team_up'] ? { teamUp: JSON.parse(str(r['team_up'])) as Conversation['teamUp'] } : {}),
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
       unread: Number(r['unread'])
@@ -938,7 +955,9 @@ export class Db {
       const owner = c.kind === 'dm' ? (c.owner ?? this.ownerId()) : null
       // A channel is whoever made it (the owner when the code doesn't say).
       const by = c.kind === 'channel' ? (c.createdBy ?? this.ownerId()) : null
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, owner, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, owner, by, Date.now())
+      this.db
+        .prepare('INSERT INTO conversations (id, kind, name, topic, threads, team_up, wiki_capture, owner, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, c.teamUp ? JSON.stringify(c.teamUp) : null, c.wikiCapture === false ? 0 : null, owner, by, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
   }
@@ -1962,7 +1981,7 @@ export class Db {
   // team's log. Returns the DMs deleted, their routines, and the files (artifacts) to delete from disk.
   purgePerson(personId: string, now = Date.now()): { dms: string[]; routines: { id: string; conversationId: string }[]; artifacts: { id: string; name: string }[] } {
     return this.tx(() => {
-      const dms = (this.db.prepare("SELECT id FROM conversations WHERE kind = 'dm' AND owner = ?").all(personId) as Row[]).map((r) => str(r['id']))
+      const dms = (this.db.prepare("SELECT id FROM conversations WHERE (kind = 'dm' AND owner = ?) OR json_extract(team_up, '$.privateTo') = ?").all(personId, personId) as Row[]).map((r) => str(r['id']))
       const inDms = `(${dms.map(() => '?').join(', ') || "''"})`
       const artifacts = (this.db.prepare(`SELECT id, name FROM artifacts WHERE conversation_id IN ${inDms}`).all(...dms) as Row[]).map((r) => ({ id: str(r['id']), name: str(r['name']) }))
       const routines = (this.db.prepare(`SELECT id, conversation_id FROM routines WHERE conversation_id IN ${inDms}`).all(...dms) as Row[]).map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']) }))

@@ -92,7 +92,10 @@ export function depthBelow(agents: Node[], id: string, seen = new Set<string>())
 }
 
 // The channels an agent works in, the first it joined first: handed work goes to the first, unless another is named.
-export const channelsOf = <C extends Pick<Conversation, 'kind' | 'members'>>(conversations: C[], agentId: string): C[] => conversations.filter((c) => c.kind === 'channel' && c.members.includes(agentId))
+// A team-up is not one of them: it is a room a reply opened for one piece of work and closes itself, so nothing
+// is handed into it and it isn't listed as somewhere an agent works.
+export const channelsOf = <C extends Pick<Conversation, 'kind' | 'members'> & { teamUp?: unknown }>(conversations: C[], agentId: string): C[] =>
+  conversations.filter((c) => c.kind === 'channel' && !c.teamUp && c.members.includes(agentId))
 
 export interface OrgNode<T> {
   agent: T

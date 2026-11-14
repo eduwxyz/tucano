@@ -61,6 +61,19 @@ describe('systemPrompt', () => {
     expect(s).toContain('Theo (@theo, Dados)')
   })
 
+  it('tells a DM’s agent, who has no one else in the room, that it can call one in, and to name the channel after the work', () => {
+    const withRoster = systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [], roster: true })
+    expect(withRoster).toContain('chamar_time')
+    // The name is the point of it: the work, not the agents that were called.
+    expect(withRoster).toContain('nome curto do que é o trabalho')
+    expect(withRoster).toContain('A ferramenta equipe lista o time')
+    // Without the tool it isn't told to use it, and a channel is told what it already was.
+    expect(systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '' }, conversation: dm, peers: [] })).not.toContain('equipe')
+    const inChannel = systemPrompt({ agent: lia, settings: { workspaceName: 'Edu', context: '' }, conversation: channel, peers: [theo], roster: true })
+    expect(inChannel).toContain('canal de equipe')
+    expect(inChannel).not.toContain('A ferramenta equipe')
+  })
+
   it('leaves out empty sections and describes a DM', () => {
     const s = systemPrompt({ agent: theo, settings: { workspaceName: 'Edu', context: '  ' }, conversation: dm, peers: [] })
     expect(s).not.toContain('## Sobre')
