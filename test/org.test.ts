@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { askKind, bossOf, channelsOf, depthBelow, directReports, headsOf, loops, MAX_LINE, orgTree, overLine, peersOf, possibleBosses, rankOf, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
+import { askKind, bossOf, channelsOf, depthBelow, directReports, headsOf, loops, orgTree, peersOf, possibleBosses, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
 
 const a = (id: string, reportsTo?: string, extra: { archived?: boolean; kind?: 'tuca' } = {}): { id: string; reportsTo?: string; archived?: boolean; kind?: 'tuca' } => ({ id, ...(reportsTo ? { reportsTo } : {}), ...extra })
 const ids = (list: { id: string }[]): string[] => list.map((x) => x.id)
@@ -27,27 +27,9 @@ describe('who answers to whom', () => {
     expect(loops(team, 'orion', 'orion')).toBe(true)
     expect(loops(team, 'nico', 'orion')).toBe(false)
     const withOthers = [...team, a('tuca', undefined, { kind: 'tuca' }), a('old', undefined, { archived: true })]
-    // Bento has people below: under Atlas, Clara or Otto its line would be too long (see the next one).
-    expect(ids(possibleBosses(withOthers, 'bento'))).toEqual(['orion', 'solo'])
-    expect(ids(possibleBosses(withOthers, 'atlas'))).toEqual(['orion', 'bento', 'clara', 'solo'])
-  })
-
-  it('keeps a line to three agents from top to bottom', () => {
-    expect(MAX_LINE).toBe(3)
-    expect([rankOf(team, 'orion'), rankOf(team, 'bento'), rankOf(team, 'nico'), rankOf(team, 'solo'), rankOf(team, 'nobody')]).toEqual([1, 2, 3, 1, 1])
-    // Under someone at the bottom of a full line: one too many.
-    expect(overLine(team, 'solo', 'nico')).toBe(true)
-    expect(overLine(team, 'solo', 'bento')).toBe(false)
-    // With someone below, it's the whole branch that has to fit.
-    expect(overLine(team, 'bento', 'atlas')).toBe(true)
-    expect(overLine(team, 'bento', 'solo')).toBe(false)
-    expect(overLine(team, 'orion', 'solo')).toBe(true) // Orion has two levels below already
-    // An archived one in the middle doesn't count: whoever answered to it answers to its boss meanwhile.
-    const gone = team.map((x) => (x.id === 'bento' ? { ...x, archived: true } : x))
-    expect(rankOf(gone, 'nico')).toBe(2)
-    expect(overLine(gone, 'solo', 'nico')).toBe(false)
-    // A loop left by hand ends the count.
-    expect(rankOf([a('x', 'y'), a('y', 'x')], 'x')).toBe(2)
+    // Anyone not below it will do, however long the line gets.
+    expect(ids(possibleBosses(withOthers, 'bento'))).toEqual(['orion', 'atlas', 'clara', 'otto', 'solo'])
+    expect(ids(possibleBosses(withOthers, 'atlas'))).toEqual(['orion', 'bento', 'clara', 'nico', 'vera', 'otto', 'solo'])
   })
 
   it('passes over an archived boss: its people answer to the one above it meanwhile', () => {

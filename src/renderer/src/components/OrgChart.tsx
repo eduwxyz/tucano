@@ -6,7 +6,7 @@
 // there is to know and change about it; the box at the bottom asks it something without leaving.
 import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { bossOf, channelsOf, depthBelow, directReports, headsOf, loops, MAX_LINE, orgTree, overLine, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
+import { bossOf, channelsOf, depthBelow, directReports, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
 import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyBoard, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
 import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
@@ -167,8 +167,6 @@ export function OrgPage(): ReactNode {
     // Latest first, so a line that depended on another is undone before it.
     for (const [id, to] of [...undo.was].reverse()) await put(id, to)
   }
-  // Why a line can't end there, when it's the length of the line and not a loop: worth saying, since nothing on the card shows it.
-  const tooLong = (boss: string, id: string): boolean => boss !== ME && id !== ME && boss !== id && byId.has(boss) && byId.has(id) && byId.get(id)?.reportsTo !== boss && !loops(agents, id, boss) && overLine(agents, id, boss)
   // `id` may answer to `boss` unless it already does or that closes a loop.
   const takes = (boss: string, id: string): boolean => {
     const agent = byId.get(id)
@@ -205,7 +203,6 @@ export function OrgPage(): ReactNode {
         setLink(null)
         setOver(null)
         if (target && lands(g.from, g.side, target)) void (g.side === 'out' ? move(target, g.from) : move(g.from, target === ME ? null : target))
-        else if (target && (g.side === 'out' ? tooLong(g.from, target) : tooLong(target, g.from))) setError(L(`Uma linha tem no máximo ${MAX_LINE} agentes, de cima a baixo. Quem está acima já alcança todos os de baixo, sem precisar de mais um no meio.`, `A line holds at most ${MAX_LINE} agents, top to bottom. Whoever is above already reaches everyone below, with no need for one more in between.`))
       } else if (g.kind === 'card') {
         setMoved(null)
         if (!g.dragged) return void (g.id !== ME && (setEdge(null), setSector(null), setPicked((p) => (p === g.id ? null : g.id))))

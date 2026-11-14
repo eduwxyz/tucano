@@ -183,15 +183,14 @@ it('takes a change back for a moment, from the board or with ⌘Z', async () => 
   expect(document.querySelector('.org-undo')).toBeNull()
 })
 
-it('says why a line that would be too long does not hold', async () => {
-  // Under Nico, the third of its line, Solo would be a fourth.
+it('lets a line be as long as it is drawn, and refuses only a loop', async () => {
+  // Under Nico, the third of its line, Solo is a fourth.
   await pull('nico', 'out', 'solo')
-  expect(save).not.toHaveBeenCalled()
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Uma linha tem no máximo 3 agentes')
-  // A loop says nothing: the card was dimmed, and that is reason enough.
-  await pull('clara', 'out', 'solo')
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'solo', reportsTo: 'nico' })
   expect(document.querySelector('[role="alert"]')).toBeNull()
+  // A loop says nothing: the card was dimmed, and that is reason enough.
   await pull('nico', 'out', 'orion')
+  expect(save).toHaveBeenCalledTimes(1)
   expect(document.querySelector('[role="alert"]')).toBeNull()
 })
 
@@ -246,8 +245,8 @@ it('opens what there is to know about an agent on a click, and changes whom it a
   expect(side.textContent).toContain('nico')
   // Whom it may answer to: not itself, nor the one below it.
   const select = side.querySelector('select')!
-  // Whom it may answer to: not itself, nor the one below it, nor one that would make its line too long (Clara, with Nico below it).
-  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['Ninguém', 'orion', 'solo'])
+  // Whom it may answer to: not itself, nor the one below it.
+  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['Ninguém', 'orion', 'clara', 'solo'])
   await act(async () => { Object.defineProperty(select, 'value', { configurable: true, value: 'solo' }); select.dispatchEvent(new window.Event('change', { bubbles: true })) })
   expect(save.mock.calls[0]![0]).toMatchObject({ id: 'bento', reportsTo: 'solo' })
   // Its page and its DM are a click away (twice on the card is the DM too); a press on the board closes it.
