@@ -1,6 +1,7 @@
 // Skills (spec §18): recipes the agents follow, kept like pages to read. Agents
 // propose; I approve, edit, and undo any change from the history.
 import { L } from '../../../shared/lang'
+import { skillOrigin } from '../../../shared/skill-groups'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -46,7 +47,12 @@ function result(r?: SkillReport): string {
   )
 }
 
-const from = (k: Skill): string => (k.source ? L(`do seu ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`, `from your ${k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}`) : L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`))
+const from = (k: Skill): string => {
+  const origin = skillOrigin(k.source)
+  if (!origin) return L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`)
+  const who = origin === 'codex' ? 'Codex' : origin === 'claude' ? 'Claude Code' : 'Hermes'
+  return L(`do seu ${who}`, `from your ${who}`)
+}
 
 // Skills are the admins': a member reads them (what the agents follow), changes nothing.
 export function SkillsPage(): ReactNode {

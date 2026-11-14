@@ -17,6 +17,8 @@
   --accent-text: #ffffff;
   --primary: #1d1a16;
   --primary-text: #fffaf3;
+  --toast-bg: #fffefb;
+  --toast-ink: #b74d19;
   --bubble: #f1ece4;
   --ok: #1f9d55;
   --ok-soft: rgba(31, 157, 85, 0.12);
@@ -79,6 +81,8 @@
     --accent-text: #1a1917;
     --primary: #f1ece4;
     --primary-text: #1a1917;
+    --toast-bg: #2a2724;
+    --toast-ink: #ff8a3d;
     --bubble: #2a2724;
     --ok: #4bd08a;
     --ok-soft: rgba(75, 208, 138, 0.14);
@@ -110,6 +114,8 @@
   --accent-text: #1a1917;
   --primary: #f1ece4;
   --primary-text: #1a1917;
+  --toast-bg: #2a2724;
+  --toast-ink: #ff8a3d;
   --bubble: #2a2724;
   --ok: #4bd08a;
   --ok-soft: rgba(75, 208, 138, 0.14);
@@ -7886,6 +7892,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .wk-canvas__edges line.is-hot { stroke: var(--accent); stroke-width: 2; }
 .wk-canvas__edges line.is-dim { opacity: 0.18; }
 .wk-node { cursor: pointer; transition: opacity var(--dur-enter) var(--ease-out); animation: fade var(--dur-data) var(--ease-out) both; animation-delay: calc(var(--i) * 22ms); }
+/* A big map arrives in one fade. Each node carries its own opacity animation for the stagger, and an
+   animated element is a layer of its own: eighty of them at once is a first frame the compositor can
+   leave unpainted until something else invalidates it. */
+.wk-canvas.is-many .wk-node { animation: none; }
+.wk-canvas.is-many > svg { animation: fade var(--dur-data) var(--ease-out) both; }
 .wk-node__hit { fill: transparent; }
 .wk-node__dot { fill: var(--k); stroke: var(--bg); stroke-width: 2.5; }
 .wk-node__halo { fill: var(--k); opacity: 0; transition: opacity var(--dur-base) var(--ease-out); }
@@ -8141,13 +8152,17 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 }
 .toast {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   width: 100%;
   padding: 10px 8px 10px 14px;
   border-radius: var(--radius);
-  background: var(--primary);
-  color: var(--primary-text);
+  /* The signature orange as the text, on a surface that lifts off the page: white in the light, a
+     step above the panel in the dark. `--primary` inverted with the theme and left the dark app
+     holding a white pill. The light ink is the accent darkened until a 13px line of it clears 4.5:1
+     on white (5.09:1); the dark ink is the dark accent as it is (6.33:1). */
+  background: var(--toast-bg);
+  color: var(--toast-ink);
   box-shadow: var(--shadow-lg);
   font-size: 13px;
   line-height: 1.4;
@@ -8160,7 +8175,6 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .toast__text {
   flex: 1;
   min-width: 0;
-  padding-top: 2px;
   overflow-wrap: anywhere;
 }
 .toast__close {
@@ -8169,8 +8183,8 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   opacity: 0.7;
 }
 .toast__close:hover {
-  /* the toast's own text color, faint: shows on the dark toast and on the light one in dark mode */
-  background: color-mix(in srgb, var(--primary-text) 14%, transparent);
+  /* the toast's own orange, faint, on either surface */
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: inherit;
   opacity: 1;
 }
@@ -11812,4 +11826,58 @@ button.agent-card__now:hover {
 }
 .orgb:has(.org-undo) .org-hint {
   visibility: hidden;
+}
+/* The filter over a long skill list: the library is a few hundred recipes, and the agent's tab
+   had them all in one column with no way to narrow it. */
+.skill-filter {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 2px 0 8px;
+}
+.skill-filter__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-3);
+}
+.skill-filter__search input {
+  flex: 1;
+  border: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 13px;
+}
+.skill-filter__search input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.check--inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.skill-filter__meta {
+  padding: 6px 0 10px;
+  gap: 12px;
+}
+.skill-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+.skill-groups .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }

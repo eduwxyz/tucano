@@ -1267,12 +1267,14 @@ function useNow(on: boolean): number {
 
 // One quiet line: what the agent is doing now (and for how long), or how many
 // steps it took. The steps themselves open on a click.
-function RunSteps({ message }: { message: Message }): ReactNode {
+export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
-  // Open while the agent works, so its steps read as they go, unless the person closes it; closed after.
+  // Open while the agent works, so its steps read as they go, unless the person closes it or turned
+  // that off in Settings (several agents at once would fill the screen); closed after.
+  const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  const open = toggled ?? working
+  const open = toggled ?? (working && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
