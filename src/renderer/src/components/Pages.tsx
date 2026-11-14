@@ -1915,8 +1915,8 @@ export const SETTINGS_TABS = (team = false, admin = true, owner = true, routing 
   ...(admin
     ? ([
         ['modelos', L('Modelos', 'Models')],
-        ['agentes', L('Agentes', 'Agents')],
         ...(routing ? [['roteamento', L('Rotas', 'Routing')]] : []),
+        ['agentes', L('Agentes', 'Agents')],
         ...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])
       ] as [string, string][])
     : []),
