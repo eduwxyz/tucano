@@ -60,27 +60,8 @@ export const MAX_CHAIN = 3
 // Whether `id` answering to `boss` would close a loop (or is itself, or is below itself).
 export const loops = (agents: Node[], id: string, boss: string): boolean => id === boss || reportsOf(agents, id).some((a) => a.id === boss)
 
-// The most agents a line holds from top to bottom. Each one more is another model reply between the
-// person and the work: slower, dearer, and something is lost every time it is retold.
-export const MAX_LINE = 3
-
-// How many agents there are from the top of its line down to `id`, itself included: 1 answering to no one.
-export function rankOf(agents: Node[], id: string): number {
-  let rank = 1
-  const seen = new Set([id])
-  for (let at = agents.find((a) => a.id === id), up = at && bossOf(agents, at); up && !seen.has(up.id); up = bossOf(agents, up)) {
-    seen.add(up.id)
-    rank++
-  }
-  return rank
-}
-
-// Whether `id` answering to `boss` would make a line longer than MAX_LINE: boss's own rank, `id`, and whoever `id` has below.
-export const overLine = (agents: Node[], id: string, boss: string): boolean => rankOf(agents, boss) + 1 + depthBelow(agents, id) > MAX_LINE
-
-// Who `id` may answer to: any other agent that isn't below it, nor the Tuca (it builds the others), and
-// that keeps the line within MAX_LINE.
-export const possibleBosses = <T extends Node>(agents: T[], id: string): T[] => agents.filter((a) => !a.archived && a.kind !== 'tuca' && !loops(agents, id, a.id) && !overLine(agents, id, a.id))
+// Who `id` may answer to: any other agent that isn't below it, nor the Tuca (it builds the others).
+export const possibleBosses = <T extends Node>(agents: T[], id: string): T[] => agents.filter((a) => !a.archived && a.kind !== 'tuca' && !loops(agents, id, a.id))
 
 // How deep the tree goes below `id`: 0 with no one.
 export function depthBelow(agents: Node[], id: string, seen = new Set<string>()): number {
