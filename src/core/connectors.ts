@@ -29,6 +29,13 @@ const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 300_000]
 // How long a renewal's answer is kept for another request that renews with the same refresh token.
 const RENEWAL_KEEP_MS = 60_000
 
+// A connector's own picture: an image inline, as a data URL, and no bigger than this (the renderer
+// shrinks what the person picks to 96 px, which lands far below the cap; the cap is the guard for the
+// pictures that go straight to the core, from a phone or a script). Small because the connector list
+// goes out on every change and travels to the phone: a picture here is a mark, not a photograph.
+const ICON_DATA_URL = /^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/
+const ICON_MAX_CHARS = 32_000
+
 // The authorization page sent the browser back without a code: why, and what to do.
 export function notAuthorized(url: URL): string {
   const error = url.searchParams.get('error')
@@ -393,6 +400,21 @@ export class ConnectorManager {
 
   private redirectFor(provider: AppProvider): string {
     return provider === 'slack' && this.deps.fixedCallbackUrl ? this.deps.fixedCallbackUrl() : this.deps.oauthCallbackUrl()
+  }
+
+  // The picture a connector wears instead of the store's mark (or the icon of its kind). Empty: back
+  // to those. It is a data URL because it lives in the database: a backup, an export and a restore of
+  // the computer carry it, and there is no folder of loose pictures to keep in step.
+  async setIcon(id: string, icon: string): Promise<void> {
+    const c = this.deps.db.connector(id)
+    if (!c) throw new Error(L('Esse conector não existe mais.', 'That connector no longer exists.'))
+    const value = icon.trim()
+    if (value && !ICON_DATA_URL.test(value))
+      throw new Error(L('Isso não é uma imagem (PNG, JPEG, WebP, GIF ou SVG).', 'That is not an image (PNG, JPEG, WebP, GIF or SVG).'))
+    if (value.length > ICON_MAX_CHARS)
+      throw new Error(L('A imagem é grande demais para um ícone. Escolha uma menor.', 'That image is too big for an icon. Pick a smaller one.'))
+    this.deps.db.setConnectorIcon(id, value || null)
+    this.emitConnector(id)
   }
 
   // Sets or replaces the token of a connector that signs in with one, and connects with it.

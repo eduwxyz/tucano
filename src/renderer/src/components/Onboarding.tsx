@@ -36,6 +36,7 @@ import { draftAgent, UseDraft } from './Tuca'
 import { AutonomyPick } from './AutonomyPick'
 import { autonomyChosen, FIRST_AUTONOMY, storedAutonomy } from '../../../shared/onboarding'
 import { AgentAvatar, Icon, type IconName } from './ui'
+import { ConnectorTile } from './ConnectorStore'
 
 type Computer = 'none' | 'linux' | 'mac'
 
@@ -642,8 +643,8 @@ function Powers(p: {
               const level = p.grants[c.id] ?? 'read' // reading is safe to start with
               return (
                 <div key={c.id} className="onb-power-row">
-                  <span className="onb-power-row__icon">
-                    <Icon name={c.kind === 'stdio' ? 'terminal' : 'plug'} size={18} />
+                  <span className="onb-power-row__icon onb-power-row__icon--tile">
+                    <ConnectorTile c={c} size={22} />
                   </span>
                   <div>
                     <strong>{c.name}</strong>

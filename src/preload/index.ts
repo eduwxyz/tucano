@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('tucano', {
   },
   connect: (): void => ipcRenderer.send('core:connect'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
+  // The picture on the clipboard, so a connector's icon can be pasted in instead of picked.
+  image: {
+    paste: (): Promise<{ mime: string; data: string } | null> => ipcRenderer.invoke('image:fromClipboard') as Promise<{ mime: string; data: string } | null>
+  },
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
   // A click on a notification opens its conversation, and the thread it's about.

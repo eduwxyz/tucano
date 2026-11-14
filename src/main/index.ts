@@ -652,6 +652,23 @@ ipcMain.handle('pick-folder', async (event) => {
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
 
+// "Paste image": the picture sitting on the system clipboard, handed to the page so a connector can
+// wear it. The page shrinks it to the same 96 px icon a picked file becomes; an empty clipboard, or one
+// holding text, comes back as null.
+ipcMain.handle('image:fromClipboard', async (event) => {
+  if (!fromApp(event)) return null
+  const items = await clipboard.read().catch(() => [])
+  for (const item of items) {
+    const mime = item.types.find((t) => t.startsWith('image/'))
+    if (!mime) continue
+    // getType hands back a Blob for every MIME type but a bookmark, which an image is never.
+    const blob = await item.getType(mime)
+    if (!(blob instanceof Blob) || !blob.size) continue
+    return { mime, data: Buffer.from(await blob.arrayBuffer()).toString('base64') }
+  }
+  return null
+})
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
