@@ -57,11 +57,10 @@ function connect(): { events: CoreEvent[]; call: (method: string) => Promise<unk
   }
 }
 
-// How long this file waits for a core to come up. 15 s was enough on a quiet machine, and the
-// Windows runner that takes the middle of four shards timed out at 20.6 s on an unchanged commit:
-// the boot spawns every harness's CLI and shares the machine with three other shards. vitest.config
-// already gives Windows 60 s per test for the same reason; this keeps the file's own numbers from
-// undercutting that on the platform that needs it.
+// Keep the file's Windows wait within the platform's existing 60-second test budget.
+// A Windows CI run recorded 20.6 seconds against the former 15-second override. Matrix shards
+// have separate runners; contention among tests within a shard is possible, but that timing
+// alone does not establish its cause. The PR records the remaining reproduction work.
 const BOOT = process.platform === 'win32' ? 60_000 : 15_000
 
 describe('the core starting', () => {
