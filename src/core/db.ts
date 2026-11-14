@@ -544,7 +544,9 @@ const COLUMNS: [string, string, string][] = [
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // Clearing a conversation's history without deleting it: what came before stays a row, out of sight.
+  ['conversations', 'cleared_at', 'INTEGER']
 ]
 
 
@@ -552,6 +554,8 @@ type Row = Record<string, unknown>
 
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
 const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
+// A message still counts for a conversation that was never cleared, or for what came after the cut.
+const STILL_THERE = 'at > COALESCE((SELECT cleared_at FROM conversations WHERE conversations.id = messages.conversation_id), 0)'
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
@@ -895,10 +899,33 @@ export class Db {
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
       ...(r['wiki_capture'] === 0 ? { wikiCapture: false } : {}),
       ...(r['threads'] === 1 ? { threads: true } : {}),
+      ...(r['cleared_at'] ? { clearedAt: Number(r['cleared_at']) } : {}),
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
       unread: Number(r['unread'])
     }
+  }
+
+  // Clearing a conversation's history without deleting it. The rows stay (receipts, approvals and the
+  // costs they carry point at message ids), the summary goes with them because it was written about
+  // them, and `summary_until` is moved so the next turns stop looking behind the cut.
+  // The history goes off the screen and out of every read, but the conversation stays: the rows are
+  // still there for the receipts and the approvals that point at them.
+  // What nobody can reach any more goes with it: an unread row would leave a badge over an empty
+  // screen (markRead heals it, but only the next time the conversation is opened).
+  clearConversation(id: string, at = Date.now()): void {
+    this.tx(() => {
+      this.db.prepare('UPDATE conversations SET cleared_at = ?, summary = NULL, summary_until = ?, summary_at = ? WHERE id = ?').run(at, at, at, id)
+      this.db.prepare('DELETE FROM unread WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)').run(id)
+      // A thread's summary was written about messages that are now behind the cut, and the reply that
+      // would read it can't be reached any more.
+      this.db.prepare('UPDATE messages SET thread_summary = NULL WHERE conversation_id = ?').run(id)
+    })
+  }
+
+  // The questions still waiting in one conversation: their message is about to be off the screen.
+  openQuestionsIn(conversationId: string): Question[] {
+    return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' AND conversation_id = ? ORDER BY created_at").all(conversationId) as Row[]).map((r) => this.toQuestion(r))
   }
 
   // `until` is the `at` of the last message the summary covers; leave it out to keep it (a hand edit).
@@ -1077,10 +1104,12 @@ export class Db {
 
   // `threadId`: only that thread's replies; null: only what's outside threads; left out: everything.
   // `before`: only those from before that moment.
+  // Nothing from before the conversation was cleared: the rows stay (receipts and approvals point at
+  // them) but no read path sees them again, the model's included.
   recentMessages(conversationId: string, limit: number, threadId?: string | null, before?: number): Message[] {
     const where = (threadId === undefined ? '' : threadId === null ? ' AND thread_id IS NULL' : ' AND thread_id = ?') + (before === undefined ? '' : ' AND at < ?')
     const args = [conversationId, ...(typeof threadId === 'string' ? [threadId] : []), ...(before === undefined ? [] : [before]), limit]
-    const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ?${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
+    const rows = this.db.prepare(`SELECT * FROM messages WHERE conversation_id = ? AND ${STILL_THERE}${where} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
   }
 
@@ -1146,7 +1175,10 @@ export class Db {
     const cut = this.db
       .prepare(`WITH ${ranked} SELECT conversation_id, at FROM ranked WHERE thread_id IS NULL AND n = ? AND conversation_id IN (SELECT conversation_id FROM ranked WHERE thread_id IS NULL AND n = ?)`)
       .all(n, n + 1) as Row[]
-    return { messages: rows.map((r) => this.toMessage(r)), since: Object.fromEntries(cut.map((r) => [str(r['conversation_id']), Number(r['at'])])) }
+    // A cleared conversation opens after its cut, the same place every other read starts.
+    const cleared = new Map((this.db.prepare('SELECT id, cleared_at FROM conversations WHERE cleared_at IS NOT NULL').all() as Row[]).map((r) => [str(r['id']), Number(r['cleared_at'])]))
+    const seen = rows.filter((r) => Number(r['at']) > (cleared.get(str(r['conversation_id'])) ?? 0))
+    return { messages: seen.map((r) => this.toMessage(r)), since: Object.fromEntries(cut.map((r) => [str(r['conversation_id']), Number(r['at'])])) }
   }
 
   // Further back, a page at a time: the `n` messages outside threads before `before` (all of them back
@@ -1154,11 +1186,11 @@ export class Db {
   messagesBefore(conversationId: string, before: number, n: number, from?: number): { messages: Message[]; since: number } {
     const page = (
       from === undefined
-        ? this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? ORDER BY at DESC LIMIT ?').all(conversationId, before, n)
-        : this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? AND at >= ? ORDER BY at DESC').all(conversationId, before, from)
+        ? this.db.prepare(`SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND ${STILL_THERE} AND at < ? ORDER BY at DESC LIMIT ?`).all(conversationId, before, n)
+        : this.db.prepare(`SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND ${STILL_THERE} AND at < ? AND at >= ? ORDER BY at DESC`).all(conversationId, before, from)
     ) as Row[]
     const oldest = page.length ? Number(page.at(-1)!['at']) : Math.min(before, from ?? before)
-    const more = !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? LIMIT 1').get(conversationId, oldest)
+    const more = !!this.db.prepare(`SELECT 1 FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND ${STILL_THERE} AND at < ? LIMIT 1`).get(conversationId, oldest)
     const since = more ? oldest : 0
     if (!page.length) return { messages: [], since }
     const ids = JSON.stringify(page.map((r) => str(r['id'])))

@@ -94,6 +94,7 @@ export const NEEDS: Record<Method, Need> = {
   renameChannel: 'anyone',
   setTopic: 'anyone',
   setChannelMembers: 'anyone',
+  clearConversation: 'target', // one's DM; a channel, admins
   deleteConversation: 'target', // one's DM; a channel, admins
   openDm: 'anyone',
   ensureTuca: 'anyone',

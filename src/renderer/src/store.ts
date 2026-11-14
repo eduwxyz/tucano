@@ -254,7 +254,15 @@ const upsert = <T extends { id: string }>(list: T[], item: T): T[] =>
 // in an index each list gets the first time something reads it.
 
 const NO_MESSAGES: Message[] = []
-export const messagesIn = (s: State, conversationId: string): Message[] => s.messages[conversationId] ?? NO_MESSAGES
+// When the person last cleared this conversation's history, or 0. What came before is still a row
+// (receipts and approvals point at message ids) and stays out of the screen, the way it stays out of
+// what the next reply reads.
+export const clearedAt = (s: Pick<State, 'conversations'>, conversationId: string): number => s.conversations.find((c) => c.id === conversationId)?.clearedAt ?? 0
+export const messagesIn = (s: State, conversationId: string): Message[] => {
+  const all = s.messages[conversationId] ?? NO_MESSAGES
+  const cut = clearedAt(s, conversationId)
+  return cut ? all.filter((m) => m.at > cut) : all
+}
 
 const byConversation = (list: Message[]): Record<string, Message[]> => {
   const out: Record<string, Message[]> = {}
@@ -947,6 +955,8 @@ export const setTopic = (id: string, topic: string): Promise<void> => call('setT
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
+// The history out of sight, the conversation kept where it is: same DM, same channel, empty screen.
+export const clearHistory = (id: string): Promise<void> => call('clearConversation', { id })
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
 // A message sent outside threads, in a conversation that answers in them: its thread opens when it

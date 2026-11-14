@@ -24,6 +24,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   archiveAgent: { id: 's', archived: 'b' },
   setTopic: { id: 's', topic: 's' },
   setChannelMembers: { id: 's', agentIds: 'S' },
+  clearConversation: { id: 's' },
   deleteConversation: { id: 's' },
   openDm: { agentId: 's' },
   ensureTuca: { modelId: 's?', fresh: 'b?' },

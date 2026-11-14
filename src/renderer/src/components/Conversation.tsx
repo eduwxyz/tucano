@@ -16,6 +16,7 @@ import { canEditChannel,
   agentById,
   askerIn,
   messagesIn,
+  clearedAt,
   attachedTo,
   conversationIndex,
   initials,
@@ -256,7 +257,11 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
-  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  // A cleared conversation starts at the cut, wherever it is drawn from (the conversation, a thread,
+  // the intro): the rows before it are still there, and none of them is on screen.
+  const cut = useStore((s) => clearedAt(s, conversationId))
+  const here = useMemo(() => (cut ? all.filter((m) => m.at > cut) : all), [all, cut])
+  const messages = useMemo(() => asShown(here, cardAnswers(everything)), [here, everything])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -321,7 +326,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   }, [first])
 
   const more = (el: HTMLDivElement): void => {
-    if (!older || loading || el.scrollTop > 800) return
+    if (!older || cut > 0 || loading || el.scrollTop > 800) return
     setLoading(true)
     before.current = { height: el.scrollHeight, top: el.scrollTop }
     void loadOlder(conversationId).finally(() => setLoading(false))
@@ -392,6 +397,11 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
       }}
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
+      {cut > 0 && (
+        <div className="messages__cleared">
+          <span>{L(`Histórico limpo em ${new Date(cut).toLocaleDateString(locale())}. O que veio antes continua nos recibos e nos custos.`, `History cleared on ${new Date(cut).toLocaleDateString(locale())}. What came before stays in the receipts and the costs.`)}</span>
+        </div>
+      )}
       {lead}
       {messages.map((m, i) => {
         const prev = messages[i - 1]

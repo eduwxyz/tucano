@@ -1562,6 +1562,32 @@ const api: Handlers = {
     if (found) toMain({ type: 'open_local', path: found.path, how: how === 'open' && (found.kind === 'folder' || found.kind === 'pdf') ? 'open' : 'reveal' })
   },
 
+  // Clearing the history of a conversation, keeping the conversation: the DM stays where it is and
+  // the rows stay, but the screen starts empty and the next turns stop reading what came before.
+  clearConversation: ({ id }, ctx) => {
+    const c = db.conversation(id)
+    if (!c) return
+    reach(ctx, id)
+    if (c.kind === 'channel') must(ctx.person, { kind: 'admin' })
+    record(ctx, c.kind === 'channel' ? 'channel.cleared' : 'dm.cleared', id, c.kind === 'channel' ? { name: c.name } : undefined)
+    // A reply at work is not cleared under the person's feet: it is stopped, and what it had said so
+    // far is before the cut.
+    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
+    // The harnesses keep a session of their own per conversation: without this the model would go on
+    // from a history the person just cleared.
+    runner.forgetSessions({ conversationId: id })
+    // What was waiting in there can't be reached any more, and leaving it would be worse than
+    // dropping it: an approval's card sits in a message that is now off the screen, so it could
+    // neither be decided nor seen until it expired on its own; an open question would show up in
+    // Questions with nothing behind it.
+    for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O histórico da conversa foi limpo.', 'The history was cleared.'))) emit({ type: 'approval', approval: db.approval(a.id)! })
+    const asked = db.openQuestionsIn(id)
+    for (const q of asked) db.saveQuestion({ ...q, state: 'closed' })
+    if (asked.length) emit({ type: 'inbox' })
+    db.clearConversation(id)
+    emit({ type: 'conversation', conversation: db.conversation(id)! })
+  },
+
   deleteConversation: ({ id }, ctx) => {
     const c = db.conversation(id)
     if (!c) return
