@@ -11868,7 +11868,11 @@ button.agent-card__now:hover {
    a long reply can be studied while it is being written; folded to the line it is on once it is over,
    and, opened again, read in full in the page instead of a box inside a box. */
 .thought {
-  margin: 4px 0 0;
+  /* The block's line is the chain's line: `.steps__list` sits 3px in and carries the same 2px
+     border, so the rail runs unbroken from the steps into the reasoning under them. Without the
+     3px the thought's line stood a hair to the left of the one above it, and the two read as one
+     line drawn twice. */
+  margin: 6px 0 0 3px;
   padding-left: 8px;
   border-left: 2px solid var(--border);
   border-radius: 0 6px 6px 0;
@@ -11917,6 +11921,9 @@ button.agent-card__now:hover {
 .thought__text {
   max-height: 9.5em;
   overflow-y: auto;
+  /* Down, never sideways: with only `overflow-y` set the browser computed a horizontal scrollbar
+     on the box whenever a line of reasoning had nowhere to wrap. */
+  overflow-x: hidden;
   padding: 1px 0 2px;
   white-space: pre-wrap;
   /* A path or an address in the model's thinking has no space to break at: it wraps onto the next
