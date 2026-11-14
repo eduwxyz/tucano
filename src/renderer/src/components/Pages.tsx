@@ -2558,17 +2558,7 @@ export function SettingsPage(): ReactNode {
               <LanguagePicker />
               <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', 'The app’s language for you. The agents reply in the Tucano’s language.')}</span>
             </div>
-            <div className="field">
-              <span className="field__label">{L('Relógio', 'Time format')}</span>
-              <div className="segmented" role="radiogroup" aria-label={L('Relógio', 'Time format')}>
-                {CLOCK_CHOICES(settings.clock).map((c) => (
-                  <button key={c.value} type="button" role="radio" aria-checked={c.on} className={c.on ? 'is-active' : ''} title={c.hint} onClick={() => updateSettings({ clock: c.value })}>
-                    {c.label}
-                  </button>
-                ))}
-              </div>
-              <span className="hint">{L('Como os horários aparecem: 15:05 no relógio de 24 horas, ou 3:05 PM no de 12. Vale pra conversa, pras rotinas e pro que os agentes leem.', 'Use 24-hour (15:05) or 12-hour (3:05 PM) time in chats, routines, and agent context.')}</span>
-            </div>
+
             <div className="field">
               <span className="field__label">{L('Tema', 'Theme')}</span>
               <div className="segmented" role="radiogroup" aria-label={L('Tema', 'Theme')}>
@@ -2618,6 +2608,22 @@ export function SettingsPage(): ReactNode {
                   {L('Mostrar a barra lateral inteira', 'Show the whole sidebar')}
                 </button>
               )}
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
+          <Card title={L('Aparência', 'Appearance')}>
+            <div className="field">
+              <span className="field__label">{L('Relógio', 'Time format')}</span>
+              <div className="segmented" role="radiogroup" aria-label={L('Relógio', 'Time format')}>
+                {CLOCK_CHOICES(settings.clock).map((c) => (
+                  <button key={c.value} type="button" role="radio" aria-checked={c.on} className={c.on ? 'is-active' : ''} title={c.hint} onClick={() => updateSettings({ clock: c.value })}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              <span className="hint">{L('Como os horários aparecem: 15:05 no relógio de 24 horas, ou 3:05 PM no de 12. Vale pra conversa, pras rotinas e pro que os agentes leem.', 'Use 24-hour (15:05) or 12-hour (3:05 PM) time in chats, routines, and agent context.')}</span>
             </div>
           </Card>
         )}
