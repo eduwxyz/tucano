@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { gsap } from 'gsap'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { L } from '../../../shared/lang'
+import { L, setLang } from '../../../shared/lang'
 import {
   NOTICE_MAX,
   NOTICE_MAX_FULL,
@@ -283,9 +283,17 @@ export function NoticeWindow(): ReactNode {
       if (card) setPushed((was) => [card, ...was.filter((c) => c.id !== card.id)].slice(0, NOTICE_MAX))
     })
     window.tucano.notice.onClear(() => setPushed([]))
-    window.tucano.notice.onDemo(() =>
-      setPushed((was) => [...demoCards(), ...was].slice(0, NOTICE_MAX))
-    )
+    window.tucano.notice.onDemo(() => {
+      void (async () => {
+        try {
+          const feed = await call('noticeFeed')
+          setLang(feed.language)
+        } catch {
+          // keep whatever language the page already has
+        }
+        setPushed((was) => [...demoCards(), ...was].slice(0, NOTICE_MAX))
+      })()
+    })
     window.tucano.notice.onPlace((p) => {
       setUp(p.up !== false)
       setSystem({ dark: p.dark === true, accent: typeof p.accent === 'string' && p.accent ? p.accent : '#d9581a' })
