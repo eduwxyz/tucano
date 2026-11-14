@@ -3,7 +3,7 @@
 // directly, so every call passes the grant and approval checks first.
 import { randomBytes, randomUUID } from 'node:crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { auth, UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
+import { auth, discoverAuthorizationServerMetadata, discoverOAuthProtectedResourceMetadata, UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
@@ -13,6 +13,7 @@ import { L } from '../shared/lang'
 import { causeText, friendly, netProblem, netText, type Friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
+import { tucanoClientMetadata } from '../shared/oauth-client'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
@@ -135,6 +136,14 @@ const GOOGLE_SIGN_IN_HINT = (): string =>
     "[Google refused this connector's sign-in. Only the person can fix it: in Connectors, click Authorize on the connector. If Google blocks the sign-in, check in Google Cloud (Google Auth Platform): their email under Audience › Test users, while the app is in testing, and a Desktop app client with “Use this client for an AI-powered agent” ticked. Don't retry before that.]"
   )
 
+// Whether a server's authorization server reads an app's description from an https address (a "client ID
+// metadata document") instead of registering it: then only a Tucano with a public https address gets in.
+export async function readsClientDocuments(url: string, fetchFn?: typeof fetch): Promise<boolean> {
+  const resource = await discoverOAuthProtectedResourceMetadata(url, undefined, fetchFn).catch(() => undefined)
+  const issuer = resource?.authorization_servers?.[0] ?? new URL('/', url).toString()
+  return (await discoverAuthorizationServerMetadata(issuer, { fetchFn }))?.client_id_metadata_document_supported === true
+}
+
 // A call the server turned away for the sign-in: none or one it refused to renew ('missing'), a token refused
 // even right after renewing ('refused'), or one without the permissions the tool needs ('scope').
 export type SignInRefusal = 'missing' | 'refused' | 'scope'
@@ -196,6 +205,9 @@ export interface ConnectorDeps {
   // Where a sign-in with the person's own app comes back: Slack takes only the address registered in the
   // app, port and all, which the gateway's (new on each launch) can't be.
   fixedCallbackUrl?: () => string
+  // Where this Tucano's description is served for servers that take no registration and read it from an
+  // https address instead (ElevenLabs); undefined where there's no public https address (a desktop).
+  clientMetadataUrl?: () => string | undefined
   ownAppOf?: (url: string | undefined) => CatalogEntry['app'] // which servers sign in with the person's app; tests point it at their own
 }
 
@@ -554,14 +566,23 @@ export class ConnectorManager {
         this.setStatus(id, 'needs_auth', interactive ? L('Conclua a autorização no navegador.', 'Finish the authorization in the browser.') : L('Precisa autorizar.', 'Needs authorization.'))
       } else if (e instanceof Error && /dynamic client registration/i.test(e.message)) {
         // GitHub's MCP server, for one: its OAuth only serves apps registered ahead of time, so a token is the way in.
+        // ElevenLabs' reads the app's description from an https address, which only a server on one has.
         await client.close().catch(() => {})
+        // Asked with a short wait: a silent server would otherwise leave the connector "connecting".
+        const brief: typeof fetch = (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(5_000) })
+        const byAddress = c.url ? await readsClientDocuments(c.url, brief).catch(() => false) : false
         this.setStatus(
           id,
           'error',
-          L(
-            'Esse servidor não deixa apps se registrarem pelo navegador. Adicione de novo com autenticação por token (no GitHub: um token de acesso pessoal, em github.com/settings/personal-access-tokens).',
-            "This server doesn't let apps register through the browser. Add it again with token authentication (on GitHub: a personal access token, from github.com/settings/personal-access-tokens)."
-          )
+          byAddress
+            ? L(
+                'Esse serviço só conecta pelo Tucano que roda num servidor. Neste computador não dá.',
+                "This service connects only from a Tucano running on a server. It can't on this computer."
+              )
+            : L(
+                'Esse servidor não deixa apps se registrarem pelo navegador. Adicione de novo com autenticação por token (no GitHub: um token de acesso pessoal, em github.com/settings/personal-access-tokens).',
+                "This server doesn't let apps register through the browser. Add it again with token authentication (on GitHub: a personal access token, from github.com/settings/personal-access-tokens)."
+              )
         )
       } else if (e instanceof Error && /timed out/i.test(e.message)) {
         await client.close().catch(() => {})
@@ -833,14 +854,11 @@ export class ConnectorManager {
         return redirectUrl
       },
       get clientMetadata(): OAuthClientMetadata {
-        return {
-          client_name: 'Tucano',
-          redirect_uris: [redirectUrl],
-          grant_types: ['authorization_code', 'refresh_token'],
-          response_types: ['code'],
-          token_endpoint_auth_method: 'none'
-        }
+        return tucanoClientMetadata(redirectUrl)
       },
+      // The SDK uses it only with a server that says it reads such documents and only for a redirect
+      // the document lists (this server's own); every other server keeps registering as before.
+      clientMetadataUrl: own || redirectUrl !== this.deps.oauthCallbackUrl() ? undefined : this.deps.clientMetadataUrl?.(),
       state: () => {
         state = randomBytes(16).toString('hex')
         return state
