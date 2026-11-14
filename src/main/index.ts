@@ -893,7 +893,7 @@ ipcMain.on('server:lend', (e) => {
 ipcMain.on('notice:pick', (e) => {
   if (!process.argv.includes('--qa-background') && fromApp(e)) notices.pick()
 })
-// Settings › Notifications › Test every kind: a card of each, so the person sees the whole set.
+// Settings › Notifications › Test notifications: a card of each, so the person sees the whole set.
 ipcMain.on('notice:demo', (e) => {
   if (!process.argv.includes('--qa-background') && fromApp(e)) notices.demo()
 })

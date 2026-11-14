@@ -37,7 +37,7 @@
 - Aprovou e não viu o resultado: ele chega numa nova mensagem do agente.
 
 ## Notificação que não chega
-- **Configurações › Geral › Notificações** › **Mandar uma**. No Mac, o Tucano só aparece em Ajustes do Sistema › Notificações depois da primeira.
+- **Configurações › Geral › Notificações** › **Testar notificações** mostra os cartões. No Mac, o Tucano só aparece em Ajustes do Sistema › Notificações depois do primeiro aviso.
 - No Mac: Ajustes do Sistema › Notificações › Tucano permitido, e nenhum modo Foco ligado.
 - A conversa aberta na tela não avisa.
 - Servidor: avisa pelo app do computador conectado a ele em **Configurações › Servidores**. O navegador só avisa por HTTPS. Veja **servidor**.
