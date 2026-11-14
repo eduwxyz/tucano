@@ -6,11 +6,17 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
-- **Settings grouped by task.** App, Workspace, Agents, Models, Knowledge and Connections organize the existing controls. Section links stay visible while scrolling, support keyboard navigation and reduced motion, and bring Memory and Wiki configuration together. Sections use plain headings and dividers.
+- **Settings grouped by task.** App, Workspace, Agents, Models, Knowledge and Connections organize the existing controls. Section links stay visible while scrolling, support keyboard navigation and reduced motion, and bring Memory and Wiki configuration together. Related settings use restrained rounded groups; the danger zone keeps its red border.
 
 ### Fixed
 
 - **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences. (#409)
+
+- **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
+
+- **An agent with no monthly limit gets a real ceiling per reply, and the pause says where it is set.** The ceiling per reply is a share of the monthly limit (10% by default). With no monthly limit there is no month to take it from, and the base used in its place gave 100 thousand tokens a reply: less than an agent with the default limit gets, so setting "no limit" made replies pause sooner. The base is now 10 million tokens (a million a reply at 10%). The note on a paused reply also says that this ceiling is set in **Settings › Agents › Limits** and isn't the agent's monthly limit.
+
+- **The desktop app says a new version is ready with a server on screen too.** With the app showing a Tucano on a server, what's on screen is the server's page, and its Settings showed the server's update state: always off, with the button to look for one disabled. The app still downloaded new versions behind it, but the note that one was ready lived only in the local screen, hidden under the server's, so a person who leaves the app on a server never saw it; the version went in only when they quit the app. The server's page now shows the app's own updates when it is in the desktop app: the version it is on, the look for a new one, the download and the note with **Restart**. Restarting from there is always confirmed in a dialog of the app's own, so a server can't restart the app by itself. Both sides need this version: the app, and the server it shows.
 
 ## [0.2.29] - 2026-11-13
 

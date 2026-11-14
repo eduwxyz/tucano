@@ -20,12 +20,14 @@ describe('an agent with no monthly limit', () => {
   it('still caps a single reply', () => {
     // 10% of a month, and 10% of the fallback base when there is no month.
     expect(replyBudget(1_000_000, 10)).toBe(100_000)
-    expect(replyBudget(0, 10)).toBe(100_000)
+    expect(replyBudget(0, 10)).toBe(1_000_000)
     expect(replyBudget(0, 10)).toBeLessThan(Infinity)
+    // No monthly limit never pauses sooner than the default one (2 million a month).
+    expect(replyBudget(0, 10)).toBeGreaterThanOrEqual(replyBudget(2_000_000, 10))
   })
 
   it('follows the configured share', () => {
-    expect(replyBudget(0, 5)).toBe(50_000)
+    expect(replyBudget(0, 5)).toBe(500_000)
     expect(replyBudget(4_000_000, 5)).toBe(200_000)
   })
 })
