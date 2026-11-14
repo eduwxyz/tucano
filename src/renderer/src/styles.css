@@ -2791,6 +2791,10 @@ h3 {
 .retry {
   margin-top: 6px;
 }
+/* "Try with instructions": the field that opens under the two ways back, and the row that sends it. */
+.retry-note { display: grid; gap: 8px; margin-top: 8px; max-width: 560px; }
+.retry-note textarea { width: 100%; min-height: 58px; resize: vertical; }
+.retry-note__row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
 .connector__actions {
   margin: 4px 0 12px;

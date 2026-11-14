@@ -15,7 +15,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   olderMessages: { conversationId: 's', before: 'n', through: 's?' },
   threadMessages: { rootId: 's' },
   stopRun: { messageId: 's' },
-  retryRun: { messageId: 's' },
+  retryRun: { messageId: 's', note: 's?' },
   continueRun: { messageId: 's' },
   setAgentModels: { agentIds: 'S', modelId: 's' },
   saveAgent: { agent: 'o', channelIds: 'S' },
