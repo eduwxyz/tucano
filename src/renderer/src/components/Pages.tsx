@@ -2660,8 +2660,7 @@ type TabList = readonly (readonly [string, string])[]
 // The groups at the top of Settings, from settings-structure.ts: only those this person has something
 // in. A member sees only what's theirs to change; the phone (Telegram) is the owner's alone.
 export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList =>
-  settingsGroups(settingsStructure({ admin, owner, team, servers: hasServers() })).map((group) => [group, settingsGroupLabel(group)])const AGENT_TABS = (): TabList => [  ['perfil', L('Perfil', 'Profile')],
-  ['canais', L('Canais e skills', 'Channels and skills')],
+  settingsGroups(settingsStructure({ admin, owner, team, servers: hasServers() })).map((group) => [group, settingsGroupLabel(group)])const AGENT_TABS = (): TabList => [  ['perfil', L('Perfil', 'Profile')],  ['canais', L('Canais e skills', 'Channels and skills')],
   ['ferramentas', L('Ferramentas', 'Tools')],
   ['memoria', L('Memória', 'Memory')]
 ]
