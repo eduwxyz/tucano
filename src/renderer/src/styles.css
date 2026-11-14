@@ -11809,3 +11809,57 @@ button.agent-card__now:hover {
 .orgb:has(.org-undo) .org-hint {
   visibility: hidden;
 }
+/* The filter over a long skill list: the library is a few hundred recipes, and the agent's tab
+   had them all in one column with no way to narrow it. */
+.skill-filter {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 2px 0 8px;
+}
+.skill-filter__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-3);
+}
+.skill-filter__search input {
+  flex: 1;
+  border: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 13px;
+}
+.skill-filter__search input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.check--inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.skill-filter__meta {
+  padding: 6px 0 10px;
+  gap: 12px;
+}
+.skill-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+.skill-groups .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
