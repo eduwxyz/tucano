@@ -19,6 +19,12 @@ export default defineConfig({
     }
   },
   renderer: {
+    // Two pages: the app's window, and the cards over every window (src/renderer/notice.html).
+    build: {
+      rolldownOptions: {
+        input: { index: 'src/renderer/index.html', notice: 'src/renderer/notice.html' }
+      }
+    },
     plugins: [react()]
   }
 })

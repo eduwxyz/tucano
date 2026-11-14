@@ -27,6 +27,9 @@ export interface AnswerDraft {
   text: string
 }
 
+// An option the agent itself points at: its own label or note says so ("recommended", "recomendado").
+export const isRecommended = (o: DecisionOption): boolean => /recomend|recommend/i.test(`${o.label} ${o.description ?? ''}`)
+
 export const MAX_QUESTIONS = 4
 export const MIN_OPTIONS = 1
 // The card always adds "Something else" (a free answer) after the agent's options: 4 rows at most.

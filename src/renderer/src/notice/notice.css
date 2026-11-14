@@ -1,0 +1,889 @@
+/* The cards over every window (src/renderer/src/notice). The app's own stylesheet is imported
+   before this one: the palette, the type, the buttons and the avatar are the app's, and this file
+   only holds what an overlay needs. No background anywhere: the window is transparent. */
+/* The skin (Settings › Notifications › Skin): the system's own surfaces and accent, which Windows 11,
+   the Mac and the Linux desktops each draw their panels with, or one pinned by the person. The card's
+   shape stays the app's; the colors are the platform's. */
+html[data-skin='light'] {
+  --panel: #ffffff;
+  --bg: #f3f3f3;
+  --text: #1a1a1a;
+  --text-2: #5b5b5b;
+  --text-3: #8b8b8b;
+  --border: #e9e9e9;
+  --border-strong: #d6d6d6;
+  --hover: rgba(0, 0, 0, 0.045);
+  --code-bg: #f4f4f4;
+  --accent: var(--os-accent, #0067c0);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --warn: #9d5d00;
+  --ok: #0f7b3f;
+  --danger: #c42b1c;
+  --shadow: 0 2px 5px rgba(0, 0, 0, 0.09), 0 10px 26px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 14px 38px rgba(0, 0, 0, 0.16);
+  color-scheme: light;
+}
+
+html[data-skin='dark'] .nc {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 88%, #ffffff) 0%, var(--panel) 44%, var(--panel) 100%);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.45),
+    0 10px 24px -8px rgba(0, 0, 0, 0.5),
+    0 22px 46px -16px rgba(0, 0, 0, 0.55);
+}
+html[data-skin='dark'] .nc:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 3px 8px rgba(0, 0, 0, 0.5),
+    0 14px 30px -8px rgba(0, 0, 0, 0.55),
+    0 30px 60px -18px rgba(0, 0, 0, 0.6);
+}
+
+html[data-skin='dark'] {
+  --panel: #202020;
+  --bg: #1b1b1b;
+  --text: #f5f5f5;
+  --text-2: #c8c8c8;
+  --text-3: #9b9b9b;
+  --border: #343434;
+  --border-strong: #454545;
+  --hover: rgba(255, 255, 255, 0.06);
+  --code-bg: #2b2b2b;
+  --accent: color-mix(in srgb, var(--os-accent, #4cc2ff) 82%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
+  --warn: #f0b23e;
+  --ok: #6ccb5f;
+  --danger: #ff99a4;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 12px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.62);
+  color-scheme: dark;
+}
+
+/* The one action that decides something carries the platform's accent, as its own dialogs do. */
+.nc .btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
+}
+.nc .btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+  border-color: color-mix(in srgb, var(--accent) 88%, #000);
+  color: #fff;
+}
+
+html,
+body {
+  background: transparent;
+}
+
+body {
+  overflow: hidden;
+}
+
+.nc-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 18px; /* NOTICE_PAD, the room main keeps around the rectangle */
+  /* A swarm past what the rectangle holds: the oldest go, and the newest stay in sight. */
+  overflow: hidden;
+  pointer-events: none;
+}
+.nc-screen[data-up='true'] {
+  justify-content: flex-end;
+}
+
+.nc-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 100%;
+  min-height: 0;
+  pointer-events: none;
+}
+
+/* Stack mode: one card in front, the rest as layers under its bottom edge, and a count on the
+   corner. What's in front goes with a swipe and the next comes up behind it. */
+.nc-deck {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-bottom: 14px; /* room for the layers under the card */
+  pointer-events: none;
+}
+.nc-deck .nc-wrap {
+  position: relative;
+  z-index: 3;
+}
+.nc-deck__ghosts {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 40px;
+  pointer-events: none;
+}
+.nc-ghost {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--depth) * 7px);
+  width: calc(100% - 20px - var(--depth) * 12px);
+  height: 26px;
+  transform: translateX(-50%);
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 60%, transparent);
+  box-shadow: 0 6px 14px -8px rgba(0, 0, 0, 0.28);
+  opacity: calc(0.9 - var(--depth) * 0.25);
+}
+.nc-deck__count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+.nc-leaving {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 5;
+  pointer-events: none;
+  animation: nc-swipe 0.3s var(--ease-in) forwards;
+}
+@keyframes nc-swipe {
+  from {
+    opacity: 1;
+    transform: translateX(0) rotate(0deg);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(58%) rotate(2.5deg);
+  }
+}
+
+/* The card and the face leaning on its corner, which the window's own room lets out. */
+.nc-wrap {
+  position: relative;
+  pointer-events: none;
+}
+
+.nc__badge {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border-strong) 80%, transparent),
+    0 3px 9px rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+}
+.nc__badge .avatar {
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.nc__kind {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 13%, transparent);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.nc:hover .nc__kind {
+  opacity: 0;
+}
+/* The newest card is nearest the edge the stack grows from: the bottom, for a corner at the bottom. */
+.nc-stack[data-up='true'] {
+  flex-direction: column-reverse;
+}
+
+.nc {
+  --kind: var(--text-3);
+  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  padding: 11px 13px 12px;
+  /* A panel with depth, not a box with a stripe: the surface lifts a little toward its top edge,
+     a hairline of light runs along the top inside, and three shadows stack under it (contact,
+     close, ambient) so the corners read as material rather than as a border. */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, #fff) 0%, var(--panel) 46%, var(--panel) 100%);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 62%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000 5%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.09),
+    0 6px 14px -6px rgba(0, 0, 0, 0.16),
+    0 18px 38px -14px rgba(0, 0, 0, 0.22);
+  cursor: default;
+  opacity: 1;
+  transform: translateZ(0);
+  transition:
+    box-shadow var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    opacity 0.7s ease,
+    transform 0.7s var(--ease-out),
+    filter 0.7s ease;
+  will-change: transform, opacity;
+}
+
+.nc--compact {
+  border-radius: 14px;
+}
+
+.nc--approval {
+  --kind: var(--warn);
+}
+.nc--ask {
+  --kind: var(--accent);
+}
+.nc--done {
+  --kind: var(--ok);
+}
+.nc--note {
+  --kind: var(--accent);
+}
+
+.nc:hover {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000 5%, transparent),
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    0 10px 22px -8px rgba(0, 0, 0, 0.2),
+    0 26px 52px -16px rgba(0, 0, 0, 0.26);
+}
+
+/* Past its seconds: the card fades where it is, and the pointer coming back brings it back. */
+.nc.is-fading {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.nc--compact {
+  padding: 8px 12px 9px;
+}
+/* Folded to a row: who and what, and nothing else. Hovering it, or the wheel, opens it whole. */
+.nc--compact .nc__body,
+.nc--compact .nc__pics,
+.nc--compact .nc__meta,
+.nc--compact .nc__table,
+.nc--compact .nc__send,
+.nc--compact .nc__actions {
+  display: none;
+}
+
+.nc__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  /* Room for the face hanging over the corner. */
+  padding-left: 23px;
+}
+
+.nc .avatar {
+  flex: 0 0 auto;
+}
+
+.nc__glyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 13%, transparent);
+}
+
+.nc__titles {
+  min-width: 0;
+  flex: 1;
+}
+
+.nc__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nc__where {
+  margin: 1px 0 0;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nc__x {
+  position: absolute;
+  top: 9px;
+  right: 11px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: var(--transition-ui);
+}
+.nc:hover .nc__x {
+  opacity: 1;
+}
+.nc__x:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.nc__body {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  white-space: pre-line;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.nc.is-open .nc__body {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.nc__body p,
+.nc__body ul,
+.nc__body ol {
+  margin: 0 0 4px;
+}
+.nc__body > :last-child {
+  margin-bottom: 0;
+}
+.nc__body ul,
+.nc__body ol {
+  padding-left: 16px;
+}
+.nc__body li {
+  margin: 1px 0;
+}
+.nc__body strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.nc__body code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+.nc__body .nc__link {
+  color: var(--accent);
+}
+
+.nc__meta {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.nc__pics {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 5px;
+  margin-top: 8px;
+  height: 42px;
+}
+.nc__pics.is-open {
+  height: 78px;
+}
+
+.nc__pic {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+}
+.nc__pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.nc__file {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.nc__more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--text) 55%, transparent);
+  color: var(--panel);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nc__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+/* A request or a question inside a card: the app's own block (the badge, the sentence, its options,
+   the arrows between decisions, Send), without the frame it carries in the conversation. */
+.nc__block {
+  margin-top: 7px;
+}
+.nc__block .ask {
+  --ring: transparent;
+  margin: 0;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.nc__block .ask::after {
+  display: none;
+}
+.nc__block .ask__head {
+  margin-bottom: 5px;
+}
+.nc__block .ask__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  margin: 2px 0 6px;
+  color: var(--text);
+}
+.nc__block .ask__prose {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.nc__block .ask__prose p {
+  margin: 0 0 5px;
+}
+.nc__block .ask-option {
+  min-height: 32px;
+  padding: 5px 9px;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.nc__block .ask-option__key {
+  width: 19px;
+  height: 19px;
+  font-size: 10.5px;
+}
+.nc__block .ask-option__rec {
+  margin-left: 6px;
+}
+.nc__block .ask__progress {
+  margin: 0 0 6px;
+}
+.nc__block .ask__nav {
+  margin-left: auto;
+}
+.nc__block .ask__text {
+  font-size: 12.5px;
+}
+.nc__block .approval__call {
+  margin-top: 6px;
+}
+
+/* A request or a question, as a table: what it asks on the left, what can be done about it on the
+   right, a row each, and the choices as toggles that turn on and off until they're sent. */
+.nc__table {
+  margin-top: 7px;
+  border-top: 1px solid var(--border);
+}
+.nc__row {
+  display: grid;
+  grid-template-columns: minmax(0, 43%) minmax(0, 57%);
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.nc__row:last-child {
+  border-bottom: 0;
+  padding-bottom: 1px;
+}
+.nc__row--head {
+  padding: 3px 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.nc__q {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-2);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.nc__v {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.nc__v.is-warn {
+  color: var(--warn);
+  font-weight: 500;
+}
+.nc__opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.nc__tog {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.nc__tog:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.nc__tog:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-instant);
+}
+.nc__tog.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.nc__tog:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.nc__answer {
+  width: 100%;
+  height: 24px;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+  transition: var(--transition-ui);
+}
+.nc__answer:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.nc__ask {
+  margin-top: 2px;
+}
+.nc__send {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.nc__count {
+  margin-right: auto;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+/* A high-risk approval: the fill runs while the button is held, and it happens at the end. */
+.nc__hold {
+  position: relative;
+  overflow: hidden;
+}
+.nc__hold span {
+  position: relative;
+  z-index: 1;
+}
+.nc__hold {
+  position: relative;
+}
+.nc__hold::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--danger) 28%, transparent);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+.nc__hold.is-holding::after {
+  transform: scaleX(1);
+  transition: transform 1.5s linear;
+}
+
+.nc__choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+}
+
+.nc__choice {
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.nc__choice:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+.nc__choice:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-instant);
+}
+.nc__choice.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.nc__choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nc__field {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+.nc__field input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+  transition: var(--transition-ui);
+}
+.nc__field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.nc__field input::placeholder {
+  color: var(--text-3);
+}
+
+.nc__step {
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-left: auto;
+}
+
+/* The seconds, draining along the bottom edge. */
+.nc__ring {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--kind);
+  opacity: 0.5;
+  transform: scaleX(var(--left, 1));
+  transform-origin: left center;
+  transition: opacity var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+.nc:hover .nc__ring {
+  opacity: 0.85;
+}
+
+/* ---------- where the cards go: the screen, dimmed, with the rectangle on it ---------- */
+
+.pick {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.pick__box {
+  position: absolute;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--panel) 18%, transparent);
+  /* Everything outside the rectangle, dimmed. */
+  box-shadow: 0 0 0 100vmax rgba(28, 20, 12, 0.42);
+  cursor: move;
+}
+
+.pick__corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+}
+.pick__corner--nw {
+  left: -6px;
+  top: -6px;
+  cursor: nwse-resize;
+}
+.pick__corner--ne {
+  right: -6px;
+  top: -6px;
+  cursor: nesw-resize;
+}
+.pick__corner--sw {
+  left: -6px;
+  bottom: -6px;
+  cursor: nesw-resize;
+}
+.pick__corner--se {
+  right: -6px;
+  bottom: -6px;
+  cursor: nwse-resize;
+}
+
+.pick__label {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick__label[data-at='top'] {
+  top: 9px;
+}
+.pick__label[data-at='bottom'] {
+  bottom: 9px;
+}
+
+.pick__bar {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.pick__bar p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.pick__bar .row {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nc,
+  .nc__x,
+  .nc__ring,
+  .nc__choice {
+    transition: none !important;
+  }
+}

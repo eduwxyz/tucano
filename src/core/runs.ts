@@ -244,7 +244,7 @@ export interface RunnerDeps {
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
-  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
+  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[], messageId?: string) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation); messageId: the reply, for the pictures the card shows
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
@@ -2442,7 +2442,7 @@ ${note}`,
           // Handed work that came to rest: its end goes back to whoever asked, who tells the person.
           const mine = this.handedIn(msg)
           if (mine) return this.settle(mine, 'done', msg)
-          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id])
+          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id], msg.id)
         }
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
@@ -2460,7 +2460,7 @@ ${note}`,
     // Handed work that stopped short: whoever asked hears why, and takes it to the person.
     const short = st === 'failed' || st === 'limit_reached' || st === 'paused' || st === 'stopped' ? this.handedIn(msg) : undefined
     if (short) this.settle(short, st === 'stopped' ? 'cancelled' : 'failed', msg)
-    else if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id])
+    else if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id], msg.id)
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
