@@ -332,6 +332,15 @@ it('starts a tree in a click when no one answers to anyone', async () => {
   expect(save.mock.calls.slice(2).map((c) => [c[0].id, c[0].reportsTo])).toEqual([['nina', undefined], ['theo', undefined]])
 })
 
+it('lights every line up to the sector\'s head when a request skips whoever is between', async () => {
+  // Nico answers to Bento, who answers to Orion: Nico passed it straight to Orion, its sector's head.
+  fake = { ...fake, delegations: [ask('u2', 'nico', 'orion')] }
+  await render()
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-up')).toHaveLength(2)
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-down')).toHaveLength(0)
+  expect(document.querySelector('.org-now')?.textContent).toContain('(chefe)')
+})
+
 it('tints each sector behind its branch, names it in its panel, and draws a request between two heads', async () => {
   // Two trees, two sectors: Orion's (unnamed) and Mira's, named, with Lino below it.
   fake = { ...fake, agents: [...fake.agents, bot('mira', undefined, { sectorName: 'Financeiro', sectorDoes: 'Cobranças' }), bot('lino', 'mira')], delegations: [ask('x1', 'mira', 'orion'), ask('u1', 'lino', 'mira')] }
