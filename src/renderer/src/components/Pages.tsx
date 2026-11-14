@@ -2690,7 +2690,7 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('agentes') && (
-          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
+          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'Find page controls by text for free, then by element number. Jev also handles controls without text.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
               {[false, true].map((v) => (
                 <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
@@ -2767,6 +2767,28 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('agentes') && (
+          <Card
+            title={L('Equipes montadas por agentes', 'Agent team-ups')}
+            lead={L(
+              'Quando um agente chama outro que não está na conversa (escrevendo @handle), a conversa vira um canal de equipe, com o que já foi feito levado junto. Esses canais são trabalho, não conversas que ficam: eles fecham sozinhos.',
+              'Agents can invite another agent with @handle. A temporary team-up channel carries the existing work and closes after inactivity.'
+            )}
+          >
+            <div className="grid2">
+              <Field
+                label={L('Fechar sozinho depois de (dias parado)', 'Close on its own after (days quiet)')}
+                hint={L(
+                  'Contados da última mensagem do canal. 0 mantém todos. Também dá pra fechar na hora: botão direito no canal, "Fechar equipe…".',
+                  'Days since the last message; 0 keeps all. Close now from the channel’s menu.'
+                )}
+              >
+                <NumberInput min={0} value={settings.teamUpDays ?? TEAM_UP_DAYS} onChange={(n) => updateSettings({ teamUpDays: Math.max(0, Math.round(n)) })} />
+              </Field>
+            </div>
+          </Card>
+        )}
+
 
         {pane('geral') && admin && <TeamCard />}
         {pane('geral') && <BackupCard />}
@@ -2822,27 +2844,7 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('agentes') && (
-          <Card
-            title={L('Equipes montadas por agentes', 'Team-ups agents put together')}
-            lead={L(
-              'Quando um agente chama outro que não está na conversa (escrevendo @handle), a conversa vira um canal de equipe, com o que já foi feito levado junto. Esses canais são trabalho, não conversas que ficam: eles fecham sozinhos.',
-              'When an agent calls another one that is not in the conversation (writing @handle), the conversation becomes a team-up channel, with what was already done carried along. Those channels are work, not conversations that stay: they close themselves.'
-            )}
-          >
-            <div className="grid2">
-              <Field
-                label={L('Fechar sozinho depois de (dias parado)', 'Close on its own after (days quiet)')}
-                hint={L(
-                  'Contados da última mensagem do canal. 0 mantém todos. Também dá pra fechar na hora: botão direito no canal, "Fechar equipe…".',
-                  'Counted from the channel’s last message. 0 keeps every one of them. You can also close one now: right-click the channel, “Close team-up…”.'
-                )}
-              >
-                <NumberInput min={0} value={settings.teamUpDays ?? TEAM_UP_DAYS} onChange={(n) => updateSettings({ teamUpDays: Math.max(0, Math.round(n)) })} />
-              </Field>
-            </div>
-          </Card>
-        )}
+
         {pane('geral') && owner && <WorkspaceDangerArea />}
       </div>
     </Page>
