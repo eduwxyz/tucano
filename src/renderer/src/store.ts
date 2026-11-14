@@ -4,6 +4,7 @@ import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
+import type { Commitment, CommitmentInput, InitiativeConfig, InitiativeInput, InitiativeView } from '../../shared/initiative'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
   asSaid,
@@ -94,6 +95,7 @@ export interface State {
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
   inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
+  initiative: InitiativeView[] | null // my own proactive coordinators, one per bot: null until read, then every one
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
   models: Model[]
@@ -129,7 +131,13 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
+export type Dialog =
+  | { kind: 'members' | 'settings'; id: string }
+  | { kind: 'archived' | 'new-channel' | 'search' }
+  | { kind: 'workspaces'; create?: boolean }
+  // My own proactive coordinator: set up, watch, stop. The DM it was opened from, when there is one.
+  | { kind: 'initiative'; agentId?: string; conversationId?: string }
+  | { kind: 'oauth'; id: string; url: string }
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -167,6 +175,7 @@ let state: State = {
   former: [],
   inbox: { approvals: [], questions: [] },
   delegations: [],
+  initiative: null,
   needsName: false,
   settings: {
     workspaceName: '',
@@ -690,6 +699,8 @@ export async function start(): Promise<void> {
       former: snap.former ?? []
     }
   })
+  // The proactive coordinator is the person's own, read beside everything else: a page shows it at once.
+  void refreshInitiative()
 }
 
 // ---------- selectors ----------
@@ -773,6 +784,40 @@ export function dismissToast(id: number): void {
   set((s) => ({ ...s, toasts: s.toasts.map((t) => (t.id === id ? { ...t, leaving: true } : t)) }))
   setTimeout(() => set((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) })), TOAST_EXIT_MS)
 }
+
+// ---------- the proactive coordinator ----------
+
+// My own, read fresh: each bot's brief, what it holds, what it did, and what is left of today.
+export const refreshInitiative = async (): Promise<void> => {
+  try {
+    const view = await call('initiative')
+    set((s) => ({ ...s, initiative: view }))
+  } catch {
+    // The core down already says so; a page that can't read it shows nothing rather than a guess.
+  }
+}
+
+// A configuration edit, against the revision the page read: another window's save is not overwritten.
+export const saveInitiative = (config: InitiativeInput, expectedRevision: number): Promise<InitiativeConfig> =>
+  call('saveInitiative', { config, expectedRevision }).then((saved) => {
+    // The saved bot's own entry, in place: a settings page saving one bot does not blank another's.
+    set((s) => ({ ...s, initiative: (s.initiative ?? []).map((v) => (v.config?.agentId === saved.agentId ? { ...v, config: saved } : v)) }))
+    void refreshInitiative()
+    return saved
+  })
+
+export const saveCommitment = (commitment: CommitmentInput): Promise<Commitment> =>
+  call('saveCommitment', { commitment }).then((saved) => {
+    void refreshInitiative()
+    return saved
+  })
+
+// "Conferir agora": it returns once the check-in has started, so the page can watch the record fill in.
+export const checkInNow = (agentId: string): Promise<{ started: boolean; why?: string; running: boolean }> =>
+  call('checkInNow', { agentId }).then((r) => {
+    void refreshInitiative()
+    return r
+  })
 
 // An action nobody waits on: if the core says no, a toast says what didn't happen, and why.
 // With the core down the banner already says it.

@@ -2,6 +2,7 @@
 import type { Answer } from './questions'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
+import type { Commitment, CommitmentInput, InitiativeConfig, InitiativeInput, InitiativeView } from './initiative'
 import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
 
 export interface Snapshot {
@@ -216,6 +217,10 @@ export interface Api {
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
+  initiative(): InitiativeView[] // my own proactive coordinators, one per bot, and no one else's
+  saveInitiative(p: { config: InitiativeInput; expectedRevision: number }): InitiativeConfig // expectedRevision: what the page read; 0 creates
+  saveCommitment(p: { commitment: CommitmentInput }): Commitment // one responsibility: its provenance, scope and links
+  checkInNow(p: { agentId: string }): { started: boolean; why?: string; running: boolean } // "Conferir agora": one of my bots looking on the spot
 }
 
 export type Method = keyof Api

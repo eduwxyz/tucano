@@ -1,6 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
+import { cleanObserve, cleanWork, COMMITMENT_STATES, NOTIFY_MODES, type Commitment, type CommitmentState, type InitiativeConfig, type InitiativeWake, type NotifyMode } from '../shared/initiative'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
@@ -528,6 +529,109 @@ export const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
   CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
+  `,
+  // A person's proactive coordinator (docs/autonomous-bots-plan.md in the fork): the bot they picked,
+  // the conversation it resumes, what it may look at and do, its standing brief and its allowance.
+  // One row per person, and no row means off: every workspace starts that way, including one that
+  // upgrades into this build. A responsibility (a commitment) links the work already running
+  // elsewhere, a run, a delegation, a question or an approval, instead of holding a second copy of
+  // its lifecycle, and keeps what it rests on (a message, a file an agent showed) as ids.
+  `
+  CREATE TABLE IF NOT EXISTS initiative (
+    person_id TEXT PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    brief TEXT NOT NULL DEFAULT '',
+    observe TEXT NOT NULL DEFAULT '{"conversations":[]}',
+    work TEXT NOT NULL DEFAULT '{"conversations":[],"kinds":[]}',
+    cadence_minutes INTEGER NOT NULL,
+    notify TEXT NOT NULL DEFAULT 'material',
+    daily_reviews INTEGER NOT NULL,
+    daily_tokens INTEGER NOT NULL,
+    timezone TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS commitments (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    message_id TEXT,
+    source_by TEXT NOT NULL DEFAULT 'person',
+    description TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT '{"conversations":[],"kinds":[]}',
+    state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'in_progress', 'waiting_external', 'waiting_user', 'done', 'dismissed')),
+    note TEXT,
+    next_check_at INTEGER,
+    evidence TEXT NOT NULL DEFAULT '[]',
+    links TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    closed_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS commitments_by_person ON commitments (person_id, state);
+  CREATE INDEX IF NOT EXISTS commitments_by_check ON commitments (next_check_at) WHERE next_check_at IS NOT NULL;
+  `,
+  // Each check-in a coordinator ran (or was admitted for and then refused): when, under which
+  // revision, what came of it, what it said, and what it cost. This is the internal evidence: a quiet
+  // check-in leaves nothing in the conversation, and what a review did is still readable here.
+  `
+  CREATE TABLE IF NOT EXISTS initiative_wakes (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    at INTEGER NOT NULL,
+    ended_at INTEGER,
+    outcome TEXT NOT NULL CHECK (outcome IN ('quiet', 'reported', 'failed', 'skipped', 'interrupted')),
+    why TEXT,
+    text TEXT,
+    tokens INTEGER NOT NULL DEFAULT 0,
+    message_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS wakes_by_person ON initiative_wakes (person_id, at);
+  `,
+  // What a coordinator has already seen of the work its responsibilities rest on: one row per link,
+  // with the version it last saw. A new version is what wakes it, once.
+  `
+  CREATE TABLE IF NOT EXISTS initiative_resumes (
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    link_kind TEXT NOT NULL,
+    link_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (person_id, link_kind, link_id)
+  );
+  `,
+  // One coordinator per bot (a person can give several of theirs something to look after). The table was
+  // keyed by person alone, so it is rebuilt once and its rows carried over: a bot already on stays on.
+  `
+  DROP TABLE IF EXISTS initiative_by_bot;
+  CREATE TABLE IF NOT EXISTS initiative_by_bot (
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    brief TEXT NOT NULL DEFAULT '',
+    observe TEXT NOT NULL DEFAULT '{"conversations":[]}',
+    work TEXT NOT NULL DEFAULT '{"conversations":[],"kinds":[]}',
+    cadence_minutes INTEGER NOT NULL,
+    notify TEXT NOT NULL DEFAULT 'material',
+    daily_reviews INTEGER NOT NULL,
+    daily_tokens INTEGER NOT NULL,
+    timezone TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (person_id, agent_id)
+  );
+  INSERT INTO initiative_by_bot (person_id, agent_id, conversation_id, enabled, brief, observe, work, cadence_minutes, notify, daily_reviews, daily_tokens, timezone, revision, created_at, updated_at)
+    SELECT person_id, agent_id, conversation_id, enabled, brief, observe, work, cadence_minutes, notify, daily_reviews, daily_tokens, timezone, revision, created_at, updated_at FROM initiative;
+  DROP TABLE initiative;
+  ALTER TABLE initiative_by_bot RENAME TO initiative;
   `
 ]
 
@@ -545,7 +649,19 @@ const COLUMNS: [string, string, string][] = [
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // A check-in stays out of the conversation while it works, and stays out of it for good when it
+  // finds nothing to say: the column keeps it out of what a page reads (the reply's wake record keeps
+  // what it did).
+  ['messages', 'hidden', 'INTEGER'],
+  // Check-ins in a row that found a responsibility exactly where it was: a cycle with no progress is
+  // bounded, not repeated forever. Added here rather than by a migration because a database from an
+  // older build may already hold the table this column completes.
+  ['commitments', 'unchanged_for', 'INTEGER NOT NULL DEFAULT 0'],
+  // A check-in that said exactly what the last one said: kept as evidence, never delivered twice.
+  ['initiative_wakes', 'deduped', 'INTEGER'],
+  // A report that reached the person, so a restart between the run and the delivery shows it once.
+  ['initiative_wakes', 'delivered', 'INTEGER']
 ]
 
 
@@ -554,6 +670,14 @@ type Row = Record<string, unknown>
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
 const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+// A JSON column as it was stored; anything unreadable reads as the empty value it falls back to.
+const jsonOf = (v: unknown): unknown => {
+  try {
+    return JSON.parse(str(v) || 'null') ?? null
+  } catch {
+    return null
+  }
+}
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
@@ -636,6 +760,10 @@ export class Db {
           DELETE FROM questions;
           DELETE FROM delegations;
           DELETE FROM activity;
+          DELETE FROM commitments;
+          DELETE FROM initiative_wakes;
+          DELETE FROM initiative_resumes;
+          UPDATE initiative SET enabled = 0, revision = revision + 1;
         `)
         target.keepOnly(parts)
         if (!parts.wiki) target.db.prepare("DELETE FROM settings WHERE key = 'wikiDir'").run() // its own, empty
@@ -724,10 +852,10 @@ export class Db {
 
   // A backup from another computer just became this database (restore.ts). What only worked there
   // goes: its secrets (sealed with that computer's key), its devices and invites, its extra logins,
-  // the agents' use of that computer (its desktop, apps and folders), and routines run there until
-  // someone turns them on here. What this server had of its own stays, from `previous` (its
-  // database before the swap): the owner's devices (so whoever restored stays signed in), the
-  // secrets, the harnesses picked and Telegram. Returns how many routines were turned off.
+  // the agents' use of that computer (its desktop, apps and folders), and what ran there, routines and
+  // initiative alike, until someone turns it on here. What this server had of its own stays, from
+  // `previous` (its database before the swap): the owner's devices (so whoever restored stays signed
+  // in), the secrets, the harnesses picked and Telegram. Returns how many routines were turned off.
   adoptRestore(previous?: string): number {
     const routines = Number((this.db.prepare('SELECT count(*) AS n FROM routines WHERE enabled = 1').get() as Row)['n'] ?? 0)
     this.tx(() => {
@@ -739,6 +867,7 @@ export class Db {
         DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
         UPDATE agents SET account = NULL, fallback_account = NULL, apps = '[]', folders = '[]', computer = CASE WHEN computer_kind = 'mac' THEN 0 ELSE computer END;
         UPDATE routines SET enabled = 0;
+        UPDATE initiative SET enabled = 0, revision = revision + 1;
       `)
     })
     this.ownerCache = ''
@@ -1032,6 +1161,8 @@ export class Db {
   // (a desktop), or each person's.
   recordActivity(message: Message, viewing: string | null | Map<string, string | null>): boolean {
     if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return false
+    // A check-in the person did not ask for never counts as something to read.
+    if (message.hidden) return false
     const phase = message.run?.status ?? 'message'
     if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return false
     return this.tx(() => {
@@ -1062,10 +1193,19 @@ export class Db {
       text: str(r['text']),
       at: Number(r['at']),
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
+      ...(r['hidden'] === 1 ? { hidden: true } : {}),
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
     }
+  }
+
+  // Who spoke last in a conversation, and when: a check-in stays out of an exchange the person is in
+  // the middle of, and knows it is over as soon as the bot has answered.
+  lastAuthor(conversationId: string): { kind: 'person' | 'agent' | 'routine' | 'system'; at: number } | undefined {
+    const r = this.db.prepare('SELECT author_kind, at FROM messages WHERE conversation_id = ? AND hidden IS NULL ORDER BY at DESC LIMIT 1').get(conversationId) as Row | undefined
+    if (!r) return undefined
+    return { kind: str(r['author_kind']) as 'person' | 'agent' | 'routine' | 'system', at: Number(r['at']) }
   }
 
   messages(): Message[] {
@@ -1134,7 +1274,7 @@ export class Db {
   // still going wherever they started, and every routine's request with its reply (Routines draws what
   // ran), each with all its replies. `since`: per conversation with older ones left, from when it's whole.
   openingMessages(n: number): { messages: Message[]; since: Record<string, number> } {
-    const ranked = 'ranked AS (SELECT id, conversation_id, thread_id, at, ROW_NUMBER() OVER (PARTITION BY conversation_id, thread_id IS NULL ORDER BY at DESC) AS n FROM messages)'
+    const ranked = `ranked AS (SELECT id, conversation_id, thread_id, at, ROW_NUMBER() OVER (PARTITION BY conversation_id, thread_id IS NULL ORDER BY at DESC) AS n FROM messages WHERE hidden IS NULL)`
     const rows = this.db
       .prepare(
         `WITH ${ranked},
@@ -1159,16 +1299,16 @@ export class Db {
   messagesBefore(conversationId: string, before: number, n: number, from?: number): { messages: Message[]; since: number } {
     const page = (
       from === undefined
-        ? this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? ORDER BY at DESC LIMIT ?').all(conversationId, before, n)
-        : this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? AND at >= ? ORDER BY at DESC').all(conversationId, before, from)
+        ? this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND hidden IS NULL AND at < ? ORDER BY at DESC LIMIT ?').all(conversationId, before, n)
+        : this.db.prepare('SELECT id, at FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND hidden IS NULL AND at < ? AND at >= ? ORDER BY at DESC').all(conversationId, before, from)
     ) as Row[]
     const oldest = page.length ? Number(page.at(-1)!['at']) : Math.min(before, from ?? before)
-    const more = !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND at < ? LIMIT 1').get(conversationId, oldest)
+    const more = !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? AND thread_id IS NULL AND hidden IS NULL AND at < ? LIMIT 1').get(conversationId, oldest)
     const since = more ? oldest : 0
     if (!page.length) return { messages: [], since }
     const ids = JSON.stringify(page.map((r) => str(r['id'])))
     const rows = this.db
-      .prepare('SELECT * FROM messages WHERE conversation_id = ? AND (id IN (SELECT value FROM json_each(?)) OR thread_id IN (SELECT value FROM json_each(?))) ORDER BY at')
+      .prepare('SELECT * FROM messages WHERE conversation_id = ? AND hidden IS NULL AND (id IN (SELECT value FROM json_each(?)) OR thread_id IN (SELECT value FROM json_each(?))) ORDER BY at')
       .all(conversationId, ids, ids) as Row[]
     return { messages: rows.map((r) => this.toMessage(r)), since }
   }
@@ -1187,7 +1327,7 @@ export class Db {
 
   // Where the agent wrote last: while it works, the conversation of its reply.
   lastConversationOf(agentId: string): string | undefined {
-    const r = this.db.prepare("SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = ? ORDER BY at DESC LIMIT 1").get(agentId) as Row | undefined
+    const r = this.db.prepare("SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = ? AND hidden IS NULL ORDER BY at DESC LIMIT 1").get(agentId) as Row | undefined
     return r && str(r['conversation_id'])
   }
 
@@ -1199,8 +1339,8 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run, hidden = excluded.hidden`
       )
       .run(
         m.id,
@@ -1211,7 +1351,8 @@ export class Db {
         m.at,
         m.run ? JSON.stringify(m.run) : null,
         m.routine ? JSON.stringify(m.routine) : null,
-        m.threadId ?? null
+        m.threadId ?? null,
+        m.hidden ? 1 : null
       )
   }
 
@@ -1665,6 +1806,214 @@ export class Db {
     this.db.prepare('DELETE FROM routines WHERE id = ?').run(id)
   }
 
+  // ---------- a person's coordinator ----------
+
+  // Their own, one per bot: nobody else reads another person's brief, scope or commitments.
+  initiative(personId: string, agentId: string): InitiativeConfig | undefined {
+    const r = this.db.prepare('SELECT * FROM initiative WHERE person_id = ? AND agent_id = ?').get(personId, agentId) as Row | undefined
+    return r && this.toInitiative(r)
+  }
+
+  // Every bot this person has given something to look after, oldest first so a page reads the same each time.
+  initiatives(personId: string): InitiativeConfig[] {
+    return (this.db.prepare('SELECT * FROM initiative WHERE person_id = ? ORDER BY created_at, agent_id').all(personId) as Row[]).map((r) => this.toInitiative(r))
+  }
+
+  private toInitiative(r: Row): InitiativeConfig {
+    const notify = str(r['notify'])
+    return {
+      personId: str(r['person_id']),
+      agentId: str(r['agent_id']),
+      conversationId: str(r['conversation_id']),
+      enabled: r['enabled'] === 1,
+      brief: str(r['brief']),
+      observe: cleanObserve(jsonOf(r['observe'])),
+      work: cleanWork(jsonOf(r['work'])),
+      cadenceMinutes: Number(r['cadence_minutes']),
+      notify: (NOTIFY_MODES as readonly string[]).includes(notify) ? (notify as NotifyMode) : 'material',
+      dailyReviews: Number(r['daily_reviews']),
+      dailyTokens: Number(r['daily_tokens']),
+      timezone: str(r['timezone']),
+      revision: Number(r['revision']),
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at'])
+    }
+  }
+
+  saveInitiative(c: InitiativeConfig): void {
+    this.db
+      .prepare(
+        `INSERT INTO initiative (person_id, agent_id, conversation_id, enabled, brief, observe, work, cadence_minutes, notify, daily_reviews, daily_tokens, timezone, revision, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (person_id, agent_id) DO UPDATE SET conversation_id = excluded.conversation_id, enabled = excluded.enabled,
+           brief = excluded.brief, observe = excluded.observe, work = excluded.work, cadence_minutes = excluded.cadence_minutes, notify = excluded.notify,
+           daily_reviews = excluded.daily_reviews, daily_tokens = excluded.daily_tokens, timezone = excluded.timezone, revision = excluded.revision, updated_at = excluded.updated_at`
+      )
+      .run(
+        c.personId,
+        c.agentId,
+        c.conversationId,
+        c.enabled ? 1 : 0,
+        c.brief,
+        JSON.stringify(c.observe),
+        JSON.stringify(c.work),
+        c.cadenceMinutes,
+        c.notify,
+        c.dailyReviews,
+        c.dailyTokens,
+        c.timezone,
+        c.revision,
+        c.createdAt,
+        c.updatedAt
+      )
+  }
+
+  // One person's responsibilities, oldest first: theirs alone, so no one else's are in the query.
+  commitments(personId: string): Commitment[] {
+    return (this.db.prepare('SELECT * FROM commitments WHERE person_id = ? ORDER BY created_at').all(personId) as Row[]).map((r) => this.toCommitment(r))
+  }
+
+  commitment(id: string): Commitment | undefined {
+    const r = this.db.prepare('SELECT * FROM commitments WHERE id = ?').get(id) as Row | undefined
+    return r && this.toCommitment(r)
+  }
+
+  private toCommitment(r: Row): Commitment {
+    const state = str(r['state'])
+    return {
+      id: str(r['id']),
+      personId: str(r['person_id']),
+      agentId: str(r['agent_id']),
+      conversationId: str(r['conversation_id']),
+      ...(r['message_id'] ? { messageId: str(r['message_id']) } : {}),
+      by: str(r['source_by']) === 'agent' ? 'agent' : 'person',
+      description: str(r['description']),
+      scope: cleanWork(jsonOf(r['scope'])),
+      state: (COMMITMENT_STATES as readonly string[]).includes(state) ? (state as CommitmentState) : 'open',
+      ...(r['note'] ? { note: str(r['note']) } : {}),
+      ...(r['next_check_at'] == null ? {} : { nextCheckAt: Number(r['next_check_at']) }),
+      evidence: jsonOf(r['evidence']) as Commitment['evidence'],
+      links: jsonOf(r['links']) as Commitment['links'],
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at']),
+      ...(r['closed_at'] == null ? {} : { closedAt: Number(r['closed_at']) }),
+      unchangedFor: Number(r['unchanged_for'] ?? 0)
+    }
+  }
+
+  saveCommitment(c: Commitment): void {
+    this.db
+      .prepare(
+        `INSERT INTO commitments (id, person_id, agent_id, conversation_id, message_id, source_by, description, scope, state, note, next_check_at, evidence, links, created_at, updated_at, closed_at, unchanged_for)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, message_id = excluded.message_id,
+           source_by = excluded.source_by, description = excluded.description, scope = excluded.scope, state = excluded.state, note = excluded.note,
+           next_check_at = excluded.next_check_at, evidence = excluded.evidence, links = excluded.links, updated_at = excluded.updated_at, closed_at = excluded.closed_at,
+           unchanged_for = excluded.unchanged_for`
+      )
+      .run(
+        c.id,
+        c.personId,
+        c.agentId,
+        c.conversationId,
+        c.messageId ?? null,
+        c.by,
+        c.description,
+        JSON.stringify(c.scope),
+        c.state,
+        c.note ?? null,
+        c.nextCheckAt ?? null,
+        JSON.stringify(c.evidence),
+        JSON.stringify(c.links),
+        c.createdAt,
+        c.updatedAt,
+        c.closedAt ?? null,
+        c.unchangedFor
+      )
+  }
+
+  // What the coordinator has already seen of the work its responsibilities rest on. A link's version
+  // is the whole of what changed in it: a new one is what a resume fires on, once.
+  resumeSeen(personId: string, kind: string, id: string): string | undefined {
+    const r = this.db.prepare('SELECT version FROM initiative_resumes WHERE person_id = ? AND link_kind = ? AND link_id = ?').get(personId, kind, id) as Row | undefined
+    return r ? str(r['version']) : undefined
+  }
+
+  markResume(personId: string, kind: string, id: string, version: string, at: number): void {
+    this.db
+      .prepare('INSERT INTO initiative_resumes (person_id, link_kind, link_id, version, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (person_id, link_kind, link_id) DO UPDATE SET version = excluded.version, at = excluded.at')
+      .run(personId, kind, id, version, at)
+  }
+
+  forgetResumes(personId: string): void {
+    this.db.prepare('DELETE FROM initiative_resumes WHERE person_id = ?').run(personId)
+  }
+
+  // What a reply cost, in counted tokens: the receipts it wrote.
+  tokensForMessage(messageId: string): number {
+    const r = this.db.prepare(`SELECT COALESCE(SUM(${COUNTED}), 0) AS n FROM receipts WHERE message_id = ?`).get(messageId) as Row | undefined
+    return Number(r?.['n'] ?? 0)
+  }
+
+  // ---------- a person's check-ins ----------
+
+  saveWake(w: InitiativeWake): void {
+    this.db
+      .prepare(
+        `INSERT INTO initiative_wakes (id, person_id, agent_id, revision, at, ended_at, outcome, why, text, tokens, message_id, deduped, delivered)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET ended_at = excluded.ended_at, outcome = excluded.outcome, why = excluded.why,
+           text = excluded.text, tokens = excluded.tokens, message_id = excluded.message_id,
+           deduped = excluded.deduped, delivered = COALESCE(excluded.delivered, initiative_wakes.delivered)`
+      )
+      .run(w.id, w.personId, w.agentId, w.revision, w.at, w.endedAt ?? null, w.outcome, w.why ?? null, w.text ?? null, w.tokens, w.messageId ?? null, w.deduped ? 1 : null, w.delivered ? 1 : null)
+  }
+
+  // Newest first: what this person's coordinator did, and what it cost. `since`: only those after.
+  wakes(personId: string, opts: { since?: number; limit?: number; agentId?: string } = {}): InitiativeWake[] {
+    const since = opts.since ?? 0
+    const limit = opts.limit ?? 50
+    if (opts.agentId)
+      return (
+        this.db
+          .prepare('SELECT * FROM initiative_wakes WHERE person_id = ? AND agent_id = ? AND at >= ? ORDER BY at DESC LIMIT ?')
+          .all(personId, opts.agentId, since, limit) as Row[]
+      ).map(this.toWake)
+    return (this.db.prepare('SELECT * FROM initiative_wakes WHERE person_id = ? AND at >= ? ORDER BY at DESC LIMIT ?').all(personId, since, limit) as Row[]).map(this.toWake)
+  }
+
+  initiativeWake(id: string): InitiativeWake | undefined {
+    const r = this.db.prepare('SELECT * FROM initiative_wakes WHERE id = ?').get(id) as Row | undefined
+    return r && this.toWake(r)
+  }
+
+  // Check-ins that started and never ended, older than `before`: a run the app did not survive. They are
+  // closed at the next start, so nothing stays "checking now" forever.
+  staleWakes(before: number): InitiativeWake[] {
+    return (this.db.prepare('SELECT * FROM initiative_wakes WHERE ended_at IS NULL AND at <= ? ORDER BY at').all(before) as Row[]).map(this.toWake)
+  }
+
+  private toWake = (r: Row): InitiativeWake => ({
+    id: str(r['id']),
+    personId: str(r['person_id']),
+    agentId: str(r['agent_id']),
+    revision: Number(r['revision']),
+    at: Number(r['at']),
+    ...(r['ended_at'] == null ? {} : { endedAt: Number(r['ended_at']) }),
+    outcome: str(r['outcome']) as InitiativeWake['outcome'],
+    ...(r['why'] ? { why: str(r['why']) as InitiativeWake['why'] } : {}),
+    ...(r['text'] ? { text: str(r['text']) } : {}),
+    tokens: Number(r['tokens']),
+    ...(r['message_id'] ? { messageId: str(r['message_id']) } : {}),
+    ...(r['deduped'] === 1 ? { deduped: true } : {}),
+    ...(r['delivered'] === 1 ? { delivered: true } : {})
+  })
+
+  // What is older than the record keeps: a month of check-ins is enough to see a rhythm.
+  pruneWakes(personId: string, before: number): void {
+    this.db.prepare('DELETE FROM initiative_wakes WHERE person_id = ? AND at < ?').run(personId, before)
+  }
+
   // ---------- skills ----------
 
   skills(): Skill[] {
@@ -1812,12 +2161,16 @@ export class Db {
     this.db.prepare(`UPDATE people SET name = ?${named ? ', named = 1' : ''} WHERE id = ?`).run(name, id)
   }
 
-  // Their access ends: keys go now; what they own is handed over by the caller.
+  // Their access ends: keys go now; what they own is handed over by the caller. Their coordinator
+  // stops: a review is not something a person who left keeps doing in their name.
   removePerson(id: string): void {
     this.tx(() => {
-      this.db.prepare("UPDATE people SET removed_at = ? WHERE id = ? AND role <> 'owner'").run(Date.now(), id)
+      const now = Date.now()
+      const removed = this.db.prepare("UPDATE people SET removed_at = ? WHERE id = ? AND role <> 'owner'").run(now, id)
+      // Their coordinator stops with their access: a review is not something someone who left keeps doing in their name.
+      if (Number(removed.changes) > 0) this.db.prepare('UPDATE initiative SET enabled = 0, revision = revision + 1, updated_at = ? WHERE person_id = ?').run(now, id)
       // Only the hashes stay, to tell their browsers "you no longer have access" instead of counting a guess.
-      this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(Date.now(), id)
+      this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(now, id)
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
     })
   }
@@ -1980,6 +2333,11 @@ export class Db {
       this.db.prepare('DELETE FROM read_state WHERE person_id = ?').run(personId)
       this.db.prepare('DELETE FROM unread WHERE person_id = ?').run(personId)
       this.db.prepare('DELETE FROM routine_watchers WHERE person_id = ?').run(personId)
+      // What they asked a bot to look after goes with the rest of their data.
+      this.db.prepare('DELETE FROM commitments WHERE person_id = ?').run(personId)
+      this.db.prepare('DELETE FROM initiative_wakes WHERE person_id = ?').run(personId)
+      this.db.prepare('DELETE FROM initiative_resumes WHERE person_id = ?').run(personId)
+      this.db.prepare('DELETE FROM initiative WHERE person_id = ?').run(personId)
       this.db.prepare('DELETE FROM invites WHERE restore = ? AND used_at IS NULL').run(personId)
       this.db.prepare("UPDATE people SET purged_at = ?, prefs = '{}', about = '', delegate_to = NULL, delegate_until = NULL WHERE id = ? AND removed_at IS NOT NULL").run(now, personId)
       return { dms, routines, artifacts }

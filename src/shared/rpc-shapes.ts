@@ -182,6 +182,10 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   answerDecision: { messageId: 's', index: 'n', answer: 'o|null' },
   submitDecisions: { messageId: 's' },
   watchRoutine: { id: 's', on: 'b' },
+  initiative: {},
+  saveInitiative: { config: 'o', expectedRevision: 'n' },
+  saveCommitment: { commitment: 'o' },
+  checkInNow: { agentId: 's' },
 }
 
 const fits = (v: unknown, t: string): boolean => {
