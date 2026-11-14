@@ -2567,10 +2567,10 @@ function SkillFoldersCard(): ReactNode {
   const on = shown.filter((f) => f.on).length
   return (
     <Card
-      title={L('De onde vêm as skills', 'Where skills come from')}
+      title={L('De onde vêm as skills', 'Skill folders')}
       lead={L(
         'As pastas que o Tucano lê. As que os harnesses já mantêm neste computador entram sozinhas; uma pasta a mais pode ser adicionada aqui. Tudo o que está ligado aparece junto na lista de skills de cada bot.',
-        'The folders Tucano reads. The ones the harnesses already keep on this computer come by themselves; one more folder can be added here. Everything that is on shows up together in each bot’s list of skills.'
+        'Runtime skill folders are detected automatically. Add other folders here. Enabled skills appear on agent profiles.'
       )}
     >
       {shown.length === 0 && <p className="muted small">{folders ? L('Nenhuma pasta de skills encontrada.', 'No skills folder found.') : L('Procurando…', 'Looking…')}</p>}
@@ -2863,7 +2863,7 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && <BackupCard />}
         {pane('servidores') && <ServersCard />}
 
-        {pane('agentes') && <SkillFoldersCard />}
+
 
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>
@@ -2914,6 +2914,8 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+
+        {pane('agentes') && <SkillFoldersCard />}
         {pane('geral') && owner && <WorkspaceDangerArea />}
       </div>
     </Page>
