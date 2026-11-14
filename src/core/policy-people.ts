@@ -243,6 +243,10 @@ export const NEEDS: Record<Method, Need> = {
   installDesktop: 'admin',
   desktopPermissions: 'admin',
   backupNow: 'admin',
+  // The file's size, its free pages and whether it reads back sound. Nothing changes.
+  dbHealth: 'admin',
+  // Rebuilds the file: it holds the core's only thread for seconds, so it is an admin's press.
+  optimizeDb: 'admin',
   openBackups: 'admin',
   report: 'admin',
   usage: 'admin',

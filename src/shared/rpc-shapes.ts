@@ -110,6 +110,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   importTeam: { text: 's' },
   importAgents: { path: 's?', data: 's?' },
   backupNow: {},
+  dbHealth: {},
+  optimizeDb: {},
   exportBackup: {},
   restoreCheck: { path: 's' },
   restoreApply: {},

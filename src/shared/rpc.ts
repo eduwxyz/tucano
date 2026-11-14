@@ -138,6 +138,11 @@ export interface Api {
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
   backupNow(): string // where the copy went
+  // The file itself: what it takes on disk, how much of that is free pages, and whether it reads back sound.
+  dbHealth(): { bytes: number; free: number; sound: boolean; said: string }
+  // Empties the log, rebuilds the file and refreshes the planner, refusing while a reply is at work:
+  // before and after in bytes, the free pages left, and the check's verdict.
+  optimizeDb(): { before: number; after: number; free: number; sound: boolean; said: string }
   // Everything in one .zip, to take this Tucano to a server (desktop): where it went, and what's in it.
   exportBackup(): { path: string } & BackupSummary
   // On a server, the owner: a backup sent up (/upload) checked and set apart; nothing changes yet.

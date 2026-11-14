@@ -1053,6 +1053,15 @@ void ready.then(async () => {
     } catch (e) {
       console.error('[people]', e)
     }
+    // The planner's statistics while the tables change size, and a slice of the pages that deletes
+    // have already freed. A file rebuilt with incremental auto-vacuum gives those pages back here,
+    // a thousand at a time, so the file stops holding its high-water mark without another rewrite.
+    try {
+      db.statistics()
+      db.trim()
+    } catch (e) {
+      console.error('[db]', e)
+    }
   }
   daily()
   setInterval(daily, 3_600_000).unref()
@@ -1722,6 +1731,22 @@ const api: Handlers = {
     }
   },
   backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
+  // The file's own numbers, from the moment the card opens: size, the free pages nothing will reuse,
+  // and whether it reads back sound (a quick check, 20 ms at 23 MB).
+  dbHealth: () => ({ ...db.size(), ...db.check() }),
+  // Empties the log, rebuilds the file and refreshes the planner. Not while a reply is at work: the
+  // rebuild holds the core's only thread, and that is where the run is writing.
+  optimizeDb: () => {
+    if (db.messagesWithRun(['working', 'waiting_approval']).length) {
+      throw new Error(L('Uma resposta está trabalhando agora. Otimize quando ela terminar.', 'A reply is at work right now. Optimize when it finishes.'))
+    }
+    const before = db.size()
+    db.rebuild()
+    const after = db.size()
+    const check = db.check()
+    record(undefined, 'db.optimized', undefined, { before: before.bytes, after: after.bytes })
+    return { before: before.bytes, after: after.bytes, free: after.free, ...check }
+  },
   // Everything in one .zip in Downloads, shown in the Finder: to take to a server, which restores it.
   exportBackup: () => {
     if (serverMode) throw new Error(L('O backup completo sai do app do computador.', 'The full backup comes from the desktop app.'))
