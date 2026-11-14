@@ -60,6 +60,7 @@ import {
   type EngineId,
   type GrantLevel,
   type MemoryMode,
+  type SendMode,
   type Skill,
   type ToolClass,
   isTeam,
@@ -2690,6 +2691,30 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('agentes') && admin && (
+          <Card title={L('Respostas dos agentes', 'Agent replies')}>
+            <Field
+                label={L('Um novo prompt com uma resposta em curso', 'While a reply is running')}
+                hint={L(
+                  'O que o Enter faz quando o agente já está respondendo ali. Ctrl+Enter põe na fila, Alt+Enter entrega no meio do trabalho, Shift+Alt+Enter interrompe, seja qual for o ajuste. Shift+Enter continua quebrando a linha.',
+                  'Enter uses this mode. Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line.'
+                )}
+              >
+                <Select
+                  value={settings.sendMode ?? 'parallel'}
+                  onChange={(v) => { if (v) updateSettings({ sendMode: v as SendMode }) }}
+                  options={[
+                    { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Parallel replies') },
+                    { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') },
+                    { value: 'steer', label: L('Entregue à resposta em curso', 'Steer current reply') },
+                    { value: 'interrupt', label: L('Interrompe e começa com esta', 'Interrupt and restart') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
+              </Field>
+          </Card>
+        )}
+
         {pane('agentes') && (
           <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
@@ -2807,6 +2832,7 @@ export function SettingsPage(): ReactNode {
                   onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
                 />
               </Field>
+
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>
                 <Select
                   value={settings.approvalTtlHours ? String(settings.approvalTtlHours) : null}

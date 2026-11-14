@@ -1,7 +1,9 @@
 // One reply at a time per agent and thread. Two replies of the same agent in the same conversation would
 // each run on a context the other is about to change, so a hand-off that reaches an agent already replying
 // there is noted instead, and the agent answers it once, after the reply it's in. Other conversations and
-// other threads stay parallel: the key is agent + conversation + thread.
+// other threads stay parallel: the key is agent + conversation + thread. The one exception is a person
+// asking for it outright (send mode 'parallel'): that reply goes beside the running one, and the pair
+// simply counts on the same slot until both end.
 
 // Also the key of an agent's kept session: same agent, same conversation, same thread.
 export const replyKey = (agentId: string, convId: string, threadId?: string): string => `${agentId}:${convId}:${threadId ?? ''}`

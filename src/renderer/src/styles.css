@@ -1236,6 +1236,13 @@ h3 {
   color: var(--text-3);
   font-size: 11.5px;
 }
+/* A prompt of mine waiting its turn behind the reply above: it goes when that one ends. */
+.msg__queued {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-style: italic;
+}
 .md > :first-child {
   margin-top: 0;
 }
@@ -1431,6 +1438,58 @@ h3 {
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
+}
+/* The steer pill, at the bottom of the chain while the agent works: small, dim, and out of the
+   way until it's wanted. It lines up with the steps' own rail above it. */
+.steps__steer {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 4px 3px;
+  padding-left: 14px;
+}
+.steps__steer-pill {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  transition: var(--transition-ui);
+}
+.steps__steer-pill:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover);
+}
+.steps__steer-note {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
+}
+.steps__steer-note textarea {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+}
+.steps__steer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+/* What the person steered, in the chain: a call's own row, carrying their words whole. */
+.step--steer .step__icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* Their words, not a tool's arguments: the same row, in the font people read in. */
+.step--steer .step__input {
+  font-family: var(--font);
+  font-size: 12.5px;
 }
 .step {
   display: flex;
@@ -1817,6 +1876,14 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 4px 8px 8px 14px;
+}
+/* How Enter sends while a reply runs here, when it isn't the plain one: short, quiet, and one click
+   back to the plain one (see the send-mode setting and the composer in Conversation.tsx). */
+.composer__mode {
+  flex: 0 0 auto;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent-soft);
 }
 .composer__hint {
   flex: 1;

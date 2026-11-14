@@ -6,7 +6,7 @@ import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type SendMode, type Settings, type Step, type StepStatus, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -325,9 +325,20 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
+// What a person wrote into a reply that was already running (`send` with mode 'steer'): the agent
+// reads it with its next tool result, and the reply's own chain carries it, in their words, from the
+// moment it's given. It is not a message of theirs: nothing of it is posted, so a reply that ends
+// before taking one leaves it in its chain, marked as not read (see `steerLeftovers`).
+type SteerNote = { id: string; who: string; text: string }
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = {
+  ctl: AbortController
+  msg: Message
+  reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'
+  steer?: SteerNote[] // what the person wrote while this reply ran, handed over at the next tool call
+  flush?: () => void // the reply's streamed text, sent before a full message of it: the window's order (`execute`)
+}
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
 // it (what was already said, its own earlier one too), and its message last.
@@ -360,6 +371,10 @@ export class Runner {
   // Every other reply asked for while the agent replies there (a person's mention or DM, a routine,
   // an approval's outcome, a retry), in the order they came: they wait here, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
+  // Replies running in each conversation, and the prompts a person marked as queued behind them: one of
+  // those starts when nothing runs there any more (see `runIn`, `settleIn`).
+  private convRuns = new Map<string, number>()
+  private convWaiting = new Map<string, { job: () => Promise<unknown>; queued?: Message }[]>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -496,7 +511,7 @@ export class Runner {
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[] } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; mode?: SendMode } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
@@ -529,7 +544,23 @@ export class Runner {
     const body = [fromCard, typed].filter(Boolean).join('\n\n')
     if (!body && pictures.length === 0 && docs.length === 0) return
 
+    // A steer is not a prompt. It is the person's direction for the reply running in this very place
+    // (its own thread, never another one's), and only that reply carries it: handed over at its next
+    // tool call, and drawn in its own chain, in their words (Conversation.tsx). So it is taken here,
+    // before any message of mine exists: nothing of a steer ever shows up in the channel or the DM as
+    // something to answer. With no reply running there — or with a picture or a file, which a tool
+    // result can't carry — there is nothing to steer, and the text goes on as a prompt like any other.
+    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, thread, { who: writer.name, text: typed }))
+      return
+
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+    // How it joins a reply already running here (the window says which): alongside it, after it,
+    // handed to it between tool calls, or in place of it. With nothing running, all four are the same.
+    // No mode at all (the phone, an approval's outcome, a routine, a retry) is the way replies have
+    // always gone here: one at a time per agent and thread, a person's newer message taking over.
+    const mode = opts.mode
+    const queued = mode === 'queue' && this.busyIn(conv.id)
+    if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -591,14 +622,128 @@ export class Runner {
       this.post(conv.id, replyIn, names ? L(`Avisei ${names}.`, `Let ${names} know.`) : L('Ninguém foi avisado: não tem ninguém com esse nome aqui pra chamar (escreva o nome inteiro se duas pessoas têm o mesmo).', 'No one was told: there is no one by that name here to call (write the whole name if two people share it).'))
       return
     }
+    if (mode === 'interrupt') this.interruptIn(conv.id)
     if (responders.length === 0) {
       if (conv.kind === 'dm' || members.length === 1) responders = members
       else if (members.length > 1) {
-        void this.routeAndRun(conv, members, replyIn, mine.id)
+        void this.runIn(conv.id, () => this.routeAndRun(conv, members, replyIn, mine.id, mode === 'parallel'), mode === 'queue', queued ? mine : undefined)
         return
       }
     }
-    for (const agent of responders) void this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
+    // A parallel one goes beside the reply running there, two at once; no mode (or a steer that found
+    // nothing to go into) goes as a reply always does, one at a time per agent and thread there, the
+    // person's newer messages taking over; a queued one waits for everything running there to end.
+    for (const agent of responders) {
+      const start = (): Promise<unknown> =>
+        this.startReply(
+          agent,
+          conv,
+          { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) },
+          // A queued prompt answers the message it was written for, never taking over an earlier one.
+          { urgent: true, merge: mode !== 'queue', parallel: mode === 'parallel' }
+        )
+      this.runIn(conv.id, start, mode === 'queue', queued ? mine : undefined)
+    }
+  }
+
+  // A prompt I queued before the app closed: its message is here, its reply never started (db.ts,
+  // queuedMessages). Each one goes in the order I wrote them, waiting for whatever runs there now.
+  resumeQueued(): void {
+    const { db } = this.deps
+    if (this.paused) return // they keep their mark, and go at the next start
+    for (const m of db.queuedMessages()) {
+      const conv = db.conversation(m.conversationId)
+      const members = conv ? this.members(conv) : []
+      if (!conv || !members.length || m.author.kind !== 'person') continue
+      const named = mentioned(m.text, members).slice(0, MAX_MENTIONS)
+      if (!named.length && conv.kind !== 'dm' && members.length > 1) this.runIn(conv.id, () => this.routeAndRun(conv, members, m.threadId, m.id), true, m)
+      else for (const agent of named.length ? named : members) this.runIn(conv.id, () => this.execute(agent, conv, { depth: 1, threadId: m.threadId, replyTo: m.id }), true, m)
+    }
+  }
+
+  // Something is answering in this conversation: a reply running there (however it was started), a
+  // prompt of mine still waiting its turn, or the router picking who answers.
+  private busyIn(conversationId: string): boolean {
+    if ((this.convRuns.get(conversationId) ?? 0) > 0 || (this.convWaiting.get(conversationId)?.length ?? 0) > 0) return true
+    for (const c of this.controllers.values()) if (c.msg.conversationId === conversationId && !c.reason) return true
+    return false
+  }
+
+  // A prompt marked as queued waits for what is running in that conversation, and there only: what
+  // runs elsewhere, or another agent's reply in another conversation, is none of its business.
+  private runIn(conversationId: string, job: () => Promise<unknown>, after: boolean, queued?: Message): void {
+    if (!after || !this.busyIn(conversationId)) return this.startIn(conversationId, job, queued)
+    this.convWaiting.set(conversationId, [...(this.convWaiting.get(conversationId) ?? []), { job, queued }])
+  }
+
+  // A prompt goes out (now, or once the one before it let go): the mark a queued one kept for a restart
+  // drops in the same step, so the app never starts it twice. From here `execute` counts it as running.
+  private startIn(conversationId: string, job: () => Promise<unknown>, queued?: Message): void {
+    if (queued?.sendMode) this.update(queued, { sendMode: undefined })
+    void this.enqueue(job, true)
+  }
+
+  // A reply ended there: the next queued prompt goes, or the conversation is free again.
+  private settleIn(conversationId: string): void {
+    const left = (this.convRuns.get(conversationId) ?? 1) - 1
+    if (left > 0) return void this.convRuns.set(conversationId, left)
+    this.convRuns.delete(conversationId)
+    const waiting = this.convWaiting.get(conversationId)
+    const next = waiting?.shift()
+    if (!waiting?.length) this.convWaiting.delete(conversationId)
+    if (next) this.startIn(conversationId, next.job, next.queued)
+  }
+
+  // Stopping what runs in one conversation, and only there: what it wrote stays, as the stop button leaves it.
+  private interruptIn(conversationId: string): void {
+    for (const c of this.controllers.values()) {
+      if (c.msg.conversationId !== conversationId || c.reason) continue
+      c.reason = 'stopped'
+      c.ctl.abort()
+    }
+  }
+
+  // A steer goes to the reply running in that place (the same thread of that conversation, never
+  // another one's: what I write in the channel isn't meant for a reply inside a thread), which reads
+  // it at its next tool call. It goes into that reply's chain right here, where the person gave it, so
+  // what they steered is part of what the reply is doing — not a prompt, and not a message of theirs.
+  private steerIn(conversationId: string, threadId: string | undefined, note: Omit<SteerNote, 'id'>): boolean {
+    let taken = false
+    for (const c of this.controllers.values()) {
+      if (c.msg.conversationId !== conversationId || c.reason || (c.msg.threadId ?? undefined) !== (threadId ?? undefined)) continue
+      const id = randomUUID()
+      ;(c.steer ??= []).push({ ...note, id })
+      c.flush?.() // the words streamed so far go first: this full message carries them too
+      const steps = [...(c.msg.run?.steps ?? [])]
+      // Before the step that's running now (the thinking one, or the call in flight): it came after them.
+      const last = steps[steps.length - 1]
+      steps.splice(last?.status === 'running' ? steps.length - 1 : steps.length, 0, {
+        id,
+        kind: 'steer',
+        label: L('Orientação', 'Steer'), // their words are the row's content; who gave it is obvious here
+        input: note.text,
+        status: 'running'
+      })
+      this.update(c.msg, { run: { ...c.msg.run!, steps } })
+      taken = true
+    }
+    return taken
+  }
+
+  // A steer's row changes state where the reply's work does: taken with a call (done), or left unread
+  // when the reply ends before one (error, and it says so). The row was placed when it was given.
+  private markSteer(reply: Message, id: string, status: StepStatus, error?: string): void {
+    const steps = reply.run?.steps
+    if (!steps?.some((s) => s.id === id)) return
+    this.update(reply, { run: { ...reply.run!, steps: steps.map((s) => (s.id === id ? { ...s, status, ...(error ? { error } : {}) } : s)) } })
+  }
+
+  // A steer the reply ended without taking (it made no tool call after it): the agent never read what
+  // the person wrote. Its row stays in the chain, marked as not read: a steer is the reply's, and its
+  // place is the chain it was given to, not a prompt of its own.
+  private steerLeftovers(control: Control, reply: Message): void {
+    for (const note of control.steer?.splice(0) ?? [])
+      this.markSteer(reply, note.id, 'error', L('A resposta terminou antes de ler isto', 'The reply ended before it read this'))
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -765,7 +910,7 @@ export class Runner {
   }
 
   private isIdle(): boolean {
-    return this.active === 0 && this.queue.length === 0 && this.routing === 0
+    return this.active === 0 && this.queue.length === 0 && this.routing === 0 && this.convWaiting.size === 0
   }
 
   private checkIdle(): void {
@@ -795,7 +940,9 @@ export class Runner {
   }
 
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
-  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string): Promise<void> {
+  // `parallel`: the prompt was sent beside the reply running there, so the reply the router picks goes
+  // beside it too (see `routed`), instead of waiting for that reply to end.
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, parallel = false): Promise<void> {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
     this.routing++
@@ -823,7 +970,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, parallel)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -837,7 +984,7 @@ export class Runner {
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -848,7 +995,9 @@ export class Runner {
 
   // Each reply answers the message that was routed (`trigger`), not whatever came in while it
   // waited. One already waiting for the same agent there takes the newer message instead: one reply.
-  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string): void {
+  // `parallel`: it goes beside whatever is running there, two at once, as the person asked of their
+  // own prompt. Otherwise it waits for that reply to end (a routed reply reads what it said).
+  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string, parallel = false): void {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
@@ -873,7 +1022,7 @@ export class Runner {
         }
       }
       this.waiting.set(key, slot)
-      if (!this.followups.busy(key) && !this.parked.has(key)) slot.start()
+      if (parallel || (!this.followups.busy(key) && !this.parked.has(key))) slot.start()
     }
   }
 
@@ -893,11 +1042,16 @@ export class Runner {
   // A reply not routed nor handed off (those wait in routed and handOff): one at a time per agent and
   // thread (replyKey), wherever it comes from. While the agent replies there it waits, off the queue,
   // and starts when that reply ends; a person's newer message there takes over theirs (`merge`).
+  // `parallel`: the person asked for this one beside that reply, not after it, so it goes now (two at
+  // once in the same place, which #358 otherwise rules out). The two share a key, so the second one
+  // gets no kept session (`sessions.begin` turns it down) and reads the whole conversation: a session
+  // can only go on in one reply, and the one already there keeps it.
   // Resolves with the reply, or undefined when it failed or was dropped.
-  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean } = {}): Promise<Message | undefined> {
+  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean; parallel?: boolean } = {}): Promise<Message | undefined> {
     const key = replyKey(agent.id, conv.id, opts.existing ? opts.existing.threadId : opts.threadId)
     return new Promise((resolve) => {
       const p: Parked = { agent, conv, opts, urgent: !!how.urgent, merge: !!how.merge, done: [resolve] }
+      if (how.parallel) return this.launch(key, p)
       const line = this.parked.get(key)
       if (!line && !this.followups.busy(key)) return this.launch(key, p)
       const same = p.merge ? line?.find((x) => x.merge) : undefined
@@ -965,7 +1119,17 @@ export class Runner {
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
+  // A reply runs here from now on: a prompt marked as queued waits for these, whatever started it.
   private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+    this.convRuns.set(conv.id, (this.convRuns.get(conv.id) ?? 0) + 1)
+    try {
+      return await this.executeReply(agent, conv, opts)
+    } finally {
+      this.settleIn(conv.id)
+    }
+  }
+
+  private async executeReply(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
@@ -1030,7 +1194,9 @@ export class Runner {
     }
     const closeThinking = (status: 'done' | 'error', label: string): Step[] => {
       const note = label === THOUGHT() ? said() : undefined
-      return msg.run!.steps.map((s) => (s.status === 'running' ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
+      // A steer's row is the person's, not the reply's thinking: it keeps its own label and only the
+      // reply's work closes it (runs.ts, `steerIn`).
+      return msg.run!.steps.map((s) => (s.status === 'running' && s.kind !== 'steer' ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
@@ -1225,6 +1391,7 @@ export class Runner {
       emit({ type: 'delta', id: msg.id, text: pending })
       pending = ''
     }
+    control.flush = flush // a steer's row is added to this reply from outside it (see `steerIn`)
 
     // Tools for this turn, served by the gateway under a URL only this turn knows:
     // ask_user plus the connector tools this agent's grants allow.
@@ -2159,7 +2326,20 @@ ${note}`,
         acted = true
         sign()
         try {
-          const r = await runTool(name, args)
+          // A steer: what the person wrote while this reply ran, handed over here, between two calls.
+          const withSteers = (r: CallToolResult): CallToolResult => {
+            const handed = control.steer?.splice(0) ?? []
+            if (!handed.length) return r
+            const said = handed.map(
+              (n) => `${L(`${n.who} escreveu isto enquanto você trabalhava:`, `${n.who} wrote this while you were working:`)}\n\n${n.text}`
+            )
+            // The row the person's steer already has in this chain turns done here: this is the call it
+            // was handed over with, so what they steered is part of what this reply did.
+            flush()
+            for (const n of handed) this.markSteer(msg, n.id, 'done')
+            return { ...r, content: [...r.content, { type: 'text', text: said.join('\n\n') }] }
+          }
+          const r = withSteers(await runTool(name, args))
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2350,6 +2530,7 @@ ${note}`,
       if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown, live })
       if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, live, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)
+      this.steerLeftovers(control, msg)
     }
 
     const endedAt = Date.now()
