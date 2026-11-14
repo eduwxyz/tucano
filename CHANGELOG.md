@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **A reply the app cut offers Continue, before Try again.** A reply killed by a restart, a crash or a stop, having already read files, written, edited or run commands, offered one way back: **Try again**, which starts the whole thing over. **Continue** now comes first: it opens a new reply in the same thread carrying a proceed message with what it was asked, how it was cut, every step it took (what it read, what it wrote, what it ran, what failed) and the instruction to go on from where it stopped without redoing what is already done. **Try again** stays a full start from the beginning. A reply killed before any tool call came back has nothing to go on with and keeps **Try again** alone. Once it is continued, the killed reply stops offering either button: the session carries on in the new reply under it. What counts as work and what counts as cut is one reading in `src/shared/run-progress.ts`, which both the core and the window use, so the button the person sees is the one the core will take. (#390)
+
 ### Fixed
 
 - **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
@@ -43,7 +47,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
-
 
 ## [0.2.28] - 2026-11-12
 
