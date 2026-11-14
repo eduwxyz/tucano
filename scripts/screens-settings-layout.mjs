@@ -101,6 +101,8 @@ try {
       await page.evaluate(() => document.fonts.ready);
       const links = await page.locator('.settings-sections a').evaluateAll(nodes => nodes.map(node => ({ id: node.getAttribute('href').slice(1), label: node.textContent })));
       assert.equal(links.length, await page.locator('[data-settings-section]').count());
+      const flat = await page.locator('.settings-content .card').evaluateAll(nodes => nodes.every(node => { const style = getComputedStyle(node); return style.borderRadius === '0px' && style.boxShadow === 'none' }));
+      assert.ok(flat, 'Settings groups must remain flat');
       const labels = await measureCopy(page, [{ selector: '.settings-pages button', maxLines: 1 }, { selector: '.settings-sections a', maxLines: 1 }]);
       assert.ok(labels.passed, JSON.stringify(labels.failures));
       for (let index = 0; index < links.length; index++) {
@@ -143,6 +145,66 @@ try {
       }
     }
   }
+  await page.setViewportSize({ width: 900, height: 900 });
+  report.dependentStates = [];
+  await page.locator('#settings-tab-models').click();
+  const routing = page.locator('#settings-models-routing');
+  if (await routing.count()) {
+    await routing.getByRole('switch').first().click();
+    await routing.locator('.routing').waitFor();
+    const copy = await measureCopy(page, [{ selector: '#settings-models-routing .hint:visible, #settings-models-routing .card__head p:visible' }]);
+    assert.ok(copy.passed, JSON.stringify(copy.failures));
+    report.dependentStates.push({ name: 'Routing enabled', ...copy });
+    await routing.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(output, '900-routing-enabled.png') });
+    report.captures.push('900-routing-enabled.png');
+    await routing.getByRole('switch').first().click();
+  }
+  const suggestions = page.locator('#settings-models-classifiers .key-row').filter({ hasText: 'Suggest answers' });
+  if (await suggestions.count()) {
+    await suggestions.getByRole('switch').click();
+    const copy = await measureCopy(page, [{ selector: '#settings-models-classifiers .hint:visible, #settings-models-classifiers .key-row p.muted.small:visible' }]);
+    assert.ok(copy.passed, JSON.stringify(copy.failures));
+    report.dependentStates.push({ name: 'Suggestions enabled without a key', ...copy });
+    await suggestions.getByRole('switch').click();
+  }
+  await page.locator('#settings-tab-knowledge').click();
+  const resolver = page.locator('#settings-knowledge-wiki-resolver');
+  if (await resolver.count()) {
+    await resolver.getByRole('switch').click();
+    const who = resolver.getByRole('combobox', { name: 'Finding resolver' });
+    await who.click();
+    await page.getByRole('option', { name: 'Lia', exact: false }).click();
+    assert.equal(await resolver.getByText('Resolver model', { exact: true }).count(), 0);
+    const copy = await measureCopy(page, [{ selector: '#settings-knowledge-wiki-resolver small:visible' }]);
+    assert.ok(copy.passed, JSON.stringify(copy.failures));
+    report.dependentStates.push({ name: 'Agent resolver', ...copy });
+    await resolver.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(output, '900-agent-resolver.png') });
+    report.captures.push('900-agent-resolver.png');
+    await who.click();
+    await page.getByRole('option', { name: 'Built-in resolver', exact: true }).click();
+    await resolver.getByText('Resolver model', { exact: true }).waitFor();
+    await resolver.getByRole('switch').click();
+  }
+  // Settings reuses the contextual Wiki import and schema flows.
+  await page.locator('#settings-tab-knowledge').click();
+  await page.locator('.settings-sections a[href="#settings-knowledge-wiki-import"]').click();
+  await page.waitForFunction(() => !document.querySelector('[data-settings-scrolling]'));
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.locator('#settings-knowledge-wiki-import').getByRole('button', { name: 'Import…', exact: true }).click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles([]);
+  await page.locator('.wk-stage').waitFor();
+  report.importFlow = true;
+  await page.locator('.sidebar .nav-item').filter({ hasText: 'Settings' }).first().click();
+  await page.locator('#settings-tab-knowledge').click();
+  await page.locator('.settings-sections a[href="#settings-knowledge-wiki-rules"]').click();
+  await page.waitForFunction(() => !document.querySelector('[data-settings-scrolling]'));
+  await page.locator('#settings-knowledge-wiki-rules button').click();
+  await page.getByRole('heading', { name: 'Wiki schema', exact: true }).first().waitFor();
+  report.schemaFlow = true;
+  await page.locator('.sidebar .nav-item').filter({ hasText: 'Settings' }).first().click();
   // Reduced motion follows the same section geometry without scheduling a scroll transition.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.locator('#settings-tab-app').click();

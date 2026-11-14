@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Settings grouped by task.** App, Workspace, Agents, Models, Knowledge and Connections organize the existing controls. Section links stay visible while scrolling, support keyboard navigation and reduced motion, and bring Memory and Wiki configuration together. Sections use plain headings and dividers.
+
 ### Fixed
 
 - **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences. (#409)
