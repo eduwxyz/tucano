@@ -190,8 +190,10 @@ describe('work handed down the tree', () => {
     await until(() => by('orion', 'dm').length === 2)
     const told = codex.turns.at(-1)!.prompt
     expect(told).toMatch(/Clara, #clientes: terminou/)
-    expect(told).toMatch(/Ainda em andamento: \[\w{8}\] Nico, #engenharia \(parado numa aprovação que espera Edu\)/)
-    expect(told).toContain('e o que espera uma aprovação dele')
+    // Held on my yes, and what it wrote before stopping is in the asker's own thread by now (see the
+    // test below for the text itself: here Nico's reply was still empty when it stopped).
+    expect(told).toMatch(/Nico, #engenharia: parou numa aprovação que espera Edu/)
+    expect(told).toContain('Não refaça o que ele fez')
     // When Nico's work does end, Orion hears of it, alone this time.
     await r.idle()
     expect(by('orion', 'dm')).toHaveLength(3)
@@ -291,8 +293,9 @@ describe('work handed down the tree', () => {
     // No person was asked.
     expect(db.openQuestions()).toEqual([])
     expect(db.answeredQuestions(0)).toEqual([])
-    // In the DM: the question showed up in Clara's name, then her answer.
-    expect(by('clara', 'dm').map((m) => m.text.split(':')[0])).toEqual(['Uma pergunta sobre o pedido em #clientes', 'Sobre o pedido em #clientes'])
+    // In the DM: what Clara wrote before asking, her question, then her answer.
+    expect(by('clara', 'dm').map((m) => m.text.split(':')[0])).toEqual(['Até agora, sobre o pedido em #clientes', 'Uma pergunta sobre o pedido em #clientes', 'Sobre o pedido em #clientes'])
+    expect(by('clara', 'dm')[0]?.text).toContain('Te mandei uma pergunta')
     expect(by('orion', 'dm').map((m) => m.text)).toEqual([expect.stringContaining('Pedido ['), 'Respondi a dúvida dele.', 'Pronto: o time terminou o que pedi.'])
     expect(db.delegationAt(thread[0]!.id)).toMatchObject({ state: 'done' })
     expect(db.delegationAt(thread[0]!.id)?.asking).toBeUndefined()
@@ -395,5 +398,60 @@ describe('work handed down the tree', () => {
     await r.idle()
     expect(db.delegationAt(root!.id)).toMatchObject({ state: 'failed', told: true })
     expect(by('orion', 'dm').at(-1)?.text).toBe('Não deu certo: o pedido não terminou.')
+  })
+
+  it('brings what it wrote so far back when it stops at an approval, before my yes', async () => {
+    const r = runner()
+    await r.send('dm', 'delegue a clara: responda o Fulano')
+    await r.idle()
+    const [root] = by('orion', 'clientes')
+    const d = db.delegationAt(root!.id)!
+    // As if the app had been closed right as Clara stopped at an approval: the request open again, her
+    // reply waiting for my yes, and nobody having heard of it.
+    db.saveDelegation({ ...d, state: 'open', told: false, result: undefined, endedAt: undefined })
+    const reply = by('clara', 'clientes')[0]!
+    db.saveMessage({ ...reply, run: { ...reply.run!, status: 'waiting_approval' } })
+    r.sweepDelegations()
+    await r.idle()
+    // Her answer, as far as it goes, is in Orion's thread: not only the news that it waits on me.
+    expect(by('clara', 'dm').map((m) => m.text.split(':')[0]).at(-1)).toBe('Até agora, sobre o pedido em #clientes')
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: parou numa aprovação que espera Edu/)
+    expect(codex.turns.at(-1)!.prompt).toContain('Não refaça o que ele fez')
+    expect(db.delegationAt(root!.id)).toMatchObject({ state: 'open', parkedTold: true })
+  })
+
+  // A request whose thread has nothing after it at all: the one asked never wrote a line, no error
+  // either (the run never got going). Nobody used to hear of it, ever.
+  const askedButSilent = (extra: { nudges?: number; createdAt?: number } = {}): string => {
+    const root = { id: 'raiz-muda', conversationId: 'clientes', author: { kind: 'agent' as const, id: 'orion' }, text: '@clara, um pedido:\n\nresponda o Fulano', at: Date.now() }
+    db.saveMessage(root)
+    db.saveDelegation({ id: 'pedido-mudo', from: 'orion', to: 'clara', conversationId: 'clientes', rootId: root.id, originConversationId: 'dm', originMessageId: 'mudo-pedido', requestedBy: db.ownerId(), text: 'responda o Fulano', state: 'open', createdAt: extra.createdAt ?? Date.now(), ...(extra.nudges ? { nudges: extra.nudges } : {}) })
+    return root.id
+  }
+
+  it('knocks once on a request whose thread has nothing, and what comes of it goes back', async () => {
+    const r = runner()
+    const rootId = askedButSilent()
+    // A minute in: too soon to knock.
+    r.sweepDelegations()
+    expect(db.delegation('pedido-mudo')?.nudges).toBeUndefined()
+    r.sweepDelegations(Date.now() + 5 * 60_000)
+    await r.idle()
+    expect(db.delegation('pedido-mudo')?.nudges).toBe(1)
+    // This time it answers, and the answer comes back to where it was asked.
+    expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(true)
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'done', told: true })
+    expect(by('clara', 'dm').at(-1)?.text).toMatch(/^Sobre o pedido em #clientes:/)
+  })
+
+  it('gives up on a request nobody answered, and whoever asked hears it', async () => {
+    const r = runner()
+    const rootId = askedButSilent({ nudges: 1, createdAt: Date.now() - 11 * 60_000 })
+    r.sweepDelegations()
+    await r.idle()
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'failed', told: true })
+    expect(db.messages().some((m) => m.conversationId === 'dm' && m.text.startsWith('O pedido a **Clara** em #clientes não terminou'))).toBe(true)
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: não terminou/)
+    expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(false)
   })
 })

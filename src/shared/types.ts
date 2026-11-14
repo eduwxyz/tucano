@@ -229,6 +229,8 @@ export interface Delegation {
   state: 'open' | 'done' | 'failed' | 'cancelled'
   asking?: string // the message whose question waits for whoever asked
   askingTold?: boolean // whoever asked has heard of that question
+  parkedTold?: boolean // whoever asked has heard it's held on an approval of theirs
+  nudges?: number // how many times the one asked was knocked on after leaving no reply at all
   result?: string // the message it ended with
   told?: boolean // whoever asked has heard how it ended
   lateTold?: boolean // whoever asked has heard it's past its deadline

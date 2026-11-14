@@ -1003,12 +1003,14 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
   )
 }
 
-// What came back from handed work, where it was asked: a line saying who answered (or asks), with the
-// whole of it one click away and a way to its thread. Whoever asked says what came of it right after.
+// What came back from handed work, where it was asked: a line saying who answered (or asks), with a way
+// to its thread, and whoever asked says what came of it right after. An answer reads folded, one click
+// away; a question opens by itself — it is the one thing here waiting on me, and folding it would hide
+// the only text that needs an answer.
 function ReturnedLine({ message, at, agent, text, components }: { message: Message; at: DelegationRef; agent: Agent; text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
-  const [open, setOpen] = useState(false)
-  const seen = useStore((s) => s.conversations.some((c) => c.id === at.conversationId))
   const answer = at.back === 'result'
+  const [open, setOpen] = useState(!answer)
+  const seen = useStore((s) => s.conversations.some((c) => c.id === at.conversationId))
   const cut = text.indexOf(':\n\n') // after "Sobre o pedido em #canal:"
   const body = cut < 0 ? text : text.slice(cut + 3)
   return (

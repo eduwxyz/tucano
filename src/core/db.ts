@@ -519,6 +519,8 @@ export const MIGRATIONS = [
     state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'done', 'failed', 'cancelled')),
     asking TEXT,
     asking_told INTEGER NOT NULL DEFAULT 0,
+    parked_told INTEGER NOT NULL DEFAULT 0,
+    nudges INTEGER NOT NULL DEFAULT 0,
     result TEXT,
     told INTEGER NOT NULL DEFAULT 0,
     late_told INTEGER NOT NULL DEFAULT 0,
@@ -544,7 +546,11 @@ const COLUMNS: [string, string, string][] = [
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // A request that answered as far as it goes before stopping on an approval of mine, and how often
+  // the one asked was knocked on after leaving no reply at all (src/core/delegations.ts).
+  ['delegations', 'parked_told', 'INTEGER NOT NULL DEFAULT 0'],
+  ['delegations', 'nudges', 'INTEGER NOT NULL DEFAULT 0']
 ]
 
 
@@ -2051,6 +2057,8 @@ export class Db {
       state: str(r['state']) as Delegation['state'],
       ...(r['asking'] ? { asking: str(r['asking']) } : {}),
       ...(r['asking_told'] === 1 ? { askingTold: true } : {}),
+      ...(r['parked_told'] === 1 ? { parkedTold: true } : {}),
+      ...(Number(r['nudges'] ?? 0) ? { nudges: Number(r['nudges']) } : {}),
       ...(r['result'] ? { result: str(r['result']) } : {}),
       ...(r['told'] === 1 ? { told: true } : {}),
       ...(r['late_told'] === 1 ? { lateTold: true } : {}),
@@ -2062,11 +2070,11 @@ export class Db {
   saveDelegation(d: Delegation): void {
     this.db
       .prepare(
-        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, result, told, late_told, created_at, ended_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, result = excluded.result, told = excluded.told, late_told = excluded.late_told, ended_at = excluded.ended_at`
+        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, created_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, ended_at = excluded.ended_at`
       )
-      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.createdAt, d.endedAt ?? null)
+      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.createdAt, d.endedAt ?? null)
   }
 
   delegation(id: string): Delegation | undefined {
