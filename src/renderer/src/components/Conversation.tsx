@@ -55,6 +55,8 @@ import { canEditChannel,
   typing,
   setTab,
   stopRun,
+  pauseRun,
+  resumeRun,
   summarizeNow,
   summarizeThreadNow,
   useStore,
@@ -557,7 +559,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             </div>
           </Details>
         )}
-        {message.run?.status === 'paused' && (
+        {/* The ceiling pause, not a reply the person put on hold: a held reply keeps its own row, and
+            nothing of it reads as ended while it waits. */}
+        {message.run?.status === 'paused' && !message.run.held && (
           <>
             <div className="note">
               {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
@@ -1290,6 +1294,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
 
   return (
+    <>
     <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
       <button className="steps__toggle" onClick={() => setOpen(!open)}>
         {working ? (
@@ -1342,6 +1347,41 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
           ))}
         </ol>
       )}
+    </div>
+    {(working || run.status === 'paused') && <HoldPill message={message} paused={run.status === 'paused'} held={!!run.held} />}
+    </>
+  )
+}
+
+// The pause, under the chain: the reply stops before its next tool call or turn and keeps everything
+// it has (its session, its steps, the text so far), then goes on when it is let go. A limit that
+// resets in an hour is waited out here instead of moving to the reserve model (src/core/hold.ts).
+function HoldPill({ message, paused, held }: { message: Message; paused: boolean; held: boolean }): ReactNode {
+  if (paused) {
+    return (
+      <div className="steps__hold">
+        <button
+          className="steps__hold-pill steps__hold-pill--go"
+          onClick={() => resumeRun(message.id)}
+          title={L('Seguir agora, na mesma sessão e no mesmo modelo', 'Go on now, in the same session and on the same model')}
+          aria-label={L('Retomar a resposta', 'Let the reply go on')}
+        >
+          <Icon name="play" size={11} /> {L('Retomar', 'Resume')}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="steps__hold">
+      <button
+        className="steps__hold-pill"
+        disabled={held}
+        onClick={() => pauseRun(message.id)}
+        title={L('Parar antes do próximo passo e esperar: a sessão e o que ele já fez ficam', 'Stop before the next step and wait: the session and what it has done stay')}
+        aria-label={L('Pausar a resposta', 'Pause the reply')}
+      >
+        <Icon name="pause" size={11} /> {held ? L('Pausando…', 'Pausing…') : L('Pausar', 'Pause')}
+      </button>
     </div>
   )
 }

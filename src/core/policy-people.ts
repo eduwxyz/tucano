@@ -88,6 +88,8 @@ export const NEEDS: Record<Method, Need> = {
   olderMessages: 'anyone',
   threadMessages: 'anyone',
   stopRun: 'anyone',
+  pauseRun: 'anyone',
+  resumeRun: 'anyone',
   retryRun: 'anyone',
   continueRun: 'anyone',
   createChannel: 'anyone',

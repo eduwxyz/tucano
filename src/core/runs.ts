@@ -18,6 +18,7 @@ import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from '.
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
+import { Hold } from './hold'
 import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
@@ -60,7 +61,7 @@ const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones 
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
 const DELTA_FLUSH_MS = 40
-const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
+const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached', 'paused']
 // Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
 // or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
 // can't here (no file tools), so it calls again and again and answers without the data.
@@ -327,7 +328,7 @@ export interface RoutineEvent {
 type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'; hold: Hold }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
 // it (what was already said, its own earlier one too), and its message last.
@@ -647,6 +648,34 @@ export class Runner {
     if (!c) return
     c.reason = 'stopped'
     c.ctl.abort()
+  }
+
+  // A reply the person puts on hold keeps everything it has (its session, its steps, the text so far)
+  // and stops at the boundary between turns, where nothing of the model's is in flight. The next work
+  // starts when they let it go, on the same model and the same session: a quota window passing, say,
+  // without the reserve model taking the reply over. Inside a turn there is nothing to hold.
+  pause(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c || !c.msg.run || c.reason) return
+    c.hold.request()
+    this.update(c.msg, { run: { ...c.msg.run, held: true } })
+  }
+
+  resume(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c) return
+    c.hold.release()
+    if (c.msg.run?.held) this.update(c.msg, { run: { ...c.msg.run, held: undefined } })
+  }
+
+  // Where a held reply waits, before a tool call and before the next turn. Stopping it is the way out
+  // of a hold nobody lets go of: the abort wakes it, and the run goes on to be stopped like any other.
+  private async heldBetweenTurns(c: Control): Promise<void> {
+    if (!c.hold.held) return
+    if (c.msg.run && c.msg.run.status !== 'paused') this.update(c.msg, { run: { ...c.msg.run, status: 'paused' } })
+    await c.hold.wait(c.ctl.signal)
+    if (c.reason) return
+    if (c.msg.run && c.msg.run.status === 'paused') this.update(c.msg, { run: { ...c.msg.run, status: 'working' } })
   }
 
   // Runs the same agent again in place of a reply that didn't finish.
@@ -1172,7 +1201,7 @@ export class Runner {
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
 
-    const control: Control = { ctl: new AbortController(), msg }
+    const control: Control = { ctl: new AbortController(), msg, hold: new Hold() }
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -2132,6 +2161,10 @@ ${note}`,
     const tools: Session = {
       tools: toolDefs,
       call: async (name, args) => {
+        // A held reply serves no further call: the model's next step waits with the session, so a limit
+        // that resets later is waited out here instead of on another model.
+        await this.heldBetweenTurns(control)
+        if (control.reason) return textResult(L('Parei aqui.', 'Stopped here.'), true)
         if (overBudget) {
           if (++refusedOver > OVER_CALLS_GRACE) halt('budget')
           return textResult(
@@ -2272,6 +2305,9 @@ ${note}`,
     let input = plan?.resume ? since(plan) : whole
     try {
       for (;;) {
+        // A reply the person put on hold waits here, between the turn that just ended and the next one.
+        await this.heldBetweenTurns(control)
+        if (control.reason) break
         try {
           const events = engines[engineId].run({
             model: modelName,
