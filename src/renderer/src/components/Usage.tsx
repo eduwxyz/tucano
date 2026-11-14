@@ -1,6 +1,7 @@
 // Uso e limites: this month at a glance (by day, by agent, by model), the
 // Claude and Codex subscriptions' windows, and where each agent will end the month.
 import { L, locale } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, messageById, modelInfo, navigate, receipts, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
 import { Sheet } from './Pages'
@@ -19,12 +20,12 @@ const until = (at: number): string => {
   const m = total % 60
   if (h < 24) return L(`em ${h ? `${h} h ` : ''}${m} min`, `in ${h ? `${h} h ` : ''}${m} min`)
   const d = new Date(at)
-  return `${d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')}, ${d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}`
+  return `${d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')}, ${d.toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))}`
 }
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 const shortTime = (at: number): string => {
   const d = new Date(at)
-  const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const hm = d.toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
   return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })} ${hm}`
 }
 
@@ -239,7 +240,7 @@ function ApiCost({ usd: v, claude }: { usd: number; claude: EngineStatus }): Rea
 function Quota(): ReactNode {
   const q = useStore((s) => s.settings.quota)
   if (!q || (!q.fiveHour && !q.sevenDay)) return null
-  const at = new Date(q.at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const at = new Date(q.at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
   return (
     <section className="read-group">
       <h2>

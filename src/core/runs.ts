@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import { monthlyCeiling } from '../shared/limits'
+
+import { timeOpts } from '../shared/clock'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -733,7 +735,7 @@ export class Runner {
     const { event } = when
     const person = r.scope === 'channel' ? undefined : r.owner && r.owner !== this.deps.db.ownerId() ? this.deps.db.person(r.owner) : undefined
     const me = r.scope === 'channel' ? L('o time', 'the team') : (person?.name ?? owner)
-    const hm = new Date(when.scheduledAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+    const hm = new Date(when.scheduledAt).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
     return [
       event
         ? L(

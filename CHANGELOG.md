@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **The clock is yours to pick: 24 hours, or 12 with am and pm.** Every time the app drew was 24-hour, except message times in English, which came out as `3:05 PM` because the shape was picked from the language, so the same conversation showed two clocks in two languages and the agent's own text disagreed with both. Settings › Yours gains **Clock**, and one helper (`src/shared/clock.ts`) now formats every time the app draws and every time it writes into an agent's context: message times, routine schedules, the panel, usage charts, and the dates a reply or a routine carries into its prompt. Untouched, it reads exactly as it did before. (#393)
+
 ### Fixed
 
 - **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.

@@ -1,6 +1,7 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
 import { L, lang, locale } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   agentById,
@@ -87,7 +88,7 @@ export function describeRoutine(r: Pick<Routine, 'schedule' | 'trigger'>, connec
 // "hoje 9:00", "amanhã 9:00", "seg, 20/10 9:00"
 export function when(at: number): string {
   const d = new Date(at)
-  const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const hm = d.toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
   const day = (n: number): string => new Date(Date.now() + n * 86_400_000).toDateString()
   if (d.toDateString() === day(0)) return L(`hoje ${hm}`, `today ${hm}`)
   if (d.toDateString() === day(1)) return L(`amanhã ${hm}`, `tomorrow ${hm}`)
@@ -314,7 +315,7 @@ const dayAt = (week: number, i: number): number => {
   d.setDate(d.getDate() + i)
   return d.getTime()
 }
-const hm = (t: number): string => new Date(t).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+const hm = (t: number): string => new Date(t).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
 
 // What actually ran: each request a routine posted, with the agent's reply after it. Worked out per
 // conversation, once per change of it, so a reply elsewhere doesn't redo the calendar.

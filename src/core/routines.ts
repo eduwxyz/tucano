@@ -4,6 +4,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
+import { timeOpts } from '../shared/clock'
 import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { dateAt, describeSchedule, isoDay, MAX_AGENT_ROUTINES, nextRun, routineCap, validDate, validTime, type Schedule, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
@@ -96,7 +97,7 @@ export function dateArg(v: string): { date: string; time?: string } | null {
 
 // "sáb, 18/10, 13:15"
 export const whenText = (at: number): string =>
-  new Date(at).toLocaleString(locale(), { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace('.', '')
+  new Date(at).toLocaleString(locale(), timeOpts({ weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })).replace('.', '')
 
 type ToolOutcome = { routine?: Routine; reply: string; error?: boolean }
 
