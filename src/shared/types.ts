@@ -169,6 +169,7 @@ export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done
 export interface Run {
   status: RunStatus
   steps: Step[]
+  held?: boolean // the person put this reply on hold: it waits where nothing of the model's is in flight
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string

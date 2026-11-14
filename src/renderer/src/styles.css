@@ -1422,6 +1422,38 @@ h3 {
 .steps__failed {
   color: var(--danger);
 }
+/* The pause, under a chain that is at work: the reply stops before its next step and waits there, so
+   a limit that has to pass costs nothing (issue #455). */
+.steps__hold {
+  display: flex;
+  justify-content: flex-start;
+  margin: 2px 0 4px 3px;
+  padding-left: 14px;
+}
+.steps__hold-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  transition: var(--transition-ui);
+}
+.steps__hold-pill:hover {
+  color: var(--accent);
+}
+.steps__hold-pill[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+/* A paused reply: letting it go on is the one thing to do there. */
+.steps__hold-pill--go {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .steps__stop {
   margin-left: 2px;
 }
