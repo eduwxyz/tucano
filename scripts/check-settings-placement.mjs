@@ -1,0 +1,10 @@
+import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { execFileSync } from 'node:child_process';
+import { inspectSettingsPlacement } from './lib/settings-placement.mjs';
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { json: { type: 'boolean' } } });
+const root = resolve(positionals[0] || '.');
+const report = inspectSettingsPlacement(root);
+const source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+console.log(JSON.stringify({ source, ...report, ...(values.json ? {} : { writes: undefined }) }, null, 2));
+if (!report.passed) process.exitCode = 1;

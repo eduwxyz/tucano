@@ -11875,3 +11875,33 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+/* Settings share one declared hierarchy; section links navigate the current document. */
+.settings-layout { min-width: 0; }
+.settings-navigation { position: sticky; top: 0; z-index: 4; padding: 6px 0 10px; margin: -6px 0 20px; background: var(--bg); }
+.settings-pages, .settings-sections { position: relative; display: flex; align-items: center; overflow-x: auto; min-width: 0; scrollbar-width: thin; }
+.settings-pages { border-bottom: 1px solid var(--border); gap: 2px; }
+.settings-pages > button { flex: 0 0 auto; padding: 10px 13px; border-bottom: 2px solid transparent; white-space: nowrap; color: var(--text-2); font-size: 13px; }
+.settings-pages > button[aria-selected="true"] { color: var(--text); border-color: var(--accent); font-weight: 600; }
+.settings-sections { gap: 4px; padding-top: 9px; }
+.settings-sections > a { flex: 0 0 auto; padding: 6px 10px; border-radius: 7px; white-space: nowrap; text-decoration: none; color: var(--text-2); font-size: 12px; }
+.settings-sections > a[aria-current="location"] { color: var(--text); background: var(--active); font-weight: 600; }
+.settings-pages > button:hover, .settings-sections > a:hover { color: var(--text); background: var(--hover); }
+.settings-pages > button:focus-visible, .settings-sections > a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-panel { min-width: 0; container-type: inline-size; }
+.settings-content { gap: 20px; max-width: none; }
+.settings-content > section { min-width: 0; outline: none; }
+.settings-content > section:not([data-settings-section="models-agents"]):not([data-settings-section="models-routing"]) { max-width: 720px; width: 100%; }
+.settings-content > section[data-settings-section="models-routing"] > .card:first-child { max-width: 720px; }
+.settings-followup { margin-top: 14px; }
+.settings-content > section:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: var(--radius-lg); }
+.settings-content > section:last-child { min-height: var(--settings-last-height, 240px); }
+.settings-content > section > .card + .card { margin-top: 14px; }
+@container (max-width: 520px) {
+  .settings-content .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .settings-content .key-row { flex-wrap: wrap; }
+  .settings-content .key-row > .grow { flex-basis: calc(100% - 34px); }
+  .settings-content .key-row > .select, .settings-content .key-row > .segmented { max-width: 100%; }
+  .settings-content .wk-settings--inline .wk-setting { flex-direction: column; align-items: stretch; }
+  .settings-content .wk-settings--inline .wk-setting > .wk-row > .select { width: 100%; }
+}
+

@@ -4,7 +4,7 @@
 // the sources, what needs care, and the pages by kind) and, beside it, the map of the pages,
 // a page with what links to it, the sources, the review; the editor takes the whole screen.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -157,11 +157,40 @@ export function WikiHeritage({ held, notice }: { held: { title: string; at: numb
   )
 }
 
-function useWikiData(): WikiData | null {
+function useWikiResource(enabled = true) {
   const rev = useStore((s) => s.wikiRev)
   const [data, setData] = useState<WikiData | null>(null)
-  useEffect(() => void call('wiki').then((d) => setData(d as WikiData)), [rev])
-  return data
+  const [error, setError] = useState('')
+  const [attempt, retry] = useState(0)
+  useEffect(() => {
+    if (!enabled) return
+    let live = true
+    setError('')
+    void call('wiki').then(value => { if (live) setData(value as WikiData) }, (reason: Error) => { if (live) setError(reason.message) })
+    return () => { live = false }
+  }, [enabled, rev, attempt])
+  return { data, error, retry: () => retry(n => n + 1) }
+}
+
+function useWikiData(): WikiData | null { return useWikiResource().data }
+
+const WikiSettingsContext = createContext<ReturnType<typeof useWikiResource> | null>(null)
+
+export function WikiSettingsProvider({ active, children }: { active: boolean; children: ReactNode }): ReactNode {
+  const resource = useWikiResource(active)
+  return <WikiSettingsContext.Provider value={resource}>{children}</WikiSettingsContext.Provider>
+}
+
+export function WikiSettingsSection({ part }: { part: WikiSettingsPart }): ReactNode {
+  const resource = useContext(WikiSettingsContext)
+  if (!resource) throw new Error('Wiki settings require their shared provider.')
+  if (part === 'storage' && !resource.data) return (
+    <section className="card">
+      <header className="card__head"><h2>{wikiSettingsTitle(part)}</h2></header>
+      {resource.error ? <><p role="alert" className="field__error">{resource.error}</p><button className="btn btn--sm" onClick={resource.retry}>{L('Tentar novamente', 'Try again')}</button></> : <p role="status" className="muted small">{L('Carregando pasta da wiki…', 'Loading Wiki folder…')}</p>}
+    </section>
+  )
+  return <WikiSettingsContent data={resource.data} part={part} onClose={() => {}} onImport={() => navigate({ kind: 'wiki', import: true })} />
 }
 
 // ---------- links ----------
@@ -721,6 +750,15 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
     })
   }
 
+  const importRequested = useRef(false)
+  useEffect(() => {
+    if (!view.import) { importRequested.current = false; return }
+    if (importRequested.current) return
+    importRequested.current = true
+    navigate({ kind: 'wiki' })
+    startImport()
+  }, [view.import])
+
   // ⌘K or / searches, N writes a new page, E edits the open one, Esc closes the panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -1075,7 +1113,15 @@ function WikiSearch({ pages, onClose }: { pages: WikiPageInfo[]; onClose: () => 
 
 // ---------- settings ----------
 
-function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null; onClose: () => void; onImport: () => void }): ReactNode {
+export type WikiSettingsPart = 'curator' | 'storage' | 'import' | 'rules'
+
+const wikiSettingsTitle = (part: WikiSettingsPart): string => ({
+  curator: L('Captura e revisão', 'Capture and review'),
+  storage: L('Pasta e Git', 'Folder and Git'), import: L('Importar notas', 'Import notes'), rules: L('Regras das páginas', 'Page rules')
+})[part]
+
+function WikiSettingsContent({ data, onClose, onImport, part }: { data: WikiData | null; onClose: () => void; onImport: () => void; part?: WikiSettingsPart }): ReactNode {
+
   const s = useStore((st) => st.settings)
   const capture = s.wikiCapture !== false
   const edits = s.wikiEdits ?? 'approve'
@@ -1083,23 +1129,14 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
   const [error, setError] = useState('')
   const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
   const move = (to: string | null): void => void call('setWikiDir', { dir: to }).then((d) => (setDir(d), setError('')), (e: Error) => setError(e.message))
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => void (e.key === 'Escape' && onClose())
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
+  useEffect(() => { if (data?.dir) setDir(data.dir) }, [data?.dir])
+  
   return (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="form-modal wk-settings">
-        <header>
-          <h2>{L('Ajustes da wiki', 'Wiki settings')}</h2>
-          <button className="btn btn--ghost btn--sm wk-icon-btn" onClick={onClose}>
-            <Icon name="x" size={15} />
-          </button>
-        </header>
-
+    <div className={part ? 'wk-settings wk-settings--inline card' : 'wk-settings-content'}>
+      {part && <header><h2>{wikiSettingsTitle(part)}</h2></header>}
+      {(!part || part === 'curator') && (
         <section>
-          <h4>{L('O curador', "Curator")}</h4>
+          {!part && <h4>{L('O curador', "Curator")}</h4>}
           <div className="wk-setting">
             <span>
               <b>{L('Guardar das conversas', "Capture conversations")}</b>
@@ -1129,9 +1166,10 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             <Toggle on={s.wikiReview === 'weekly'} onChange={(v) => updateSettings({ wikiReview: v ? 'weekly' : 'off' })} />
           </div>
         </section>
-
+      )}
+      {(!part || part === 'storage') && (
         <section>
-          <h4>{L('A pasta', "Storage folder")}</h4>
+          {!part && <h4>{L('A pasta', "Storage folder")}</h4>}
           <code className="wk-folder" title={dir}>
             <Icon name="folder" size={14} />
             {dir.replace(/^\/Users\/[^/]+/, '~')}
@@ -1171,9 +1209,10 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           {error && <small className="field__error">{error}</small>}
           <GitSync dir={dir} onDir={setDir} />
         </section>
-
+      )}
+      {(!part || part === 'import') && (
         <section>
-          <h4>{L('Trazer o que você já tem', "Import")}</h4>
+          {!part && <h4>{L('Trazer o que você já tem', "Import")}</h4>}
           <div className="wk-setting">
             <span>
               <b>{L('Importar um cofre do Obsidian', 'Import an Obsidian vault')}</b>
@@ -1188,9 +1227,10 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             </button>
           </div>
         </section>
-
+      )}
+      {(!part || part === 'rules') && (
         <section>
-          <h4>{L('As regras', "Page rules")}</h4>
+          {!part && <h4>{L('As regras', "Page rules")}</h4>}
           <div className="wk-setting">
             <span>
               <b>{L('Esquema da wiki', 'Wiki schema')}</b>
@@ -1201,6 +1241,25 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             </button>
           </div>
         </section>
+      )}
+    </div>
+  )
+}
+
+export function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null; onClose: () => void; onImport: () => void }): ReactNode {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label={L('Ajustes da wiki', 'Wiki settings')} onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      <div className="form-modal wk-settings">
+        <header>
+          <h2>{L('Ajustes da wiki', 'Wiki settings')}</h2>
+          <button className="btn btn--ghost btn--sm wk-icon-btn" aria-label={L('Fechar ajustes da wiki', 'Close Wiki settings')} onClick={onClose}><Icon name="x" size={15} /></button>
+        </header>
+        <WikiSettingsContent data={data} onClose={onClose} onImport={onImport} />
       </div>
     </div>
   )
