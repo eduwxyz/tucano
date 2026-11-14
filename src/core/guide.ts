@@ -1,55 +1,77 @@
 // The app's guide, which the Tuca reads to explain how Tucano works: a page per topic in
-// src/core/guide/, each starting with "# Title" and a "> one-line summary". He sees the list in
-// his prompt and reads a page with ler_guia before explaining it, so he doesn't make things up.
+// src/core/guide/, each starting with "# Title" and a "> one-line summary". He sees the list in his
+// prompt and reads a page with ler_guia before explaining it, so he doesn't make things up.
+//
+// Each page is written twice: the Portuguese one in src/core/guide/, the English one in
+// src/core/guide/en/ with the same slug. A workspace in English reads the English page, one in
+// Portuguese reads the Portuguese one, so a model never copies a label from the other language into
+// an answer. test/guide.test.ts fails on a page that exists in one and not the other.
 import type { ToolDef } from './gateway'
 import { L, lang } from '../shared/lang'
-import { GUIDE_EN } from './guide-i18n'
 
-const files = import.meta.glob<string>('./guide/*.md', { query: '?raw', import: 'default', eager: true })
+const ptFiles = import.meta.glob<string>('./guide/*.md', { query: '?raw', import: 'default', eager: true })
+const enFiles = import.meta.glob<string>('./guide/en/*.md', { query: '?raw', import: 'default', eager: true })
 
-export interface GuidePage {
-  slug: string
+export interface GuideText {
   title: string
   summary: string
   body: string
 }
 
-export const GUIDE: GuidePage[] = Object.entries(files)
+export interface GuidePage extends GuideText {
+  slug: string
+  en?: GuideText
+}
+
+const parse = (path: string, text: string): { slug: string } & GuideText => {
+  const [first = '', second = '', ...rest] = text.replace(/\r\n/g, '\n').split('\n')
+  return {
+    slug: path.replace(/^.*\//, '').replace(/\.md$/, ''),
+    title: first.replace(/^#\s*/, '').trim(),
+    summary: second.replace(/^>\s*/, '').trim(),
+    body: rest.join('\n').trim()
+  }
+}
+
+const english = new Map<string, GuideText>(
+  Object.entries(enFiles).map(([path, text]) => {
+    const page = parse(path, text)
+    return [page.slug, { title: page.title, summary: page.summary, body: page.body }]
+  })
+)
+
+export const GUIDE: GuidePage[] = Object.entries(ptFiles)
   .map(([path, text]) => {
-    const [first = '', second = '', ...rest] = text.replace(/\r\n/g, '\n').split('\n')
-    return { slug: path.replace(/^.*\//, '').replace(/\.md$/, ''), title: first.replace(/^#\s*/, '').trim(), summary: second.replace(/^>\s*/, '').trim(), body: rest.join('\n').trim() }
+    const page = parse(path, text)
+    const en = english.get(page.slug)
+    return { slug: page.slug, title: page.title, summary: page.summary, body: page.body, ...(en ? { en } : {}) }
   })
   .sort((a, b) => a.slug.localeCompare(b.slug))
 
-// The guide's bodies are Portuguese only, and in an English workspace a model that reads one copies
-// its labels into the answer ("Configure Aprovações") unless it is told where that Portuguese comes
-// from. The index a model sees on every message is in English (guide-i18n.ts), so this line is about
-// the bodies alone; in a Portuguese workspace it would be telling the model what it can see, so it
-// isn't there.
-const GUIDE_LANGUAGE_NOTE =
-  "The body of a guide page is written in Portuguese (they are the app's own manual). Explain what a page says in the language the person is writing in, and never copy its Portuguese labels into the answer."
+// The page in the language the model reads: English in an English workspace, the page's own
+// Portuguese in a Portuguese one.
+const pageIn = (page: GuidePage): GuideText => (lang() === 'en' && page.en ? page.en : page)
 
-// A page's title and summary in the language the model reads: English in an English workspace, the
-// page's own Portuguese in a Portuguese one.
-export const guideHead = (page: GuidePage): { title: string; summary: string } =>
-  lang() === 'en' ? (GUIDE_EN[page.slug] ?? { title: page.title, summary: page.summary }) : { title: page.title, summary: page.summary }
+export const guideHead = (page: GuidePage): { title: string; summary: string } => {
+  const { title, summary } = pageIn(page)
+  return { title, summary }
+}
 
 // The list in the Tuca's prompt: what each page covers.
 export const guideIndex = (pages: GuidePage[] = GUIDE): string =>
-  [
-    ...(lang() === 'pt' ? [] : [GUIDE_LANGUAGE_NOTE]),
-    ...pages.map((p) => {
+  pages
+    .map((p) => {
       const h = guideHead(p)
       return `- ${p.slug}: ${h.title}. ${h.summary}`
     })
-  ].join('\n')
+    .join('\n')
 
 export const LER_GUIA: ToolDef = {
   name: 'ler_guia',
   get description() {
     return L(
       'Lê uma página do guia do Tucano (a lista está no seu prompt). Leia antes de explicar como algo funciona, e explique só o que a página diz.',
-      "Reads a page of Tucano's guide (the list is in your prompt, and the pages are written in Portuguese). Read it before explaining how something works, explain only what the page says, and answer in the language the person is using."
+      "Reads a page of Tucano's guide (the list is in your prompt). Read it before explaining how something works, explain only what the page says, and answer in the language the person is using."
     )
   },
   get inputSchema() {
@@ -60,6 +82,7 @@ export const LER_GUIA: ToolDef = {
 export function readGuide(slug: unknown, pages: GuidePage[] = GUIDE): { text: string; error?: boolean } {
   const page = pages.find((p) => p.slug === String(slug ?? '').trim().toLowerCase())
   if (!page) return { text: L(`Não existe essa página. As que existem: ${pages.map((p) => p.slug).join(', ')}.`, `There's no such page. The ones there are: ${pages.map((p) => p.slug).join(', ')}.`), error: true }
-  // The heading is the page's title in the language it is asked for; the body under it is Portuguese.
-  return { text: `# ${guideHead(page).title}\n\n${page.body}` }
+  // The heading and the body are both in the language it is asked for.
+  const { title, body } = pageIn(page)
+  return { text: `# ${title}\n\n${body}` }
 }
