@@ -34,4 +34,7 @@ it('does not start a queued thread reply after its bot history is wiped', async 
   await client.call('wipeHistory', { agentId: lia.id })
   await until(() => core.toMain.slice(before).some((event) => event.type === 'busy' && event.busy === false))
   expect((await messages()).some((m) => m.threadId === parent!.id)).toBe(false)
-})
+  // Six 3 s replies are started and the core is rebuilt around them; on a macOS
+  // runner that is well past vitest's 5 s default, and the sibling live-wipe test
+  // already takes 4 s. The budget is for the machine, not for the assertion.
+}, 30_000)
