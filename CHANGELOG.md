@@ -4,7 +4,29 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.30] - 2026-11-14
+
+> **Em português:**
+> - **Novo:** cada time do quadro **Time** agora é um **setor**, com um chefe no topo. Dê um nome ao setor e diga o que ele resolve (clique no nome dele no quadro). Quando o assunto é de outra área, o agente passa ao chefe do setor, o chefe pede ao chefe do outro setor, e esse decide quem faz: a resposta volta pelo mesmo caminho, e o pedido aparece no quadro como uma linha tracejada entre os dois chefes. Um agente também pode passar ao próprio chefe o que não consegue fazer. O guia tem a página "Setores".
+> - **Mudou:** uma linha do Time não tem mais limite de três agentes: pode ter quantos níveis você quiser.
+> - **Novo:** com duas contas ligadas no mesmo app do **Composio**, o agente diz por qual conta cada ação roda, e "Aprovar e sempre permitir" vale por conta.
+> - **Correção:** um limite mensal digitado como um número enorme não impede mais o workspace de abrir. Um agente sem limite mensal ganha um teto de verdade por resposta. O app avisa que há versão nova mesmo mostrando um Tucano num servidor. O quadro do Time parado não gasta mais processador animando os avatares.
+
+### Added
+
+- **Sectors on Team: heads ask other heads.** Each tree on the board is now a sector, headed by the agent at its top. A team with two areas couldn't pass a technical problem from finance to the technical people: the branches didn't reach each other, and an `@mention` isn't tracked and doesn't bring the answer back. Now an agent passes what isn't its sector's job to its sector's head, that head asks the other sector's head, and that one decides who in its sector does it. The answer comes back the same way. Only heads ask another sector, and only its head; an agent reaches its own sector's head directly from any depth, so crossing sectors is always three requests. An agent may also pass to its own boss what it can't do. A click on a sector's name on the board opens a panel where an admin names it and writes what it solves, which is what the other heads read to know when to send something there. The board tints each sector behind its branch, marks the head, draws a request between sectors as a dashed line between the two heads, and counts both in the header. The chip in a conversation reads "Passou ao chefe" or "Pediu para" the sector. A sector's name and what it solves travel in a team file. The guide has a "Setores" page.
+
+- **A Composio item can name its account, and "always allow" goes per account.** With two accounts connected on one Composio app, each action has to say which account it runs as. Tucano didn't know that field, so every such call asked for approval, reads included, with no "Approve and always allow". An item with an account is now classed like the same item without one: a read runs, a send asks. Allowing a send from one account doesn't allow it from another, the card shows the account on each action, and rules saved before keep working.
+
+### Changed
+
+- **A line on Team can be as long as you draw it.** A line held at most three agents from top to bottom. That limit is gone: an agent may answer to any other that isn't below it. A piece of work still stacks at most three requests in a row.
+
 ### Fixed
+
+- **Composio's remote code tools never get "always allow".** `COMPOSIO_REMOTE_BASH_TOOL` and `COMPOSIO_REMOTE_WORKBENCH` called on their own showed the button, and a saved rule let them run without asking. They now always ask, as they already did inside a batch, and an old rule is ignored.
+
+- **An idle Team board no longer animates every avatar.** The drawn avatars on the cards were one pixel past the size that stays still, so every card animated forever: about 550 style writes a second on an idle board, enough to slow an iPad down. A card's avatar now moves only while its agent works or has just finished.
 
 - **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
 
