@@ -1,5 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
-import { hasMonthlyLimit } from '../../../shared/limits'
+import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
@@ -91,8 +91,9 @@ import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
+import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
-import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
+import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -532,10 +533,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <div className="always">
                   <span className="small muted">{L('Sempre permitido, sem pedir:', 'Always allowed, without asking:')}</span>
                   {draft.autoApprove!.map((rule) => {
-                    const [cid, tool] = rule.split(':')
+                    const cid = rule.slice(0, rule.indexOf(':'))
+                    const { tool, account } = ruleTool(rule)
                     return (
                       <span key={rule} className="chip is-on always__rule">
-                        {connectors.find((c) => c.id === cid)?.name ?? L('conector', 'connector')} · {toolWords(tool ?? '')}
+                        {connectors.find((c) => c.id === cid)?.name ?? L('conector', 'connector')} · {accountLabel(toolWords(tool), account)}
                         {admin && (
                           <button
                             className="always__x"
@@ -763,7 +765,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     min={0}
                     step={0.5}
                     value={draft.limit / 1_000_000}
-                    onChange={(n) => patch({ limit: Math.max(0, Math.round(n * 1_000_000)) })}
+                    onChange={(n) => patch({ limit: safeLimit(n * 1_000_000) })}
                     className="input--short"
                   />
                 </Field>
@@ -2873,10 +2875,10 @@ export function SettingsPage(): ReactNode {
                   min={0}
                   step={0.5}
                   value={settings.defaultLimit / 1_000_000}
-                  onChange={(n) => updateSettings({ defaultLimit: Math.max(0, Math.round(n * 1_000_000)) })}
+                  onChange={(n) => updateSettings({ defaultLimit: safeLimit(n * 1_000_000) })}
                 />
               </Field>
-              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua.', 'When it hits it, the agent pauses and you decide whether it continues.')}>
+              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua. Num agente sem limite mensal, a conta é sobre 10 milhões de tokens.', 'When it hits it, the agent pauses and you decide whether it continues. For an agent with no monthly limit, it is taken over 10 million tokens.')}>
                 <NumberInput
                   min={1}
                   max={100}
