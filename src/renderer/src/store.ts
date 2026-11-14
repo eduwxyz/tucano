@@ -29,6 +29,7 @@ import {
   type Memory,
   type MemoryScope,
   type Message,
+  type ReplyTarget,
   type Model,
   type Person,
   type Delegation,
@@ -118,6 +119,7 @@ export interface State {
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
+  replyTo: Record<string, ReplyTarget | undefined> // selected message per conversation, kept with its draft
   demoServer?: { command: string; args: string[] }
   toasts: Toast[] // short notes at the bottom: an action that didn't go through
   coreDown: boolean // the core's process ended; a banner offers to reopen
@@ -201,7 +203,8 @@ let state: State = {
   dialog: null,
   tabs: {},
   toasts: [],
-  coreDown: false
+  coreDown: false,
+  replyTo: {}
 }
 
 // ---------- store plumbing ----------
@@ -952,13 +955,15 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // A message sent outside threads, in a conversation that answers in them: its thread opens when it
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
-// `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+// `threadId`: a reply in the thread that message started. `reply`: the message this one answers.
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], reply?: ReplyTarget): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(reply ? { reply } : {}) })
 }
+
+export const setReplyTo = (conversationId: string, reply?: ReplyTarget): void => set((s) => ({ ...s, replyTo: { ...s.replyTo, [conversationId]: reply } }))
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
