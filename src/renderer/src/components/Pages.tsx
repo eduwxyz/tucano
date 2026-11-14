@@ -2642,10 +2642,10 @@ function WorkspaceHistorySection(): ReactNode {
       <h3>{L('Histórico', 'History')}</h3>
       <p className="small muted">{L('O que fica guardado do que foi dito e respondido neste workspace. O prazo é conferido uma vez por dia; apagar na hora é o botão abaixo.', 'What is kept of what was said and answered in this workspace. The period is checked once a day; the button below deletes at once.')}</p>
       <Field
-        label={L('Guardar por quantos dias', 'Keep for how many days')}
+        label={L('Guardar por quantos dias', 'History retention (days)')}
         hint={L(
           'Zero guarda tudo, para sempre. Com 30, o que foi dito ou respondido há mais de 30 dias sai do banco na limpeza diária. Um bot pode ter um prazo próprio, na página dele. As memórias, a wiki e os recibos de uso não entram nessa conta.',
-          'Zero keeps everything, for good. With 30, anything said or answered more than 30 days ago leaves the database in the daily cleanup. A bot can have its own period, on its page. Memories, the wiki and the usage receipts are not part of it.'
+          'Daily cleanup deletes older messages. 0 keeps all; agent overrides apply. Memory, Wiki, and usage records remain.'
         )}
       >
         <NumberInput min={0} max={MAX_RETENTION_DAYS} step={1} value={kept} onChange={(n) => updateSettings({ retentionDays: cleanRetentionDays(n) ?? 0 })} className="input--short" />
