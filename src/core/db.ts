@@ -530,11 +530,6 @@ export const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
   CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
-  `,
-  // What each person sees of the team (PersonAccess, as JSON; NULL: everything), and what an invite grants.
-  `
-  ALTER TABLE people ADD COLUMN access TEXT;
-  ALTER TABLE invites ADD COLUMN access TEXT;
   `
 ]
 
@@ -555,6 +550,9 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'reports_to', 'TEXT'],
   // A sector head's name for its sector and what it solves, in a line (src/shared/org.ts).
   ['agents', 'sector_name', 'TEXT'],
+  // What a person sees of the team (PersonAccess, as JSON; empty: everything), and what an invite grants.
+  ['people', 'access', 'TEXT'],
+  ['invites', 'access', 'TEXT'],
   ['agents', 'sector_does', 'TEXT']
 ]
 
