@@ -539,17 +539,30 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'action_rules', "TEXT NOT NULL DEFAULT '{}'"],
   ['agents', 'autonomy', 'TEXT'],
   ['agents', 'outside_guard', 'INTEGER'],
+  // Smart routing (Settings › Routing): Jev picks the model from the person's pools instead of the agent's own.
+  // 1 on for this agent · 0 off for this agent · NULL follow the global switch (Settings › Models › Router).
+  ['agents', 'smart_routing', 'INTEGER'],
   // A phone's push handle (src/core/push.ts), on its device key: {"handle", "tag"} as JSON.
   ['person_keys', 'push', 'TEXT'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
-  ['agents', 'reports_to', 'TEXT']
+  ['agents', 'reports_to', 'TEXT'],
+  // A channel's mention mode, per member: in the room, answering only when mentioned.
+  ['members', 'mention_only', 'INTEGER NOT NULL DEFAULT 0'],
+  // A channel's listen mode, per member: in the room, and Jev says when a message is for them.
+  ['members', 'listen', 'INTEGER NOT NULL DEFAULT 0']
 ]
 
 
 type Row = Record<string, unknown>
+
+// A row of `members`, the one place a channel's modes are read from.
+type MemberRow = { conversation_id?: string; agent_id: string; mention_only: number; listen: number }
+
+// The agents of these rows whose `column` is on.
+const idsWhere = (rows: MemberRow[], column: 'mention_only' | 'listen'): string[] => rows.filter((m) => m[column] === 1).map((m) => m.agent_id)
 
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
 const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
@@ -826,6 +839,7 @@ export class Db {
       ...(str(r['action_rules']) && str(r['action_rules']) !== '{}' ? { actionRules: cleanRules(JSON.parse(str(r['action_rules']))) } : {}),
       ...(isAutonomy(r['autonomy']) ? { autonomy: r['autonomy'] } : {}),
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
+      ...(r['smart_routing'] === 0 || r['smart_routing'] === 1 ? { smartRouting: r['smart_routing'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
@@ -847,14 +861,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, archived, kind, custom_color, picture, avatar, wiki, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, fallback_model, fallback_account, account, effort, limit_tokens, max_routines, grants, memory_mode, computer, computer_kind, web, browser, apps, auto_approve, action_rules, autonomy, outside_guard, smart_routing, archived, kind, custom_color, picture, avatar, wiki, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
-           color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort,
+           color = excluded.color, instructions = excluded.instructions, model = excluded.model, fallback_model = excluded.fallback_model, fallback_account = excluded.fallback_account, account = excluded.account, effort = excluded.effort, smart_routing = excluded.smart_routing,
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
            computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.smartRouting === true ? 1 : a.smartRouting === false ? 0 : null, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
     this.db.prepare('UPDATE agents SET reports_to = ? WHERE id = ?').run(a.reportsTo || null, a.id)
@@ -884,17 +898,24 @@ export class Db {
          ORDER BY c.created_at`
       )
       .all(personId) as Row[]
-    const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
-    return rows.map((r) => this.toConversation(r, members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id)))
+    const members = this.db.prepare('SELECT conversation_id, agent_id, mention_only, listen FROM members').all() as MemberRow[]
+    return rows.map((r) => {
+      const mine = members.filter((m) => m.conversation_id === r['id'])
+      return this.toConversation(r, mine.map((m) => m.agent_id), idsWhere(mine, 'mention_only'), idsWhere(mine, 'listen'))
+    })
   }
 
-  private toConversation(r: Row, members: string[]): Conversation {
+  // `mentionOnly`: the agents of a channel that answer only when mentioned; `listen`: the ones Jev
+  // brings in when the message is theirs (each left out when empty).
+  private toConversation(r: Row, members: string[], mentionOnly: string[] = [], listen: string[] = []): Conversation {
     return {
       id: str(r['id']),
       kind: str(r['kind']) as Conversation['kind'],
       name: str(r['name']),
       topic: r['topic'] ? str(r['topic']) : undefined,
       members,
+      ...(mentionOnly.length ? { mentionOnly } : {}),
+      ...(listen.length ? { listen } : {}),
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
       summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
@@ -921,8 +942,8 @@ export class Db {
       )
       .get(personId, id) as Row | undefined
     if (!r) return undefined
-    const members = (this.db.prepare('SELECT agent_id FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as { agent_id: string }[]).map((m) => m.agent_id)
-    return this.toConversation(r, members)
+    const mine = this.db.prepare('SELECT agent_id, mention_only, listen FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as MemberRow[]
+    return this.toConversation(r, mine.map((m) => m.agent_id), idsWhere(mine, 'mention_only'), idsWhere(mine, 'listen'))
   }
 
   // Only whose a conversation is, for checks on every event (no counts, no members).
@@ -966,11 +987,21 @@ export class Db {
     this.db.prepare('UPDATE conversations SET topic = ? WHERE id = ?').run(topic ?? null, id)
   }
 
-  // Exactly these agents in the conversation.
-  setMembers(id: string, agentIds: string[]): void {
+  // Exactly these agents in the conversation. `mentionOnly`: which of them answer only when
+  // mentioned (a channel's mention mode); `listen`: which of them Jev brings in when a message is
+  // about what they do (a channel's listen mode). Left out, each agent keeps the mode it had. An
+  // agent is in one mode or the other, never both: the one named in `listen` leaves mention mode.
+  setMembers(id: string, agentIds: string[], mentionOnly?: string[], listen?: string[]): void {
+    const agents = [...new Set(agentIds)]
+    const before = this.conversation(id)
+    const quiet = new Set(mentionOnly === undefined ? before?.mentionOnly ?? [] : mentionOnly)
+    const hears = new Set(listen === undefined ? before?.listen ?? [] : listen)
+    for (const a of hears) quiet.delete(a)
+    for (const a of quiet) hears.delete(a)
     this.tx(() => {
       this.db.prepare('DELETE FROM members WHERE conversation_id = ?').run(id)
-      for (const a of new Set(agentIds)) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(id, a)
+      for (const a of agents)
+        this.db.prepare('INSERT INTO members (conversation_id, agent_id, mention_only, listen) VALUES (?, ?, ?, ?)').run(id, a, quiet.has(a) ? 1 : 0, hears.has(a) ? 1 : 0)
     })
   }
 

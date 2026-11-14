@@ -97,6 +97,7 @@ import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
+import { RouteLine } from './Routing'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -143,6 +144,30 @@ function until(at: number): string {
   if (d.toDateString() === new Date().toDateString()) return L(`Vale até as ${hm}.`, `Good until ${hm}.`)
   const day = d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' }).replace('.', '')
   return L(`Vale até ${day}, às ${hm}.`, `Good until ${day}, ${hm}.`)
+}
+
+// Every agent in the channel in mention mode or listen mode: nothing here is answered unless it is
+// called, or unless Jev hears that the message is one of the listening agents'.
+export const allMentionOnly = (conv: Conversation, members: Agent[]): boolean =>
+  conv.kind === 'channel' &&
+  members.length > 0 &&
+  members.every((a) => conv.mentionOnly?.includes(a.id) === true || conv.listen?.includes(a.id) === true)
+
+// Some agent in the channel is in listen mode: it may join a message nobody was mentioned in.
+export const anyListening = (conv: Conversation, members: Agent[]): boolean =>
+  conv.kind === 'channel' && members.some((a) => conv.listen?.includes(a.id) === true)
+
+// The line under the field: what a message there sets off, in the fewest words.
+export function composerNote(opts: { note?: string; members: Agent[]; thread?: boolean; dm?: boolean; mentionOnly?: boolean; listening?: boolean }): string {
+  const { note, members, thread, dm, mentionOnly, listening } = opts
+  if (note) return note
+  if (members[0]?.kind === 'tuca') return L('Nada é criado sem você', 'Nothing is created without you')
+  if (thread) return L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone')
+  if (dm) return L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`)
+  if (mentionOnly && listening) return L('Todos em modo menção ou escuta: só respondem com @nome', 'Everyone is in mention or listen mode: they answer only with @name')
+  if (mentionOnly) return L('Todos aqui em modo menção: só respondem com @nome', 'Everyone here is in mention mode: they answer only with @name')
+  if (listening) return L('Quem escuta entra quando a mensagem é do assunto dele · @ chama direto', 'Whoever listens joins when the message is about what they do · @ calls them right away')
+  return L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @')
 }
 
 export function ConversationView({ id }: { id: string }): ReactNode {
@@ -241,7 +266,13 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <Composer
+          conversationId={id}
+          members={members}
+          mentionOnly={allMentionOnly(conv, members)}
+          listening={anyListening(conv, members)}
+          placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)}
+        />
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
     </div>
@@ -505,6 +536,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             <span className="msg__time">{time(saidAt(message))}</span>
           </div>
         )}
+        {message.run?.route && <RouteLine route={message.run.route} />}
         {message.run && <RunSteps message={message} />}
         {text ? (
           <div className="md">
@@ -526,7 +558,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
           (team && message.run?.askedTo ? (
-            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} recommended={message.run.recommended} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
           ) : (
             <AnswersSummary message={message} />
           ))}
@@ -813,7 +845,14 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
           <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
-          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+          <Composer
+            conversationId={conv.id}
+            threadId={rootId}
+            members={members}
+            mentionOnly={allMentionOnly(conv, members)}
+            listening={anyListening(conv, members)}
+            placeholder={L('Responder na thread…', 'Reply in thread…')}
+          />
         </>
       ) : looked === rootId || root ? (
         <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
@@ -1101,7 +1140,7 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; recommended?: (number | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
 }
 
@@ -1197,7 +1236,7 @@ function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, 
 // A question with decisions, with a team: whom it's for and who asked; answered on the card by
 // whoever may (the person, whoever covers for them or, past the deadline, the requester: those
 // who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
-function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+function TeamAsk({ id, agentName, askedTo, decisions, answers, recommended, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; recommended?: (number | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
@@ -1206,7 +1245,7 @@ function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, a
   const answerer = useStore((s) => (answeredBy && answeredBy !== s.you ? personById(s, answeredBy) : undefined))
   const [answering, setAnswering] = useState(false)
   const who = agentName ?? L('O agente', 'The agent')
-  const card = { id, questions: decisions, saved: answers }
+  const card = { id, questions: decisions, saved: answers, recommended }
   if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
   const toMe = target.id === you
   const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
@@ -1988,7 +2027,21 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 }
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
-export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
+export function Composer({
+  conversationId,
+  threadId,
+  members,
+  mentionOnly,
+  listening,
+  placeholder
+}: {
+  conversationId: string
+  threadId?: string
+  members: Agent[]
+  mentionOnly?: boolean
+  listening?: boolean
+  placeholder: string
+}): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2348,7 +2401,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             }}
           />
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
+            {composerNote({ note, members, thread: !!threadId, dm: isDm, mentionOnly, listening })}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>

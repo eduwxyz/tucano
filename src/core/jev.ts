@@ -1,15 +1,19 @@
-// Jev, TypeSafe's decision model, as an optional router (spec §2): it answers
-// "who replies?" as a typed choice in well under a second, where a CLI turn
-// takes several. It needs the user's own TypeSafe key, and each decision sends
-// the channel's recent messages to TypeSafe, so it's off unless chosen.
+// A classifier as the router (spec §2): it answers "who replies?" as a typed choice in well under a
+// second, where a CLI turn takes several. Which model pair does it is the person's choice in
+// Settings › Classifiers (src/shared/classifiers.ts); this file writes the questions, and each
+// decision sends the channel's recent messages to that provider, so it's off unless chosen.
 import { randomUUID } from 'node:crypto'
+import type { ClassifierConfig } from '../shared/classifiers'
+import { JEV_CLASSIFIER, providerSpec } from '../shared/classifiers'
 import { L } from '../shared/lang'
+import { MAX_STEPS, type Decision } from '../shared/questions'
 import type { Agent, Connector, Message, Person } from '../shared/types'
+import { ask, badFormat, checkClassifierKey, failure, noAnswer, type ClassifierAnswers, type ClassifierQuestion } from './classifiers'
 import type { ThreadDigest } from './memory'
-import { describeAgent, MAX_ROUTED, REPLY_JSON, routerPrompt } from './router'
+import { describeAgent, MAX_ROUTED, REPLY_JSON, ROUTER_HISTORY, routerPrompt } from './router'
 
-export const JEV_MODEL = 'jev' // the routerModel value that picks it
-export const JEV_SECRET = 'typesafe:key'
+export const JEV_MODEL = 'jev' // the routerModel value that picks the routing classifier
+export const JEV_SECRET = 'typesafe:key' // the key an install from before Settings › Classifiers saved
 const API = 'https://api.typesafe.ai/v1'
 const NOBODY = '__ninguem' // can't clash with a handle: handles never start with "_"
 const EVERYONE = '__todos'
@@ -18,28 +22,23 @@ const TIMEOUT_MS = 10_000
 
 type Fetch = typeof fetch
 
-const noAnswer = (): string => L('o TypeSafe não respondeu', "TypeSafe didn't answer")
-const badFormat = (): string => L('resposta do TypeSafe fora do formato', "TypeSafe's answer wasn't in the format")
+// The classifier a call runs on: the one chosen for that job, or Jev, as before the section existed.
+const targetOf = (t?: ClassifierConfig): ClassifierConfig => t ?? JEV_CLASSIFIER
 
-function failure(status: number): string {
-  if (status === 401 || status === 403) return L('a chave do TypeSafe não vale mais', 'the TypeSafe key is no longer valid')
-  if (status === 429) return L('o TypeSafe pediu pra esperar (limite de uso)', 'TypeSafe asked to wait (usage limit)')
-  return L(`o TypeSafe respondeu ${status}`, `TypeSafe answered ${status}`)
-}
+// "o TypeSafe", "OpenRouter": the provider as it reads mid-sentence.
+const inSentence = (t: ClassifierConfig): { pt: string; en: string } =>
+  t.provider === 'typesafe' ? { pt: 'o TypeSafe', en: 'TypeSafe' } : { pt: providerSpec(t.provider).label, en: providerSpec(t.provider).label }
 
-// Checks a key before it's saved.
+const failed = (a: ClassifierAnswers | { error: string }): a is { error: string } => typeof (a as { error?: unknown }).error === 'string'
+
+// Checks a key before it's saved: Jev's own check, for an install that still has only that one.
 export async function checkJevKey(key: string, f: Fetch = fetch): Promise<void> {
-  let res: Response
-  try {
-    res = await f(`${API}/models`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(TIMEOUT_MS) })
-  } catch {
-    throw new Error(L('Não consegui falar com o TypeSafe. Confira a internet e tente de novo.', "I couldn't reach TypeSafe. Check the internet and try again."))
-  }
-  if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? L('O TypeSafe recusou essa chave.', 'TypeSafe refused that key.') : L(`O TypeSafe respondeu ${res.status}.`, `TypeSafe answered ${res.status}.`))
+  return checkClassifierKey(JEV_CLASSIFIER, key, f)
 }
 
 export async function routeJev(opts: {
   key: string
+  target?: ClassifierConfig
   messages: Message[]
   agents: Agent[]
   me: string
@@ -52,6 +51,7 @@ export async function routeJev(opts: {
   const started = Date.now()
   const ms = (): number => Date.now() - started
   const { agents } = opts
+  const target = targetOf(opts.target)
   // The same roster and conversation the CLI router reads, as the state; the agents are the options.
   const prompt = routerPrompt(opts)
   const state = prompt.endsWith(REPLY_JSON()) ? prompt.slice(0, -REPLY_JSON().length).trimEnd() : prompt
@@ -66,53 +66,288 @@ export async function routeJev(opts: {
     "No one: the message asks nothing of any agent (a thank-you, a note, a conversation that's already over). Never a greeting."
   )
 
-  let res: Response
-  try {
-    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'jev-latest',
-        state,
-        questions: {
-          who: {
-            type: 'choice',
-            instructions: L(
-              'Qual agente do canal deve responder à última mensagem humana? Se ela depende de um sistema externo (Linear, GitHub…), prefira quem tem acesso a ele; senão, escolha pelo papel.',
-              'Which agent in the channel should answer the last human message? If it depends on an external system (Linear, GitHub…), prefer whoever has access to it; otherwise, choose by role.'
-            ),
-            criteria
-          }
-        }
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    })
-  } catch {
-    return { error: noAnswer(), ms: ms() }
-  }
-  if (!res.ok) return { error: failure(res.status), ms: ms() }
+  const questions: ClassifierQuestion[] = [
+    {
+      name: 'who',
+      type: 'choice',
+      instructions: L(
+        'Qual agente do canal deve responder à última mensagem humana? Se ela depende de um sistema externo (Linear, GitHub…), prefira quem tem acesso a ele; senão, escolha pelo papel.',
+        'Which agent in the channel should answer the last human message? If it depends on an external system (Linear, GitHub…), prefer whoever has access to it; otherwise, choose by role.'
+      ),
+      criteria
+    }
+  ]
+  const answers = await ask({ target, key: opts.key, state, questions, timeoutMs: TIMEOUT_MS, fetch: opts.fetch })
+  if (failed(answers)) return { error: answers.error, ms: ms() }
 
-  const body = (await res.json().catch(() => null)) as { answers?: { who?: { choice?: unknown; probabilities?: Record<string, number> } } } | null
-  const who = body?.answers?.who
-  if (typeof who?.choice !== 'string') return { error: badFormat(), ms: ms() }
+  const who = answers['who']
+  if (typeof who?.choice !== 'string') return { error: badFormat(target.provider), ms: ms() }
   const probs = who.probabilities ?? {}
   const pct = (h: string): string => `${Math.round((probs[h] ?? 0) * 100)}%`
-  if (who.choice === NOBODY) return { agents: [], reason: `Jev, ${pct(NOBODY)}`, ms: ms() }
-  if (who.choice === EVERYONE) return { agents: [...agents], reason: `Jev, ${pct(EVERYONE)}`, ms: ms() }
+  if (who.choice === NOBODY) return { agents: [], reason: `${target.name}, ${pct(NOBODY)}`, ms: ms() }
+  if (who.choice === EVERYONE) return { agents: [...agents], reason: `${target.name}, ${pct(EVERYONE)}`, ms: ms() }
 
   const first = agents.find((a) => a.handle === who.choice)
-  if (!first) return { error: L('o TypeSafe escolheu alguém fora do canal', 'TypeSafe picked someone outside the channel'), ms: ms() }
+  if (!first) return { error: L(`${inSentence(target).pt} escolheu alguém fora do canal`, `${inSentence(target).en} picked someone outside the channel`), ms: ms() }
   const second = agents
     .filter((a) => a !== first && (probs[a.handle] ?? 0) >= SECOND_AT)
     .sort((a, b) => (probs[b.handle] ?? 0) - (probs[a.handle] ?? 0))[0]
   const picked = [first, ...(second ? [second] : [])].slice(0, MAX_ROUTED)
-  return { agents: picked, reason: `Jev, ${picked.map((a) => pct(a.handle)).join(L(' e ', ' and '))}`, ms: ms() }
+  return { agents: picked, reason: `${target.name}, ${picked.map((a) => pct(a.handle)).join(L(' e ', ' and '))}`, ms: ms() }
+}
+
+// ---------- listening: the expensive agents ----------
+// An agent in listen mode sits in the room and out of the roster: before the router picks, one
+// cheap question says whether this message is about what that agent does, and whether the agents
+// already there can handle it. Only then does it join — so the expensive model is paid for when
+// the work calls for it, and not for every message in the room.
+export const LISTEN_NONE = '__ninguem'
+const LISTEN_YES = '__sim'
+const LISTEN_NO = '__nao'
+
+export async function listenJev(opts: {
+  key: string
+  target?: ClassifierConfig
+  messages: Message[]
+  trigger: Message
+  listeners: Agent[]
+  answering: Agent[]
+  me: string
+  people?: Pick<Person, 'id' | 'name'>[]
+  connectors?: Connector[]
+  fetch?: Fetch
+}): Promise<{ agents: Agent[]; reason: string; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const target = targetOf(opts.target)
+  const { listeners, answering, connectors = [] } = opts
+  const everyone = [...listeners, ...answering]
+  const name = (m: Message): string =>
+    m.author.kind === 'person'
+      ? (opts.people?.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? opts.me)
+      : m.author.kind === 'routine'
+        ? L(`rotina de ${opts.me}`, `${opts.me}'s routine`)
+        : (everyone.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
+  const line = (m: Message): string => `[${name(m)}] ${m.text.replace(/\s+/g, ' ').trim().slice(0, 600)}`
+  // The message that came in, then what was said before it, oldest first: the last line is the one
+  // the question is about.
+  const recent = opts.messages.filter((m) => !!m.text.trim() && m.author.kind !== 'system' && m.id !== opts.trigger.id).slice(-ROUTER_HISTORY)
+  const state = [
+    L('Agentes que escutam este canal (só entram quando a mensagem precisa do que só eles fazem):', 'Agents listening in this channel (they join only when the message needs what only they do):'),
+    ...listeners.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
+    '',
+    L('Agentes já no canal, que respondem sem ser chamados:', 'Agents already in the channel, who answer without being called:'),
+    ...(answering.length ? answering.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`) : [L('- ninguém', '- no one')]),
+    '',
+    L('Conversa (a última é a que acabou de chegar):', 'Conversation (the last one just arrived):'),
+    ...recent.map(line),
+    line(opts.trigger)
+  ].join('\n')
+
+  const criteria: Record<string, string> = {}
+  for (const a of listeners) criteria[a.handle] = describeAgent(a, connectors)
+  criteria[LISTEN_NONE] = L(
+    'Ninguém: a mensagem não pede nada do que só um destes agentes faz, ou quem já está no canal resolve.',
+    'No one: the message asks nothing of what only one of these agents does, or whoever is already in the channel handles it.'
+  )
+
+  const questions: ClassifierQuestion[] = [
+    {
+      name: 'who',
+      type: 'choice',
+      instructions: L(
+        'Qual destes agentes, que estão só escutando, precisa entrar nesta mensagem? Escolha um só se o pedido exigir a especialidade, o modelo caro ou o acesso que só ele tem, e ninguém no canal der conta. Na dúvida, ninguém.',
+        'Which of these agents, who are only listening, does this message need? Pick one only if the request needs the specialty, the expensive model or the access only that agent has, and no one in the channel can handle it. When in doubt, no one.'
+      ),
+      criteria
+    },
+    {
+      name: 'needed',
+      type: 'choice',
+      instructions: L(
+        'Quem já está no canal (ou ninguém) dá conta desta mensagem, sem o agente escolhido?',
+        'Can whoever is already in the channel (or no one) handle this message, without the agent you picked?'
+      ),
+      criteria: {
+        [LISTEN_YES]: L('Sim: os que estão no canal dão conta, ou a mensagem não pede trabalho.', 'Yes: whoever is in the channel handles it, or the message asks for no work.'),
+        [LISTEN_NO]: L('Não: falta o que só o agente escolhido faz.', 'No: what only the agent you picked does is missing.')
+      }
+    }
+  ]
+  const answers = await ask({ target, key: opts.key, state, questions, timeoutMs: TIMEOUT_MS, fetch: opts.fetch })
+  if (failed(answers)) return { error: answers.error, ms: ms() }
+
+  const who = answers['who']
+  const needed = answers['needed']
+  if (typeof who?.choice !== 'string' || typeof needed?.choice !== 'string') return { error: badFormat(target.provider), ms: ms() }
+  const pct = (h: string): string => `${Math.round((who?.probabilities?.[h] ?? 0) * 100)}%`
+  const picked = listeners.find((a) => a.handle === who.choice)
+  if (who.choice === LISTEN_NONE || !picked) return { agents: [], reason: '', ms: ms() }
+  // It's the right agent for the subject, but the room can do without it: it stays out.
+  if (needed.choice !== LISTEN_NO) return { agents: [], reason: L(`o ${picked.name} caberia, mas quem está no canal dá conta`, `${picked.name} would fit, but whoever is in the channel handles it`), ms: ms() }
+  return { agents: [picked], reason: `${picked.name}, ${pct(picked.handle)}`, ms: ms() }
+}
+
+// ---------- the decisions an agent asks (ask_user) ----------
+// A question can offer two or three ways forward and the person has to pick one. One cheap typed
+// question per decision says which option Jev would pick, and the card shows it as a pill. It never
+// picks for anybody: "none" is a real answer, for a choice that's the person's own.
+export const RECOMMEND_NONE = '__nenhuma'
+const RECOMMEND_TIMEOUT_MS = 8_000
+const CONTEXT_MAX = 1_200
+
+type Suggested = number | null
+
+// One decision, one question. `state` is what the agent said, then the decision itself.
+async function recommendOne(opts: { key: string; target: ClassifierConfig; state: string; decision: Decision; fetch?: Fetch }): Promise<Suggested | { error: string }> {
+  const options = opts.decision.options ?? []
+  const criteria: Record<string, string> = {}
+  options.forEach((o, j) => {
+    criteria[`o${j}`] = o.description ? `${o.label} — ${o.description}` : o.label
+  })
+  criteria[RECOMMEND_NONE] = L(
+    'Nenhuma: nenhuma opção é claramente melhor, ou a escolha é da própria pessoa (gosto, preferência, algo que só ela sabe).',
+    "None: no option is clearly better, or the choice is the person's own (taste, preference, something only they know)."
+  )
+  const answers = await ask({
+    target: opts.target,
+    key: opts.key,
+    state: opts.state,
+    questions: [
+      {
+        name: 'pick',
+        type: 'choice',
+        instructions: L(
+          'Qual opção desta decisão é a melhor pra pessoa escolher? Prefira o que a pergunta e o contexto apontam: o mais direto e o de menor risco. Se empatarem, ou se a escolha for da pessoa, escolha Nenhuma.',
+          'Which option of this decision is the best for the person to pick? Prefer what the question and the context point to: the most direct, the lowest risk. If they tie, or the choice is the person\'s own, pick None.'
+        ),
+        criteria
+      }
+    ],
+    timeoutMs: RECOMMEND_TIMEOUT_MS,
+    fetch: opts.fetch
+  })
+  if (failed(answers)) return { error: answers.error }
+  const choice = answers['pick']?.choice
+  if (typeof choice !== 'string') return { error: badFormat(opts.target.provider) }
+  if (choice === RECOMMEND_NONE) return null
+  const j = options.findIndex((_, i) => choice === `o${i}`)
+  const who = inSentence(opts.target)
+  return j >= 0 ? j : { error: L(`${who.pt} escolheu uma opção que não existe`, `${who.en} picked an option that doesn't exist`) }
+}
+
+// One pick per decision, in the order asked: an index into its options, or null. Decisions with a
+// single option (or none: a text answer) are skipped without a call — they have nothing to pick
+// between, and the card's own "Something else" row is never one of them.
+export async function recommendOptions(opts: {
+  key: string
+  target?: ClassifierConfig
+  questions: Decision[]
+  context?: string
+  fetch?: Fetch
+}): Promise<{ picks: Suggested[]; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const worth = opts.questions.map((q) => (q.options?.length ?? 0) >= 2)
+  if (!worth.some(Boolean)) return { picks: opts.questions.map(() => null), ms: ms() }
+  const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, CONTEXT_MAX)
+  const picks = await Promise.all(
+    opts.questions.map((decision, i) => {
+      if (!worth[i]) return Promise.resolve(null as Suggested)
+      const options = (decision.options ?? []).map((o, j) => `${j + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`).join('\n')
+      const state = [
+        ...(context ? [L('O que o agente disse antes da pergunta:', 'What the agent said before asking:'), context, ''] : []),
+        L('A pergunta:', 'The question:'),
+        decision.question,
+        '',
+        L('As opções:', 'The options:'),
+        options
+      ].join('\n')
+      return recommendOne({ key: opts.key, target: targetOf(opts.target), state, decision, fetch: opts.fetch })
+    })
+  )
+  const problem = picks.find((p): p is { error: string } => !!p && typeof p === 'object')
+  if (problem) return { error: problem.error, ms: ms() }
+  return { picks: picks as Suggested[], ms: ms() }
+}
+
+// ---------- the next steps an agent proposes ----------
+// A next-steps card starts with every box ticked, and that is the point: nothing the agent offered
+// gets lost. With this on, one small typed question per step says which of them are worth doing now,
+// and only those keep their tick; the rest wait in the card, a click away. Never all of them off: a
+// list with nothing ticked is not a suggestion, it's a chore.
+const STEP_TIMEOUT_MS = 8_000
+const STEPS_CONTEXT_MAX = 1_200
+
+type Step = 'do' | 'later'
+
+// One step, one question: does the person do it now, or can it wait. The state carries the whole
+// list and then the step itself, so the answer is about that step and not about the list.
+async function worthDoing(opts: { key: string; target: ClassifierConfig; state: string; fetch?: Fetch }): Promise<Step | { error: string }> {
+  const criteria: Record<string, string> = {
+    do: L('Fazer agora: é o que o trabalho pede em seguida, o que destrava o resto, ou o de maior risco.', 'Do it now: it is what the work asks for next, what unblocks the rest, or the riskiest.'),
+    later: L('Pode esperar: é opcional, um polimento, ou depende de algo que ainda não está feito.', 'Can wait: it is optional, a polish, or it depends on something not done yet.')
+  }
+  const answers = await ask({
+    target: opts.target,
+    key: opts.key,
+    state: opts.state,
+    questions: [
+      {
+        name: 'pick',
+        type: 'choice',
+        instructions: L('Este próximo passo: a pessoa faz agora ou pode esperar?', 'This next step: does the person do it now, or can it wait?'),
+        criteria
+      }
+    ],
+    timeoutMs: STEP_TIMEOUT_MS,
+    fetch: opts.fetch
+  })
+  if (failed(answers)) return { error: answers.error }
+  const choice = answers['pick']?.choice
+  return choice === 'do' || choice === 'later' ? choice : { error: badFormat(opts.target.provider) }
+}
+
+// Which steps keep their tick: indexes into the list, in order. A failure, or none of them picked,
+// leaves every step ticked: the card never hides what the agent offered.
+export async function stepsWorthDoing(opts: { key: string; target?: ClassifierConfig; decision: Decision; context?: string; fetch?: Fetch }): Promise<{ ticked: number[]; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const steps = (opts.decision.options ?? []).slice(0, MAX_STEPS)
+  const all = steps.map((_, i) => i)
+  if (steps.length < 2) return { ticked: all, ms: ms() }
+  const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, STEPS_CONTEXT_MAX)
+  const list = steps.map((o, i) => `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`).join('\n')
+  const answers = await Promise.all(
+    steps.map((o, i) =>
+      worthDoing({
+        key: opts.key,
+        target: targetOf(opts.target),
+        state: [
+          ...(context ? [L('O que o agente disse antes de propor os passos:', 'What the agent said before proposing the steps:'), context, ''] : []),
+          L('O que os passos continuam:', 'What the steps go on with:'),
+          opts.decision.question,
+          '',
+          L('Os próximos passos:', 'The next steps:'),
+          list,
+          '',
+          L('O passo em questão:', 'The step in question:'),
+          `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`
+        ].join('\n'),
+        fetch: opts.fetch
+      })
+    )
+  )
+  const problem = answers.find((a): a is { error: string } => typeof a === 'object')
+  if (problem) return { error: problem.error, ms: ms() }
+  const ticked = answers.flatMap((a, i) => (a === 'do' ? [i] : []))
+  return { ticked: ticked.length ? ticked : all, ms: ms() }
 }
 
 // ---------- the browser (spec §24) ----------
-// The agent says what to click in words; Jev finds it on the page. First among
-// the page's elements (a Choice over their labels), and, when none fits, on the
-// screen itself (a Box over the screenshot: still experimental at TypeSafe).
+// The agent says what to click in words; the classifier finds it on the page. First among the
+// page's elements (a choice over their labels), and, when none fits, on the screen itself: a Box
+// over the screenshot, which only TypeSafe reads.
 
 export interface PageElement {
   ref: number
@@ -130,43 +365,48 @@ const describe = (e: PageElement): string =>
 
 export async function jevElement(opts: {
   key: string
-  target: string
+  target: string // what the agent asked for, in words
+  classifier?: ClassifierConfig // the model pair that looks; Jev when unset
   page: { url: string; title: string }
   elements: PageElement[]
   fetch?: Fetch
 }): Promise<{ ref: number; p: number } | { error: string }> {
+  const classifier = targetOf(opts.classifier)
   const criteria: Record<string, string> = {}
   for (const e of opts.elements) criteria[`e${e.ref}`] = describe(e)
   criteria[NONE] = L('Nenhum destes elementos é o que foi pedido.', 'None of these elements is what was asked for.')
-  let res: Response
-  try {
-    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'jev-latest',
-        state: { pagina: opts.page.title, endereco: opts.page.url, pedido: opts.target },
-        questions: {
-          alvo: { type: 'choice', instructions: L('Qual elemento da página é o `pedido`? Prefira os que estão na tela.', 'Which element of the page is the `pedido`? Prefer the ones on screen.'), criteria }
-        }
-      }),
-      signal: AbortSignal.timeout(BROWSER_TIMEOUT_MS)
-    })
-  } catch {
-    return { error: noAnswer() }
-  }
-  if (!res.ok) return { error: failure(res.status) }
-  const body = (await res.json().catch(() => null)) as { answers?: { alvo?: { choice?: unknown; probabilities?: Record<string, number> } } } | null
-  const choice = body?.answers?.alvo?.choice
-  if (typeof choice !== 'string') return { error: badFormat() }
+  const questions: ClassifierQuestion[] = [
+    {
+      name: 'alvo',
+      type: 'choice',
+      instructions: L('Qual elemento da página é o `pedido`? Prefira os que estão na tela.', 'Which element of the page is the `pedido`? Prefer the ones on screen.'),
+      criteria
+    }
+  ]
+  const answers = await ask({ target: classifier, key: opts.key, state: { pagina: opts.page.title, endereco: opts.page.url, pedido: opts.target }, questions, timeoutMs: BROWSER_TIMEOUT_MS, fetch: opts.fetch })
+  if (failed(answers)) return { error: answers.error }
+  const answer = answers['alvo']
+  const choice = answer?.choice
+  if (typeof choice !== 'string') return { error: badFormat(classifier.provider) }
   if (choice === NONE) return { error: L('nenhum elemento da página bate', 'no element on the page matches') }
   const ref = Number(choice.slice(1))
-  if (!opts.elements.some((e) => e.ref === ref)) return { error: L('o TypeSafe escolheu um elemento que não existe', "TypeSafe picked an element that doesn't exist") }
-  return { ref, p: body?.answers?.alvo?.probabilities?.[choice] ?? 0 }
+  if (!opts.elements.some((e) => e.ref === ref))
+    return { error: L(`${inSentence(classifier).pt} escolheu um elemento que não existe`, `${inSentence(classifier).en} picked an element that doesn't exist`) }
+  return { ref, p: answer?.probabilities?.[choice] ?? 0 }
 }
 
-// Where on the screenshot the target is, as fractions of its width and height.
-export async function jevBox(opts: { key: string; target: string; jpeg: string; fetch?: Fetch }): Promise<{ x: number; y: number; confidence: number } | { error: string }> {
+// Where on the screenshot the target is, as fractions of its width and height. Only TypeSafe reads
+// a screenshot, so another classifier says so and the browser stays with the page's own text.
+export async function jevBox(opts: {
+  key: string
+  target: string // what the agent asked for, in words
+  classifier?: ClassifierConfig
+  jpeg: string
+  fetch?: Fetch
+}): Promise<{ x: number; y: number; confidence: number } | { error: string }> {
+  const classifier = targetOf(opts.classifier)
+  if (!providerSpec(classifier.provider).box)
+    return { error: L(`${providerSpec(classifier.provider).label} não acha no print da tela`, `${providerSpec(classifier.provider).label} doesn't find things in a screenshot`) }
   const ref = `tela-${randomUUID()}`
   let res: Response
   try {
@@ -182,11 +422,11 @@ export async function jevBox(opts: { key: string; target: string; jpeg: string; 
       signal: AbortSignal.timeout(BROWSER_TIMEOUT_MS)
     })
   } catch {
-    return { error: noAnswer() }
+    return { error: noAnswer('typesafe') }
   }
-  if (!res.ok) return { error: failure(res.status) }
+  if (!res.ok) return { error: failure(res.status, 'typesafe') }
   const body = (await res.json().catch(() => null)) as { answers?: { alvo?: { box?: { top: number; bottom: number; left: number; right: number }; confidence?: number } } } | null
   const box = body?.answers?.alvo?.box
-  if (!box || ![box.top, box.bottom, box.left, box.right].every((n) => typeof n === 'number')) return { error: badFormat() }
+  if (!box || ![box.top, box.bottom, box.left, box.right].every((n) => typeof n === 'number')) return { error: badFormat('typesafe') }
   return { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2, confidence: body?.answers?.alvo?.confidence ?? 0 }
 }
