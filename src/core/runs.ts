@@ -9,6 +9,8 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
+import { decideRoute, readPrompt, unavailableTrace } from './model-routing'
+import { POOLS, targetId, type RouteTarget, type RouteTrace, type RoutingConfig } from '../shared/routing'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
@@ -341,6 +343,12 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
   return [...before, ...since, anchor]
 }
 
+// The name an engine is given for a model. Settings hold a model as `<harness>:<name>` (an agent's own
+// pick, and a chain entry built from the same picker); the engine takes `<name>`.
+const bareModelFor = (engine: EngineId, model: string): string => {
+  const info = modelInfo(model)
+  return info && info.engine === engine ? info.id : model
+}
 export class Runner {
   private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
@@ -962,6 +970,55 @@ export class Runner {
     return { model, account }
   }
 
+  // Smart routing: Jev reads what the person asked, the config turns it into a tier, and the person's
+  // chains give the model this reply runs on. It never throws. Two different things can go wrong: no
+  // reading at all (no key, no answer, a malformed one) leaves the agent's own model running and the
+  // trace saying why, which is the documented fail-open; a good reading with nothing eligible leaves
+  // the reply unsent, and `blocked` says so.
+  private async routeModel(
+    agent: Agent,
+    settings: Settings,
+    config: RoutingConfig,
+    baseline: RouteTarget,
+    asked: { trigger?: string; replyTo?: string; task?: string }
+  ): Promise<{ trace: RouteTrace; blocked: boolean }> {
+    const { db } = this.deps
+    const anchorId = asked.trigger ?? asked.replyTo
+    const anchor = anchorId ? db.message(anchorId) : undefined
+    const prompt = (asked.task ?? anchor?.text ?? '').trim()
+    if (!prompt) return { trace: unavailableTrace(undefined, config, L('não havia pedido pra ler', 'there was no request to read'), baseline), blocked: false }
+    const key = await this.deps.jev?.key()
+    if (!key) return { trace: unavailableTrace(undefined, config, L('falta a chave do TypeSafe', 'the TypeSafe key is missing'), baseline), blocked: false }
+    // The last few messages, so a short follow-up ("e o teste?") is read in its context.
+    const before = anchor ? contextWindow(db, anchor, 6).messages : []
+    const who = (m: Message): string =>
+      m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? 'agent') : m.author.kind === 'person' ? (db.person(m.author.id)?.name ?? 'person') : m.author.kind
+    const history = before.map((m) => `${who(m)}: ${m.text}`).join('\n')
+    const read = await readPrompt({
+      key,
+      prompt,
+      ...(history ? { history } : {}),
+      roles: config.roles,
+      ...(this.deps.jev?.fetch ? { fetch: this.deps.jev.fetch } : {})
+    })
+    if ('error' in read) return { trace: unavailableTrace(undefined, config, read.error, baseline), blocked: false }
+    const decided = decideRoute(read, config, (t) => this.whyNot(t, settings), baseline)
+    return decided.kind === 'exhausted' ? { trace: decided.trace, blocked: true } : { trace: decided.trace, blocked: false }
+  }
+
+  // Why a candidate can't run this reply, in the person's language; undefined when it can. A
+  // candidate names its own login: a chain entry may run on an account the agent itself doesn't use.
+  private whyNot(t: RouteTarget, settings: Settings): string | undefined {
+    const label = ENGINES[t.engine].label
+    const status = settings.engines[t.engine]
+    if (!status?.installed) return L(`${label} não está instalado aqui`, `${label} isn't installed here`)
+    if (settings.harnesses && !settings.harnesses.includes(t.engine)) return L(`${label} está desligado`, `${label} is turned off`)
+    const own = t.accountId ? settings.accounts?.find((a) => a.id === t.accountId && a.engine === t.engine) : undefined
+    if (t.accountId && !own) return L(`a conta ${t.accountId} não existe mais`, `the account ${t.accountId} is gone`)
+    if (!status.loggedIn && !own?.loggedIn) return L(`${label} não está logado`, `${label} isn't signed in`)
+    return undefined
+  }
+
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
@@ -1046,8 +1103,63 @@ export class Runner {
       return msg
     }
 
+    // Smart routing (Settings › Routing): Jev reads what was asked and the person's pools pick the model
+    // for this reply. The switch is in two places: the global one (Settings › Models › Router) and, on each
+    // agent's page, On · Off · Follow the global one. A bot set to On routes even with the global switch
+    // off; one set to Off never routes; the rest follow the switch. An agent that decides nothing keeps
+    // its own model, which is also the baseline the trace compares against.
+    let effort = agent.effort
+    // A routed reply may run on another login than the agent's own, when the chain entry names one.
+    let routedAccountId: string | undefined
+    const routing = settings.routing
+    const wantsRouting = agent.smartRouting === true || (agent.smartRouting === undefined && routing?.enabled === true)
+    // Switched on before any pool has a model is a setup half done, not a route with nothing eligible:
+    // the tab says replies run on the agent's own model until one is added, and that has to hold.
+    const anyModel = !!routing && (POOLS.some((p) => (routing.pools[p]?.chain.length ?? 0) > 0) || Object.values(routing.roles).some((r) => (r.chain?.length ?? 0) > 0))
+    if (routing && wantsRouting && anyModel) {
+      const baseline: RouteTarget = {
+        id: targetId({ engine: engineId, ...(agent.accountId ? { accountId: agent.accountId } : {}), model: modelName, effort }),
+        engine: engineId,
+        ...(agent.accountId ? { accountId: agent.accountId } : {}),
+        model: modelName,
+        effort
+      }
+      const routed = await this.routeModel(agent, settings, routing, baseline, { ...(opts.trigger ? { trigger: opts.trigger } : {}), ...(replyTo ? { replyTo } : {}), ...(task ? { task } : {}) })
+      msg.run = { ...msg.run!, route: routed.trace }
+      if (routed.blocked) {
+        // A good reading and nothing eligible: sending it on some dearer model anyway is exactly what
+        // the person's pools said not to do. The reply is not sent, and it says why.
+        save({
+          run: {
+            status: 'failed',
+            endedAt: Date.now(),
+            depth: opts.depth,
+            steps: [],
+            ...again,
+            route: routed.trace,
+            error: routed.trace.error ?? L('Nenhum modelo elegível nas rotas: a resposta não foi enviada.', 'No eligible model in the routes: the reply was not sent.')
+          }
+        })
+        return msg
+      }
+      const picked = routed.trace.selected
+      if (picked && routed.trace.state !== 'unavailable') {
+        modelId = agent.modelId // the baseline stays the agent's own: what the trace compares against
+        // A chain entry may name a model the way an agent's page does, with its harness in front
+        // ("pi:opencode-go/deepseek-v4.1-flash"). The engines take the bare name: with the prefix left
+        // on, pi answered `Model "pi:opencode-go/deepseek-v4.1-flash" not found` and the reply died.
+        modelName = bareModelFor(picked.engine, picked.model)
+        engineId = picked.engine
+        effort = picked.effort
+        routedAccountId = picked.accountId
+        engineLabel = `${ENGINES[engineId].label} · ${modelName}`
+        msg.run.steps = msg.run.steps.map((st) => (st.status === 'running' ? { ...st, detail: engineLabel } : st))
+      }
+    }
+
     // Another login of this harness (Settings › Accounts), when the agent has one.
-    let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    const accountId = routedAccountId ?? agent.accountId
+    let account = accountId ? settings.accounts?.find((a) => a.id === accountId && a.engine === engineId) : undefined
     if (account && !account.loggedIn) {
       save({
         run: {
@@ -2244,7 +2356,7 @@ ${note}`,
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
     const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
     // Which tools come loaded (_meta) stays out: a tool used for the first time in this reply mustn't end the session.
-    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
+    const config = sessionConfig({ engine: engineId, model: modelName, effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
@@ -2275,7 +2387,7 @@ ${note}`,
         try {
           const events = engines[engineId].run({
             model: modelName,
-            effort: agent.effort,
+            effort,
             system,
             ...input,
             session: plan && { id: plan.id, resume: plan.resume, keep: true },
@@ -2383,7 +2495,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, route: msg.run?.route, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

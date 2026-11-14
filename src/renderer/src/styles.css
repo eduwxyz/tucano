@@ -2353,6 +2353,20 @@ h3 {
   flex-shrink: 0;
 }
 
+/* A three-state switch (Global · On · Off) beside a sentence needs more room than a toggle: in a
+   narrow card it drops to its own line, right-aligned, instead of squeezing the sentence into a
+   column of single words (a 900 px window left it 70 px wide and fourteen lines tall). */
+.key-row--switch {
+  flex-wrap: wrap;
+}
+.key-row--switch .grow {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.key-row--switch .segmented {
+  margin-left: auto;
+}
+
 /* An error arrives calm: it rises in on a red tint that fades, no shake. */
 .note--error {
   color: var(--danger);
@@ -11874,4 +11888,445 @@ button.agent-card__now:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+/* ---------- Settings › Routing ---------- */
+/* The pools on the left, one pool's chain on the right: six destinations visible at once, one
+   editor in front of you. Widened past the other settings panes because a chain row carries a
+   harness, a model and a thinking level side by side. */
+.agent-form--wide {
+  max-width: 980px;
+}
+.routing {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.routing__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.routing__title {
+  margin: 0 0 2px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.routing__status {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.routing__status.is-on {
+  border-color: transparent;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.routing__body {
+  display: grid;
+  /* 184px, not 168: "Tier 5 · Ultra premium" needs 122px of label beside the 18px badge, and a
+     name that clips is worse than 16px of the editor's width. */
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.routing__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Flush: the row is the selection, not a box inside a box. The old rail's 6px padding made the
+     2px accent bar float against nothing; nobody gets to line up against nothing. */
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.routing__pool {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* One line per pool: the count lives in the badge at the right, not in a second row under the
+     name, so six pools and the editor beside them cost 36px a row instead of 52. */
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.routing__pool:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+/* The same warm wash as the role pills right below it: selected reads as colour, not as elevation,
+   and there is no stripe to misalign. */
+.routing__pool.is-active {
+  background: var(--accent-soft);
+}
+/* The accent pulled 28% toward the ink, measured, not guessed: the raw accent on its own wash is
+   3.03:1 in the light theme, and the selected row has to be the easiest to read, not the hardest.
+   72/28 measures 4.65:1 light and 7.7:1 dark, over the wash the row actually paints. */
+.routing__pool.is-active .routing__pool-name {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  font-weight: 600;
+}
+.routing__pool-name {
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The count is a circle at the right end of the row: dial geometry fixed at 18px, so the badge
+   sits at the same x on every row and the label never has to be short to make room for it. */
+.routing__pool-count {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  /* Translucent, so it reads on the row's own background in all three states (idle, hover,
+     selected) without needing one fill per state. */
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+/* An empty chain is a ring with a 0 in it: same footprint, quieter, and the number is not a lie. */
+.routing__pool-count.is-empty {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  /* Not --text-3: a 0 on the bare row measures 3.33:1 at 11px, under the floor. */
+  color: var(--text-2);
+  font-weight: 500;
+}
+.routing__pool:hover .routing__pool-count {
+  color: var(--text);
+}
+.routing__pool.is-active .routing__pool-count {
+  /* The badge keeps the raised surface instead of another tint of the wash: a number tinted into the
+     wash it sits on measured 4.37:1, and the count is 11px. Panel under the same accent mix is 5.7:1. */
+  background: var(--panel);
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+.routing__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.routing__roles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.routing__role {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.routing__role:hover {
+  background: var(--hover);
+}
+.routing__role.is-active {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.routing__role-more {
+  min-width: 130px;
+}
+.routing__pool-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.routing__chain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* A step in a chain is a small card: the number and the three buttons on one line, then the harness,
+   the model and the thinking one under the other, each as wide as the card. A third of a row cuts a
+   model's name and its note short, and a list of cut-off names is a list of guesses. */
+.route-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.route-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+.route-row__fields,
+.route-add__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* `.grow` belonged to the horizontal row: in a column it stretched the model field down the card and
+   left the thinking line a hundred pixels below it, so every field keeps its own height and the card is
+   as tall as its three lines. */
+.route-row__fields > .select,
+.route-add__fields > .select {
+  flex: 0 0 auto;
+}
+.route-list > .route-row {
+  flex: 0 0 auto;
+}
+.route-row__n {
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.route-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.route-row__down .icon {
+  transform: rotate(180deg);
+}
+.route-row__actions .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.routing__chain-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Each line takes the column: the note ran beside the title as a narrow strip that read as a label. */
+.routing__chain-head > strong,
+.routing__chain-head > span {
+  width: 100%;
+}
+.route-add {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-top: 4px;
+}
+/* The shared Select is width:100% by design, and here it keeps it: the card is the line. */
+.route-row__fields > .select,
+.route-add__fields > .select {
+  width: 100%;
+}
+
+/* ---------- the thin line over a reply ---------- */
+.route-line {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.route-line__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 6px 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.route-line__row:hover .route-line__chev {
+  color: var(--text-2);
+}
+.route-line__jev {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.route-line__role {
+  color: var(--text);
+  font-weight: 500;
+}
+.route-line__pool {
+  color: var(--text-2);
+}
+.route-line__arrow {
+  color: var(--text-3);
+}
+.route-line__model {
+  color: var(--text);
+}
+.route-line__thinking,
+.route-line__state {
+  color: var(--text-3);
+}
+.route-line__chev {
+  display: inline-flex;
+  color: var(--text-3);
+  transform: rotate(0deg);
+  transition: transform 180ms ease;
+}
+.route-line.is-open .route-line__chev {
+  transform: rotate(180deg);
+}
+.route-line__why {
+  margin: 0 0 4px;
+  color: var(--warn);
+}
+.route-line__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.route-line__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+.route-line__label {
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.route-line__group ul,
+.route-line__attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 14px;
+}
+.route-line__warn {
+  color: var(--warn);
+}
+
+/* One bar for what Jev read: complexity and capability weighted together, with the reasoning bonus
+   the core applies, so its length is the demand the tier name beside it comes from. */
+.route-demand {
+  display: inline-block;
+  flex: none;
+  width: 76px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.route-demand__fill {
+  /* The accent held back a fifth toward the ink, measured against the track it is drawn on: the raw
+     accent on --border-strong is 2.61:1 in the light theme, under the 3:1 a graphic that carries a
+     value has to meet. 80/20 measures 3.53:1 light and 5.71:1 dark. */
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 80%, var(--text));
+  transition: width 180ms ease;
+}
+/* The three criteria and their sum, only once the line is opened. */
+.route-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 4px;
+}
+.route-scores__row {
+  display: grid;
+  grid-template-columns: 96px 64px 44px;
+  align-items: center;
+  gap: 8px;
+}
+.route-scores__label {
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.route-scores__track {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+.route-scores__fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--text-2);
+}
+.route-scores__value {
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.route-scores__row--sum .route-scores__label {
+  color: var(--text);
+  font-weight: 600;
+}
+.route-scores__row--sum .route-scores__fill {
+  background: color-mix(in srgb, var(--accent) 80%, var(--text));
+}
+.route-scores__row--sum .route-scores__value {
+  color: var(--text-2);
+}
+@media (max-width: 900px) {
+  .routing__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .routing__rail {
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .routing__pool {
+    flex: none;
+  }
 }
