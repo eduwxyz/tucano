@@ -52,7 +52,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
 
-
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**
