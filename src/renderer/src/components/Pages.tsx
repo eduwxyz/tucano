@@ -2873,7 +2873,7 @@ function NoticeSettingsCard({ settings, update }: { settings: Settings; update: 
               <p className="muted small">
                 {L(
                   'Arraste um retângulo na tela, com os cantos, pro canto onde os avisos devem chegar. Sem escolher, eles chegam no canto de baixo, à direita.',
-                  'Drag a rectangle on screen, by its corners, to the corner where notifications should arrive. Without choosing, they arrive in the bottom right corner.'
+                  'Choose the screen area for notifications. Default: bottom right.'
                 )}
               </p>
             </div>
@@ -2906,7 +2906,7 @@ function NoticeSettingsCard({ settings, update }: { settings: Settings; update: 
               <p className="muted small">
                 {L(
                   'As cores do próprio sistema, no claro e no escuro, com o destaque do Windows, do Mac ou do Linux de agora. Sistema acompanha a troca do dia pra noite.',
-                  'The system’s own colors, light and dark, with the accent Windows, the Mac or Linux has now. System follows the day to night switch.'
+                  'Use light, dark, or system appearance with the operating system’s accent color.'
                 )}
               </p>
             </div>
@@ -2944,7 +2944,7 @@ function NoticeSettingsCard({ settings, update }: { settings: Settings; update: 
               <p className="muted small">
                 {L(
                   'Um aviso de cada vez, com os outros esperando atrás dele, na ordem do que mais importa: aprovações, perguntas e, por último, o que terminou. O de frente sai com um deslize e o próximo sobe.',
-                  'One notification at a time, the rest waiting behind it, in the order that matters most: approvals, questions, and last what finished. The one in front leaves with a swipe and the next comes up.'
+                  'Show one at a time: approvals, questions, then completions. Swipe to dismiss.'
                 )}
               </p>
             </div>
