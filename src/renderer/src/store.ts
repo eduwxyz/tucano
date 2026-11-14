@@ -497,7 +497,9 @@ export function useLiveThought(id: string, every = 0): string | undefined {
     },
     [id, every]
   )
-  return useSyncExternalStore(subscribe, () => thoughts.get(id))
+  // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
+  // frame) has none, and asking for them there would throw instead of drawing the steps.
+  return useSyncExternalStore(subscribe, () => thoughts.get(id), () => undefined)
 }
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
