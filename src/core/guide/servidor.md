@@ -25,7 +25,7 @@ Como um serviço do systemd com o seu usuário. Pra atualizar: `git pull && npm 
 Variáveis: `TUCANO_DATA` (a pasta de dados, `~/.tucano-server` por padrão), `TUCANO_HOST`, `TUCANO_PORT` (7337) e `TUCANO_TOKEN`. Atrás de um proxy de saída, `HTTPS_PROXY` (e `NO_PROXY`): os conectores passam por ele. O Tucano confia nos certificados raiz do sistema além dos do Node.
 
 ## O que muda em relação ao app
-- Notificações: no **app do Tucano no computador** conectado a ele (**Configurações › Servidores**), como as do próprio app, enquanto o app estiver aberto, e no app do iPhone. No navegador, só por HTTPS (um proxy com HTTPS, ou `tailscale serve`): por `http://` no endereço do Tailscale ou da rede de casa o navegador não mostra nenhuma. O Telegram (**Configurações › Celular**) avisa em qualquer caso. **Configurações › Geral › Notificações** › **Mandar uma** testa.
+- Notificações: no **app do Tucano no computador** conectado a ele (**Configurações › Servidores**), como as do próprio app, enquanto o app estiver aberto, e no app do iPhone. No navegador, só por HTTPS (um proxy com HTTPS, ou `tailscale serve`): por `http://` no endereço do Tailscale ou da rede de casa o navegador não mostra nenhuma. O Telegram (**Configurações › Celular**) avisa em qualquer caso. **Configurações › Geral › Notificações** › **Testar notificações** mostra como ficam.
 - Conector com OAuth: a autorização abre no seu navegador; ao terminar, você cola o endereço em que a página parou.
 - Escolher uma pasta pede o caminho dela no servidor.
 - A wiki pode usar o seu cofre do Obsidian guardado num repositório git: **Ajustes da wiki** › **Sincronizar com git**. Veja **wiki-git**.
