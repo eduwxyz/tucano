@@ -2918,8 +2918,8 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('agentes') && (
-          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
+        {pane('modelos') && (
+          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'Find page controls by text for free, then by element number. Jev also handles controls without text.')}>
             <div className="key-row">
               <Icon name="spark" />
               <div className="grow">
