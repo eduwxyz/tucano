@@ -2206,7 +2206,7 @@ export function BackupCard(): ReactNode {
             )
           : L(
               'Tudo deste Tucano num arquivo .zip: agentes, conversas, memórias, wiki e arquivos, pra levar pra um Tucano num servidor (como o Tucano Pro). As senhas dos conectores e os logins de IA não vão: eles ficam presos a este computador.',
-              "Everything of this Tucano in one .zip: agents, conversations, memories, wiki and files, to take to a Tucano on a server (such as Tucano Pro). Connector passwords and AI logins don't go: they're tied to this computer."
+              "Export agents, chats, memory, Wiki, and files as a ZIP for another Tucano. Connector passwords and AI logins stay on this computer."
             )
       }
     >
