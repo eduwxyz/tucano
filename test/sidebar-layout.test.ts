@@ -80,3 +80,22 @@ it.skipIf(!existsSync(chromium.executablePath()))('keeps the agent name visible 
     await browser.close()
   }
 })
+
+it.skipIf(!existsSync(chromium.executablePath()))('lines up system lines with the message column on a wide window', async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 600 } })
+    await page.setContent(`
+      <style>${readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')}</style>
+      <div class="messages">
+        <article class="msg"><div class="msg__gutter"></div><div class="msg__body">Hello</div></article>
+        <div class="system-line"><span>Used 82% of the month's limit</span></div>
+      </div>`)
+    const edges = await page.evaluate(() => {
+      const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
+      return { message: box('.msg'), notice: box('.system-line') }
+    })
+    expect(edges.notice.left).toBe(edges.message.left)
+    expect(edges.notice.width).toBe(edges.message.width)
+  } finally { await browser.close() }
+})

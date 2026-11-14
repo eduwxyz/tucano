@@ -1341,6 +1341,8 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 6px 24px 6px 70px;
+  max-width: 860px;
+  margin: 0 auto;
   color: var(--text-2);
   font-size: 12.5px;
 }
