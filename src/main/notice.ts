@@ -319,6 +319,7 @@ export class Notices {
     // Wherever the app's window is now, the cards follow it: a second screen has its own corner.
     this.place()
     if (!win.isVisible()) win.showInactive()
+    win.setFocusable(true)
     this.startPoll()
   }
 
@@ -326,6 +327,7 @@ export class Notices {
     const win = this.win
     if (!win || win.isDestroyed()) return
     this.stopPoll()
+    win.setFocusable(false)
     if (win.isVisible()) win.hide()
     this.interactive(false)
   }
