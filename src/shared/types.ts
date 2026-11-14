@@ -413,9 +413,36 @@ export interface Message {
 export const saidAt = (m: Message): number => m.run?.endedAt ?? m.at
 
 // A conversation as people read it: in the order things were said, and whoever is still working at the end.
+// A reply at work is the one exception: it stays with the prompt it answers, so that a second prompt
+// written while the first is still running reads below that reply instead of on top of it.
 export function asSaid(messages: Message[]): Message[] {
   const working = (m: Message): boolean => m.run?.status === 'working'
-  return [...messages.filter((m) => !working(m)).sort((a, b) => saidAt(a) - saidAt(b)), ...messages.filter(working).sort((a, b) => a.at - b.at)]
+  const said = messages.filter((m) => !working(m)).sort((a, b) => saidAt(a) - saidAt(b))
+  const atWork = messages.filter(working).sort((a, b) => a.at - b.at)
+  if (atWork.length === 0) return said
+  // Who answers what: a reply whose prompt is here goes right under it; one whose prompt is on a
+  // page not loaded yet (or was a note) has nowhere to stand, so it waits at the end as before.
+  const answering = new Map<string, Message[]>()
+  const standing: Message[] = []
+  const here = new Set(said.map((m) => m.id))
+  for (const m of atWork) {
+    const to = m.run?.replyTo
+    if (!to || !here.has(to)) {
+      standing.push(m)
+      continue
+    }
+    const had = answering.get(to)
+    if (had) had.push(m)
+    else answering.set(to, [m])
+  }
+  if (answering.size === 0) return [...said, ...standing]
+  const out: Message[] = []
+  for (const m of said) {
+    out.push(m)
+    const replies = answering.get(m.id)
+    if (replies) out.push(...replies)
+  }
+  return [...out, ...standing]
 }
 
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.

@@ -3,7 +3,7 @@ import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
@@ -251,6 +251,14 @@ const NO_REPLIES: Message[] = []
 // conversation, so it only takes the focus when the person taps it.
 const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
+// How a row brings a message to the top of the list: the button under "Reply in thread" goes back to
+// the prompt its reply answers. A context, rather than the scroller handed down through every row.
+const JumpTo = createContext<(id: string) => void>(() => {})
+
+// Whether a reply's own prompt is somewhere else in the list: right above it, there is nothing to
+// jump to, and a reply with no prompt of its own (a routine's, one an agent called for) has none.
+export const promptAway = (m: Message, prev?: Message): boolean => !!m.run?.replyTo && prev?.id !== m.run.replyTo
+
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
@@ -303,7 +311,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const el = ref.current
     if (!el) return
     const watch = new ResizeObserver(() => {
-      if (stick.current) el.scrollTop = el.scrollHeight
+      if (stick.current && Date.now() >= held.current) el.scrollTop = el.scrollHeight
     })
     for (const row of el.children) watch.observe(row)
     return () => watch.disconnect()
@@ -326,6 +334,22 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     before.current = { height: el.scrollHeight, top: el.scrollTop }
     void loadOlder(conversationId).finally(() => setLoading(false))
   }
+  // Back to the prompt a reply answers, from that reply's own row: its first line at the top of the
+  // list, and lit for a moment so it's clear where the jump landed. `held` keeps the list from
+  // snapping back to the end while the jump lands (a scroll that ends near the bottom re-sticks).
+  const held = useRef(0)
+  const jump = useMemo(
+    () => (id: string) => {
+      const el = ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(id)}"]`)
+      if (!el) return
+      stick.current = false
+      held.current = Date.now() + 1200
+      el.scrollIntoView({ block: 'start' })
+      el.classList.add('is-flash')
+      setTimeout(() => el.classList.remove('is-flash'), 1800)
+    },
+    []
+  )
   // Too little to scroll: the page before comes without waiting for a scroll (once per page, so a
   // failure doesn't ask again and again).
   const tried = useRef<string | undefined>(undefined)
@@ -386,26 +410,28 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
       onScroll={(e) => {
         const el = e.currentTarget
         const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-        stick.current = fromBottom < 60
+        if (Date.now() >= held.current) stick.current = fromBottom < 60
         setFarFromBottom(fromBottom > el.clientHeight / 2)
         more(el)
       }}
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
       {lead}
-      {messages.map((m, i) => {
-        const prev = messages[i - 1]
-        const grouped =
-          !!prev &&
-          prev.author.kind === m.author.kind &&
-          (m.author.kind !== 'agent' || (prev.author.kind === 'agent' && prev.author.id === m.author.id)) &&
-          (m.author.kind !== 'person' || (prev.author.kind === 'person' && prev.author.id === m.author.id)) &&
-          m.at - prev.at < 5 * 60_000 &&
-          !m.run &&
-          m.author.kind !== 'system' &&
-          m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
-      })}
+      <JumpTo.Provider value={jump}>
+        {messages.map((m, i) => {
+          const prev = messages[i - 1]
+          const grouped =
+            !!prev &&
+            prev.author.kind === m.author.kind &&
+            (m.author.kind !== 'agent' || (prev.author.kind === 'agent' && prev.author.id === m.author.id)) &&
+            (m.author.kind !== 'person' || (prev.author.kind === 'person' && prev.author.id === m.author.id)) &&
+            m.at - prev.at < 5 * 60_000 &&
+            !m.run &&
+            m.author.kind !== 'system' &&
+            m.author.kind !== 'routine'
+          return <MessageRow key={m.id} message={m} grouped={grouped} away={promptAway(m, prev)} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
+        })}
+      </JumpTo.Provider>
       {farFromBottom && (
         <div className="messages__jump">
           <button className="messages__jump-btn" title={L('Ir para o fim', 'Go to the end')} aria-label={L('Ir para o fim da conversa', 'Go to the end of the conversation')} onClick={() => ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' })}>
@@ -427,7 +453,7 @@ const NO_ATTACHED: Artifact[] = []
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
+const MessageRow = memo(function MessageRow({ message, grouped, replies, away }: { message: Message; grouped: boolean; away?: boolean; replies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
@@ -582,11 +608,28 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
+        {away && message.run?.replyTo && <PromptJump id={message.run.replyTo} />}
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
   )
 })
+
+// The glyph under "Reply in thread", on a reply that answers a prompt another message now sits
+// between: it puts that prompt at the top of the list, so a long reply is one click from what was asked.
+export function PromptJump({ id }: { id: string }): ReactNode {
+  const jump = useContext(JumpTo)
+  return (
+    <button
+      className="icon-btn icon-btn--sm msg__reply msg__reply--up"
+      title={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
+      aria-label={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
+      onClick={() => jump(id)}
+    >
+      <Icon name="up" size={12} />
+    </button>
+  )
+}
 
 // What a routine asked, posted at its time; the agent's reply comes next.
 function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {

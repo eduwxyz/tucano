@@ -36,6 +36,17 @@ describe('asSaid', () => {
     expect(saidAt(said('antiga', 1, 'done'))).toBe(1)
   })
 
+  it('keeps a reply at work under the prompt it answers, so a second prompt reads below it', () => {
+    const prompt = (id: string, at: number): Message => said(id, at)
+    const reply = (id: string, at: number, replyTo?: string): Message => ({ ...said(id, at, 'working'), run: { status: 'working', steps: [], ...(replyTo ? { replyTo } : {}) } })
+    // Theo answers the second prompt, Lia the first: each reply sits under its own.
+    expect(ids([prompt('p1', 1), prompt('p2', 2), reply('theo', 3, 'p2'), reply('lia', 4, 'p1')])).toEqual(['p1', 'lia', 'p2', 'theo'])
+    // One answering the same prompt keeps the order it started in, right under it.
+    expect(ids([prompt('p', 1), reply('a', 2, 'p'), reply('b', 3, 'p')])).toEqual(['p', 'a', 'b'])
+    // A prompt that isn't here (an older page), or none at all, leaves the reply at the end.
+    expect(ids([prompt('p', 1), reply('fora', 2, 'antiga'), reply('sem', 3)])).toEqual(['p', 'fora', 'sem'])
+  })
+
   it('leaves the list it was given as it was', () => {
     const list = [said('lenta', 1, 'done', 9), said('m', 2)]
     asSaid(list)
@@ -100,6 +111,16 @@ describe('replies that overlap', () => {
     expect(of('lia').run!.endedAt!).toBeGreaterThan(of('theo').run!.endedAt!) // …and ended last
     expect(asSaid(db.messages()).map(whose)).toEqual(['me', 'me', 'theo', 'lia'])
     expect(saidAt(of('lia'))).toBe(of('lia').run!.endedAt)
+  })
+
+  it('puts each prompt above the reply it started, while both are still at work', async () => {
+    const r = runner()
+    await r.send('c', '@lia bom dia')
+    await vi.waitFor(() => expect(turns).toHaveLength(1))
+    await r.send('c', '@theo bom dia')
+    // Both running at once: the second prompt is not pushed above both replies.
+    await vi.waitFor(() => expect(asSaid(db.messages()).map(whose)).toEqual(['me', 'lia', 'me', 'theo']))
+    await r.idle()
   })
 
   it('goes on with the session it had: what the other said while it worked is simply new to it', async () => {
