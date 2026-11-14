@@ -278,7 +278,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
     <div className="ask__body" ref={body} tabIndex={-1} onKeyDown={keys}>
       <Title q={question} />
       {question.kind === 'text' ? (
-        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => edit({ text: e.target.value })} />
+        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onFocus={() => window.tucano?.notice?.focus?.()} onChange={(e) => edit({ text: e.target.value })} />
       ) : (
         <div className="ask-options" role={multiple ? 'group' : 'radiogroup'} aria-label={question.question}>
           {options.map((o, i) => {
@@ -302,7 +302,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
           {writing ? (
             <label className={`ask-option ask-option--other is-open ${other.trim() ? 'is-on' : ''}`} onMouseEnter={() => setFocus(options.length)}>
               <span className="ask-option__key">{options.length + 1}</span>
-              <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onChange={(e) => edit({ other: e.target.value })} />
+              <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onFocus={() => window.tucano?.notice?.focus?.()} onChange={(e) => edit({ other: e.target.value })} />
             </label>
           ) : (
             <button className={`ask-option ask-option--other ${focus === options.length ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(options.length)} onClick={openOther}>
