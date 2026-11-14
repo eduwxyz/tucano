@@ -1,6 +1,7 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { sectorName } from '../../../shared/org'
+import { withMessage } from '../../../shared/attach'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
@@ -2063,11 +2064,14 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
 
   const addFiles = async (all: File[]): Promise<void> => {
     if (!all.length) return
-    // On a server, a file that isn't an image goes up to it (~/Enviados) and the message says where:
-    // an agent on that computer opens it there, and the link brings it back down.
+    // On a server too, a file goes with the message, and its text to the agents. Only one too big for
+    // that (or for what a browser's request holds) goes up to the server (~/Enviados) and the message
+    // says where: an agent with a computer opens it there, and the link brings it back down.
     const upload = window.tucano.upload
-    const files = upload ? all.filter((f) => IMAGE_MIMES.includes(f.type)) : all
-    const others = upload ? all.filter((f) => !IMAGE_MIMES.includes(f.type)) : []
+    const held = live.current.images.filter(isFile).reduce((n, a) => n + (a.size ?? 0), 0)
+    const goes = upload ? withMessage(all, held) : all.map(() => true)
+    const files = all.filter((_, i) => goes[i])
+    const others = all.filter((_, i) => !goes[i])
     if (others.length && upload) {
       setNote(L(`Enviando ${others.length === 1 ? others[0]!.name : `${others.length} arquivos`}…`, `Sending ${others.length === 1 ? others[0]!.name : `${others.length} files`}…`))
       const sent = await Promise.allSettled(others.map((f) => upload(f, 'message')))

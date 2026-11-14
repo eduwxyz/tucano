@@ -4,6 +4,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **A file attached in the browser goes with the message, and the agents read it.** On a Tucano on a server, a file that wasn't an image (a PDF, a spreadsheet) went up to `~/Enviados` and the message only said "Arquivo enviado:" and its path: nothing showed as an attachment, and an agent with no computer couldn't read it. It now goes with the message, as in the desktop app: it shows under the message and what it says reaches the agents as text. Only a file over 20 MB, or one that no longer fits beside those already attached (40 MB a message from a browser), still goes up to the server with its path in the message.
+
+- **Sector zones stay apart on a tidy Team board.** Two sectors side by side were laid out so close that their zones overlapped, tints and borders running into each other, and the person's card sat on top of the zones. A tidy board now leaves room between sectors and above them. A board placed by hand keeps its places: **Organizar** lays it out again.
+
 ## [0.2.30] - 2026-11-14
 
 > **Em português:**
