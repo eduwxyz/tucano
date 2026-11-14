@@ -84,6 +84,11 @@ contextBridge.exposeInMainWorld('tucano', {
     areaDone: (): void => ipcRenderer.send('notice:area-done'),
     areaCancel: (): void => ipcRenderer.send('notice:area-cancel'),
     hit: (inside: boolean): void => ipcRenderer.send('notice:hit', inside),
+    // Where the cursor is while cards are on screen, in the window's own coordinates: the page runs
+    // its own hit test there, since only it knows where the cards are.
+    onCursor: (cb: (p: { x: number; y: number }) => void): void => {
+      ipcRenderer.on('notice:cursor', (_e, p: { x: number; y: number }) => cb(p))
+    },
     focus: (): void => ipcRenderer.send('notice:focus'),
     count: (n: number): void => ipcRenderer.send('notice:count', n),
     open: (p: { conversationId?: string; threadId?: string; page?: 'skills' }): void => ipcRenderer.send('notice:open', p)

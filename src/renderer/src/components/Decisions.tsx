@@ -43,7 +43,8 @@ export function AskCard({
   badge,
   byline,
   answeredInText,
-  children
+  children,
+  onSend
 }: {
   id: string
   questions: Decision[]
@@ -53,8 +54,11 @@ export function AskCard({
   byline?: string
   answeredInText?: boolean
   children?: ReactNode
+  // A card the app drew for a look (Settings' test): there is nothing behind it to answer, so
+  // choosing and sending stay on the card and this is what Send does.
+  onSend?: (() => void) | undefined
 }): ReactNode {
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} extra={children} />
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} extra={children} onSend={onSend} />
   return (
     <section className={`ask ask--${mode}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} />
@@ -120,7 +124,7 @@ function Summary({ questions, answers, answeredInText }: { questions: Decision[]
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, extra, onSend }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; extra?: ReactNode; onSend?: (() => void) | undefined }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -137,6 +141,8 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
 
   const send = (): void => {
     if (sending) return
+    // A card the app drew has no question behind it: Send is what its card says it is.
+    if (onSend) return onSend()
     setSending(true)
     void submitDecisions(id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
   }
@@ -146,7 +152,7 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
     drafts.delete(draftKey(id, index))
     const next = answers.map((a, i) => (i === index ? answer : a))
     setAnswers(next)
-    answerDecision(id, index, answer)
+    if (!onSend) answerDecision(id, index, answer)
     if (!answer) return
     if (questions.length === 1) return send()
     const after = questions.findIndex((_, i) => i > index && !isAnswered(next[i]))
@@ -163,7 +169,7 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
     const answer = draftAnswer(questions[step]!, draft)
     const next = answers.map((a, i) => (i === step ? answer : a))
     setAnswers(next)
-    answerDecision(id, step, answer)
+    if (!onSend) answerDecision(id, step, answer)
     return next
   }
 

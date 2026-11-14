@@ -124,7 +124,7 @@ export interface NoticeCard {
   approval?: Approval // what the buttons decide
   ask?: Inbox['questions'][number]
   pictures?: NoticePicture[]
-  preview?: boolean // a card Settings › Notifications › Test every kind made: nothing to decide
+  preview?: boolean // a card Settings › Notifications › Test notifications made: nothing to decide
   previewAgent?: number // which of the team's agents leans on its corner, by place
 }
 
@@ -283,7 +283,7 @@ export function demoCards(now = Date.now()): NoticeCard[] {
     connectorId: 'github',
     connectorName: 'GitHub',
     tool: 'create_issue',
-    args: { repo: 'acme/site', title: 'O menu some no celular' },
+    args: { repo: 'acme/site', title: L('O menu some no celular', 'The menu disappears on mobile') },
     why: L('Quero abrir o issue com o que achei no código.', 'I want to open the issue with what I found in the code.'),
     highRisk: false,
     state: 'pending',
