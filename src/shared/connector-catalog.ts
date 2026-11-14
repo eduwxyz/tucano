@@ -1,6 +1,6 @@
 // The connectors the app offers ready to add: official remote MCP servers that an app it has never
 // met (Tucano) can sign in to by itself, through the browser (OAuth with dynamic registration and
-// PKCE), or that need no sign-in at all. Each was probed on 2026-11-05 (Supabase on 2026-11-13); a server that only takes an
+// PKCE), or that need no sign-in at all. Each was probed on 2026-11-05 (Supabase on 2026-11-13, ElevenLabs on 2026-11-14); a server that only takes an
 // app registered ahead of time (HubSpot, Box, Asana's current one; Outlook and Teams) isn't here:
 // it's added by hand. Some ask a few things first (the address of your own instance, a token) or run
 // the service's official server on this computer. Google's and Slack's sign-in take no app they haven't
@@ -206,6 +206,9 @@ export const CATALOG: CatalogEntry[] = [
   }),
 
   e('canva', 'Canva', 'https://mcp.canva.com/mcp', 'design', 'Designs, modelos e exportações', 'Designs, templates and exports'),
+  // Takes no registration: it reads the app's description from an https address (src/shared/oauth-client.ts),
+  // so only a Tucano on a server with one gets in. Generating spends the account's credits: said in its line.
+  e('elevenlabs', 'ElevenLabs', 'https://api.elevenlabs.io/v1/mcp', 'design', 'Voz, transcrição e agentes de voz · gasta créditos da sua conta', 'Speech, transcription and voice agents · spends your account’s credits'),
   e('webflow', 'Webflow', 'https://mcp.webflow.com/mcp', 'design', 'Sites, páginas e CMS', 'Sites, pages and CMS'),
   e('wix', 'Wix', 'https://mcp.wix.com/mcp', 'design', 'Sites e lojas', 'Sites and stores'),
 

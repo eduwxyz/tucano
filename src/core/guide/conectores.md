@@ -9,6 +9,14 @@ Um conector é um servidor MCP: ele dá aos agentes ferramentas de um serviço (
 3. **Conectar**: o login abre no navegador. O acesso fica neste computador. Alguns perguntam antes o endereço da sua instância ou um token (GitHub, Dynatrace, Snowflake, Metabase), e o Azure DevOps e o AWS CloudWatch rodam o servidor oficial no seu computador (precisam do Node.js ou do uv).
 4. Dê acesso aos agentes: na página de cada um, **Ferramentas** › **Ferramentas e acesso**.
 
+## ElevenLabs
+Dá aos agentes voz (texto em fala), transcrição, música, efeitos e os agentes de voz da sua conta.
+- **Só conecta pelo Tucano que roda num servidor** (veja **servidor**). No app do computador ela aparece como **não conectou**.
+- Gerar gasta créditos da sua conta da ElevenLabs, como no site dela.
+- O áudio volta como um link que expira em umas 2 horas: peça de novo ao agente se o link venceu.
+- Mudar um agente de voz publica na hora.
+- Conta na Europa, Índia ou Singapura: **Adicionar personalizado** com o endereço da sua região (`https://api.eu.residency.elevenlabs.io/v1/mcp`, `https://api.in.residency.elevenlabs.io/v1/mcp` ou `https://api.sg.residency.elevenlabs.io/v1/mcp`) e autenticação **OAuth**.
+
 ## Google e Slack
 Gmail, Calendar, Drive, Docs e Sheets pedem um app seu no Google Cloud, criado uma vez: veja **google**. O Slack também pede um app seu, interno do seu workspace: veja **slack**.
 
