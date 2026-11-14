@@ -3,6 +3,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getEventListeners } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { Hold } from '../src/core/hold'
@@ -81,5 +82,47 @@ describe('a hold left behind by an app that closed', () => {
     expect(db.message('working')?.run?.status).toBe('interrupted')
     expect(db.message('ceiling')?.run?.status).toBe('paused')
     db.close()
+  })
+})
+
+describe('pause gate cancellation and parallel calls', () => {
+  it('does not wait for an abort that already happened', async () => {
+    const hold = new Hold()
+    hold.request()
+    const ctl = new AbortController()
+    ctl.abort()
+    let settled = false
+    void hold.wait(ctl.signal).then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(true)
+  })
+
+  it('resumes every parallel tool call waiting at the gate', async () => {
+    const hold = new Hold()
+    hold.request()
+    const ctl = new AbortController()
+    const completed: number[] = []
+    const waits = [1, 2, 3].map(id => hold.wait(ctl.signal).then(() => { completed.push(id) }))
+    try {
+      hold.release()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect([...completed]).toEqual([1, 2, 3])
+      await Promise.all(waits)
+    } finally {
+      ctl.abort()
+    }
+  })
+
+  it('removes abort listeners after each normal resume', async () => {
+    const hold = new Hold()
+    const ctl = new AbortController()
+    for (let index = 0; index < 12; index++) {
+      hold.request()
+      const waiting = hold.wait(ctl.signal)
+      hold.release()
+      await waiting
+      expect(getEventListeners(ctl.signal, 'abort')).toHaveLength(0)
+    }
   })
 })
