@@ -1,7 +1,7 @@
 // Skills (spec §18): recipes the agents follow, kept like pages to read. Agents
 // propose; I approve, edit, and undo any change from the history.
 import { L } from '../../../shared/lang'
-import { skillOrigin } from '../../../shared/skill-groups'
+import { skillHarnessName } from '../../../shared/skill-groups'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -48,9 +48,8 @@ function result(r?: SkillReport): string {
 }
 
 const from = (k: Skill): string => {
-  const origin = skillOrigin(k.source)
-  if (!origin) return L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`)
-  const who = origin === 'codex' ? 'Codex' : origin === 'claude' ? 'Claude Code' : 'Hermes'
+  const who = skillHarnessName(k.source)
+  if (!who) return L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`)
   return L(`do seu ${who}`, `from your ${who}`)
 }
 

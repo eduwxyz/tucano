@@ -11,7 +11,7 @@ export function skillOrigin(source: string | undefined): 'codex' | 'claude' | 'h
   const path = source.replace(/\\/g, '/') // on Windows the stored path has backslashes
   if (path.includes('/.codex/')) return 'codex'
   if (path.includes('/.claude/')) return 'claude'
-  if (path.includes('/hermes/')) return 'hermes'
+  if (path.includes('/hermes/') || path.includes('/.hermes/')) return 'hermes'
   return undefined
 }
 
@@ -22,4 +22,16 @@ export function skillGroup(source: string | undefined): string {
   const category = parts.length >= 3 ? parts[parts.length - 3]! : ''
   if (!category || category === 'skills' || category === 'skill.md') return skillOrigin(source) ?? SKILL_LOCAL
   return category
+}
+
+// Source labels cover every harness read by local-skills, not only the three icon variants.
+const HARNESSES: readonly [string, string][] = [
+  ['/.hermes/', 'Hermes'], ['/hermes/', 'Hermes'],
+  ['/.config/opencode/', 'OpenCode'], ['/.opencode/', 'OpenCode'],
+  ['/.copilot/', 'Copilot'], ['/.gemini/', 'Gemini'], ['/.codex/', 'Codex'],
+  ['/.pi/', 'Pi'], ['/.agents/', 'Agents'], ['/.claude/', 'Claude Code']
+]
+export function skillHarnessName(source: string | undefined): string | undefined {
+  const path = source?.replaceAll('\\', '/').toLowerCase()
+  return path ? HARNESSES.find(([folder]) => path.includes(folder))?.[1] : undefined
 }
