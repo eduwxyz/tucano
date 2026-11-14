@@ -222,7 +222,7 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
+    const { sounds: _s, stepsOpen: _so, showThinking: _t, steps: _st, stepsLatest: _sl, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
     return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 
@@ -303,7 +303,9 @@ export class People {
     switch (event.type) {
       case 'message':
         return conversation(event.message.conversationId) && this.visibleAt(person, event.message) ? event : undefined
-      case 'delta': {
+      case 'delta':
+      case 'thinking': {
+        // What the model is thinking reaches exactly who the reply's text reaches.
         const c = this.db.messageConversation(event.id)
         return c && conversation(c) && this.visibleAt(person, this.db.message(event.id) ?? { conversationId: c, at: Infinity }) ? event : undefined
       }

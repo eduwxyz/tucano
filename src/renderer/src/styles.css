@@ -1362,8 +1362,15 @@ h3 {
   max-width: 600px;
   font-size: 12.5px;
 }
+.steps__header {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+}
 .steps__toggle {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 7px;
   padding: 3px 9px 3px 7px;
@@ -1378,6 +1385,7 @@ h3 {
 }
 .steps__chev {
   display: inline-flex;
+  flex: none;
   transition: transform var(--dur-base) var(--ease-out);
 }
 /* Done: the label crossfades from the shimmer to the count, the chevron comes back. */
@@ -1416,14 +1424,47 @@ h3 {
   animation: pop var(--dur-enter) var(--ease-spring) backwards;
 }
 .steps__elapsed {
+  flex: none;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
 .steps__failed {
+  flex: none;
+  white-space: nowrap;
   color: var(--danger);
 }
 .steps__stop {
+  flex: none;
   margin-left: 2px;
+}
+.steps__pulse,
+.steps__done {
+  flex: none;
+}
+.steps__activity,
+.steps__summary,
+.steps__now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.steps__now {
+  flex: 0 1 320px;
+  /* Never three characters: a target is worth reading down to eight, and the label above
+     gives the room for them. */
+  min-width: 8ch;
+  max-width: 320px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+/* The label gives way before the target does: whole when the row has room ("Ran…", "Thinking…"
+   always are), trimmed when it doesn't, and never under six characters. Unshrinkable, a long
+   label — "Still working: long tasks do take a while" — pushed the target to three characters
+   and spilled the row out of its toggle on a narrow window. */
+.steps__activity {
+  flex: 0 1 auto;
+  min-width: 6ch;
 }
 .steps__list {
   list-style: none;
@@ -1431,6 +1472,41 @@ h3 {
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
+}
+/* The latest few (Settings › General): a window that keeps itself at the bottom, the older steps
+   fading into the top edge instead of pushing the new ones off the message. */
+.steps--latest .steps__list {
+  max-height: 232px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+}
+/* The three ways a reply can show its steps (Settings › General, and an agent's own page):
+   four buttons on a wide window, two lines of two on a narrow one. */
+.steps-pick {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.steps-pick button {
+  flex: 1 1 auto;
+}
+/* The number under the choices, only while the window is the chosen one. */
+.steps-keep {
+  gap: 8px;
+  margin-top: 10px;
+}
+.steps-keep input {
+  width: 72px;
+}
+.steps__earlier {
+  padding: 2px 0 4px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.step--fading {
+  transition: opacity var(--dur-base) var(--ease-out);
 }
 .step {
   display: flex;
@@ -11874,4 +11950,31 @@ button.agent-card__now:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* What the model is thinking, apart from what it said: dim, small, and scrolling itself as it
+   arrives, so a long reply can be studied while it is being written. */
+.thought {
+  margin: 6px 0 0;
+  max-height: 9.5em;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  scrollbar-width: thin;
+}
+.thought__label {
+  font: 600 10px/1.4 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+.thought__text {
+  opacity: 0.85;
 }
