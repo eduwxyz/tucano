@@ -1236,6 +1236,13 @@ h3 {
   color: var(--text-3);
   font-size: 11.5px;
 }
+/* A prompt of mine waiting its turn behind the reply above: it goes when that one ends. */
+.msg__queued {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-style: italic;
+}
 .md > :first-child {
   margin-top: 0;
 }
@@ -1431,6 +1438,95 @@ h3 {
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
+}
+/* The pill under the chain: a steer while the agent works, a follow up once the reply has ended.
+   Small, dim, out of the way until it's wanted, and lined up with the steps' own rail above it. */
+.steps__steer {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 4px 3px;
+  padding-left: 14px;
+}
+/* The follow up pill rides the reply's own footer — the line that fades in under a finished answer,
+   first in it, before the receipt. So it comes in with that line: a reply that has ended shows its
+   answer, not a button, and a hover (or a tab to it) brings the way to go on with the numbers. */
+.msg__meta .steps__steer--reply {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.msg:hover .msg__meta .steps__steer--reply,
+.msg__meta .steps__steer--reply:focus-within,
+.msg__meta .steps__steer--reply:has(.steps__steer-pill[aria-expanded='true']) {
+  opacity: 1;
+}
+/* Open, the field needs the row: the pill keeps its place and the receipt goes under it. */
+.msg__meta .steps__steer--reply:has(.steps__steer-pill[aria-expanded='true']) {
+  flex: 1 1 100%;
+}
+/* Nothing to hover with: no fade to depend on, so it is simply there. */
+@media (hover: none) {
+  .msg__meta .steps__steer--reply {
+    opacity: 1;
+  }
+}
+.steps__steer-pill {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  transition: var(--transition-ui);
+}
+.steps__steer-pill:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover);
+}
+.steps__steer-note {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
+}
+.steps__steer-note textarea {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+}
+.steps__steer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+/* What the person steered, or asked it to go on with, in the chain: not a tool call, so it doesn't
+   wear a tool's colours. */
+.step--steer,
+.step--followup {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.step--steer .step__icon,
+.step--followup .step__icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.step__said {
+  flex-basis: 100%;
+  padding-left: 26px; /* under the label, past the icon */
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 .step {
   display: flex;
@@ -1805,6 +1901,14 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 4px 8px 8px 14px;
+}
+/* How Enter sends while a reply runs here, when it isn't the plain one: short, quiet, and one click
+   back to the plain one (see the send-mode setting and the composer in Conversation.tsx). */
+.composer__mode {
+  flex: 0 0 auto;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent-soft);
 }
 .composer__hint {
   flex: 1;
@@ -3230,8 +3334,9 @@ body.is-resizing webview {
 .msg__meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   column-gap: 14px;
+  row-gap: 6px;
   margin-top: 4px;
 }
 .msg__meta .receipt,

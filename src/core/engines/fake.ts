@@ -49,6 +49,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
+      } else if (/carries on from your last reply|continuação da sua última resposta/i.test(turn.prompt)) {
+        // A follow up: the reply goes on from the one before instead of starting again, and says so,
+        // so a frame can show the same row carrying on rather than a second reply beside it. Read from
+        // the whole prompt: when the session went on, this is the only block it got.
+        const direction = /(?:The direction now|A direção de agora): ([^\n]+)/is.exec(turn.prompt)?.[1]?.trim() ?? ''
+        reply = L(`Segui dali, sem refazer o que já estava pronto: ${direction}`, `I went on from there, without redoing what was already done: ${direction}`)
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
@@ -127,6 +133,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
           'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
         )
+      } else if (turn.mcpUrl && /sem pressa com a skill `([\w-]+)`/i.test(last)) {
+        // A run that is still working when the person steers it: a step, a pause long enough to write
+        // in (TUCANO_FAKE_HOLD_MS), then a second call, which is where the steer is handed over. Only
+        // the fake engine holds: it is how the steer pill can be shown at all (screens-steer-pill.mjs).
+        const [, nome] = /sem pressa com a skill `([\w-]+)`/i.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        reply = L('Segui a orientação e terminei.', 'I followed the steer and finished.')
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`

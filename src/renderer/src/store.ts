@@ -39,6 +39,7 @@ import {
   delegating,
   type Routine,
   type RoutineInput,
+  type SendMode,
   type Settings,
   type SetupEngine,
   type SetupState,
@@ -953,11 +954,11 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: SendMode): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
@@ -978,6 +979,8 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+export const followUpRun = (messageId: string, text: string): void =>
+  void fire(L('Não consegui seguir com essa resposta.', "I couldn't go on from that reply."), 'followUpRun', { messageId, text })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })

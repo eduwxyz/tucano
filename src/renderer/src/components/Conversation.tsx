@@ -49,9 +49,11 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  followUpRun,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  updateSettings,
   typing,
   setTab,
   stopRun,
@@ -68,6 +70,7 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
+  type SendMode,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -86,7 +89,7 @@ import { canEditChannel,
   teamMode,
   type Person
 } from '../store'
-import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -503,7 +506,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             <span className="msg__time">{time(saidAt(message))}</span>
           </div>
         )}
-        {message.run && <RunSteps message={message} />}
+        {message.run && <RunBlock message={message} />}
         {text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
@@ -519,6 +522,20 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
               <ArtifactCard key={a.id} id={a.id} />
             ))}
           </div>
+        )}
+        {/* A prompt of mine waiting its turn behind the reply above (the mode on the message, runs.ts):
+            it says so until its own reply starts, and then the mark goes. */}
+        {message.sendMode === 'queue' && (
+          <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
+            {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
+          </span>
+        )}
+        {/* A prompt handed into the reply above, which reads it between two tool calls (runs.ts). It's
+            said here, so a message that gets no reply of its own never looks lost. */}
+        {message.sendMode === 'steer' && (
+          <span className="tag msg__queued" title={L('A resposta acima leu isto no meio do trabalho dela', 'The reply above read this in the middle of its work')}>
+            {L('Entregue à resposta acima', 'Handed to the reply above')}
+          </span>
         )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
@@ -575,9 +592,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
-        {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
+        {/* The line under a finished reply, the one that fades in when you hover it: the way to go on
+            from this answer first, then the receipt and the way to keep it in the wiki. One footer, one
+            line — the pill belongs to the reply's own numbers, not to the chain that led to it.
+            A request and what came back from one are posted, not replies: nothing there to keep in the
+            wiki, so that half of the line waits for the receipt. */}
+        {(message.run?.status === 'done' || message.run?.receipt) && (
           <div className="msg__meta">
+            {message.run?.status === 'done' && <FollowUpPill message={message} />}
             {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
@@ -1341,9 +1363,120 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   )
 }
 
+// One reply's run as the conversation draws it: the line of steps it took, and, under that box and
+// outside it, whatever the reply offers while it still works. Anything the run says about itself —
+// its steps, and the thinking it streams under them — stays above that, never under it.
+export function RunBlock({ message }: { message: Message }): ReactNode {
+  return (
+    <>
+      <RunSteps message={message} />
+      {/* At the bottom of the chain and outside its box, the same pill either way: steer what's
+          running, go on from what ended. The thinking streams inside the box, above this. */}
+      {message.run?.status === 'working' && <SteerPill message={message} />}
+    </>
+  )
+}
+
+// A steer, from the bottom of the chain: while the agent works, the person can say how to go on
+// without stopping it. What they write isn't a message of its own — it's handed to the reply at its
+// next tool call, and the chain says so, in the person's words (send mode `steer`, src/core/runs.ts).
+// With the reply already over, the same text is an ordinary prompt: nothing here holds it back.
+function SteerPill({ message }: { message: Message }): ReactNode {
+  const steer = (text: string): void => sendMessage(message.conversationId, text, [], message.threadId, [], 'steer')
+  return (
+    <PillPrompt
+      icon="pointer"
+      label={L('Orientar', 'Steer')}
+      title={L('Dizer como seguir, sem parar o que ele está fazendo', 'Say how to go on, without stopping what it is doing')}
+      aria={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+      placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+      onSend={steer}
+    />
+  )
+}
+
+// A follow up, under a reply that has ended: the same pill, the same field, and the instruction stays
+// in this reply — it goes on in the same row, its text and steps kept, instead of turning into another
+// message in the conversation (src/core/runs.ts, `followUp`). Under the answer, never above it: the
+// chain that led to it ends at the text, and what goes on from there comes after it.
+export function FollowUpPill({ message }: { message: Message }): ReactNode {
+  if (message.run?.status !== 'done') return null
+  return (
+    <PillPrompt
+      icon="down"
+      place="reply"
+      label={L('Seguir', 'Follow Up')}
+      title={L('Pedir mais desta resposta, na mesma sessão', 'Ask more of this reply, in the same session')}
+      aria={L('O que mais esta resposta deve fazer', 'What more this reply should do')}
+      placeholder={L('O que mais?', 'What next?')}
+      onSend={(text) => followUpRun(message.id, text)}
+    />
+  )
+}
+
+// The one pill both use, under the steps: quiet until it's wanted, then a field and the send asleep
+// until there's something to send. Ctrl+Enter sends, Escape closes and sends nothing.
+function PillPrompt(p: { icon: IconName; label: string; title: string; aria: string; placeholder: string; place?: 'rail' | 'reply'; onSend: (text: string) => void }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const typed = note.trim()
+  const close = (): void => {
+    setOpen(false)
+    setNote('')
+  }
+  const go = (text: string): void => {
+    p.onSend(text)
+    close()
+  }
+  return (
+    <div className={`steps__steer steps__steer--${p.icon}${p.place === 'reply' ? ' steps__steer--reply' : ''}`}>
+      <button className="steps__steer-pill" aria-expanded={open} title={p.title} onClick={() => (open ? close() : setOpen(true))}>
+        <Icon name={p.icon} size={11} /> {p.label}
+      </button>
+      {open && (
+        <div className="steps__steer-note">
+          <textarea
+            aria-label={p.aria}
+            placeholder={p.placeholder}
+            rows={2}
+            value={note}
+            autoFocus
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) go(typed)
+              if (e.key === 'Escape') close()
+            }}
+          />
+          <div className="steps__steer-row">
+            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => go(typed)}>
+              {p.label}
+            </button>
+            <button className="link" onClick={close}>
+              {L('Cancelar', 'Cancel')}
+            </button>
+            <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
+  // A steer, or a follow up, in the chain isn't a tool call: it's what the person wrote — while the
+  // reply ran, or to make it go on — and it reads as their words under what it changed.
+  if (step.kind === 'steer' || step.kind === 'followup')
+    return (
+      <li className={`step step--${step.kind}`}>
+        <span className="step__icon">
+          <Icon name={step.kind === 'steer' ? 'pointer' : 'down'} size={12} />
+        </span>
+        <span className="step__label">{step.label}</span>
+        {step.detail && <span className="step__said">{step.detail}</span>}
+      </li>
+    )
   return (
     <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
       <span className="step__icon">
@@ -2203,14 +2336,18 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
-  const submit = (): void => {
+  const sendMode = useStore((st) => st.settings?.sendMode ?? 'parallel')
+  // How this one joins a reply that's already running here: the setting says what Enter does, and
+  // the modifier keys say the rest (see `send` in src/core/runs.ts). Nothing running: all the same.
+  const submit = (mode?: SendMode): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data }))
+      images.filter(isFile).map(({ name, data }) => ({ name, data })),
+      mode ?? sendMode
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2316,10 +2453,13 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
                 if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
                 if (e.key === 'Escape') return setMention(null)
               }
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                submit()
-              }
+              // Enter does what the setting says; a modifier picks a mode whatever the setting says. Shift+Enter
+              // alone is the line break it has always been, so the queue sits on Ctrl+Enter (Cmd+Enter on a Mac).
+              if (e.key === 'Enter' && e.nativeEvent.isComposing) return
+              if (e.key !== 'Enter') return
+              if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return // a new line, as it always was
+              e.preventDefault()
+              submit(e.altKey ? (e.shiftKey ? 'interrupt' : 'steer') : e.ctrlKey || e.metaKey ? 'queue' : undefined)
             }}
           />
         </div>
@@ -2341,12 +2481,24 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
             {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
+          {sendMode !== 'parallel' ? (
+            <button
+              className="btn btn--sm btn--ghost composer__mode"
+              onClick={() => updateSettings({ sendMode: 'parallel' })}
+              title={L(
+                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Ctrl+Enter põe na fila, Alt+Enter entrega, Shift+Alt+Enter interrompe, Shift+Enter quebra a linha).',
+                'While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Ctrl+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts, Shift+Enter breaks the line).'
+              )}
+            >
+              {sendMode === 'queue' ? L('Enter: na fila', 'Enter: queued') : sendMode === 'steer' ? L('Enter: entregue à resposta', 'Enter: into the reply') : L('Enter: interrompe', 'Enter: interrupts')}
+            </button>
+          ) : null}
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={() => submit()} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>
