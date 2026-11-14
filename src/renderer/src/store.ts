@@ -535,7 +535,8 @@ export function useLiveThoughtState(id: string, every = 0): RetainedThought | un
   )
   // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
   // frame) has none, and asking for them there would throw instead of drawing the steps.
-  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)}
+  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)
+}
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
 export function useLiveText(m: Message, every = 0): string {
