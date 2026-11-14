@@ -3269,6 +3269,23 @@ body.is-resizing webview {
   top: 6px;
   right: calc(100% + 6px);
 }
+/* A run taller than the screen: the button rides the top of the run while it scrolls, and leaves with
+   its last line, instead of sitting at the run's start and scrolling away. The pin takes no room (it
+   is zero-height and sticky), so the first step sits where it did; the button keeps its old offsets,
+   measured from the pin and pushed back into the message's own 28px right padding (-24px = 28 - 4). */
+/* No margin on the wrapper: the steps' own top margin still collapses through the zero-height pin, so
+   the gap above the first step is the 1px it collapsed to before there was a wrapper at all. */
+.msg__anchor-pin {
+  position: sticky;
+  top: 0;
+  height: 0;
+  z-index: 1;
+}
+.msg__anchor-pin .msg__reply {
+  position: absolute;
+  top: 4px;
+  right: -24px;
+}
 .msg:hover .msg__reply,
 .msg__reply:focus-visible {
   opacity: 1;
