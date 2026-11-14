@@ -468,6 +468,7 @@ export interface Settings {
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
+  skillsDir?: string // an extra folder of skills (<category>/<name>/SKILL.md), like Hermes keeps them; TUCANO_SKILLS_DIR wins; empty when unset
   defaultLimit: number
   approvalTtlHours: number
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
@@ -1093,6 +1094,10 @@ export interface LocalSkill {
   origin: string // "Claude Code", "Plugin <name>", "Codex"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
+  category?: string // the frontmatter's, or the folder it sits in (<category>/<name>/SKILL.md)
+  version?: string // top-level "version", or metadata.version
+  tags?: string[] // metadata.hermes.tags, e.g. "family:ops"
+  allowedTools?: string // the frontmatter's allowed-tools
 }
 
 export interface SkillVersion {

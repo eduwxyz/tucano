@@ -2583,6 +2583,9 @@ export function SettingsPage(): ReactNode {
             <Field label={L('Contexto', 'Context')} hint={L('Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.', 'Goes into every conversation of every agent: who you are, what you do, what matters now and what never to do.')}>
               <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
             </Field>
+            <Field label={L('Pasta extra de skills', 'Extra skills folder')} hint={L('Opcional: uma pasta com <categoria>/<nome>/SKILL.md (como o Hermes guarda). Vazio: só as skills do Claude Code e do Codex. A variável TUCANO_SKILLS_DIR vale mais.', 'Optional: a folder with <category>/<name>/SKILL.md (like Hermes keeps them). Empty: only the Claude Code and Codex skills. The TUCANO_SKILLS_DIR variable wins.')}>
+              <input value={settings.skillsDir ?? ''} placeholder="~/.hermes/skills" onChange={(e) => updateSettings({ skillsDir: e.target.value })} />
+            </Field>
             <div className="row">
               {/* What the person already set (the short sidebar, the tour) stays as it was. */}
               <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { ...settings.onboarding, done: false } })}>
