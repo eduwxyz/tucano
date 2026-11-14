@@ -2,10 +2,15 @@ import { L, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { parseQuestionsText } from '../../../shared/questions'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
+  dismissQuestion,
   navigate,
+  questionsHistory,
   newAgentDraft,
   openDm,
   refreshEngines,
@@ -54,6 +59,7 @@ import {
   MODELS,
   type Agent,
   type AgentColor,
+  type AskEntry,
   type Message,
   type Connector,
   type ConnectorAuth,
@@ -1213,6 +1219,186 @@ export function Field({ label, hint, error, group, children }: { label: string; 
   )
 }
 
+// ---------- Asks ----------
+
+// Every agent's question to the person, in one place, the way Approvals gathers the approvals:
+// without it a question only exists as a card inside the reply that made it, which in a long
+// session is pages up (see the placement issue) or on a DM nobody opened.
+export function AsksPage(): ReactNode {
+  const inbox = useStore((s) => s.inbox)
+  const conversations = useStore((s) => s.conversations)
+  const agents = useStore((s) => s.agents)
+  // Which one is being dismissed, and the two steps it takes: an ask left unanswered is gone for
+  // good, and the only list that showed it was this one.
+  const [dropping, setDropping] = useState<string | null>(null)
+  // The one history row whose text is open. One at a time: the list is for scanning, the text for
+  // reading the one you picked.
+  const [opened, setOpened] = useState<string | null>(null)
+  const [past, setPast] = useState<AskEntry[]>([])
+  const questions = inbox.questions
+  // What left the list: answered and closed asks, newest first. Reloaded when the open ones change,
+  // which is exactly when one of them moved down here.
+  const open = questions.length
+  useEffect(() => {
+    let live = true
+    questionsHistory(30).then(
+      (rows) => live && setPast(rows),
+      () => {}
+    )
+    return () => {
+      live = false
+    }
+  }, [open])
+  const where = (conversationId: string | undefined, agentId: string): string => {
+    const conv = conversations.find((c) => c.id === conversationId)
+    const who = agents.find((x) => x.id === agentId)?.name
+    if (!conv) return L('numa conversa que você não vê', "in a conversation you don't see")
+    if (conv.kind === 'channel') return L(`em #${conv.name}`, `in #${conv.name}`)
+    return who ? L(`na sua DM com ${who}`, `in your DM with ${who}`) : L('na sua DM', 'in your DM')
+  }
+
+  return (
+    <Page
+      title={L('Perguntas', 'Asks')}
+      subtitle={L('O que os agentes perguntaram a você e ainda espera resposta, de todos eles, num lugar só.', 'What the agents asked you and is still waiting for an answer, from all of them, in one place.')}
+    >
+      {questions.length === 0 ? (
+        <div className="empty empty--rest">
+          <SleepingToucan />
+          <p>{L('Nenhuma pergunta esperando.', 'No questions waiting.')}</p>
+          <p className="muted">{L('Quando um agente precisar de uma decisão sua, a pergunta aparece aqui e na conversa.', 'When an agent needs a decision from you, the question shows up here and in the conversation.')}</p>
+        </div>
+      ) : (
+        <div className="stack-list">
+          {questions.map((q) => (
+            <div key={q.id}>
+              <div className="row row--between small muted list-meta">
+                <span>
+                  {where(q.conversationId, q.agentId)} · {time(q.createdAt)}
+                </span>
+                <span className="row">
+                  {q.conversationId && conversations.some((c) => c.id === q.conversationId) && (
+                    <button className="link" onClick={() => navigate({ kind: 'conversation', id: q.conversationId! })}>
+                      {L('Ver na conversa', 'See in the conversation')}
+                    </button>
+                  )}
+                  {dropping === q.id ? (
+                    <>
+                      <span>{L('Deixar sem resposta?', 'Leave it unanswered?')}</span>
+                      <button className="link" onClick={() => (setDropping(null), dismissQuestion(q.id))}>
+                        {L('Sim, dispensar', 'Yes, dismiss')}
+                      </button>
+                      <button className="link" onClick={() => setDropping(null)}>
+                        {L('Manter', 'Keep it')}
+                      </button>
+                    </>
+                  ) : (
+                    <button className="link" onClick={() => setDropping(q.id)} title={L('Some perguntas não precisam de resposta: esta some daqui, fecha, e o agente segue sem ela.', "Some questions don't need an answer: this one leaves the page, closes, and the agent goes on without it.")}>
+                      {L('Dispensar', 'Dismiss')}
+                    </button>
+                  )}
+                </span>
+              </div>
+              <QuestionCard
+                id={q.id}
+                agentName={agents.find((x) => x.id === q.agentId)?.name}
+                askedTo={q.askedTo}
+                question={q.text}
+                {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})}
+                answered={false}
+                inbox
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      {past.length > 0 && (
+        <>
+          <h3 className="section-title">{L('Histórico', 'History')}</h3>
+          <div className="table">
+            {past.map((q) => (
+              <AskedRow
+                key={q.id}
+                q={q}
+                place={where(q.conversationId, q.agentId)}
+                open={opened === q.id}
+                onToggle={() => setOpened(opened === q.id ? null : q.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </Page>
+  )
+}
+
+// One answered or closed ask, in the same table the approvals keep their history in: the agent, the
+// ask flattened to a single line, how it ended, when. Clicking the row opens the ask itself, which
+// is stored as numbered lines whose options sit behind pipes and reads as a wall of text unshaped.
+const askSummary = (text: string): string =>
+  parseQuestionsText(text)
+    .map((q) => q.question)
+    .join(' · ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+// The same text as markdown: one bullet per question, and one under it per option it offered.
+const askMarkdown = (text: string): string =>
+  parseQuestionsText(text)
+    .map((q) =>
+      q.options && q.options.length > 0 ? [`- ${q.question}`, ...q.options.map((o) => `  - ${o.label}`)].join('\n') : `- ${q.question}`
+    )
+    .join('\n')
+
+export function AskedRow({
+  q,
+  place,
+  open,
+  onToggle
+}: {
+  q: AskEntry
+  place: string
+  open: boolean
+  onToggle: () => void
+}): ReactNode {
+  const agent = useStore((s) => s.agents.find((x) => x.id === q.agentId))
+  const you = useStore((s) => s.you)
+  const people = useStore((s) => s.people)
+  const by = q.answeredBy ? people.find((p) => p.id === q.answeredBy) : undefined
+  const ended =
+    q.state !== 'answered'
+      ? L('sem resposta', 'no answer')
+      : q.answeredBy === you
+        ? L('por você', 'by you')
+        : by
+          ? L(`por ${by.name}`, `by ${by.name}`)
+          : L('respondida', 'answered')
+  const line = askSummary(q.text)
+  return (
+    <div className="ask-row">
+      <button type="button" className="table__row table__row--btn ask-row__head" onClick={onToggle} aria-expanded={open}>
+        {agent && <AgentAvatar agent={agent} size={22} />}
+        <span className="ask-row__text" title={line}>
+          {line}
+        </span>
+        <span className={`tag ask-row__state ${q.state === 'answered' ? 'tag--ok' : ''}`}>{ended}</span>
+        <span className="muted small ask-row__when">{time(q.answeredAt ?? q.createdAt)}</span>
+        <span className={`ask-row__chev ${open ? 'is-open' : ''}`}>
+          <Icon name="chevron" size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="ask-row__body">
+          <Markdown remarkPlugins={[remarkGfm]}>{askMarkdown(q.text)}</Markdown>
+          <span className="hint">
+            {agent?.name ?? L('O agente', 'The agent')} · {place} · {time(q.createdAt)}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------- Approvals ----------
 
 export function ApprovalsPage(): ReactNode {
@@ -1395,9 +1581,13 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
       <span className="history-row__what">
         {a.connectorId === COMPUTADOR ? shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || toolWords(a.tool) : toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
       </span>
-      {a.outcome && <span className="muted small history-row__outcome" title={a.outcome}>{a.outcome}</span>}
-      <span className={`tag ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
-      <span className="muted small">{a.decidedAt ? time(a.decidedAt) : ''}</span>
+      {/* Always a cell, empty when the approval reported nothing, so every row's columns start at
+          the same place. */}
+      <span className="muted small history-row__outcome" title={a.outcome ?? ''}>
+        {a.outcome ?? ''}
+      </span>
+      <span className={`tag history-row__state ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
+      <span className="muted small history-row__when">{a.decidedAt ? time(a.decidedAt) : ''}</span>
     </div>
   )
 }
@@ -2625,6 +2815,27 @@ export function SettingsPage(): ReactNode {
                 <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Opens the list of what the agent is doing under its reply. Off, only the line with what it’s doing now stays; a click on it opens the steps. It changes only for you.')}</p>
               </div>
               <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
+          <Card title={L('Barra lateral', 'Sidebar')}>
+            <div className="key-row">
+              <Icon name="ask" />
+              <div className="grow">
+                <strong>{L('Esconder Perguntas quando não há nenhuma', 'Hide empty Asks')}</strong>
+                <p className="muted small">{L('A entrada Perguntas sai da barra lateral enquanto nenhum agente te perguntou nada, e volta na primeira pergunta. Desligado, ela fica sempre lá.', 'Show Asks only when an agent has a question for you.')}</p>
+              </div>
+              <Toggle on={settings.hideEmptyAsks === true} onChange={(v) => updateSettings({ hideEmptyAsks: v })} />
+            </div>
+            <div className="key-row">
+              <Icon name="shield" />
+              <div className="grow">
+                <strong>{L('Esconder Aprovações quando não há nenhuma', 'Hide empty Approvals')}</strong>
+                <p className="muted small">{L(team ? 'A entrada Pra você sai da barra lateral enquanto nada espera por você, e volta na primeira aprovação ou pergunta. Desligado, ela fica sempre lá.' : 'A entrada Aprovações sai da barra lateral enquanto nada espera por você, e volta na primeira aprovação. Desligado, ela fica sempre lá.', team ? 'Show For you only when a question or approval needs you.' : 'Show Approvals only when an action needs your approval.')}</p>
+              </div>
+              <Toggle on={settings.hideEmptyApprovals === true} onChange={(v) => updateSettings({ hideEmptyApprovals: v })} />
             </div>
           </Card>
         )}

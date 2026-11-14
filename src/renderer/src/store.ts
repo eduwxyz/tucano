@@ -8,6 +8,7 @@ import type { AppProvider } from '../../shared/connector-catalog'
 import {
   asSaid,
   type Account,
+  type AskEntry,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
   MODELS,
@@ -69,6 +70,7 @@ export type View =
   | { kind: 'agent'; id: string }
   | { kind: 'new-agent'; draft?: Agent; fromMessage?: string } // a draft from a Tuca card, to edit before creating
   | { kind: 'tuca'; from?: View } // the builder screen: a new agent with the Tuca; closing goes back to `from`
+  | { kind: 'asks' }
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
@@ -1088,7 +1090,11 @@ export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => 
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)
 export const answerQuestion = (id: string, text: string): Promise<void> => call('answerQuestion', { id, text })
+// The Asks page's History: answered and closed questions, newest first.
+export const questionsHistory = (limit?: number): Promise<AskEntry[]> => call('questionsHistory', limit ? { limit } : {})
 export const confirmQuestion = (id: string, ok: boolean): void => void fire(L('Não consegui responder.', "I couldn't answer."), 'confirmQuestion', { id, ok })
+// Leaving an ask unanswered on purpose: it closes, and the reply goes on instead of waiting for good.
+export const dismissQuestion = (id: string): void => void fire(L('Não consegui dispensar a pergunta.', "I couldn't dismiss the question."), 'dismissQuestion', { id })
 export const watchRoutine = (id: string, on: boolean): void => void fire(L('Não consegui mudar o aviso.', "I couldn't change the notice."), 'watchRoutine', { id, on })
 // The link an invite's code makes: this page's address (a server's) with ?invite=.
 export const inviteLink = (code: string): string => `${window.location.origin}/?invite=${encodeURIComponent(code)}`

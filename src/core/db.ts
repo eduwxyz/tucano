@@ -2028,6 +2028,13 @@ export class Db {
     return (this.db.prepare("SELECT * FROM questions WHERE state = 'answered' AND answered_at >= ? ORDER BY answered_at DESC").all(since) as Row[]).map((r) => this.toQuestion(r))
   }
 
+  // Answered and closed questions, newest first: the Asks page's History, which is what the open
+  // list drops off. A closed one has no `answered_at` (nobody answered it), so it sorts by when it
+  // was asked.
+  pastQuestions(limit = 50): Question[] {
+    return (this.db.prepare("SELECT * FROM questions WHERE state != 'open' ORDER BY COALESCE(answered_at, created_at) DESC LIMIT ?").all(limit) as Row[]).map((r) => this.toQuestion(r))
+  }
+
   openQuestions(): Question[] {
     return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toQuestion(r))
   }

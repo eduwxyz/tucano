@@ -160,6 +160,13 @@ export function Sidebar(): ReactNode {
   const parts = useSidebarParts()
   const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
   const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const asks = useStore((s) => s.inbox.questions.length)
+  // Out of the sidebar while nothing waits in them, when that's asked for; the one I'm looking at stays,
+  // so ticking the setting never takes away the page under my feet.
+  const onAsks = useStore((s) => s.view?.kind === 'asks')
+  const onApprovals = useStore((s) => s.view?.kind === 'approvals')
+  const showAsks = !settings.hideEmptyAsks || asks > 0 || onAsks
+  const showApprovals = !settings.hideEmptyApprovals || pending > 0 || onApprovals
   const suggestions = useStore((s) => pendingMemories(s).length)
   const proposals = useStore((s) => s.skills.filter((k) => k.state === 'pending').length)
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
@@ -339,7 +346,8 @@ export function Sidebar(): ReactNode {
       )}
       <nav className="sidebar__scroll">
         <TucaItem />
-        <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
+        {showAsks && <NavItem view={{ kind: 'asks' }} icon="ask" label={L('Perguntas', 'Asks')} badge={asks} />}
+        {showApprovals && <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />}
         {(parts.shows('memory') || suggestions > 0) && <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} />}
         {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
         {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}

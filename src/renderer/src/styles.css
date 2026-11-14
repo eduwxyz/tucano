@@ -2207,17 +2207,96 @@ h3 {
   white-space: nowrap;
 }
 .history-row__outcome {
-  flex: 0 1 auto;
+  /* The action's own line ("Delete · Computer"): a reserved column that wraps onto a second line
+     rather than being cut, and gives the width back on a narrow window. */
+  flex: 0 1 160px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 32%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .table > .table__row {
   animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
 .table__row--btn:hover {
   background: var(--hover);
+}
+
+/* The Asks history: a row of the approvals table whose text is one clipped line, and whose click
+   opens the ask itself under it. */
+.ask-row__head {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  cursor: pointer;
+}
+/* Each column keeps its own height and sits on the row's middle line: a wrapping date made the row
+   three lines tall, which read as a table whose cells were not lined up. */
+.ask-row__head > * {
+  flex: 0 0 auto;
+}
+.ask-row__when {
+  white-space: nowrap;
+}
+.ask-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-row__chev {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.ask-row__chev.is-open {
+  transform: rotate(90deg);
+}
+.ask-row__body {
+  padding: 2px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ask-row__body > div > :first-child {
+  margin-top: 0;
+}
+.ask-row__body > div > :last-child {
+  margin-bottom: 0;
+}
+.ask-row__body .hint {
+  margin-top: 8px;
+}
+.ask-row:last-child .ask-row__head,
+.ask-row:last-child .ask-row__body {
+  border-bottom: 0;
+}
+
+/* Both history tables give the state pill and the date the same reserved width, centred, so the
+   columns line up from row to row instead of each row drifting by the width of its own label. */
+.history-row,
+.ask-row__head {
+  --history-state: 96px;
+  --history-when: 104px;
+}
+.history-row__state,
+.ask-row__state {
+  flex: 0 0 var(--history-state);
+  width: var(--history-state);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.history-row__when,
+.ask-row__when {
+  flex: 0 0 var(--history-when);
+  width: var(--history-when);
+  text-align: center;
+  white-space: nowrap;
 }
 .connector {
   padding: 0;

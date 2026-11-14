@@ -373,10 +373,10 @@ describe('the sidebar and the missions', () => {
   const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: 'Agenda', color: 'violet', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
   const labels = (): string[] => [...document.querySelectorAll('.nav-item__label')].map((x) => x.textContent ?? '')
 
-  it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions, the settings', async () => {
+  it('starts short on a new install: the Tuca, the questions, what waits on you, the channel, the agent, the missions, the settings', async () => {
     fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia', 'Configurações'])
+    expect(labels()).toEqual(['Tuca', 'Perguntas', 'Aprovações', 'geral', 'Lia', 'Configurações'])
     expect(text()).toContain('Missões')
     expect(text()).toContain('Próxima: fale com Lia')
   })

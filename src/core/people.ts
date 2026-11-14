@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
-import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
+import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf, type AskEntry } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
@@ -467,6 +467,17 @@ export class People {
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)
     const proposals = isAdmin(person) ? this.forwardedProposals() : []
     return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}) }
+  }
+
+  // The Asks page's history: answered and closed questions, newest first, from the conversations
+  // this person can see. A question from a DM that isn't theirs comes without where it was asked.
+  history(person: Person, limit = 50): AskEntry[] {
+    const shown = (q: Question): AskEntry => {
+      if (this.canSeeConversation(person, this.conversationOf(q.conversationId))) return q
+      const { conversationId: _c, threadId: _t, ...only } = q
+      return only
+    }
+    return this.db.pastQuestions(limit).filter((q) => this.canSeeConversation(person, this.conversationOf(q.conversationId))).map(shown)
   }
 
   // The cards members sent to the admins that no one has applied or dismissed yet (a reply's cards
