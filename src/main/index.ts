@@ -623,6 +623,8 @@ function showWindow(conversationId?: string, page?: 'skills', threadId?: string)
 // New versions: the window shows when one is ready, and restarting puts it in.
 const updates = new Updates((state) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update', state)
+  // With a server on screen, its page is what the person sees: it says a version is ready too.
+  servers.tell('server:update', state)
 })
 ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
 ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
@@ -641,6 +643,31 @@ ipcMain.on('update:install', (e) => {
     if (answer !== 0) return
   }
   updates.install()
+})
+// The same from a server's page (src/preload/server.ts), which shows the app's updates while it is
+// on screen. It reads the state and asks for a look; restarting is always asked of the person
+// here, so a server can't restart this app on its own word.
+const fromServer = (e: IpcMainEvent | IpcMainInvokeEvent): boolean => {
+  const frame = e.senderFrame
+  return !!frame && frame === e.sender.mainFrame && !!servers.serverOf(e.sender, frame.url)
+}
+ipcMain.handle('server:update-state', (e) => (fromServer(e) ? updates.get() : null))
+ipcMain.on('server:update-check', (e) => fromServer(e) && updates.check())
+ipcMain.on('server:update-install', (e) => {
+  const state = updates.get()
+  if (!fromServer(e) || state.status !== 'ready' || !mainWindow || mainWindow.isDestroyed()) return
+  const answer = dialog.showMessageBoxSync(mainWindow, {
+    type: 'question',
+    buttons: [L('Reiniciar agora', 'Restart now'), L('Depois', 'Later')],
+    defaultId: 0,
+    cancelId: 1,
+    message: L(`Reiniciar pra instalar o Tucano ${state.next ?? ''}?`.replace(' ?', '?'), `Restart to install Tucano ${state.next ?? ''}?`.replace(' ?', '?')),
+    detail:
+      awakeBlocker !== null
+        ? L('Um agente deste computador ainda está trabalhando: reiniciar agora interrompe o que ele está fazendo. Se esperar, a atualização entra quando você fechar o Tucano.', 'An agent on this computer is still working: restarting now stops what it is doing. If you wait, the update goes in when you quit Tucano.')
+        : L('O app fecha e abre de novo na versão nova. O servidor continua rodando.', 'The app closes and opens again on the new version. The server keeps running.')
+  })
+  if (answer === 0) updates.install()
 })
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
