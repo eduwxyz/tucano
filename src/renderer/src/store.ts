@@ -819,7 +819,7 @@ export const loginEngine = async (engine: keyof Settings['engines']): Promise<{ 
   if (r.screen) showLogin(r.screen)
   return r
 }
-// More logins of Claude Code and Codex, each signed into in a terminal.
+// More logins of Claude Code, Codex and Grok, each signed into in a terminal.
 export const addAccount = (engine: AccountEngine, name: string): Promise<Account> => call('addAccount', { engine, name })
 export const loginAccount = async (id: string): Promise<{ opened: boolean; command: string }> => {
   const r = await call('loginAccount', { id, screen: true })
@@ -841,7 +841,7 @@ export const useLoginShown = (): LoginScreen | null =>
 export const loginScreen = (): Promise<LoginScreen | null> => call('loginScreen')
 export const loginInput = (id: string, input: { text?: string; key?: LoginKey; enter?: boolean }): Promise<LoginScreen | null> => call('loginInput', { id, ...input })
 export const stopLogin = (id: string): void => void call('stopLogin', { id }).catch(() => {})
-export const removeAccount = (id: string): Promise<void> => call('removeAccount', { id })
+export const removeAccount = (id: string): Promise<{ folder: boolean }> => call('removeAccount', { id })
 export const installEngine = (engine: keyof Settings['engines']): Promise<{ opened: boolean; command: string; needsNode?: boolean }> => call('installEngine', { engine })
 // Codex or Claude Code with no terminal (the introduction): the CLI downloaded, then its own sign-in in the browser.
 export const setupEngine = (engine: SetupEngine): Promise<SetupState> => call('setupEngine', { engine })

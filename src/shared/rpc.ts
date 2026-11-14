@@ -77,7 +77,7 @@ export interface Api {
   stopLogin(p: { id: string }): void
   addAccount(p: { engine: AccountEngine; name: string }): Account
   loginAccount(p: { id: string; screen?: boolean }): { opened: boolean; command: string; screen?: LoginScreen }
-  removeAccount(p: { id: string }): void
+  removeAccount(p: { id: string }): { folder: boolean } // folder: its login left with it now; false: at the next launch
   installEngine(p: { engine: EngineId }): { opened: boolean; command: string; needsNode?: boolean } // needsNode: an npm install with no npm here
   setupEngine(p: { engine: EngineId }): SetupState // Codex or Claude Code with no terminal: downloaded, then the CLI's own sign-in in the browser
   engineSetupState(): SetupState | null

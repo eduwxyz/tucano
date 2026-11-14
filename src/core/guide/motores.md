@@ -19,7 +19,7 @@ Cada harness pode rodar de três jeitos, conforme você configurou: no **plano**
 Na página do agente, em **Onde roda e modelo**, você escolhe o motor e o modelo da lista dele. Se o modelo não aparece, use **Outro modelo…** e digite o nome exato. Dá pra ter um **Modelo reserva**, usado quando o principal bate no limite da assinatura.
 
 ## Contas extras
-Pro Claude Code e o Codex dá pra ter mais de um login (ex.: "Trabalho"). Em **Configurações › Modelos** › **Contas**, **Adicionar e entrar**. Cada agente escolhe a conta em **Conta**. Uma conta que ainda não entrou deixa o agente sem responder até você entrar nela.
+Pro Claude Code, pro Codex e pro Grok dá pra ter mais de um login (ex.: "Trabalho"). Em **Configurações › Modelos** › **Contas**, **Adicionar e entrar**. Cada agente escolhe a conta em **Conta**. Uma conta que ainda não entrou deixa o agente sem responder até você entrar nela. No Grok, a conta é o `auth.json` da pasta dela: o login do grok.com feito ali dentro, e a chave `XAI_API_KEY` do ambiente não entra no lugar dele.
 
 ## O roteador
 Em **Configurações › Modelos** › **Roteador** (Router), o modelo pequeno que lê a conversa e decide quem responde nos canais. Prefira um rápido. Uma opção é o Jev, da TypeSafe: decide em menos de 1 segundo, mas manda as últimas 10 mensagens do canal pra TypeSafe e precisa da **Chave do TypeSafe**. Se ele falhar, o Haiku decide.

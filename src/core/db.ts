@@ -594,7 +594,7 @@ export class Db {
 
   // Snapshot the live DB, then sanitize only the copy. Publish it only after
   // VACUUM removes deleted history from its pages; no engine/browser files copy.
-  // The extra Claude Code and Codex logins stay too (their folders, and the Mac's keychain,
+  // The extra Claude Code, Codex and Grok logins stay too (their folders, and the Mac's keychain,
   // are the source's): the copy's agents use the usual login.
   // `wikiDir`: the source's wiki folder, which the copy uses too when the wiki comes along.
   duplicateTo(file: string, name: string, parts: WorkspaceParts = ALL_PARTS, wikiDir?: string): void {
