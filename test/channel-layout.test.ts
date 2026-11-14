@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addGroup, arrange, EMPTY_LAYOUT, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../src/shared/channel-layout'
+import { addGroup, arrange, EMPTY_LAYOUT, moveChannel, moveChannelTo, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../src/shared/channel-layout'
 
 const channels = ['a', 'b', 'c', 'd'].map((id) => ({ id }))
 const ids = (l: { id: string }[]): string[] => l.map((c) => c.id)
@@ -54,5 +54,45 @@ describe('moving', () => {
     const g: ChannelLayout = { loose: ['a'], groups: [{ id: 'g', name: 'G', channels: ['b', 'c'] }] }
     expect(renameGroup(g, 'g', 'Novo').groups[0]!.name).toBe('Novo')
     expect(removeGroup(g, 'g')).toEqual({ groups: [], loose: ['a', 'b', 'c'] })
+  })
+})
+
+// The same hold-and-drop the DMs and agents use, read for channels: the value is whatever the row
+// the channel was let go on carries in `data-order-id`.
+describe('moveChannelTo', () => {
+  const layout: ChannelLayout = {
+    loose: ['a'],
+    groups: [
+      { id: 'g1', name: 'One', channels: ['b', 'c'] },
+      { id: 'g2', name: 'Two', channels: ['d'] }
+    ]
+  }
+
+  it('drops a channel before the row it was let go on, inside that row group', () => {
+    const r = moveChannelTo(channels, layout, 'a', 'c')!
+    expect(r.groups[0]!.channels).toEqual(['b', 'a', 'c'])
+    expect(r.loose).toEqual([])
+  })
+
+  it('drops on a loose row and stays loose', () => {
+    const r = moveChannelTo(channels, layout, 'c', 'a')!
+    expect(r.loose).toEqual(['c', 'a'])
+    expect(r.groups[0]!.channels).toEqual(['b'])
+  })
+
+  it('drops on a group name to join it last', () => {
+    const r = moveChannelTo(channels, layout, 'a', 'grp:g2')!
+    expect(r.groups[1]!.channels).toEqual(['d', 'a'])
+    expect(r.loose).toEqual([])
+  })
+
+  it('drops on the end of the loose list, or of a group, to go last there', () => {
+    expect(moveChannelTo(channels, layout, 'c', 'end:loose')!.loose).toEqual(['a', 'c'])
+    expect(moveChannelTo(channels, layout, 'a', 'end:g1')!.groups[0]!.channels).toEqual(['b', 'c', 'a'])
+  })
+
+  it('says nothing changed when the row was let go on itself or on nothing it knows', () => {
+    expect(moveChannelTo(channels, layout, 'a', 'a')).toBeNull()
+    expect(moveChannelTo(channels, layout, 'a', 'whatever')).toBeNull()
   })
 })
