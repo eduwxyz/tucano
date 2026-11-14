@@ -17,7 +17,7 @@ import { proposalFrom, workspaceState } from '../src/core/tuca-help'
 import { screenOf } from '../src/shared/screens'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const linear: Connector = { id: 'c-lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth', status: 'needs_auth', error: 'O Linear pediu pra entrar de novo.', tools: [] }
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: 'Você tria tickets.', modelId: 'sonnet', effort: 'low', limit: 100_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const lia = agent('a1', 'lia', { grants: { 'c-lin': 'read' } })
@@ -33,6 +33,12 @@ const ctx = {
 }
 
 describe("the Tuca's proposals for what exists", () => {
+  it('keeps proposed instructions over the recommendation exactly as provided', () => {
+    const instructions = ` ${'x'.repeat(32_000)} END\n`
+    const result = proposalFrom('propor_ajuste', { agente: 'lia', instrucoes: instructions }, ctx)
+    expect(result.proposal?.kind === 'agent' && result.proposal.changes.instructions).toBe(instructions)
+  })
+
   it('proposes only what changes in an agent, checked like the screens check it', () => {
     const r = proposalFrom('propor_ajuste', { agente: '@lia', modelo: 'haiku', esforco: 'low', instrucoes: 'Você tria tickets.', conectores: [{ conector: 'linear', nivel: 'escrita' }], limite: 200000, motivo: 'Mais barato' }, ctx)
     expect(r.proposal).toEqual({ kind: 'agent', agentId: 'a1', changes: { modelId: 'haiku', grants: { 'c-lin': 'read_write' }, limit: 200000 }, before: { modelId: 'sonnet', grants: { 'c-lin': 'read' }, limit: 100000 }, reason: 'Mais barato' })
@@ -126,7 +132,11 @@ describe('the guide and the screen links', () => {
   })
 
   it('turns #abrir/ links into screens, and nothing else', () => {
-    expect(screenOf('#abrir/conectores')?.screen?.view).toBe('connectors')
+    expect(screenOf('#abrir/conectores')?.screen?.view).toBe('connectors') // the id of before, still a link
+    expect(screenOf('#abrir/connectors')?.screen?.view).toBe('connectors')
+    expect(screenOf('#abrir/settings/models')?.screen).toMatchObject({ view: 'settings', tab: 'modelos' })
+    expect(screenOf('#abrir/configuracoes/modelos')?.screen).toMatchObject({ view: 'settings', tab: 'modelos' })
+    expect(screenOf('#abrir/agent/lia')).toEqual({ agentHandle: 'lia' })
     expect(screenOf('#abrir/configuracoes/modelos')?.screen).toMatchObject({ view: 'settings', tab: 'modelos' })
     expect(screenOf('#abrir/agente/lia')).toEqual({ agentHandle: 'lia' })
     expect(screenOf('#abrir/nada')).toBeUndefined()
@@ -182,7 +192,7 @@ describe('the Tuca helping, in a conversation', () => {
     turns.length = 0
     results.length = 0
     calls = []
-    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
     db.saveAgent(lia)
     const tuca = tucaAgent('sonnet', ['lia'], 1000)
@@ -202,7 +212,7 @@ describe('the Tuca helping, in a conversation', () => {
     await runner.send('d1', 'por que a Lia não responde?')
     await runner.idle()
     expect(turns[0]!.system).toContain('## O guia do Tucano')
-    expect(turns[0]!.system).toContain('(#abrir/conectores)')
+    expect(turns[0]!.system).toContain('(#abrir/connectors)')
     expect(turns[0]!.prompt).toContain('Lia (@lia)')
     const texts = results.map((r) => (r as { content: { text: string }[] }).content[0]!.text)
     if (GUIDE.length) expect(texts[0]).toContain(`# ${GUIDE[0]!.title}`)
@@ -307,12 +317,9 @@ describe("the Tuca's prompt, for several changes", () => {
   it('brings a Tuca still on the instructions from before up to date, and leaves hand-written ones alone', () => {
     const before = (lang: 'pt' | 'en'): string => {
       setLang(lang)
-      // The lines that changed, as they were.
-      return tucaInstructions()
-        .replace(/- Se o que ela quer depende[^\n]*/, '- Se o que ela quer depende de algo que não existe (uma rotina pra um agente que ainda não existe), comece por isso: proponha o agente, e depois da criação proponha a rotina.')
-        .replace(/- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma.\n[^\n]*\n- Depois de propor, uma frase curta basta./, '- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma. Depois de propor, uma frase curta basta.')
-        .replace(/- If what they want needs[^\n]*/, "- If what they want needs something that doesn't exist yet (a routine for an agent there isn't), start there: propose the agent, and once it's created propose the routine.")
-        .replace(/- Each proposal becomes a card with Apply and Discard: the person confirms.\n[^\n]*\n- After proposing, one short sentence is enough./, '- Each proposal becomes a card with Apply and Discard: the person confirms. After proposing, one short sentence is enough.')
+      // The lines that changed, as they were: the links he is taught, which carried a Portuguese
+      // id (#abrir/conectores) before the screen ids lost the language.
+      return tucaInstructions().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
     }
     for (const lang of ['pt', 'en'] as const) {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }

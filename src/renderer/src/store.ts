@@ -31,6 +31,7 @@ import {
   type Message,
   type Model,
   type Person,
+  type Delegation,
   type Inbox,
   type Device,
   type Invite,
@@ -59,6 +60,7 @@ import {
   type BackupSummary
 } from '../../shared/types'
 import { call, connect, disconnect } from './rpc'
+import { hashToView, viewToHash } from './address'
 
 export * from '../../shared/types'
 
@@ -75,6 +77,7 @@ export type View =
   | { kind: 'routines' }
   | { kind: 'skills' }
   | { kind: 'report' }
+  | { kind: 'org' } // who answers to whom (src/shared/org.ts)
   | { kind: 'settings' }
   | { kind: 'missions' } // what to try next, each bringing a part of the sidebar on a new install
 
@@ -90,6 +93,7 @@ export interface State {
   people: Person[]
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
   inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
+  delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
   models: Model[]
@@ -162,11 +166,12 @@ let state: State = {
   people: [],
   former: [],
   inbox: { approvals: [], questions: [] },
+  delegations: [],
   needsName: false,
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -362,6 +367,7 @@ export const lastBrowserIn = (s: State, conversationId: string, agentId: string)
 // Across conversations, once per change.
 interface Everywhere {
   workingAgents: Set<string>
+  workingOn: Map<string, Message> // an agent → the reply it is on (the latest, with several)
   receipts: Message[]
   agentDone: boolean
 }
@@ -369,10 +375,14 @@ const everywhere = new WeakMap<Record<string, Message[]>, Everywhere>()
 function across(s: State): Everywhere {
   const had = everywhere.get(s.messages)
   if (had) return had
-  const all: Everywhere = { workingAgents: new Set(), receipts: [], agentDone: false }
+  const all: Everywhere = { workingAgents: new Set(), workingOn: new Map(), receipts: [], agentDone: false }
   for (const list of Object.values(s.messages)) {
     const ix = indexOf(list)
-    for (const m of ix.working) if (m.author.kind === 'agent') all.workingAgents.add(m.author.id)
+    for (const m of ix.working)
+      if (m.author.kind === 'agent') {
+        all.workingAgents.add(m.author.id)
+        if ((all.workingOn.get(m.author.id)?.at ?? 0) <= m.at) all.workingOn.set(m.author.id, m)
+      }
     all.receipts.push(...ix.receipts)
     all.agentDone ||= ix.agentDone
   }
@@ -380,6 +390,7 @@ function across(s: State): Everywhere {
   return all
 }
 export const workingAgents = (s: State): Set<string> => across(s).workingAgents
+export const workingOn = (s: State): Map<string, Message> => across(s).workingOn
 export const receipts = (s: State): Message[] => across(s).receipts
 export const anyReplyDone = (s: State): boolean => across(s).agentDone
 
@@ -520,7 +531,20 @@ function apply(e: CoreEvent): void {
     switch (e.type) {
       case 'message': {
         const id = e.message.conversationId
-        return { ...s, messages: { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) } }
+        const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
+        // What I just wrote in a conversation that answers in threads opens its thread, where the
+        // answers go: it's what clicking the thread's link would do, without having to find it.
+        const m = e.message
+        const opens =
+          openNext?.conversationId === id &&
+          Date.now() < openNext.until &&
+          !m.threadId &&
+          isMine(s, m.author) &&
+          !messagesIn(s, id).some((x) => x.id === m.id)
+        if (!opens) return { ...s, messages }
+        openNext = null
+        const here = s.view?.kind === 'conversation' && s.view.id === id
+        return { ...s, messages, ...(here ? { panel: { kind: 'thread' as const, id: m.id } } : {}) }
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
@@ -580,12 +604,18 @@ function apply(e: CoreEvent): void {
         return withMe({ ...s, people: e.people, ...(e.former ? { former: e.former } : {}) })
       case 'inbox':
         return { ...s, inbox: e.inbox ?? s.inbox }
+      case 'delegations':
+        return { ...s, delegations: e.delegations ?? s.delegations }
     }
   })
   // A full message carries all its text so far: what streamed before it is in there.
   if (e.type === 'message' && live.delete(e.message.id)) wake(liveListeners, e.message.id)
   if (e.type === 'browser') showFrame(e.view.agentId, e.view.frame)
 }
+
+// A screen from the address, only if it's still there (a conversation that was removed, an agent gone).
+const stillThere = (view: View | undefined, s: Pick<State, 'conversations' | 'agents'>): View | undefined =>
+  !view || (view.kind === 'conversation' && !s.conversations.some((c) => c.id === view.id)) || (view.kind === 'agent' && !s.agents.some((a) => a.id === view.id)) ? undefined : view
 
 export async function start(): Promise<void> {
   window.tucano.onNavigate((id, thread) => {
@@ -605,12 +635,31 @@ export async function start(): Promise<void> {
       if (id && state.ready) void call('markRead', { conversationId: id })
     }
   })
+  // In a browser the screen rides in the address, so a reload (a phone bringing the tab back)
+  // opens where it was. The desktop keeps it in memory, as before.
+  const web = windowless()
+  if (web) {
+    const write = (): void => {
+      const hash = state.view && viewToHash(state.view)
+      if (hash && location.hash !== hash) history.replaceState(history.state, '', `${location.pathname}${location.search}${hash}`)
+    }
+    let last: View | null = null
+    subscribe(() => state.view !== last && ((last = state.view), write()))
+    // An address typed or pasted while the page is open: there, or back to where it is.
+    window.addEventListener('hashchange', () => {
+      if (!state.ready) return
+      const view = stillThere(hashToView(location.hash), state)
+      if (view && viewToHash(view) !== (state.view && viewToHash(state.view))) navigate(view)
+      else write()
+    })
+  }
   await connect(apply)
   const snap = await call('snapshot')
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
-    const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
+    const there = web ? stillThere(hashToView(location.hash), snap) : undefined
+    const view = s.view ?? there ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
     return {
       ...withSettings({ ...s, you: snap.you, people: snap.people }, snap.settings),
       ready: true,
@@ -636,6 +685,7 @@ export async function start(): Promise<void> {
       demoServer: snap.demoServer,
       you: snap.you,
       inbox: snap.inbox ?? { approvals: [], questions: [] },
+      delegations: snap.delegations ?? [],
       people: snap.people,
       former: snap.former ?? []
     }
@@ -859,6 +909,13 @@ export async function openDm(agentId: string): Promise<void> {
   navigate({ kind: 'conversation', id })
 }
 
+// Asks an agent something from somewhere else (the organogram): it goes to its DM, and I stay where I am.
+export async function askAgent(agentId: string, text: string): Promise<string> {
+  const id = await call('openDm', { agentId })
+  sendMessage(id, text)
+  return id
+}
+
 export function setGrant(agentId: string, connectorId: string, level: GrantLevel): void {
   const agent = agentById(state, agentId)
   if (agent) patchAgent(agentId, { grants: { ...agent.grants, [connectorId]: level } })
@@ -892,9 +949,15 @@ export const setChannelMembers = (id: string, agentIds: string[]): Promise<void>
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
+// A message sent outside threads, in a conversation that answers in them: its thread opens when it
+// comes back from the core (a while at most, so one that never does doesn't open a later one).
+let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started.
 export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
-  if (text.trim() || images.length || files.length) void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  if (!(text.trim() || images.length || files.length)) return
+  const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
+  openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>

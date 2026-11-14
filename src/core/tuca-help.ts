@@ -3,6 +3,8 @@
 // card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
 // He sees settings, statuses and error messages, never what was said in a conversation.
 import { L } from '../shared/lang'
+import { usedShare } from '../shared/limits'
+import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
 import { channelName, dateAt, ENGINES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { dateArg } from './routines'
@@ -12,8 +14,19 @@ const DAY = 24 * 3_600_000
 
 // ---------- ver_estado ----------
 
-const AREAS = ['tudo', 'motores', 'conectores', 'agentes', 'rotinas', 'falhas'] as const
+// The areas ver_estado can be asked for, in English: the enum is in the model's prompt, and a
+// Portuguese enum in an English workspace teaches the model Portuguese words for the app. The names
+// that came before them keep working, so a memory or a prompt that already says "agentes" resolves.
+const AREAS = ['all', 'harnesses', 'connectors', 'agents', 'routines', 'failures'] as const
 type Area = (typeof AREAS)[number]
+const AREA_ALIASES: Record<string, Area> = {
+  tudo: 'all',
+  motores: 'harnesses',
+  conectores: 'connectors',
+  agentes: 'agents',
+  rotinas: 'routines',
+  falhas: 'failures'
+}
 
 export const VER_ESTADO: ToolDef = {
   name: 'ver_estado',
@@ -49,8 +62,9 @@ const when = (at: number | undefined, now: number): string => {
 }
 
 export function workspaceState(area: unknown, x: StateInput): string {
-  const want = (AREAS as readonly string[]).includes(String(area)) ? (area as Area) : 'tudo'
-  const show = (a: Area): boolean => want === 'tudo' || want === a
+  const asked = String(area ?? '')
+  const want = (AREAS as readonly string[]).includes(asked) ? (asked as Area) : (AREA_ALIASES[asked] ?? 'all')
+  const show = (a: Area): boolean => want === 'all' || want === a
   const s = x.settings
   const agentName = (id: string): string => x.agents.find((a) => a.id === id)?.name ?? (id === 'router' ? 'router' : L('agente removido', 'removed agent'))
   const where = (id: string): string => {
@@ -60,7 +74,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
   const out: string[] = [
     `${L('Workspace', 'Workspace')}: ${s.workspaceLabel || s.workspaceName}${s.paused ? L(' · PAUSADO: nenhum agente começa a trabalhar e nenhuma rotina roda', ' · PAUSED: no agent starts working and no routine runs') : ''}${s.quietHours ? L(` · horário de silêncio ${s.quietHours.from}–${s.quietHours.to}`, ` · quiet hours ${s.quietHours.from}–${s.quietHours.to}`) : ''}`
   ]
-  if (show('motores')) {
+  if (show('harnesses')) {
     const lines = (Object.keys(s.engines) as (keyof typeof ENGINES)[]).map((e) => {
       const st = s.engines[e]
       const state = st.off ? L('desligado na introdução', 'turned off in the introduction') : !st.installed ? L('não instalado', 'not installed') : st.loggedIn ? L(`pronto${st.account ? ` (${st.account})` : ''}`, `ready${st.account ? ` (${st.account})` : ''}`) : L('instalado, sem login', 'installed, not signed in')
@@ -69,22 +83,24 @@ export function workspaceState(area: unknown, x: StateInput): string {
     const accounts = (s.accounts ?? []).map((a) => `- ${a.name} (${ENGINES[a.engine].label}): ${a.loggedIn ? L('com login', 'signed in') : L('sem login', 'not signed in')}`)
     out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning})`)
   }
-  if (show('conectores')) {
+  if (show('connectors')) {
     const status: Record<Connector['status'], string> = { connected: L('conectado', 'connected'), connecting: L('conectando', 'connecting'), needs_auth: L('pede login', 'needs sign-in'), error: L('com erro', 'error'), disconnected: L('desconectado', 'disconnected') }
     const lines = x.connectors.map((c) => `- ${c.name}: ${status[c.status]}${c.error ? ` · ${c.error}` : ''}`)
     out.push(`## ${L('Conectores', 'Connectors')}\n${lines.join('\n') || L('nenhum adicionado', 'none added')}`)
   }
-  if (show('agentes')) {
+  if (show('agents')) {
     const lines = x.agents.map((a) => {
       const m = modelInfo(a.modelId)
       const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
-      const pct = a.limit ? Math.round((a.used / a.limit) * 100) : 0
+      // With no monthly limit (0) there is no month to be a percentage of: say so, rather than "0%".
+      const share = usedShare(a.used, a.limit)
+      const pct = share === undefined ? undefined : Math.round(share * 100)
       const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
-      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
     })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
   }
-  if (show('rotinas')) {
+  if (show('routines')) {
     const lines = x.routines.map((r) => {
       const last = x.lastRun(r)
       const t = r.trigger
@@ -93,7 +109,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     })
     out.push(`## ${L('Rotinas', 'Routines')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
   }
-  if (show('falhas')) {
+  if (show('failures')) {
     const lines = x.failures.map((f) => `- ${when(f.at, x.now)} · ${agentName(f.agentId)} · ${where(f.conversationId)} · ${f.status}${f.error ? `: ${f.error}` : ''}`)
     out.push(`## ${L('Respostas que falharam (7 dias)', 'Replies that failed (7 days)')}\n${lines.join('\n') || L('nenhuma', 'none')}`)
   }
@@ -122,7 +138,7 @@ export const PROPOR_AJUSTE: ToolDef = {
         ...agentProp(),
         nome: { type: 'string' },
         funcao: { type: 'string' },
-        instrucoes: { type: 'string', description: L('As instruções novas, inteiras.', 'The new instructions, whole.') },
+        instrucoes: { type: 'string', description: L(`As instruções novas, inteiras. Até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres é a recomendação, não um limite.`, `The new instructions, whole. ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters is a recommendation, not a limit.`) },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
         esforco: { type: 'string', enum: EFFORTS },
         web: { type: 'boolean' },
@@ -196,6 +212,7 @@ export interface ProposalCtx {
 }
 
 const text = (args: Record<string, unknown>, k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).trim().slice(0, max) : '')
+const instructionsText = (args: Record<string, unknown>): string => (typeof args['instrucoes'] === 'string' ? (args['instrucoes'] as string) : '')
 const findAgent = (ctx: ProposalCtx, raw: unknown): Agent | undefined => {
   const h = String(raw ?? '').trim().replace(/^@/, '').toLowerCase()
   return ctx.agents.find((a) => a.handle.toLowerCase() === h) ?? ctx.agents.find((a) => a.name.toLowerCase() === h)
@@ -239,7 +256,7 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
     if (name && name !== agent.name) changes.name = name
     const role = text(args, 'funcao', 40)
     if (role && role !== agent.role) changes.role = role
-    const instructions = text(args, 'instrucoes', 8000)
+    const instructions = instructionsText(args)
     if (instructions && instructions !== agent.instructions) changes.instructions = instructions
     const model = text(args, 'modelo', 200)
     if (model && model !== agent.modelId) {

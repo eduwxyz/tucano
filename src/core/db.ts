@@ -20,6 +20,7 @@ import {
   type ConnectorAuth,
   type ConnectorTool,
   type Conversation,
+  type Delegation,
   type Effort,
   type Invite,
   type LentFolder,
@@ -498,6 +499,34 @@ export const MIGRATIONS = [
   UPDATE agents SET fallback_model = 'antigravity:' || substr(fallback_model, 8) WHERE fallback_model LIKE 'gemini:%';
   UPDATE receipts SET engine = 'antigravity' WHERE engine = 'gemini';
   UPDATE receipts SET model = 'antigravity:' || substr(model, 8) WHERE model LIKE 'gemini:%';
+  `,
+  // The work one agent hands to another below it (src/shared/org.ts): a thread in that one's channel,
+  // whose end goes back to where it was asked from. Who answers to whom is a column of agents (COLUMNS).
+  `
+  CREATE TABLE IF NOT EXISTS delegations (
+    id TEXT PRIMARY KEY,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    root_id TEXT NOT NULL,
+    origin_conversation_id TEXT NOT NULL,
+    origin_thread_id TEXT,
+    origin_message_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    text TEXT NOT NULL,
+    done TEXT,
+    due_at INTEGER,
+    state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'done', 'failed', 'cancelled')),
+    asking TEXT,
+    asking_told INTEGER NOT NULL DEFAULT 0,
+    result TEXT,
+    told INTEGER NOT NULL DEFAULT 0,
+    late_told INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    ended_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
+  CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
   `
 ]
 
@@ -513,7 +542,9 @@ const COLUMNS: [string, string, string][] = [
   ['person_keys', 'push', 'TEXT'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
-  ['routines', 'month_day', 'INTEGER']
+  ['routines', 'month_day', 'INTEGER'],
+  // The agent an agent answers to (src/shared/org.ts); empty: no one.
+  ['agents', 'reports_to', 'TEXT']
 ]
 
 
@@ -588,7 +619,7 @@ export class Db {
           DELETE FROM artifacts;
           DELETE FROM services;
           UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
-          DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts');
+          DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts');
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
           DELETE FROM person_keys;
@@ -602,6 +633,7 @@ export class Db {
           UPDATE people SET delegate_to = NULL, delegate_until = NULL;
           DELETE FROM routine_watchers;
           DELETE FROM questions;
+          DELETE FROM delegations;
           DELETE FROM activity;
         `)
         target.keepOnly(parts)
@@ -699,7 +731,7 @@ export class Db {
         DELETE FROM person_keys;
         DELETE FROM removed_keys;
         DELETE FROM invites;
-        DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
+        DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
         UPDATE agents SET account = NULL, fallback_account = NULL, apps = '[]', folders = '[]', computer = CASE WHEN computer_kind = 'mac' THEN 0 ELSE computer END;
         UPDATE routines SET enabled = 0;
       `)
@@ -793,7 +825,8 @@ export class Db {
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
-      owner: r['owner'] ? str(r['owner']) : this.ownerId()
+      owner: r['owner'] ? str(r['owner']) : this.ownerId(),
+      ...(r['reports_to'] ? { reportsTo: str(r['reports_to']) } : {})
     }
   }
 
@@ -819,6 +852,7 @@ export class Db {
       .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki === 'none' || a.wiki === 'read' || a.wiki === 'read_write' ? a.wiki : null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
+    this.db.prepare('UPDATE agents SET reports_to = ? WHERE id = ?').run(a.reportsTo || null, a.id)
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -1996,6 +2030,75 @@ export class Db {
 
   openQuestions(): Question[] {
     return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toQuestion(r))
+  }
+
+  // ---------- delegations ----------
+
+  private toDelegation(r: Row): Delegation {
+    return {
+      id: str(r['id']),
+      from: str(r['from_agent']),
+      to: str(r['to_agent']),
+      conversationId: str(r['conversation_id']),
+      rootId: str(r['root_id']),
+      originConversationId: str(r['origin_conversation_id']),
+      ...(r['origin_thread_id'] ? { originThreadId: str(r['origin_thread_id']) } : {}),
+      originMessageId: str(r['origin_message_id']),
+      requestedBy: str(r['requested_by']),
+      text: str(r['text']),
+      ...(r['done'] ? { done: str(r['done']) } : {}),
+      ...(r['due_at'] ? { dueAt: Number(r['due_at']) } : {}),
+      state: str(r['state']) as Delegation['state'],
+      ...(r['asking'] ? { asking: str(r['asking']) } : {}),
+      ...(r['asking_told'] === 1 ? { askingTold: true } : {}),
+      ...(r['result'] ? { result: str(r['result']) } : {}),
+      ...(r['told'] === 1 ? { told: true } : {}),
+      ...(r['late_told'] === 1 ? { lateTold: true } : {}),
+      createdAt: Number(r['created_at']),
+      ...(r['ended_at'] ? { endedAt: Number(r['ended_at']) } : {})
+    }
+  }
+
+  saveDelegation(d: Delegation): void {
+    this.db
+      .prepare(
+        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, result, told, late_told, created_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, result = excluded.result, told = excluded.told, late_told = excluded.late_told, ended_at = excluded.ended_at`
+      )
+      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.createdAt, d.endedAt ?? null)
+  }
+
+  delegation(id: string): Delegation | undefined {
+    const r = this.db.prepare('SELECT * FROM delegations WHERE id = ?').get(id) as Row | undefined
+    return r && this.toDelegation(r)
+  }
+
+  // The one whose thread `rootId` opened.
+  delegationAt(rootId: string): Delegation | undefined {
+    const r = this.db.prepare('SELECT * FROM delegations WHERE root_id = ?').get(rootId) as Row | undefined
+    return r && this.toDelegation(r)
+  }
+
+  // Open, or ended since `since`: what a screen shows as going on, newest first.
+  liveDelegations(since: number): Delegation[] {
+    return (this.db.prepare("SELECT * FROM delegations WHERE state = 'open' OR ended_at >= ? ORDER BY created_at DESC").all(since) as Row[]).map((r) => this.toDelegation(r))
+  }
+
+  openDelegations(): Delegation[] {
+    return (this.db.prepare("SELECT * FROM delegations WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toDelegation(r))
+  }
+
+  // What whoever asked hasn't heard yet: an end, a question left waiting, a deadline gone by.
+  untoldDelegations(now: number): Delegation[] {
+    const rows = this.db.prepare("SELECT * FROM delegations WHERE (state <> 'open' AND told = 0) OR (state = 'open' AND asking IS NOT NULL AND asking_told = 0) OR (state = 'open' AND due_at IS NOT NULL AND due_at < ? AND late_told = 0) ORDER BY created_at").all(now) as Row[]
+    return rows.map((r) => this.toDelegation(r))
+  }
+
+  // What `from` asked for from one place (a conversation, or a thread of it), oldest first.
+  delegationsFrom(from: string, originConversationId: string, originThreadId?: string): Delegation[] {
+    const rows = this.db.prepare(`SELECT * FROM delegations WHERE from_agent = ? AND origin_conversation_id = ? AND ${originThreadId ? 'origin_thread_id = ?' : 'origin_thread_id IS NULL'} ORDER BY created_at`).all(...[from, originConversationId, ...(originThreadId ? [originThreadId] : [])]) as Row[]
+    return rows.map((r) => this.toDelegation(r))
   }
 
   // ---------- activity ----------

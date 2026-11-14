@@ -77,7 +77,7 @@ describe('indexes for what runs often', () => {
 
   it('an existing database gains them, keeps its data, and the hot queries use them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'tucano-idx-')), 'tucano.db')
-    // A database from before the indexes: those migrations undone (and the two after them: cls_auto, and the Antigravity rename, which has nothing to undo), with messages in it.
+    // A database from before the indexes: those migrations undone (and the ones after them: cls_auto, the Antigravity rename and the delegations table, which have nothing to undo), with messages in it.
     const db0 = new Db(file)
     db0.saveAgent(agent('a1'))
     db0.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1'] })
@@ -86,7 +86,7 @@ describe('indexes for what runs often', () => {
     db0.close()
     const raw = new DatabaseSync(file)
     const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-    raw.exec(`DROP INDEX messages_by_thread_id; DROP INDEX messages_by_author; DROP INDEX receipts_by_message; ALTER TABLE connector_tools DROP COLUMN cls_auto; PRAGMA user_version = ${user_version - 3}`)
+    raw.exec(`DROP INDEX messages_by_thread_id; DROP INDEX messages_by_author; DROP INDEX receipts_by_message; ALTER TABLE connector_tools DROP COLUMN cls_auto; PRAGMA user_version = ${user_version - 4}`)
     expect(plan(raw, "SELECT conversation_id FROM messages WHERE author_kind = 'agent' AND author_id = 'a1' ORDER BY at DESC LIMIT 1")).toContain('SCAN messages')
     raw.close()
 

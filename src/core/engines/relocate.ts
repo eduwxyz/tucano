@@ -26,6 +26,12 @@ export function relocating(engine: Engine, o: { path: () => string | undefined; 
   })
   return {
     ...engine,
+    // Asked each time, not copied as it stood when the app opened: Codex keeps sessions only while
+    // its app-server can take every turn. A copy that stayed true kept asking it to resume
+    // conversations it had answered through exec, and every other reply failed.
+    get sessions() {
+      return engine.sessions
+    },
     async *run(turn: Turn): AsyncIterable<EngineEvent> {
       let looked = false
       const before = missing()
