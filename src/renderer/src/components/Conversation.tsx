@@ -1,7 +1,7 @@
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
-import { runnerRules } from '../../../shared/classify'
+import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
@@ -119,6 +119,8 @@ export const toolWords = (name: string): string =>
     .replace(/[_\-.]+/g, ' ')
     .trim()
     .toLowerCase()
+
+export const accountLabel = (label: string, account?: string): string => (account ? `${label} (${L('conta', 'account')} ${account})` : label)
 
 // An approval's arguments a person can read at a glance: the plain values, named in words.
 // Nested ones stay in the exact details.
@@ -1417,7 +1419,11 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const runner = isRunner(approval.tool)
   const actions = runner ? innerActions(approval.tool, approval.args) : undefined
   // What "always allow" covers there: each inner tool that asked, on its own (none for a raw request or code).
-  const forGood = runner ? runnerRules(approval.connectorId, approval.tool, approval.args)?.map((r) => r.slice(r.indexOf(':') + 1)) : undefined
+  const forGood = runner
+    ? runnerRules(approval.connectorId, approval.tool, approval.args)
+        ?.map(ruleTool)
+        .map(({ tool, account }) => accountLabel(tool, account))
+    : undefined
   // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
   // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
   // Letting go drains the fill back and clears the timer. Space or Enter hold too.
@@ -1438,7 +1444,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const onComputer = approval.connectorId === COMPUTADOR
   const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && (!onComputer || kinds.length > 0)
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
   const alwaysTitle = onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
@@ -1500,7 +1506,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <p className="muted">{L(`${actions.length === 1 ? 'Ação' : `${actions.length} ações`} que esta chamada roda:`, `${actions.length === 1 ? 'The action' : `${actions.length} actions`} this call runs:`)}</p>
               {actions.map((a, i) => (
                 <p key={i}>
-                  <code>{actionLabel(a)}</code>
+                  <code>{accountLabel(actionLabel(a), a.kind === 'tool' ? a.account : undefined)}</code>
                 </p>
               ))}
             </>
@@ -1575,7 +1581,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           </div>
         </form>
       ) : (
-        <div className="row">
+        <div className="row approval__buttons">
           {approval.highRisk ? (
             // The hold can't depend on the pointer staying inside the button: taking capture makes
             // the browser fire pointerout/pointerleave on the button at once, and a cursor that drifts
@@ -1602,13 +1608,13 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                 {L('Aprovar', 'Approve')}
               </button>
               {canAlways && (
-                <button className="btn" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+                <button className="btn approval__always" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   {L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
               {forGood && (
                 <button
-                  className="btn"
+                  className="btn approval__always"
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
                     `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call. Other actions still ask. You can take it back on its page.`
