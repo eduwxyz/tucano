@@ -57,6 +57,12 @@ function connect(): { events: CoreEvent[]; call: (method: string) => Promise<unk
   }
 }
 
+// Keep the file's Windows wait within the platform's existing 60-second test budget.
+// A Windows CI run recorded 20.6 seconds against the former 15-second override. Matrix shards
+// have separate runners; contention among tests within a shard is possible, but that timing
+// alone does not establish its cause. The PR records the remaining reproduction work.
+const BOOT = process.platform === 'win32' ? 60_000 : 15_000
+
 describe('the core starting', () => {
   it('says it is ready before the harnesses are checked, and tells the window when they are', async () => {
     Object.assign(process.env, { TUCANO_DATA: dataDir, TUCANO_DEFAULT_WORKSPACE: '0', TUCANO_SEED: '0', TUCANO_WEBHOOK_PORT: '47967', TUCANO_GIT_PORT: '47968', TUCANO_WIKI: join(dataDir, 'wiki') })
@@ -67,7 +73,7 @@ describe('the core starting', () => {
     // asserts below state. The boot's wall-clock time is a different claim and not this one's:
     // it measures the test's own poll latency as much as the core, and a starved CI runner took
     // 5.7 s on an unchanged commit, so the assert turned a busy machine into a red shard.
-    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: 'ready' }), { timeout: 15_000 })
+    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: 'ready' }), { timeout: BOOT })
     expect(detection.calls).toBe(1) // started, and still running
 
     const window = connect()
@@ -85,5 +91,5 @@ describe('the core starting', () => {
     // Kept for the next start, which opens on it.
     const kept = JSON.parse(readFileSync(join(dataDir, 'engines.json'), 'utf8')) as { engines: Record<EngineId, EngineStatus> }
     expect(kept.engines.claude).toMatchObject({ loggedIn: true, account: 'Plano Claude Max' })
-  }, 15_000)
+  }, BOOT)
 })
