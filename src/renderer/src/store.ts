@@ -26,6 +26,7 @@ import {
   type Conversation,
   type GrantLevel,
   type LocalSkill,
+  type LocalSkillFolder,
   type Memory,
   type MemoryScope,
   type Message,
@@ -1049,6 +1050,7 @@ export const engineModels = (engine: EngineId): Promise<{ models: string[]; labe
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
 export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')
+export const skillFolders = (): Promise<LocalSkillFolder[]> => call('skillFolders')
 export const linkSkill = (source: string, agents: string[] = []): Promise<Skill> => call('linkSkill', { source, agents })
 export const decideSkill = (id: string, approve: boolean): void =>
   void fire(approve ? L('Não consegui aprovar a skill.', "I couldn't approve the skill.") : L('Não consegui recusar a skill.', "I couldn't refuse the skill."), 'decideSkill', { id, approve })

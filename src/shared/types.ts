@@ -501,6 +501,8 @@ export interface Settings {
     guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
   }
   folded?: string[] // the ids of what I folded in the sidebar
+  skillFolders?: string[] // folders to read skills from, on top of the ones the harnesses keep
+  skillFoldersOff?: string[] // folders found on this computer that aren't read
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
@@ -1090,9 +1092,23 @@ export interface LocalSkill {
   name: string
   description: string
   bodyLength: number // recipe characters, excluding frontmatter
-  origin: string // "Claude Code", "Plugin <name>", "Codex"
+  origin: string // "Claude Code", "Plugin <name>", "Codex", "Pi", "Hermes", "Added"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
+  category?: string // the folder it sits in, when the library is organised in categories (a Hermes one)
+  version?: string // from the frontmatter: a Hermes library keeps one; a plain skill may under metadata
+  tags?: string[] // metadata.hermes.tags, facets included (family:*, tool:*, risk:*…)
+}
+
+// A folder skills are read from: one a harness keeps for itself on this computer (Claude Code,
+// Codex, Pi, Hermes, OpenCode…), or one the person added. All the ones that are on mix into the
+// same list (src/core/local-skills.ts).
+export interface LocalSkillFolder {
+  path: string // where it is on this computer
+  source: string // who keeps it: "Claude Code", "Pi", "Hermes"…, or "Added"
+  detected: boolean // found on this computer, not added by hand
+  on: boolean // read; off: kept in the list, not read
+  count: number // skills in it right now
 }
 
 export interface SkillVersion {
