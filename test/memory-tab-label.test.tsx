@@ -52,7 +52,7 @@ afterEach(async () => {
   document.body.innerHTML = '<div id="root"></div>'
 })
 
-const tabs = () => [...document.querySelectorAll('.tabs-line > button')].map((b) => b.textContent?.trim())
+const tabs = () => [...document.querySelectorAll('.tabs-line__strip > button')].map((b) => b.textContent?.trim())
 
 const render = async (): Promise<void> => {
   await act(async () => root.render(<MemoryPage />))

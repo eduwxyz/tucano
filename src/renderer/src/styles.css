@@ -6161,11 +6161,26 @@ kbd {
 .tabs-line {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 6px;
   margin: 32px 0 4px;
   border-bottom: 1px solid var(--border);
 }
-.tabs-line > button {
+/* The strip is as long as the bots are many: it scrolls inside the bar, and the scrollbar stays
+   out of the way because the arrows below are the way through it. */
+.tabs-line__strip {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.tabs-line__strip::-webkit-scrollbar {
+  display: none;
+}
+.tabs-line__strip > button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -6177,17 +6192,41 @@ kbd {
   background: none;
   color: var(--text-3);
   font-size: 13.5px;
+  white-space: nowrap;
   transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
-.tabs-line > button:hover {
+.tabs-line__strip > button:hover {
   color: var(--text);
 }
-.tabs-line > button.is-on {
+.tabs-line__strip > button.is-on {
   color: var(--text);
   border-bottom-color: var(--text);
 }
-.tabs-line .grow {
-  flex: 1;
+/* Borderless arrows that page the strip; they appear only while there is strip in that direction.
+   A tint on hover is the whole affordance, and the gap either side keeps them off the tab text. */
+.tabs-line__page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-2);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.tabs-line__page:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.tabs-line__strip + .tabs-line__page {
+  margin-left: 8px;
+}
+.tabs-line__page--back .icon {
+  transform: rotate(180deg);
 }
 .tabs-line__icon {
   width: 28px;
