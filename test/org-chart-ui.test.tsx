@@ -1,6 +1,6 @@
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Agent, Conversation, Delegation, Message } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
@@ -11,7 +11,7 @@ let busy = new Map<string, Message>()
 let admin = true
 const save = vi.fn(async (_agent: Agent, _channels: string[]) => {})
 const settings = vi.fn((_patch: { orgLayout?: Record<string, { x: number; y: number }> | null }) => {})
-const asked = vi.fn(async (_agent: string, _text: string) => 'dm')
+const asked = vi.fn(async (_agent: string, _text: string, _images: unknown[], _files: unknown[]) => 'dm')
 const go = vi.fn()
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(fake),
@@ -19,7 +19,7 @@ vi.mock('../src/renderer/src/store', () => ({
   isTeam: (a: Agent) => !a.archived && a.kind !== 'tuca',
   saveAgent: (a: Agent, c: string[]) => save(a, c),
   updateSettings: (p: never) => settings(p),
-  askAgent: (id: string, text: string) => asked(id, text),
+  askAgent: (id: string, text: string, images: unknown[] = [], files: unknown[] = []) => asked(id, text, images, files),
   navigate: (v: unknown) => go(v),
   setTab: () => {},
   openDm: (id: string) => go({ dm: id }),
@@ -267,13 +267,48 @@ it('asks whoever is at the top, or the agent picked, without leaving the board',
   expect(box().getAttribute('placeholder')).toBe('Pedir algo a orion…')
   await type(box(), '  veja por que a conversão caiu  ')
   await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
-  expect(asked).toHaveBeenCalledWith('orion', 'veja por que a conversão caiu')
+  expect(asked).toHaveBeenCalledWith('orion', 'veja por que a conversão caiu', [], [])
   expect(box().getAttribute('placeholder')).toContain('Enviado a orion')
   await pick('clara')
   expect(box().getAttribute('placeholder')).toContain('clara')
   await type(box(), 'responda o Fulano')
   await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
-  expect(asked).toHaveBeenLastCalledWith('clara', 'responda o Fulano')
+  expect(asked).toHaveBeenLastCalledWith('clara', 'responda o Fulano', [], [])
+})
+
+// linkedom has no FileReader: this one reads the same bytes through Blob, as the browser's does.
+const previousFileReader = globalThis.FileReader
+afterAll(() => Object.assign(globalThis, { FileReader: previousFileReader }))
+class BlobReader {
+  result: string | null = null
+  error: unknown = null
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  readAsDataURL(blob: Blob): void {
+    void blob.arrayBuffer().then((buf) => ((this.result = `data:${blob.type};base64,${Buffer.from(buf).toString('base64')}`), this.onload?.()), () => this.onerror?.())
+  }
+}
+
+it('sends a file along with the question, or alone, and clears the chips after', async () => {
+  Object.assign(globalThis, { FileReader: BlobReader })
+  const picker = (): HTMLInputElement => document.querySelector('.org-ask input[type="file"]')!
+  const submit = async (): Promise<void> => void (await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) }))
+  const attach = async (name: string, body: string): Promise<void> => {
+    Object.defineProperty(picker(), 'files', { configurable: true, value: [new File([body], name, { type: 'text/plain' })] })
+    await act(async () => { picker().dispatchEvent(new window.Event('change', { bubbles: true })) })
+  }
+  const send = (): HTMLButtonElement => document.querySelector('.org-ask button.btn--primary')!
+  expect(send().disabled).toBe(true)
+  await attach('notas.txt', 'conversão caiu')
+  expect(document.querySelector('.composer__file-name')?.textContent).toBe('notas.txt')
+  expect(send().disabled).toBe(false) // an attachment alone can go
+  await type(document.querySelector('.org-ask input[type="text"]')!, 'olhe isto')
+  await submit()
+  expect(asked).toHaveBeenCalledWith('orion', 'olhe isto', [], [{ name: 'notas.txt', data: Buffer.from('conversão caiu').toString('base64') }])
+  expect(document.querySelector('.composer__file')).toBeNull()
+  await attach('so-arquivo.txt', 'oi')
+  await submit()
+  expect(asked).toHaveBeenLastCalledWith('orion', '', [], [{ name: 'so-arquivo.txt', data: Buffer.from('oi').toString('base64') }])
 })
 
 it('shows what is under way: the request, the line it travels and what each one is doing', async () => {
