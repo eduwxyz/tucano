@@ -2,10 +2,13 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { Message, Step } from '../src/shared/types'
+import type { State } from '../src/renderer/src/store'
 
+// The app's own state: the reply box reads settings from the store, and an empty stand-in throws on
+// the first one it touches.
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
-  return { ...real, useStore: <T,>(select: (s: Record<string, unknown>) => T): T => select({}) }
+  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(real.getState()) }
 })
 const { RunSteps } = await import('../src/renderer/src/components/Conversation')
 
