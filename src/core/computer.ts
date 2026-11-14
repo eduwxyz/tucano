@@ -13,7 +13,8 @@ import type { CoreEvent } from '../shared/rpc'
 import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type ComputerInfo, type LentFolder, type Service } from '../shared/types'
 import type { Db } from './db'
 import { textResult, type ToolDef } from './gateway'
-import { MacComputer, macTools } from './mac'
+import { homePath, type ChangeScope } from './changes'
+import { MacComputer, macPath, macTools } from './mac'
 import { isWin, osOf } from './platform'
 
 export const IMAGE = 'node:22-bookworm'
@@ -396,6 +397,29 @@ export class Computers {
 
   folder(agentId: string): string {
     return join(this.deps.dataDir, 'computers', agentId, 'work')
+  }
+
+  // Where this agent's computer writes that is the person's, here: what the snapshots of a reply's
+  // changes look at (src/core/changes.ts). In the container, /work and the folders lent to write.
+  changeScope(agent: Agent): ChangeScope {
+    if (agent.computerKind === 'mac') {
+      const cwd = this.mac.cwd(agent)
+      return { bases: [cwd], toHost: (p) => macPath(p, cwd), shown: homePath }
+    }
+    const lent = (agent.folders ?? []).filter((f) => !f.readOnly).map((f) => ({ at: `${PROJECTS_DIR}/${f.name}`, path: f.path }))
+    const mounts = [{ at: WORK, path: this.folder(agent.id) }, ...lent]
+    return {
+      bases: mounts.map((m) => m.path),
+      toHost: (p) => {
+        const lp = linuxPath(p)
+        const m = mounts.find((x) => lp === x.at || lp.startsWith(`${x.at}/`))
+        return m ? join(m.path, ...lp.slice(m.at.length).split('/').filter(Boolean)) : undefined
+      },
+      shown: (host) => {
+        const m = mounts.find((x) => host === x.path || host.startsWith(x.path + sep))
+        return m ? posix.join(m.at, ...host.slice(m.path.length).split(sep).filter(Boolean)) : homePath(host)
+      }
+    }
   }
 
   private onMac(agentId: string): Agent | undefined {

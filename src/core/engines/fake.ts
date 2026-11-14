@@ -118,6 +118,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const statement = /(?:consulte|run the sql) `([^`]+)`/i.exec(last)![1]!
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'execute_sql_read_only'), { statement })
         reply = textOf(r)
+      } else if (turn.mcpUrl && /^(?:mude o código|change the code)/im.test(last)) {
+        // Changes to code, one per line, to see what a reply changed: "escreva `p`: text", "troque `a`
+        // por `b` em `p`" (\n for a new line in either), "rode `command`".
+        for (const line of last.split('\n')) {
+          const write = /(?:escreva|write) `([^`]+)`: (.*)$/i.exec(line)
+          const edit = /(?:troque|replace) `([^`]+)` (?:por|with) `([^`]*)` (?:em|in) `([^`]+)`/i.exec(line)
+          const run = /(?:rode|run) `([^`]+)`/i.exec(line)
+          if (write) await callTool(turn.mcpUrl, 'write_file', { path: write[1]!, content: `${write[2]!.replace(/\\n/g, '\n')}\n` })
+          else if (edit) await callTool(turn.mcpUrl, 'edit_file', { path: edit[3]!, old_text: edit[1]!, new_text: edit[2]!.replace(/\\n/g, '\n') })
+          else if (run) await callTool(turn.mcpUrl, 'bash', { command: run[1]! })
+        }
+        reply = L('Pronto: mudei o código. Os arquivos estão logo acima.', 'Done: I changed the code. The files are right above.')
       } else if (turn.mcpUrl && /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.test(last)) {
         // A skill that runs a CLI (a databricks-query skill and the databricks command): read it, then run.
         const [, skill, first, then] = /com a skill ([\w-]+),? rode `([^`]+)`(?: e depois `([^`]+)`)?/is.exec(last)!
