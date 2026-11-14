@@ -746,10 +746,12 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     },
     notifyState,
     testNotify,
-    updateState: async () => ({ version: ${JSON.stringify(version)}, status: 'off' }),
-    onUpdate: () => {},
-    checkUpdates: () => {},
-    installUpdate: () => {}
+    // In the desktop app, the app's own updates (its page is what's on screen, so it is the one to
+    // say a version is ready); in a browser, the server's version, which updates on the server.
+    updateState: async () => (desktop && desktop.updateState && (await desktop.updateState())) || { version: ${JSON.stringify(version)}, status: 'off' },
+    onUpdate: (cb) => { if (desktop && desktop.onUpdate) desktop.onUpdate(cb) },
+    checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
+    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() }
   }
 })()
 `

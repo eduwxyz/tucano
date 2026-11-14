@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The desktop app says a new version is ready with a server on screen too.** With the app showing a Tucano on a server, what's on screen is the server's page, and its Settings showed the server's update state: always off, with the button to look for one disabled. The app still downloaded new versions behind it, but the note that one was ready lived only in the local screen, hidden under the server's, so a person who leaves the app on a server never saw it; the version went in only when they quit the app. The server's page now shows the app's own updates when it is in the desktop app: the version it is on, the look for a new one, the download and the note with **Restart**. Restarting from there is always confirmed in a dialog of the app's own, so a server can't restart the app by itself. Both sides need this version: the app, and the server it shows.
+
 ## [0.2.29] - 2026-11-13
 
 > **Em português:**

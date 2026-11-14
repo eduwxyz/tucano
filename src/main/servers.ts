@@ -271,6 +271,11 @@ export class Servers {
     return undefined
   }
 
+  // Something for every server's page (the app's update state).
+  tell(channel: string, payload: unknown): void {
+    for (const v of this.views.values()) if (!v.webContents.isDestroyed()) v.webContents.send(channel, payload)
+  }
+
   // A click on a server's notification: that server on screen, at what it's about.
   async openNote(id: string, note: ServerNote): Promise<void> {
     await this.show(id)
