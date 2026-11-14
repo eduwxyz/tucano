@@ -2600,8 +2600,8 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('geral') && admin && (
-          <Card title={L('Ao reiniciar', 'On restart')}>
+        {pane('agentes') && admin && (
+          <Card title={L('Recuperação', 'Recovery')}>
             <div className="key-row">
               <div className="grow">
                 <strong>{L('Retomar respostas interrompidas', 'Resume interrupted replies')}</strong>
