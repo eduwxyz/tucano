@@ -1510,16 +1510,21 @@ export class Db {
     return r ? this.toApproval(r) : undefined
   }
 
-  // Runs that were working when the app closed can't continue: their CLI process is gone. Returns
-  // their messages, so the work can go on in new replies (Runner.resumeInterrupted).
+  // Runs that were working when the app closed can't continue: their CLI process is gone. A reply held
+  // by the person is the same, and only that one: a reply paused at its spending ceiling had already
+  // ended, and still goes on from where it stopped. Returns their messages, so the work can go on in new
+  // replies (Runner.resumeInterrupted).
   interruptStaleRuns(): string[] {
     const ids: string[] = []
-    for (const m of this.messagesWithRun(['working'])) {
-      if (m.run?.status !== 'working') continue
+    for (const m of this.messagesWithRun(['working', 'paused'])) {
+      const run = m.run
+      if (!run) continue
+      const stale = run.status === 'working' || (run.status === 'paused' && run.held === true)
+      if (!stale) continue
       ids.push(m.id)
       this.saveMessage({
         ...m,
-        run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
+        run: { ...run, status: 'interrupted', steps: run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
     return ids
