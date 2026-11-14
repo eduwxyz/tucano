@@ -4275,27 +4275,20 @@ function NoticeSettingsCard({ settings, update }: { settings: Settings; update: 
 }
 
 function NotifyTest(): ReactNode {
-  const [state, setState] = useState<NotifyState | 'shown' | null>(() => window.tucano.notifyState?.() ?? null)
-  if (!window.tucano.testNotify) return null
-  const hint = state ? notifyHint(state, /Mac/i.test(navigator.userAgent)) : null
-  const off = state === 'insecure' || state === 'unsupported'
+  // The system's own notifications are the app's, shown when it sends one: what is left here is the
+  // cards, drawn by the page that draws them, so the person sees how they look with the settings
+  // they chose.
+  if (!window.tucano.notice) return null
   return (
     <div className="key-row">
-      <Icon name="send" />
+      <Icon name="spark" />
       <div className="grow">
         <strong>{L('Testar', 'Test')}</strong>
         <p className="muted small">{hint ?? L('Manda uma notificação agora, pra ver se chega.', 'Send a test notification.')}</p>
       </div>
-      {!off && (
-        <div className="row">
-          <button className="btn btn--sm" onClick={() => void window.tucano.testNotify?.().then(setState, () => setState('unsupported'))}>
-            {L('Mandar uma', 'Send one')}
-          </button>
-          <button className="btn btn--sm" title={L('Um aviso de cada tipo: terminou, menção, pergunta, aprovação e alto risco.', 'One of every kind: done, mention, question, approval and high risk.')} onClick={() => window.tucano.notice.demo()}>
-            {L('Testar todos', 'Test every kind')}
-          </button>
-        </div>
-      )}
+      <button className="btn btn--sm" title={L('Uma notificação de cada tipo, como elas ficam.', 'One notification of each kind, as they look.')} onClick={() => window.tucano.notice.demo()}>
+        {L('Testar notificações', 'Test notifications')}
+      </button>
     </div>
   )
 }
