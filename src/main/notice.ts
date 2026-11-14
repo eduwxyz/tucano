@@ -128,7 +128,7 @@ export class Notices {
     else this.waiting.push(card)
   }
 
-  // Settings › Notifications › Test every kind: one card of each, drawn by the page itself, so the
+  // Settings › Notifications › Test notifications: one card of each, drawn by the page itself, so the
   // person sees how they look with the settings they chose.
   demo(): void {
     const win = this.ensure()
@@ -343,18 +343,26 @@ export class Notices {
   }
 
   // The page's pointer tracking is fast but misses the case where a card appears under a pointer
-  // that is not moving: the click then passes through to the window behind it. Poll the cursor
-  // while cards are on screen so the whole notification rectangle becomes clickable whenever the
-  // pointer is in it, and transparent again once it leaves.
+  // that is not moving: the click then passes through to the window behind it. While cards are on
+  // screen, tell the page where the cursor is and let it run the same `elementFromPoint` test it runs
+  // on a move, so a card that arrived under a still pointer is reachable and the empty part of the
+  // rectangle keeps passing clicks through. `getCursorScreenPoint` and `getBounds` are both measured
+  // in DIP, so the difference is the point in the window's own coordinates and no scale factor
+  // applies; dividing by it puts the point in the display's top-left and answers "outside" for every
+  // cursor inside the window on a scaled display.
   private startPoll(): void {
     if (this.pollTimer) return
+    let last = ''
     this.pollTimer = setInterval(() => {
       const win = this.win
       if (!win || win.isDestroyed()) return this.stopPoll()
       const point = screen.getCursorScreenPoint()
       const b = win.getBounds()
-      const inside = point.x >= b.x && point.x < b.x + b.width && point.y >= b.y && point.y < b.y + b.height
-      this.interactive(inside)
+      const at = { x: Math.round(point.x - b.x), y: Math.round(point.y - b.y) }
+      const here = `${at.x},${at.y}`
+      if (here === last) return
+      last = here
+      if (this.loaded) win.webContents.send('notice:cursor', at)
     }, 80)
   }
   private stopPoll(): void {
