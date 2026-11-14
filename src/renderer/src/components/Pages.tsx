@@ -2542,7 +2542,7 @@ export function SettingsPage(): ReactNode {
                 <p className="muted small">
                   {L(
                     `Com um trecho selecionado numa mensagem, ${key} começa uma resposta a ele, sem procurar o botão. Desligado, o atalho não faz nada e o botão da mensagem responde ao trecho do mesmo jeito.`,
-                    `With text selected in a message, ${key} starts a reply to that excerpt without hunting for the button. Off, the shortcut does nothing and the message’s own button still replies to it.`
+                    `Select text and press ${key} to reply to it. The message button works with this off.`
                   )}
                 </p>
               </div>
