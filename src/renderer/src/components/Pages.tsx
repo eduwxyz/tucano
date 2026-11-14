@@ -2604,8 +2604,8 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('agentes') && (
-          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
+        {pane('modelos') && (
+          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'Find page controls by text for free, then by element number. Jev also handles controls without text.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
               {[false, true].map((v) => (
                 <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
@@ -2626,12 +2626,12 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('agentes') && (
+        {pane('modelos') && (
           <Card
             title={L('Jev como classificador', 'Jev as a classifier')}
             lead={L(
               'O Jev, do TypeSafe, lê um pedido e responde uma pergunta de múltipla escolha em menos de um segundo, com a probabilidade de cada opção. Aqui ele sugere qual opção de uma pergunta de agente você deve escolher, com um selo na opção.',
-              "TypeSafe's Jev reads a request and answers a multiple-choice question in under a second, with each option's probability. Here it suggests which option of an agent's question you should pick, with a pill on the option."
+              "TypeSafe’s Jev suggests an answer to agent questions, with each option’s probability."
             )}
           >
             <div className="key-row">
@@ -2641,7 +2641,7 @@ export function SettingsPage(): ReactNode {
                 <p className="muted small">
                   {L(
                     'Desligado por padrão. Ligado, cada pergunta de agente com duas ou mais opções vai pro TypeSafe com o texto e as opções, e volta com a sugestão. É só uma sugestão: quem escolhe continua sendo você, e "Outra coisa" nunca é sugerida.',
-                    'Off by default. On, every agent question with two or more options goes to TypeSafe with its text and options, and comes back with a suggestion. It is only a suggestion: you still choose, and "Something else" is never suggested.'
+                    'Off by default. Sends questions and options to TypeSafe for suggestions. You choose; “Something else” is never suggested.'
                   )}
                 </p>
               </div>
