@@ -179,10 +179,15 @@ describe('work handed down the tree', () => {
 
   it('does not hold the answers back for a request that waits on an approval of mine', async () => {
     const r = runner()
-    await r.send('dm', 'delegue a clara: fale com o Gabriel\ndelegue a nico: demore 2 s')
+    // Nico takes 8 s, not 2: the wait for Clara below gives up at 5 s, so his work has to outlast that on
+    // any runner. With 2 s of head start a loaded shard had him finished before Clara's answer landed, the
+    // sweep found nothing open to wait on, and it reported him as done instead of held at an approval.
+    await r.send('dm', 'delegue a clara: fale com o Gabriel\ndelegue a nico: demore 8 s')
     await until(() => db.liveDelegations(0).some((d) => d.to === 'clara' && d.state === 'done'))
     // Clara is done, Nico still at it: Orion waits to tell it all at once.
     expect(by('orion', 'dm')).toHaveLength(1)
+    // The fixture, not the behaviour: if Nico has already finished there is nothing parked to tell apart.
+    expect(db.openDelegations().some((d) => d.to === 'nico')).toBe(true)
     // Nico's reply stops at an approval. That is mine to give, whenever: Clara's answer shouldn't sit behind it.
     const nico = by('nico', 'eng').at(-1)!
     db.saveMessage({ ...nico, run: { ...nico.run!, status: 'waiting_approval' } })
@@ -197,7 +202,8 @@ describe('work handed down the tree', () => {
     expect(by('orion', 'dm')).toHaveLength(3)
     expect(codex.turns.at(-1)!.prompt).not.toContain('Clara, #clientes')
     expect(db.openDelegations()).toEqual([])
-  })
+    // Nico's own 8 s have to run out inside the test, so the default 5 s wouldn't hold the fixture.
+  }, 30_000)
 
   it('calls no one when the answer names whoever asked, even in a channel they share', async () => {
     db.setAgentChannels('orion', ['clientes'])
