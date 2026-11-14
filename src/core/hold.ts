@@ -4,7 +4,7 @@
 // costs nothing, and the reply goes on in the same session, on the same model, when it is let go.
 // Aborting the turn is the way out of a hold nobody lets go of, so a stop is never left waiting.
 export class Hold {
-  private waiting: (() => void) | null = null
+  private waiting = new Set<() => void>()
   private asked = false
 
   // Held, and not yet let go. A second request while one is waiting changes nothing.
@@ -16,23 +16,25 @@ export class Hold {
     return this.asked
   }
 
-  // Let go: the reply waiting here starts again, and one that has not reached the hold yet never stops.
+  // Let go: all calls waiting here start again, and one that has not reached the hold yet never stops.
   release(): void {
     this.asked = false
-    const waiting = this.waiting
-    this.waiting = null
-    waiting?.()
+    for (const finish of this.waiting) finish()
   }
 
   // Where the run waits, when it was asked to. Says whether it waited, for a caller that has work to
   // do before and after: nothing happens here unless the hold is on.
   async wait(signal: AbortSignal): Promise<boolean> {
-    if (!this.asked) return false
+    if (!this.asked || signal.aborted) return false
     await new Promise<void>((resolve) => {
-      this.waiting = resolve
-      signal.addEventListener('abort', () => resolve(), { once: true })
+      const finish = (): void => {
+        this.waiting.delete(finish)
+        signal.removeEventListener('abort', finish)
+        resolve()
+      }
+      this.waiting.add(finish)
+      signal.addEventListener('abort', finish, { once: true })
     })
-    this.waiting = null
     return true
   }
 }
