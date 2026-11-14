@@ -24,6 +24,7 @@ type Section = {
 export function settingsStructure({ admin, owner, team, servers }: SettingsAccess) {
   return [
     { id: 'app-appearance', page: 'app', label: L('Aparência', 'Appearance'), keys: ['theme', 'language'], scope: 'mixed', visible: true },
+    { id: 'app-conversation', page: 'app', label: L('Conversa', 'Conversation'), keys: ['stepsOpen'], scope: 'personal', visible: true },
     { id: 'app-notifications', page: 'app', label: L('Notificações', 'Notifications'), keys: ['sounds'], scope: 'personal', visible: true },
     { id: 'app-dictation', page: 'app', label: L('Ditado', 'Dictation'), keys: ['voice'], scope: 'mixed', visible: admin },
     { id: 'app-startup', page: 'app', label: L('Inicialização', 'Startup'), keys: ['openAtLogin'], scope: 'computer', visible: admin },

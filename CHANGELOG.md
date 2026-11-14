@@ -4,9 +4,21 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.29] - 2026-11-13
+
+> **Em português:**
+> - **Novo:** o **Supabase** entra na loja de conectores. Na aba de skills de um agente, dá pra **buscar**, filtrar por grupo e marcar ou desmarcar todas as mostradas de uma vez. Em Configurações, **Mostrar os passos enquanto o agente trabalha** pode ser desligado, só pra você. O Tucano no navegador mostra a versão do servidor em Configurações.
+> - **Correção:** um agente no **Codex** não falha mais uma resposta sim, outra não, com "o Codex não tem mais essa conversa". Um conector como o da **Vercel** para de pedir autorização de novo todo dia (autorize mais uma vez pra valer). Um agente que perdeu o acesso à wiki, ou uma página que virou privada, deixa de ser lido na hora, mesmo no meio de uma resposta longa. O mapa da wiki aparece ao abrir e se ajusta quando a janela muda de tamanho. O aviso (toast) fica legível no tema escuro. Num workspace em inglês, o Tuca não aprende mais palavras em português pros links de telas e pro guia.
+
 ### Added
 
 - **Supabase in the connector store.** Your Supabase projects from [Supabase](https://supabase.com/docs/guides/getting-started/mcp)'s official server, in Development next to Neon: tables, SQL, migrations, logs and Edge Functions. One click opens Supabase's sign-in in the browser, where you choose the organization the agents may reach. Its tools that write (running SQL, applying a migration, deploying a function) come in under the same classes and approvals as any connector's.
+
+- **Find, group and bulk-tick skills in an agent's tab.** The skills tab of an agent was one flat list of every active skill in the library, with no search. It now has a search box (name, description and group), group chips with counts (a skill's group is the folder it lives in), "Only this agent's", and **Tick / Untick the shown ones**, which applies to what the filter shows. The line above the list says how many tokens the agent's skills add to each message.
+
+- **Keep a reply's steps closed while the agent works.** A reply opens the list of its steps while the agent works, which fills the screen when several agents answer at once. **Settings › General › Show the steps while the agent works** turns that off: the line with what the agent is doing now stays, and a click on it opens the steps. It changes only for you.
+
+- **The server's version in a browser's Settings.** Tucano on a server showed no version in Settings when opened in a browser. It now shows the version of the build the server runs.
 
 ### Fixed
 
@@ -16,6 +28,17 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 
 - **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences. (#409)
+
+- **A long reply no longer keeps wiki access that changed after it started.** A reply read the wiki with the access it had when its prompt was built: an agent whose wiki access was removed, or a page that became one person's while the reply was still working, could still be read until the reply ended. Each wiki call now checks the agent's access and the held pages again.
+
+- **The wiki map is there in its first frame, and fits again when the window changes size.** The map was laid out at no size and resized a frame later, which on some machines left an empty map on screen until something else redrew it; and a window that took its real size after the screen mounted (a restart restoring its bounds) left the whole map small in a corner. The first frame is now drawn with the camera the fit would give, the map fits again while you haven't moved it yourself, and a big map arrives in one fade instead of one animation per page.
+
+- **The toast reads in the dark theme.** The toast used the primary color, which inverts with the theme and left a white pill in the dark app. It is now the app's orange as text on a surface that lifts off the page, in both themes.
+
+- **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
+
+- **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
+
 
 ## [0.2.28] - 2026-11-12
 
@@ -670,6 +693,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.29]: https://github.com/eduwxyz/tucano/compare/v0.2.28...v0.2.29
 [0.2.28]: https://github.com/eduwxyz/tucano/compare/v0.2.27...v0.2.28
 [0.2.27]: https://github.com/eduwxyz/tucano/compare/v0.2.26...v0.2.27
 [0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26
