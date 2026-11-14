@@ -1227,7 +1227,15 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { 
     const agent = db.agent(p.agentId)
     if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
     const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
-    api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
+    // The skills it follows aren't on the agent: they are each skill's own list of agents.
+    const { skills: wanted, ...changes } = p.changes
+    api.saveAgent({ agent: { ...agent, ...changes }, channelIds }, ctx)
+    if (wanted) {
+      const r = skills.assign(agent.id, wanted)
+      if (r.unknown.length) throw new Error(L(`Não existe skill ativa ${r.unknown.map((u) => `"${u}"`).join(', ')}.`, `There's no active skill ${r.unknown.map((u) => `"${u}"`).join(', ')}.`))
+      if (r.alone) throw new Error(L(`"${r.alone}" é de todos e não dá pra tirar só deste agente: arquive a skill.`, `"${r.alone}" is everyone's and can't be taken from just this agent: archive the skill.`))
+      for (const k of r.changed) record(ctx, 'skill.updated', k.id, { agents: k.agents, why: 'proposal' })
+    }
     id = agent.id
   } else if (p.kind === 'routine') {
     if (p.routine.conversationId) reach(ctx, p.routine.conversationId)

@@ -61,6 +61,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           ]
           for (const [tool, args] of calls) await callTool(turn.mcpUrl, tool, args)
           reply = L('Mandei tudo de uma vez: o Léo, o limite novo de cada um, a rotina dele e o canal. Dá pra aplicar um por um ou todos.', 'I sent it all at once: Léo, the new limit for each, his routine and the channel. You can apply them one by one or all together.')
+        } else if (/s[óo] a skill|only (the )?\S* ?skill|leave theo/i.test(last)) {
+          // A change to the skills an agent follows: the whole list, so the card can show both sides.
+          const r = await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'theo', skills: ['tucano-ops'], motivo: L('Ele não precisa das outras.', 'It needs none of the others.') })
+          reply = textOf(r).includes('card') ? L('Deixei o Theo só com a tucano-ops: é só aplicar.', 'Theo follows tucano-ops only: just apply it.') : textOf(r)
         } else if (/suporte|ticket|cliente|support|customer/i.test(last)) {
           const r = await callTool(turn.mcpUrl, 'propor_agente', {
             nome: 'Rafa',

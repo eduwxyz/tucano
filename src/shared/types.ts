@@ -253,8 +253,10 @@ export interface AgentDraft {
   agentId?: string // once created
 }
 
-// What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+// What the Tuca may propose to change in an agent that exists. `skills`: the whole list of active
+// skills it follows, by name; a single "*" means every one of them (and reads back as "*").
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>> &
+  { skills?: string[] }
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,

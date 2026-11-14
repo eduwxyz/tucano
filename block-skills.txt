@@ -1,0 +1,21 @@
+  if (show('skills')) {
+    const hit = (k: Skill): boolean => !needle || k.name.toLowerCase().includes(needle) || k.description.toLowerCase().includes(needle)
+    const found = allSkills.filter(hit)
+    const named = found.filter((k) => k.agents.length > 0)
+    const shared = found.filter((k) => k.agents.length === 0)
+    const lines: string[] = [
+      L(`${found.length} de ${allSkills.length} skills ativas · ${named.length} só com alguns agentes · ${shared.length} de todos`, `${found.length} of ${allSkills.length} active skills · ${named.length} with some agents · ${shared.length} with everyone`)
+    ]
+    if (named.length) {
+      const shown = named.slice(0, 80).map((k) => `- ${k.name} → ${k.agents.map(agentName).join(', ')}`)
+      lines.push(`${L('com dono', 'with owners')}:\n${shown.join('\n')}${named.length > 80 ? `\n${L(`… e mais ${named.length - 80}`, `… and ${named.length - 80} more`)}` : ''}`)
+    }
+    // Everyone's skills are the same list for every agent: names only, in a line that stays readable.
+    if (shared.length) lines.push(`${L('de todos', 'with everyone')}: ${shared.slice(0, 60).map((k) => k.name).join(', ')}${shared.length > 60 ? `, ${L(`… e mais ${shared.length - 60}`, `… and ${shared.length - 60} more`)}` : ''}`)
+    if (needle) {
+      // A search says when to use each one: that is how the Tuca picks a name to assign.
+      const hits = found.slice(0, 40).map((k) => `- ${k.name}: ${k.description.slice(0, 160)}`)
+      lines.push(`${L('achadas', 'found')}:\n${hits.join('\n') || L('nenhuma', 'none')}${found.length > 40 ? `\n${L(`… e mais ${found.length - 40}`, `… and ${found.length - 40} more`)}` : ''}`)
+    }
+    out.push(`## ${L('Skills', 'Skills')}\n${lines.join('\n')}`)
+  }
