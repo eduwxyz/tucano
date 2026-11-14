@@ -700,9 +700,9 @@ describe('calling a person by the whole name (22)', () => {
 
 describe('what the owner alone sees (23, 24)', () => {
   it("the phone tab and the missions are the owner's", async () => {
-    const pages = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Pages.tsx'), 'utf8')
-    expect(pages).toContain("...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])")
-    expect(pages).toContain('const tabs = SETTINGS_TABS(team, admin, owner)')
+    const { settingsStructure } = await import('../src/renderer/src/settings-structure')
+    expect(settingsStructure({ admin: true, owner: false, team: true, servers: true }).find(s => s.id === 'connections-phone')!.visible).toBe(false)
+    expect(settingsStructure({ admin: true, owner: true, team: true, servers: true }).find(s => s.id === 'connections-phone')!.visible).toBe(true)
     const sidebar = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Sidebar.tsx'), 'utf8')
     expect(sidebar).toMatch(/const owner = amOwner\(/)
     expect(sidebar).toMatch(/\{owner && settings\.onboarding\?\.done && !settings\.onboarding\.checklistHidden && <MissionsCard \/>\}/)

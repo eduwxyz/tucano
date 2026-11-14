@@ -4,7 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Settings grouped by task.** App, Workspace, Agents, Models, Knowledge and Connections organize the existing controls. Section links stay visible while scrolling, support keyboard navigation and reduced motion, and bring Memory and Wiki configuration together. Related settings use restrained rounded groups; the danger zone keeps its red border.
+
 ### Fixed
+
+- **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences. (#409)
 
 - **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
 
@@ -34,6 +40,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
 
+
+
 - **A long reply no longer keeps wiki access that changed after it started.** A reply read the wiki with the access it had when its prompt was built: an agent whose wiki access was removed, or a page that became one person's while the reply was still working, could still be read until the reply ended. Each wiki call now checks the agent's access and the held pages again.
 
 - **The wiki map is there in its first frame, and fits again when the window changes size.** The map was laid out at no size and resized a frame later, which on some machines left an empty map on screen until something else redrew it; and a window that took its real size after the screen mounted (a restart restoring its bounds) left the whole map small in a corner. The first frame is now drawn with the camera the fit would give, the map fits again while you haven't moved it yourself, and a big map arrives in one fade instead of one animation per page.
@@ -43,7 +51,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
-
 
 ## [0.2.28] - 2026-11-12
 
