@@ -22,7 +22,22 @@ const list = (ts: string[]): string => (ts.length <= 3 ? ts.map(link).join(', ')
 
 // Names written with capitals ("Construtora Alpha", "Dona Rita"), in the text outside links and code.
 const NAME = /(?<![\p{L}\p{N}])(\p{Lu}[\p{L}\p{N}]+(?:\s+(?:d[aeo]s?\s+|e\s+)?\p{Lu}[\p{L}\p{N}]+){1,3})(?![\p{L}\p{N}])/gu
-function namesIn(body: string): Set<string> {
+// Two capitals in a row also start a sentence with a date ("On Nov 10 Apo decided…"), and that pair
+// is not a name: a candidate beginning with a function word, or carrying a month anywhere, is dropped.
+const STOP = new Set(
+  'on in at by the a an and but or so then it this that these those if when while after before since until as because whether for with from to of not no yes also only both each every his her their our my its see note notes source sources decided status details links goal next posture steps de da do das dos em no na nos nas um uma para com por que se ou e o os as'.split(' ')
+)
+const MONTHS = new Set(
+  'jan feb mar apr may jun jul sept sep aug oct nov dec january february march april june july august september october november december fev abr mai ago set out dez janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro'
+    .split(' ')
+    .map((m) => m.normalize('NFD').replace(/\p{M}/gu, ''))
+)
+const word = (w: string): string => w.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+const isName = (candidate: string): boolean => {
+  const words = candidate.split(' ')
+  return !STOP.has(word(words[0]!)) && !words.some((w) => MONTHS.has(word(w)))
+}
+export function namesIn(body: string): Set<string> {
   const text = body
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`\n]*`/g, ' ')
@@ -31,7 +46,10 @@ function namesIn(body: string): Set<string> {
     .replace(/\*\*[^*\n]*:\*\*/g, ' · ')
   const out = new Set<string>()
   for (const line of text.split(/\n|[.!?:;]\s/)) {
-    for (const m of line.matchAll(NAME)) out.add(m[1]!.replace(/\s+/g, ' '))
+    for (const m of line.matchAll(NAME)) {
+      const name = m[1]!.replace(/\s+/g, ' ')
+      if (isName(name)) out.add(name)
+    }
   }
   return out
 }
