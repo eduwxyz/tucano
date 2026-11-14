@@ -4,6 +4,47 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
+
+- **An agent with no monthly limit gets a real ceiling per reply, and the pause says where it is set.** The ceiling per reply is a share of the monthly limit (10% by default). With no monthly limit there is no month to take it from, and the base used in its place gave 100 thousand tokens a reply: less than an agent with the default limit gets, so setting "no limit" made replies pause sooner. The base is now 10 million tokens (a million a reply at 10%). The note on a paused reply also says that this ceiling is set in **Settings › Agents › Limits** and isn't the agent's monthly limit.
+
+- **The desktop app says a new version is ready with a server on screen too.** With the app showing a Tucano on a server, what's on screen is the server's page, and its Settings showed the server's update state: always off, with the button to look for one disabled. The app still downloaded new versions behind it, but the note that one was ready lived only in the local screen, hidden under the server's, so a person who leaves the app on a server never saw it; the version went in only when they quit the app. The server's page now shows the app's own updates when it is in the desktop app: the version it is on, the look for a new one, the download and the note with **Restart**. Restarting from there is always confirmed in a dialog of the app's own, so a server can't restart the app by itself. Both sides need this version: the app, and the server it shows.
+
+## [0.2.29] - 2026-11-13
+
+> **Em português:**
+> - **Novo:** o **Supabase** entra na loja de conectores. Na aba de skills de um agente, dá pra **buscar**, filtrar por grupo e marcar ou desmarcar todas as mostradas de uma vez. Em Configurações, **Mostrar os passos enquanto o agente trabalha** pode ser desligado, só pra você. O Tucano no navegador mostra a versão do servidor em Configurações.
+> - **Correção:** um agente no **Codex** não falha mais uma resposta sim, outra não, com "o Codex não tem mais essa conversa". Um conector como o da **Vercel** para de pedir autorização de novo todo dia (autorize mais uma vez pra valer). Um agente que perdeu o acesso à wiki, ou uma página que virou privada, deixa de ser lido na hora, mesmo no meio de uma resposta longa. O mapa da wiki aparece ao abrir e se ajusta quando a janela muda de tamanho. O aviso (toast) fica legível no tema escuro. Num workspace em inglês, o Tuca não aprende mais palavras em português pros links de telas e pro guia.
+
+### Added
+
+- **Supabase in the connector store.** Your Supabase projects from [Supabase](https://supabase.com/docs/guides/getting-started/mcp)'s official server, in Development next to Neon: tables, SQL, migrations, logs and Edge Functions. One click opens Supabase's sign-in in the browser, where you choose the organization the agents may reach. Its tools that write (running SQL, applying a migration, deploying a function) come in under the same classes and approvals as any connector's.
+
+- **Find, group and bulk-tick skills in an agent's tab.** The skills tab of an agent was one flat list of every active skill in the library, with no search. It now has a search box (name, description and group), group chips with counts (a skill's group is the folder it lives in), "Only this agent's", and **Tick / Untick the shown ones**, which applies to what the filter shows. The line above the list says how many tokens the agent's skills add to each message.
+
+- **Keep a reply's steps closed while the agent works.** A reply opens the list of its steps while the agent works, which fills the screen when several agents answer at once. **Settings › General › Show the steps while the agent works** turns that off: the line with what the agent is doing now stays, and a click on it opens the steps. It changes only for you.
+
+- **The server's version in a browser's Settings.** Tucano on a server showed no version in Settings when opened in a browser. It now shows the version of the build the server runs.
+
+### Fixed
+
+- **A connector whose sign-in server offers to stay signed in is asked for it, so it stops asking to authorize again every day.** Vercel's MCP server lists only its own scope (`openid`), while its authorization server also offers `offline_access`, the one that comes with a refresh token. The sign-in asked for the first list alone, got no refresh token, and lasted as long as the access token: the connector showed "needs authorization" again the next day. The app now reads what the authorization server offers and asks for `offline_access` when it is there, in the registration and in the authorization page. A connector signed in before this has to be authorized once more to get a sign-in that renews itself.
+
+- **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
+
+- **A long reply no longer keeps wiki access that changed after it started.** A reply read the wiki with the access it had when its prompt was built: an agent whose wiki access was removed, or a page that became one person's while the reply was still working, could still be read until the reply ended. Each wiki call now checks the agent's access and the held pages again.
+
+- **The wiki map is there in its first frame, and fits again when the window changes size.** The map was laid out at no size and resized a frame later, which on some machines left an empty map on screen until something else redrew it; and a window that took its real size after the screen mounted (a restart restoring its bounds) left the whole map small in a corner. The first frame is now drawn with the camera the fit would give, the map fits again while you haven't moved it yourself, and a big map arrives in one fade instead of one animation per page.
+
+- **The toast reads in the dark theme.** The toast used the primary color, which inverts with the theme and left a white pill in the dark app. It is now the app's orange as text on a surface that lifts off the page, in both themes.
+
+- **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
+
+- **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
+
+
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**
@@ -657,6 +698,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.29]: https://github.com/eduwxyz/tucano/compare/v0.2.28...v0.2.29
 [0.2.28]: https://github.com/eduwxyz/tucano/compare/v0.2.27...v0.2.28
 [0.2.27]: https://github.com/eduwxyz/tucano/compare/v0.2.26...v0.2.27
 [0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26

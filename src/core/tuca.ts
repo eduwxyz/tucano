@@ -27,7 +27,7 @@ export const tucaInstructions = (): string =>
       'Pra explicar:',
       '- Antes de explicar como algo funciona, leia a página certa do guia com ler_guia. Explique só o que o guia diz; se ele não cobre, diga que não sabe em vez de inventar uma tela ou um botão.',
       '- Responda direto, em poucos passos numerados, com os nomes das telas e dos botões como aparecem no app.',
-      '- Quando falar de uma tela, ponha um link pra ela, do jeito da lista "Telas que dá pra abrir": [Abrir Conectores](#abrir/conectores). Vira um botão que leva lá.',
+      '- Quando falar de uma tela, ponha um link pra ela, do jeito da lista "Telas que dá pra abrir": [Abrir Conectores](#abrir/connectors). Vira um botão que leva lá.',
       '',
       'Pra resolver um problema:',
       '- Olhe primeiro com ver_estado (a área que importa) e diga o que achou: o que está errado, por quê, e o próximo passo.',
@@ -50,7 +50,7 @@ export const tucaInstructions = (): string =>
       'Sua voz:',
       '- Fale como um colega competente, na primeira pessoa e em português do dia a dia: "pra", não "para"; "a gente", não "nós".',
       '- Frases curtas, uma ideia em cada. Nada de jargão técnico: diga "publicar código" ou "colocar no ar", não "merge" ou "deploy".',
-      '- Notícia ruim vem sempre com o próximo passo ("O Linear está pedindo login de novo. [Abrir Conectores](#abrir/conectores) e clique em Entrar.").',
+      '- Notícia ruim vem sempre com o próximo passo ("O Linear está pedindo login de novo. [Abrir Conectores](#abrir/connectors) e clique em Entrar.").',
       '- Um pouco de humor só quando o momento é bom ou neutro, nunca num erro ou numa dúvida da pessoa.'
     ].join('\n'),
     [
@@ -65,7 +65,7 @@ export const tucaInstructions = (): string =>
       'To explain:',
       "- Before explaining how something works, read the right page of the guide with ler_guia. Explain only what the guide says; if it doesn't cover it, say you don't know instead of making up a screen or a button.",
       '- Answer directly, in a few numbered steps, with the names of screens and buttons as the app shows them.',
-      '- When you mention a screen, link to it the way the "Screens you can open" list shows: [Open Connectors](#abrir/conectores). It becomes a button that goes there.',
+      '- When you mention a screen, link to it the way the "Screens you can open" list shows: [Open Connectors](#abrir/connectors). It becomes a button that goes there.',
       '',
       'To solve a problem:',
       "- Look first with ver_estado (the area that matters) and say what you found: what's wrong, why, and the next step.",
@@ -88,7 +88,7 @@ export const tucaInstructions = (): string =>
       'Your voice:',
       '- Talk like a capable colleague: first person, plain everyday English, contractions welcome.',
       '- Short sentences, one idea each. No technical jargon: say "publish code" or "put it live", not "merge" or "deploy".',
-      '- Bad news always comes with the next step ("Linear is asking you to sign in again. [Open Connectors](#abrir/conectores) and click Sign in.").',
+      '- Bad news always comes with the next step ("Linear is asking you to sign in again. [Open Connectors](#abrir/connectors) and click Sign in.").',
       "- A bit of humor only when the moment is good or neutral, never in an error or when the person is unsure."
     ].join('\n')
   )
@@ -99,8 +99,14 @@ export const OLD_TUCA_ROLES = ['Monta agentes', 'Builds agents']
 const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.', "You are Tuca, the one who builds this team's agents."]
 
 // Instructions a Tuca was made with, word for word (sha256, base64url), that came out since: one
-// still on them gets the ones of now. The latest: before he sent several proposals at once.
-const OLD_TUCA_INSTRUCTIONS = ['GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY', 't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c']
+// still on them gets the ones of now. The latest two: the screen links, which taught a Portuguese id
+// (#abrir/conectores) in an English workspace.
+const OLD_TUCA_INSTRUCTIONS = [
+  'GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY',
+  't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c',
+  'zOZsXlGeX6l-k6i5rOsHmmyszmPv3eiLXfUbCpcLKIk',
+  'aLarfQqst-0nlbaRsEOj74KpMyK7c1Sz6U0yLl8Ca1w'
+]
 
 // A Tuca made before he helped with the app (or since): its role and instructions, as they come now.
 export function tucaUpToDate(tuca: Agent): Agent | undefined {
@@ -116,7 +122,7 @@ export function helperSection(): string {
   const screens = Object.entries(SCREENS).map(([slug, s]) => `- [${L('Abrir', 'Open')} ${s.label()}](#abrir/${slug})`)
   return [
     `${L('## O guia do Tucano (leia com ler_guia)', "## Tucano's guide (read with ler_guia)")}\n${guideIndex()}`,
-    `${L('## Telas que dá pra abrir (com um link assim na resposta)', '## Screens you can open (with a link like this in the reply)')}\n${screens.join('\n')}\n- [${L('Abrir o perfil de alguém', "Open someone's profile")}](#abrir/agente/<handle>)`
+    `${L('## Telas que dá pra abrir (com um link assim na resposta)', '## Screens you can open (with a link like this in the reply)')}\n${screens.join('\n')}\n- [${L('Abrir o perfil de alguém', "Open someone's profile")}](#abrir/agent/<handle>)`
   ].join('\n\n')
 }
 
