@@ -57,6 +57,13 @@ function connect(): { events: CoreEvent[]; call: (method: string) => Promise<unk
   }
 }
 
+// How long this file waits for a core to come up. 15 s was enough on a quiet machine, and the
+// Windows runner that takes the middle of four shards timed out at 20.6 s on an unchanged commit:
+// the boot spawns every harness's CLI and shares the machine with three other shards. vitest.config
+// already gives Windows 60 s per test for the same reason; this keeps the file's own numbers from
+// undercutting that on the platform that needs it.
+const BOOT = process.platform === 'win32' ? 60_000 : 15_000
+
 describe('the core starting', () => {
   it('says it is ready before the harnesses are checked, and tells the window when they are', async () => {
     Object.assign(process.env, { TUCANO_DATA: dataDir, TUCANO_DEFAULT_WORKSPACE: '0', TUCANO_SEED: '0', TUCANO_WEBHOOK_PORT: '47967', TUCANO_GIT_PORT: '47968', TUCANO_WIKI: join(dataDir, 'wiki') })
@@ -67,7 +74,7 @@ describe('the core starting', () => {
     // asserts below state. The boot's wall-clock time is a different claim and not this one's:
     // it measures the test's own poll latency as much as the core, and a starved CI runner took
     // 5.7 s on an unchanged commit, so the assert turned a busy machine into a red shard.
-    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: 'ready' }), { timeout: 15_000 })
+    await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: 'ready' }), { timeout: BOOT })
     expect(detection.calls).toBe(1) // started, and still running
 
     const window = connect()
@@ -85,5 +92,5 @@ describe('the core starting', () => {
     // Kept for the next start, which opens on it.
     const kept = JSON.parse(readFileSync(join(dataDir, 'engines.json'), 'utf8')) as { engines: Record<EngineId, EngineStatus> }
     expect(kept.engines.claude).toMatchObject({ loggedIn: true, account: 'Plano Claude Max' })
-  }, 15_000)
+  }, BOOT)
 })
