@@ -788,6 +788,11 @@ export interface HarnessMcp {
 
 export type ApprovalState = 'pending' | 'approved' | 'refused' | 'expired'
 
+// What became of the call once it was approved: it ran and went through, it ran and came back an
+// error, or nothing ran (a computer that was off, an access that changed, a refusal). Left out
+// while the call is on its way, so a card can say "approved, waiting" without inventing a result.
+export type ApprovalResult = 'done' | 'error' | 'not_run'
+
 // The approval an agent asks with pedir_acesso: a grant, not a tool call.
 export const ACCESS_REQUEST = 'pedir_acesso'
 
@@ -806,6 +811,7 @@ export interface Approval {
   state: ApprovalState
   reason?: string
   outcome?: string // short summary of what happened when it ran
+  result?: ApprovalResult // what became of the call: not written until it's over
   createdAt: number
   expiresAt: number
   decidedAt?: number

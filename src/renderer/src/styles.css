@@ -1027,13 +1027,17 @@ h3 {
   overflow: hidden;
   user-select: none;
 }
-/* Held, the light fills the button in 1.5s (linear: it's a clock) and the component
-   approves when that same 1.5 s run out; let go and it drains back. */
+/* Held, a 3px track along the bottom fills in 1.5s (linear: it's a clock) and the component
+   approves when that same 1.5 s run out; let go and it drains back. A track rather than a fill of
+   the whole button, so the label never has to change size under the pointer. */
 .btn--hold::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.28);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.85);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform var(--dur-base) var(--ease-out);
@@ -1597,14 +1601,16 @@ h3 {
 }
 
 /* approval card */
+/* The card leads with the action and its target (issue #252, direction A): the status is a quiet
+   row, the title is the largest thing in it, and the decisions are one line at the bottom. */
 .approval {
   position: relative;
   margin: 10px 0 4px;
   max-width: 560px;
   border: 1px solid var(--border-strong);
   border-left: 3px solid var(--warn);
-  border-radius: var(--radius-lg);
-  padding: 12px 14px;
+  border-radius: 14px;
+  padding: 20px;
   background: var(--panel);
   box-shadow: var(--shadow);
   transition: border-left-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
@@ -1653,7 +1659,8 @@ h3 {
   box-shadow: none;
 }
 .approval--refused,
-.approval--expired {
+.approval--expired,
+.approval--error {
   border-left-color: var(--danger);
   box-shadow: none;
 }
@@ -1661,29 +1668,129 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
+}
+.approval__grow {
+  flex: 1;
 }
 .approval__badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
   color: var(--warn);
+}
+/* Whose request it is: quiet, and only there to keep the card readable outside its conversation. */
+.approval__who {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-3);
 }
 .approval--approved .approval__badge {
   color: var(--ok);
 }
-.approval--refused .approval__badge {
+.approval--refused .approval__badge,
+.approval--error .approval__badge {
   color: var(--danger);
 }
 .approval__title {
+  margin: 6px 0 6px;
+  font-size: 18px;
+  line-height: 24px;
   font-weight: 600;
-  font-size: 14.5px;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.approval__title:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .approval__why {
-  margin: 4px 0 10px;
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--text-2);
+}
+/* The connector and the exact target, as a row of their own rather than inside the title. */
+.approval__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* The decisions: one 44px line, the three of them side by side, 12px apart — Approve, the one
+   that can be long, and Refuse, never wrapped onto a second line. The primary used to hold 244px of
+   its own and "Approve and always allow" asked for 196 more, so Refuse fell to a line below at every
+   width. Now the primary grows into whatever the row has left, and the long label gives way before
+   the row does. */
+.approval__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+}
+.approval__actions .btn {
+  height: 44px;
+  border-radius: 9px;
+  flex: 0 0 auto;
+}
+.approval__actions .approval__approve {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+/* The hold carries a longer sentence ("Hold to approve · high-risk action") and is alone with
+   Refuse, so it keeps its own width; the plain Approve stops growing at the 244 the card was drawn
+   for — while the row is a row. Stacked, the three are the card's width, as before. */
+@media (min-width: 561px) {
+  .approval__approve:not(.btn--hold) {
+    max-width: 244px;
+  }
+}
+/* "Approve and always allow": its own words are what would push Refuse down, so it takes the space
+   the row has left and, when the sentence doesn't fit in one line there, it reads on two lines
+   inside the same 44px button ("Approve and / always allow") rather than shortening to "Approve and
+   alw…". Only past two lines — a runner listing every tool it covers — does it end in an
+   ellipsis; the whole sentence is in its tooltip either way. */
+.approval__actions .approval__allow {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.approval__allow-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 16px;
+  text-align: center;
+}
+.approval__refuse-btn {
+  min-width: 108px;
+}
+.approval__unconfirmed {
+  font-size: 12.5px;
+  color: var(--danger);
+}
+/* Below this width the three don't fit on one line ("Approve and always allow" would start
+   losing its words at 560), so each takes the card's own line instead. */
+@media (max-width: 560px) {
+  .approval__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .approval__actions .btn {
+    width: 100%;
+    min-width: 0;
+  }
 }
 .approval__call {
   background: var(--code-bg);
@@ -1749,6 +1856,32 @@ h3 {
 }
 .approval__refuse .row {
   justify-content: flex-end;
+}
+
+/* A request still waiting, over the field: the way back to it from anywhere in the conversation.
+   Never takes the focus on arrival; Review is a click, and only a click moves the focus. */
+.approval-reminder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 14px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  font-size: 13px;
+  color: var(--text-2);
+  animation: rise 240ms var(--ease-out) backwards;
+}
+.approval-reminder .icon {
+  color: var(--warn);
+  flex: none;
+}
+.approval-reminder .link {
+  margin-left: auto;
+  font-weight: 600;
 }
 
 /* composer */
