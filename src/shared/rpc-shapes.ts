@@ -151,6 +151,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   wikiReview: {},
   wikiRunReview: {},
   wikiDismissFinding: { id: 's' },
+  wikiResolveFinding: { id: 's' },
   wikiImport: { dir: 's' },
   wikiImportZip: { path: 's' },
   setWikiCapture: { conversationId: 's', on: 'b' },

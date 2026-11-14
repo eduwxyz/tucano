@@ -57,6 +57,7 @@ import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
+import { WikiResolver } from './wiki-resolver'
 import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
@@ -911,10 +912,11 @@ function mergeWiki(from: { root: string; dir: string; held: { key: string; perso
   return { copied, copies }
 }
 // The curator reads the conversations with the memory's cheap model, and keeps what lasts.
-const wikiLlm = async (system: string, prompt: string): Promise<string> => {
+// The model the wiki reads with: the memory's by default, or the one a job names (the resolver's).
+const wikiLlm = async (system: string, prompt: string, pick?: string): Promise<string> => {
   await enginesReady
   const s = settings()
-  const model = usable(modelInfo(s.memoryModel)) ?? modelInfo('haiku')!
+  const model = usable(modelInfo(pick || s.memoryModel)) ?? modelInfo('haiku')!
   const st = s.engines[model.engine]
   if (!st.installed || !st.loggedIn) throw new Error(L(`O ${ENGINES[model.engine].label} não está pronto pra organizar a wiki.`, `${ENGINES[model.engine].label} isn't ready to organize the wiki.`))
   const cwd = join(dataDir, 'agents', '_wiki')
@@ -934,6 +936,8 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
 const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined), beforeWrite: () => gitSync.pull() })
 // The review: by hand, or once a week when asked (checked every hour).
 const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
+// The resolver: a finding the review couldn't settle, read again whole when the person asks (Wiki settings).
+const resolver = new WikiResolver({ wiki, settings, llm: (system, prompt) => wikiLlm(system, prompt, settings().wikiResolveModel) })
 setInterval(() => {
   if (reviewer.due()) void reviewer.review().then(() => emit({ type: 'wiki' }))
 }, 3600_000).unref()
@@ -2150,6 +2154,11 @@ const api: Handlers = {
     emit({ type: 'wiki' })
   },
   wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
+  wikiResolveFinding: async ({ id }) => {
+    const r = await resolver.resolve(id)
+    emit({ type: 'wiki' })
+    return { resolved: !!r.change, ...(r.note ? { note: r.note } : {}), ...(r.gone ? { gone: true } : {}) }
+  },
   wikiImport: ({ dir }, ctx) => wiki.importVault(dir, nameOf(ctx)),
   // On a server: a vault zipped on the person's computer and sent up. Only from the uploads folder
   // the server writes to; unpacked apart, copied in as any vault, then both go.

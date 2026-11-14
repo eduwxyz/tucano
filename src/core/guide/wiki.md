@@ -17,6 +17,9 @@ Um modelo que cuida da wiki. Em **Ajustes da wiki** (Wiki settings):
 
 **Decisões do curador** mostra o que ele quer mudar em páginas que já existem: **Aprovar**, **Recusar** ou **Desfazer**. Se a página mudou depois da sugestão, **Refazer sobre a versão nova**.
 
+## O resolvedor
+Quando a revisão só aponta o problema, o botão **Resolver** em **Cuidados** lê as páginas inteiras com as fontes e propõe a mudança — ou faz a pergunta que só você responde. Em **Ajustes da wiki** › **O resolvedor**: liga e desliga, e o modelo dele.
+
 ## A pasta
 A wiki é Markdown puro numa pasta: abre no Obsidian, vai pro iCloud ou pro git. Em **Ajustes da wiki** › **A pasta**:
 - **Abrir pasta** mostra onde está.

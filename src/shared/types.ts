@@ -467,6 +467,8 @@ export interface Settings {
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
+  wikiResolve?: boolean // the resolver settles a finding the review couldn't fix, when asked (off by default)
+  wikiResolveModel?: string // a model id; unset: the memory model, then Haiku
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
@@ -1248,6 +1250,7 @@ export interface WikiFinding {
   pages: string[] // the pages it is about
   text: string // what's wrong, in a sentence (Markdown, with [[links]])
   name?: string // broken, missing: the page it would take
+  note?: string // what the resolver found and couldn't settle, or the question only the person can answer
   change?: WikiChange // the fix it suggests, waiting for approval
 }
 // What came in from an Obsidian vault.
