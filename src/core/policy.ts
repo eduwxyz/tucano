@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto'
 import type { ConnectorTool, GrantLevel } from '../shared/types'
 // The classes themselves live in shared/, so the approval card reads them too.
-export { callClass, classify, classifyAction, legacyClassify, permits, runnerAllowed, runnerRules } from '../shared/classify'
+export { callClass, classify, classifyAction, legacyClassify, neverAllowedForGood, permits, runnerAllowed, runnerRules } from '../shared/classify'
 
 // `read` exposes read tools; `read_write` exposes everything (sensitive ones go through approval).
 // `forReaders`: a Composio tool exposed to readers too (shared/composio.ts).
