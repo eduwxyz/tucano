@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { L } from '../../shared/lang'
+import { L, locale } from '../../shared/lang'
 import { memorySystem } from '../memory'
 import { curatorSystem } from '../wiki-curator'
 import { handoffSystem, routerSystem } from '../router'
@@ -289,7 +289,7 @@ function fakeCuration(prompt: string): { guardar: boolean; motivo: string; titul
   const named = titles.find((t) => t.toLowerCase().split(/\s+/).filter((w) => w.length >= 5).some((w) => stretch.toLowerCase().includes(w)))
   const plain = stretch.replace(/\*\*[^*]+\*\* \([^)]*\): /g, '').replace(/\s+/g, ' ').trim()
   const line = plain.length > 160 ? `${plain.slice(0, 157)}…` : plain
-  const day = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  const day = new Date().toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })
   const mudancas: Record<string, string>[] = []
   if (named) mudancas.push({ op: 'append', pagina: named, secao: L('Histórico', 'History'), texto: `- **${day}:** ${line}` })
   if (/\d|decid|fech|guarda/i.test(plain) && !named) mudancas.push({ op: 'create', pagina: plain.split(/[.!?:]/)[0]!.split(' ').slice(0, 5).join(' '), tipo: L('Assunto', 'Topic'), texto: `${line}\n\n## ${L('Detalhes', 'Details')}\n- ${line}` })
