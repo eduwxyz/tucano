@@ -317,7 +317,7 @@ describe('Runner', () => {
   })
 })
 
-describe('one reply at a time per agent and thread', () => {
+describe('hand-offs wait their turn; a person\'s messages, routines, retries and continuations do not', () => {
   const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((res) => { const t = setTimeout(res, ms); signal.addEventListener('abort', () => (clearTimeout(t), res()), { once: true }) })
   // Lia and Bia ask Theo for something; Theo takes `ms` and records how many of his turns overlap.
   const slowTheo = (ms: number): { engine: Engine; active: () => number; max: () => number } => {
@@ -376,7 +376,7 @@ describe('one reply at a time per agent and thread', () => {
     for (let i = 0; i < 200 && by('a2')[0]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
   }
 
-  it("a person's mention while the agent replies waits for it, and the ones that pile up are one reply", async () => {
+  it("a person's mentions while the agent replies each get a reply of their own, side by side", async () => {
     const t = slowTheo(400)
     const r = runner(t.engine)
     await r.send('c3', '@theo um')
@@ -384,11 +384,12 @@ describe('one reply at a time per agent and thread', () => {
     await r.send('c3', '@theo dois')
     await r.send('c3', '@theo três')
     await r.idle()
-    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done'])
-    expect(t.max()).toBe(1)
+    // A mention is a message like any other: three messages, three sessions, none folded into another.
+    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done', 'done'])
+    expect(t.max()).toBeGreaterThan(1)
   })
 
-  it('a routine in the same chat waits for the reply running there', async () => {
+  it('a routine in the same chat goes beside the reply running there, not after it', async () => {
     const t = slowTheo(400)
     const r = runner(t.engine)
     await r.send('c3', '@theo um')
@@ -397,16 +398,56 @@ describe('one reply at a time per agent and thread', () => {
     await r.idle()
     expect((await done)?.run?.status).toBe('done')
     expect(by('a2')).toHaveLength(2)
-    expect(t.max()).toBe(1)
+    expect(t.max()).toBeGreaterThan(1)
   })
 
-  it('two routines that fire together in one chat run one after the other', async () => {
+  it('two routines that fire together in one chat each run their own reply', async () => {
     const t = slowTheo(200)
     const r = runner(t.engine)
     const routine = (id: string) => ({ id, name: id, agentId: 'a2', conversationId: 'c3', prompt: 'rotina', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
     const runs = await Promise.all([r.runRoutine(routine('r1'), { scheduledAt: 1, late: false }), r.runRoutine(routine('r2'), { scheduledAt: 1, late: false })])
     expect(runs.map((m) => m?.run?.status)).toEqual(['done', 'done'])
-    expect(t.max()).toBe(1)
+    expect(t.max()).toBeGreaterThan(1)
+  })
+
+  it('a retry goes beside the reply running there, not after it', async () => {
+    let fail = true
+    const slow = slowTheo(400)
+    const flaky: Engine = {
+      id: 'claude',
+      run: (ctx) => (fail && ctx.system.startsWith('Você é theo') ? (async function* () { yield { type: 'error' as const, message: 'caiu' } })() : slow.engine.run(ctx))
+    }
+    const r = runner(flaky)
+    await r.send('c3', '@theo um')
+    await r.idle()
+    const failed = by('a2')[0]!
+    expect(failed.run?.status).toBe('failed')
+    fail = false
+    await r.send('c3', '@theo dois')
+    // Theo is answering the second one: the retry of the first doesn't wait for that reply to end.
+    for (let i = 0; i < 200 && by('a2')[1]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
+    r.retry(failed.id)
+    await r.idle()
+    expect(db.message(failed.id)?.run?.status).toBe('done')
+    expect(by('a2')).toHaveLength(2)
+    expect(slow.max()).toBeGreaterThan(1)
+  })
+
+  it('a reply going on past its budget goes beside the reply running there, not after it', async () => {
+    const slow = slowTheo(400)
+    const r = runner(slow.engine)
+    await r.send('c3', '@theo um')
+    await r.idle()
+    const paused = by('a2')[0]!
+    db.saveMessage({ ...paused, run: { ...paused.run!, status: 'paused' } }) // as the budget leaves it, with Continuar on it
+    await r.send('c3', '@theo dois')
+    // Theo is answering the second one: pressing Continuar on the first doesn't wait for that reply to end.
+    for (let i = 0; i < 200 && by('a2')[1]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
+    await r.continue(paused.id)
+    await r.idle()
+    expect(db.message(paused.id)?.run?.status).toBe('done')
+    expect(by('a2')).toHaveLength(3)
+    expect(slow.max()).toBeGreaterThan(1)
   })
 
   it('drops the follow-up when the reply it waited for was stopped', async () => {

@@ -110,8 +110,10 @@ describe.skipIf(process.platform === 'win32')('runCli with an error on stderr', 
     expect(ms).toBeLessThan(5_000)
   })
 
+  // The window is the engine's own (30 s), not a fifth of a second: a runner under load can take longer
+  // than that between the error on stderr and the first line on stdout, and the turn was ending there.
   it('lets it go on when output comes after the error (a retry that worked)', async () => {
-    const { events } = await collect('echo FALHOU >&2; sleep 0.05; echo resposta; sleep 0.3', parser(200))
+    const { events } = await collect('echo FALHOU >&2; sleep 0.05; echo resposta; sleep 0.3', parser(OPENCODE_ERROR_WAIT_MS))
     expect(events).toEqual([{ type: 'text', delta: 'resposta' }, { type: 'done', text: 'saiu 0', usage: { inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 } }])
   })
 })
