@@ -256,6 +256,7 @@ export const NEEDS: Record<Method, Need> = {
   removeDevice: 'anyone', // one's own (the core looks only among theirs)
   removePerson: 'target',
   setRole: 'target',
+  setPersonAccess: 'target', // the admins change members' (the owner, admins' too: always everything)
   activity: 'admin',
   purgePerson: 'owner',
   leave: 'anyone', // one's own access (the owner is refused in the core)

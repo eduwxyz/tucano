@@ -17,6 +17,7 @@ import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rp
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { assertAgentVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
@@ -1232,6 +1233,7 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { 
   } else if (p.kind === 'routine') {
     if (p.routine.conversationId) reach(ctx, p.routine.conversationId)
     const agentId = needed[0] ?? p.routine.agentId
+    assertAgentVisible(db, ctx.person, agentId)
     const conversationId = p.routine.conversationId || api.openDm({ agentId }, ctx)
     const made = routines.save({ ...p.routine, agentId, conversationId }, ctx.person.id)
     id = made.id
@@ -1315,8 +1317,13 @@ const record = (ctx: Ctx | undefined, kind: string, target?: string, detail?: Re
   void db.addActivity({ ...(ctx ? { personId: ctx.person.id } : {}), kind, ...(target ? { target } : {}), ...(detail ? { detail } : {}) })
 // A routine's rules: the team's are the admins'; a person's, theirs (and the admins').
 const mayRoutine = (ctx: Ctx, r: Pick<Routine, 'scope' | 'owner'> | undefined): void => must(ctx.person, { kind: 'routine', routine: r ?? { scope: 'channel' } })
+// The open pages of the people whose view is cut down read it again (a moment after the answer) when what they see changes.
+const refreshRestricted = (): void => {
+  for (const id of restrictedIds(db)) setTimeout(() => hub.closeFor(id), 200)
+}
 // A browser working for a conversation this person sees is theirs to take over; any other, the admins'.
 function mayBrowser(ctx: Ctx, agentId: string): void {
+  assertAgentVisible(db, ctx.person, agentId)
   if (!people.canSeeFrom(ctx.person, browser.view(agentId)?.conversationId) || !browser.view(agentId)?.conversationId) must(ctx.person, { kind: 'admin' })
 }
 // What a removed person's DMs had running stops; their files go from the disk, and what the wiki
@@ -1435,9 +1442,9 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
-  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.retry(messageId)),
+  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
 
-  continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
+  continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
 
   setAgentModels: ({ agentIds, modelId }, ctx) => {
     const value = modelId.trim()
@@ -1491,6 +1498,7 @@ const api: Handlers = {
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
+    if (before?.reportsTo !== clean.reportsTo) refreshRestricted() // a sector's reach moves with whom it answers to
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
@@ -1521,6 +1529,7 @@ const api: Handlers = {
       if (agent.browser) bg(browser.close(id), 'archiveAgent')
     }
     db.saveAgent({ ...agent, archived })
+    refreshRestricted()
     emit({ type: 'agent', agent: db.agent(id)! })
     emitConversations()
   },
@@ -1546,7 +1555,7 @@ const api: Handlers = {
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    db.setMembers(id, agentIds.filter((a) => known.has(a)))
+    db.setMembers(id, membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a))))
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
@@ -1591,6 +1600,7 @@ const api: Handlers = {
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     const id = randomUUID()
     db.createConversation({ id, kind: 'channel', name: clean, members: [], createdBy: ctx.person.id, ...(threads ? { threads } : {}) })
+    grantOwnChannel(db, ctx.person, id)
     emitConversations([id])
     record(ctx, 'channel.created', id, { name: clean })
     return id
@@ -1671,6 +1681,7 @@ const api: Handlers = {
   },
   // One DM per agent and person.
   openDm: ({ agentId }, ctx) => {
+    assertAgentVisible(db, ctx.person, agentId)
     const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
     if (existing) return existing.id
     const id = randomUUID()
@@ -1953,6 +1964,7 @@ const api: Handlers = {
 
   computerAction: ({ agentId, action }, ctx) => {
     admitComputer(ctx.person, action)
+    assertAgentVisible(db, ctx.person, agentId)
     const agent = db.agent(agentId)
     if (!agent) return
     if (action === 'open_folder') {
@@ -2291,6 +2303,15 @@ const api: Handlers = {
     toMain({ type: 'person-changed', id })
     emitPeople()
     emit({ type: 'inbox' })
+    setTimeout(() => hub.closeFor(id), 200) // their open pages read the view again: a new role changes what they see
+  },
+  setPersonAccess: ({ id, access }, ctx) => {
+    people.setPersonAccess(ctx.person, id, access)
+    toMain({ type: 'person-changed', id })
+    emitPeople()
+    emit({ type: 'inbox' })
+    // Their open pages reconnect and read the snapshot again with the new view (a moment after the answer).
+    setTimeout(() => hub.closeFor(id), 200)
   },
   purgePerson: ({ id }, ctx) => purged([people.purge(ctx.person, id)]),
   // Leaving on one's own: gone now, with what was theirs alone. Their own line closes a moment after
@@ -2319,6 +2340,7 @@ const api: Handlers = {
   runRoutine: ({ id }, ctx) => {
     const r = db.routine(id)
     if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))
+    assertAgentVisible(db, ctx.person, r.agentId)
     reach(ctx, r.conversationId)
     mayRoutine(ctx, r)
     return routines.runNow(id)

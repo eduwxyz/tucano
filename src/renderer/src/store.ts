@@ -31,6 +31,7 @@ import {
   type Message,
   type Model,
   type Person,
+  type PersonAccess,
   type Delegation,
   type Inbox,
   type Device,
@@ -1077,7 +1078,8 @@ export const removeRoutine = (id: string): void => void fire(L('Não consegui re
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })
 export const doneNaming = (): void => set((s) => ({ ...s, needsName: false }))
 export const setDelegation = (to: string | null, until?: number): Promise<void> => call('setDelegation', { to, ...(until ? { until } : {}) })
-export const createInvite = (role: 'admin' | 'member', about: string, restore?: string): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}) })
+export const createInvite = (role: 'admin' | 'member', about: string, restore?: string, access?: PersonAccess): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}), ...(access ? { access } : {}) })
+export const setPersonAccess = (id: string, access: PersonAccess): Promise<void> => call('setPersonAccess', { id, access })
 export const revokeInvite = (id: string): Promise<void> => call('revokeInvite', { id })
 export const listInvites = (): Promise<Invite[]> => call('listInvites')
 export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => call('removedPeople')

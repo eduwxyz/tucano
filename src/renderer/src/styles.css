@@ -12079,3 +12079,47 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 6px;
 }
+
+/* ---------- What a person sees (PersonAccess.tsx) ---------- */
+.modal__card.access-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.access { display: flex; flex-direction: column; gap: 20px; }
+.access :where(button) { border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; background: none; }
+.access-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 1.5; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.access-chip--all { background: var(--ok-soft); color: var(--ok); }
+.access-cover-hint { margin: 4px 0 8px; color: var(--text-2); }
+.access-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.access-mode { display: flex; gap: 10px; align-items: flex-start; border: 1.5px solid var(--border-strong); border-radius: var(--radius); padding: 12px 14px; }
+.access-mode.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.access-mode__text { display: flex; flex-direction: column; gap: 2px; line-height: 1.35; }
+.access-mode__text > span { font-size: 13px; color: var(--text-2); }
+.access-radio { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-strong); flex: none; margin-top: 1px; display: grid; place-items: center; }
+.access-mode.is-on .access-radio { border-color: var(--accent); }
+.access-mode.is-on .access-radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.access-label { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.access-hint { font-size: 12.5px; color: var(--text-3); margin-bottom: 10px; line-height: 1.4; }
+.access-empty { margin: 0; padding: 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--text-3); font-size: 13px; text-align: center; }
+.access-box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border-strong); display: grid; place-items: center; flex: none; font-size: 12px; font-weight: 700; line-height: 1; }
+.access-box--on, .access-box--part { background: var(--accent); border-color: var(--accent); color: #fff; }
+.access-sector { border: 1px solid var(--border); border-radius: var(--radius); }
+.access-sector + .access-sector { margin-top: 8px; }
+.access-sector__head { display: flex; align-items: center; }
+.access-sector__check { padding: 11px 0 11px 14px; display: flex; }
+.access-sector__open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 11px 14px; }
+.access-sector__name { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.35; }
+.access-sector__name > span { font-size: 12.5px; color: var(--text-3); }
+.access-count { font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
+.access-chev { color: var(--text-3); display: grid; transform: rotate(-90deg); transition: transform 0.15s; }
+.access-chev.is-open { transform: none; }
+.access-agents { border-top: 1px solid var(--border); padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.access-agent { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; line-height: 1.3; min-width: 0; }
+.access-agent.is-on { background: var(--accent-soft); }
+.access-agent__text { display: flex; flex-direction: column; min-width: 0; }
+.access-agent__text > span { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.access-channels { display: flex; flex-wrap: wrap; gap: 8px; }
+.access-channel { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px 6px 10px; line-height: 1.3; }
+.access-channel.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.access-result { border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; line-height: 1.45; }
+.access-no { color: var(--text-3); font-size: 13px; }
+.access-fine { margin: 0; font-size: 12.5px; color: var(--text-3); line-height: 1.4; }
+.access button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { .access-modes, .access-agents { grid-template-columns: 1fr; } }

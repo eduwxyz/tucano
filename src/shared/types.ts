@@ -316,6 +316,17 @@ export interface Person {
   delegateUntil?: number // …until then
   seenAt?: number // when they last opened the Tucano with a key of theirs
   devices?: number // how many keys (browsers, apps) they have
+  access?: PersonAccess // what they see; unset: everything. Sent to admins and to the person alone
+}
+
+// What a person sees of the team. 'all': everything, as always. 'picked': the agents and channels
+// marked, plus every agent of a marked sector (by its head, so one who joins it later is in too).
+// The owner and admins always see everything, whatever is stored here.
+export interface PersonAccess {
+  mode: 'all' | 'picked'
+  sectors: string[] // sector heads' agent ids
+  agents: string[]
+  channels: string[]
 }
 
 // One of my own keys (a browser, the phone, the desktop app), as Settings › Pessoas lists them.
@@ -387,6 +398,7 @@ export interface Invite {
   role: Exclude<Role, 'owner'>
   about: string
   restore?: string // a removed person this brings back
+  access?: PersonAccess // what whoever joins with it sees; unset: everything
   createdBy: string
   createdAt: number
   expiresAt: number
