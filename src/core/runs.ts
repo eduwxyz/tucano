@@ -1218,7 +1218,13 @@ export class Runner {
     const mySkills = skills?.forAgent(agent.id) ?? []
     // The wiki: for agents that may read it, once it has a page.
     // A page held for one person (see Wiki.inherit) is read only in their own DM: anywhere else the reply reaches others.
-    const wikiShown = this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conv, db.ownerId())))
+    const wikiNow = () => {
+      const current = db.agent(agent.id)
+      const conversation = db.conversation(conv.id)
+      if (!current || current.archived || !conversation || wikiAccess(current) === 'none') return undefined
+      return this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conversation, db.ownerId())))
+    }
+    const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
 
     const control: Control = { ctl: new AbortController(), msg }
@@ -1759,7 +1765,10 @@ ${note}`,
         }
 
         if (wiki && WIKI_TOOL_NAMES.has(name)) {
-          const r = wikiCall(wiki, name, args)
+          // A long reply must not keep access that changed after its prompt was built.
+          const current = wikiNow()
+          if (!current) return textResult(L('Você não tem acesso à wiki agora.', 'You do not have wiki access now.'), true)
+          const r = wikiCall(current, name, args)
           addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
           return textResult(r.text, r.error)
         }

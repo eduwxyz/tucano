@@ -89,8 +89,14 @@ function signIn(print: string, code: number | null): { spawn: SetupDeps['spawn']
       runs.push({ bin, args, env })
       let end: (c: number) => void = () => {}
       const exit = new Promise<number>((r) => (end = r))
-      if (code !== null) setTimeout(() => end(code), 5)
-      return { output: (on) => setTimeout(() => on(print), 1), exit, kill: () => ((killed = true), end(143)) }
+      return {
+        output: (on) => setTimeout(() => {
+          on(print)
+          if (code !== null) end(code)
+        }, 1),
+        exit,
+        kill: () => ((killed = true), end(143))
+      }
     }
   }
 }

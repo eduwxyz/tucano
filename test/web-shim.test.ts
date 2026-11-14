@@ -117,8 +117,9 @@ describe('the bridge script the server sends', () => {
   it('is JavaScript a browser can run, with the shims in it', () => {
     const server = readFileSync(join(import.meta.dirname, '..', 'src', 'server', 'index.ts'), 'utf8')
     const start = server.indexOf('const WEB = `') + 'const WEB = `'.length
-    // The template as JS reads it (its escapes and its two shims), then the script it makes.
-    const web = new Function('INSECURE_CONTEXT_SHIM', 'ACCESS_SHIM', 'return `' + server.slice(start, server.indexOf('\n`\n', start)) + '`')(INSECURE_CONTEXT_SHIM, ACCESS_SHIM) as string
+    // The template as JS reads it (its escapes, its two shims and the server's version), then the script it makes.
+    const web = new Function('INSECURE_CONTEXT_SHIM', 'ACCESS_SHIM', 'version', 'return `' + server.slice(start, server.indexOf('\n`\n', start)) + '`')(INSECURE_CONTEXT_SHIM, ACCESS_SHIM, '0.0.0') as string
+    expect(web).toContain(`updateState: async () => ({ version: "0.0.0", status: 'off' })`)
     expect(() => new Function(web)).not.toThrow()
   })
 })

@@ -132,7 +132,11 @@ describe('the guide and the screen links', () => {
   })
 
   it('turns #abrir/ links into screens, and nothing else', () => {
-    expect(screenOf('#abrir/conectores')?.screen?.view).toBe('connectors')
+    expect(screenOf('#abrir/conectores')?.screen?.view).toBe('connectors') // the id of before, still a link
+    expect(screenOf('#abrir/connectors')?.screen?.view).toBe('connectors')
+    expect(screenOf('#abrir/settings/models')?.screen).toMatchObject({ view: 'settings', tab: 'modelos' })
+    expect(screenOf('#abrir/configuracoes/modelos')?.screen).toMatchObject({ view: 'settings', tab: 'modelos' })
+    expect(screenOf('#abrir/agent/lia')).toEqual({ agentHandle: 'lia' })
     expect(screenOf('#abrir/configuracoes/modelos')?.screen).toMatchObject({ view: 'settings', tab: 'modelos' })
     expect(screenOf('#abrir/agente/lia')).toEqual({ agentHandle: 'lia' })
     expect(screenOf('#abrir/nada')).toBeUndefined()
@@ -208,7 +212,7 @@ describe('the Tuca helping, in a conversation', () => {
     await runner.send('d1', 'por que a Lia não responde?')
     await runner.idle()
     expect(turns[0]!.system).toContain('## O guia do Tucano')
-    expect(turns[0]!.system).toContain('(#abrir/conectores)')
+    expect(turns[0]!.system).toContain('(#abrir/connectors)')
     expect(turns[0]!.prompt).toContain('Lia (@lia)')
     const texts = results.map((r) => (r as { content: { text: string }[] }).content[0]!.text)
     if (GUIDE.length) expect(texts[0]).toContain(`# ${GUIDE[0]!.title}`)
@@ -313,12 +317,9 @@ describe("the Tuca's prompt, for several changes", () => {
   it('brings a Tuca still on the instructions from before up to date, and leaves hand-written ones alone', () => {
     const before = (lang: 'pt' | 'en'): string => {
       setLang(lang)
-      // The lines that changed, as they were.
-      return tucaInstructions()
-        .replace(/- Se o que ela quer depende[^\n]*/, '- Se o que ela quer depende de algo que não existe (uma rotina pra um agente que ainda não existe), comece por isso: proponha o agente, e depois da criação proponha a rotina.')
-        .replace(/- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma.\n[^\n]*\n- Depois de propor, uma frase curta basta./, '- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma. Depois de propor, uma frase curta basta.')
-        .replace(/- If what they want needs[^\n]*/, "- If what they want needs something that doesn't exist yet (a routine for an agent there isn't), start there: propose the agent, and once it's created propose the routine.")
-        .replace(/- Each proposal becomes a card with Apply and Discard: the person confirms.\n[^\n]*\n- After proposing, one short sentence is enough./, '- Each proposal becomes a card with Apply and Discard: the person confirms. After proposing, one short sentence is enough.')
+      // The lines that changed, as they were: the links he is taught, which carried a Portuguese
+      // id (#abrir/conectores) before the screen ids lost the language.
+      return tucaInstructions().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
     }
     for (const lang of ['pt', 'en'] as const) {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }
