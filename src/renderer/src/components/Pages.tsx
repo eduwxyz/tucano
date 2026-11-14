@@ -1335,7 +1335,7 @@ export function InboxPage(): ReactNode {
             {questions.map(({ q, done }) => (
               <div key={q.id}>
                 {meta(q.conversationId, q.agentId, q.createdAt)}
-                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
+                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}), ...(q.recommended ? { recommended: q.recommended } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
               </div>
             ))}
           </div>
@@ -2688,8 +2688,8 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('agentes') && (
-          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
+        {pane('modelos') && (
+          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'Find page controls by text for free, then by element number. Jev also handles controls without text.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
               {[false, true].map((v) => (
                 <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
@@ -2704,6 +2704,55 @@ export function SettingsPage(): ReactNode {
                 hint={L(
                   'Acha o elemento em menos de 1 segundo, até sem texto (pelo print da tela). Mas cada clique que o texto não resolve manda pra TypeSafe a lista de elementos da página e, às vezes, o print dela, inclusive em áreas logadas.',
                   'Finds the element in under 1 second, even without text (from the screenshot). But every click text can’t resolve sends TypeSafe the page’s element list and sometimes its screenshot, including signed-in areas.'
+                )}
+              />
+            )}
+          </Card>
+        )}
+
+        {pane('modelos') && (
+          <Card
+            title={L('Jev como classificador', 'Jev as a classifier')}
+            lead={L(
+              'O Jev, do TypeSafe, lê um pedido e responde uma pergunta de múltipla escolha em menos de um segundo, com a probabilidade de cada opção. Aqui ele sugere qual opção de uma pergunta de agente você deve escolher, com um selo na opção.',
+              "TypeSafe’s Jev suggests an answer to agent questions, with each option’s probability."
+            )}
+          >
+            <div className="key-row">
+              <Icon name="spark" />
+              <div className="grow">
+                <strong>{L('Marcar a opção recomendada', 'Mark the recommended option')}</strong>
+                <p className="muted small">
+                  {L(
+                    'Desligado por padrão. Ligado, cada pergunta de agente com duas ou mais opções vai pro TypeSafe com o texto e as opções, e volta com a sugestão. É só uma sugestão: quem escolhe continua sendo você, e "Outra coisa" nunca é sugerida.',
+                    'Off by default. Sends questions and options to TypeSafe for suggestions. You choose; “Something else” is never suggested.'
+                  )}
+                </p>
+              </div>
+              <Toggle on={!!settings.jevRecommend} onChange={(v) => updateSettings({ jevRecommend: v })} />
+            </div>
+            <div className="key-row">
+              <Icon name="spark" />
+              <div className="grow">
+                <strong>{L('Marcar só os próximos passos que importam', 'Tick only the next steps worth doing')}</strong>
+                <p className="muted small">
+                  {L(
+                    'Desligado por padrão. Ligado, cada passo de um card de próximos passos vai pro TypeSafe com o que o agente disse antes, e só os que ele consideraria pra agora começam marcados; o resto espera no card, a um clique. Nunca deixa a lista vazia: se nenhum for marcado, todos ficam.',
+                    'Off by default. Sends steps and reply context to TypeSafe to check suggested tasks. Others stay available; if none is chosen, all stay checked.'
+                  )}
+                </p>
+              </div>
+              <Toggle on={!!settings.jevNextSteps} onChange={(v) => updateSettings({ jevNextSteps: v })} />
+            </div>
+            {settings.jevRecommend && work && (
+              <OutsideGateway what={L('cada pergunta de agente com opções, com o texto da pergunta e das opções, vai pro TypeSafe.', "every agent question with options, with the question's and the options' text, goes to TypeSafe.")} />
+            )}
+            {settings.jevRecommend && (
+              <JevKey
+                saved={!!settings.jevKey}
+                hint={L(
+                  'Sem a chave, o selo não aparece e a pergunta fica como está hoje: nenhuma opção marcada.',
+                  'Without the key, the pill never shows and the question stays as it is today: no option marked.'
                 )}
               />
             )}

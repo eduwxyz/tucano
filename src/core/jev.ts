@@ -4,6 +4,7 @@
 // the channel's recent messages to TypeSafe, so it's off unless chosen.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
+import { isNextSteps, MAX_STEPS, type Decision } from '../shared/questions'
 import type { Agent, Connector, Message, Person } from '../shared/types'
 import type { ThreadDigest } from './memory'
 import { describeAgent, MAX_ROUTED, REPLY_JSON, routerPrompt } from './router'
@@ -107,6 +108,175 @@ export async function routeJev(opts: {
     .sort((a, b) => (probs[b.handle] ?? 0) - (probs[a.handle] ?? 0))[0]
   const picked = [first, ...(second ? [second] : [])].slice(0, MAX_ROUTED)
   return { agents: picked, reason: `Jev, ${picked.map((a) => pct(a.handle)).join(L(' e ', ' and '))}`, ms: ms() }
+}
+
+// ---------- the decisions an agent asks (ask_user) ----------
+// A question can offer two or three ways forward and the person has to pick one. One cheap typed
+// question per decision says which option Jev would pick, and the card shows it as a pill. It never
+// picks for anybody: "none" is a real answer, for a choice that's the person's own.
+export const RECOMMEND_NONE = '__nenhuma'
+const RECOMMEND_TIMEOUT_MS = 8_000
+const CONTEXT_MAX = 1_200
+
+type Suggested = number | null
+
+// One decision, one question. `state` is what the agent said, then the decision itself.
+async function recommendOne(opts: { key: string; state: string; decision: Decision; fetch?: Fetch }): Promise<Suggested | { error: string }> {
+  const options = opts.decision.options ?? []
+  const criteria: Record<string, string> = {}
+  options.forEach((o, j) => {
+    criteria[`o${j}`] = o.description ? `${o.label} — ${o.description}` : o.label
+  })
+  criteria[RECOMMEND_NONE] = L(
+    'Nenhuma: nenhuma opção é claramente melhor, ou a escolha é da própria pessoa (gosto, preferência, algo que só ela sabe).',
+    "None: no option is clearly better, or the choice is the person's own (taste, preference, something only they know)."
+  )
+  let res: Response
+  try {
+    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'jev-latest',
+        state: opts.state,
+        questions: {
+          pick: {
+            type: 'choice',
+            instructions: L(
+              'Qual opção desta decisão é a melhor pra pessoa escolher? Prefira o que a pergunta e o contexto apontam: o mais direto e o de menor risco. Se empatarem, ou se a escolha for da pessoa, escolha Nenhuma.',
+              'Which option of this decision is the best for the person to pick? Prefer what the question and the context point to: the most direct, the lowest risk. If they tie, or the choice is the person\'s own, pick None.'
+            ),
+            criteria
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(RECOMMEND_TIMEOUT_MS)
+    })
+  } catch {
+    return { error: noAnswer() }
+  }
+  if (!res.ok) return { error: failure(res.status) }
+  const body = (await res.json().catch(() => null)) as { answers?: { pick?: { choice?: unknown } } } | null
+  const choice = body?.answers?.pick?.choice
+  if (typeof choice !== 'string') return { error: badFormat() }
+  if (choice === RECOMMEND_NONE) return null
+  const j = options.findIndex((_, i) => choice === `o${i}`)
+  return j >= 0 ? j : { error: L('o TypeSafe escolheu uma opção que não existe', "TypeSafe picked an option that doesn't exist") }
+}
+
+// One pick per decision, in the order asked: an index into its options, or null. Decisions with a
+// single option (or none: a text answer) are skipped without a call — they have nothing to pick
+// between, and the card's own "Something else" row is never one of them.
+export async function recommendOptions(opts: {
+  key: string
+  questions: Decision[]
+  context?: string
+  fetch?: Fetch
+}): Promise<{ picks: Suggested[]; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  // A next-steps card already says which of its steps are worth doing now; asking which option is
+  // best on the same list would be a second answer to it, and a disagreeing one.
+  const worth = opts.questions.map((q) => !isNextSteps(q) && (q.options?.length ?? 0) >= 2)
+  if (!worth.some(Boolean)) return { picks: opts.questions.map(() => null), ms: ms() }
+  const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, CONTEXT_MAX)
+  const picks = await Promise.all(
+    opts.questions.map((decision, i) => {
+      if (!worth[i]) return Promise.resolve(null as Suggested)
+      const options = (decision.options ?? []).map((o, j) => `${j + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`).join('\n')
+      const state = [
+        ...(context ? [L('O que o agente disse antes da pergunta:', 'What the agent said before asking:'), context, ''] : []),
+        L('A pergunta:', 'The question:'),
+        decision.question,
+        '',
+        L('As opções:', 'The options:'),
+        options
+      ].join('\n')
+      return recommendOne({ key: opts.key, state, decision, fetch: opts.fetch })
+    })
+  )
+  const problem = picks.find((p): p is { error: string } => !!p && typeof p === 'object')
+  if (problem) return { error: problem.error, ms: ms() }
+  return { picks: picks as Suggested[], ms: ms() }
+}
+
+// ---------- the next steps an agent proposes ----------
+// A next-steps card starts with every box ticked, and that is the point: nothing the agent offered
+// gets lost. With this on, one small typed question per step says which of them are worth doing now,
+// and only those keep their tick; the rest wait in the card, a click away. Never all of them off: a
+// list with nothing ticked is not a suggestion, it's a chore.
+const STEP_TIMEOUT_MS = 8_000
+const STEPS_CONTEXT_MAX = 1_200
+
+type Step = 'do' | 'later'
+
+// One step, one question: does the person do it now, or can it wait. The state carries the whole
+// list and then the step itself, so the answer is about that step and not about the list.
+async function worthDoing(opts: { key: string; state: string; fetch?: Fetch }): Promise<Step | { error: string }> {
+  const criteria: Record<string, string> = {
+    do: L('Fazer agora: é o que o trabalho pede em seguida, o que destrava o resto, ou o de maior risco.', 'Do it now: it is what the work asks for next, what unblocks the rest, or the riskiest.'),
+    later: L('Pode esperar: é opcional, um polimento, ou depende de algo que ainda não está feito.', 'Can wait: it is optional, a polish, or it depends on something not done yet.')
+  }
+  let res: Response
+  try {
+    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'jev-latest',
+        state: opts.state,
+        questions: {
+          pick: {
+            type: 'choice',
+            instructions: L('Este próximo passo: a pessoa faz agora ou pode esperar?', 'This next step: does the person do it now, or can it wait?'),
+            criteria
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(STEP_TIMEOUT_MS)
+    })
+  } catch {
+    return { error: noAnswer() }
+  }
+  if (!res.ok) return { error: failure(res.status) }
+  const body = (await res.json().catch(() => null)) as { answers?: { pick?: { choice?: unknown } } } | null
+  const choice = body?.answers?.pick?.choice
+  return choice === 'do' || choice === 'later' ? choice : { error: badFormat() }
+}
+
+// Which steps keep their tick: indexes into the list, in order. A failure, or none of them picked,
+// leaves every step ticked: the card never hides what the agent offered.
+export async function stepsWorthDoing(opts: { key: string; decision: Decision; context?: string; fetch?: Fetch }): Promise<{ ticked: number[]; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const steps = (opts.decision.options ?? []).slice(0, MAX_STEPS)
+  const all = steps.map((_, i) => i)
+  if (steps.length < 2) return { ticked: all, ms: ms() }
+  const context = (opts.context ?? '').replace(/\s+/g, ' ').trim().slice(0, STEPS_CONTEXT_MAX)
+  const list = steps.map((o, i) => `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`).join('\n')
+  const answers = await Promise.all(
+    steps.map((o, i) =>
+      worthDoing({
+        key: opts.key,
+        state: [
+          ...(context ? [L('O que o agente disse antes de propor os passos:', 'What the agent said before proposing the steps:'), context, ''] : []),
+          L('O que os passos continuam:', 'What the steps go on with:'),
+          opts.decision.question,
+          '',
+          L('Os próximos passos:', 'The next steps:'),
+          list,
+          '',
+          L('O passo em questão:', 'The step in question:'),
+          `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ''}`
+        ].join('\n'),
+        fetch: opts.fetch
+      })
+    )
+  )
+  const problem = answers.find((a): a is { error: string } => typeof a === 'object')
+  if (problem) return { error: problem.error, ms: ms() }
+  const ticked = answers.flatMap((a, i) => (a === 'do' ? [i] : []))
+  return { ticked: ticked.length ? ticked : all, ms: ms() }
 }
 
 // ---------- the browser (spec §24) ----------
