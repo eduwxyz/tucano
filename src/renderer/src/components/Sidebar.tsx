@@ -1,4 +1,5 @@
 import { L } from '../../../shared/lang'
+import { usedShare } from '../../../shared/limits'
 import { isWaiting, mineIn, waitingIn, waitingTitle, type Waiting } from './waiting'
 import { memo, useCallback, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
@@ -343,6 +344,7 @@ export function Sidebar(): ReactNode {
         {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
         {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}
         {(parts.shows('skills') || proposals > 0) && <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} fresh={fresh('skills')} />}
+        {agents.filter(isTeam).length > 1 && <NavItem view={{ kind: 'org' }} icon="users" label={L('Time', 'Team')} />}
         {admin && parts.shows('report') && <NavItem view={{ kind: 'report' }} icon="report" label={L('Boletim', 'Report')} fresh={fresh('report')} />}
 
         <Section
@@ -506,7 +508,8 @@ const AgentItem = memo(function AgentItem({ id, owner }: { id: string; owner?: s
   // The agent list is configuration: working shows on the thread (DM, channel),
   // never here — an agent busy in a channel would glow next to an idle DM.
   if (!agent) return null
-  const pct = agent.limit > 0 ? agent.used / agent.limit : 1
+  // No monthly limit, no dot: undefined share, so nothing here can read as spent.
+  const pct = usedShare(agent.used, agent.limit)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'agent', id })}>
       <AgentAvatar agent={agent} size={18} />
@@ -517,7 +520,7 @@ const AgentItem = memo(function AgentItem({ id, owner }: { id: string; owner?: s
           <Icon name="laptop" size={13} />
         </span>
       )}
-      {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={pct >= 1 ? L('Bateu o limite do mês', 'Hit the monthly limit') : L('Já usou mais de 80% do limite', 'Over 80% of the limit used')} />}
+      {pct !== undefined && pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={pct >= 1 ? L('Bateu o limite do mês', 'Hit the monthly limit') : L('Já usou mais de 80% do limite', 'Over 80% of the limit used')} />}
     </button>
   )
 })

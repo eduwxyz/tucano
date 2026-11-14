@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { overMonthlyLimit } from '../../../shared/limits'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
@@ -65,6 +66,7 @@ import { canEditChannel,
   type Conversation,
   type ImageUpload,
   type Author,
+  type DelegationRef,
   type Message,
   type Step,
   IMAGE_MIMES,
@@ -245,6 +247,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 }
 
 const NO_REPLIES: Message[] = []
+// A phone or a tablet: focusing the message field there raises the keyboard over the
+// conversation, so it only takes the focus when the person taps it.
+const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
@@ -442,7 +447,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   )
   // Streamed words wake only this row; while they come, the Markdown is drawn a few times a second,
   // whole again once the reply ends.
-  const text = useLiveText(message, message.run?.status === 'working' ? STREAM_MS : 0)
+  const said = useLiveText(message, message.run?.status === 'working' ? STREAM_MS : 0)
+  // A request written before what counts as finished left the conversation still carries that line: not shown.
+  const text = message.run?.delegation?.rootId === message.id ? said.replace(/\n\n\*\*(Pronto quando|Done when):\*\* [^\n]*/, '') : said
 
   // The same object between renders, or every link would start over.
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
@@ -458,6 +465,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   }
 
   if (message.author.kind === 'routine') return <RoutineMessage message={message} replies={replies} />
+
+  // What came back from handed work, where it was asked: a line, not a voice. Whoever did it speaks in
+  // its own channel; here only whoever I asked does.
+  const from = message.run?.delegation
+  if (agent && from && from.to === agent.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
 
   const name = agent ? agent.name : (other ?? me.name)
   return (
@@ -520,6 +532,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         {(message.run?.agentDraft || proposalsOf(message.run).length > 0) && <Proposals message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
+        {message.run?.delegations?.map((d) => <DelegationChip key={d.id} at={d} asked />)}
+        {message.run?.delegation && message.conversationId !== message.run.delegation.conversationId && <DelegationChip at={message.run.delegation} />}
+        {message.run?.delegation && message.id === message.run.delegation.rootId && <RequestNote at={message.run.delegation} from={agent?.name} />}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
@@ -548,21 +563,23 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             </button>
           </>
         )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || agent.used < agent.limit))) && (
+        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
+            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
+        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             {L('Tentar de novo', 'Try again')}
           </button>
         )}
-        {message.run?.status === 'limit_reached' && agent && agent.used >= agent.limit && (
+        {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
           <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length)) && (
+        {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
+        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
           <div className="msg__meta">
             {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
-            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && <KeepInWiki messageId={message.id} />}
+            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
         {replies && <ThreadLink message={message} replies={replies} />}
@@ -956,6 +973,98 @@ function MemoryChip({ id }: { id: string }): ReactNode {
 }
 
 // A routine the agent scheduled in this reply.
+// Work handed to an agent below (src/shared/org.ts): where it went, and a way there. `asked`: on the
+// Under a request, where it was delivered: how it stands, and where its answer goes. One quiet line.
+function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactNode {
+  const d = useStore((s) => s.delegations.find((x) => x.id === at.id))
+  const state = !d
+    ? null
+    : d.state === 'open'
+      ? d.asking
+        ? { tone: 'is-warn', text: L('esperando uma resposta', 'waiting on an answer') }
+        : { tone: 'is-live', text: L('em andamento', 'under way') }
+      : d.state === 'done'
+        ? { tone: 'is-done', text: L('terminado', 'done') }
+        : d.state === 'cancelled'
+          ? { tone: '', text: L('cancelado', 'cancelled') }
+          : { tone: 'is-warn', text: L('não terminou', 'did not finish') }
+  return (
+    <div className="request-note">
+      <Icon name="users" size={12} />
+      <span>{L('Pedido', 'Request')}</span>
+      {state && (
+        <span className={`request-note__state ${state.tone}`}>
+          <i />
+          {state.text}
+        </span>
+      )}
+      <span className="request-note__where">{from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', 'what this thread ends with goes back to whoever asked')}</span>
+    </div>
+  )
+}
+
+// What came back from handed work, where it was asked: a line saying who answered (or asks), with the
+// whole of it one click away and a way to its thread. Whoever asked says what came of it right after.
+function ReturnedLine({ message, at, agent, text, components }: { message: Message; at: DelegationRef; agent: Agent; text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const seen = useStore((s) => s.conversations.some((c) => c.id === at.conversationId))
+  const answer = at.back === 'result'
+  const cut = text.indexOf(':\n\n') // after "Sobre o pedido em #canal:"
+  const body = cut < 0 ? text : text.slice(cut + 3)
+  return (
+    <div className={`system-line returned-line ${open ? 'is-open' : ''}`} data-id={message.id}>
+      <AgentAvatar agent={agent} size={16} />
+      <p>
+        <strong>{agent.name}</strong> {answer ? L('respondeu', 'answered') : L('tem uma pergunta', 'has a question')}
+      </p>
+      <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? L('Recolher', 'Fold') : answer ? L('Ver resposta', 'See the answer') : L('Ver pergunta', 'See the question')}
+      </button>
+      {seen && (
+        <button
+          className="link"
+          onClick={() => {
+            navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
+            openThread(at.rootId)
+          }}
+        >
+          {L('Abrir a thread', 'Open the thread')}
+        </button>
+      )}
+      <span className="muted">{time(message.at)}</span>
+      {open && (
+        <div className="returned-line__body md">
+          <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={components}>{wikiLinks(body)}</MessageMarkdown>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// reply that handed it; otherwise on what came back from it (an answer, a question).
+function DelegationChip({ at, asked }: { at: DelegationRef; asked?: boolean }): ReactNode {
+  const to = useStore((s) => agentById(s, at.to))
+  const channel = useStore((s) => s.conversations.find((c) => c.id === at.conversationId))
+  if (!channel) return null // a channel this person doesn't see, or one that's gone
+  return (
+    <div className="memory-chip delegation-chip">
+      <Icon name="users" size={13} />
+      <span className="memory-chip__label">{asked ? L('Pediu a', 'Asked') : L('Do pedido a', 'From the request to')}</span>
+      <span className="memory-chip__text">{to?.name ?? L('um agente', 'an agent')}</span>
+      <span className="muted small">{channel.kind === 'dm' ? 'DM' : `#${channel.name}`}</span>
+      <button
+        className="link"
+        onClick={() => {
+          navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
+          openThread(at.rootId)
+        }}
+      >
+        {L('Abrir a thread', 'Open the thread')}
+      </button>
+    </div>
+  )
+}
+
 function RoutineChip({ id }: { id: string }): ReactNode {
   const r = useStore((s) => s.routines.find((x) => x.id === id))
   if (!r) return null // deleted
@@ -1158,12 +1267,14 @@ function useNow(on: boolean): number {
 
 // One quiet line: what the agent is doing now (and for how long), or how many
 // steps it took. The steps themselves open on a click.
-function RunSteps({ message }: { message: Message }): ReactNode {
+export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
-  // Open while the agent works, so its steps read as they go, unless the person closes it; closed after.
+  // Open while the agent works, so its steps read as they go, unless the person closes it or turned
+  // that off in Settings (several agents at once would fill the screen); closed after.
+  const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  const open = toggled ?? working
+  const open = toggled ?? (working && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
@@ -1914,7 +2025,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
     setText(draft?.text ?? '')
     setImages(draft?.images ?? [])
     setNote('')
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
     return () => {
       const { text, images } = live.current
       if (text.trim() || images.length) drafts.set(key, { text, images })
@@ -1936,7 +2047,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
       const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
       setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
-      if (!files.length) return void ref.current?.focus()
+      if (!files.length) return void (touchScreen() || ref.current?.focus())
     }
     if (!files.length) return
     // In the app, a file that isn't an image goes with the message, and its text to the agents.
@@ -1952,7 +2063,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
     })
     setNote([...errors, over].filter(Boolean).join(' '))
-    ref.current?.focus()
+    if (!touchScreen()) ref.current?.focus()
   }
 
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
@@ -2088,7 +2199,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
       const glue = before && !/\s$/.test(before) ? ' ' : ''
       return `${before}${glue}${said}${cur.slice(end)}`
     })
-    el?.focus()
+    if (!touchScreen()) el?.focus()
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 

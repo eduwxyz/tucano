@@ -303,7 +303,7 @@ describe('a reply, with people', () => {
   let notes: { kind?: string; to?: string[] }[]
   let runner: Runner
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
+  const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
 
   beforeEach(() => {
     setLang('en')
@@ -319,7 +319,7 @@ describe('a reply, with people', () => {
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: dir(), notify: (_t, _b, _c, kind, _th, to) => void notes.push({ kind, to }) })
     db.saveAgent(agent('a1', 'lia'))
     db.createConversation({ id: 'dm', kind: 'dm', name: 'a1', members: ['a1'] })

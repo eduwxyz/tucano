@@ -33,6 +33,15 @@ const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
 const port = Number(process.env['TUCANO_PORT'] || 7337)
 const page = join(import.meta.dirname, '..', 'renderer')
+// This build's version: what a browser's Settings shows, and what the core takes as its own
+// (the desktop says its over the environment; a server reads the package.json next to the build).
+const version = (() => {
+  try {
+    return String((JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version?: string }).version ?? '')
+  } catch {
+    return ''
+  }
+})()
 mkdirSync(dataDir, { recursive: true, mode: 0o700 })
 
 // A file only this user reads, made once: the server's key or token.
@@ -737,7 +746,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     },
     notifyState,
     testNotify,
-    updateState: async () => ({ version: '', status: 'off' }),
+    updateState: async () => ({ version: ${JSON.stringify(version)}, status: 'off' }),
     onUpdate: () => {},
     checkUpdates: () => {},
     installUpdate: () => {}
@@ -752,6 +761,7 @@ process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_LOCAL_KEY'] = localKey
 process.env['TUCANO_PACKAGED'] = '1'
 process.env['TUCANO_SERVER'] = '1'
+process.env['TUCANO_VERSION'] ??= version
 ;(process as unknown as { parentPort: Port }).parentPort = parent
 await import(pathToFileURL(join(import.meta.dirname, 'core.js')).href)
 toCore(null, [watcher])

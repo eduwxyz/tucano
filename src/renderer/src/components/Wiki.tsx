@@ -298,12 +298,12 @@ const mdLinks = (missing?: Set<string>) => ({ a: (p: { href?: string; children?:
 
 type Pos = { x: number; y: number }
 type Cam = { x: number; y: number; k: number }
-type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
+export type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
 const SPREAD = 1.6 // from the simulation's units to the map's
 
 // One step of the forces: pages push each other away, links pull, the middle holds them.
 // A page being dragged stays under the pointer and pulls its neighbors along.
-function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
+export function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
   const n = bodies.length
   for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
@@ -336,6 +336,14 @@ function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16A
     const g = deg[i]! ? 0.009 : 0.03
     b.vx -= b.x * g
     b.vy -= b.y * g * 1.6
+    // no force may fling a page away: the spring's pull grows with the distance and two
+    // pages too close oscillate through each other, so together they'd fly to infinity
+    // (a wiki big enough starts landing every page on the same spot). A step is capped.
+    const sp = Math.hypot(b.vx, b.vy)
+    if (sp > 40) {
+      b.vx = (b.vx / sp) * 40
+      b.vy = (b.vy / sp) * 40
+    }
     if (b.held) {
       b.vx = 0
       b.vy = 0
@@ -405,6 +413,11 @@ function useSize(): [React.RefObject<HTMLDivElement | null>, { w: number; h: num
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
     if (!ref.current) return
+    // Read here, before the first paint, so the map's first frame is already the size it is. Left to
+    // the observer alone the map is laid out at nothing and resized a frame later, which is a raster
+    // some machines never replace until something else invalidates the screen.
+    const r = ref.current.getBoundingClientRect()
+    setSize({ w: Math.round(r.width), h: Math.round(r.height) })
     const ro = new ResizeObserver(([e]) => setSize({ w: Math.round(e!.contentRect.width), h: Math.round(e!.contentRect.height) }))
     ro.observe(ref.current)
     return () => ro.disconnect()
@@ -427,7 +440,6 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   }
   const [cam, setCam] = useState<Cam | null>(null)
   const camRef = useRef(cam)
-  camRef.current = cam
   const anim = useRef(0)
   const [hover, setHover] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
@@ -446,7 +458,21 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     const k = Math.max(0.3, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
     return { k, x: a.w / 2 - ((x0 + x1) / 2) * k, y: a.h / 2 - ((y0 + y1) / 2) * k }
   }
+  // What the first frame is drawn with, before the effect that fits the map runs: the camera the fit
+  // would give. A frame drawn with no camera is a frame with no map in it, and one a reload can leave
+  // on screen until something else invalidates it.
+  const first = (): Cam => {
+    const f = fit()
+    const p = selected ? world(selected) : undefined
+    if (!p) return f
+    const k = Math.max(f.k, 1.15)
+    return { k, x: free().w / 2 - p.x * k, y: size.h / 2 - p.y * k }
+  }
+  const view = cam ?? (size.w ? first() : null)
+  camRef.current = view
+  const touched = useRef(false)
   const fly = (to: Cam, ms = 700): void => {
+    touched.current = true
     cancelAnimationFrame(anim.current)
     const from = camRef.current
     if (!from) return setCam(to)
@@ -461,6 +487,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   const zoom = (f: number, at?: Pos): void => {
     const c = camRef.current
     if (!c) return
+    touched.current = true
     const k = Math.max(0.3, Math.min(3, c.k * f))
     const p = at ?? { x: free().w / 2, y: size.h / 2 }
     setCam({ k, x: p.x - (p.x - c.x) * (k / c.k), y: p.y - (p.y - c.y) * (k / c.k) })
@@ -468,22 +495,26 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
 
   // the first look fits it all; then it follows the page that's open, and fits again when it closes
   const had = useRef<string | undefined>(undefined)
+  const fitted = useRef('')
   useEffect(() => {
     if (!size.w) return
     const p = selected ? world(selected) : undefined
     const was = had.current
     had.current = selected
-    if (!camRef.current) {
-      const f = fit()
-      const k = Math.max(f.k, 1.15)
-      setCam(p ? { k, x: free().w / 2 - p.x * k, y: size.h / 2 - p.y * k } : f)
+    const area = `${size.w}x${size.h}`
+    // The window can take its real size after this screen mounts (a restart restores its bounds), and
+    // a camera fitted for the old box leaves the whole map small in a corner of the new one. Fit again
+    // while the person hasn't moved the map themselves.
+    if (!fitted.current || (!touched.current && fitted.current !== area)) {
+      fitted.current = area
+      setCam(first())
       return
     }
     if (p) {
-      const k = Math.max(camRef.current.k, 1.15)
+      const k = Math.max(camRef.current?.k ?? 1, 1.15)
       fly({ k, x: free().w / 2 - p.x * k, y: size.h / 2 - p.y * k })
     } else if (was && !panel) fly(fit())
-  }, [selected, panel, size.w > 0])
+  }, [selected, panel, size.w, size.h])
   useEffect(() => () => cancelAnimationFrame(anim.current), [])
 
   // scrolling moves it; pinching (or ⌘/Ctrl + scroll) zooms where the pointer is
@@ -517,28 +548,28 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   const kindOf = new Map(graph.nodes.map((n) => [n.title, n.kind]))
   const shown = (t: string): boolean => !only || kindOf.get(t) === only
 
-  const k = cam?.k ?? 1
+  const k = view?.k ?? 1
   const at = (t: string): Pos | null => {
     const p = world(t)
-    return p && cam ? { x: p.x * k + cam.x, y: p.y * k + cam.y } : null
+    return p && view ? { x: p.x * k + view.x, y: p.y * k + view.y } : null
   }
   const scale = 0.8 + 0.2 * Math.min(k, 1.8)
   const many = graph.nodes.length > 40
   return (
     <div
       ref={ref}
-      className={`wk-canvas ${panning ? 'is-panning' : ''} ${holding ? 'is-holding' : ''}`}
-      style={cam ? { backgroundPosition: `${cam.x}px ${cam.y}px`, backgroundSize: `${26 * k}px ${26 * k}px` } : undefined}
+      className={`wk-canvas ${panning ? 'is-panning' : ''} ${holding ? 'is-holding' : ''} ${many ? 'is-many' : ''}`}
+      style={view ? { backgroundPosition: `${view.x}px ${view.y}px`, backgroundSize: `${26 * k}px ${26 * k}px` } : undefined}
       onPointerDown={(e) => {
-        if (!cam || e.button !== 0) return
+        if (!view || e.button !== 0) return
         cancelAnimationFrame(anim.current)
         const hit = (e.target as Element).closest('[data-page]')
-        drag.current = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false, page: hit?.getAttribute('data-page'), missing: !!hit?.getAttribute('data-missing') }
+        drag.current = { x: e.clientX, y: e.clientY, cx: view.x, cy: view.y, moved: false, page: hit?.getAttribute('data-page'), missing: !!hit?.getAttribute('data-missing') }
         e.currentTarget.setPointerCapture(e.pointerId)
       }}
       onPointerMove={(e) => {
         const d = drag.current
-        if (!d || !cam) return
+        if (!d || !view) return
         const dx = e.clientX - d.x
         const dy = e.clientY - d.y
         if (!d.moved && Math.hypot(dx, dy) > 4) {
@@ -547,17 +578,18 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
           else setPanning(true)
         }
         if (!d.moved) return
+        touched.current = true
         if (d.page) {
           // the page follows the pointer; its links pull the others after it
           const b = bodies.get(d.page)
           const r = ref.current!.getBoundingClientRect()
           if (b) {
             b.held = true
-            b.x = (e.clientX - r.left - cam.x) / cam.k / SPREAD
-            b.y = (e.clientY - r.top - cam.y) / cam.k / SPREAD
+            b.x = (e.clientX - r.left - view.x) / view.k / SPREAD
+            b.y = (e.clientY - r.top - view.y) / view.k / SPREAD
             kick(0.5)
           }
-        } else setCam({ ...cam, x: d.cx + dx, y: d.cy + dy })
+        } else setCam({ ...view, x: d.cx + dx, y: d.cy + dy })
       }}
       onPointerUp={() => {
         const d = drag.current
@@ -576,7 +608,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
         }
       }}
     >
-      {cam && (
+      {view && (
         <svg width={size.w} height={size.h}>
           <g className="wk-canvas__edges">
             {graph.edges.map(([a, b]) => {
