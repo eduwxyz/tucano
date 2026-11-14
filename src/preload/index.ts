@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('tucano', {
     areaDone: (): void => ipcRenderer.send('notice:area-done'),
     areaCancel: (): void => ipcRenderer.send('notice:area-cancel'),
     hit: (inside: boolean): void => ipcRenderer.send('notice:hit', inside),
+    focus: (): void => ipcRenderer.send('notice:focus'),
     count: (n: number): void => ipcRenderer.send('notice:count', n),
     open: (p: { conversationId?: string; threadId?: string; page?: 'skills' }): void => ipcRenderer.send('notice:open', p)
   },

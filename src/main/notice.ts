@@ -46,6 +46,14 @@ export class Notices {
     ipcMain.on('notice:hit', (e, inside: unknown) => {
       if (this.owns(e)) this.interactive(inside === true)
     })
+    ipcMain.on('notice:focus', (e) => {
+      if (!this.owns(e)) return
+      const win = this.win
+      if (!win || win.isDestroyed()) return
+      win.setFocusable(true)
+      win.focus()
+      win.webContents.focus()
+    })
     ipcMain.on('notice:count', (e, n: unknown) => {
       if (!this.owns(e)) return
       this.cards = typeof n === 'number' && Number.isFinite(n) ? n : 0
@@ -243,6 +251,10 @@ export class Notices {
       if (this.win === win) this.win = null
       this.loaded = false
       this.cards = 0
+    })
+    win.on('blur', () => {
+      if (win.isDestroyed()) return
+      win.setFocusable(false)
     })
     win.webContents.on('did-finish-load', () => {
       this.loaded = true

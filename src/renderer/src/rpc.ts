@@ -44,6 +44,7 @@ declare global {
         areaDone: () => void
         areaCancel: () => void
         hit: (inside: boolean) => void
+        focus: () => void
         count: (n: number) => void
         open: (to: { conversationId?: string; threadId?: string; page?: 'skills' }) => void
       }
