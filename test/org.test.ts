@@ -72,10 +72,10 @@ describe('who answers to whom', () => {
     expect(ids(peersOf(gone, 'nico'))).toEqual(['atlas', 'clara', 'vera'])
   })
 
-  it('reaches those below first, then colleagues, then its own boss: one step up, never across', () => {
+  it('reaches those below first, then colleagues, then its own boss and its sector\'s head, never across', () => {
     expect(ids(reachOf(team, 'bento'))).toEqual(['nico', 'vera', 'atlas', 'clara', 'orion'])
-    expect(ids(reachOf(team, 'nico'))).toEqual(['vera', 'bento'])
-    expect(ids(reachOf(team, 'otto'))).toEqual(['clara'])
+    expect(ids(reachOf(team, 'nico'))).toEqual(['vera', 'bento', 'orion']) // its boss, then the head two steps up
+    expect(ids(reachOf(team, 'otto'))).toEqual(['clara', 'orion'])
     expect(ids(reachOf(team, 'orion'))).toEqual(['atlas', 'bento', 'clara', 'nico', 'vera', 'otto'])
     expect(reachOf(team, 'solo')).toEqual([])
   })
@@ -98,13 +98,14 @@ describe('sectors', () => {
     expect(ids(reachOf(sectors, 'orion'))).toEqual(['atlas', 'bento', 'clara', 'nico', 'vera', 'otto', 'mira'])
     expect(ids(reachOf(sectors, 'mira'))).toEqual(['lino', 'tito', 'orion'])
     expect(ids(reachOf(sectors, 'lino'))).toEqual(['tito', 'mira']) // up to its head, not across
-    expect(ids(reachOf(sectors, 'tito'))).toEqual(['lino'])
+    expect(ids(reachOf(sectors, 'tito'))).toEqual(['lino', 'mira']) // straight to its sector's head, past Lino
   })
 
   it('tells how a request goes', () => {
     expect(askKind(sectors, 'orion', 'nico')).toBe('down')
     expect(askKind(sectors, 'nico', 'vera')).toBe('peer')
     expect(askKind(sectors, 'tito', 'lino')).toBe('up')
+    expect(askKind(sectors, 'tito', 'mira')).toBe('up') // the sector's head, two steps up
     expect(askKind(sectors, 'mira', 'orion')).toBe('sector')
   })
 

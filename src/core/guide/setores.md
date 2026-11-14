@@ -11,7 +11,7 @@ No quadro do **Time**, clique no nome do setor (o selo colorido acima do time). 
 Salva sozinho ao sair do campo. Só um admin muda; os outros veem.
 
 ## Quando o assunto é de outro setor
-1. Quem está no time e não consegue resolver, ou vê que não é do setor, **passa ao próprio chefe**, dizendo por quê.
+1. Quem está no time e vê que o assunto não é do setor **passa direto ao chefe do setor**, dizendo por quê, mesmo com alguém no meio. O que só não consegue fazer, passa ao próprio chefe.
 2. Só o **chefe** pede a outro setor, e sempre **ao chefe dele**. Nunca direto a alguém do time de lá.
 3. O chefe que recebe decide quem do setor faz, ou responde dizendo por que não é do setor dele.
 4. A resposta volta pelo mesmo caminho até quem começou.

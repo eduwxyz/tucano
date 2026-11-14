@@ -268,7 +268,8 @@ export function OrgPage(): ReactNode {
   const sectorAsks = open.filter((d) => askWay(agents, d) === 'sector')
   for (const d of open) {
     if (askWay(agents, d) === 'up') {
-      flowing.set(`${d.to}>${d.from}`, 'up')
+      // Up every line between the two: straight to the sector's head it passes whoever is in the middle.
+      for (const [boss, below] of pathBetween(bossId, d.to, d.from)) flowing.set(`${boss}>${below}`, 'up')
       continue
     }
     const hops = pathBetween(bossId, d.from, d.to)

@@ -38,7 +38,7 @@ import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from '
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, questionMessage, RESPONDER_PEDIDO, resultMessage, returnTask, teamMember, teamSection, type Returned } from './delegations'
-import { askKind, channelsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
+import { askKind, channelsOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId })
@@ -2942,7 +2942,7 @@ ${note}`,
     this.followups.reserve(key)
     const agents = this.deps.db.agents()
     const kind = askKind(agents, from.id, to.id)
-    this.enqueue(() => this.execute(to, channel, { depth: 1, threadId: root.id, task: askTask(from, me, ask.done, kind, kind === 'sector' ? sectorName(sectorOf(agents, from.id) ?? from, L('Setor de', 'Sector of')) : undefined), reserved: true }))
+    this.enqueue(() => this.execute(to, channel, { depth: 1, threadId: root.id, task: askTask(from, me, ask.done, kind, kind === 'sector' ? sectorName(sectorOf(agents, from.id) ?? from, L('Setor de', 'Sector of')) : undefined, headsOf(agents).some((h) => h.id === to.id)), reserved: true }))
     return d
   }
 

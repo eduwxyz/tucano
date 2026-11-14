@@ -247,10 +247,10 @@ describe('work handed down the tree', () => {
     await r.idle()
     expect(by('bento', 'eng').some((m) => m.text.includes('Clara já está esperando por este pedido'))).toBe(true)
     expect(by('bento', 'clientes')).toHaveLength(1) // only what came back: nothing was asked of Clara
-    // Nico answers to Bento: Duda is a colleague and Bento is one step up; Clara (Bento's own colleague) is out of reach.
+    // Nico answers to Bento: Duda is a colleague, Bento its boss and Orion its sector's head; Clara (Bento's own colleague) is out of reach.
     await r.send('dn', 'delegue a clara: qualquer coisa')
     await r.idle()
-    expect(by('nico', 'dn')[0]?.text).toContain('Você não alcança ninguém chamado "clara". Quem você alcança: @duda, @bento.')
+    expect(by('nico', 'dn')[0]?.text).toContain('Você não alcança ninguém chamado "clara". Quem você alcança: @duda, @bento, @orion.')
   })
 
   it('passes up to its own boss, and only heads ask another sector, through its head', async () => {
@@ -278,6 +278,33 @@ describe('work handed down the tree', () => {
     await r.idle()
     expect(codex.turns.some((t) => t.prompt.includes('um pedido do Financeiro, via Mira: decida quem do seu setor faz'))).toBe(true)
     expect(by('mira', 'dmira').at(-1)?.text).toBe('Pronto: o time terminou o que pedi.')
+    expect(db.openDelegations()).toEqual([])
+  })
+
+  it('goes straight to its sector\'s head from any depth, so crossing sectors always fits in three requests', async () => {
+    // Mira's sector is three deep (Mira ← Lino ← Tito); Nico is two below Orion, the other head.
+    db.saveAgent(agent('mira', { sectorName: 'Financeiro' }))
+    db.saveAgent(agent('lino', { reportsTo: 'mira' }))
+    db.saveAgent(agent('tito', { reportsTo: 'lino' }))
+    db.createConversation({ id: 'dt', kind: 'dm', name: 'tito', members: ['tito'] })
+    const r = runner()
+    // Tito, at the bottom, passes it to Mira past Lino; Mira asks Orion; Orion hands it to Nico: three requests.
+    await r.send('dt', 'delegue a mira: delegue a orion: delegue a nico: veja o boleto')
+    await r.idle()
+    const prompts = [...claude.turns, ...codex.turns].map((t) => t.prompt)
+    expect(prompts.find((p) => p.includes('## Chefe do seu setor'))).toContain('## Seu chefe\n@lino · Lino. Passe a ele com pedir só o que você não consegue fazer')
+    expect(prompts.some((p) => p.includes('## Chefe do seu setor\n@mira · Mira. O que não é do trabalho do seu setor vai direto a ele'))).toBe(true)
+    expect(prompts.some((p) => p.includes('de Tito, do seu time, que passou isto a você: resolva, ou leve ao setor certo.'))).toBe(true)
+    expect(prompts.some((p) => p.includes('um pedido do Financeiro, via Mira'))).toBe(true)
+    expect(prompts.some((p) => p.includes('um pedido de Orion, a quem você responde'))).toBe(true)
+    expect(db.messages().some((m) => m.text.includes('pedidos seguidos'))).toBe(false)
+    expect(db.conversations().some((c) => c.kind === 'dm' && c.name === 'lino')).toBe(false) // Lino wasn't in the way
+    expect(by('tito', 'dt').at(-1)?.text).toBe('Pronto: o time terminou o que pedi.')
+    expect(db.openDelegations()).toEqual([])
+    // What Tito can't do goes to its own boss, who isn't a head: it solves it or says what is left.
+    await r.send('dt', 'delegue a lino: não consigo abrir o sistema')
+    await r.idle()
+    expect([...claude.turns, ...codex.turns].some((t) => t.prompt.includes('de Tito, do seu time, que passou isto a você: resolva, ou responda dizendo o que falta.'))).toBe(true)
     expect(db.openDelegations()).toEqual([])
   })
 
