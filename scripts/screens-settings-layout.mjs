@@ -101,8 +101,8 @@ try {
       await page.evaluate(() => document.fonts.ready);
       const links = await page.locator('.settings-sections a').evaluateAll(nodes => nodes.map(node => ({ id: node.getAttribute('href').slice(1), label: node.textContent })));
       assert.equal(links.length, await page.locator('[data-settings-section]').count());
-      const flat = await page.locator('.settings-content .card').evaluateAll(nodes => nodes.every(node => { const style = getComputedStyle(node); return style.borderRadius === '0px' && style.boxShadow === 'none' }));
-      assert.ok(flat, 'Settings groups must remain flat');
+      const grouped = await page.locator('.settings-content .card').evaluateAll(nodes => nodes.every(node => { const style = getComputedStyle(node); return style.borderRadius !== '0px' && style.boxShadow === 'none' }));
+      assert.ok(grouped, 'Settings groups need restrained rounded borders without shadows');
       const labels = await measureCopy(page, [{ selector: '.settings-pages button', maxLines: 1 }, { selector: '.settings-sections a', maxLines: 1 }]);
       assert.ok(labels.passed, JSON.stringify(labels.failures));
       for (let index = 0; index < links.length; index++) {

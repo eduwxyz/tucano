@@ -13,7 +13,7 @@ Settings are grouped by the decision being made, with one canonical section for 
 | Knowledge | Memory learning and Wiki capture, storage, imports and page rules |
 | Connections | Phone/Telegram and server connections |
 
-The page is flat: section headings, generous spacing and thin dividers separate related decisions. Sections and nested groups have no raised cards, rounded containers or shadows. Input controls keep the application's existing affordances.
+Related controls share understated rounded containers with thin borders and no heavy shadows. Section headings and spacing clarify their order, and the danger zone retains a red border. Input controls keep the application's existing affordances.
 
 ## Declared sections
 
