@@ -276,8 +276,12 @@ describe('a queued prompt outlives a restart', () => {
 
 describe('a steer reaches the agent between two tool calls', () => {
   it('hands it over with the next tool result, and says so in a step', async () => {
-    // Two calls, with a pause between them: the person writes during the pause.
+    // Synchronize on the first result so machine load cannot move the steer to the wrong call.
     const results: unknown[] = []
+    let arrived!: () => void
+    let proceed!: () => void
+    const firstResult = new Promise<void>(resolve => { arrived = resolve })
+    const nextCall = new Promise<void>(resolve => { proceed = resolve })
     const engine: Engine = {
       id: 'claude',
       async *run(turn: Turn) {
@@ -287,7 +291,8 @@ describe('a steer reaches the agent between two tool calls', () => {
           await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
           const list = (await client.listTools()).tools.map((t) => t.name).find((n) => n.endsWith('__list_tasks'))!
           results.push(await client.callTool({ name: list, arguments: {} }))
-          await new Promise((res) => setTimeout(res, 400))
+          arrived()
+          await nextCall
           results.push(await client.callTool({ name: list, arguments: {} }))
           await client.close()
           reply = 'vi as tarefas'
@@ -300,8 +305,9 @@ describe('a steer reaches the agent between two tool calls', () => {
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const r = runnerWith(engine)
     await r.send('d1', 'quais tarefas?')
-    await new Promise((res) => setTimeout(res, 150)) // inside the pause between the two calls
+    await firstResult
     await r.send('d1', 'mude de plano: só as abertas', [], undefined, undefined, { mode: 'steer' })
+    proceed()
     await r.idle()
     expect(results).toHaveLength(2)
     expect(allText(results[0])).not.toContain('mude de plano')
