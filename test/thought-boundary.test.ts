@@ -1,8 +1,14 @@
+import { existsSync } from 'node:fs'
 import { createServer } from 'vite'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 
-it('preserves a retained passage across prefix eviction without changing folding or following', async () => {
+// Layout needs a browser, and the CI runners have none installed: Playwright's own binary is not on
+// them, which is why `thought-line`, `thinking-scroll` and `sidebar-layout` skip here too. Without
+// the guard this one launched anyway and failed on all three platforms with "Executable doesn't
+// exist", so the file never once ran in CI — it only ever went red for a reason that had nothing to
+// do with the reasoning it checks. It runs on a machine that has the browser, as it does locally.
+it.skipIf(!existsSync(chromium.executablePath()))('preserves a retained passage across prefix eviction without changing folding or following', async () => {
   const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0, hmr: false }, appType: 'custom', oxc: { jsx: { runtime: 'automatic' } }, optimizeDeps: { include: ['react', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-markdown', 'remark-gfm', 'open-bot-avatar', 'open-bot-avatar/dom', 'qrcode-generator'] }, resolve: { dedupe: ['react', 'react-dom'] } })
   server.middlewares.use((req, res, next) => {
     if (req.url !== '/') return next()
