@@ -4,10 +4,14 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **The Memory page's bot tabs stay in the bar, however many bots there are.** The strip of tabs (All, You, one per bot with notes, Forgotten) was a plain row that ran past the 720 px column as soon as a few bots had notes, so the tabs after the first few, and the search control with them, could not be reached at all. The strip now scrolls inside the bar, the tab you pick slides to the middle of it, and two borderless arrows page it a screenful at a time, each offered only while there is strip in that direction. (#396)
+
 ### Changed
 
 - **A request to the team reads like a thread at work.** Asking the agent on top for something it passes on used to fill your conversation with it: a line from it right away saying whom it asked, the answer in the name of whoever did the work, a question from them, and then the agent's summary. Now each piece of work happens in a thread in the channel of whoever does it, and nothing reaches you until it's done.
-  - **While it works,** there's no new message. Under the agent's reply, a line per request says whom it asked, where, and how it stands: working, has a question, waiting for your approval, done. An approval shows right there, and you approve it from there.
+  - **While it works,** there's no new message. The agent's reply that passed it on goes into the thread of your message, and under your message a line per request says whom it asked, where, and how it stands: working, has a question, waiting for your approval, done. An approval shows right there, and you approve it from there.
   - **When it's done,** the agent answers once, in the thread of your message, and the line offers **See the answer**. What came back from the team goes to the agent, not to your conversation, and the whole answer stays in the request's thread.
   - **A question** from whoever is doing it goes to the agent that asked, which answers it without writing to you; if it's yours to decide, it asks you in your message's thread.
   - **A follow-up** written in that thread goes on in the same thread where the work was done, so whoever did it sees what it already did, instead of a new thread starting from nothing.
@@ -16,6 +20,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
   - **A request isn't done while its parts are out.** Whoever does it may ask others and end its turn; the request stays open until what it asked comes back and it answers again, and only that answer goes back.
   - **What an agent writes after only handing work on** is folded behind **See what it wrote**, and it no longer tells you it's done.
   - **A request asked in a DM stays in a DM** when other people use the workspace, unless you write the channel's name yourself: it never ends up more visible than where you asked.
+
+### Fixed
+
+- **A dropdown's arrow sits inside the field.** Every native dropdown (a member's role, the invite's role, who covers for you, the activity filters) drew the system's arrow flush against its right border, whatever the padding. It now draws the same caret as the app's other dropdowns, 10 px in from the edge, in the theme's color, light or dark. Thanks, eialanjones! (#477)
 
 ## [0.2.33] - 2026-11-15
 
@@ -130,7 +138,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
-
 
 ## [0.2.28] - 2026-11-12
 

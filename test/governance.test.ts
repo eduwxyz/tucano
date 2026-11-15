@@ -22,9 +22,10 @@ import { plainCipher, Secrets } from '../src/core/secrets'
 const DEMO = join(import.meta.dirname, '..', 'scripts', 'demo-mcp-server.mjs')
 const ready = { installed: true, loggedIn: true }
 
-type Plan = { tool: string; args: Record<string, unknown> } | null
+type Call = { tool: string; args: Record<string, unknown> }
+type Plan = Call | Call[] | null
 
-// A "model" that, on each turn, lists its tools and makes at most one call.
+// A "model" that, on each turn, lists its tools and makes the calls planned (usually one), in order.
 function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Turn[]; tools: string[][]; results: unknown[]; alwaysLoad: string[][] }): Engine {
   return {
     id: 'claude',
@@ -39,10 +40,10 @@ function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Tu
         seen.tools.push(tools)
         seen.alwaysLoad.push(listed.filter((t) => t._meta?.['anthropic/alwaysLoad'] === true).map((t) => t.name))
         const p = plan(turn, tools)
-        if (p) {
-          const r = await client.callTool({ name: p.tool, arguments: p.args })
+        for (const c of p ? [p].flat() : []) {
+          const r = await client.callTool({ name: c.tool, arguments: c.args })
           seen.results.push(r)
-          reply = `chamei ${p.tool}`
+          reply = `chamei ${c.tool}`
         }
         await client.close()
       }
@@ -417,6 +418,26 @@ describe('always allow and asking for access', () => {
     expect(db.approvals()).toHaveLength(1) // no new request
     const last = agentMessages().find((m) => m.run?.steps.some((s) => s.label === 'Executou (sempre permitido)'))
     expect(last).toBeDefined()
+  })
+
+  it('a tool allowed for good runs with other arguments and after reading something from outside, with no guardrails too (#449)', async () => {
+    db.saveAgent({ ...agent('read_write'), autonomy: 'free', autoApprove: [`${connectorId}:delete_task`] })
+    // In one reply it reads the tasks (someone else's text), then deletes one it was never approved for by value.
+    const r = runner((_, tools) => [{ tool: tools.find((t) => t.endsWith('__list_tasks'))!, args: {} }, { tool: 'tarefas__delete_task', args: { id: 3, _motivo: 'duplicada' } }])
+    await r.send('d1', 'lê as tarefas e apaga a duplicada')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(0) // no card, not even from the outside-content guard
+    const last = agentMessages().at(-1)!
+    expect(last.run?.outside).toBe(true)
+    expect(last.run?.steps.some((s) => s.label === 'Executou (sempre permitido)')).toBe(true)
+  })
+
+  it('without "sempre permitir", the guard still asks after reading something from outside', async () => {
+    db.saveAgent({ ...agent('read_write'), autonomy: 'free' })
+    const r = runner((_, tools) => [{ tool: tools.find((t) => t.endsWith('__list_tasks'))!, args: {} }, { tool: 'tarefas__delete_task', args: { id: 3, _motivo: 'duplicada' } }])
+    await r.send('d1', 'lê as tarefas e apaga a duplicada')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(1)
   })
 
   it('a high-risk tool never becomes a rule', async () => {

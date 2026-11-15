@@ -283,7 +283,7 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 
 ### 21. Governança no dia a dia (M12)
 
-- **Sempre permitir:** no cartão de aprovação, "Aprovar e sempre permitir" faz daquela ferramenta uma regra do agente: daí em diante ela roda como escrita, com o passo "Executou (sempre permitido)". Nunca vale pra uma de alto risco, pro pedido de acesso ou pra PR. As regras aparecem na página do agente, com um x pra voltar a pedir.
+- **Sempre permitir:** no cartão de aprovação, "Aprovar e sempre permitir" faz daquela ferramenta uma regra do agente: daí em diante ela roda sem pedido, com quaisquer argumentos e sem prazo, com o passo "Executou (sempre permitido)". Vale também depois de o agente ler algo de fora: a trava de conteúdo externo não volta a pedir por ela (só o nível Cuidadoso, uma regra "pergunta antes" ou "nunca" ainda param). Nunca vale pra uma de alto risco, pro pedido de acesso ou pra PR. As regras aparecem na página do agente, com um x pra voltar a pedir.
 - **Pedido de acesso:** `pedir_acesso` (conector, ler ou ler e escrever, motivo) vira um pedido de aprovação; aprovado, o grant muda e o agente continua numa nova resposta com as ferramentas novas.
 - **Pausar tudo:** um botão no topo da barra lateral; pausado, nenhuma resposta começa (a mensagem ganha um aviso), nenhuma rotina roda e agentes não chamam outros. Ao retomar, as rotinas perdidas rodam como atrasadas (até 12 h).
 - **Horário de silêncio:** rotinas e gatilhos esperam e rodam quando ele acaba; mensagens minhas continuam sendo respondidas.

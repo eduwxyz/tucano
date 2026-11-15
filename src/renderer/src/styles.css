@@ -12,6 +12,7 @@
   --text: #1d1a16;
   --text-2: #5f584e;
   --text-3: #948b7f;
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23948b7f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); /* the caret of the Select component, as an image */
   --accent: #d9581a;
   --accent-soft: rgba(228, 99, 28, 0.12);
   --accent-text: #ffffff;
@@ -76,6 +77,7 @@
     --text: #efeae2;
     --text-2: #aaa39a;
     --text-3: #7a746b;
+    --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a746b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); /* the caret of the Select component, as an image */
     --accent: #ff8a3d;
     --accent-soft: rgba(255, 138, 61, 0.14);
     --accent-text: #1a1917;
@@ -109,6 +111,7 @@
   --text: #efeae2;
   --text-2: #aaa39a;
   --text-3: #7a746b;
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a746b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); /* the caret of the Select component, as an image */
   --accent: #ff8a3d;
   --accent-soft: rgba(255, 138, 61, 0.14);
   --accent-text: #1a1917;
@@ -175,6 +178,16 @@ select {
   width: 100%;
   outline: none;
   transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+/* The system's arrow sits flush against the right edge, and a padding doesn't move it. Ours keeps the
+   field's own inset from the edge and wears the theme's color. */
+select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: var(--select-caret);
+  background-position: right 10px center;
+  background-size: 14px;
+  background-repeat: no-repeat;
 }
 input:focus,
 textarea:focus,
@@ -2285,7 +2298,7 @@ h3 {
   border-top: 1px solid var(--border);
 }
 .tools__row select {
-  padding: 3px 8px;
+  padding: 3px 28px 3px 8px;
   font-size: 12.5px;
 }
 .tools__row.is-off code {
@@ -3295,6 +3308,23 @@ body.is-resizing webview {
 .msg--me .msg__reply {
   top: 6px;
   right: calc(100% + 6px);
+}
+/* A run taller than the screen: the button rides the top of the run while it scrolls, and leaves with
+   its last line, instead of sitting at the run's start and scrolling away. The pin takes no room (it
+   is zero-height and sticky), so the first step sits where it did; the button keeps its old offsets,
+   measured from the pin and pushed back into the message's own 28px right padding (-24px = 28 - 4). */
+/* No margin on the wrapper: the steps' own top margin still collapses through the zero-height pin, so
+   the gap above the first step is the 1px it collapsed to before there was a wrapper at all. */
+.msg__anchor-pin {
+  position: sticky;
+  top: 0;
+  height: 0;
+  z-index: 1;
+}
+.msg__anchor-pin .msg__reply {
+  position: absolute;
+  top: 4px;
+  right: -24px;
 }
 .msg:hover .msg__reply,
 .msg__reply:focus-visible {
@@ -6176,11 +6206,26 @@ kbd {
 .tabs-line {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 6px;
   margin: 32px 0 4px;
   border-bottom: 1px solid var(--border);
 }
-.tabs-line > button {
+/* The strip is as long as the bots are many: it scrolls inside the bar, and the scrollbar stays
+   out of the way because the arrows below are the way through it. */
+.tabs-line__strip {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.tabs-line__strip::-webkit-scrollbar {
+  display: none;
+}
+.tabs-line__strip > button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -6192,17 +6237,41 @@ kbd {
   background: none;
   color: var(--text-3);
   font-size: 13.5px;
+  white-space: nowrap;
   transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
-.tabs-line > button:hover {
+.tabs-line__strip > button:hover {
   color: var(--text);
 }
-.tabs-line > button.is-on {
+.tabs-line__strip > button.is-on {
   color: var(--text);
   border-bottom-color: var(--text);
 }
-.tabs-line .grow {
-  flex: 1;
+/* Borderless arrows that page the strip; they appear only while there is strip in that direction.
+   A tint on hover is the whole affordance, and the gap either side keeps them off the tab text. */
+.tabs-line__page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-2);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.tabs-line__page:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.tabs-line__strip + .tabs-line__page {
+  margin-left: 8px;
+}
+.tabs-line__page--back .icon {
+  transform: rotate(180deg);
 }
 .tabs-line__icon {
   width: 28px;
