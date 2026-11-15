@@ -55,8 +55,47 @@ export function MemoryPage(): ReactNode {
   const shown = tab === 'all' ? groups : groups.filter((g) => g.scope === (tab === 'me' ? mine : tab))
   const review = pending.length + stale.length
 
+  // The strip holds a tab per bot, and there is no limit on bots, so it scrolls inside the bar
+  // instead of running past the page. The tab picked comes back to the middle of the strip: with a
+  // dozen bots the one clicked would otherwise sit under an edge or outside the view. The arrows
+  // walk the same strip a screenful at a time, for a person reading along it.
+  const strip = useRef<HTMLDivElement>(null)
+  const [over, setOver] = useState({ back: 0, on: 0 })
+  const measure = (): void => {
+    const s = strip.current
+    if (!s) return
+    setOver({ back: s.scrollLeft, on: s.scrollWidth - s.clientWidth - s.scrollLeft })
+  }
+  useEffect(() => {
+    measure()
+  }, [withNotes.length, forgotten.length, finding])
+  useEffect(() => {
+    const on = (): void => measure()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  // Selecting is where the sliding happens: the chosen tab is put in the middle, whether the click
+  // came from a tab or from an arrow that only moved the strip.
+  useEffect(() => {
+    const s = strip.current
+    const el = s?.querySelector<HTMLElement>(`[data-tab="${tab}"]`)
+    if (!s || !el) return
+    // The strip fits: there is no middle to bring the tab to. Written this way so a host without
+    // layout, where both widths are absent, also leaves the strip alone.
+    if (!(s.scrollWidth > s.clientWidth)) return
+    const box = el.getBoundingClientRect()
+    const own = s.getBoundingClientRect()
+    const middle = s.scrollLeft + (box.left - own.left) - (s.clientWidth - box.width) / 2
+    s.scrollTo({ left: Math.max(0, middle), behavior: 'smooth' })
+  }, [tab])
+  const page = (by: 1 | -1): void => {
+    const s = strip.current
+    if (!s) return
+    s.scrollBy({ left: by * Math.max(160, s.clientWidth - 48), behavior: 'smooth' })
+  }
+
   const tabBtn = (id: Tab, label: ReactNode): ReactNode => (
-    <button key={id} className={tab === id ? 'is-on' : ''} onClick={() => setTab(id)}>
+    <button key={id} data-tab={id} className={tab === id ? 'is-on' : ''} onClick={() => setTab(id)}>
       {label}
     </button>
   )
@@ -64,18 +103,29 @@ export function MemoryPage(): ReactNode {
   return (
     <Sheet title={L('Memória', 'Memory')} lede={L('O que os agentes sabem sobre você e o seu trabalho.', 'What the agents know about you and your work.')}>
       <nav className="tabs-line">
-        {tabBtn('all', L('Tudo', 'All'))}
-        {tabBtn('me', L('Você', 'You'))}
-        {withNotes.map((a) =>
-          tabBtn(
-            a.id,
-            <>
-              <AgentAvatar agent={a} size={14} /> {a.name}
-            </>
-          )
+        <div className="tabs-line__strip" ref={strip} onScroll={measure}>
+          {tabBtn('all', L('Tudo', 'All'))}
+          {tabBtn('me', L('Você', 'You'))}
+          {withNotes.map((a) =>
+            tabBtn(
+              a.id,
+              <>
+                <AgentAvatar agent={a} size={14} /> {a.name}
+              </>
+            )
+          )}
+          {forgotten.length > 0 && tabBtn('forgotten', L('Esquecidas', 'Forgotten'))}
+        </div>
+        {over.back > 1 && (
+          <button className="tabs-line__page tabs-line__page--back" aria-label={L('Abas anteriores', 'Earlier tabs')} title={L('Abas anteriores', 'Earlier tabs')} onClick={() => page(-1)}>
+            <Icon name="chevron" size={16} />
+          </button>
         )}
-        {forgotten.length > 0 && tabBtn('forgotten', L('Esquecidas', 'Forgotten'))}
-        <span className="grow" />
+        {over.on > 1 && (
+          <button className="tabs-line__page" aria-label={L('Mais abas', 'More tabs')} title={L('Mais abas', 'More tabs')} onClick={() => page(1)}>
+            <Icon name="chevron" size={16} />
+          </button>
+        )}
         {finding || q ? (
           <label className="tabs-line__find">
             <Icon name="search" size={13} />
