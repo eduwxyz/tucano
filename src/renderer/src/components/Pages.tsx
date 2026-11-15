@@ -2347,6 +2347,7 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
         <Select
           aria-label={L('Também responde a', 'Also answers to')}
           multiple
+          showAllValues
           values={also}
           onValuesChange={(ids) => {
             const keep = ids.filter((id) => id !== draft.reportsTo).slice(0, 12)
