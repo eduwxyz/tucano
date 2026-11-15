@@ -1521,20 +1521,24 @@ ${note}`,
           if (db.openDelegations().filter((d) => d.from === agent.id).length >= MAX_OPEN_DELEGATIONS) return textResult(L(`Você já tem ${MAX_OPEN_DELEGATIONS} pedidos em aberto, o máximo. Espere algum voltar, ou cancele um com cancelar_pedido.`, `You already have ${MAX_OPEN_DELEGATIONS} open requests, the most allowed. Wait for one to come back, or cancel one with cancelar_pedido.`), true)
           let d: Delegation
           let channel: Conversation
+          // A request never ends up more visible than where it was asked: from a DM, with other people in
+          // the workspace, it stays in a DM, unless the person named the channel (#engenharia) themselves.
+          const said = msg.run?.replyTo ? db.message(msg.run.replyTo)?.text ?? '' : ''
+          const saidChannel = (c: Conversation): boolean => said.toLowerCase().split(/[^\p{L}\p{N}#_-]+/u).includes(`#${(c.name ?? '').toLowerCase()}`)
+          const fromDm = conv.kind === 'dm' && db.people().length > 1
           if (before) {
             const there = db.conversation(before.conversationId)
             if (!there || !db.message(before.rootId) || !sees.canSeeConversation(requester, there)) return textResult(L(`A thread do pedido [${codeOf(before)}] não existe mais. Peça de novo, sem "continuar".`, `Request [${codeOf(before)}]'s thread is gone. Ask again, without "continuar".`), true)
+            // The same rule on a follow-up: one asked before in a channel doesn't take what is said in a DM there.
+            if (fromDm && there.kind !== 'dm' && !saidChannel(there)) return textResult(L(`O pedido [${codeOf(before)}] está em ${placeOf(there)}, e esta conversa é uma DM: continuar levaria o que foi dito aqui pra lá. Peça de novo, sem "continuar" (fica numa DM), ou só continue se ${settings.workspaceName} escrever o nome do canal.`, `Request [${codeOf(before)}] is in ${placeOf(there)}, and this conversation is a DM: continuing would take what was said here there. Ask again, without "continuar" (it stays in a DM), or continue only if ${settings.workspaceName} writes the channel's name.`), true)
             channel = there
             d = this.reopen(before, agent, to, channel, ask, msg, requester, settings.workspaceName)
           } else {
             // Only channels the person this reply is for can see: handing work never reaches further than they do.
             const channels = channelsOf(db.conversations(), to.id).filter((c) => sees.canSeeConversation(requester, c))
             const wanted = typeof args['canal'] === 'string' && args['canal'].trim() ? args['canal'] : undefined
-            // A request never ends up more visible than where it was asked: from a DM, with other people in
-            // the workspace, it stays in a DM, unless the person named the channel (#engenharia) themselves.
-            const said = msg.run?.replyTo ? db.message(msg.run.replyTo)?.text ?? '' : ''
             const named = wanted && !wantsDm(wanted) ? channelNamed(channels, wanted) : undefined
-            const kept = conv.kind === 'dm' && db.people().length > 1 && !(named && said.toLowerCase().split(/[^\p{L}\p{N}#_-]+/u).includes(`#${named.name.toLowerCase()}`))
+            const kept = fromDm && !(named && saidChannel(named))
             // Where it stays: the channel named; the DM the agent has with this person when the subject is of
             // no channel ("dm"), or when it is in none (that this person sees); else its first channel.
             const picked = kept ? this.dmWith(to.id, requester.id) : wantsDm(wanted) ? this.dmWith(to.id, requester.id) : wanted ? named : (channels[0] ?? this.dmWith(to.id, requester.id))
@@ -3159,6 +3163,14 @@ ${note}`,
         this.knockOn(d, now)
         continue
       }
+      // Its last reply ended well, but the request stayed open: someone wrote in the thread meanwhile and
+      // the reply to that never came (the app closed, or it was dropped). Nothing will end it now, so it
+      // ends with the last reply that did, and whoever asked hears of it.
+      const ended = this.endedWell(d, now)
+      if (ended) {
+        this.settle(d, 'done', ended)
+        continue
+      }
       if (last.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
       if (now - (last.run.endedAt ?? last.at) < 60_000) continue // its own reply settles it; this is for the ones that never got to
       this.settle(d, last.run.status === 'stopped' ? 'cancelled' : 'failed', last)
@@ -3168,6 +3180,19 @@ ${note}`,
     // What came back beside it may be told meanwhile, though (tellAsker doesn't hold answers behind it).
     for (const d of db.openDelegations()) if (!d.asking && this.onApproval(d)) places.set(replyKey(d.from, d.originConversationId, d.originThreadId), d)
     for (const d of places.values()) this.tellAsker(d.from, d.originConversationId, d.originThreadId, now)
+  }
+
+  // The reply an open request should have ended with: the newest one by whoever does it, since it was
+  // (re)asked, finished over a minute ago, with nothing of theirs running, parked or queued there.
+  private endedWell(d: Delegation, now: number): Message | undefined {
+    const key = replyKey(d.to, d.conversationId, d.rootId)
+    if (this.followups.busy(key) || this.parked.has(key) || this.waiting.has(key)) return undefined
+    const reply = this.deps.db
+      .recentMessages(d.conversationId, 20, d.rootId)
+      .filter((m) => m.author.kind === 'agent' && m.author.id === d.to && !!m.run)
+      .pop()
+    if (!reply?.run || reply.at < d.createdAt || reply.run.status !== 'done' || this.controllers.has(reply.id)) return undefined
+    return now - (reply.run.endedAt ?? reply.at) >= 60_000 ? reply : undefined
   }
 
   // A request whose thread still has nothing after it: the one asked never even started (no text, no

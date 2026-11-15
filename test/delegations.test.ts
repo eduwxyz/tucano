@@ -557,6 +557,27 @@ describe('work handed down the tree', () => {
     expect(by('orion', 'clientes')[0]?.text).toContain('responda o Fulano')
   })
 
+  it('does not take a follow-up from a DM into the channel an older request is in, unless I name it', async () => {
+    const r = runner()
+    // Asked when I was alone in the workspace: it went to #clientes.
+    await r.send('dm', 'delegue a clara: responda o Fulano')
+    await r.idle()
+    const [asked] = mine('dm')
+    const [root] = by('orion', 'clientes')
+    const people = new People(db)
+    const joined = people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    // Now someone else shares the workspace: what I say in my DM doesn't go to #clientes on a follow-up.
+    await r.send('dm', 'continue com clara: o Fulano deve 300 reais', [], asked!.id)
+    await r.idle()
+    expect(under(root!).some((m) => m.text.includes('300 reais'))).toBe(false)
+    expect(db.delegationAt(root!.id)).toMatchObject({ state: 'done', text: 'responda o Fulano' })
+    // Naming the channel myself lets it go on there.
+    await r.send('dm', 'continue com clara: mande pro Fulano no #clientes', [], asked!.id)
+    await r.idle()
+    expect(under(root!).some((m) => m.text.includes('mande pro Fulano no #clientes'))).toBe(true)
+  })
+
   it('sends it to the agent channel when I am the only person, as before', async () => {
     const r = runner()
     await r.send('dm', 'delegue a clara: veja quanto o cliente X deve')
@@ -601,6 +622,28 @@ describe('work handed down the tree', () => {
     expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(true)
     expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'done', told: true })
     expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: terminou/)
+  })
+
+  it('ends a request whose last reply ended well but stayed open, when the reply to what I wrote there never came', async () => {
+    const r = runner()
+    const rootId = askedButSilent({ createdAt: Date.now() - 10 * 60_000 })
+    // Clara answered; I wrote in the thread meanwhile, and the app closed before her reply to that.
+    const answer: Message = { id: 'resposta-clara', conversationId: 'clientes', threadId: rootId, author: { kind: 'agent', id: 'clara' }, text: 'Respondi o Fulano.', at: Date.now() - 9 * 60_000, run: { status: 'done', endedAt: Date.now() - 8 * 60_000 } } as Message
+    db.saveMessage(answer)
+    db.saveMessage({ id: 'eu-na-thread', conversationId: 'clientes', threadId: rootId, author: { kind: 'person', id: db.ownerId() }, text: 'e o Beltrano?', at: Date.now() - 8 * 60_000 } as Message)
+    r.sweepDelegations()
+    await r.idle()
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'done', told: true, result: 'resposta-clara' })
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: terminou/)
+  })
+
+  it('leaves a request open while its last good reply is under a minute old', async () => {
+    const r = runner()
+    const rootId = askedButSilent({ createdAt: Date.now() - 60_000 })
+    db.saveMessage({ id: 'resposta-recente', conversationId: 'clientes', threadId: rootId, author: { kind: 'agent', id: 'clara' }, text: 'Respondi.', at: Date.now() - 30_000, run: { status: 'done', endedAt: Date.now() - 10_000 } } as Message)
+    r.sweepDelegations()
+    await r.idle()
+    expect(db.delegation('pedido-mudo')?.state).toBe('open')
   })
 
   it('does not start an old silent request out of the blue: it ends, and whoever asked hears it', async () => {
