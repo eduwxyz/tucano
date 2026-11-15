@@ -5,8 +5,10 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { plainCipher } from '../src/core/secrets'
 import { WhatsApp } from '../src/core/whatsapp'
-import { metaError, parse, signed, verify } from '../src/core/whatsapp/cloud'
-import { WhatsAppStore } from '../src/core/whatsapp/store'
+import { metaError, parse, parseChanges, signed, verify } from '../src/core/whatsapp/cloud'
+import { shortId, WhatsAppStore } from '../src/core/whatsapp/store'
+import { lineOf, listOf, pollOf } from '../src/core/whatsapp/tools'
+import { mediaOf, quotedOf, special } from '../src/core/whatsapp/wire'
 import {
   accessFor,
   ALL_CHATS,
@@ -139,6 +141,13 @@ describe('settings and access', () => {
     ])
   })
 
+  it('keeps the settings of media and groups inside what is allowed', () => {
+    expect(defaultSettings('qr')).toMatchObject({ markRead: false, groupManagers: [] })
+    expect(clampSettings('qr', { markRead: true, groupManagers: ['a', 'a', 'b', 42 as never, ''] })).toMatchObject({ markRead: true, groupManagers: ['a', 'b'] })
+    expect(clampSettings('qr', { markRead: 'yes' as never, groupManagers: 'a' as never })).toMatchObject({ markRead: false, groupManagers: [] })
+    expect(clampSettings('cloud', { groupManagers: ['a'] }).groupManagers).toEqual([]) // groups only exist on a QR number
+  })
+
   it('reads a phone number from how people write it', () => {
     expect(phoneDigits('+55 (11) 90000-0142')).toBe('5511900000142')
     expect(phoneDigits('123')).toBeUndefined()
@@ -189,6 +198,34 @@ describe('official API: webhook pieces', () => {
     expect(parse(hook([{ from: '1', id: 'r1', type: 'reaction', reaction: { emoji: '👍' } }]))).toEqual([])
     expect(parse({ entry: [{ changes: [{ value: { metadata: { phone_number_id: 'P1' }, statuses: [{ id: 'x' }] } }] }] })).toEqual([])
     for (const junk of [null, undefined, 42, 'text', [], {}, { entry: 'x' }, { entry: [null, { changes: 'x' }, { changes: [null, { value: null }] }] }]) expect(parse(junk)).toEqual([])
+  })
+
+  it('reads the file and the answered message of a media message', () => {
+    const [doc, sticker, broken] = parse(
+      hook([
+        { from: '5511900000001', id: 'm1', timestamp: '1800000000', type: 'document', document: { id: 'MEDIA1', mime_type: 'application/pdf', filename: '../proposta.pdf', caption: 'segue' }, context: { id: 'wamid.Q' } },
+        { from: '5511900000001', id: 'm2', timestamp: '1800000001', type: 'sticker', sticker: { id: 'MEDIA2' } },
+        { from: '5511900000001', id: 'm3', timestamp: '1800000002', type: 'image', image: { caption: 'sem id' } }
+      ])
+    )
+    expect(doc).toMatchObject({ text: '[documento] segue', quotedId: 'wamid.Q', media: { kind: 'document', mime: 'application/pdf', id: 'MEDIA1', fileName: 'proposta.pdf', caption: 'segue' } })
+    expect(sticker?.media).toMatchObject({ kind: 'sticker', mime: 'image/webp', id: 'MEDIA2' }) // the type Meta left out gets a usual one
+    expect(broken?.media).toBeUndefined() // nothing to download without Meta's media id
+    expect(broken?.text).toBe('[imagem] sem id')
+  })
+
+  it('reads reactions apart from messages, an empty one meaning it was taken back', () => {
+    const body = hook([
+      { from: '5511900000001', id: 'r1', timestamp: '1800000000', type: 'reaction', reaction: { message_id: 'wamid.T', emoji: '👍' } },
+      { from: '5511900000001', id: 'r2', timestamp: '1800000001', type: 'reaction', reaction: { message_id: 'wamid.T' } },
+      { from: '5511900000001', id: 'r3', timestamp: '1800000002', type: 'reaction', reaction: {} }
+    ])
+    expect(parseChanges(body)).toEqual([
+      { phoneId: 'P1', from: '5511900000001', id: 'r1', at: 1_800_000_000_000, kind: 'reaction', target: 'wamid.T', emoji: '👍' },
+      { phoneId: 'P1', from: '5511900000001', id: 'r2', at: 1_800_000_001_000, kind: 'reaction', target: 'wamid.T', emoji: '' }
+    ])
+    expect(parse(body)).toEqual([])
+    for (const junk of [null, 42, 'x', {}, { entry: [null] }]) expect(parseChanges(junk)).toEqual([])
   })
 
   it('turns Meta\'s refusals into what to do next', () => {
@@ -327,7 +364,7 @@ describe('WhatsApp service: bad input is a sentence, never a crash', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'wa-service-'))
     changes = 0
-    wa = new WhatsApp({ dir, cipher: plainCipher, agents: () => [{ id: 'ag', name: 'Vendas' }], changed: () => void changes++, wake: () => {} })
+    wa = new WhatsApp({ dir, cipher: plainCipher, agents: () => [{ id: 'ag', name: 'Vendas' }], changed: () => void changes++, wake: () => {}, artifact: () => undefined })
   })
   afterEach(() => {
     wa.stop()
@@ -354,6 +391,7 @@ describe('WhatsApp service: bad input is a sentence, never a crash', () => {
     await expect(wa.chats('nope')).rejects.toThrow(gone)
     await expect(wa.setAccess('nope', [])).rejects.toThrow(gone)
     await expect(wa.templates('nope')).rejects.toThrow(gone)
+    await expect(wa.history('nope', 'x')).rejects.toThrow(gone)
     await expect(wa.update(undefined as never, {})).rejects.toThrow(gone)
   })
 
@@ -379,5 +417,184 @@ describe('WhatsApp service: bad input is a sentence, never a crash', () => {
     expect(send.approval).toBeUndefined()
     expect((await wa.call(agent, 'whatsapp_enviar', undefined as never)).isError).toBe(true)
     expect((await wa.approved('ag', { numero_id: 'nope', conversa_id: 'x', texto: 'oi' })).ok).toBe(false)
+  })
+
+  it('answers the new tools and approvals with a sentence when nothing is open to the agent', async () => {
+    const agent = { id: 'ag', name: 'Vendas' }
+    const asks: [string, Record<string, unknown>][] = [
+      ['whatsapp_midia', { numero: 'x', conversa: 'y', mensagem: 'ABC123' }],
+      ['whatsapp_reagir', { numero: 'x', conversa: 'y', mensagem: 'ABC123', emoji: '👍' }],
+      ['whatsapp_corrigir', { numero: 'x', conversa: 'y', mensagem: 'ABC123' }],
+      ['whatsapp_grupo', { numero: 'x', acao: 'criar', nome: 'Grupo', pessoas: ['5511900000001'] }],
+      ['whatsapp_enviar', { numero: 'x', conversa: 'y', arquivo: { not: 'a name' } }],
+      ['whatsapp_midia', 'not an object' as never]
+    ]
+    for (const [name, args] of asks) {
+      const out = await wa.call(agent, name, args, { file: () => undefined })
+      expect(out, name).toMatchObject({ isError: true })
+      expect(out.approval, name).toBeUndefined()
+    }
+    expect((await wa.call(agent, 'whatsapp_inexistente', {})).isError).toBe(true)
+    for (const tool of ['whatsapp_corrigir', 'whatsapp_grupo', 'whatsapp_enviar']) expect((await wa.approved('ag', { numero_id: 'nope', acao: 'criar' }, tool)).ok, tool).toBe(false)
+    expect(wa.what({ acao: 'criar', nome: 'Equipe', pessoas: [{ id: 'a', nome: 'Ana' }], numero: 'Loja' }, 'whatsapp_grupo')).toContain('Equipe')
+    expect(wa.what({ conversa: 'Ana', numero: 'Loja', arquivo: { id: 'f', nome: 'tabela.pdf' } })).toContain('tabela.pdf')
+    expect(wa.what({ conversa: 'Ana', numero: 'Loja', enquete: { pergunta: 'Que dia?', opcoes: ['a', 'b'] } })).toContain('Que dia?')
+  })
+})
+
+describe('short ids and what happens to a message that is kept', () => {
+  let dir: string
+  let store: WhatsAppStore
+  const T = NOW
+  const base = { fromMe: false, at: T }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'wa-ids-'))
+    store = new WhatsAppStore(dir, plainCipher)
+    store.addNumber({ id: 'n1', name: 'Loja', description: '', kind: 'qr', settings: defaultSettings('qr'), createdAt: 1 })
+  })
+  afterEach(() => {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('shows the last six characters in upper case', () => {
+    expect(shortId('3EB0a1b2c3d4e5f6')).toBe('D4E5F6')
+    expect(shortId('ab')).toBe('AB')
+  })
+
+  it('finds a message by its full id or by a short one, and by nothing that is unknown or ambiguous', () => {
+    store.addMessage('n1', { ...base, id: 'wamid.AAAA111111', chat: 'ana', text: 'um' })
+    store.addMessage('n1', { ...base, id: 'wamid.BBBB222222', chat: 'ana', text: 'dois' })
+    store.addMessage('n1', { ...base, id: 'x-ZZZ999', chat: 'ana', text: 'três' })
+    store.addMessage('n1', { ...base, id: 'y-ZZZ999', chat: 'ana', text: 'quatro' })
+    store.addMessage('n1', { ...base, id: 'wamid.AAAA111111', chat: 'bia', text: 'de outra conversa' })
+    expect(store.message('n1', 'ana', 'wamid.BBBB222222')?.text).toBe('dois')
+    expect(store.message('n1', 'ana', shortId('wamid.BBBB222222'))?.text).toBe('dois')
+    expect(['#' + shortId('wamid.BBBB222222'), '(#' + shortId('wamid.BBBB222222') + ')'].map((k) => store.message('n1', 'ana', k)?.text)).toEqual(['dois', 'dois']) // as the list shows it, or as an agent copies it
+    expect(store.message('n1', 'ana', ' b222222 ')?.text).toBe('dois') // any case, spaces ignored
+    expect(store.message('n1', 'ana', 'wamid.aaaa')?.text).toBe('um') // a unique start is enough
+    expect(store.message('n1', 'bia', 'wamid.AAAA111111')?.text).toBe('de outra conversa')
+    expect(store.message('n1', 'ana', 'ZZZ999')).toBeUndefined() // two messages end the same way
+    expect(store.message('n1', 'ana', 'AB')).toBeUndefined() // too short to mean one
+    expect(store.message('n1', 'ana', 'NOPE0000')).toBeUndefined()
+    expect([store.message('n1', 'ana', ''), store.message('n1', 'ana', 'x'.repeat(500))]).toEqual([undefined, undefined])
+    expect(store.message('n1', 'ana', '100%_%')).toBeUndefined() // a pattern is only text
+  })
+
+  it('gives back who wrote a message in a group and what it answers', () => {
+    store.addMessage('n1', { ...base, id: 'g1', chat: 'g@g.us', text: '[imagem] foto', sender: 'Ana', participant: '5511900000001@lid', media: 'image', mime: 'image/jpeg', size: 10, file: 'n1/g1.jpg', fileName: 'foto.jpg', quoted: { id: 'q0', text: 'antes', sender: '551100' } })
+    expect(store.message('n1', 'g@g.us', 'g1')).toMatchObject({ participant: '5511900000001@lid', media: 'image', mime: 'image/jpeg', size: 10, file: 'n1/g1.jpg', quoted: { id: 'q0', text: 'antes', sender: '551100' } })
+    expect(store.messages('n1', 'g@g.us', 5)[0]).toMatchObject({ media: 'image', fileName: 'foto.jpg', quoted: { id: 'q0' } })
+  })
+
+  it('marks an edit, and takes a message back keeping its marker but not its words or file', () => {
+    store.addMessage('n1', { ...base, id: 'm1', chat: 'ana', text: '[imagem] foto', media: 'image', file: 'n1/m1.jpg' })
+    expect([store.setText('n1', 'ana', 'm1', 'nova legenda', true), store.setText('n1', 'ana', 'nope', 'x', true)]).toEqual([true, false])
+    expect(store.messages('n1', 'ana', 5)[0]).toMatchObject({ text: 'nova legenda', edited: true })
+    expect(store.setDeleted('n1', 'ana', 'nope')).toEqual({ found: false })
+    expect(store.setDeleted('n1', 'ana', 'm1')).toEqual({ found: true, file: 'n1/m1.jpg' })
+    expect(store.message('n1', 'ana', 'm1')).toMatchObject({ deleted: true, text: '' })
+    expect(store.message('n1', 'ana', 'm1')?.file).toBeUndefined()
+    expect(store.setFile('n1', 'ana', 'm1', 'n1/late.jpg', 5)).toBe(false) // the file that came too late is not attached
+  })
+
+  it('attaches a file that arrives after its message', () => {
+    store.addMessage('n1', { ...base, id: 'm2', chat: 'ana', text: '[documento]', media: 'document' })
+    expect(store.setFile('n1', 'ana', 'm2', 'n1/m2.pdf', 321)).toBe(true)
+    expect(store.message('n1', 'ana', 'm2')).toMatchObject({ file: 'n1/m2.pdf', size: 321 })
+  })
+
+  it('keeps the oldest message seen as the place to ask earlier ones from, and only moves it back', () => {
+    expect(store.anchor('n1', 'ana')).toBeUndefined()
+    store.setAnchor('n1', 'ana', { id: 'm5', fromMe: false, at: T })
+    store.setAnchor('n1', 'ana', { id: 'm9', fromMe: true, at: T + 5 }) // newer: ignored
+    expect(store.anchor('n1', 'ana')).toEqual({ id: 'm5', fromMe: false, at: T })
+    store.setAnchor('n1', 'ana', { id: 'm1', fromMe: false, participant: 'p@lid', at: T - 50 })
+    expect(store.anchor('n1', 'ana')).toEqual({ id: 'm1', fromMe: false, participant: 'p@lid', at: T - 50 })
+    store.upsertChat('n1', { id: 'ana', name: 'Ana', kind: 'contact', lastAt: T })
+    expect(store.anchor('n1', 'ana')?.id).toBe('m1') // updating the conversation keeps it
+  })
+
+  it('counts reactions and group changes of the day apart from messages', () => {
+    const since = dayStart(T)
+    store.addEvent('n1', 'reaction', since + 1)
+    store.addEvent('n1', 'reaction', since + 2)
+    store.addEvent('n1', 'reaction', since - 1) // yesterday
+    store.addEvent('n1', 'group', since + 3)
+    expect(store.reactionsToday('n1', since)).toBe(2)
+    expect(store.groupActionsToday('n1', since)).toBe(1)
+    expect(store.sentToday('n1', since)).toBe(0)
+  })
+
+  it('hands back the files of what it deletes with a number, and of what it prunes', () => {
+    store.addNumber({ id: 'n2', name: 'Outro', description: '', kind: 'qr', settings: defaultSettings('qr'), createdAt: 2 })
+    store.addMessage('n1', { ...base, id: 'a', chat: 'ana', text: 'x', file: 'n1/a.jpg', media: 'image' })
+    store.addMessage('n1', { ...base, id: 'b', chat: 'ana', text: 'y' })
+    store.addMessage('n2', { ...base, id: 'c', chat: 'ana', text: 'z', file: 'n2/c.jpg', media: 'image' })
+    store.addMessage('n2', { ...base, id: 'old', chat: 'ana', text: 'z', file: 'n2/old.jpg', media: 'image', at: T - 100 * 86_400_000 })
+    expect(store.prune(T)).toEqual(['n2/old.jpg'])
+    expect(store.removeNumber('n1')).toEqual(['n1/a.jpg'])
+    expect(store.messages('n2', 'ana', 5).map((m) => m.id)).toEqual(['c'])
+  })
+})
+
+describe('wire: files, quotes and messages that are not messages', () => {
+  it('reads the file a message carries, its declared size and caption, and never a path', () => {
+    expect(mediaOf({ imageMessage: { mimetype: 'image/png', fileLength: 1234, caption: ' foto ' } })).toEqual({ kind: 'image', mime: 'image/png', size: 1234, caption: 'foto' })
+    expect(mediaOf({ audioMessage: {} })).toEqual({ kind: 'audio', mime: 'audio/ogg' })
+    expect(mediaOf({ documentMessage: { fileName: '../../etc/passwd', mimetype: 'application/pdf' } })).toMatchObject({ kind: 'document', fileName: 'passwd' })
+    expect(mediaOf({ conversation: 'oi' })).toBeUndefined()
+  })
+
+  it('reads the message that one answers', () => {
+    expect(quotedOf({ extendedTextMessage: { text: 'sim', contextInfo: { stanzaId: 'Q1', participant: '5511900000001@s.whatsapp.net', quotedMessage: { conversation: 'vamos?' } } } })).toEqual({ id: 'Q1', text: 'vamos?', sender: '5511900000001' })
+    expect(quotedOf({ extendedTextMessage: { text: 'sim', contextInfo: { stanzaId: 'Q2' } } })).toEqual({ id: 'Q2', text: '' })
+    expect(quotedOf({ conversation: 'oi' })).toBeUndefined()
+  })
+
+  it('recognises a reaction, an edit, a delete and a poll being made', () => {
+    expect(special({ reactionMessage: { key: { id: 'T1' }, text: '👍' } })).toEqual({ kind: 'reaction', target: 'T1', emoji: '👍' })
+    expect(special({ reactionMessage: { key: { id: 'T1' } } })).toEqual({ kind: 'reaction', target: 'T1', emoji: '' })
+    expect(special({ protocolMessage: { key: { id: 'T2' }, type: 0 } } as never)).toEqual({ kind: 'delete', target: 'T2' })
+    expect(special({ protocolMessage: { key: { id: 'T3' }, type: 14, editedMessage: { conversation: 'novo texto' } } } as never)).toEqual({ kind: 'edit', target: 'T3', text: 'novo texto' })
+    expect(special({ pollCreationMessage: { name: 'Que dia?', options: [{ name: 'Seg' }] } } as never)?.kind).toBe('poll')
+    expect(special({ conversation: 'oi' })).toBeUndefined()
+  })
+})
+
+describe('what agents write and read', () => {
+  it('reads a poll, and says what is wrong with one that is not', () => {
+    expect(pollOf(undefined)).toBeUndefined()
+    expect(pollOf({ pergunta: ' Que dia? ', opcoes: ['Seg', ' Ter ', ''], multipla: true })).toEqual({ pergunta: 'Que dia?', opcoes: ['Seg', 'Ter'], multipla: true })
+    expect(pollOf({ pergunta: 'Que dia?', opcoes: 'Seg, Ter' })).toEqual({ pergunta: 'Que dia?', opcoes: ['Seg', 'Ter'], multipla: false })
+    expect(() => pollOf({ pergunta: 'Que dia?', opcoes: ['Só uma'] })).toThrow('2 a')
+    expect(() => pollOf({ pergunta: 'Que dia?', opcoes: ['Seg', 'seg'] })).toThrow('diferentes')
+    expect(() => pollOf({ pergunta: 'Que dia?', opcoes: Array.from({ length: 13 }, (_, i) => `o${i}`) })).toThrow('2 a')
+    expect(() => pollOf({ pergunta: '', opcoes: ['a', 'b'] })).toThrow('pergunta')
+    expect(() => pollOf({ pergunta: 'x'.repeat(256), opcoes: ['a', 'b'] })).toThrow('255')
+    expect(() => pollOf('uma enquete')).toThrow('pergunta')
+  })
+
+  it('reads a list given as an array or as a text with commas, and nothing else', () => {
+    expect(listOf(['a', ' b ', 3, null, ''])).toEqual(['a', 'b', '3'])
+    expect(listOf('a, b,,c')).toEqual(['a', 'b', 'c'])
+    expect(listOf(42)).toEqual([])
+    expect(listOf(undefined)).toEqual([])
+    expect(listOf(['a', 'b', 'c'], 2)).toEqual(['a', 'b'])
+  })
+
+  it('shows a message with its short id, what it answers and its marks', () => {
+    const m = { id: 'wamid.XY3EB0A1', chat: 'c', fromMe: false, sender: 'Marina', text: '[imagem] nota fiscal', at: NOW, quoted: { id: 'q', text: 'manda a nota?', sender: 'Eu' } }
+    const line = lineOf(m, 'Conversa', '14/11 09:32')
+    expect(line).toContain('[14/11 09:32] (#3EB0A1) Marina: [imagem] nota fiscal')
+    expect(line).toContain('↪')
+    expect(line).toContain('"manda a nota?"')
+    expect(lineOf({ ...m, quoted: undefined, edited: true }, 'Conversa', 'x')).toContain('editada')
+    expect(lineOf({ ...m, quoted: undefined, deleted: true, text: '' }, 'Conversa', 'x')).toContain('apagada')
+    expect(lineOf({ ...m, quoted: { id: 'q', text: '' } }, 'Conversa', 'x')).toContain('mais antiga')
+    const reaction = lineOf({ ...m, id: 'rx:q:Marina:1', text: '[reagiu 👍 a "nota"]', quoted: { id: 'q', text: 'nota' } }, 'Conversa', 'x')
+    expect(reaction).toBe('[x] Marina: [reagiu 👍 a "nota"]') // a reaction has no id of its own and no quote line
+    expect(lineOf({ ...m, sender: undefined, fromMe: true, agentId: 'ag' }, 'Conversa', 'x')).toContain('Agente')
   })
 })
