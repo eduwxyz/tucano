@@ -650,6 +650,28 @@ export class Wiki {
     return new Set(rows.filter((r) => r.person !== person).map((r) => r.title))
   }
 
+  // The pages (keys) that took something from a conversation `sees` says no to: a restricted member
+  // (PersonAccess) doesn't read them. A version whose source is gone, or the curator's from before
+  // sources said where they came from, may have come from anywhere: it counts as one not seen.
+  outOfReach(sees: (conversationId: string) => boolean): Set<string> {
+    const rows = this.db.prepare("SELECT v.key AS key, v.by AS by, v.source_id AS source_id, s.origin AS origin FROM versions v LEFT JOIN sources s ON s.id = v.source_id WHERE v.action != 'delete'").all() as { key: string; by: string; source_id: string | null; origin: string | null }[]
+    const out = new Set<string>()
+    for (const r of rows) {
+      if (out.has(r.key)) continue
+      if (!r.source_id) {
+        if (r.by === 'auto') out.add(r.key)
+        continue
+      }
+      if (r.origin === null) {
+        out.add(r.key)
+        continue
+      }
+      const conv = (JSON.parse(r.origin) as WikiSource['origin']).conversationId
+      if (conv && !sees(conv)) out.add(r.key)
+    }
+    return out
+  }
+
   // Every key ever held for someone other than `person`, released ones apart: a held page deleted or
   // renamed leaves its title here, so nothing that names it (the log) reaches anyone else.
   everHeld(person?: string): Set<string> {
