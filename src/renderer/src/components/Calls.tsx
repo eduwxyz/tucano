@@ -9,8 +9,8 @@ import { navigate, useStore, type Agent } from '../store'
 import { confirmDialog } from './Dialogs'
 import { Card, Toggle } from './Pages'
 import { Select } from './Select'
-import { AgentAvatar, Icon, UsageBar } from './ui'
-import { DigitsField, DraftText, errText, phoneText } from './WhatsAppParts'
+import { AgentAvatar, Icon } from './ui'
+import { DraftText, errText, LimitRow, phoneText } from './WhatsAppParts'
 
 const STEPS: CallSetupStep[] = ['connector', 'attendant', 'number', 'done']
 
@@ -363,20 +363,20 @@ function CallsBody({ n, agents }: { n: WhatsAppNumber; agents: Agent[] }): React
       <h3 className="wa-call__sub">{L('Limites', 'Limits')}</h3>
       <p className="muted small wa-call__subtext">{L('Minutos de voz custam. O Tucano para de atender quando o limite do dia acaba.', 'Voice minutes cost money. Tucano stops answering when the day’s limit is used up.')}</p>
       <p className="muted small wa-call__subtext">{L(`Cada minuto de ligação gasta créditos do ${providerName}.`, `Each minute of a call uses ${providerName} credits.`)}</p>
-      <div className="wa-limits">
-        <div className="wa-limit">
-          <span className="field__label">{L('Minutos por dia', 'Minutes per day')}</span>
-          <DigitsField label={L('Minutos por dia', 'Minutes per day')} value={s.minutesPerDay} onCommit={(v) => limit('minutesPerDay', v)} />
-          <UsageBar used={state.usedToday} limit={s.minutesPerDay} />
-          <span className="muted small">{L(`Hoje: ${state.usedToday} de ${s.minutesPerDay} min`, `Today: ${state.usedToday} of ${s.minutesPerDay} min`)}</span>
-          <span className="hint wa-limit__max">{L(`No máximo ${CALL_LIMITS.minutesPerDayMax.toLocaleString()}`, `At most ${CALL_LIMITS.minutesPerDayMax.toLocaleString()}`)}</span>
-        </div>
-        <div className="wa-limit">
-          <span className="field__label">{L('Minutos por ligação', 'Minutes per call')}</span>
-          <DigitsField label={L('Minutos por ligação', 'Minutes per call')} value={s.minutesPerCall} onCommit={(v) => limit('minutesPerCall', v)} />
-          <span className="muted small">{L('A ligação termina sozinha ao chegar nesse tempo.', 'The call ends by itself when it reaches this time.')}</span>
-          <span className="hint wa-limit__max">{L(`No máximo ${CALL_LIMITS.minutesPerCallMax}`, `At most ${CALL_LIMITS.minutesPerCallMax}`)}</span>
-        </div>
+      <div className="wa-quotas">
+        <LimitRow
+          label={L('Minutos por dia', 'Minutes per day')}
+          value={s.minutesPerDay}
+          onCommit={(v) => limit('minutesPerDay', v)}
+          used={state.usedToday}
+          caption={L(`Hoje: ${state.usedToday} de ${s.minutesPerDay} min · máximo ${CALL_LIMITS.minutesPerDayMax.toLocaleString()}`, `Today: ${state.usedToday} of ${s.minutesPerDay} min · at most ${CALL_LIMITS.minutesPerDayMax.toLocaleString()}`)}
+        />
+        <LimitRow
+          label={L('Minutos por ligação', 'Minutes per call')}
+          value={s.minutesPerCall}
+          onCommit={(v) => limit('minutesPerCall', v)}
+          caption={L(`A ligação termina sozinha nesse tempo · máximo ${CALL_LIMITS.minutesPerCallMax}`, `The call ends by itself at this time · at most ${CALL_LIMITS.minutesPerCallMax}`)}
+        />
       </div>
 
       <div className="wa-call__off">
