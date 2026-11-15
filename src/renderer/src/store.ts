@@ -1,7 +1,7 @@
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import { ThoughtCache } from './thoughts'
+import { ThoughtCache, type RetainedThought } from './thoughts'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
@@ -494,6 +494,10 @@ export const liveThought = (id: string): string | undefined => thoughts.get(id)
 
 // The thinking as it is now, woken as it arrives. `every`: wake at most that often (ms).
 export function useLiveThought(id: string, every = 0): string | undefined {
+  return useLiveThoughtState(id, every)?.text
+}
+
+export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {
   const subscribe = useCallback(
     (l: () => void) => {
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -514,7 +518,7 @@ export function useLiveThought(id: string, every = 0): string | undefined {
   )
   // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
   // frame) has none, and asking for them there would throw instead of drawing the steps.
-  return useSyncExternalStore(subscribe, () => thoughts.get(id), () => undefined)
+  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)
 }
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.

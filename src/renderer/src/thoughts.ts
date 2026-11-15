@@ -1,20 +1,27 @@
+export interface RetainedThought { text: string; start: number }
+
 // Reasoning is temporary renderer data, with a bound on both each reply and the whole window.
 export class ThoughtCache {
-  private readonly values = new Map<string, string>()
+  private readonly values = new Map<string, RetainedThought>()
 
   constructor(private readonly changed: (id: string) => void, private readonly replies = 200, private readonly characters = 20_000) {
     if (![replies, characters].every((value) => Number.isSafeInteger(value) && value > 0)) throw new RangeError('Reasoning cache limits must be positive integers')
   }
 
   get(id: string): string | undefined {
+    return this.values.get(id)?.text
+  }
+
+  snapshot(id: string): RetainedThought | undefined {
     return this.values.get(id)
   }
 
   append(id: string, text: string): void {
-    const all = (this.values.get(id) ?? '') + text
+    const previous = this.values.get(id)
+    const all = (previous?.text ?? '') + text
     // A reply still receiving deltas stays recent; reads alone do not prolong retention.
     this.values.delete(id)
-    this.values.set(id, all.slice(-this.characters))
+    this.values.set(id, { text: all.slice(-this.characters), start: (previous?.start ?? 0) + Math.max(0, all.length - this.characters) })
     while (this.values.size > this.replies) this.forget(this.values.keys().next().value!)
     this.changed(id)
   }

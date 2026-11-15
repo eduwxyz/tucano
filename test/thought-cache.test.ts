@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { ThoughtCache } from '../src/renderer/src/thoughts'
 
 describe('temporary reasoning retention', () => {
+  it('tracks the absolute origin across repeated trims, including identical retained text', () => {
+    const cache = new ThoughtCache(() => {}, 2, 6)
+    cache.append('a', 'xxxxxx')
+    const first = cache.snapshot('a')
+    expect(first).toEqual({ text: 'xxxxxx', start: 0 })
+    expect(cache.snapshot('a')).toBe(first)
+    cache.append('a', 'xxx')
+    expect(cache.snapshot('a')).toEqual({ text: 'xxxxxx', start: 3 })
+    cache.append('a', 'xx')
+    expect(cache.snapshot('a')).toEqual({ text: 'xxxxxx', start: 5 })
+    cache.clear()
+    cache.append('a', 'new')
+    expect(cache.snapshot('a')).toEqual({ text: 'new', start: 0 })
+  })
+
   it('bounds the number of retained replies while keeping currently streamed replies recent', () => {
     const changed = vi.fn()
     const cache = new ThoughtCache(changed, 2, 10)
