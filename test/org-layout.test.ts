@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orgTree } from '../src/shared/org'
-import { above, BOARD as B, BOARD_RATIO, boundsOf, curve, fitView, layoutOrg, MAX_K, ME, MIN_K, ORG_SIZES as S, orthogonal, pathBetween, spotsOf, tidyBoard, tidyLayout, ZONE_BOTTOM, ZONE_PAD, ZONE_TOP, toBoard, under, zoomAt } from '../src/shared/org-layout'
+import { above, BOARD as B, BOARD_RATIO, boundsOf, curve, fitView, layoutOrg, MAX_K, ME, MIN_K, ORG_SIZES as S, orthogonal, pathBetween, SLOT_GAP, spotsOf, tidyBoard, tidyLayout, topSlots, ZONE_BOTTOM, ZONE_PAD, ZONE_TOP, toBoard, under, zoomAt } from '../src/shared/org-layout'
 
 const a = (id: string, reportsTo?: string): { id: string; reportsTo?: string } => ({ id, ...(reportsTo ? { reportsTo } : {}) })
 const at = (l: ReturnType<typeof layoutOrg>, id: string): { x: number; y: number } => l.nodes.find((n) => n.id === id)!
@@ -228,5 +228,28 @@ describe('the board', () => {
     expect(d.endsWith(` ${to.x} ${to.y}`)).toBe(true)
     // The second handle is straight above the end, so the line arrives from above even when the card is higher.
     expect(curve({ x: 0, y: 300 }, { x: 200, y: 0 })).toBe('M0 300C0 450 200 -150 200 0')
+  })
+
+  // A specialist several teams share: every boss's line arrives on its own point of the card's top edge, so
+  // no two of them ever land on the same spot — the one it hangs from in the middle, the others stepping out.
+  it('gives each boss its own point along the top of a card', () => {
+    const p = { x: 100, y: 40 }
+    const mid = p.x + B.w / 2
+    expect(topSlots(p, 1)).toEqual([{ x: mid, y: 40 }])
+    const two = topSlots(p, 2)
+    expect(two[0]!.x).toBe(mid) // the tree's own line does not move when another boss arrives
+    expect(two[1]!.x).toBe(mid + SLOT_GAP)
+    expect(topSlots(p, 3).map((s) => s.x)).toEqual([mid, mid + SLOT_GAP, mid - SLOT_GAP])
+    expect(topSlots(p, 5).map((s) => s.x)).toEqual([mid, mid + SLOT_GAP, mid - SLOT_GAP, mid + 2 * SLOT_GAP, mid - 2 * SLOT_GAP])
+    // Always on the top edge, never past a corner, and never closer than the dot that sits there.
+    for (let n = 1; n <= 13; n++) {
+      const slots = topSlots(p, n)
+      expect(slots).toHaveLength(n)
+      expect(slots.every((s) => s.y === p.y)).toBe(true)
+      expect(slots.every((s) => s.x > p.x + 8 && s.x < p.x + B.w - 8)).toBe(true)
+      const xs = slots.map((s) => s.x).sort((l, r) => l - r)
+      // Dots are 12px wide: they stay apart, never touching, however many bosses a card answers to.
+      for (let i = 1; i < xs.length; i++) expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(14)
+    }
   })
 })

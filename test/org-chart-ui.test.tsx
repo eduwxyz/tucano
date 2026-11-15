@@ -2,6 +2,7 @@ import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Agent, Conversation, Delegation, Message } from '../src/shared/types'
+import { BOARD, SLOT_GAP } from '../src/shared/org-layout'
 import type { State } from '../src/renderer/src/store'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
@@ -59,8 +60,9 @@ const ptr = async (el: Element | Document, type: string, x = 0, y = 0, extra: Re
 const click = async (el: Element) => act(async () => { el.dispatchEvent(new window.Event('click', { bubbles: true })) })
 // A press and a release in the same place: a click on a card.
 const pick = async (name: string) => (await ptr(card(name), 'pointerdown', 10, 10), await ptr(document, 'pointerup', 10, 10))
-// A line pulled from a card's dot (under it, or above it) and let go over another card.
-const pull = async (from: string, side: 'out' | 'in', onto: string) => {
+// A line pulled from a card's dot (under it, above it, or the one beside that for another boss) and let go
+// over another card.
+const pull = async (from: string, side: 'out' | 'in' | 'also', onto: string) => {
   await ptr(card(from).querySelector(`.org-port--${side}`)!, 'pointerdown', 5, 5)
   await ptr(card(onto), 'pointerover', 50, 50)
   await ptr(document, 'pointerup', 50, 50)
@@ -311,11 +313,113 @@ it('draws a shared specialist from every boss it answers to, and hangs it under 
   expect(document.querySelectorAll('.orgb .org-card').length).toBe(5) // me and the four of them
   expect(card('artist').textContent).toContain('#arte')
   expect(at('artist').y).toBeGreaterThan(at('campaign-a').y)
-  // An extra line is not the tree's own: it can't be picked to be taken out from the board.
-  expect(document.querySelectorAll('.orgb__hit')).toHaveLength(1) // only the line it hangs from: no picking an extra one
+  // Both kinds of line are made and unmade here: the tree's own and the extra ones (only mine, from me, are not).
+  expect(document.querySelectorAll('.orgb__hit')).toHaveLength(3)
   // The panel offers the bosses it also answers to, beside the one it answers to first.
   await pick('artist')
   expect(document.querySelector('.org-side')?.textContent).toContain('Também responde a')
+  // An extra line picked, and taken out: that one link goes, the one it hangs from stays.
+  const extra = [...document.querySelectorAll('.orgb__lines g.is-also')][1]!
+  await ptr(extra.querySelector('.orgb__hit')!, 'pointerdown', 5, 5)
+  expect(extra.getAttribute('class')).toContain('is-picked')
+  await click(document.querySelector('.org-edge-x')!)
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'artist', alsoTo: ['campaign-b'] })
+  expect(save.mock.calls[0]![1]).toEqual(['arte'])
+  expect(document.body.textContent).toContain('artist não responde mais a campaign-c.')
+})
+
+it('gives an agent another boss from the dot beside the one above its card', async () => {
+  // Two campaigns and an artist that answers to the first of them; the second takes it too, from the board.
+  fake = { ...fake, agents: [bot('campaign-a'), bot('campaign-b'), bot('artist', 'campaign-a'), bot('nina', 'artist')], conversations: [channel('arte', ['artist'])] }
+  await render()
+  // The dots above the artist's card: the one it answers to, and beside it the one for another boss — on the very
+  // point that line will arrive at, clear of the first (topSlots: the middle, then SLOT_GAP to the right).
+  const dots = [...card('artist').querySelectorAll('.org-port--in, .org-port--also')]
+  expect(dots.map((d) => d.className.includes('org-port--in'))).toEqual([true, false])
+  expect((dots[1] as HTMLElement).style.left).toBe(`calc(50% + ${SLOT_GAP}px)`)
+  // A card that answers to nobody has no such dot: its first boss is made from the one above it.
+  expect(card('campaign-a').querySelector('.org-port--also')).toBeNull()
+  expect(card('campaign-a').querySelector('.org-port--in')).not.toBeNull()
+  // While it comes from that dot, only a boss it may also answer to is a place to land.
+  await ptr(card('artist').querySelector('.org-port--also')!, 'pointerdown', 5, 5)
+  expect(document.querySelector('.orgb__line.is-new.is-extra')).not.toBeNull()
+  expect(card('campaign-b').className).toContain('is-target')
+  expect(card('campaign-a').className).not.toContain('is-target') // the one it already hangs from
+  expect(card('Edu').className).not.toContain('is-target') // and never me: I am no boss it answers to
+  await ptr(document, 'pointerup', 50, 50)
+  expect(save).not.toHaveBeenCalled() // let go on no card at all
+  // Let go over the second campaign: one more boss, and it is the extra line, not the one it hangs from.
+  await pull('artist', 'also', 'campaign-b')
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'artist', alsoTo: ['campaign-b'] })
+  expect(save.mock.calls[0]![0].reportsTo).toBe('campaign-a')
+  expect(document.body.textContent).toContain('artist também responde a campaign-b.')
+  // Never the same one twice, nor one below it: that would close a circle.
+  save.mockClear()
+  await pull('artist', 'also', 'campaign-a')
+  expect(save).not.toHaveBeenCalled()
+  await pull('artist', 'also', 'nina')
+  expect(save).not.toHaveBeenCalled()
+})
+
+// The other way round, with the same two dots: pulled from under a boss, a line let go on the dot beside the
+// one above a card adds it as another boss; let go on the card itself it replaces the boss it hangs from.
+it('adds or replaces a boss with the dot it is let go on, from the card above', async () => {
+  fake = { ...fake, agents: [bot('campaign-a'), bot('campaign-b'), bot('artist', 'campaign-a')], conversations: [channel('arte', ['artist'])] }
+  await render()
+  // Pulled from under the second campaign, let go on the artist's dot for another boss: added, nothing replaced.
+  const drop = async (boss: string, onto: string, where: 'dot' | 'card' = 'dot') => {
+    await ptr(card(boss).querySelector('.org-port--out')!, 'pointerdown', 5, 5)
+    const el = where === 'dot' ? card(onto).querySelector('.org-port--also')! : card(onto)
+    await ptr(el, 'pointerover', 50, 50)
+    await ptr(document, 'pointerup', 50, 50)
+    await ptr(el, 'pointerout', 60, 60)
+  }
+  // Only the cards the line may land on offer the dot, and it shows while the line is being pulled.
+  await ptr(card('campaign-b').querySelector('.org-port--out')!, 'pointerdown', 5, 5)
+  expect(card('artist').querySelector('.org-port--also')?.className).toContain('is-offer')
+  expect(card('campaign-a').querySelector('.org-port--also')).toBeNull() // it answers to nobody yet
+  await ptr(card('artist').querySelector('.org-port--also')!, 'pointerover', 50, 50)
+  expect(card('artist').querySelector('.org-port--also')?.className).toContain('is-over')
+  await ptr(document, 'pointerup', 50, 50)
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'artist', reportsTo: 'campaign-a', alsoTo: ['campaign-b'] })
+  expect(document.body.textContent).toContain('artist também responde a campaign-b.')
+  // Let go on the card body instead: that is the one it hangs from, so what it answered to before is undone.
+  save.mockClear()
+  await act(async () => root.unmount())
+  root = createRoot(document.getElementById('root')!)
+  await render()
+  await drop('campaign-b', 'artist', 'card')
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'artist', reportsTo: 'campaign-b' })
+  expect(save.mock.calls[0]![0].alsoTo).toBeUndefined()
+})
+
+// Every boss's line arrives on its own point of the shared card's top edge, however many teams share it.
+it('lands each boss line on its own point along the top of a card', async () => {
+  fake = {
+    ...fake,
+    agents: [bot('a'), bot('b'), bot('c'), bot('d'), bot('artist', 'a', { alsoTo: ['b', 'c', 'd'] })],
+    conversations: [channel('arte', ['artist'])]
+  }
+  await render()
+  // Where each line ends: the last point of its path, on the artist's top edge.
+  const ends = [...document.querySelectorAll('.orgb__lines g')]
+    .filter((g) => g.querySelector('.orgb__line'))
+    .map((g) => (g.querySelector('.orgb__line')!.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)!.map(Number))
+    .map((n) => ({ x: n[n.length - 2]!, y: n[n.length - 1]! }))
+  const top = at('artist').y
+  const landings = ends.filter((e) => e.y === top).map((e) => e.x).sort((l, r) => l - r)
+  expect(landings).toHaveLength(4) // the tree's own plus the three extras
+  expect(new Set(landings).size).toBe(4) // no two on the same spot
+  for (let i = 1; i < landings.length; i++) expect(landings[i]! - landings[i - 1]!).toBeGreaterThanOrEqual(14)
+  // The one it hangs from stays in the middle, and the others step out from it.
+  const middle = at('artist').x + BOARD.w / 2
+  expect(landings).toContain(middle)
+  expect(landings).toContain(middle + SLOT_GAP)
+  expect(landings).toContain(middle - SLOT_GAP)
 })
 
 it('asks whoever is at the top, or the agent picked, without leaving the board', async () => {

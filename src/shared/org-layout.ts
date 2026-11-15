@@ -320,3 +320,23 @@ export function curve(from: Point, to: Point): string {
 }
 export const under = (p: Point, s: OrgSizes = BOARD): Point => ({ x: p.x + s.w / 2, y: p.y + s.h })
 export const above = (p: Point, s: OrgSizes = BOARD): Point => ({ x: p.x + s.w / 2, y: p.y })
+
+// How far apart two points on a card's top edge are, and how close to a corner the last one may sit.
+export const SLOT_GAP = 48
+const PORT_CLEAR = 16
+
+// The points a card's bosses' lines arrive at, along its own top edge: the one it hangs from in the middle,
+// then one for each boss it also answers to — right, left, further right, further left — so that however many
+// teams share it no two lines ever land on the same spot or on top of each other. `n` is how many bosses the
+// card has; index 0 is the primary one, and the rest are the extras, in the order bossesOf gives them. With
+// many extras the step narrows until they fit, so they stay apart (never closer than the dot they land on).
+export function topSlots(p: Point, n: number, s: OrgSizes = BOARD): Point[] {
+  const mid = p.x + s.w / 2
+  const extras = Math.max(0, n - 1)
+  const room = s.w / 2 - PORT_CLEAR
+  const step = extras ? Math.min(SLOT_GAP, room / Math.ceil(extras / 2)) : SLOT_GAP
+  return Array.from({ length: Math.max(1, n) }, (_, i) => ({
+    x: Math.round(mid + (i === 0 ? 0 : (i % 2 === 1 ? 1 : -1) * Math.ceil(i / 2) * step)),
+    y: p.y
+  }))
+}
