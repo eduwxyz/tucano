@@ -34,7 +34,7 @@ import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { agentsFor } from './access-policy'
-import { covers } from '../shared/access'
+import { covers, restricted } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
@@ -3043,8 +3043,11 @@ ${note}`,
         }
         this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : r.what === 'parked' ? { ...r.d, parkedTold: true } : { ...r.d, told: true })
       }
-      // The person the work was asked for, not whoever a bare channel would mean (the owner).
-      const requester = db.person(returned[0]!.d.requestedBy) ?? requesterOf(db, conv, [], threadId)
+      // The person the work was asked for, not whoever a bare channel would mean (the owner). When the
+      // answers back were asked for by different people, the one limited to a part of the team wins, so
+      // the reply never reaches past what someone who reads it may see.
+      const askers = returned.flatMap((r) => db.person(r.d.requestedBy) ?? [])
+      const requester = askers.find((p) => restricted(p)) ?? askers[0] ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
       this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true }), true)

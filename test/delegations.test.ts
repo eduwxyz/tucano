@@ -10,6 +10,7 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
 import { exportTeam, importTeam } from '../src/core/team'
+import { People } from '../src/core/people'
 
 const ready = { installed: true, loggedIn: true }
 const agent = (id: string, extra: Partial<Agent> = {}): Agent => ({ id, name: id[0]!.toUpperCase() + id.slice(1), handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
@@ -549,3 +550,39 @@ describe('work handed down the tree', () => {
     expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(false)
   })
 })
+
+// Work handed on for someone who sees only part of the team stays within that part, however far it goes.
+describe('work handed on for a restricted member', () => {
+  // Orion is the entry point: Bento heads a sector (Nico), Clara another (Lia).
+  async function ask(picked: boolean): Promise<{ bia: string; bento: string }> {
+    db.saveAgent({ ...db.agent('orion')!, entry: true })
+    db.saveAgent(agent('lia', { reportsTo: 'clara' }))
+    const r = runner()
+    const people = new People(db)
+    const joined = people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    const bia = joined.person.id
+    if (picked) db.setPersonAccess(bia, { mode: 'picked', sectors: ['bento'], agents: [], channels: ['eng'] })
+    await r.send('eng', '@nico delegue a bento: veja o build', [], undefined, bia)
+    await r.idle()
+    const turn = claude.turns.find((t) => t.system.includes('Você é Bento'))
+    if (!turn) throw new Error('Bento never ran')
+    return { bia, bento: `${turn.system}\n${turn.prompt}` }
+  }
+
+  it('runs the one asked for the member, not the owner, and brings the answer back as them', async () => {
+    const { bia, bento } = await ask(true)
+    const [d] = db.delegationsFrom('nico', 'eng')
+    expect(d).toMatchObject({ to: 'bento', requestedBy: bia, state: 'done', told: true })
+    // Bento, asked in a thread with no person in it, still works for Bia: no other sector, no hidden agent.
+    expect(bento).toContain('@nico')
+    for (const hidden of ['@clara', '@lia', '@orion']) expect(bento).not.toContain(hidden)
+    expect(by('bento', 'eng').some((m) => !m.threadId && m.text.startsWith('Sobre o pedido em #engenharia'))).toBe(true)
+  })
+
+  it('leaves a member who sees everything as before', async () => {
+    const { bento } = await ask(false)
+    expect(bento).toContain('@clara')
+  })
+})
+
