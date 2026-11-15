@@ -1484,7 +1484,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const whatsapp = approval.connectorId === 'whatsapp'
   const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0) && !(whatsapp && !whatsappCanAlways(approval))
   const alwaysTitle = whatsapp
-    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} envia sozinho nesta conversa, sem pedir. Dá pra mudar em Configurações › WhatsApp.`, `From now on ${agent?.name ?? 'the agent'} sends on its own in this conversation, without asking. You can change it in Settings › WhatsApp.`)
+    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} envia sozinho nesta conversa, sem pedir. Dá pra mudar em Configurações › Celular.`, `From now on ${agent?.name ?? 'the agent'} sends on its own in this conversation, without asking. You can change it in Settings › Phone.`)
     : onComputer
     ?L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)

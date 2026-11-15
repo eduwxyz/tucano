@@ -2,7 +2,7 @@
 > Números de WhatsApp do time: ligar por QR code ou API oficial, o que cada agente lê e faz, aprovações, limites e o que acontece quando chega uma mensagem.
 
 ## O que é
-Você cadastra números do time (nome e pra que servem) e escolhe **qual agente usa qual conversa**: **só ler** ou **ler e responder**. Quando alguém escreve, o agente é avisado e responde, se você deixou. Só admins mexem, em **Configurações › WhatsApp** (Settings › WhatsApp).
+Você cadastra números do time (nome e pra que servem) e escolhe **qual agente usa qual conversa**: **só ler** ou **ler e responder**. Quando alguém escreve, o agente é avisado e responde, se você deixou. Só o dono mexe, em **Configurações › Celular** (Settings › Phone).
 
 ## Duas formas de ligar
 - **QR code** (não oficial): um WhatsApp que já está num celular, como "aparelho conectado". Enxerga contatos **e grupos**. No celular: WhatsApp › Aparelhos conectados › Conectar um aparelho, e aponte pro código (ou digite um código no lugar do QR).

@@ -1860,8 +1860,7 @@ export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList
     ? ([
         ['modelos', L('Modelos', 'Models')],
         ['agentes', L('Agentes', 'Agents')],
-        ...(owner ? [['integracoes', L('Celular', 'Phone')]] : []),
-        ['whatsapp', 'WhatsApp']
+        ...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])
       ] as [string, string][])
     : []),
   ...(team ? [['pessoas', L('Pessoas', 'People')] as [string, string]] : []),
@@ -2537,13 +2536,13 @@ export function SettingsPage(): ReactNode {
   const tabs = SETTINGS_TABS(team, admin, owner)
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
+  const [numberOpen, setNumberOpen] = useState(false)
   return (
     <Page title={L('Configurações', 'Settings')}>
       <Tabs page="settings" tabs={tabs} />
       <div className="agent-form">
         {pane('pessoas') && <PeoplePane />}
         {pane('atividade') && admin && <ActivityPane />}
-        {pane('whatsapp') && admin && <WhatsAppPane />}
         {/* A member's own: the language, the theme and the sounds (their name is in Pessoas). */}
         {pane('geral') && !admin && (
           <Card title={L('Pra você', 'Yours')} lead={L('Como o Tucano aparece pra você. Muda só pra você.', 'How Tucano looks to you. It changes only for you.')}>
@@ -2715,9 +2714,11 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && window.tucano.phone && <HomePhoneCard />}
-        {pane('integracoes') && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
+        {pane('integracoes') && owner && !numberOpen && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
+        {pane('integracoes') && owner && !numberOpen && window.tucano.phone && <HomePhoneCard />}
+        {pane('integracoes') && owner && !numberOpen && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
+        {/* One number's screen takes the whole tab: the owner's own phone cards step aside while it is open. */}
+        {pane('integracoes') && owner && <WhatsAppPane onOpen={setNumberOpen} />}
 
         {pane('modelos') && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>

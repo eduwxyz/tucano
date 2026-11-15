@@ -28,7 +28,7 @@ export class Groups {
   // The administrator must have named this agent, and the number's day must have room.
   private allowed(n: NumberRow, agentId: string): void {
     if (!n.settings.groupManagers.includes(agentId)) {
-      throw new UserError(L('Você não tem permissão para criar ou mudar grupos neste número. Peça a um administrador para ligar "Pode cuidar de grupos" para você em Configurações › WhatsApp.', 'You are not allowed to create or change groups on this number. Ask an admin to turn on "Can manage groups" for you in Settings › WhatsApp.'))
+      throw new UserError(L('Você não tem permissão para criar ou mudar grupos neste número. Peça a um administrador para ligar "Pode cuidar de grupos" para você em Configurações › Celular.', 'You are not allowed to create or change groups on this number. Ask an admin to turn on "Can manage groups" for you in Settings › Phone.'))
     }
     if (this.h.store().groupActionsToday(n.id, dayStart(Date.now())) >= GROUP_ACTIONS_PER_DAY) {
       throw new UserError(L(`Este número já fez ${GROUP_ACTIONS_PER_DAY} mudanças em grupos hoje, que é o limite. Nada foi feito. Não tente de novo hoje.`, `This number already made ${GROUP_ACTIONS_PER_DAY} group changes today, which is the limit. Nothing was done. Don't try again today.`))
@@ -48,7 +48,7 @@ export class Groups {
   // Changing a group (adding or removing people, the invite link) takes "read and answer" on it; reading only lets the agent list who is in it.
   private canChange(n: NumberRow, agentId: string, group: WhatsAppChat): void {
     if (accessFor(this.h.store().access(n.id), agentId, group.id)?.level !== 'reply') {
-      throw new UserError(L(`Para mudar o grupo "${group.name}", ele precisa estar liberado pra você com "Ler e responder". Peça a um administrador para liberar em Configurações › WhatsApp.`, `To change the group "${group.name}", it must be open to you with "Read and answer". Ask an admin to open it in Settings › WhatsApp.`))
+      throw new UserError(L(`Para mudar o grupo "${group.name}", ele precisa estar liberado pra você com "Ler e responder". Peça a um administrador para liberar em Configurações › Celular.`, `To change the group "${group.name}", it must be open to you with "Read and answer". Ask an admin to open it in Settings › Phone.`))
     }
   }
 

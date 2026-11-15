@@ -291,7 +291,7 @@ export interface RefusalContext {
 export function refusalText(why: SendRefusal, c: RefusalContext): string {
   switch (why) {
     case 'no_access':
-      return L(`Você não tem acesso a "${c.chat}" no número "${c.number}". Nada foi enviado. Peça a um administrador para liberar em Configurações › WhatsApp.`, `You have no access to "${c.chat}" on the number "${c.number}". Nothing was sent. Ask an admin to open it in Settings › WhatsApp.`)
+      return L(`Você não tem acesso a "${c.chat}" no número "${c.number}". Nada foi enviado. Peça a um administrador para liberar em Configurações › Celular.`, `You have no access to "${c.chat}" on the number "${c.number}". Nothing was sent. Ask an admin to open it in Settings › Phone.`)
     case 'read_only':
       return L(`Você só pode ler "${c.chat}", não responder. Nada foi enviado. Se precisar responder, peça a um administrador para mudar para "Ler e responder".`, `You can only read "${c.chat}", not answer. Nothing was sent. If you need to answer, ask an admin to change it to "Read and answer".`)
     case 'daily_limit':

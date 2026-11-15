@@ -120,7 +120,7 @@ Once a browser has the cookie, the server answers only its own page: a page of a
 
 A number linked by QR code works anywhere. Meta's official API needs Meta to call your server when a message arrives, so it only works with Tucano on a server reachable over HTTPS:
 
-- Set `TUCANO_URL` to the `https://` address people open. Without it, **Settings › WhatsApp** says the official API isn't available.
+- Set `TUCANO_URL` to the `https://` address people open. Without it, **Settings › Phone** says the official API isn't available.
 - In Meta's app panel (WhatsApp › Configuration), set the webhook's callback URL to `https://<your address>/whatsapp/webhook` and subscribe to `messages`. The same page of Tucano (the number's **Webhook** card) shows the exact address and the **verify token** to paste there, each with a copy button.
 - The reverse proxy must pass `/whatsapp/webhook` through to Tucano without a sign-in in front of it, and without changing the body: each request is signed with the app secret, and Tucano checks the signature before reading anything.
 

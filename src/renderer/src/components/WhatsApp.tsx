@@ -1,4 +1,4 @@
-// Settings › WhatsApp (admins): the numbers the team gave its agents, and one number's screen.
+// Settings › Phone, below the owner's own phone cards (the tab is the owner's): the numbers the team gave its agents, and one number's screen.
 // Everything saves as soon as it changes; a change that fails goes back and says why.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
@@ -12,7 +12,8 @@ import { AddNumber, ChatPicker } from './WhatsAppAdd'
 import { AccessCard, CloudCard, DraftText, InboundCard, KindTag, LimitsCard, StatusTag, WaIcon, errText, phoneText } from './WhatsAppParts'
 import { AgentAvatar, Icon } from './ui'
 
-export function WhatsAppPane(): ReactNode {
+// `onOpen`: told when one number's screen opens or closes, so the tab can show it alone.
+export function WhatsAppPane({ onOpen }: { onOpen?: (open: boolean) => void }): ReactNode {
   const rev = useStore((s) => s.whatsappRev)
   const agents = useStore((s) => s.agents)
   const [state, setState] = useState<WhatsAppState | null>(null)
@@ -47,6 +48,11 @@ export function WhatsAppPane(): ReactNode {
   }, [])
 
   const open = openId ? state?.numbers.find((n) => n.id === openId) : undefined
+  const isOpen = !!open
+  useEffect(() => {
+    onOpen?.(isOpen)
+    return () => onOpen?.(false)
+  }, [isOpen, onOpen])
   if (!state)
     return error ? (
       <Card title={L('Números de WhatsApp', 'WhatsApp numbers')}>
