@@ -2646,12 +2646,14 @@ function Tabs({ page, tabs, aside }: { page: string; tabs: TabList; aside?: Reac
 }
 
 // Whom the agent answers to (src/shared/org.ts). With that set, the one above hands it work in its own
-// channel and gets the answer back; with no one answering to anyone, nothing changes.
+// channel and gets the answer back; with no one answering to anyone, nothing changes. More than one: a
+// specialist several teams share, which the board draws under its first boss with a line to each other.
 function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, now?: boolean) => void }): ReactNode {
   const agents = useStore((s) => s.agents)
   const bosses = possibleBosses(agents, draft.id)
   const below = directReports(agents, draft.id)
   const boss = bosses.find((a) => a.id === draft.reportsTo)
+  const also = (draft.alsoTo ?? []).filter((id) => id !== draft.reportsTo)
   const none = L('Ninguém', 'No one')
   return (
     <Section
@@ -2677,6 +2679,28 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
           value={boss?.id ?? null}
           onChange={(v) => patch({ reportsTo: v || undefined }, true)}
           options={[{ value: '', label: none }, ...bosses.map((a) => ({ value: a.id, label: a.role ? `${a.name} · ${a.role}` : a.name }))]}
+          placeholder={none}
+        />
+      </Row>
+      {/* More than one boss (src/shared/org.ts bossesOf): a specialist several teams share. Each of them may
+          ask it for work and gets the answer; on the board it sits under the first, with a dashed line to
+          each of the others. Never its own primary boss, which is the row above. */}
+      <Row
+        label={L('Também responde a', 'Also answers to')}
+        help={L(
+          'Mais de um só quando o mesmo agente serve a mais de um time: cada um deles pode pedir trabalho a ele e recebe a resposta. No organograma ele fica sob o primeiro, com uma linha tracejada até cada outro.',
+          'More than one only when the same agent serves more than one team: each of them can ask it for work and gets the answer. On the board it sits under the first one, with a dashed line to each of the others.'
+        )}
+      >
+        <Select
+          aria-label={L('Também responde a', 'Also answers to')}
+          multiple
+          values={also}
+          onValuesChange={(ids) => {
+            const keep = ids.filter((id) => id !== draft.reportsTo).slice(0, 12)
+            patch({ alsoTo: keep.length ? keep : undefined })
+          }}
+          options={bosses.filter((a) => a.id !== draft.reportsTo).map((a) => ({ value: a.id, label: a.role ? `${a.name} · ${a.role}` : a.name }))}
           placeholder={none}
         />
       </Row>

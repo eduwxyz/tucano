@@ -6,7 +6,7 @@
 // there is to know and change about it; the box at the bottom asks it something without leaving.
 import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
+import { bossesOf, bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
 import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyLayout, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
 import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
@@ -202,6 +202,19 @@ export function OrgPage(): ReactNode {
     setUndo({ was, text: said ?? (boss ? L(`${who} agora responde a ${boss}.`, `${who} answers to ${boss} now.`) : L(`${who} não responde mais a ninguém.`, `${who} answers to no one now.`)) })
   }
   const move = (id: string, to: string | null): Promise<void> => moveAll([id], to)
+  // The other agents it also answers to (a specialist several teams share): saved as they are, and never
+  // its own primary boss, which is the line it hangs from.
+  const also = async (id: string, ids: string[]): Promise<void> => {
+    const agent = byId.get(id)
+    if (!agent || !admin) return
+    const keep = ids.filter((x) => x !== id && x !== agent.reportsTo)
+    setError(null)
+    try {
+      await saveAgent({ ...agent, alsoTo: keep.length ? keep : undefined }, channels(id).map((c) => c.id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
   const takeBack = async (): Promise<void> => {
     if (!undo) return
     setUndo(null)
@@ -307,6 +320,11 @@ export function OrgPage(): ReactNode {
   // Between colleagues it goes up to the agent both answer to and down the other side.
   const flowing = new Map<string, 'down' | 'up'>()
   const bossId = (id: string): string | undefined => bossOf(agents, byId.get(id)!)?.id
+  // Every agent a card answers to, its primary one first (the line it hangs from, then the others).
+  const bossIds = (id: string): string[] => {
+    const a = byId.get(id)
+    return a ? bossesOf(agents, a).map((b) => b.id) : []
+  }
   const heads = headsOf(agents)
   const sectorAsks = open.filter((d) => askWay(agents, d) === 'sector')
   // A request to a sector from the entry point right above its head: down the line between the two.
@@ -318,21 +336,31 @@ export function OrgPage(): ReactNode {
       continue
     }
     const hops = pathBetween(bossId, d.from, d.to)
-    const shared = hops.length ? undefined : bossId(d.from)
+    // A line it answers to that isn't its primary one (a shared specialist): not on the way down the tree,
+    // so the request travels the one line between the two.
+    if (!hops.length && bossIds(d.to).includes(d.from)) {
+      flowing.set(`${d.from}>${d.to}`, d.asking ? 'up' : 'down')
+      continue
+    }
+    if (!hops.length && bossIds(d.from).includes(d.to)) {
+      flowing.set(`${d.to}>${d.from}`, d.asking ? 'down' : 'up')
+      continue
+    }
+    const shared = hops.length ? undefined : bossIds(d.from).find((b) => bossIds(d.to).includes(b))
     const way: [string, 'down' | 'up'][] = hops.length
       ? hops.map(([boss, below]) => [`${boss}>${below}`, d.asking ? 'up' : 'down'])
-      : shared && shared === bossId(d.to)
+      : shared
         ? [[`${shared}>${d.from}`, d.asking ? 'down' : 'up'], [`${shared}>${d.to}`, d.asking ? 'up' : 'down']]
         : []
     for (const [line, dir] of way) flowing.set(line, dir === 'up' ? 'up' : flowing.get(line) ?? 'down')
   }
-  const lines = [
+  const links: { from: string; to: string; also?: boolean }[] = [
     ...roots.map((r) => ({ from: ME, to: r.agent.id })),
-    ...agents.flatMap((a) => {
-      const boss = bossOf(agents, a)
-      return boss ? [{ from: boss.id, to: a.id }] : []
-    })
-  ].map((l) => ({ ...l, a: under(spot(l.from)), b: above(spot(l.to)) }))
+    // One line per agent it answers to: the first is the tree's own (the card hangs under it), the others
+    // reach a shared agent from the side, drawn dashed.
+    ...agents.flatMap((a) => bossesOf(agents, a).map((boss, i) => ({ from: boss.id, to: a.id, ...(i ? { also: true } : {}) })))
+  ]
+  const lines = links.map((l) => ({ ...l, a: under(spot(l.from)), b: above(spot(l.to)) }))
 
   const levels = roots.length ? 1 + Math.max(...roots.map((r) => depthBelow(agents, r.agent.id))) : 0
   const inTree = agents.length - loose.length
@@ -418,14 +446,14 @@ export function OrgPage(): ReactNode {
               const d = routed ?? curve(l.a, l.b)
               const mine = l.from === ME
               return (
-                <g key={`${l.from}>${l.to}`} className={`${mine ? 'is-me' : ''} ${flow ? `is-flow is-${flow}` : ''} ${edge === l.to && !mine ? 'is-picked' : ''}`}>
+                <g key={`${l.from}>${l.to}`} className={`${mine ? 'is-me' : ''} ${l.also ? 'is-also' : ''} ${flow ? `is-flow is-${flow}` : ''} ${edge === l.to && !mine ? 'is-picked' : ''}`}>
                   <path d={d} className="orgb__line" />
                   {flow && (
                     <circle r="4.5" className="orgb__dot">
                       <animateMotion dur="1.6s" repeatCount="indefinite" path={d} keyPoints={flow === 'up' ? '1;0' : '0;1'} keyTimes="0;1" calcMode="linear" />
                     </circle>
                   )}
-                  {admin && !mine && <path d={d} className="orgb__hit" onPointerDown={(e) => (e.stopPropagation(), setPicked(null), setEdge(edge === l.to ? null : l.to))} />}
+                  {admin && !mine && !l.also && <path d={d} className="orgb__hit" onPointerDown={(e) => (e.stopPropagation(), setPicked(null), setEdge(edge === l.to ? null : l.to))} />}
                 </g>
               )
             })}
@@ -494,7 +522,7 @@ export function OrgPage(): ReactNode {
                 team={directReports(agents, a.id).length}
                 head={heads.some((h) => h.id === a.id)}
                 entry={entries.some((e) => e.id === a.id)}
-                bossName={a.reportsTo ? byId.get(a.reportsTo)?.name : undefined}
+                bossName={bossOf(agents, a)?.name}
                 moving={!!moved?.ids.includes(a.id)}
                 picked={picked === a.id}
                 linking={link?.from === a.id}
@@ -572,6 +600,7 @@ export function OrgPage(): ReactNode {
               return !c ? '?' : c.kind === 'dm' ? 'DM' : `#${c.name}`
             }}
             onBoss={(to) => void move(chosen.id, to)}
+            onAlso={(ids) => void also(chosen.id, ids)}
             onEntry={(on) => void saveAgent({ ...chosen, entry: on }, channels(chosen.id).map((c) => c.id)).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))}
             onThread={goThread}
             onLive={goLive}
@@ -707,6 +736,7 @@ function Details({
   nameOf,
   channelOf,
   onBoss,
+  onAlso,
   onEntry,
   onThread,
   onLive,
@@ -724,6 +754,7 @@ function Details({
   nameOf: (id: string) => string
   channelOf: (id: string) => string
   onBoss: (to: string | null) => void
+  onAlso: (ids: string[]) => void
   onEntry: (on: boolean) => void
   onThread: (d: Delegation) => void
   onLive: (m: Message) => void
@@ -731,6 +762,7 @@ function Details({
 }): ReactNode {
   const none = L('Ninguém', 'No one')
   const boss = bosses.find((a) => a.id === agent.reportsTo)
+  const extra = (agent.alsoTo ?? []).filter((id) => id !== agent.reportsTo)
   const row = (d: Delegation, label: string): ReactNode => (
     <button key={d.id} className="org-pop__ask" title={d.text} onClick={() => onThread(d)}>
       <span className="org-pop__ask-top">
@@ -769,8 +801,21 @@ function Details({
           placeholder={none}
         />
       </label>
+      {/* More than one boss (src/shared/org.ts bossesOf): a specialist several teams share. Each of them may
+          hand it work, and the board draws a dashed line from each to its card. */}
+      <label className="field org-pop__boss">
+        <span className="field__label">{L('Também responde a', 'Also answers to')}</span>
+        <Select
+          multiple
+          values={extra}
+          disabled={!admin}
+          onValuesChange={(ids) => onAlso(ids)}
+          options={bosses.filter((b) => b.id !== agent.reportsTo).map((a) => ({ value: a.id, label: a.role ? `${a.name} · ${a.role}` : a.name }))}
+          placeholder={none}
+        />
+      </label>
       {/* Only for one that answers to no agent: an entry point is over the sectors, in none. */}
-      {!boss && (admin || agent.entry) && (
+      {!boss && !extra.length && (admin || agent.entry) && (
         <label className="check org-pop__entry">
           <input type="checkbox" checked={!!agent.entry} disabled={!admin} onChange={(e) => onEntry(e.target.checked)} />
           <span>

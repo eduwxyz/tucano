@@ -298,6 +298,26 @@ it('opens what there is to know about an agent on a click, and changes whom it a
   expect(document.querySelector('.org-side')).toBeNull()
 })
 
+it('draws a shared specialist from every boss it answers to, and hangs it under the first', async () => {
+  // Three campaigns and the artist they share: it answers to all three, its own line being the first.
+  fake = { ...fake, agents: [bot('campaign-a'), bot('campaign-b'), bot('campaign-c'), bot('artist', 'campaign-a', { alsoTo: ['campaign-b', 'campaign-c'] })], conversations: [channel('arte', ['artist'])] }
+  await render()
+  // One line from me to each campaign, one from the first to the artist, and a dashed one from each other.
+  const lines = [...document.querySelectorAll('.orgb__lines g')]
+  expect(lines).toHaveLength(6)
+  expect(lines.filter((g) => g.classList.contains('is-also'))).toHaveLength(2)
+  expect(document.querySelectorAll('.orgb__lines g.is-me')).toHaveLength(3)
+  // Drawn once, under the first one: the other two are leaves with a line down to it.
+  expect(document.querySelectorAll('.orgb .org-card').length).toBe(5) // me and the four of them
+  expect(card('artist').textContent).toContain('#arte')
+  expect(at('artist').y).toBeGreaterThan(at('campaign-a').y)
+  // An extra line is not the tree's own: it can't be picked to be taken out from the board.
+  expect(document.querySelectorAll('.orgb__hit')).toHaveLength(1) // only the line it hangs from: no picking an extra one
+  // The panel offers the bosses it also answers to, beside the one it answers to first.
+  await pick('artist')
+  expect(document.querySelector('.org-side')?.textContent).toContain('Também responde a')
+})
+
 it('asks whoever is at the top, or the agent picked, without leaving the board', async () => {
   const box = (): HTMLInputElement => document.querySelector('.org-ask input')!
   expect(box().getAttribute('placeholder')).toBe('Pedir algo a orion…')
