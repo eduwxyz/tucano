@@ -94,6 +94,9 @@ export interface Agent {
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
   reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
+  sectorName?: string // on a sector's head (src/shared/org.ts headsOf): the sector's name; unset: "Setor de <name>"
+  sectorDoes?: string // on a sector's head: what the sector handles, in one line, read by the other heads
+  entry?: boolean // the person chose it as an entry point (src/shared/org.ts entriesOf): it answers to no agent, is in no sector, and the teams below it are sectors
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -229,6 +232,8 @@ export interface Delegation {
   state: 'open' | 'done' | 'failed' | 'cancelled'
   asking?: string // the message whose question waits for whoever asked
   askingTold?: boolean // whoever asked has heard of that question
+  parkedTold?: boolean // whoever asked has heard it's held on an approval of theirs
+  nudges?: number // how many times the one asked was knocked on after leaving no reply at all
   result?: string // the message it ended with
   told?: boolean // whoever asked has heard how it ended
   lateTold?: boolean // whoever asked has heard it's past its deadline
@@ -314,6 +319,17 @@ export interface Person {
   delegateUntil?: number // …until then
   seenAt?: number // when they last opened the Tucano with a key of theirs
   devices?: number // how many keys (browsers, apps) they have
+  access?: PersonAccess // what they see; unset: everything. Sent to admins and to the person alone
+}
+
+// What a person sees of the team. 'all': everything, as always. 'picked': the agents and channels
+// marked, plus every agent of a marked sector (by its head, so one who joins it later is in too).
+// The owner and admins always see everything, whatever is stored here.
+export interface PersonAccess {
+  mode: 'all' | 'picked'
+  sectors: string[] // sector heads' agent ids
+  agents: string[]
+  channels: string[]
 }
 
 // One of my own keys (a browser, the phone, the desktop app), as Settings › Pessoas lists them.
@@ -385,6 +401,7 @@ export interface Invite {
   role: Exclude<Role, 'owner'>
   about: string
   restore?: string // a removed person this brings back
+  access?: PersonAccess // what whoever joins with it sees; unset: everything
   createdBy: string
   createdAt: number
   expiresAt: number

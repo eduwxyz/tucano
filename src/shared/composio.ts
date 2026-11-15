@@ -10,7 +10,7 @@ export const MANAGE_CONNECTIONS = 'COMPOSIO_MANAGE_CONNECTIONS' // links an app'
 const RUNNERS = new Set([MULTI_EXECUTE, EXECUTE, PROXY_EXECUTE])
 
 // One action a call runs: an app's tool by its slug ("GMAIL_FETCH_EMAILS"), or a raw request to an app's API.
-export type InnerAction = { kind: 'tool'; slug: string } | { kind: 'http'; toolkit: string; method: string; endpoint: string; params: { name: string; value: string; type: string }[] }
+export type InnerAction = { kind: 'tool'; slug: string; account?: string } | { kind: 'http'; toolkit: string; method: string; endpoint: string; params: { name: string; value: string; type: string }[] }
 
 export const isComposio = (url: string | undefined): boolean => {
   try {
@@ -39,8 +39,13 @@ const NOTES: Record<string, 'string' | 'boolean'> = { thought: 'string', current
 const plainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype
 // Only these keys, and the notes with their types.
 const only = (o: Record<string, unknown>, keys: string[]): boolean => Object.entries(o).every(([k, v]) => keys.includes(k) || (k in NOTES && typeof v === NOTES[k]))
-const toolOf = (o: unknown): InnerAction | undefined =>
-  plainObject(o) && only(o, ['tool_slug', 'arguments']) && typeof o['tool_slug'] === 'string' && SLUG.test(o['tool_slug']) && plainObject(o['arguments']) ? { kind: 'tool', slug: o['tool_slug'] } : undefined
+const nonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+// "account" names whose identity the item runs as (an alias or a connected account's id); a toolkit with two or more accounts needs it.
+const toolOf = (o: unknown): InnerAction | undefined => {
+  if (!plainObject(o) || !only(o, ['tool_slug', 'arguments', 'account']) || typeof o['tool_slug'] !== 'string' || !SLUG.test(o['tool_slug']) || !plainObject(o['arguments'])) return undefined
+  if ('account' in o && !nonEmptyString(o['account'])) return undefined
+  return { kind: 'tool', slug: o['tool_slug'], ...(nonEmptyString(o['account']) ? { account: o['account'] } : {}) }
+}
 
 // What a runner's call runs; undefined when its arguments aren't one of the documented shapes.
 export function innerActions(name: string, args: unknown): InnerAction[] | undefined {

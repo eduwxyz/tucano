@@ -2,7 +2,7 @@
 import type { Answer } from './questions'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
+import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -38,6 +38,7 @@ export interface Api {
   olderMessages(p: { conversationId: string; before: number; through?: string }): { messages: Message[]; since: number } // a page from before `before` (or back to `through`, a message to show), with their threads; since: from when it's whole now, 0 once all of it is
   threadMessages(p: { rootId: string }): Message[] // a thread whole: the message that started it and its replies
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
+  revealArtifact(p: { id: string }): void // shows an artifact's file in the file manager; never opens it
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
@@ -198,7 +199,7 @@ export interface Api {
   // People: who I am, and (admins) who comes in. The link is the page's origin with ?invite=<code>.
   setMyName(p: { name: string; about?: string }): void // about: what I do, for the agents
   setDelegation(p: { to: string | null; until?: number }): void // someone answers and approves for me until then; null ends it
-  createInvite(p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string }): { code: string; expiresAt: number }
+  createInvite(p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string; access?: PersonAccess }): { code: string; expiresAt: number }
   revokeInvite(p: { id: string }): void
   listInvites(): Invite[]
   removedPeople(): (Person & { removedAt: number })[] // admins: who left in the last 30 days (still restorable)
@@ -207,6 +208,7 @@ export interface Api {
   removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
+  setPersonAccess(p: { id: string; access: PersonAccess }): void // what a member sees; admins and the owner always see everything
   purgePerson(p: { id: string }): void // the owner, before the 30 days: a removed person's DMs and memories go now
   leave(): void // someone (not the owner) leaves on their own: access ends, and their DMs, memories and own routines go now
   activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)

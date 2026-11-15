@@ -8,6 +8,7 @@ import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import { dateAt, describeSchedule, isoDay, MAX_AGENT_ROUTINES, nextRun, routineCap, validDate, validTime, type Schedule, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { routineCut } from './access-policy'
 import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
@@ -432,6 +433,7 @@ export class Routines {
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
+    if (routineCut(this.deps.db, r)) return // its person can no longer see its agent: it doesn't run (until they can)
     this.running.add(id)
     // The first tick comes before the connectors have connected, with what was missed while the
     // app was closed and what is due right then: a run waits for them (a little), or the agent

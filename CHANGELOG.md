@@ -4,6 +4,70 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **A reply the app cut offers Continue, before Try again.** A reply killed by a restart, a crash or a stop, having already read files, written, edited or run commands, offered one way back: **Try again**, which starts the whole thing over. **Continue** now comes first: it opens a new reply in the same thread carrying a proceed message with what it was asked, how it was cut, every step it took (what it read, what it wrote, what it ran, what failed) and the instruction to go on from where it stopped without redoing what is already done. **Try again** stays a full start from the beginning. A reply killed before any tool call came back has nothing to go on with and keeps **Try again** alone. Once it is continued, the killed reply stops offering either button: the session carries on in the new reply under it. What counts as work and what counts as cut is one reading in `src/shared/run-progress.ts`, which both the core and the window use, so the button the person sees is the one the core will take. (#390)
+
+### Fixed
+
+- **Retrying an older reply uses its original conversation context.** History is bounded by the reply timestamp before applying the SQL limit, and a summary written after that reply is excluded. (#389)
+- **Large skill comparisons keep both complete versions available.** Detailed comparisons use a bounded matrix; larger changes show the complete Before and After text in scrolling panels instead of allocating an unbounded comparison. (#454)
+- **The wiki review stops reading a date as a page.** It took any two capitalised words in a row as a proper name, so a sentence that opens with a date offered "On Nov" as a page the wiki should have (26 hits across 24 pages) and "The Foundry" the same way; both had to be dismissed by hand, and the dismissal was carried forever to keep them quiet. A candidate is now dropped when its first word is a function word or when any word of it is a month, in either language, and dismissals reset after resolution only for missing pages and broken links. Other dismissed alert types remain hidden permanently. Thanks, apoapostolov! (#392)
+- **An answer to a hand-off comes back however the other agent's reply ends.** It used to come back only when that reply ended well: a reply that stopped at a question brought the question alone, one stopped at an approval brought nothing until the person decided, and a request whose turn never started stayed open for good. Now what the other agent wrote so far comes back before its question, and once when it stops at an approval. A request nobody picked up gets one more try after a few minutes and, if that also comes to nothing, ends as failed and whoever asked hears it. A request already more than an hour old when the app checks it is not run again out of the blue: it ends as failed and whoever asked hears it. A question that comes back arrives open. (#377)
+- **An answer back runs for whoever asked, within what they see.** When work handed on came back, the reply that brought it ran for whoever wrote last where it was asked, not for the person who asked: in a channel, a member who sees only part of the team (#461) could get an answer that named agents outside their access, if someone who sees more had written there since. Now it runs for the person who asked. When answers asked by several people come back together, it runs within what all of them see. (#479)
+- **A member who sees only part of the team no longer reads the wiki pages from the rest.** With a member's access limited to some sectors, agents and channels (#461), the wiki stayed whole: they read what the curator summed up from channels and DMs they don't see, and so did an agent answering them. Now a page that took anything from a conversation outside their access is out of their wiki, its search, its index, its map and its log, and out of the wiki of an agent replying to them. A part whose source is gone, or that the curator wrote before sources said where they came from, counts as outside. Owners, admins and members who see everything read the wiki as before. (#478)
+
+## [0.2.32] - 2026-11-14
+
+> **Em português:**
+> - **Novo:** uma **porta de entrada** no quadro do **Time**, se você quiser. Clique num agente que não responde a ninguém e marque **Porta de entrada**: ele fica acima dos setores, você fala com ele, e ele passa cada parte ao chefe do setor certo. Os times abaixo dele viram os setores, e o pedido dele a um setor aparece na linha como "Pedido para" o setor. Você continua podendo falar direto com qualquer chefe, e nada disso é obrigatório: dá pra ter só setores lado a lado, ou só agentes soltos.
+
+### Added
+
+- **An entry point on Team, if you want one.** With every sector's head answering only to you, nothing on the board said which agent you talk to: the box at the bottom asked whichever head was made first. Now an agent that answers to no one can be marked **Porta de entrada** (click its card on the board). It sits over the sectors and in none: its card says so, the teams below it become the sectors, each with its head, and the box at the bottom asks it. It is told which sectors there are and what each solves, and to ask a sector's head instead of someone below the head. Its request to a sector lights the line between them and reads "Pedido para" the sector. You can still talk to any head directly. Nothing asks for an entry point: a board of sectors side by side, or of agents on their own, works as before. The choice travels in a team file.
+
+## [0.2.31] - 2026-11-14
+
+> **Em português:**
+> - **Correção:** um arquivo anexado pelo clipe no **navegador** (Tucano num servidor) agora vai junto da mensagem, como no app do computador: aparece embaixo dela e os agentes leem o que está escrito. Antes só ia o texto "Arquivo enviado:" com o caminho. Um arquivo acima de 20 MB ainda sobe pro servidor, com o caminho na mensagem.
+> - **Correção:** no quadro do **Time**, as zonas de dois setores lado a lado não se sobrepõem mais. Num quadro arrumado à mão, clique em **Organizar** uma vez.
+
+### Fixed
+
+- **A file attached in the browser goes with the message, and the agents read it.** On a Tucano on a server, a file that wasn't an image (a PDF, a spreadsheet) went up to `~/Enviados` and the message only said "Arquivo enviado:" and its path: nothing showed as an attachment, and an agent with no computer couldn't read it. It now goes with the message, as in the desktop app: it shows under the message and what it says reaches the agents as text. Only a file over 20 MB, or one that no longer fits beside those already attached (40 MB a message from a browser), still goes up to the server with its path in the message.
+
+- **Sector zones stay apart on a tidy Team board.** Two sectors side by side were laid out so close that their zones overlapped, tints and borders running into each other, and the person's card sat on top of the zones. A tidy board now leaves room between sectors and above them. A board placed by hand keeps its places: **Organizar** lays it out again.
+
+## [0.2.30] - 2026-11-14
+
+> **Em português:**
+> - **Novo:** cada time do quadro **Time** agora é um **setor**, com um chefe no topo. Dê um nome ao setor e diga o que ele resolve (clique no nome dele no quadro). Quando o assunto é de outra área, o agente passa ao chefe do setor, o chefe pede ao chefe do outro setor, e esse decide quem faz: a resposta volta pelo mesmo caminho, e o pedido aparece no quadro como uma linha tracejada entre os dois chefes. Um agente também pode passar ao próprio chefe o que não consegue fazer. O guia tem a página "Setores".
+> - **Mudou:** uma linha do Time não tem mais limite de três agentes: pode ter quantos níveis você quiser.
+> - **Novo:** com duas contas ligadas no mesmo app do **Composio**, o agente diz por qual conta cada ação roda, e "Aprovar e sempre permitir" vale por conta.
+> - **Correção:** um limite mensal digitado como um número enorme não impede mais o workspace de abrir. Um agente sem limite mensal ganha um teto de verdade por resposta. O app avisa que há versão nova mesmo mostrando um Tucano num servidor. O quadro do Time parado não gasta mais processador animando os avatares.
+
+### Added
+
+- **Sectors on Team: heads ask other heads.** Each tree on the board is now a sector, headed by the agent at its top. A team with two areas couldn't pass a technical problem from finance to the technical people: the branches didn't reach each other, and an `@mention` isn't tracked and doesn't bring the answer back. Now an agent passes what isn't its sector's job to its sector's head, that head asks the other sector's head, and that one decides who in its sector does it. The answer comes back the same way. Only heads ask another sector, and only its head; an agent reaches its own sector's head directly from any depth, so crossing sectors is always three requests. An agent may also pass to its own boss what it can't do. A click on a sector's name on the board opens a panel where an admin names it and writes what it solves, which is what the other heads read to know when to send something there. The board tints each sector behind its branch, marks the head, draws a request between sectors as a dashed line between the two heads, and counts both in the header. The chip in a conversation reads "Passou ao chefe" or "Pediu para" the sector. A sector's name and what it solves travel in a team file. The guide has a "Setores" page.
+
+- **A Composio item can name its account, and "always allow" goes per account.** With two accounts connected on one Composio app, each action has to say which account it runs as. Tucano didn't know that field, so every such call asked for approval, reads included, with no "Approve and always allow". An item with an account is now classed like the same item without one: a read runs, a send asks. Allowing a send from one account doesn't allow it from another, the card shows the account on each action, and rules saved before keep working.
+
+### Changed
+
+- **A line on Team can be as long as you draw it.** A line held at most three agents from top to bottom. That limit is gone: an agent may answer to any other that isn't below it. A piece of work still stacks at most three requests in a row.
+
+### Fixed
+
+- **Composio's remote code tools never get "always allow".** `COMPOSIO_REMOTE_BASH_TOOL` and `COMPOSIO_REMOTE_WORKBENCH` called on their own showed the button, and a saved rule let them run without asking. They now always ask, as they already did inside a batch, and an old rule is ignored.
+
+- **An idle Team board no longer animates every avatar.** The drawn avatars on the cards were one pixel past the size that stays still, so every card animated forever: about 550 style writes a second on an idle board, enough to slow an iPad down. A card's avatar now moves only while its agent works or has just finished.
+
+- **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
+
+- **An agent with no monthly limit gets a real ceiling per reply, and the pause says where it is set.** The ceiling per reply is a share of the monthly limit (10% by default). With no monthly limit there is no month to take it from, and the base used in its place gave 100 thousand tokens a reply: less than an agent with the default limit gets, so setting "no limit" made replies pause sooner. The base is now 10 million tokens (a million a reply at 10%). The note on a paused reply also says that this ceiling is set in **Settings › Agents › Limits** and isn't the agent's monthly limit.
+
+- **The desktop app says a new version is ready with a server on screen too.** With the app showing a Tucano on a server, what's on screen is the server's page, and its Settings showed the server's update state: always off, with the button to look for one disabled. The app still downloaded new versions behind it, but the note that one was ready lived only in the local screen, hidden under the server's, so a person who leaves the app on a server never saw it; the version went in only when they quit the app. The server's page now shows the app's own updates when it is in the desktop app: the version it is on, the look for a new one, the download and the note with **Restart**. Restarting from there is always confirmed in a dialog of the app's own, so a server can't restart the app by itself. Both sides need this version: the app, and the server it shows.
+
 ## [0.2.29] - 2026-11-13
 
 > **Em português:**
