@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 const { createRoot } = await import('react-dom/client')
-const { Diff } = await import('../src/renderer/src/components/Skills')
+const { Diff } = await import('../src/renderer/src/components/skills/SkillDiff')
 let root: ReturnType<typeof createRoot> | undefined
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined })
 
