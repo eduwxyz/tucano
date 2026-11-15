@@ -44,7 +44,7 @@ try {
   }
   const capture = async (name) => {
     await guard()
-    await window.screenshot({ path: join(output, `${name}.png`) })
+    await window.screenshot({ path: join(output, `${name}.png`), animations: 'disabled' })
     await guard()
     report.checks.push(name)
   }
@@ -89,5 +89,3 @@ try {
   writeFileSync(join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify(report))
 }
-
-
