@@ -238,7 +238,7 @@ export class AgentTools {
     return {
       text: L('Essa ligação espera a aprovação de uma pessoa antes de sair. Nada foi feito ainda; você será avisado da decisão.', 'This call waits for a person to approve it before it goes out. Nothing was done yet; you will be told the decision.'),
       step: { label, detail: `${n.name} · ${chat.name}` },
-      approval: { args: { numero_id: n.id, numero: n.name, conversa_id: chat.id, conversa: chat.name, motivo }, why: asks ? L(`Pedir a ${chat.name} permissão para ligar, pelo número ${n.name}. A ligação só sai depois que a pessoa aceitar.`, `Ask ${chat.name} for permission to call, from the number ${n.name}. The call only goes out after the person accepts.`) : L(`Ligação para ${chat.name} pelo número ${n.name}.`, `Call to ${chat.name} from the number ${n.name}.`), detail: motivo || chat.name }
+      approval: { args: { numero_id: n.id, numero: n.name, conversa_id: chat.id, conversa: chat.name, motivo }, why: asks ? L(`Ligação para ${chat.name} pelo número ${n.name}. A pessoa ainda não permitiu ligações: primeiro vai o pedido de permissão por mensagem.`, `Call to ${chat.name} from the number ${n.name}. The person hasn't allowed calls yet: the permission request goes first, by message.`) : L(`Ligação para ${chat.name} pelo número ${n.name}.`, `Call to ${chat.name} from the number ${n.name}.`), detail: motivo || chat.name }
     }
   }
 

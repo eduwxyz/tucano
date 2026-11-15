@@ -145,9 +145,9 @@ describe('the ElevenLabs provider (the parts that need no connection)', () => {
     expect(r.dynamic_variables).toEqual({})
   })
 
-  it('leaves out the voice and the tools when there are none, and passes tools when there are', () => {
+  it('says the usual voice and leaves out the tools when there are none, and passes tools when there are', () => {
     const none = eleven.startReply({ prompt: 'P', firstMessage: 'Oi', language: 'en', toolIds: [], variables: {} }) as { conversation_config_override: Record<string, unknown> }
-    expect(none.conversation_config_override['tts']).toBeUndefined()
+    expect(none.conversation_config_override['tts']).toMatchObject({ voice_id: expect.stringMatching(/\w{10,}/) }) // the usual voice, said out loud
     expect(none.conversation_config_override['conversation']).toBeUndefined()
     const some = eleven.startReply({ prompt: 'P', firstMessage: 'Oi', language: 'en', toolIds: ['t1'], variables: { a: 'b' } }) as { conversation_config_override: { agent: { prompt: { tool_ids?: string[] } } }; dynamic_variables: Record<string, string> }
     expect(some.conversation_config_override.agent.prompt.tool_ids).toEqual(['t1'])
@@ -228,7 +228,7 @@ describe('the ElevenLabs provider (the parts that need no connection)', () => {
       return {}
     })
     expect(await placing.dial({ agentId: 'ag', phoneNumberId: 'ph', toolIds: [], secretIds: [] }, { to: '+5511900000001', variables: {}, voiceId: 'v' })).toEqual({})
-    expect(seen).toEqual(['agents_update_voice', 'agents_submit_batch_call']) // nothing to put back: it was never changed
+    expect(seen).toEqual(['agents_update_voice', 'agents_submit_batch_call', 'agents_update_voice']) // put back anyway: a refusal may be an answer that got lost
   })
 })
 

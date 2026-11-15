@@ -310,7 +310,8 @@ export class ElevenLabs implements VoiceProvider {
       type: 'conversation_initiation_client_data',
       conversation_config_override: {
         agent: { prompt: { prompt: p.prompt, ...(p.toolIds.length ? { tool_ids: p.toolIds } : {}) }, first_message: p.firstMessage, language: p.language },
-        ...(p.voiceId ? { tts: { voice_id: p.voiceId } } : {}),
+        // Always a voice: the attendant's own may be, for a moment, the one of a call Tucano is placing (see dial).
+        tts: { voice_id: p.voiceId || USUAL_VOICE },
         ...(p.maxSeconds ? { conversation: { max_duration_seconds: p.maxSeconds } } : {})
       },
       dynamic_variables: p.variables
@@ -336,15 +337,16 @@ export class ElevenLabs implements VoiceProvider {
   //
   // A batch takes no voice of its own, and the service asks nothing at the start of a call it places. So the caller's
   // voice is put on the attendant for as long as the call takes to start, and the service's usual one is put back
-  // after. One call at a time goes through here: two callers never swap each other's voice. Best effort: a call
-  // whose voice couldn't be set still goes out, with the usual voice.
+  // after. One call at a time goes through here: two callers never swap each other's voice, and a call that comes in
+  // meanwhile carries its own (startReply). Best effort: a call whose voice couldn't be set still goes out, with the usual one.
   dial(state: ProviderState, p: { to: string; variables: Record<string, string>; voiceId?: string }): Promise<{ conversationId?: string }> {
     const run = this.dialing.then(async () => {
-      const own = p.voiceId ? await this.call('agents_update_voice', { agent_id: state.agentId, voice_id: p.voiceId }).then(() => true, () => false) : false
+      // A change that failed here may still have been made there (an answer that never came): it is put back either way.
+      if (p.voiceId) await this.call('agents_update_voice', { agent_id: state.agentId, voice_id: p.voiceId }).catch(() => undefined)
       try {
         return await this.submit(state, p)
       } finally {
-        if (own) await this.call('agents_update_voice', { agent_id: state.agentId, voice_id: USUAL_VOICE }).catch(() => undefined)
+        if (p.voiceId) await this.call('agents_update_voice', { agent_id: state.agentId, voice_id: USUAL_VOICE }).catch(() => undefined)
       }
     })
     this.dialing = run.catch(() => undefined)
