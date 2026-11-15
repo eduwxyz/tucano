@@ -2,7 +2,7 @@
 > Os números de WhatsApp do time: ligar por QR code ou pela API oficial da Meta, escolher o que cada agente lê e responde, aprovar envios, os limites e o que acontece quando chega uma mensagem.
 
 ## O que é
-Você cadastra um ou mais números de WhatsApp do time (um nome e pra que servem) e escolhe **qual agente pode usar qual conversa**. O agente pode **só ler** ou **ler e responder**. Quando alguém escreve, o agente é avisado e pode responder, se você deixou. Só admins veem e mexem nisso, em **Configurações › WhatsApp** (Settings › WhatsApp). Fica no workspace padrão.
+Você cadastra um ou mais números de WhatsApp do time (um nome e pra que servem) e escolhe **qual agente pode usar qual conversa**. O agente pode **só ler** ou **ler e responder**. Quando alguém escreve, o agente é avisado e pode responder, se você deixou. Só admins veem e mexem nisso, em **Configurações › WhatsApp** (Settings › WhatsApp).
 
 ## Duas formas de ligar
 - **QR code** (não oficial): um WhatsApp que já está num celular, ligado como "aparelho conectado". Enxerga contatos **e grupos**. No celular, abra WhatsApp › Aparelhos conectados › Conectar um aparelho e aponte pro código (ou digite um código no lugar do QR).
@@ -13,7 +13,7 @@ Em cada número, o card **Quem pode usar** lista os agentes e as conversas liber
 - **Só ler** ou **Ler e responder**.
 - Pra quem responde: **Pede aprovação** (cada envio espera o seu ok) ou **Envia sozinho**.
 - **Todas as conversas** libera o número inteiro pro agente. Use com cuidado: ele passa a enxergar tudo e pode começar conversas novas (precisa de **Ler e responder**).
-Um agente arquivado ou removido perde o acesso.
+Agente arquivado perde o acesso.
 
 ## Aprovações
 Se o envio pede aprovação, o agente cria um pedido com o texto exato e a conversa; **nada sai antes do seu ok**. Ao aprovar, o Tucano envia exatamente aquele texto (os limites do dia ainda valem). **Sempre enviar nesta conversa** faz os próximos envios dali saírem sozinhos; o primeiro contato com alguém novo sempre pede. Veja também **aprovacoes**.
@@ -32,5 +32,5 @@ Se alguém responde pelo celular numa conversa, os agentes **ficam quietos ali p
 
 ## Quando dá errado
 - **Desconectado**: aperte **Reconectar**. Se o celular desligou o aparelho, leia o QR de novo.
-- **API oficial indisponível**: precisa do Tucano num servidor com https (página **servidor**).
+- **API oficial indisponível**: precisa de servidor com https.
 - **Passou do limite**: o dia vira à meia-noite; ajuste em **Limites**, se fizer sentido.
