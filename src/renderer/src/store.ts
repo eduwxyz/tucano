@@ -1,6 +1,7 @@
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { ThoughtCache } from './thoughts'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
@@ -483,13 +484,10 @@ export const liveText = (id: string): string | undefined => live.get(id)
 
 // What the model is thinking, streamed apart from the reply: kept here, in memory, because it is
 // something to watch as it goes and not part of what the agent said.
-const thoughts = new Map<string, string>()
-const THOUGHT_KEEP = 20_000 // a very long one is trimmed from the front, never allowed to grow forever
+const thoughts = new ThoughtCache((id) => wake(thoughtListeners, id))
 
 function streamThought(id: string, text: string): void {
-  const all = (thoughts.get(id) ?? '') + text
-  thoughts.set(id, all.length > THOUGHT_KEEP ? all.slice(all.length - THOUGHT_KEEP) : all)
-  wake(thoughtListeners, id)
+  thoughts.append(id, text)
 }
 
 export const liveThought = (id: string): string | undefined => thoughts.get(id)
@@ -575,6 +573,7 @@ function withMe(s: State): State {
 }
 
 function withSettings(s: State, settings: Settings): State {
+  if (settings.showThinking !== true) thoughts.clear()
   setLang(settings.language)
   return withMe({ ...s, settings })
 }
@@ -640,6 +639,7 @@ function apply(e: CoreEvent): void {
       case 'routine':
         return { ...s, routines: upsert(s.routines, e.routine) }
       case 'conversation_removed': {
+        thoughts.clear(messagesIn(s, e.id).map((message) => message.id))
         const left = s.conversations.filter((c) => c.id !== e.id)
         const here = s.view?.kind === 'conversation' && s.view.id === e.id
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
@@ -722,6 +722,7 @@ export async function start(): Promise<void> {
   }
   await connect(apply)
   const snap = await call('snapshot')
+  thoughts.clear() // A replacement snapshot may no longer grant access to previously shown replies.
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
