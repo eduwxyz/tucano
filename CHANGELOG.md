@@ -7,6 +7,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Added
 
 - **A reply the app cut offers Continue, before Try again.** A reply killed by a restart, a crash or a stop, having already read files, written, edited or run commands, offered one way back: **Try again**, which starts the whole thing over. **Continue** now comes first: it opens a new reply in the same thread carrying a proceed message with what it was asked, how it was cut, every step it took (what it read, what it wrote, what it ran, what failed) and the instruction to go on from where it stopped without redoing what is already done. **Try again** stays a full start from the beginning. A reply killed before any tool call came back has nothing to go on with and keeps **Try again** alone. Once it is continued, the killed reply stops offering either button: the session carries on in the new reply under it. What counts as work and what counts as cut is one reading in `src/shared/run-progress.ts`, which both the core and the window use, so the button the person sees is the one the core will take. (#390)
+- **For contributors: two checks that run the real app out of sight.** `node scripts/qa-background.mjs` starts Tucano with `--qa-background` on a fresh scratch workspace, fake engines and ports of its own, keeps every window hidden and unfocusable, walks the main screens and saves what it saw, so it runs beside the app you use. `node scripts/e2e-kill-restart.mjs` kills the app in the middle of a reply, opens it again and checks that the work done survived and that Continue and Try again are offered when they should be. `docs/background-qa.md` explains both. Thanks, apoapostolov! (#372, #402)
+
+### Changed
+
+- **The Skills screen is split into components.** Its page, people picker, terminal import, history, proposals, form and comparison each live in their own file under `components/skills/`, with the same behavior and copy. Thanks, apoapostolov! (#472)
 
 ### Fixed
 
