@@ -5,8 +5,8 @@
 Você cadastra um ou mais números de WhatsApp do time (um nome e pra que servem) e escolhe **qual agente pode usar qual conversa**. O agente pode **só ler** ou **ler e responder**. Quando alguém escreve, o agente é avisado e pode responder, se você deixou. Só admins veem e mexem nisso, em **Configurações › WhatsApp** (Settings › WhatsApp). Fica no workspace padrão.
 
 ## Duas formas de ligar
-- **QR code** (não oficial): é um WhatsApp que já está num celular, ligado como "aparelho conectado". Enxerga contatos **e grupos**. Em **Adicionar número**, escolha **QR code**; no celular, abra WhatsApp › Aparelhos conectados › Conectar um aparelho e aponte pro código. Se preferir, dá pra digitar um código no lugar do QR. O celular precisa ficar com internet de vez em quando.
-- **API oficial da Meta**: só contatos (sem grupos), e só quando o Tucano roda num servidor com endereço https, porque a Meta precisa avisar o Tucano quando chega uma mensagem. Você informa quatro dados do painel da Meta, e o Tucano confere com ela antes de salvar. Os passos de servidor estão na página **servidor**.
+- **QR code** (não oficial): um WhatsApp que já está num celular, ligado como "aparelho conectado". Enxerga contatos **e grupos**. No celular, abra WhatsApp › Aparelhos conectados › Conectar um aparelho e aponte pro código (ou digite um código no lugar do QR).
+- **API oficial da Meta**: só contatos (sem grupos), e só com o Tucano num servidor com endereço https, porque a Meta precisa avisar quando chega uma mensagem. Você informa quatro dados do painel da Meta, conferidos antes de salvar. Veja a página **servidor**.
 
 ## Quem pode usar o quê
 Em cada número, o card **Quem pode usar** lista os agentes e as conversas liberadas:
@@ -19,7 +19,7 @@ Um agente arquivado ou removido perde o acesso.
 Se o envio pede aprovação, o agente cria um pedido com o texto exato e a conversa; **nada sai antes do seu ok**. Ao aprovar, o Tucano envia exatamente aquele texto (os limites do dia ainda valem). **Sempre enviar nesta conversa** faz os próximos envios dali saírem sozinhos; o primeiro contato com alguém novo sempre pede. Veja também **aprovacoes**.
 
 ## Limites (e por que um número por QR não serve pra disparo em massa)
-Cada número tem um máximo de mensagens por dia e de conversas novas por dia, que você ajusta, até um teto. O número por QR tem teto baixo de propósito: o WhatsApp bloqueia números comuns que mandam muito, ou pra muita gente que não conversou antes, e um número bloqueado não volta. Os envios saem com pequenas pausas, como uma pessoa. Pra volume maior, use a API oficial, que segue as regras da Meta: depois de 24 horas sem resposta da pessoa, só vale **modelo de mensagem** aprovado pela Meta.
+Cada número tem um máximo de mensagens por dia e de conversas novas por dia, que você ajusta até um teto. O número por QR tem teto baixo de propósito: o WhatsApp bloqueia números que mandam muito, ou pra quem nunca conversou, e um número bloqueado não volta. Os envios saem com pequenas pausas. Pra volume, use a API oficial, nas regras da Meta: depois de 24 horas sem resposta da pessoa, só vale **modelo de mensagem** aprovado.
 
 ## Quando chega uma mensagem
 Em **Quando chega uma mensagem** você escolhe:
@@ -28,9 +28,9 @@ Em **Quando chega uma mensagem** você escolhe:
 O texto que chega é de gente de fora: o agente o trata como informação, nunca como ordem.
 
 ## Quando você responde pelo celular
-Se uma pessoa responde pelo próprio celular numa conversa, os agentes **param de responder ali por um tempo** (você escolhe quanto, ou desliga), pra não falar por cima dela. Vale só pro número por QR.
+Se alguém responde pelo celular numa conversa, os agentes **ficam quietos ali por 30 minutos** (dá pra desligar). Vale só pro número por QR.
 
 ## Quando dá errado
 - **Desconectado**: aperte **Reconectar**. Se o celular desligou o aparelho, leia o QR de novo.
 - **API oficial indisponível**: precisa do Tucano num servidor com https (página **servidor**).
-- **O agente diz que passou do limite**: o limite do dia acaba à meia-noite; ajuste em **Limites**, se fizer sentido.
+- **Passou do limite**: o dia vira à meia-noite; ajuste em **Limites**, se fizer sentido.
