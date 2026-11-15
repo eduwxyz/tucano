@@ -8,6 +8,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A reply the app cut offers Continue, before Try again.** A reply killed by a restart, a crash or a stop, having already read files, written, edited or run commands, offered one way back: **Try again**, which starts the whole thing over. **Continue** now comes first: it opens a new reply in the same thread carrying a proceed message with what it was asked, how it was cut, every step it took (what it read, what it wrote, what it ran, what failed) and the instruction to go on from where it stopped without redoing what is already done. **Try again** stays a full start from the beginning. A reply killed before any tool call came back has nothing to go on with and keeps **Try again** alone. Once it is continued, the killed reply stops offering either button: the session carries on in the new reply under it. What counts as work and what counts as cut is one reading in `src/shared/run-progress.ts`, which both the core and the window use, so the button the person sees is the one the core will take. (#390)
 
+### Fixed
+
+- **Retrying an older reply uses its original conversation context.** History is bounded by the reply timestamp before applying the SQL limit, and a summary written after that reply is excluded. (#389)
+- **Large skill comparisons keep both complete versions available.** Detailed comparisons use a bounded matrix; larger changes show the complete Before and After text in scrolling panels instead of allocating an unbounded comparison. (#454)
+- **The wiki review stops reading a date as a page.** It took any two capitalised words in a row as a proper name, so a sentence that opens with a date offered "On Nov" as a page the wiki should have (26 hits across 24 pages) and "The Foundry" the same way; both had to be dismissed by hand, and the dismissal was carried forever to keep them quiet. A candidate is now dropped when its first word is a function word or when any word of it is a month, in either language, and dismissals reset after resolution only for missing pages and broken links. Other dismissed alert types remain hidden permanently. Thanks, apoapostolov! (#392)
+
 ## [0.2.32] - 2026-11-14
 
 > **Em português:**
