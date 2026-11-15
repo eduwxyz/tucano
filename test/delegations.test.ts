@@ -10,6 +10,7 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
 import { exportTeam, importTeam } from '../src/core/team'
+import { People } from '../src/core/people'
 
 const ready = { installed: true, loggedIn: true }
 const agent = (id: string, extra: Partial<Agent> = {}): Agent => ({ id, name: id[0]!.toUpperCase() + id.slice(1), handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
@@ -195,8 +196,10 @@ describe('work handed down the tree', () => {
     await until(() => by('orion', 'dm').length === 2)
     const told = codex.turns.at(-1)!.prompt
     expect(told).toMatch(/Clara, #clientes: terminou/)
-    expect(told).toMatch(/Ainda em andamento: \[\w{8}\] Nico, #engenharia \(parado numa aprovação que espera Edu\)/)
-    expect(told).toContain('e o que espera uma aprovação dele')
+    // Held on my yes, and what it wrote before stopping is in the asker's own thread by now (see the
+    // test below for the text itself: here Nico's reply was still empty when it stopped).
+    expect(told).toMatch(/Nico, #engenharia: parou numa aprovação que espera Edu/)
+    expect(told).toContain('Não refaça o que ele fez')
     // When Nico's work does end, Orion hears of it, alone this time.
     await r.idle()
     expect(by('orion', 'dm')).toHaveLength(3)
@@ -373,8 +376,9 @@ describe('work handed down the tree', () => {
     // No person was asked.
     expect(db.openQuestions()).toEqual([])
     expect(db.answeredQuestions(0)).toEqual([])
-    // In the DM: the question showed up in Clara's name, then her answer.
-    expect(by('clara', 'dm').map((m) => m.text.split(':')[0])).toEqual(['Uma pergunta sobre o pedido em #clientes', 'Sobre o pedido em #clientes'])
+    // In the DM: what Clara wrote before asking, her question, then her answer.
+    expect(by('clara', 'dm').map((m) => m.text.split(':')[0])).toEqual(['Até agora, sobre o pedido em #clientes', 'Uma pergunta sobre o pedido em #clientes', 'Sobre o pedido em #clientes'])
+    expect(by('clara', 'dm')[0]?.text).toContain('Te mandei uma pergunta')
     expect(by('orion', 'dm').map((m) => m.text)).toEqual([expect.stringContaining('Pedido ['), 'Respondi a dúvida dele.', 'Pronto: o time terminou o que pedi.'])
     expect(db.delegationAt(thread[0]!.id)).toMatchObject({ state: 'done' })
     expect(db.delegationAt(thread[0]!.id)?.asking).toBeUndefined()
@@ -478,4 +482,130 @@ describe('work handed down the tree', () => {
     expect(db.delegationAt(root!.id)).toMatchObject({ state: 'failed', told: true })
     expect(by('orion', 'dm').at(-1)?.text).toBe('Não deu certo: o pedido não terminou.')
   })
+
+  it('brings what it wrote so far back when it stops at an approval, before my yes', async () => {
+    const r = runner()
+    await r.send('dm', 'delegue a clara: responda o Fulano')
+    await r.idle()
+    const [root] = by('orion', 'clientes')
+    const d = db.delegationAt(root!.id)!
+    // As if the app had been closed right as Clara stopped at an approval: the request open again, her
+    // reply waiting for my yes, and nobody having heard of it.
+    db.saveDelegation({ ...d, state: 'open', told: false, result: undefined, endedAt: undefined })
+    const reply = by('clara', 'clientes')[0]!
+    db.saveMessage({ ...reply, run: { ...reply.run!, status: 'waiting_approval' } })
+    r.sweepDelegations()
+    await r.idle()
+    // Her answer, as far as it goes, is in Orion's thread: not only the news that it waits on me.
+    expect(by('clara', 'dm').map((m) => m.text.split(':')[0]).at(-1)).toBe('Até agora, sobre o pedido em #clientes')
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: parou numa aprovação que espera Edu/)
+    expect(codex.turns.at(-1)!.prompt).toContain('Não refaça o que ele fez')
+    expect(db.delegationAt(root!.id)).toMatchObject({ state: 'open', parkedTold: true })
+  })
+
+  // A request whose thread has nothing after it at all: the one asked never wrote a line, no error
+  // either (the run never got going). Nobody used to hear of it, ever.
+  const askedButSilent = (extra: { nudges?: number; createdAt?: number } = {}): string => {
+    const root = { id: 'raiz-muda', conversationId: 'clientes', author: { kind: 'agent' as const, id: 'orion' }, text: '@clara, um pedido:\n\nresponda o Fulano', at: Date.now() }
+    db.saveMessage(root)
+    db.saveDelegation({ id: 'pedido-mudo', from: 'orion', to: 'clara', conversationId: 'clientes', rootId: root.id, originConversationId: 'dm', originMessageId: 'mudo-pedido', requestedBy: db.ownerId(), text: 'responda o Fulano', state: 'open', createdAt: extra.createdAt ?? Date.now(), ...(extra.nudges ? { nudges: extra.nudges } : {}) })
+    return root.id
+  }
+
+  it('knocks once on a request whose thread has nothing, and what comes of it goes back', async () => {
+    const r = runner()
+    const rootId = askedButSilent()
+    // A minute in: too soon to knock.
+    r.sweepDelegations()
+    expect(db.delegation('pedido-mudo')?.nudges).toBeUndefined()
+    r.sweepDelegations(Date.now() + 5 * 60_000)
+    await r.idle()
+    expect(db.delegation('pedido-mudo')?.nudges).toBe(1)
+    // This time it answers, and the answer comes back to where it was asked.
+    expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(true)
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'done', told: true })
+    expect(by('clara', 'dm').at(-1)?.text).toMatch(/^Sobre o pedido em #clientes:/)
+  })
+
+  it('does not start an old silent request out of the blue: it ends, and whoever asked hears it', async () => {
+    const r = runner()
+    // Open and silent for two days (the app was closed, or it predates the knock): no turn now.
+    const rootId = askedButSilent({ createdAt: Date.now() - 2 * 24 * 60 * 60_000 })
+    r.sweepDelegations()
+    await r.idle()
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'failed', told: true })
+    expect(db.delegation('pedido-mudo')?.nudges).toBeUndefined()
+    expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(false)
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: não terminou/)
+  })
+
+  it('gives up on a request nobody answered, and whoever asked hears it', async () => {
+    const r = runner()
+    const rootId = askedButSilent({ nudges: 1, createdAt: Date.now() - 11 * 60_000 })
+    r.sweepDelegations()
+    await r.idle()
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'failed', told: true })
+    expect(db.messages().some((m) => m.conversationId === 'dm' && m.text.startsWith('O pedido a **Clara** em #clientes não terminou'))).toBe(true)
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: não terminou/)
+    expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(false)
+  })
 })
+
+// Work handed on for someone who sees only part of the team stays within that part, however far it goes.
+describe('work handed on for a restricted member', () => {
+  // Orion is the entry point: Bento heads a sector (Nico), Clara another (Lia).
+  async function ask(picked: boolean): Promise<{ bia: string; bento: string }> {
+    db.saveAgent({ ...db.agent('orion')!, entry: true })
+    db.saveAgent(agent('lia', { reportsTo: 'clara' }))
+    const r = runner()
+    const people = new People(db)
+    const joined = people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    const bia = joined.person.id
+    if (picked) db.setPersonAccess(bia, { mode: 'picked', sectors: ['bento'], agents: [], channels: ['eng'] })
+    await r.send('eng', '@nico delegue a bento: veja o build', [], undefined, bia)
+    await r.idle()
+    const turn = claude.turns.find((t) => t.system.includes('Você é Bento'))
+    if (!turn) throw new Error('Bento never ran')
+    return { bia, bento: `${turn.system}\n${turn.prompt}` }
+  }
+
+  it('runs the one asked for the member, not the owner, and brings the answer back as them', async () => {
+    const { bia, bento } = await ask(true)
+    const [d] = db.delegationsFrom('nico', 'eng')
+    expect(d).toMatchObject({ to: 'bento', requestedBy: bia, state: 'done', told: true })
+    // Bento, asked in a thread with no person in it, still works for Bia: no other sector, no hidden agent.
+    expect(bento).toContain('@nico')
+    for (const hidden of ['@clara', '@lia', '@orion']) expect(bento).not.toContain(hidden)
+    expect(by('bento', 'eng').some((m) => !m.threadId && m.text.startsWith('Sobre o pedido em #engenharia'))).toBe(true)
+  })
+
+  it('leaves a member who sees everything as before', async () => {
+    const { bento } = await ask(false)
+    expect(bento).toContain('@clara')
+  })
+
+  it('runs the answer back for the member who asked, even when someone else wrote there since', async () => {
+    db.saveAgent({ ...db.agent('orion')!, entry: true })
+    db.saveAgent(agent('lia', { reportsTo: 'clara' }))
+    const r = runner()
+    const people = new People(db)
+    const joined = people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    const bia = joined.person.id
+    db.setPersonAccess(bia, { mode: 'picked', sectors: ['bento'], agents: [], channels: ['eng'] })
+    const sent = r.send('eng', '@nico delegue a bento: demore 1s e veja o build', [], undefined, bia)
+    await until(() => db.delegationsFrom('nico', 'eng').length > 0)
+    // The owner writes in the channel while Bento works: the last person there is no longer Bia.
+    const hers = db.messages().find((m) => m.conversationId === 'eng' && m.author.kind === 'person')!
+    db.saveMessage({ ...hers, id: 'edu-later', author: { kind: 'person', id: db.ownerId() }, text: 'bom dia', at: Date.now() })
+    await sent
+    await r.idle()
+    await until(() => db.delegationsFrom('nico', 'eng')[0]?.told === true)
+    await r.idle()
+    const back = claude.turns.filter((t) => t.system.includes('Você é Nico')).at(-1)!
+    expect(back.prompt).toMatch(/Voltou do que você pediu/)
+    for (const hidden of ['@clara', '@lia', '@orion']) expect(`${back.system}\n${back.prompt}`).not.toContain(hidden)
+  })
+})
+

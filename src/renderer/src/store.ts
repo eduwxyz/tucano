@@ -31,12 +31,12 @@ import {
   type Message,
   type Model,
   type Person,
+  type PersonAccess,
   type Delegation,
   type Inbox,
   type Device,
   type Invite,
   type ActivityEntry,
-  delegating,
   type Routine,
   type RoutineInput,
   type Settings,
@@ -59,6 +59,7 @@ import {
   type ProposalsResult,
   type BackupSummary
 } from '../../shared/types'
+import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
 import { hashToView, viewToHash } from './address'
 
@@ -732,7 +733,7 @@ export const roleLabel = (r: Person['role']): string => (r === 'owner' ? L('Dono
 export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<Approval, 'agentId'>): boolean => {
   if (amAdmin(s)) return true
   const owner = personById(s, s.agents.find((x) => x.id === a.agentId)?.owner)
-  return !!owner && (owner.id === s.you || delegating(owner, s.you))
+  return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))
 }
 // How many things wait on me (approvals I decide, questions, cards members sent).
 export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)
@@ -1078,7 +1079,8 @@ export const removeRoutine = (id: string): void => void fire(L('Não consegui re
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })
 export const doneNaming = (): void => set((s) => ({ ...s, needsName: false }))
 export const setDelegation = (to: string | null, until?: number): Promise<void> => call('setDelegation', { to, ...(until ? { until } : {}) })
-export const createInvite = (role: 'admin' | 'member', about: string, restore?: string): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}) })
+export const createInvite = (role: 'admin' | 'member', about: string, restore?: string, access?: PersonAccess): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}), ...(access ? { access } : {}) })
+export const setPersonAccess = (id: string, access: PersonAccess): Promise<void> => call('setPersonAccess', { id, access })
 export const revokeInvite = (id: string): Promise<void> => call('revokeInvite', { id })
 export const listInvites = (): Promise<Invite[]> => call('listInvites')
 export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => call('removedPeople')

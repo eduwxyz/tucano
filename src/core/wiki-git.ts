@@ -186,6 +186,9 @@ export interface WikiGitDeps {
   privatePaths: () => Set<string>
   // A private file git had to move aside (a new file from the repository took its path): it stays private.
   movedPrivate?: (from: string, to: string) => void
+  // Any page git copied or moved to its copy name (a conflict, read-only, a file moved aside): where
+  // it came from goes with it, so a restricted member doesn't read the copy (PersonAccess).
+  copied?: (from: string, to: string) => void
   quiet: (on: boolean) => void // the wiki's watcher waits while git works
   refresh: () => Promise<void> // the folder read again after a pull
   notice: (n: { key: string; pages: string[]; text: string }) => void // in Cuidados
@@ -696,6 +699,7 @@ export class WikiGit {
     const to = this.copyName(dir, path)
     renameSync(join(dir, path), join(dir, to))
     if (this.privateSet().has(nfc(path))) this.deps.movedPrivate?.(nfc(path), to)
+    this.deps.copied?.(nfc(path), to)
   }
 
   private async rebase(dir: string, branch: string): Promise<void> {
@@ -777,6 +781,7 @@ export class WikiGit {
       copy = this.copyName(dir, f)
       mkdirSync(dirname(join(dir, copy)), { recursive: true })
       writeFileSync(join(dir, copy), mine)
+      this.deps.copied?.(nfc(f), copy)
       await this.must(['add', '--', copy], { cwd: dir, env: lit })
     }
     if (remote) {
@@ -810,6 +815,7 @@ export class WikiGit {
         if (existsSync(join(dir, f))) {
           const to = this.copyName(dir, f)
           writeFileSync(join(dir, to), readFileSync(join(dir, f)))
+          this.deps.copied?.(nfc(f), to)
           kept.push(to)
         }
         await this.must(['checkout', '--quiet', `origin/${branch}`, '--', f], { cwd: dir, env: lit })

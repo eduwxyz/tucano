@@ -475,12 +475,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   // What came back from handed work, where it was asked: a line, not a voice. Whoever did it speaks in
   // its own channel; here only whoever I asked does.
   const from = message.run?.delegation
-  if (agent && from && from.to === agent.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
+  if (message.author.kind === 'agent' && from && from.to === message.author.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
 
-  const name = agent ? agent.name : (other ?? me.name)
+  // An agent the server hides from this member (restricted view): a neutral voice, never my own name.
+  const ghost = message.author.kind === 'agent' && !agent
+  const name = agent ? agent.name : ghost ? L('Agente', 'Agent') : (other ?? me.name)
   return (
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
-    <article className={`msg ${agent ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
+    <article className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
           (agent ? (
@@ -488,7 +490,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
               <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
             </AgentCardButton>
           ) : (
-            <MeAvatar initials={other ? initials(other) : me.initials} size={34} />
+            <MeAvatar initials={ghost ? 'A' : other ? initials(other) : me.initials} size={34} />
           ))}
       </div>
       <div className="msg__body">
@@ -1019,19 +1021,21 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
   )
 }
 
-// What came back from handed work, where it was asked: a line saying who answered (or asks), with the
-// whole of it one click away and a way to its thread. Whoever asked says what came of it right after.
-function ReturnedLine({ message, at, agent, text, components }: { message: Message; at: DelegationRef; agent: Agent; text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
-  const [open, setOpen] = useState(false)
-  const seen = useStore((s) => s.conversations.some((c) => c.id === at.conversationId))
+// What came back from handed work, where it was asked: a line saying who answered (or asks), with a way
+// to its thread, and whoever asked says what came of it right after. An answer reads folded, one click
+// away; a question opens by itself — it is the one thing here waiting on me, and folding it would hide
+// the only text that needs an answer.
+function ReturnedLine({ message, at, agent, text, components }: { message: Message; at: DelegationRef; agent: Agent | undefined; text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
   const answer = at.back === 'result'
+  const [open, setOpen] = useState(!answer)
+  const seen = useStore((s) => s.conversations.some((c) => c.id === at.conversationId))
   const cut = text.indexOf(':\n\n') // after "Sobre o pedido em #canal:"
   const body = cut < 0 ? text : text.slice(cut + 3)
   return (
     <div className={`system-line returned-line ${open ? 'is-open' : ''}`} data-id={message.id}>
-      <AgentAvatar agent={agent} size={16} />
+      {agent ? <AgentAvatar agent={agent} size={16} /> : <MeAvatar initials="A" size={16} />}
       <p>
-        <strong>{agent.name}</strong> {answer ? L('respondeu', 'answered') : L('tem uma pergunta', 'has a question')}
+        <strong>{agent?.name ?? L('Agente', 'Agent')}</strong> {answer ? L('respondeu', 'answered') : L('tem uma pergunta', 'has a question')}
       </p>
       <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? L('Recolher', 'Fold') : answer ? L('Ver resposta', 'See the answer') : L('Ver pergunta', 'See the question')}
