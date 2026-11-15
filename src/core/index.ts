@@ -855,7 +855,11 @@ wikiGit = new WikiGit({
     const next = pageKey(to.split('/').pop()!.replace(/\.md$/i, ''))
     const h = wiki.heldKeys().find((x) => x.key === key)
     if (h) wiki.holdKey(next, h.person)
-    wiki.carryKey(key, next) // and the cut for a restricted member (PersonAccess)
+  },
+  // any copy git makes of a page (conflict, read-only, moved aside): the cut for a restricted member goes along (PersonAccess)
+  copied: (from, to) => {
+    if (!from.endsWith('.md') || !to.endsWith('.md')) return
+    wiki.carryKey(pageKey(from.split('/').pop()!.replace(/\.md$/i, '')), pageKey(to.split('/').pop()!.replace(/\.md$/i, '')))
   },
   quiet: (on) => wiki.quiet(on),
   refresh: () => wiki.refresh(),

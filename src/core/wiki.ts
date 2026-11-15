@@ -440,6 +440,9 @@ export class Wiki {
     }
     for (const r of this.db.prepare('SELECT key FROM orphaned').all() as { key: string }[]) add(r.key, '')
     for (const r of this.db.prepare('SELECT key, conv FROM carried').all() as { key: string; conv: string }[]) add(r.key, r.conv)
+    // a page with no history at all (outOfReach): the new index would give it one, from outside
+    const known = new Set((this.db.prepare('SELECT DISTINCT key FROM versions WHERE key IS NOT NULL').all() as { key: string }[]).map((r) => r.key))
+    for (const r of this.db.prepare('SELECT title FROM pages').all() as { title: string }[]) if (!known.has(pageKey(r.title))) add(pageKey(r.title), '')
     return [...out.values()]
   }
   carry(rows: { key: string; conv: string }[]): void {
