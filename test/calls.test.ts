@@ -204,6 +204,32 @@ describe('the ElevenLabs provider (the parts that need no connection)', () => {
   it('turns a failed connector call into a sentence, never a crash', async () => {
     await expect(eleven.voices('ana')).rejects.toMatchObject({ message: expect.stringContaining('no network in tests') })
   })
+
+  it("places a call with the caller's voice and puts the usual one back, one call at a time", async () => {
+    const seen: string[] = []
+    const placing = new ElevenLabs(async (name, args) => {
+      seen.push(name === 'agents_update_voice' ? `voice:${String(args['voice_id'])}` : name)
+      return {} // a batch with no id: the call went out, it just can't be followed
+    })
+    const state = { agentId: 'ag', phoneNumberId: 'ph', toolIds: [], secretIds: [] }
+    const calls = [placing.dial(state, { to: '+5511900000001', variables: {}, voiceId: 'voz-da-lia' }), placing.dial(state, { to: '+5511900000002', variables: {} })]
+    expect(await Promise.all(calls)).toEqual([{}, {}])
+    expect(seen[0]).toBe('voice:voz-da-lia')
+    expect(seen[1]).toBe('agents_submit_batch_call')
+    expect(seen[2]).toMatch(/^voice:(?!voz-da-lia)/) // back to the usual voice before the next call starts
+    expect(seen.slice(3)).toEqual(['agents_submit_batch_call']) // a caller with no voice of its own changes nothing
+  })
+
+  it('still places the call when the voice cannot be set', async () => {
+    const seen: string[] = []
+    const placing = new ElevenLabs(async (name) => {
+      seen.push(name)
+      if (name === 'agents_update_voice') throw new Error('refused')
+      return {}
+    })
+    expect(await placing.dial({ agentId: 'ag', phoneNumberId: 'ph', toolIds: [], secretIds: [] }, { to: '+5511900000001', variables: {}, voiceId: 'v' })).toEqual({})
+    expect(seen).toEqual(['agents_update_voice', 'agents_submit_batch_call']) // nothing to put back: it was never changed
+  })
 })
 
 describe("Meta's answer to a call permission request", () => {

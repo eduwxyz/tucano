@@ -1037,7 +1037,7 @@ const whatsapp = defaultWorkspace
       numberGone: async (id) => {
         if (calls && (await calls.state(id)).ready) await calls.disable(id)
       },
-      dial: async (agentId, args) => (calls ? calls.dial(agentId, args) : { ok: false, text: L('As ligações não estão disponíveis aqui.', "Calls aren't available here.") })
+      dial: async (agentId, args, dry) => (calls ? calls.dial(agentId, args, dry) : { ok: false, text: L('As ligações não estão disponíveis aqui.', "Calls aren't available here.") })
     })
   : undefined
 

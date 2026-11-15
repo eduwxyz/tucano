@@ -106,7 +106,11 @@ function refused(e: unknown): UserError {
 
 const gone = (e: unknown): boolean => /not.?found|404|does not exist|já foi|no such/i.test(e instanceof Error ? e.message : String(e))
 
+// The voice an attendant has when none was ever set (the service's own default): the attendant is made here without one.
+const USUAL_VOICE = 'cjVigY5qzO86Huf0OWal'
+
 export class ElevenLabs implements VoiceProvider {
+  private dialing: Promise<unknown> = Promise.resolve() // the calls Tucano places, one after the other
   readonly id = 'elevenlabs' as const
   readonly sip = { hostname: 'sip.rtc.elevenlabs.io', port: 5061 }
 
@@ -329,7 +333,25 @@ export class ElevenLabs implements VoiceProvider {
 
   // There is no "call now" tool: a batch of one recipient is. The batch has no conversation yet, so it is asked a few
   // times for the one the call got; without it the call still happens, it just can't be followed.
-  async dial(state: ProviderState, p: { to: string; variables: Record<string, string> }): Promise<{ conversationId?: string }> {
+  //
+  // A batch takes no voice of its own, and the service asks nothing at the start of a call it places. So the caller's
+  // voice is put on the attendant for as long as the call takes to start, and the service's usual one is put back
+  // after. One call at a time goes through here: two callers never swap each other's voice. Best effort: a call
+  // whose voice couldn't be set still goes out, with the usual voice.
+  dial(state: ProviderState, p: { to: string; variables: Record<string, string>; voiceId?: string }): Promise<{ conversationId?: string }> {
+    const run = this.dialing.then(async () => {
+      const own = p.voiceId ? await this.call('agents_update_voice', { agent_id: state.agentId, voice_id: p.voiceId }).then(() => true, () => false) : false
+      try {
+        return await this.submit(state, p)
+      } finally {
+        if (own) await this.call('agents_update_voice', { agent_id: state.agentId, voice_id: USUAL_VOICE }).catch(() => undefined)
+      }
+    })
+    this.dialing = run.catch(() => undefined)
+    return run
+  }
+
+  private async submit(state: ProviderState, p: { to: string; variables: Record<string, string> }): Promise<{ conversationId?: string }> {
     const batch = await this.call('agents_submit_batch_call', {
       call_name: `Tucano ${new Date().toISOString().slice(0, 16)}`,
       agent_id: state.agentId,

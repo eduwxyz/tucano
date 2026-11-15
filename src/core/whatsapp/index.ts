@@ -55,7 +55,7 @@ export interface WhatsAppDeps {
   log?(text: string): void
   callPermission?(numberId: string, chat: string, reply: { accepted: boolean; until?: number }): void // a person's answer to "may we call you"
   numberGone?(id: string): Promise<void> | void // a number is about to be removed: its calls are turned off first
-  dial?(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> // an approved whatsapp_ligar
+  dial?(agentId: string, args: Record<string, unknown>, dry?: boolean): Promise<{ ok: boolean; text: string }> // an approved whatsapp_ligar; `dry` only checks
 }
 
 const gone = (): UserError => new UserError(L('Esse número de WhatsApp não existe mais.', 'That WhatsApp number no longer exists.'))
@@ -108,7 +108,7 @@ export class WhatsApp {
       media: this.media,
       artifact: (id) => this.deps.artifact(id),
       speech: (data) => this.arrivals.speech(data),
-      dial: (agentId, args) => (this.deps.dial ? this.deps.dial(agentId, args) : Promise.resolve({ ok: false, text: generic() }))
+      dial: (agentId, args, dry) => (this.deps.dial ? this.deps.dial(agentId, args, dry) : Promise.resolve({ ok: false, text: generic() }))
     })
   }
 

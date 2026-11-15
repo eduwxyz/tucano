@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import { L } from '../../shared/lang'
 import { errorFor, UserError } from '../../shared/errors'
-import { CALL_LIMITS, openNow, type CallSettings } from '../../shared/calls'
+import { ASKS_FIRST, CALL_LIMITS, openNow, type CallSettings } from '../../shared/calls'
 import { dayStart } from '../../shared/whatsapp'
 import * as cloud from '../whatsapp/cloud'
 import type { CallRow } from '../whatsapp/store'
@@ -31,9 +31,11 @@ export interface OutboundCtx {
 }
 
 // The agent's `dial` tool: the answer is a sentence either way, so the agent can tell the person what happened.
-export async function dialAgent(c: OutboundCtx, agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
+// With `dry`, nothing goes out: it only says whether the call could be placed now, so an approval is never asked for a
+// call that would be refused anyway. Its text is then ASKS_FIRST when the person still has to allow calls.
+export async function dialAgent(c: OutboundCtx, agentId: string, args: Record<string, unknown>, dry = false): Promise<{ ok: boolean; text: string }> {
   try {
-    return { ok: true, text: await place(c, agentId, args) }
+    return { ok: true, text: await place(c, agentId, args, dry) }
   } catch (e) {
     if (!(e instanceof UserError)) c.log(e)
     return { ok: false, text: errorFor(e, true) }
@@ -54,7 +56,7 @@ export function answerPermission(c: OutboundCtx, numberId: string, chat: string,
   }
 }
 
-export async function place(c: OutboundCtx, agentId: string, args: Record<string, unknown>): Promise<string> {
+export async function place(c: OutboundCtx, agentId: string, args: Record<string, unknown>, dry = false): Promise<string> {
   const { deps } = c
   const agent = deps.agent(agentId)
   if (!agent || agent.archived) throw new UserError(L('Esse agente não existe mais.', 'That agent no longer exists.'))
@@ -87,6 +89,7 @@ export async function place(c: OutboundCtx, agentId: string, args: Record<string
     if (now - (c.asked.get(key) ?? 0) < ASK_AGAIN_MS) throw new UserError(L('Já pedi a essa pessoa para permitir ligações e estou esperando a resposta. Tente de novo depois que ela aceitar.', "I already asked this person to allow calls and I'm waiting for the answer. Try again after they accept."))
     // The request is a message like any other, so it counts against the number's daily message limit.
     if (store.sentToday(n.id, dayStart(now)) >= n.settings.dailyLimit) throw new UserError(L('As mensagens de hoje deste número acabaram, então não posso pedir permissão para ligar. Tente amanhã.', "This number's messages for today are used up, so I can't ask for permission to call. Try tomorrow."))
+    if (dry) return ASKS_FIRST
     const ask = L(`${agent.name} (${deps.workspace()}) gostaria de ligar para você pelo WhatsApp${reason ? `: ${reason}` : ''}. Você permite?`, `${agent.name} (${deps.workspace()}) would like to call you on WhatsApp${reason ? `: ${reason}` : ''}. Do you allow it?`)
     const id = await cloud.askCallPermission(keys, phone, ask)
     c.asked.set(key, now)
@@ -96,10 +99,12 @@ export async function place(c: OutboundCtx, agentId: string, args: Record<string
   }
   const made = await c.providerState(n.id)
   if (!made) throw new UserError(L('As ligações deste número precisam ser ligadas de novo na tela do número.', "This number's calls need to be turned on again in the number's screen."))
+  if (dry) return ''
   const lang = deps.language() === 'pt' ? 'pt' : 'en'
   const prompt = buildPrompt({ agent, team: deps.workspace(), person: { name: chat.name, phone }, numberName: n.name, recent: c.recent(n.id, agentId, chat.id), language: lang, minutesPerCall: settings.minutesPerCall, direction: 'out', reason })
   const first = braceSafe(defaultGreeting({ name: agent.name, language: lang, direction: 'out', person: chat.name }))
-  const { conversationId } = await c.service.dial(made, { to: `+${phone}`, variables: { [PROMPT_VAR]: prompt, [FIRST_VAR]: first } })
+  const voiceId = store.voice(agentId)?.voiceId // the caller's own voice, as on the calls it answers
+  const { conversationId } = await c.service.dial(made, { to: `+${phone}`, variables: { [PROMPT_VAR]: prompt, [FIRST_VAR]: first }, ...(voiceId ? { voiceId } : {}) })
   c.open({
     id: randomUUID(),
     numberId: n.id,

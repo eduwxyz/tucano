@@ -537,8 +537,8 @@ export class Calls {
 
   // ---------- an agent calls a person ----------
 
-  async dial(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
-    return dialAgent(this.outboundCtx(), agentId, args)
+  async dial(agentId: string, args: Record<string, unknown>, dry = false): Promise<{ ok: boolean; text: string }> {
+    return dialAgent(this.outboundCtx(), agentId, args, dry)
   }
 
   // What the outbound calls lend to outbound.ts: the voice service, the permission bookkeeping and this class's own pieces.

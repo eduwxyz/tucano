@@ -34,6 +34,8 @@ export interface CallSettings {
 
 export const CALL_LIMITS = { minutesPerDay: 120, minutesPerDayMax: 1_440, minutesPerCall: 10, minutesPerCallMax: 30, outboundPerDay: 20 }
 export const GREETING_MAX = 300
+// What a call that was only checked answers when the person still has to allow calls: the request goes first.
+export const ASKS_FIRST = 'asks-first'
 
 export function defaultCallSettings(): CallSettings {
   return { enabled: false, provider: 'elevenlabs', greeting: '', hours: { on: false, days: [1, 2, 3, 4, 5], from: '08:00', to: '20:00' }, outbound: false, minutesPerDay: CALL_LIMITS.minutesPerDay, minutesPerCall: CALL_LIMITS.minutesPerCall }

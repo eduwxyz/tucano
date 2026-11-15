@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
+import { ASKS_FIRST } from '../../shared/calls'
 import { ALL_CHATS, accessFor, dayStart, judgeSend, phoneDigits, type SendVerdict, type WhatsAppChat, type WhatsAppNumber } from '../../shared/whatsapp'
 import * as cloud from './cloud'
 import { describePlan, Extras, notConnected, type Plan, type Spec } from './extras'
@@ -50,7 +51,7 @@ export interface Host {
   media: WhatsAppMedia // the files of messages
   artifact(id: string): { path: string; name: string } | undefined // a file of a conversation, by id
   speech(data: Buffer): Promise<string | undefined> // an audio's words, when dictation and ffmpeg are there
-  dial(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> // the calls service places an approved call
+  dial(agentId: string, args: Record<string, unknown>, dry?: boolean): Promise<{ ok: boolean; text: string }> // the calls service places an approved call; `dry` only says whether it could
 }
 
 interface Target {
@@ -201,7 +202,7 @@ export class AgentTools {
       if (name === 'whatsapp_reagir') return await this.extras.react(agent.id, a, label)
       if (name === 'whatsapp_corrigir') return await this.extras.correct(agent.id, a, label)
       if (name === 'whatsapp_grupo') return await this.groups.call(agent.id, a, label)
-      if (name === 'whatsapp_ligar') return this.ligarTool(agent.id, a, label)
+      if (name === 'whatsapp_ligar') return await this.ligarTool(agent.id, a, label)
       return { text: L('Essa ferramenta de WhatsApp não existe.', "That WhatsApp tool doesn't exist."), isError: true, step: { label, detail: name } }
     } catch (e) {
       if (!(e instanceof UserError)) this.h.fail(e)
@@ -218,9 +219,10 @@ export class AgentTools {
     }
   }
 
-  // A call always waits for a person: it is heard by someone, costs minutes and can't be taken back. The answer and the
-  // limits are checked again when it is approved (calls/outbound.ts).
-  private ligarTool(agentId: string, args: Record<string, unknown>, label: string): ToolOutcome {
+  // A call always waits for a person: it is heard by someone, costs minutes and can't be taken back. What would refuse
+  // it (hours, the day's minutes, a person who declined) is said now, before anyone is asked, and checked again when it
+  // is approved (calls/outbound.ts).
+  private async ligarTool(agentId: string, args: Record<string, unknown>, label: string): Promise<ToolOutcome> {
     const n = this.pickNumber(agentId, str(args['numero']))
     const q = str(args['conversa'])
     if (!q) throw new UserError(L('Diga para quem ligar (conversa). Veja whatsapp_conversas.', 'Say who to call (conversa). See whatsapp_conversas.'))
@@ -229,10 +231,14 @@ export class AgentTools {
     const chat = pick(this.usable(n, agentId), q, 'chat', true)
     if (accessFor(this.h.store().access(n.id), agentId, chat.id)?.level !== 'reply') throw new UserError(L(`Para ligar para "${chat.name}", a conversa precisa estar liberada pra você com "Ler e responder".`, `To call "${chat.name}", the conversation must be open to you with "Read and answer".`))
     const motivo = str(args['motivo']).slice(0, 300)
+    const ready = await this.h.dial(agentId, { numero: n.id, conversa: chat.id, motivo }, true)
+    if (!ready.ok) throw new UserError(ready.text)
+    // The person hasn't allowed calls yet: what is approved is the request that goes to them by message.
+    const asks = ready.text === ASKS_FIRST
     return {
       text: L('Essa ligação espera a aprovação de uma pessoa antes de sair. Nada foi feito ainda; você será avisado da decisão.', 'This call waits for a person to approve it before it goes out. Nothing was done yet; you will be told the decision.'),
       step: { label, detail: `${n.name} · ${chat.name}` },
-      approval: { args: { numero_id: n.id, numero: n.name, conversa_id: chat.id, conversa: chat.name, motivo }, why: L(`Ligação para ${chat.name} pelo número ${n.name}.`, `Call to ${chat.name} from the number ${n.name}.`), detail: motivo || chat.name }
+      approval: { args: { numero_id: n.id, numero: n.name, conversa_id: chat.id, conversa: chat.name, motivo }, why: asks ? L(`Pedir a ${chat.name} permissão para ligar, pelo número ${n.name}. A ligação só sai depois que a pessoa aceitar.`, `Ask ${chat.name} for permission to call, from the number ${n.name}. The call only goes out after the person accepts.`) : L(`Ligação para ${chat.name} pelo número ${n.name}.`, `Call to ${chat.name} from the number ${n.name}.`), detail: motivo || chat.name }
     }
   }
 

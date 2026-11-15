@@ -45,5 +45,6 @@ export interface VoiceProvider {
   readTool(body: unknown): { conversationId: string; args: Record<string, unknown> } | undefined
   // The call afterwards; undefined while it is still going on.
   result(conversationId: string): Promise<{ seconds: number; summary?: string; turns: CallTurn[] } | undefined>
-  dial(state: ProviderState, p: { to: string; variables: Record<string, string> }): Promise<{ conversationId?: string }>
+  // `voiceId`: the voice this one call speaks with, when the agent that calls has one.
+  dial(state: ProviderState, p: { to: string; variables: Record<string, string>; voiceId?: string }): Promise<{ conversationId?: string }>
 }
