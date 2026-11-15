@@ -69,6 +69,7 @@ async function connected(url: string, o: { ssh?: string } = {}) {
       for (const s of wiki?.sources(1000) ?? []) if (s.origin.conversationId && dms.get(s.origin.conversationId) !== null) out.add(`${s.file}.md`)
       return out
     },
+    copied: (from, to) => wiki?.carryKey(pageKey(from.replace(/\.md$/i, '')), pageKey(to.replace(/\.md$/i, ''))),
     quiet: (on) => wiki?.quiet(on),
     refresh: () => wiki?.refresh() ?? Promise.resolve(),
     notice: (n) => wiki?.addNotice(n),
@@ -213,6 +214,20 @@ describe('the loop', () => {
     wiki.setFindings([])
     expect(wiki.findings().some((x) => x.kind === 'git')).toBe(true)
     expect(g.status().state).toBe('ok')
+  })
+
+  it('a conflict copy keeps the cut of the page it came from (a restricted member)', async () => {
+    const r = remote({ 'Salários.md': 'Folha.\n' })
+    const { g, wiki, dir } = await connected(r.url)
+    await g.sync()
+    macEdit(r.mac, 'Salários.md', 'Folha (do Mac).\n')
+    const src = wiki.addSource({ title: 'rh', text: 'Folha de novembro.', kind: 'conversation', origin: { conversationId: 'rh', messageIds: [] }, by: 'auto' })
+    wiki.applyChange(wiki.addChange({ ops: [{ op: 'append', page: 'Salários', text: 'Folha de novembro (do #rh).' }], sourceId: src.id, by: 'auto' }).id, 'Curador')
+    await g.sync()
+    expect(readFileSync(join(dir, 'Salários (versão do Tucano).md'), 'utf8')).toContain('do #rh')
+    const out = wiki.outOfReach((id) => id === 'eng')
+    expect(out.has(pageKey('Salários (versão do Tucano)'))).toBe(true)
+    expect(wiki.outOfReach((id) => id === 'eng' || id === 'rh').has(pageKey('Salários (versão do Tucano)'))).toBe(false)
   })
 
   it('held pages and DM sources are never committed', async () => {

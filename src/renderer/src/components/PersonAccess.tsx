@@ -177,7 +177,7 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
             </span>
             {hiddenText.length > 0 && (
               <span className="access-no">
-                {L('Não vai ver:', "Won't see:")} {sentence(hiddenText)}. {L(`Os agentes que ficam de fora também não são chamados a pedido dessa pessoa.`, 'The agents left out are not called on this person’s behalf either.')} {L('A wiki continua aberta a todos, inclusive o que ela resume desses canais.', 'The wiki stays open to everyone, including what it sums up from these channels.')}
+                {L('Não vai ver:', "Won't see:")} {sentence(hiddenText)}. {L(`Os agentes que ficam de fora também não são chamados a pedido dessa pessoa.`, 'The agents left out are not called on this person’s behalf either.')} {L('Na wiki, também não vê as páginas que vieram desses canais.', 'In the wiki, they also won’t see the pages that came from these channels.')}
               </span>
             )}
           </>

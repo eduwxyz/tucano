@@ -270,7 +270,7 @@ export interface RunnerDeps {
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
-  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'outOfReach'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
@@ -1198,7 +1198,11 @@ export class Runner {
       const current = db.agent(agent.id)
       const conversation = db.conversation(conv.id)
       if (!current || current.archived || !conversation || wikiAccess(current) === 'none') return undefined
-      return this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conversation, db.ownerId())))
+      const w = this.deps.wiki
+      if (!w) return undefined
+      // A reply for a restricted member: not the pages that took something from a conversation they don't see.
+      const cut = restricted(requester) ? w.outOfReach((id) => sees.canSeeFrom(requester, id)) : new Set<string>()
+      return w.view(new Set([...w.heldTitles(dmOwner(conversation, db.ownerId())), ...cut]), cut.size ? { everHidden: cut } : {})
     }
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
