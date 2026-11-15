@@ -12209,8 +12209,22 @@ button.agent-card__now:hover {
 .wa-notes { list-style: none; margin: 10px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
 .wa-notes li { display: flex; gap: 8px; }
 .wa-notes svg { flex: none; margin-top: 2px; color: var(--text-3, var(--text-2)); }
-.wa-templates { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.wa-template__body { margin-top: 2px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.wa-templates { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.wa-templates__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.wa-templates__head .grow { flex: 1 1 240px; min-width: 0; }
+.wa-templates__head p { margin: 2px 0 0; }
+.wa-templates__count { margin-left: 8px; font-weight: 500; }
+.wa-templates__search { flex: 0 1 220px; min-width: 140px; padding-top: 6px; padding-bottom: 6px; }
+.wa-templates__list { max-height: min(336px, 50vh); overflow-y: auto; }
+.wa-template + .wa-template { border-top: 1px solid var(--border); }
+.wa-template__row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; text-align: left; transition: var(--transition-ui); }
+.wa-template__row:hover, .wa-template.is-open .wa-template__row { background: var(--hover); }
+.wa-template__row > svg { flex: none; color: var(--text-2); transition: transform 0.15s ease; }
+.wa-template.is-open .wa-template__row > svg { transform: rotate(90deg); }
+.wa-template__name { flex: none; max-width: 45%; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-template__preview { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-template__row .tag { flex: none; }
+.wa-template__body { margin: 0; padding: 10px 14px 12px 36px; max-height: 260px; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.5; color: var(--text-2); background: var(--hover); }
 .wa-send { margin: 6px 0 8px; }
 .wa-send__first { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
 .wa-bubble { max-width: 440px; margin-left: auto; padding: 9px 12px; border-radius: 10px 10px 2px 10px; background: var(--ok-soft); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -12266,6 +12280,8 @@ button.agent-card__now:hover {
 @media (max-width: 560px) {
   .wa-choices, .wa-opts { grid-template-columns: 1fr; }
   .wa-quota { grid-template-columns: minmax(0, 1fr) 88px; }
+  .wa-template__preview { display: none; }
+  .wa-template__name { flex: 1 1 0; max-width: none; }
   .wa-quota__use { grid-column: 1 / -1; }
   .wa-select, .wa-select--add { flex: 1 1 160px; width: auto; }
   .wa-chat__ctl { width: 100%; }
