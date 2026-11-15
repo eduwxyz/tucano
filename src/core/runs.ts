@@ -1190,6 +1190,7 @@ export class Runner {
     const handed = this.handedIn(msg)
     const boss = handed ? db.agent(handed.from) : undefined
     const delegated: DelegationRef[] = []
+    let answeredUp = false // answered a question its team left on a request: nothing in that for the person
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
     // why, so it says so in a sentence instead of spending a call on each tool to find out.
@@ -1577,6 +1578,7 @@ ${note}`,
           if (!answer) return textResult(L('Diga a resposta em "resposta".', 'Say the answer in "resposta".'), true)
           const r = this.answerDelegation(d, agent, answer)
           if (r.error) return textResult(r.error, true)
+          answeredUp = true
           addSteps({ id: randomUUID(), label: L(`Respondeu a ${who}`, `Answered ${who}`), detail: snip(answer, 120), status: 'done' })
           return textResult(L(`Resposta entregue a ${who}, que continua o pedido [${codeOf(d)}]. O resultado volta pra você. Se não há mais nada a dizer a ${settings.workspaceName}, encerre sem texto.`, `Answer delivered to ${who}, who goes on with request [${codeOf(d)}]. The result comes back to you. If there is nothing else to tell ${settings.workspaceName}, end with no text.`))
         }
@@ -2520,8 +2522,9 @@ ${note}`,
           // when they do, and the reply it ends with then is the request's end.
           if (mine && db.delegationsFrom(agent.id, conv.id, msg.threadId).some((x) => x.state === 'open')) return
           if (mine) return this.settle(mine, 'done', msg)
-          // A reply that only handed work on isn't done: whoever asked hears when the work comes back.
-          if (delegated.length) return
+          // A reply that only handed work on isn't done: whoever asked hears when the work comes back. One
+          // that only answered its team's question, saying nothing, has nothing for the person either.
+          if (delegated.length || (answeredUp && !msg.text.trim())) return
           if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id])
         }
         this.callPeople(conv, msg, agent.name)
@@ -3212,13 +3215,12 @@ ${note}`,
   // The reply an open request should have ended with: the newest one by whoever does it, since it was
   // (re)asked, finished over a minute ago, with nothing of theirs running, parked or queued there.
   private endedWell(d: Delegation, now: number): Message | undefined {
-    const key = replyKey(d.to, d.conversationId, d.rootId)
+    const key = replyKey(d.to, d.conversationId, workThread(d))
     if (this.followups.busy(key) || this.parked.has(key) || this.waiting.has(key)) return undefined
-    const reply = this.deps.db
-      .recentMessages(d.conversationId, 20, d.rootId)
-      .filter((m) => m.author.kind === 'agent' && m.author.id === d.to && !!m.run)
-      .pop()
-    if (!reply?.run || reply.at < d.createdAt || reply.run.status !== 'done' || this.controllers.has(reply.id)) return undefined
+    // Waiting on what it asked of others there: not done, whatever its last reply said.
+    if (this.deps.db.delegationsFrom(d.to, d.conversationId, workThread(d)).some((x) => x.state === 'open')) return undefined
+    const reply = this.lastOf(d)
+    if (!reply?.run || reply.run.status !== 'done' || this.controllers.has(reply.id)) return undefined
     return now - (reply.run.endedAt ?? reply.at) >= 60_000 ? reply : undefined
   }
 

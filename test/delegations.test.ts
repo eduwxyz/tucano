@@ -661,6 +661,16 @@ describe('work handed down the tree', () => {
     expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: terminou/)
   })
 
+  it('leaves a request open while what its doer asked of others there is still out', async () => {
+    const r = runner()
+    const rootId = askedButSilent({ createdAt: Date.now() - 10 * 60_000 })
+    // Clara's reply ended well, but it only asked Bento: the request waits for that, not for the sweep.
+    db.saveMessage({ id: 'clara-pediu', conversationId: 'clientes', threadId: rootId, author: { kind: 'agent', id: 'clara' }, text: '', at: Date.now() - 9 * 60_000, run: { status: 'done', endedAt: Date.now() - 8 * 60_000, handed: 'pedido-mudo' } } as Message)
+    db.saveDelegation({ id: 'pedido-dela', from: 'clara', to: 'bento', conversationId: 'eng', rootId: 'raiz-bento', originConversationId: 'clientes', originThreadId: rootId, originMessageId: 'clara-pediu', requestedBy: db.ownerId(), text: 'veja o build', state: 'open', createdAt: Date.now() - 9 * 60_000 })
+    r.sweepDelegations()
+    expect(db.delegation('pedido-mudo')?.state).toBe('open')
+  })
+
   it('leaves a request open while its last good reply is under a minute old', async () => {
     const r = runner()
     const rootId = askedButSilent({ createdAt: Date.now() - 60_000 })
