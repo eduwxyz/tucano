@@ -36,7 +36,9 @@ const { app } = require('electron')
 app.setAppPath(${JSON.stringify(process.cwd())})
 globalThis.__qaExposure = []
 app.on('browser-window-created', (_event, win) => {
-  win.setFocusable(false)
+  const setFocusable = win.setFocusable.bind(win)
+  setFocusable(false)
+  win.setFocusable = () => setFocusable(false)
   win.show = win.showInactive = win.focus = () => {}
   for (const event of ['show', 'focus']) win.on(event, () => globalThis.__qaExposure.push(event))
 })
@@ -55,7 +57,7 @@ const check = (name, ok, detail) => {
 const report = (name, value) => console.log(`     ${name}: ${JSON.stringify(value)}`)
 
 const launch = async () => {
-  const app = await electron.launch({ args: [bootstrap, '--qa-background'], env })
+  const app = await electron.launch({ args: [bootstrap], env })
   const win = await app.firstWindow()
   await win.setViewportSize({ width: 1280, height: 880 })
   await win.waitForSelector('.sidebar')
