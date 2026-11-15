@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orgTree } from '../src/shared/org'
-import { above, BOARD as B, boundsOf, curve, fitView, layoutOrg, MAX_K, ME, MIN_K, ORG_SIZES as S, pathBetween, spotsOf, tidyBoard, toBoard, under, zoomAt } from '../src/shared/org-layout'
+import { above, BOARD as B, boundsOf, curve, fitView, layoutOrg, MAX_K, ME, MIN_K, ORG_SIZES as S, pathBetween, spotsOf, tidyBoard, ZONE_PAD, toBoard, under, zoomAt } from '../src/shared/org-layout'
 
 const a = (id: string, reportsTo?: string): { id: string; reportsTo?: string } => ({ id, ...(reportsTo ? { reportsTo } : {}) })
 const at = (l: ReturnType<typeof layoutOrg>, id: string): { x: number; y: number } => l.nodes.find((n) => n.id === id)!
@@ -75,7 +75,7 @@ describe('the board', () => {
 
   it('lays the tree out sideways, me over the top, and those on their own in a row under it', () => {
     expect(tidy[ME]!.y).toBe(0)
-    expect(tidy.lia!.y).toBe(B.h + B.gapY)
+    expect(tidy.lia!.y).toBe(B.h + B.gapY + B.rootDrop!) // clear of the top of Lia's zone
     // No stacking here: the two that answer to Lia are side by side, and she is centered over them.
     expect(tidy.theo!.y).toBe(tidy.nina!.y)
     expect(tidy.nina!.x - tidy.theo!.x).toBe(B.w + B.gapX)
@@ -83,6 +83,27 @@ describe('the board', () => {
     expect(tidy[ME]!.x).toBe(tidy.lia!.x)
     expect(tidy.duda!.y).toBe(tidy.theo!.y + B.h + B.gapY)
     expect(tidy.otto).toEqual({ x: tidy.duda!.x + B.w + B.gapX, y: tidy.duda!.y })
+  })
+
+  it('keeps two sectors far enough apart for the zone around each', () => {
+    // lia ← theo, nina and duda ← otto: two trees, two zones of ZONE_PAD at each side.
+    const two = orgTree([a('lia'), a('theo', 'lia'), a('nina', 'lia'), a('duda'), a('otto', 'duda')])
+    const t = tidyBoard(two.roots, two.loose)
+    const first = boundsOf([t.lia!, t.theo!, t.nina!])
+    const second = boundsOf([t.duda!, t.otto!])
+    expect(second.x - ZONE_PAD - (first.x + first.w + ZONE_PAD)).toBe(B.gapX)
+    // Inside a sector the branches keep their own gap, and I stay over the middle of the heads.
+    expect(t.nina!.x - t.theo!.x).toBe(B.w + B.gapX)
+    expect(t[ME]!.x).toBe((t.lia!.x + t.duda!.x) / 2)
+  })
+
+  it('keeps the sectors apart under an entry point too, and the entry point clear of their zones', () => {
+    // top ← lia, duda; lia ← theo; duda ← otto: the sectors hang from the top, not from me.
+    const one = orgTree([a('top'), a('lia', 'top'), a('theo', 'lia'), a('duda', 'top'), a('otto', 'duda')])
+    const t = tidyBoard(one.roots, one.loose, B, ['top'])
+    expect(t.duda!.x - ZONE_PAD - (t.lia!.x + B.w + ZONE_PAD)).toBe(B.gapX)
+    expect(t.lia!.y - t.top!.y).toBe(B.h + B.gapY + B.rootDrop!)
+    expect(t.top!.y - t[ME]!.y).toBe(B.h + B.gapY + B.rootDrop!) // as any top: a sector may sit beside it
   })
 
   it('centers the tree over a row of loose ones that is wider than it', () => {
