@@ -121,6 +121,7 @@ export const DESCRIPTION_MAX = 300
 export const SERVICE_WINDOW_MS = 24 * 3_600_000 // the official API: free text only this long after they wrote
 export const PAUSE_MAX_MIN = 24 * 60
 export const MEDIA_IN_MAX = 25 * 1024 * 1024 // a file that arrives: bigger ones are noted, not kept
+export const MEDIA_NUMBER_MAX = 2 * 1024 * 1024 * 1024 // every file one number keeps: past it the oldest ones go
 export const MEDIA_OUT_MAX = 16 * 1024 * 1024 // a file an agent sends
 export const GROUP_ACTIONS_PER_DAY = 5 // groups created or changed in a day, per number: never raised from the screen
 export const GROUP_PEOPLE_PER_ACTION = 20

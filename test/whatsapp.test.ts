@@ -1,9 +1,10 @@
 import { createHmac } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { plainCipher } from '../src/core/secrets'
+import { WhatsAppMedia } from '../src/core/whatsapp/media'
 import { WhatsApp } from '../src/core/whatsapp'
 import { metaError, parse, parseChanges, signed, verify } from '../src/core/whatsapp/cloud'
 import { shortId, WhatsAppStore } from '../src/core/whatsapp/store'
@@ -596,5 +597,28 @@ describe('what agents write and read', () => {
     const reaction = lineOf({ ...m, id: 'rx:q:Marina:1', text: '[reagiu 👍 a "nota"]', quoted: { id: 'q', text: 'nota' } }, 'Conversa', 'x')
     expect(reaction).toBe('[x] Marina: [reagiu 👍 a "nota"]') // a reaction has no id of its own and no quote line
     expect(lineOf({ ...m, sender: undefined, fromMe: true, agentId: 'ag' }, 'Conversa', 'x')).toContain('Agente')
+  })
+})
+
+describe('media: the room one number gets', () => {
+  it('drops the oldest files once a number passes its limit, and keeps the newest', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wa-media-'))
+    try {
+      const media = new WhatsAppMedia(dir, 1000)
+      const rels: string[] = []
+      for (let i = 0; i < 4; i++) {
+        const rel = await media.save('n1', `m${i}`, Buffer.alloc(300, i), 'image/png')
+        if (i < 3) utimesSync(join(dir, 'whatsapp-media', rel), 1_000 + i, 1_000 + i) // an older file each: the last keeps "now"
+        rels.push(rel)
+      }
+      // 1200 bytes passed 1000: the oldest went until a fifth of the room was free (600 left).
+      expect(readdirSync(join(dir, 'whatsapp-media', 'n1')).sort()).toEqual(['m2.png', 'm3.png'])
+      expect((await media.read(rels[3]!)).length).toBe(300)
+      await expect(media.read(rels[0]!)).rejects.toThrow()
+      await media.save('n2', 'x', Buffer.alloc(900), 'image/png') // another number has its own room
+      expect(readdirSync(join(dir, 'whatsapp-media', 'n1')).length).toBe(2)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
