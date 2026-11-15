@@ -11998,6 +11998,12 @@ button.agent-card__now:hover {
   font-size: 14px;
 }
 
+/* What a reply that only handed work on wrote anyway: behind a link, under its steps. */
+.msg__said {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
 /* Under a request, where it was delivered: how it stands and where its answer goes. */
 .request-note {
   display: flex;

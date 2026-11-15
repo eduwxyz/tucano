@@ -12,6 +12,9 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
   - **A question** from whoever is doing it goes to the agent that asked, which answers it without writing to you; if it's yours to decide, it asks you in your message's thread.
   - **A follow-up** written in that thread goes on in the same thread where the work was done, so whoever did it sees what it already did, instead of a new thread starting from nothing.
   - **What you write in a request's thread** goes to whoever is doing it, and the request ends with their answer to it.
+  - **Work passed on inside the same channel stays in the same thread.** When whoever does a request asks someone else in that channel, the request is a message in its thread, not a new thread loose in the channel, and the answer comes back there.
+  - **A request isn't done while its parts are out.** Whoever does it may ask others and end its turn; the request stays open until what it asked comes back and it answers again, and only that answer goes back.
+  - **What an agent writes after only handing work on** is folded behind **See what it wrote**, and it no longer tells you it's done.
   - **A request asked in a DM stays in a DM** when other people use the workspace, unless you write the channel's name yourself: it never ends up more visible than where you asked.
 
 ## [0.2.33] - 2026-11-15

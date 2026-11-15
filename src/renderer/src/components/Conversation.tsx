@@ -456,6 +456,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const said = useLiveText(message, message.run?.status === 'working' ? STREAM_MS : 0)
   // A request written before what counts as finished left the conversation still carries that line: not shown.
   const text = message.run?.delegation?.rootId === message.id ? said.replace(/\n\n\*\*(Pronto quando|Done when):\*\* [^\n]*/, '') : said
+  // A reply that only handed work on says what's going on in the line under it, not in words: whatever it
+  // wrote anyway waits behind a link, and the agent speaks when the work comes back.
+  const [showSaid, setShowSaid] = useState(false)
+  const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
 
   // The same object between renders, or every link would start over.
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
@@ -512,7 +516,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           </div>
         )}
         {message.run && <RunSteps message={message} />}
-        {text ? (
+        {text && quiet && !showSaid ? (
+          <button className="link small msg__said" onClick={() => setShowSaid(true)}>
+            {L('Ver o que escreveu', 'See what it wrote')}
+          </button>
+        ) : text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
               <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(text)}</MessageMarkdown>
@@ -1016,7 +1024,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
           {state.text}
         </span>
       )}
-      <span className="request-note__where">{from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', 'what this thread ends with goes back to whoever asked')}</span>
+      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', 'what this thread ends with goes back to whoever asked')}</span>
     </div>
   )
 }
@@ -1044,8 +1052,8 @@ function ReturnedLine({ message, at, agent, text, components }: { message: Messa
         <button
           className="link"
           onClick={() => {
-            navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
-            openThread(at.rootId)
+            navigate({ kind: 'conversation', id: at.conversationId, message: at.threadId ?? at.rootId })
+            openThread(at.threadId ?? at.rootId)
           }}
         >
           {L('Abrir a thread', 'Open the thread')}
@@ -1117,8 +1125,8 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
         <button
           className="link"
           onClick={() => {
-            navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
-            openThread(at.rootId)
+            navigate({ kind: 'conversation', id: at.conversationId, message: at.threadId ?? at.rootId })
+            openThread(at.threadId ?? at.rootId)
           }}
         >
           {L('Abrir a thread', 'Open the thread')}

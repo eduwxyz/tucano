@@ -600,6 +600,30 @@ describe('work handed down the tree', () => {
     expect(under(mine('dm')[0]!).filter((m) => m.author.kind === 'agent').map((m) => m.text)).toEqual(['Pronto: o time terminou o que pedi.'])
   }, 15_000)
 
+  it('keeps a request to someone in the same channel inside the thread, and closes the outer one only when it comes back', async () => {
+    const r = runner()
+    // Bento works in #engenharia, and so does Nico: Bento's request to Nico stays in Bento's thread.
+    await r.send('dm', 'delegue a bento: delegue a nico: veja o build')
+    await r.idle()
+    const roots = by('orion', 'eng').filter((m) => !m.threadId)
+    expect(roots).toHaveLength(1)
+    expect(db.messages().filter((m) => m.conversationId === 'eng' && !m.threadId)).toHaveLength(1) // nothing loose in the channel
+    const thread = under(roots[0]!)
+    expect(thread.map((m) => (m.author as { id: string }).id)).toEqual(['bento', 'bento', 'nico', 'bento'])
+    expect(thread[1]?.text).toBe('@nico, um pedido:\n\nveja o build')
+    const outer = db.delegationAt(roots[0]!.id)!
+    const inner = db.liveDelegations(0).find((d) => d.to === 'nico')!
+    expect(inner).toMatchObject({ from: 'bento', threadId: roots[0]!.id, rootId: thread[1]!.id, state: 'done', told: true, result: thread[2]!.id })
+    // Bento's first reply only asked Nico: the outer request stayed open until Nico's answer came back,
+    // and it ends with Bento's reply after it.
+    expect(thread[0]?.run?.handed).toBe(outer.id)
+    expect(thread[2]?.run?.handed).toBe(inner.id)
+    expect(outer).toMatchObject({ state: 'done', told: true, result: thread[3]!.id })
+    // Orion heard once, with Bento's closing answer.
+    expect(codex.turns.filter((t) => /Voltou do que você pediu/.test(t.prompt))).toHaveLength(1)
+    expect(under(mine('dm')[0]!).filter((m) => m.author.kind === 'agent').map((m) => m.text)).toEqual(['Pronto: o time terminou o que pedi.'])
+  })
+
   // A request whose thread has nothing after it at all: the one asked never wrote a line, no error
   // either (the run never got going). Nobody used to hear of it, ever.
   const askedButSilent = (extra: { nudges?: number; createdAt?: number } = {}): string => {
