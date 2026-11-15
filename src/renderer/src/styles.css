@@ -11540,6 +11540,12 @@ button.agent-card__now:hover {
 .orgb__lines .is-me .orgb__line {
   stroke-dasharray: 1 6;
 }
+/* A second (or third) boss: a specialist several teams share. Dashed, and drawn behind the tree's own
+   lines, so the card still reads as hanging from its first boss. */
+.orgb__lines .is-also .orgb__line {
+  stroke-dasharray: 2 5;
+  opacity: 0.75;
+}
 .orgb__hit {
   fill: none;
   stroke: transparent;

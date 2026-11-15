@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { askKind, bossOf, entriesOf, entryOf, channelsOf, depthBelow, directReports, headsOf, loops, orgTree, peersOf, possibleBosses, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
+import { askKind, bossesOf, bossOf, entriesOf, entryOf, channelsOf, depthBelow, directReports, headsOf, loops, orgTree, peersOf, possibleBosses, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
 
-const a = (id: string, reportsTo?: string, extra: { archived?: boolean; kind?: 'tuca'; entry?: boolean } = {}): { id: string; reportsTo?: string; archived?: boolean; kind?: 'tuca'; entry?: boolean } => ({ id, ...(reportsTo ? { reportsTo } : {}), ...extra })
+type TestNode = { id: string; reportsTo?: string; archived?: boolean; kind?: 'tuca'; entry?: boolean; alsoTo?: string[] }
+const a = (id: string, reportsTo?: string, extra: { archived?: boolean; kind?: 'tuca'; entry?: boolean; alsoTo?: string[] } = {}): TestNode => ({ id, ...(reportsTo ? { reportsTo } : {}), ...extra })
 const ids = (list: { id: string }[]): string[] => list.map((x) => x.id)
 
 // orion ← atlas, bento, clara; bento ← nico, vera; clara ← otto
@@ -140,5 +141,70 @@ describe('sectors', () => {
     expect(sectorName({ name: 'Rafa', sectorName: ' Técnico ' })).toBe('Técnico')
     expect(sectorName({ name: 'Teo' })).toBe('Setor de Teo')
     expect(sectorName({ name: 'Teo', sectorName: '  ' }, 'Sector of')).toBe('Sector of Teo')
+  })
+})
+
+// Two campaign bots and one artist they share: the artist answers to both, and hangs under the first.
+const shared = [a('campaign-a'), a('campaign-b'), a('campaign-c'), a('artist', 'campaign-a', { alsoTo: ['campaign-b', 'campaign-c'] })]
+
+describe('an agent that answers to more than one boss', () => {
+  it('answers to all of them, its own first, each once', () => {
+    expect(ids(bossesOf(shared, shared.find((x) => x.id === 'artist')!))).toEqual(['campaign-a', 'campaign-b', 'campaign-c'])
+    expect(bossOf(shared, shared.find((x) => x.id === 'artist')!)?.id).toBe('campaign-a') // the line it hangs from
+    expect(ids(directReports(shared, 'campaign-a'))).toEqual(['artist'])
+    expect(ids(directReports(shared, 'campaign-b'))).toEqual(['artist'])
+    expect(ids(directReports(shared, 'campaign-c'))).toEqual(['artist'])
+    // Below either of them, once, even though two paths lead there.
+    expect(ids(reportsOf(shared, 'campaign-b'))).toEqual(['artist'])
+    expect(ids(reportsOf(shared, 'campaign-a'))).toEqual(['artist'])
+    // Every one of them may hand it work.
+    for (const boss of ['campaign-a', 'campaign-b', 'campaign-c']) expect(ids(reachOf(shared, boss))).toContain('artist')
+    // And it reaches them all upward, as one reaches its boss.
+    expect(ids(reachOf(shared, 'artist'))).toEqual(['campaign-a', 'campaign-b', 'campaign-c'])
+    expect(askKind(shared, 'artist', 'campaign-c')).toBe('up')
+    expect(askKind(shared, 'campaign-b', 'artist')).toBe('down')
+  })
+
+  it('works beside both teams: a shared boss makes colleagues of its other reports', () => {
+    const both = [...shared, a('writer', 'campaign-b'), a('muse', 'campaign-c')]
+    // The artist is a colleague of whoever else answers to any of its bosses.
+    expect(ids(peersOf(both, 'artist'))).toEqual(['writer', 'muse'])
+    expect(ids(peersOf(both, 'writer'))).toEqual(['artist'])
+    expect(askKind(both, 'artist', 'writer')).toBe('peer')
+    expect(askKind(both, 'artist', 'muse')).toBe('peer')
+  })
+
+  it('belongs to the nearest sector head of each of them, drawn under its first', () => {
+    // Two sectors, each with a head, and the artist in both: it sits in its own line's, the one it hangs under.
+    const two = [a('a'), a('a-kid', 'a'), a('c'), a('c-kid', 'c'), a('artist', 'a', { alsoTo: ['c'] })]
+    expect(sectorOf(two, 'artist')?.id).toBe('a')
+    // Only a second link, and no line of its own: the head there is the sector it sits in.
+    const borrowed = [a('c'), a('c-kid', 'c'), a('artist', undefined, { alsoTo: ['c'] })]
+    expect(sectorOf(borrowed, 'artist')?.id).toBe('c')
+    // Its own line has no head above it (it answers to nobody): nobody's sector.
+    // Only a second link, with no primary: it hangs under the first of them all the same.
+    const extraOnly = [a('a'), a('b'), a('artist', undefined, { alsoTo: ['b', 'a'] })]
+    expect(bossOf(extraOnly, extraOnly.find((x) => x.id === 'artist')!)?.id).toBe('b')
+    expect(ids(directReports(extraOnly, 'b'))).toEqual(['artist'])
+    // The board places it once, under the primary boss, and the other link is a line of its own.
+    const tree = orgTree(shared)
+    expect(tree.roots.map((r) => r.agent.id)).toEqual(['campaign-a', 'campaign-b', 'campaign-c'])
+    expect(tree.loose).toEqual([])
+    const artistNode = tree.roots[0]!.kids.find((k) => k.agent.id === 'artist')!
+    expect(artistNode).toBeTruthy()
+    expect(tree.roots[1]!.kids).toEqual([]) // not drawn under the second one
+  })
+
+  it('passes over an archived boss, and never onto itself or a loop', () => {
+    const away = [a('a'), a('b', undefined, { archived: true }), a('top'), a('artist', 'a', { alsoTo: ['b', 'top'] })]
+    // b is away: the link goes to its own boss meanwhile its own boss is none, so it drops.
+    expect(ids(bossesOf(away, away.find((x) => x.id === 'artist')!))).toEqual(['a', 'top'])
+    // A link onto itself, or the same one twice, is ignored; saving an agent refuses a circle, and one a
+    // file left by hand is walked once, as before.
+    const weird = [a('boss'), a('artist', 'boss', { alsoTo: ['artist', 'boss', 'boss'] })]
+    expect(ids(bossesOf(weird, weird.find((x) => x.id === 'artist')!))).toEqual(['boss'])
+    expect(ids(possibleBosses(weird, 'artist'))).toEqual(['boss']) // itself is no candidate either
+    // Nothing changes for an agent that answers to one agent only.
+    expect(ids(bossesOf(team, team.find((x) => x.id === 'nico')!))).toEqual(['bento'])
   })
 })
