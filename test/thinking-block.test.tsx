@@ -13,7 +13,7 @@ Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, N
 
 let fake: Pick<State, 'settings'>
 let thought: string | undefined
-vi.mock('../src/renderer/src/store', () => ({ useStore: (select: (s: unknown) => unknown) => select(fake), useLiveThought: () => thought }))
+vi.mock('../src/renderer/src/store', () => ({ useStore: (select: (s: unknown) => unknown) => select(fake), useLiveThoughtState: () => thought === undefined ? undefined : { text: thought, start: 0 } }))
 
 const { createRoot } = await import('react-dom/client')
 const { Thought } = await import('../src/renderer/src/components/Conversation')

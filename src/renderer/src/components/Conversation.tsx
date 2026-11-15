@@ -1987,7 +1987,8 @@ export function followsTheEnd(box: { scrollHeight: number; scrollTop: number; cl
 // people want the answer.
 export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
   const on = useStore((s) => s.settings.showThinking === true)
-  const thought = useLiveThought(message.id, STREAM_MS)
+  const retained = useLiveThoughtState(message.id, STREAM_MS)
+  const thought = retained?.text
   // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
   const [asked, setAsked] = useState<boolean | null>(null)
   const open = asked ?? working
@@ -1996,13 +1997,26 @@ export function Thought({ message, working }: { message: Message; working: boole
   // read an earlier passage keeps that place while the rest streams in below it, and the block takes
   // the stream up again by itself once they are back at the end. Opened by a click, it starts there.
   const follow = useRef(true)
-  useEffect(() => {
-    if (open) follow.current = true
+  const line = useRef<ThoughtLine | null>(null)
+  const written = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (open) {
+      follow.current = true
+      line.current = null
+    }
   }, [open])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = box.current
-    if (open && working && follow.current && el) el.scrollTop = el.scrollHeight
-  }, [thought, open, working])
+    if (!el || !retained || !open || !on) {
+      line.current = null
+      written.current = null
+      follow.current = true
+      return
+    }
+    if (working && follow.current) el.scrollTop = el.scrollHeight
+    else if (line.current) restoreThoughtLine(el, line.current, retained.start)
+    written.current = el.scrollTop
+  }, [retained, open, working, on])
   if (!on || !thought) return null
   // Folded, it carries the line it is on now: what it is thinking, cut to the width of the block.
   const last = thought.trimEnd().split(/\r?\n/).filter((l) => l.trim() !== '').pop() ?? ''
@@ -2021,7 +2035,11 @@ export function Thought({ message, working }: { message: Message; working: boole
       </button>
       {open && (
         <div ref={box} className="thought__text" onScroll={(e) => {
-          follow.current = followsTheEnd(e.currentTarget)
+          const el = e.currentTarget
+          if (written.current !== null && Math.abs(el.scrollTop - written.current) < 0.5) return
+          follow.current = followsTheEnd(el)
+          line.current = !follow.current && retained ? captureThoughtLine(el, retained.start) : null
+          written.current = el.scrollTop
         }}>
           {thought}
           {working && <span className="thought__caret" aria-hidden="true" />}

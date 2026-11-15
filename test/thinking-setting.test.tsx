@@ -9,7 +9,7 @@ let fake: State
 let thought: string | undefined
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
-  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake), useLiveThought: () => thought }
+  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake), useLiveThoughtState: () => thought === undefined ? undefined : { text: thought, start: 0 } }
 })
 const { getState } = await import('../src/renderer/src/store')
 const { Thought, followsTheEnd } = await import('../src/renderer/src/components/Conversation')
