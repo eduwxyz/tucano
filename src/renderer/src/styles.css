@@ -11867,6 +11867,23 @@ button.agent-card__now:hover {
 .org-pop__boss {
   margin: 0 0 14px;
 }
+.org-pop__entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0 0 14px;
+}
+.org-pop__entry b,
+.org-pop__entry small {
+  display: block;
+}
+.org-pop__entry small {
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.35;
+}
 .org-pop__facts {
   display: grid;
   grid-template-columns: 64px 1fr;

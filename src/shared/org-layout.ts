@@ -37,7 +37,10 @@ export interface OrgLayout {
 }
 
 // `pile: false` spreads every level sideways (the board, whose lines leave a card from below).
-export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgSizes = ORG_SIZES, pile = true): OrgLayout {
+// `over`: the entry points. Sectors hang from me and from them: those branches get rootGap and rootDrop.
+export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgSizes = ORG_SIZES, pile = true, over: string[] = []): OrgLayout {
+  const sectorsUnder = (id: string): boolean => id === ME || over.includes(id)
+  const gapUnder = (id: string): number => (sectorsUnder(id) ? s.rootGap ?? s.gapX : s.gapX)
   const stacked = (n: OrgNode<T>): boolean => pile && n.kids.length > 0 && n.kids.every((k) => k.kids.length === 0)
   const nodes: Placed[] = []
   const edges: OrgEdge[] = []
@@ -45,7 +48,7 @@ export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgS
     if (!n.kids.length) return { w: s.w, h: s.h }
     if (stacked(n)) return { w: s.indent + s.w, h: s.h + n.kids.length * (s.h + s.stackGap) }
     const kids = n.kids.map(size)
-    return { w: Math.max(s.w, kids.reduce((a, k) => a + k.w, 0) + s.gapX * (kids.length - 1)), h: s.h + s.gapY + Math.max(...kids.map((k) => k.h)) }
+    return { w: Math.max(s.w, kids.reduce((a, k) => a + k.w, 0) + gapUnder(n.agent.id) * (kids.length - 1)), h: s.h + s.gapY + Math.max(...kids.map((k) => k.h)) }
   }
   // Down from (x1, y1), across at `mid`, down to (x2, y2), with rounded corners.
   const elbow = (x1: number, y1: number, x2: number, y2: number, mid: number): string => {
@@ -56,7 +59,8 @@ export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgS
     return `M${x1} ${y1}V${mid - r}Q${x1} ${mid} ${x1 + dir * r} ${mid}H${x2 - dir * r}Q${x2} ${mid} ${x2} ${mid + r}V${y2}`
   }
   // Places the branch in the box starting at (x, y); returns the middle of its own card, for the line from above.
-  const place = (id: string, kids: OrgNode<T>[], pile: boolean, x: number, y: number, width: number, gap = s.gapX): number => {
+  const place = (id: string, kids: OrgNode<T>[], pile: boolean, x: number, y: number, width: number): number => {
+    const gap = gapUnder(id)
     if (!kids.length) {
       nodes.push({ id, x, y })
       return x + s.w / 2
@@ -74,7 +78,7 @@ export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgS
     }
     const sizes = kids.map(size)
     const total = sizes.reduce((a, k) => a + k.w, 0) + gap * (kids.length - 1)
-    const ky = y + s.h + s.gapY + (id === ME ? s.rootDrop ?? 0 : 0)
+    const ky = y + s.h + s.gapY + (sectorsUnder(id) ? s.rootDrop ?? 0 : 0)
     let kx = x + (width - total) / 2
     const anchors = kids.map((k, i) => {
       const at = place(k.agent.id, k.kids, stacked(k), kx, ky, sizes[i]!.w)
@@ -87,9 +91,8 @@ export function layoutOrg<T extends { id: string }>(roots: OrgNode<T>[], s: OrgS
     return cx
   }
   const sizes = roots.map(size)
-  const rootGap = s.rootGap ?? s.gapX
-  const width = Math.max(s.w, sizes.reduce((a, k) => a + k.w, 0) + rootGap * Math.max(0, roots.length - 1))
-  place(ME, roots, false, 0, 0, width, rootGap)
+  const width = Math.max(s.w, sizes.reduce((a, k) => a + k.w, 0) + gapUnder(ME) * Math.max(0, roots.length - 1))
+  place(ME, roots, false, 0, 0, width)
   // A lone card sits in the middle of nothing; with roots, its place came from theirs.
   const left = Math.min(...nodes.map((n) => n.x))
   if (left < 0) for (const n of nodes) n.x -= left
@@ -138,8 +141,9 @@ export const MIN_K = 0.3
 export const MAX_K = 1.6
 
 // Where everything goes when nobody placed it: the tree from me down, and below it, in a row, those on their own.
-export function tidyBoard<T extends { id: string }>(roots: OrgNode<T>[], loose: T[], s: OrgSizes = BOARD): Spots {
-  const tree = layoutOrg(roots, s, false)
+// `over`: the entry points, whose branches are sectors too.
+export function tidyBoard<T extends { id: string }>(roots: OrgNode<T>[], loose: T[], s: OrgSizes = BOARD, over: string[] = []): Spots {
+  const tree = layoutOrg(roots, s, false, over)
   const row = loose.length * s.w + Math.max(0, loose.length - 1) * s.gapX
   const width = Math.max(tree.width, row)
   const spots: Spots = {}

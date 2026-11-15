@@ -96,6 +96,7 @@ export interface Agent {
   reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
   sectorName?: string // on a sector's head (src/shared/org.ts headsOf): the sector's name; unset: "Setor de <name>"
   sectorDoes?: string // on a sector's head: what the sector handles, in one line, read by the other heads
+  entry?: boolean // the person chose it as an entry point (src/shared/org.ts entriesOf): it answers to no agent, is in no sector, and the teams below it are sectors
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
