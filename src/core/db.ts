@@ -561,7 +561,11 @@ const COLUMNS: [string, string, string][] = [
   // A request that answered as far as it goes before stopping on an approval of mine, and how often
   // the one asked was knocked on after leaving no reply at all (src/core/delegations.ts).
   ['delegations', 'parked_told', 'INTEGER NOT NULL DEFAULT 0'],
-  ['delegations', 'nudges', 'INTEGER NOT NULL DEFAULT 0']
+  ['delegations', 'nudges', 'INTEGER NOT NULL DEFAULT 0'],
+  // The approval a request's work stopped on, shown with the request where it was asked from.
+  ['delegations', 'approval', 'TEXT'],
+  // The thread a request is worked in, when it was asked inside another's in the same channel.
+  ['delegations', 'thread_id', 'TEXT']
 ]
 
 
@@ -1222,6 +1226,11 @@ export class Db {
   message(id: string): Message | undefined {
     const r = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Row | undefined
     return r && this.toMessage(r)
+  }
+
+  // A reply moved into a thread after it started (one that handed work on goes under the person's message).
+  moveToThread(id: string, threadId: string): void {
+    this.db.prepare('UPDATE messages SET thread_id = ? WHERE id = ? AND thread_id IS NULL').run(threadId, id)
   }
 
   saveMessage(m: Message): void {
@@ -2087,6 +2096,7 @@ export class Db {
       to: str(r['to_agent']),
       conversationId: str(r['conversation_id']),
       rootId: str(r['root_id']),
+      ...(r['thread_id'] ? { threadId: str(r['thread_id']) } : {}),
       originConversationId: str(r['origin_conversation_id']),
       ...(r['origin_thread_id'] ? { originThreadId: str(r['origin_thread_id']) } : {}),
       originMessageId: str(r['origin_message_id']),
@@ -2102,6 +2112,7 @@ export class Db {
       ...(r['result'] ? { result: str(r['result']) } : {}),
       ...(r['told'] === 1 ? { told: true } : {}),
       ...(r['late_told'] === 1 ? { lateTold: true } : {}),
+      ...(r['approval'] ? { approval: str(r['approval']) } : {}),
       createdAt: Number(r['created_at']),
       ...(r['ended_at'] ? { endedAt: Number(r['ended_at']) } : {})
     }
@@ -2110,11 +2121,11 @@ export class Db {
   saveDelegation(d: Delegation): void {
     this.db
       .prepare(
-        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, created_at, ended_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, ended_at = excluded.ended_at`
+        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, thread_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, approval, created_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET origin_conversation_id = excluded.origin_conversation_id, origin_thread_id = excluded.origin_thread_id, origin_message_id = excluded.origin_message_id, requested_by = excluded.requested_by, text = excluded.text, done = excluded.done, due_at = excluded.due_at, state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, approval = excluded.approval, created_at = excluded.created_at, ended_at = excluded.ended_at`
       )
-      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.createdAt, d.endedAt ?? null)
+      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.threadId ?? null, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.approval ?? null, d.createdAt, d.endedAt ?? null)
   }
 
   delegation(id: string): Delegation | undefined {
