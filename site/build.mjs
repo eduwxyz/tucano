@@ -2,8 +2,12 @@
 // English side by side, and comes out twice: in Portuguese and in English, each at its own
 // address with its own title, description, canonical address, hreflang links and structured
 // data (what search engines and AI answers read), plus the sitemap.
+// The guides (guias/, docs/) are written in Markdown instead, one file per language, and come out
+// through guia.html, with an index per section and llms.txt (see guias/README.md). Every page gets
+// the home page's PostHog snippet.
 // `npx wrangler deploy` runs it first (wrangler.jsonc); `node build.mjs` to see dist/ by hand.
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { readGuide } from './guides.mjs'
 
 const SITE = 'https://tucano.sh'
 const here = (p) => new URL(p, import.meta.url)
@@ -59,7 +63,16 @@ const links = (lang, urls) => `<meta property="og:url" content="${urls[lang]}">
 `
 
 const out = {} // dist path → html
-const sitemap = [] // [{ urls }]
+const sitemap = [] // [{ urls, lastmod? }]
+
+// The analytics (PostHog) of the home page's <head>, for every other page too: one copy to change.
+const HOME_SRC = read('index.html')
+const ANALYTICS = (() => {
+  const at = HOME_SRC.indexOf('<!-- Analytics (PostHog)')
+  const end = HOME_SRC.indexOf('</script>', at) + '</script>'.length
+  if (at < 0 || end < at) throw new Error('build.mjs: the PostHog snippet is missing from index.html')
+  return `${HOME_SRC.slice(at, end)}\n`
+})()
 
 // The waitlist's anti-robot check (Cloudflare Turnstile): its public site key, for tucano.sh. The
 // secret that goes with it is the worker's (`npx wrangler secret put TURNSTILE_SECRET`). To try the
@@ -129,7 +142,7 @@ const PAGES = [
 
 // The home page's look and its Tucano Pro script, for the pages that ask for them (pro.html):
 // one source for the styles and the waitlist form, so the two pages can't drift apart.
-const home = read('index.html')
+const home = HOME_SRC
 const HOME_STYLE = home.slice(home.indexOf('<style>'), home.indexOf('</style>') + '</style>'.length)
 const PRO_SCRIPT = home.slice(home.lastIndexOf('<script src="https://challenges.cloudflare.com'), home.lastIndexOf('</script>') + '</script>'.length)
 for (const page of PAGES) {
@@ -143,7 +156,8 @@ for (const page of PAGES) {
     { '@type': 'WebPage', '@id': `${urls[lang]}#page`, url: urls[lang], name: title(lang), description: desc(lang), inLanguage: lang, about: { '@id': `${SITE}/#app` }, publisher: { '@id': `${SITE}/#org` } },
     ...(faq ? [faqPage(faq, lang, urls[lang])] : []),
   ])
-  const head = (lang) => `${links(lang, urls)}${data(lang)}</head>`
+  if (src.includes('posthog.init')) throw new Error(`build.mjs: ${page.file} has its own PostHog; build.mjs adds the home page's`)
+  const head = (lang) => `${links(lang, urls)}${data(lang)}${ANALYTICS}</head>`
 
   // Portuguese: the data-en attributes go; English: they replace what they sit next to.
   const pt = src.replace(/ data-en(-href)?="[^"]*"/g, '')
@@ -157,11 +171,238 @@ for (const page of PAGES) {
   sitemap.push(urls)
 }
 
+// ---------- the guides: guias/<guide>/pt.md and en.md (and docs/, the same way) → pages and an index ----------
+// How to write one: guias/README.md. A section with no guides yet publishes nothing.
+const SECTIONS = [
+  {
+    dir: 'guias',
+    'pt-BR': 'guias/', en: 'en/guides/',
+    name: { 'pt-BR': 'Guias', en: 'Guides' },
+    count: { 'pt-BR': (n) => (n === 1 ? '1 guia' : `${n} guias`), en: (n) => (n === 1 ? '1 guide' : `${n} guides`) },
+    title: { 'pt-BR': 'Guias do Tucano', en: 'Tucano guides' },
+    desc: {
+      'pt-BR': 'Como instalar, configurar e usar o Tucano, o app grátis e open source em que um time de agentes de IA trabalha junto em canais.',
+      en: 'How to install, set up and use Tucano, the free, open-source app where a team of AI agents works together in channels.',
+    },
+  },
+  {
+    dir: 'docs',
+    'pt-BR': 'docs/', en: 'en/docs/',
+    name: { 'pt-BR': 'Documentação', en: 'Docs' },
+    count: { 'pt-BR': (n) => (n === 1 ? '1 página' : `${n} páginas`), en: (n) => (n === 1 ? '1 page' : `${n} pages`) },
+    title: { 'pt-BR': 'Documentação do Tucano', en: 'Tucano docs' },
+    desc: {
+      'pt-BR': 'O que cada parte do Tucano faz: agentes, canais, conectores, permissões, aprovações, rotinas e memória.',
+      en: 'What each part of Tucano does: agents, channels, connectors, permissions, approvals, routines and memory.',
+    },
+  },
+]
+
+const UI = {
+  'pt-BR': {
+    home: '/', getTucano: 'Baixar o Tucano', madeIn: 'Feito no Brasil.', crumbs: 'Caminho', updated: 'Atualizado em', questions: 'Perguntas',
+    more: 'Mais guias', support: ['Suporte', '/suporte/'], privacy: ['Privacidade', '/privacidade/'], guides: ['Guias', '/guias/'],
+    wrong: 'Viu algo errado ou desatualizado? <a href="https://github.com/eduwxyz/tucano/issues">Abra uma issue</a> que a gente corrige.',
+    date: (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }),
+  },
+  en: {
+    home: '/en/', getTucano: 'Get Tucano', madeIn: 'Made in Brazil.', crumbs: 'Breadcrumb', updated: 'Updated', questions: 'Questions',
+    more: 'More guides', support: ['Support', '/en/support/'], privacy: ['Privacy', '/en/privacy/'], guides: ['Guides', '/en/guides/'],
+    wrong: 'Spotted something wrong or out of date? <a href="https://github.com/eduwxyz/tucano/issues">Open an issue</a> and we\'ll fix it.',
+    date: (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }),
+  },
+}
+const LANGS = ['pt-BR', 'en']
+const FILE = { 'pt-BR': 'pt.md', en: 'en.md' }
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const GUIDE_PAGE = read('guia.html')
+const fill = (vars) => GUIDE_PAGE.replace(/\{\{(\w+)\}\}/g, (_, k) => {
+  if (!(k in vars)) throw new Error(`build.mjs: guia.html asks for {{${k}}}, which build.mjs doesn't fill`)
+  return vars[k]
+})
+const crumbsHtml = (trail) => trail.map(([name, url], i) => (i === trail.length - 1 ? `<span aria-current="page">${esc(name)}</span>` : `<a href="${url.replace(SITE, '')}">${esc(name)}</a>`)).join(' <span aria-hidden="true">›</span> ')
+const breadcrumb = (trail) => ({ '@type': 'BreadcrumbList', itemListElement: trail.map(([name, url], i) => ({ '@type': 'ListItem', position: i + 1, name, item: url })) })
+const footer = (lang) => {
+  const t = UI[lang]
+  return [[`tucano.sh`, t.home], t.guides, ['GitHub', 'https://github.com/eduwxyz/tucano'], ['X (@tucanosh)', 'https://x.com/tucanosh'], ['Discord', 'https://discord.gg/uQp4x7wUgT'], t.support, t.privacy]
+    .map(([name, href]) => `<a href="${href}">${esc(name)}</a>`).join('')
+}
+const faqHtml = (faq, lang) => faq.length ? `<section>
+  <h2>${UI[lang].questions}</h2>
+  <div class="qa" data-faq>
+    ${faq.map(({ q, a }, i) => `<details${i ? '' : ' open'}><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('\n    ')}
+  </div>
+</section>` : ''
+
+const guides = [] // every guide, for llms.txt: { section, lang, url, title, desc, group }
+for (const section of SECTIONS) {
+  const root = here(`${section.dir}/`)
+  const ids = existsSync(root) ? readdirSync(root).filter((d) => statSync(here(`${section.dir}/${d}`)).isDirectory()).sort() : []
+  if (!ids.length) continue
+  const sectionUrls = { 'pt-BR': `${SITE}/${section['pt-BR']}`, en: `${SITE}/${section.en}` }
+
+  // Read and check both languages of each guide.
+  const list = ids.map((id) => {
+    const g = {}
+    for (const lang of LANGS) {
+      const file = `${section.dir}/${id}/${FILE[lang]}`
+      if (!existsSync(here(file))) throw new Error(`build.mjs: ${file} is missing: every guide has pt.md and en.md`)
+      g[lang] = readGuide(read(file), file)
+      g[lang].url = `${sectionUrls[lang]}${g[lang].slug}/`
+      g[lang].path = `${section[lang]}${g[lang].slug}/`
+    }
+    const [pt, en] = [g['pt-BR'], g.en]
+    const where = `${section.dir}/${id}`
+    if (pt.faq.length !== en.faq.length) throw new Error(`build.mjs: ${where}: ${pt.faq.length} questions in pt.md, ${en.faq.length} in en.md`)
+    if (pt.howto !== en.howto || pt.steps.length !== en.steps.length) throw new Error(`build.mjs: ${where}: pt.md and en.md differ in howto or in the number of steps`)
+    if (pt.updated !== en.updated) throw new Error(`build.mjs: ${where}: "atualizado" differs between pt.md and en.md`)
+    return { id, ...g }
+  })
+  for (const lang of LANGS) {
+    const seen = new Set()
+    for (const g of list) {
+      if (seen.has(g[lang].slug)) throw new Error(`build.mjs: two ${section.dir} guides with the slug "${g[lang].slug}"`)
+      seen.add(g[lang].slug)
+    }
+  }
+  const sorted = (lang) => [...list].sort((a, b) => a[lang].order - b[lang].order || a[lang].title.localeCompare(b[lang].title, lang))
+  const groups = (lang) => {
+    const by = new Map()
+    for (const g of sorted(lang)) by.set(g[lang].group, [...(by.get(g[lang].group) || []), g])
+    return [...by]
+  }
+
+  // Each guide's page.
+  for (const g of list) {
+    for (const lang of LANGS) {
+      const t = UI[lang]
+      const p = g[lang]
+      const trail = [['Tucano', `${SITE}${t.home}`], [section.name[lang], sectionUrls[lang]], [p.title, p.url]]
+      const graph = [
+        ORG,
+        {
+          '@type': 'Article',
+          '@id': `${p.url}#article`,
+          headline: p.title,
+          description: p.desc,
+          inLanguage: lang,
+          datePublished: p.published,
+          dateModified: p.updated,
+          mainEntityOfPage: p.url,
+          image: `${SITE}/assets/brand/og.png`,
+          author: { '@id': `${SITE}/#org` },
+          publisher: { '@id': `${SITE}/#org` },
+          about: { '@id': `${SITE}/#app` },
+        },
+        breadcrumb(trail),
+        ...(p.howto ? [{ '@type': 'HowTo', name: p.title, description: p.desc, inLanguage: lang, step: p.steps.map((s, i) => ({ '@type': 'HowToStep', position: i + 1, name: s.name, text: s.text || s.name, url: `${p.url}#${s.id}` })) }] : []),
+        ...(p.faq.length ? [{ '@type': 'FAQPage', url: p.url, inLanguage: lang, mainEntity: p.faq.map(({ q, a }) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) }] : []),
+      ]
+      const others = list.filter((o) => o !== g && o[lang].group === p.group)
+      const more = others.length ? `<section class="more">
+  <h2>${t.more}</h2>
+  <ul>${others.map((o) => `<li><a href="/${o[lang].path}">${esc(o[lang].title)}</a></li>`).join('')}</ul>
+</section>` : ''
+      const urls = { 'pt-BR': g['pt-BR'].url, en: g.en.url }
+      const html = fill({
+        lang,
+        title: esc(p.title),
+        desc: esc(p.desc),
+        ogType: 'article',
+        home: t.home,
+        ptHref: `/${g['pt-BR'].path}`,
+        enHref: `/${g.en.path}`,
+        getTucano: t.getTucano,
+        crumbsLabel: t.crumbs,
+        crumbs: crumbsHtml(trail),
+        eyebrow: `${esc(section.name[lang])} · ${esc(p.group)} · ${t.updated.toLowerCase()} ${t.date(p.updated)}`,
+        main: `<article class="prose">
+${p.html}
+</article>
+${faqHtml(p.faq, lang)}
+<p class="updated">${t.updated} ${t.date(p.updated)}. ${t.wrong}</p>
+${more}`,
+        madeIn: t.madeIn,
+        footerLinks: footer(lang),
+      })
+      out[`${p.path}index.html`] = swap(html, '</head>', `${links(lang, urls)}${jsonLd(graph)}${ANALYTICS}</head>`, `${section.dir}/${g.id}/${FILE[lang]}`)
+      guides.push({ section, lang, url: p.url, title: p.title, desc: p.desc, group: p.group })
+    }
+    sitemap.push({ 'pt-BR': g['pt-BR'].url, en: g.en.url, lastmod: g.en.updated })
+  }
+
+  // The section's index: its guides, by group.
+  for (const lang of LANGS) {
+    const t = UI[lang]
+    const trail = [['Tucano', `${SITE}${t.home}`], [section.name[lang], sectionUrls[lang]]]
+    const body = groups(lang).map(([group, gs]) => `<section>
+  <h2>${esc(group)}</h2>
+  <ul class="guide-list">
+    ${gs.map((g) => `<li><a href="/${g[lang].path}"><b>${esc(g[lang].title)}</b><span>${esc(g[lang].desc)}</span></a></li>`).join('\n    ')}
+  </ul>
+</section>`).join('\n')
+    const graph = [
+      ORG,
+      { '@type': 'CollectionPage', '@id': `${sectionUrls[lang]}#page`, url: sectionUrls[lang], name: section.title[lang], description: section.desc[lang], inLanguage: lang, publisher: { '@id': `${SITE}/#org` }, hasPart: sorted(lang).map((g) => ({ '@id': `${g[lang].url}#article` })) },
+      breadcrumb(trail),
+    ]
+    const html = fill({
+      lang,
+      title: esc(section.title[lang]),
+      desc: esc(section.desc[lang]),
+      ogType: 'website',
+      home: t.home,
+      ptHref: `/${section['pt-BR']}`,
+      enHref: `/${section.en}`,
+      getTucano: t.getTucano,
+      crumbsLabel: t.crumbs,
+      crumbs: crumbsHtml(trail),
+      eyebrow: section.count[lang](list.length),
+      main: `<p class="answer">${esc(section.desc[lang])}</p>\n${body}`,
+      madeIn: t.madeIn,
+      footerLinks: footer(lang),
+    })
+    out[`${section[lang]}index.html`] = swap(html, '</head>', `${links(lang, sectionUrls)}${jsonLd(graph)}${ANALYTICS}</head>`, `${section.dir}/ index`)
+  }
+  sitemap.push({ ...sectionUrls, lastmod: list.map((g) => g.en.updated).sort().at(-1) })
+}
+
+// ---------- llms.txt: what the site has, for AI tools that read it (llmstxt.org) ----------
+{
+  const line = (title, url, desc) => `- [${title}](${url})${desc ? `: ${desc}` : ''}`
+  const part = (sectionDir, lang) => guides.filter((g) => g.section.dir === sectionDir && g.lang === lang)
+  const blocks = []
+  for (const section of SECTIONS) {
+    for (const lang of ['en', 'pt-BR']) {
+      const gs = part(section.dir, lang)
+      if (!gs.length) continue
+      blocks.push(`## ${section.title[lang]}${lang === 'pt-BR' ? ' (português)' : ''}\n\n${line(section.title[lang], `${SITE}/${section[lang]}`, '')}\n${gs.map((g) => line(g.title, g.url, g.desc)).join('\n')}`)
+    }
+  }
+  out['llms.txt'] = `# Tucano
+
+> Tucano is a free, open-source (Apache-2.0) app for macOS, Windows and Linux where a team of AI agents works together in channels, like a work chat. Agents run on the Claude Code, Codex, Cursor, Grok, Cline, Hermes, OpenCode or Pi already set up on your computer, with no API key, and you decide what each agent can read, write, and what waits for your approval. Tucano Pro is the paid, hosted version.
+
+Every page exists in English and in Portuguese (pt-BR).
+
+## Pages
+
+${line('Tucano (home)', `${SITE}/en/`, 'what Tucano is, what it does, how to install it, questions')}
+${line('Tucano Pro', `${SITE}/en/pro/`, 'Tucano hosted for you, always on')}
+${line('OpenClaw alternative', `${SITE}/en/openclaw-alternative/`, 'Tucano compared with OpenClaw, Hermes Agent and NanoClaw')}
+${line('Grok Bot alternative', `${SITE}/en/grok-bot-alternative/`, 'Tucano compared with Grok Bot, MausBot, OpenBot and Rerun')}
+${line('Support', `${SITE}/en/support/`, '')}
+${line('Source code', 'https://github.com/eduwxyz/tucano', 'README, changelog and releases')}
+
+${blocks.join('\n\n')}
+`
+}
+
 // ---------- the sitemap, with each page's two languages ----------
 const today = new Date().toISOString().slice(0, 10)
-const entries = sitemap.flatMap((urls) => {
+const entries = sitemap.flatMap(({ lastmod, ...urls }) => {
   const alts = `<xhtml:link rel="alternate" hreflang="pt-BR" href="${urls['pt-BR']}"/><xhtml:link rel="alternate" hreflang="en" href="${urls.en}"/><xhtml:link rel="alternate" hreflang="x-default" href="${urls.en}"/>`
-  return [urls['pt-BR'], urls.en].map((u) => `  <url><loc>${u}</loc><lastmod>${today}</lastmod>${alts}</url>`)
+  return [urls['pt-BR'], urls.en].map((u) => `  <url><loc>${u}</loc><lastmod>${lastmod || today}</lastmod>${alts}</url>`)
 })
 out['sitemap.xml'] = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
