@@ -43,10 +43,12 @@ app.on('browser-window-created', (_event, win) => {
 import(${JSON.stringify(pathToFileURL(join(process.cwd(), 'out/main/index.js')).href)})
 `)
 const errors = []
+const checks = []
 const dbFile = join(data, 'tucano.db')
 
 let failed = 0
 const check = (name, ok, detail) => {
+  checks.push({ name, passed: !!ok, detail })
   if (!ok) failed++
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail === undefined ? '' : ` :: ${JSON.stringify(detail)}`}`)
 }
@@ -136,6 +138,8 @@ const buttons = (win) => win.evaluate(() => [...document.querySelectorAll('.retr
   const { app: first } = await launch()
   await first.close()
   const db = new DatabaseSync(dbFile)
+  // Exercise the manual Continue path even on branches that also offer startup recovery.
+  db.prepare("INSERT INTO settings (key, value) VALUES ('resumeInterrupted', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run()
   const now = Date.now()
   const me = db.prepare("SELECT id FROM people WHERE role = 'owner' LIMIT 1").get()
   const put = db.prepare(
@@ -238,4 +242,9 @@ check('the window raised no errors across four launches', errors.length === 0)
 await app.close()
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
+writeFileSync(join(out, 'report.json'), JSON.stringify({
+  source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  dirty: !!execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(),
+  checks, errors, passed: failed === 0
+}, null, 2))
 process.exitCode = failed ? 1 : 0
