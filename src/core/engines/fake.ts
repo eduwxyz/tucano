@@ -28,7 +28,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       let last = lastMessage(turn.prompt)
       // Work handed down (src/core/delegations.ts): what was asked is the line after "um pedido:", and
       // what came back to whoever asked is in the task at the end, not in a message.
-      const handed = /A mensagem acima é um pedido de|The message above is a request from/.test(turn.prompt) ? [...turn.prompt.matchAll(/(?:um pedido|a request):\n\n([^\n]+)/g)].at(-1)?.[1] : undefined
+      const handed = /A mensagem acima é (?:um pedido d[eo]|de) |The message above is (?:a request )?from /.test(turn.prompt) ? [...turn.prompt.matchAll(/(?:um pedido|a request):\n\n([^\n]+)/g)].at(-1)?.[1] : undefined
       if (handed) last = handed
       const back = /(?:Voltou do que você pediu ao seu time|Back from what you asked of your team):[\s\S]*$/.exec(turn.prompt)?.[0]
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another

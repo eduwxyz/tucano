@@ -84,6 +84,10 @@ const CHANGE_WORDS = new Set(['post', 'create', 'update', 'set', 'add', 'edit', 
 // Query keys whose value is the operation itself (?action=create).
 const OPERATION_KEYS = new Set(['action', 'method', '_method', 'op', 'operation', 'do', 'cmd', 'command', 'mode', 'verb'])
 
+// Remote code tools called directly: they run anything, so a call to them is never allowed for good.
+const RUNS_CODE_DIRECTLY = new Set(['composio_remote_workbench', 'composio_remote_bash_tool'])
+export const neverAllowedForGood = (toolName: string): boolean => RUNS_CODE_DIRECTLY.has(toolName.toLowerCase())
+
 // A Composio tool inside a call that can't be allowed for good: Composio's own (a runner inside a
 // runner) or one that runs code.
 const neverForGood = (slug: string): boolean => {
@@ -124,6 +128,16 @@ export function callClass(tool: { name: string; cls: ToolClass }, connectorUrl: 
   return cls === 'read' && 'body' in args && args['body'] !== undefined && args['body'] !== null ? 'write' : cls
 }
 
+// An item that names an account is allowed for good for that account only: "<connector>:GMAIL_SEND_EMAIL@work".
+// A slug never holds "@", so this key can't be one saved before accounts existed.
+const ACCOUNT_SEPARATOR = '@'
+const ruleKey = (connectorId: string, slug: string, account: string | undefined): string => `${connectorId}:${slug.toUpperCase()}${account ? ACCOUNT_SEPARATOR + account : ''}`
+export const ruleTool = (rule: string): { tool: string; account?: string } => {
+  const named = rule.slice(rule.indexOf(':') + 1)
+  const at = named.indexOf(ACCOUNT_SEPARATOR)
+  return at < 0 ? { tool: named } : { tool: named.slice(0, at), account: named.slice(at + 1) }
+}
+
 // "Always allow" on a runner's call: one rule per inner tool that asked for approval, keyed by the
 // connector and that tool's slug ("<connector>:GMAIL_REPLY_TO_THREAD"), never by the runner. Undefined
 // when any of them can't be allowed for good: a raw request, a call not understood, Composio's own
@@ -134,7 +148,7 @@ export function runnerRules(connectorId: string, toolName: string, args: Record<
   if (!actions) return undefined
   const asking = actions.filter((a) => classifyAction(a) === 'sensitive')
   if (!asking.length || asking.some((a) => a.kind !== 'tool' || neverForGood(a.slug))) return undefined
-  return [...new Set(asking.map((a) => `${connectorId}:${(a as { slug: string }).slug.toUpperCase()}`))]
+  return [...new Set(asking.map((a) => ruleKey(connectorId, (a as { slug: string }).slug, (a as { account?: string }).account)))]
 }
 
 // A runner's call runs without asking only when every inner tool that would ask is allowed for good.

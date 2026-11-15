@@ -29,7 +29,7 @@ import { sessionConfig, Sessions, type SessionPlan, type Shown } from './session
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
-import { allowed, approvalHash, callClass, canonical, permits, runnerAllowed, runnerRules } from './policy'
+import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
@@ -38,8 +38,9 @@ import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from '
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, questionMessage, RESPONDER_PEDIDO, resultMessage, returnTask, soFarMessage, teamMember, teamSection, type Returned } from './delegations'
-import { channelsOf, MAX_CHAIN, peersOf, reachOf } from '../shared/org'
+import { askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
+import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId })
 
@@ -65,6 +66,16 @@ const FIRST_NUDGE_MS = 4 * 60_000
 const GIVE_UP_MS = 10 * 60_000
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
+// How the reply was cut, in the words the next reply reads: the app closing is not the same news as
+// a failure, and neither is the same as the person stopping it.
+const cutOf = (status: RunStatus): string =>
+  status === 'interrupted'
+    ? L('quando o app fechou', 'when the app closed')
+    : status === 'failed'
+      ? L('por uma falha', 'by a failure')
+      : status === 'stopped'
+        ? L('quando foi parada', 'when it was stopped')
+        : L('antes de terminar', 'before it finished')
 // Per tool result handed back to the model, in UTF-8 bytes. Under Claude Code's own cut (about 50 KB,
 // or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
 // can't here (no file tools), so it calls again and again and answers without the data.
@@ -75,8 +86,10 @@ const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, 
 const USAGE_ALERT = 0.8
 // An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
 // reply that keeps making progress would never be cut. The percentage then has
-// no month to apply to, so it is taken over this base instead.
-const NO_LIMIT_REPLY_BASE = 1_000_000
+// no month to apply to, so it is taken over this base instead: at the default
+// 10%, a million tokens a reply. (It was a tenth of that, less than an agent
+// with the default monthly limit gets: "no limit" paused sooner than a limit.)
+export const NO_LIMIT_REPLY_BASE = 10_000_000
 
 // The month's ceiling for an agent: 0 (or anything that isn't a positive
 // number) is no ceiling, so every comparison against it is false. The rule
@@ -663,28 +676,38 @@ export class Runner {
     void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true })
   }
 
-  // A reply paused at its budget goes on in a new reply that knows what it did:
-  // its text is in the transcript, and its steps go in the task.
+  // A reply that was cut goes on in a new reply that knows what it did: its text is in the
+  // transcript, and its steps go in the task. Cutting it two ways is one path: at its budget it
+  // always has somewhere to go on from; stopped, interrupted or failed, only when a step came back.
+  // A reply that never got a tool call back is not continued: the person tries again instead.
   async continue(messageId: string): Promise<void> {
     const { db } = this.deps
     const msg = db.message(messageId)
-    if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    if (!msg?.run || msg.author.kind !== 'agent' || !canContinue(msg.run)) return
     if (this.paused) return // nobody starts working while paused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
     const me = (await this.deps.settings()).workspaceName
+    // Read before the status changes: how it was cut is what the next reply is told.
+    const cut = msg.run.status
+    // Said before the new reply starts, so the cut one reads as answered rather than as an offer.
     this.update(msg, { run: { ...msg.run, status: 'done' } })
-    const steps = msg.run.steps
-      .filter((s) => s.status !== 'running' && !['Pensou', 'Pausou', 'Thought', 'Paused'].includes(s.label))
+    const steps = (msg.run.steps ?? [])
+      .filter((s) => s.status !== 'running' && !WORKLESS_LABELS.includes(s.label))
       .slice(-40)
       .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
     const task = [
       msg.run.task, // what it was asked: a trigger's event is only there
-      L(
-        `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
-        `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
-      ),
+      cut === 'paused'
+        ? L(
+            `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
+            `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
+          )
+        : L(
+            `A sua última resposta foi cortada ${cutOf(cut)}, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
+            `Your last reply was cut ${cutOf(cut)}, and ${me} asked you to go on. What you wrote is in your last message above.`
+          ),
       steps.length ? `${L('Os passos que você fez', 'The steps you took')}:\n${steps.join('\n')}` : '',
       L('Continue de onde parou, sem refazer o que já está feito, e termine com o resultado.', "Pick up where you left off, without redoing what's already done, and finish with the result.")
     ]
@@ -2028,7 +2051,7 @@ ${note}`,
         // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
         // A runner's call, only when every inner tool that would ask is allowed for good on its own.
         const rules = db.agent(agent.id)?.autoApprove ?? []
-        const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : rules.includes(`${hit.connector.id}:${current.name}`))
+        const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
         // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
         const inner = perCall ? innerActions(current.name, callArgs) : undefined
         const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : kindsOf({ cls, name: current.name })
@@ -2495,7 +2518,7 @@ ${note}`,
     const owner = db.agent(ap.agentId)
     // A runner (Composio's) is never allowed for good itself: "always" allows the inner tools that asked, each on its own.
     const runner = perCallTool(this.deps.connectors?.list().find((c) => c.id === ap.connectorId)?.url, ap.tool)
-    const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : [`${ap.connectorId}:${ap.tool}`]
+    const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : neverAllowedForGood(ap.tool) ? [] : [`${ap.connectorId}:${ap.tool}`]
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
     // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
     const kinds: ActionKind[] = ap.connectorId === COMPUTADOR ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
@@ -2943,7 +2966,9 @@ ${note}`,
     this.keep(d)
     const key = replyKey(to.id, channel.id, root.id)
     this.followups.reserve(key)
-    this.enqueue(() => this.execute(to, channel, { depth: 1, threadId: root.id, task: askTask(from, me, ask.done, peersOf(this.deps.db.agents(), from.id).some((p) => p.id === to.id)), reserved: true }))
+    const agents = this.deps.db.agents()
+    const kind = askKind(agents, from.id, to.id)
+    this.enqueue(() => this.execute(to, channel, { depth: 1, threadId: root.id, task: askTask(from, me, ask.done, kind, kind === 'sector' ? sectorName(sectorOf(agents, from.id) ?? from, L('Setor de', 'Sector of')) : undefined, headsOf(agents).some((h) => h.id === to.id) || entriesOf(agents).some((e) => e.id === to.id)), reserved: true }))
     return d
   }
 

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createServer } from 'node:http'
+import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { describe, expect, it } from 'vitest'
@@ -37,19 +37,53 @@ describe('passing services through on a private address', () => {
   const lan = Object.values(networkInterfaces())
     .flat()
     .find((i) => i && i.family === 'IPv4' && !i.internal && isPrivate(i.address))?.address
+  // The port the system picks for loopback can already be taken on the private address: a runner's own
+  // outgoing connections leave from it. The forwarder drops a port it cannot take, so a test that sleeps
+  // and then asks is racing the machine. Wait for the page instead, and take another port when it stays shut.
+  const served = async (url: string, within: number): Promise<string | undefined> => {
+    const until = Date.now() + within
+    for (;;) {
+      try {
+        return await (await fetch(url)).text()
+      } catch (e) {
+        if (Date.now() > until) return undefined
+        await new Promise((r) => setTimeout(r, 25))
+      }
+    }
+  }
+  const refused = async (url: string, within: number): Promise<void> => {
+    const until = Date.now() + within
+    for (;;) {
+      try {
+        await (await fetch(url)).text()
+      } catch (e) {
+        return
+      }
+      if (Date.now() > until) throw new Error(`still answering at ${url}`)
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  }
   it.skipIf(!lan)('serves a loopback page at the private address, then stops', async () => {
-    const page = createServer((_q, r) => void r.end('do serviço'))
-    await new Promise<void>((r) => page.listen(0, '127.0.0.1', r))
-    const p = (page.address() as AddressInfo).port
-    const f = new Forwarder(lan!)
-    f.set(new Set([p]))
-    await new Promise((r) => setTimeout(r, 100))
-    expect(await (await fetch(`http://${lan}:${p}/`)).text()).toBe('do serviço')
+    let picked: { page: Server; f: Forwarder; p: number } | undefined
+    for (let tries = 0; tries < 5 && !picked; tries++) {
+      const page = createServer((_q, r) => void r.end('do serviço'))
+      await new Promise<void>((r) => page.listen(0, '127.0.0.1', r))
+      const p = (page.address() as AddressInfo).port
+      const f = new Forwarder(lan!)
+      f.set(new Set([p]))
+      if ((await served(`http://${lan}:${p}/`, 3_000)) === 'do serviço') picked = { page, f, p }
+      else {
+        f.set(new Set())
+        await new Promise((r) => page.close(r))
+      }
+    }
+    if (!picked) throw new Error(`no port was free on both 127.0.0.1 and ${lan}`)
+    const { page, f, p } = picked
+    expect(await served(`http://${lan}:${p}/`, 3_000)).toBe('do serviço')
     f.set(new Set())
-    await new Promise((r) => setTimeout(r, 100))
-    await expect(fetch(`http://${lan}:${p}/`)).rejects.toThrow()
+    await refused(`http://${lan}:${p}/`, 5_000)
     await new Promise((r) => page.close(r))
-  })
+  }, 30_000)
 })
 
 describe('the server on the internet', () => {
