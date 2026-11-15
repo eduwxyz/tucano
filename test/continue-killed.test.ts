@@ -156,3 +156,38 @@ describe('continuing a reply the app cut', () => {
     expect(said.interrupted).toContain('when the app closed')
   })
 })
+
+// The join between the two halves: what startup does to a run the app died under, and whether the rule
+// the button reads then offers to go on. The same pair is driven end to end, with the app killed for
+// real, by scripts/e2e-kill-restart.mjs.
+describe('a run the app died under, read at the next startup', () => {
+  it('comes back interrupted with its steps kept, and goes on when a tool call had come back', () => {
+    const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'guarde e procure a preferência do time')
+    const cut = put(
+      'd1',
+      { kind: 'agent', id: 'a1' },
+      'Vou guardar.',
+      {
+        status: 'working',
+        task: 'guarde e procure a preferência do time',
+        depth: 1,
+        steps: [step('Thought', 'done'), step('Saved to memory', 'done'), step('Thinking', 'running')]
+      },
+      prompt.id
+    )
+    expect(db.interruptStaleRuns()).toBe(1)
+    const after = db.message(cut.id)!
+    expect(after.run?.status).toBe('interrupted')
+    // The step that was running when the process died is not finished work, and says so.
+    expect(after.run?.steps?.at(-1)).toMatchObject({ label: 'Thinking', status: 'error' })
+    expect(canContinue(after.run!)).toBe(true)
+  })
+
+  it('and one that had only thought has nothing to go on with', () => {
+    const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'pergunte em 30 s')
+    const cut = put('d1', { kind: 'agent', id: 'a1' }, '', { status: 'working', task: 'pergunte em 30 s', depth: 1, steps: [step('Thinking', 'running')] }, prompt.id)
+    expect(db.interruptStaleRuns()).toBe(1)
+    expect(db.message(cut.id)?.run?.status).toBe('interrupted')
+    expect(canContinue(db.message(cut.id)!.run!)).toBe(false)
+  })
+})
