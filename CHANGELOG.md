@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **A dropdown's arrow sits inside the field.** Every native dropdown (a member's role, the invite's role, who covers for you, the activity filters) drew the system's arrow flush against its right border, whatever the padding. It now draws the same caret as the app's other dropdowns, 10 px in from the edge, in the theme's color, light or dark. Thanks, eialanjones! (#477)
+
 ### Added
 
 - **A reply the app cut offers Continue, before Try again.** A reply killed by a restart, a crash or a stop, having already read files, written, edited or run commands, offered one way back: **Try again**, which starts the whole thing over. **Continue** now comes first: it opens a new reply in the same thread carrying a proceed message with what it was asked, how it was cut, every step it took (what it read, what it wrote, what it ran, what failed) and the instruction to go on from where it stopped without redoing what is already done. **Try again** stays a full start from the beginning. A reply killed before any tool call came back has nothing to go on with and keeps **Try again** alone. Once it is continued, the killed reply stops offering either button: the session carries on in the new reply under it. What counts as work and what counts as cut is one reading in `src/shared/run-progress.ts`, which both the core and the window use, so the button the person sees is the one the core will take. (#390)
