@@ -506,7 +506,8 @@ export const liveText = (id: string): string | undefined => live.get(id)
 const thoughts = new ThoughtCache((id) => wake(thoughtListeners, id))
 
 function streamThought(id: string, text: string): void {
-  thoughts.append(id, text)}
+  thoughts.append(id, text)
+}
 
 export const liveThought = (id: string): string | undefined => thoughts.get(id)
 
@@ -515,7 +516,8 @@ export function useLiveThought(id: string, every = 0): string | undefined {
   return useLiveThoughtState(id, every)?.text
 }
 
-export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {  const subscribe = useCallback(
+export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {
+  const subscribe = useCallback(
     (l: () => void) => {
       let timer: ReturnType<typeof setTimeout> | undefined
       const off = listen(thoughtListeners, id, () => {
