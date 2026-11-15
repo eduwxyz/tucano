@@ -332,6 +332,31 @@ it('starts a tree in a click when no one answers to anyone', async () => {
   expect(save.mock.calls.slice(2).map((c) => [c[0].id, c[0].reportsTo])).toEqual([['nina', undefined], ['theo', undefined]])
 })
 
+it('lets an admin choose an entry point, marks it, hangs the sectors from it and asks it from the box', async () => {
+  // Not chosen yet: Orion heads the one sector, and its panel offers the choice.
+  expect(card('orion').textContent).toContain('Chefe do setor')
+  await pick('orion')
+  const box = document.querySelector('.org-pop__entry input') as HTMLInputElement
+  expect(box.checked).toBe(false)
+  await act(async () => { Object.defineProperty(box, 'checked', { configurable: true, value: true }); box.dispatchEvent(new window.Event('click', { bubbles: true })) })
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'orion', entry: true })
+  // Chosen: orion ← clara, bento; bento ← nico. Bento's team is the sector; Orion is over it, with Mira's beside.
+  fake = { ...fake, agents: [...fake.agents.map((x) => (x.id === 'orion' ? { ...x, entry: true } : x)), bot('mira'), bot('lino', 'mira')], delegations: [ask('e1', 'orion', 'bento')] }
+  await render()
+  expect(card('orion').textContent).toContain('Porta de entrada')
+  expect(card('orion').textContent).not.toContain('Chefe do setor')
+  expect(card('bento').textContent).toContain('Chefe do setor')
+  expect([...document.querySelectorAll('.org-zone__name')].map((z) => z.textContent)).toEqual(['Setor de bento', 'Setor de mira'])
+  // Its request to a sector goes down its own line, lit, and says which sector it is for.
+  expect(document.querySelector('.org-xlabel')?.textContent).toContain('Pedido para Setor de bento')
+  expect(document.querySelectorAll('.org-xline')).toHaveLength(0)
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-down')).toHaveLength(1)
+  expect(document.querySelector('main > p')?.textContent).toContain('1 pedido entre setores')
+  // A card that answers to someone has no such choice.
+  await pick('bento')
+  expect(document.querySelector('.org-pop__entry')).toBeNull()
+})
+
 it('lights every line up to the sector\'s head when a request skips whoever is between', async () => {
   // Nico answers to Bento, who answers to Orion: Nico passed it straight to Orion, its sector's head.
   fake = { ...fake, delegations: [ask('u2', 'nico', 'orion')] }

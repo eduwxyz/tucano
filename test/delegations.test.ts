@@ -179,10 +179,15 @@ describe('work handed down the tree', () => {
 
   it('does not hold the answers back for a request that waits on an approval of mine', async () => {
     const r = runner()
-    await r.send('dm', 'delegue a clara: fale com o Gabriel\ndelegue a nico: demore 2 s')
+    // Nico takes 8 s, not 2: the wait for Clara below gives up at 5 s, so his work has to outlast that on
+    // any runner. With 2 s of head start a loaded shard had him finished before Clara's answer landed, the
+    // sweep found nothing open to wait on, and it reported him as done instead of held at an approval.
+    await r.send('dm', 'delegue a clara: fale com o Gabriel\ndelegue a nico: demore 8 s')
     await until(() => db.liveDelegations(0).some((d) => d.to === 'clara' && d.state === 'done'))
     // Clara is done, Nico still at it: Orion waits to tell it all at once.
     expect(by('orion', 'dm')).toHaveLength(1)
+    // The fixture, not the behaviour: if Nico has already finished there is nothing parked to tell apart.
+    expect(db.openDelegations().some((d) => d.to === 'nico')).toBe(true)
     // Nico's reply stops at an approval. That is mine to give, whenever: Clara's answer shouldn't sit behind it.
     const nico = by('nico', 'eng').at(-1)!
     db.saveMessage({ ...nico, run: { ...nico.run!, status: 'waiting_approval' } })
@@ -197,7 +202,8 @@ describe('work handed down the tree', () => {
     expect(by('orion', 'dm')).toHaveLength(3)
     expect(codex.turns.at(-1)!.prompt).not.toContain('Clara, #clientes')
     expect(db.openDelegations()).toEqual([])
-  })
+    // Nico's own 8 s have to run out inside the test, so the default 5 s wouldn't hold the fixture.
+  }, 30_000)
 
   it('calls no one when the answer names whoever asked, even in a channel they share', async () => {
     db.setAgentChannels('orion', ['clientes'])
@@ -279,6 +285,27 @@ describe('work handed down the tree', () => {
     expect(codex.turns.some((t) => t.prompt.includes('um pedido do Financeiro, via Mira: decida quem do seu setor faz'))).toBe(true)
     expect(by('mira', 'dmira').at(-1)?.text).toBe('Pronto: o time terminou o que pedi.')
     expect(db.openDelegations()).toEqual([])
+  })
+
+  it('tells a chosen entry point about the sectors, and a head below it about its own', async () => {
+    // Orion tops Clara and Bento, and Bento has Nico: chosen as the entry point, Bento heads a sector under it.
+    db.saveAgent({ ...db.agent('orion')!, entry: true })
+    db.saveAgent({ ...db.agent('bento')!, sectorName: 'Engenharia', sectorDoes: 'Bugs e código' })
+    const r = runner()
+    await r.send('dm', 'delegue a bento: arrume o build')
+    await r.idle()
+    const orion = codex.turns[0]!.prompt
+    expect(orion).toContain('## Os setores\nVocê é a porta de entrada: Edu fala com você')
+    expect(orion).toContain('- @bento · Engenharia · resolve: Bugs e código')
+    const bento = claude.turns.find((t) => t.prompt.includes('um pedido de Orion, a quem você responde'))!.prompt
+    expect(bento).toContain('## Seu setor\nSeu setor: Engenharia · resolve: Bugs e código')
+    expect(bento).not.toContain('Você é a porta de entrada')
+    expect(db.openDelegations()).toEqual([])
+    // Nico, in Bento's sector, reaches its head and not the entry point past it.
+    db.createConversation({ id: 'dn', kind: 'dm', name: 'nico', members: ['nico'] })
+    await r.send('dn', 'delegue a orion: qualquer coisa')
+    await r.idle()
+    expect(by('nico', 'dn').at(-1)?.text).toContain('Você não alcança ninguém chamado "orion".')
   })
 
   it('goes straight to its sector\'s head from any depth, so crossing sectors always fits in three requests', async () => {
