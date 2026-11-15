@@ -97,6 +97,15 @@ describe('the board', () => {
     expect(t[ME]!.x).toBe((t.lia!.x + t.duda!.x) / 2)
   })
 
+  it('keeps the sectors apart under an entry point too, and the entry point clear of their zones', () => {
+    // top ← lia, duda; lia ← theo; duda ← otto: the sectors hang from the top, not from me.
+    const one = orgTree([a('top'), a('lia', 'top'), a('theo', 'lia'), a('duda', 'top'), a('otto', 'duda')])
+    const t = tidyBoard(one.roots, one.loose, B, ['top'])
+    expect(t.duda!.x - ZONE_PAD - (t.lia!.x + B.w + ZONE_PAD)).toBe(B.gapX)
+    expect(t.lia!.y - t.top!.y).toBe(B.h + B.gapY + B.rootDrop!)
+    expect(t.top!.y - t[ME]!.y).toBe(B.h + B.gapY + B.rootDrop!) // as any top: a sector may sit beside it
+  })
+
   it('centers the tree over a row of loose ones that is wider than it', () => {
     const lone = orgTree([a('lia'), a('theo', 'lia'), a('x'), a('y'), a('z')])
     const t = tidyBoard(lone.roots, lone.loose)

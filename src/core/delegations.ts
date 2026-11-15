@@ -6,7 +6,7 @@
 // its own conversation, and takes the rest to the person itself. Nothing else changes: approvals,
 // limits and what each agent may do stay each agent's own.
 import { L, locale } from '../shared/lang'
-import { bossOf, channelsOf, directReports, headsOf, peersOf, reportsOf, sectorName, sectorOf, type AskKind } from '../shared/org'
+import { bossOf, channelsOf, directReports, entriesOf, headsOf, peersOf, reportsOf, sectorName, sectorOf, type AskKind } from '../shared/org'
 import type { Agent, Connector, Conversation, Delegation } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { describeAgent } from './router'
@@ -198,10 +198,12 @@ export function returnTask(returned: Returned[], open: { d: Delegation; to: stri
 export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations: Conversation[]; connectors: Connector[]; open: Delegation[]; me: string }): string | undefined {
   const { agent, agents, conversations, connectors, open, me } = opts
   const team = reportsOf(agents, agent.id)
-  const peers = peersOf(agents, agent.id).filter((p) => !team.some((t) => t.id === p.id))
   const boss = bossOf(agents, agent)
   const heads = headsOf(agents)
   const isHead = heads.some((h) => h.id === agent.id)
+  const isEntry = entriesOf(agents).some((e) => e.id === agent.id)
+  // Another sector's head that answers to the same agent is told as a sector, below, not as a colleague.
+  const peers = peersOf(agents, agent.id).filter((p) => !team.some((t) => t.id === p.id) && !(isHead && heads.some((h) => h.id === p.id)))
   if (!team.length && !peers.length && !boss && !isHead) return undefined
   const direct = new Set(directReports(agents, agent.id).map((a) => a.id))
   const name = (id: string): string => agents.find((a) => a.id === id)?.name ?? L('agente removido', 'removed agent')
@@ -265,5 +267,12 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
           : ''
       }`
     : ''
-  return `${[mine, beside, up, sectors].filter(Boolean).join('\n\n')}${going}`
+  // The entry point: the person talks to it, and each team below it is a sector with a head of its own.
+  const below = isEntry
+    ? `${L(
+        `## Os setores\nVocê é a porta de entrada: ${me} fala com você, e você passa cada parte ao setor certo. Cada time é um setor, com um chefe. O que é de um setor, peça ao chefe dele, que decide quem do setor faz; não peça direto a quem está abaixo dele. Quando um pedido envolve mais de um setor, passe as partes ao mesmo tempo.`,
+        `## The sectors\nYou are the entry point: ${me} talks to you, and you pass each part to the sector it belongs to. Each team is a sector, with a head. What is a sector's, ask its head, who decides who in the sector does it; do not ask those below the head directly. When a request involves more than one sector, pass the parts at the same time.`
+      )}\n${heads.map((h) => `- @${h.handle} · ${sectorName(h, L('Setor de', 'Sector of'))} · ${L('resolve', 'solves')}: ${does(h)}`).join('\n')}`
+    : ''
+  return `${[mine, beside, up, sectors, below].filter(Boolean).join('\n\n')}${going}`
 }

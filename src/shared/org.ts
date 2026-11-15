@@ -1,13 +1,15 @@
 // Who answers to whom. An agent may answer to another (Agent.reportsTo), which makes a tree: an agent
 // hands work to anyone below it, and to those who answer to the same agent as it does, in that one's
-// own channel, and what comes of it goes back to it. Up, only to its own boss (what it can't do) and
+// own channel, and what comes of it goes back to it. Each tree is a sector, headed by its top; under an
+// agent the person chose as an entry point, each team below it is a sector instead. Up, only to its own
+// boss (what it can't do) and
 // straight to its sector's head (what isn't the sector's), never one step at a time: each step is one
 // more reply and one more retelling. Each tree is a sector (its top agent is the head): only heads ask
 // other sectors, and only their heads, who pass it down their own branch.
 // With no one answering to anyone there is no tree, and everything works as it always did.
 import type { Agent, Conversation } from './types'
 
-type Node = Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind'>>
+type Node = Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind' | 'entry'>>
 
 // The agent `a` answers to. One that was archived is passed over: whoever answered to it answers to
 // its own boss meanwhile, and to it again when it comes back.
@@ -51,36 +53,63 @@ export function peersOf<T extends Node>(agents: T[], id: string): T[] {
   return boss ? directReports(agents, boss.id).filter((a) => a.id !== id) : []
 }
 
-// The sector heads: those who answer to no agent and have someone below (the tops of the trees), Tuca aside.
-export const headsOf = <T extends Node>(agents: T[]): T[] => agents.filter((a) => !a.archived && a.kind !== 'tuca' && !bossOf(agents, a) && directReports(agents, a.id).length > 0)
+// The tops of the trees: those who answer to no agent and have someone below, Tuca aside.
+const topsOf = <T extends Node>(agents: T[]): T[] => agents.filter((a) => !a.archived && a.kind !== 'tuca' && !bossOf(agents, a) && directReports(agents, a.id).length > 0)
 
-// The head of the sector `id` is in (itself, when it is one); none when it is in no tree.
+// The entry points: an agent the person chose as one (Agent.entry) that answers to no agent. It is in no
+// sector: the person talks to it, and it passes each part to the sector it belongs to; those who answer
+// to it and have someone below head a sector each. Nothing asks for one: a person may draw only
+// sectors, or only agents alone. It is a choice and never read off the tree: a deep sector (a head, a
+// lead below it, the lead's own people) looks the same.
+export const entriesOf = <T extends Node>(agents: T[]): T[] => agents.filter((a) => a.entry === true && !a.archived && a.kind !== 'tuca' && !bossOf(agents, a))
+
+// The first of them: whom the board's box asks when no card is picked.
+export const entryOf = <T extends Node>(agents: T[]): T | undefined => entriesOf(agents)[0]
+
+// The sector heads: under an entry point, those who answer to it and have someone below; any other
+// top of a tree heads its own tree. Both kinds may be on the same board.
+export const headsOf = <T extends Node>(agents: T[]): T[] => {
+  const entries = entriesOf(agents)
+  return topsOf(agents).flatMap((t) => (entries.some((e) => e.id === t.id) ? directReports(agents, t.id).filter((a) => directReports(agents, a.id).length > 0) : [t]))
+}
+
+// The head of the sector `id` is in (itself, when it is one); none when it is in no sector: alone, the
+// entry point, or one who answers to the entry point with no team of its own.
 export function sectorOf<T extends Node>(agents: T[], id: string): T | undefined {
   const me = agents.find((a) => a.id === id)
   if (!me || me.archived) return undefined
-  let top: T = me
-  const seen = new Set([me.id])
-  for (let up = bossOf(agents, me); up && !seen.has(up.id); up = bossOf(agents, up)) (seen.add(up.id), (top = up))
-  return headsOf(agents).find((h) => h.id === top.id)
+  const heads = headsOf(agents)
+  const seen = new Set<string>()
+  for (let at: T | undefined = me; at && !seen.has(at.id); at = bossOf(agents, at)) {
+    seen.add(at.id)
+    const head = heads.find((h) => h.id === at!.id)
+    if (head) return head
+  }
+  return undefined
 }
 
 // A sector's name as people read it: the one given on its head, or "Setor de <head>".
 export const sectorName = (head: Pick<Agent, 'name'> & Partial<Pick<Agent, 'sectorName'>>, of = 'Setor de'): string => head.sectorName?.trim() || `${of} ${head.name}`
 
 // Everyone `id` may hand work to: those below it, its colleagues, its own boss, its sector's head (however
-// far above), and, when it heads a sector, the other sectors' heads. Nearest first, each once.
+// far above), and, when it heads a sector or is an entry point, the sectors' heads. Nearest first, each once.
 export const reachOf = <T extends Node>(agents: T[], id: string): T[] => {
   const me = agents.find((a) => a.id === id)
   const boss = me && !me.archived ? bossOf(agents, me) : undefined
   const isHead = headsOf(agents).some((h) => h.id === id)
+  const isEntry = entriesOf(agents).some((e) => e.id === id)
   const head = boss && !isHead ? sectorOf(agents, id) : undefined
-  const all = [...reportsOf(agents, id), ...peersOf(agents, id), ...(boss ? [boss] : []), ...(head ? [head] : []), ...(isHead ? headsOf(agents).filter((h) => h.id !== id) : [])]
+  const all = [...reportsOf(agents, id), ...peersOf(agents, id), ...(boss ? [boss] : []), ...(head ? [head] : []), ...(isHead || isEntry ? headsOf(agents).filter((h) => h.id !== id) : [])]
   return all.filter((a, i) => all.findIndex((b) => b.id === a.id) === i)
 }
 
 // How `from` asking `to` goes: down its branch, to a colleague, up (to its own boss or its sector's head), or to another sector's head.
 export type AskKind = 'down' | 'peer' | 'up' | 'sector'
 export function askKind(agents: Node[], from: string, to: string): AskKind {
+  if (from === to) return 'peer' // a head and itself are not two sectors
+  // Two heads, whether each tops a tree or both answer to the entry point: one sector asking another.
+  const heads = headsOf(agents)
+  if (heads.some((h) => h.id === from) && heads.some((h) => h.id === to)) return 'sector'
   if (reportsOf(agents, from).some((a) => a.id === to)) return 'down'
   if (peersOf(agents, from).some((a) => a.id === to)) return 'peer'
   const me = agents.find((a) => a.id === from)

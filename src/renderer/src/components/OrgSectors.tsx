@@ -3,7 +3,7 @@
 // side says what a sector solves, so the other heads know when to send something its way.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { askKind, channelsOf, headsOf, reportsOf, sectorName, type AskKind } from '../../../shared/org'
+import { askKind, channelsOf, entriesOf, headsOf, reportsOf, sectorName, type AskKind } from '../../../shared/org'
 import { BOARD, boundsOf, ZONE_PAD, type Point } from '../../../shared/org-layout'
 import { navigate, openDm, openThread, saveAgent, useStore, type Agent, type Delegation } from '../store'
 import { ago, AgentAvatar, Icon, ownColor } from './ui'
@@ -15,11 +15,14 @@ const DOES_ROOM = 520 // a zone this wide has room for what it solves, beside th
 
 const tint = (a: Agent): CSSProperties => ownColor(a)
 
-// How a request goes; "sector" only between two heads, anything else unrelated is told as between colleagues.
-// Matches core's askKind: 'sector' to a non-head only happens after the tree changed, so it shows as 'peer'.
+// How a request goes, as people are told. "sector": to a sector's head, from another head or from an
+// entry point (which hands it down its own line, and it still is a request to that sector). Anything
+// else unrelated is told as between colleagues: 'sector' to a non-head only happens after the tree changed.
 export function askWay(agents: Agent[], d: Pick<Delegation, 'from' | 'to'>): AskKind {
   const kind = askKind(agents, d.from, d.to)
-  return kind === 'sector' && !headsOf(agents).some((h) => h.id === d.to) ? 'peer' : kind
+  const toHead = headsOf(agents).some((h) => h.id === d.to)
+  if (kind === 'down' && toHead && entriesOf(agents).some((e) => e.id === d.from)) return 'sector'
+  return kind === 'sector' && !toHead ? 'peer' : kind
 }
 
 // The line of a request between two heads: out of the asker's side facing the other, into the other's side,

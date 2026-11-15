@@ -6,7 +6,7 @@
 // there is to know and change about it; the box at the bottom asks it something without leaving.
 import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { bossOf, channelsOf, depthBelow, directReports, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
+import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
 import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyBoard, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
 import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
@@ -47,7 +47,10 @@ export function OrgPage(): ReactNode {
   const byId = new Map(agents.map((a) => [a.id, a]))
   const { roots, loose } = orgTree(agents)
   const open = delegations.filter((d) => d.state === 'open' && byId.has(d.from) && byId.has(d.to))
-  const base = spotsOf([ME, ...agents.map((a) => a.id)], tidyBoard(roots, loose), saved)
+  // The one the person talks to, when one agent tops teams of their own: the sectors hang from it.
+  const entries = entriesOf(agents)
+  const entry = entries[0]
+  const base = spotsOf([ME, ...agents.map((a) => a.id)], tidyBoard(roots, loose, BOARD, entries.map((e) => e.id)), saved)
 
   const board = useRef<HTMLDivElement>(null)
   const gesture = useRef<Gesture | null>(null)
@@ -266,6 +269,8 @@ export function OrgPage(): ReactNode {
   const bossId = (id: string): string | undefined => bossOf(agents, byId.get(id)!)?.id
   const heads = headsOf(agents)
   const sectorAsks = open.filter((d) => askWay(agents, d) === 'sector')
+  // A request to a sector from the entry point right above its head: down the line between the two.
+  const handedDown = (d: Delegation): boolean => bossId(d.to) === d.from
   for (const d of open) {
     if (askWay(agents, d) === 'up') {
       // Up every line between the two: straight to the sector's head it passes whoever is in the middle.
@@ -305,7 +310,7 @@ export function OrgPage(): ReactNode {
   const chosen = picked ? byId.get(picked) : undefined
   const sectorHead = sector ? heads.find((h) => h.id === sector) : undefined
   // Whoever the box at the bottom talks to: the card picked, or else whoever is at the top.
-  const asked = chosen ?? roots[0]?.agent
+  const asked = chosen ?? entry ?? roots[0]?.agent
   const send = (): void => {
     const what = text.trim()
     if (!asked || !what) return
@@ -383,14 +388,17 @@ export function OrgPage(): ReactNode {
                 </g>
               )
             })}
-            {sectorAsks.map((d) => {
+            {sectorAsks.filter((d) => !handedDown(d)).map((d) => {
               const x = sectorLink(spot(d.from), spot(d.to))
               return <path key={d.id} d={x.d} className="org-xline" />
             })}
             {link && <path className="orgb__line is-new" d={link.side === 'out' ? curve(under(spot(link.from)), link.to) : curve(link.to, above(spot(link.from)))} />}
           </svg>
           {sectorAsks.map((d) => {
-            const x = sectorLink(spot(d.from), spot(d.to))
+            // From an entry point it travels the line already there, lit: the label sits on that line.
+            const a = under(spot(d.from))
+            const b = above(spot(d.to))
+            const x = handedDown(d) ? { mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } } : sectorLink(spot(d.from), spot(d.to))
             return (
               <span key={d.id} className="org-xlabel" style={{ left: x.mid.x, top: x.mid.y }}>
                 <Icon name="send" size={12} />
@@ -444,6 +452,7 @@ export function OrgPage(): ReactNode {
                 asked={open.filter((d) => d.from === a.id).length}
                 team={directReports(agents, a.id).length}
                 head={heads.some((h) => h.id === a.id)}
+                entry={entries.some((e) => e.id === a.id)}
                 bossName={a.reportsTo ? byId.get(a.reportsTo)?.name : undefined}
                 moving={!!moved?.ids.includes(a.id)}
                 picked={picked === a.id}
@@ -522,6 +531,7 @@ export function OrgPage(): ReactNode {
               return !c ? '?' : c.kind === 'dm' ? 'DM' : `#${c.name}`
             }}
             onBoss={(to) => void move(chosen.id, to)}
+            onEntry={(on) => void saveAgent({ ...chosen, entry: on }, channels(chosen.id).map((c) => c.id)).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))}
             onThread={goThread}
             onLive={goLive}
             onClose={() => setPicked(null)}
@@ -543,6 +553,7 @@ function Card({
   asked,
   team,
   head,
+  entry,
   bossName,
   moving,
   picked,
@@ -566,6 +577,7 @@ function Card({
   asked: number // open requests it made
   team: number // how many answer to it
   head: boolean // it tops a sector
+  entry: boolean // the one the person talks to, with the sectors below it
   bossName?: string
   moving: boolean
   picked: boolean
@@ -613,6 +625,11 @@ function Card({
           {L('Chefe do setor', 'Sector head')}
         </span>
       )}
+      {entry && (
+        <span className={`org-card__head org-card__head--entry c-${agent.color}`} style={ownColor(agent)}>
+          {L('Porta de entrada', 'Entry point')}
+        </span>
+      )}
       {admin && <span className="org-port org-port--in" title={L('Puxe até quem ele vai responder', 'Pull onto whoever it will answer to')} onPointerDown={onPort('in')} />}
       <AgentAvatar agent={agent} size={40} busy={!!live} still />
       <span className="org-card__who">
@@ -649,6 +666,7 @@ function Details({
   nameOf,
   channelOf,
   onBoss,
+  onEntry,
   onThread,
   onLive,
   onClose
@@ -665,6 +683,7 @@ function Details({
   nameOf: (id: string) => string
   channelOf: (id: string) => string
   onBoss: (to: string | null) => void
+  onEntry: (on: boolean) => void
   onThread: (d: Delegation) => void
   onLive: (m: Message) => void
   onClose: () => void
@@ -709,6 +728,16 @@ function Details({
           placeholder={none}
         />
       </label>
+      {/* Only for one that answers to no agent: an entry point is over the sectors, in none. */}
+      {!boss && (admin || agent.entry) && (
+        <label className="check org-pop__entry">
+          <input type="checkbox" checked={!!agent.entry} disabled={!admin} onChange={(e) => onEntry(e.target.checked)} />
+          <span>
+            <b>{L('Porta de entrada', 'Entry point')}</b>
+            <small>{L('Você fala com ele, e ele passa cada parte ao setor certo. Os times abaixo dele são os setores.', 'You talk to it, and it passes each part to the right sector. The teams below it are the sectors.')}</small>
+          </span>
+        </label>
+      )}
       <dl className="org-pop__facts">
         <dt>{L('Canais', 'Channels')}</dt>
         <dd>

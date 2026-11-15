@@ -281,6 +281,27 @@ describe('work handed down the tree', () => {
     expect(db.openDelegations()).toEqual([])
   })
 
+  it('tells a chosen entry point about the sectors, and a head below it about its own', async () => {
+    // Orion tops Clara and Bento, and Bento has Nico: chosen as the entry point, Bento heads a sector under it.
+    db.saveAgent({ ...db.agent('orion')!, entry: true })
+    db.saveAgent({ ...db.agent('bento')!, sectorName: 'Engenharia', sectorDoes: 'Bugs e código' })
+    const r = runner()
+    await r.send('dm', 'delegue a bento: arrume o build')
+    await r.idle()
+    const orion = codex.turns[0]!.prompt
+    expect(orion).toContain('## Os setores\nVocê é a porta de entrada: Edu fala com você')
+    expect(orion).toContain('- @bento · Engenharia · resolve: Bugs e código')
+    const bento = claude.turns.find((t) => t.prompt.includes('um pedido de Orion, a quem você responde'))!.prompt
+    expect(bento).toContain('## Seu setor\nSeu setor: Engenharia · resolve: Bugs e código')
+    expect(bento).not.toContain('Você é a porta de entrada')
+    expect(db.openDelegations()).toEqual([])
+    // Nico, in Bento's sector, reaches its head and not the entry point past it.
+    db.createConversation({ id: 'dn', kind: 'dm', name: 'nico', members: ['nico'] })
+    await r.send('dn', 'delegue a orion: qualquer coisa')
+    await r.idle()
+    expect(by('nico', 'dn').at(-1)?.text).toContain('Você não alcança ninguém chamado "orion".')
+  })
+
   it('goes straight to its sector\'s head from any depth, so crossing sectors always fits in three requests', async () => {
     // Mira's sector is three deep (Mira ← Lino ← Tito); Nico is two below Orion, the other head.
     db.saveAgent(agent('mira', { sectorName: 'Financeiro' }))

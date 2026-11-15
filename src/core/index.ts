@@ -1479,6 +1479,9 @@ const api: Handlers = {
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
+    // An entry point is chosen by hand, and only for an agent that answers to no one. Absent keeps the stored one.
+    if ((clean.entry === undefined ? db.agent(clean.id)?.entry : clean.entry) === true && !clean.reportsTo && clean.kind !== 'tuca') clean.entry = true
+    else delete clean.entry
     // A sector's name and what it solves (on its head): trimmed and capped; empty clears it. Absent keeps the stored one (other callers don't send them).
     const sectorName = (clean.sectorName === undefined ? db.agent(clean.id)?.sectorName : clean.sectorName)
     const nameNext = typeof sectorName === 'string' ? sectorName.trim().slice(0, 40) : ''

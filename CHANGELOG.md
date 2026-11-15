@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **An entry point on Team, if you want one.** With every sector's head answering only to you, nothing on the board said which agent you talk to: the box at the bottom asked whichever head was made first. Now an agent that answers to no one can be marked **Porta de entrada** (click its card on the board). It sits over the sectors and in none: its card says so, the teams below it become the sectors, each with its head, and the box at the bottom asks it. It is told which sectors there are and what each solves, and to ask a sector's head instead of someone below the head. Its request to a sector lights the line between them and reads "Pedido para" the sector. You can still talk to any head directly. Nothing asks for an entry point: a board of sectors side by side, or of agents on their own, works as before. The choice travels in a team file.
+
 ## [0.2.31] - 2026-11-14
 
 > **Em português:**

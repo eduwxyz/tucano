@@ -3,6 +3,11 @@
 
 Cada time montado em **Time** é um **setor**. Quem fica no topo dele (responde só a você e tem alguém abaixo) é o **chefe do setor**. Dentro do setor nada muda: cada um pede a quem está abaixo e aos colegas.
 
+## Uma porta de entrada (se você quiser)
+Pra falar com um agente só, ponha um no topo, faça os chefes responderem a ele e, no quadro, clique nele e marque **Porta de entrada**. Ele fica acima dos setores, fora de todos: você pede a ele, e ele passa cada parte ao chefe do setor certo. Os setores passam a ser os times abaixo dele. Você continua podendo falar direto com qualquer chefe.
+
+Nada disso é obrigatório: dá pra ter só setores, lado a lado, ou só agentes soltos, cada um falando com você.
+
 ## Dar nome e dizer o que resolve
 No quadro do **Time**, clique no nome do setor (o selo colorido acima do time). No painel:
 - **Nome do setor**: sem nome, aparece "Setor de" e o nome do chefe.
