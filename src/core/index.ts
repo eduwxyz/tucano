@@ -1390,9 +1390,12 @@ const api: Handlers = {
     if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
     const a = db.artifact(id)
     if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
-    const folder = resolve(dataDir, 'artifacts', a.id)
+    // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
+    const root = resolve(dataDir, 'artifacts')
+    const folder = resolve(root, a.id)
     const file = resolve(folder, a.name)
-    if (!file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
+    const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
+    if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
     toMain({ type: 'open_local', path: file, how: 'reveal' })
   },
 

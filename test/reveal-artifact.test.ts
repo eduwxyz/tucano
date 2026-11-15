@@ -65,6 +65,24 @@ describe('revealArtifact', () => {
     expect(opened()).toHaveLength(1)
   })
 
+  it('refuses an id that leaves artifacts/, though the file it points to exists', async () => {
+    // `..` as the id makes the folder the data dir itself, where segredo.txt is.
+    writeFileSync(join(core.dataDir, 'segredo.txt'), 'x')
+    insertArtifact('../', 'segredo.txt')
+    expect(await err(owner.call('revealArtifact', { id: '../' }))).toMatch(/no longer here|não está mais/)
+    insertArtifact('art-ok/..', 'segredo.txt')
+    expect(await err(owner.call('revealArtifact', { id: 'art-ok/..' }))).toMatch(/no longer here|não está mais/)
+    expect(opened()).toHaveLength(1)
+  })
+
+  it('refuses a name with `..` in it, even one that lands back inside its folder', async () => {
+    mkdirSync(join(core.dataDir, 'artifacts', 'art-sub', 'sub'), { recursive: true })
+    writeFileSync(join(core.dataDir, 'artifacts', 'art-sub', 'dados.bin'), 'x')
+    insertArtifact('art-sub', 'sub/../dados.bin')
+    expect(await err(owner.call('revealArtifact', { id: 'art-sub' }))).toMatch(/no longer here|não está mais/)
+    expect(opened()).toHaveLength(1)
+  })
+
   it('refuses an unknown artifact', async () => {
     expect(await err(owner.call('revealArtifact', { id: 'nao-existe' }))).not.toBe('ok')
     expect(opened()).toHaveLength(1)
