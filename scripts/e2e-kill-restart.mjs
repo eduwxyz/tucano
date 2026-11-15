@@ -55,7 +55,7 @@ const check = (name, ok, detail) => {
 const report = (name, value) => console.log(`     ${name}: ${JSON.stringify(value)}`)
 
 const launch = async () => {
-  const app = await electron.launch({ args: [bootstrap], env })
+  const app = await electron.launch({ args: [bootstrap, '--qa-background'], env })
   const win = await app.firstWindow()
   await win.setViewportSize({ width: 1280, height: 880 })
   await win.waitForSelector('.sidebar')
