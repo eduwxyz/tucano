@@ -512,7 +512,21 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             <span className="msg__time">{time(saidAt(message))}</span>
           </div>
         )}
-        {message.run && <RunSteps message={message} />}
+        {/* A run is taller than the screen, so the way into the thread can't sit at its start: it rides the
+            top of the run here, in the same block, and leaves with the run's last line. Without threads, or
+            without a run, it stays where it was, at the corner of the message (ThreadLink). */}
+        {message.run ? (
+          replies ? (
+            <div className="msg__anchor">
+              <div className="msg__anchor-pin">
+                <ThreadButton message={message} />
+              </div>
+              <RunSteps message={message} />
+            </div>
+          ) : (
+            <RunSteps message={message} />
+          )
+        ) : null}
         {text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
@@ -601,7 +615,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
-        {replies && <ThreadLink message={message} replies={replies} />}
+        {replies && <ThreadLink message={message} replies={replies} noReply={!!message.run} />}
       </div>
     </article>
   )
@@ -685,10 +699,22 @@ function Faces({ authors, busy }: { authors: Author[]; busy: Set<string> }): Rea
   )
 }
 
-// "Reply in thread" on hover and, under a message with replies, a small pill: who took part,
-// how many replies and when the last came (or who's replying, or what waits on me). It opens
-// the thread on the side. With no reply yet, the system's note says what happened.
-function ThreadLink({ message, replies }: { message: Message; replies: Message[] }): ReactNode {
+// The way into the thread. It is its own piece because where it lives depends on the message: at the
+// corner of a short one (ThreadLink), or riding the top of a run too tall for the screen (MessageRow).
+function ThreadButton({ message }: { message: Message }): ReactNode {
+  const label = L('Responder na thread', 'Reply in thread')
+  return (
+    <button className="icon-btn icon-btn--sm msg__reply" title={label} aria-label={label} onClick={() => openThread(message.id)}>
+      <Icon name="thread" size={13} />
+    </button>
+  )
+}
+
+// The reply button on a short message, and, under a message with replies, a small pill: who took part,
+// how many replies and when the last came (or who's replying, or what waits on me). It opens the thread
+// on the side. With no reply yet, the system's note says what happened. `noReply` when the button is
+// already riding the run above (MessageRow).
+function ThreadLink({ message, replies, noReply }: { message: Message; replies: Message[]; noReply?: boolean }): ReactNode {
   const agents = useStore((s) => s.agents)
   const you = useStore((s) => s.you)
   const people = useStore((s) => s.people)
@@ -718,9 +744,7 @@ function ThreadLink({ message, replies }: { message: Message; replies: Message[]
   const go = (): void => openThread(message.id)
   return (
     <>
-      <button className="icon-btn icon-btn--sm msg__reply" title={L('Responder na thread', 'Reply in thread')} aria-label={L('Responder na thread', 'Reply in thread')} onClick={go}>
-        <Icon name="thread" size={13} />
-      </button>
+      {!noReply && <ThreadButton message={message} />}
       {note && (
         <button className={`thread-note ${note.run?.status === 'working' ? 'is-pending' : ''}`} onClick={go} title={note.text.replace(/\*\*/g, '')}>
           <Icon name="spark" size={12} />
@@ -1486,8 +1510,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const alwaysTitle = whatsapp
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} envia sozinho nesta conversa, sem pedir. Dá pra mudar em Configurações › Celular.`, `From now on ${agent?.name ?? 'the agent'} sends on its own in this conversation, without asking. You can change it in Settings › Phone.`)
     : onComputer
-    ?L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
-    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
+    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
+    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking, in any call, even after reading something from outside. You can take it back on its page.`)
 
   return (
     <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
@@ -1659,8 +1683,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
                 <button
                   className="btn approval__always"
                   title={L(
-                    `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
-                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call. Other actions still ask. You can take it back on its page.`
+                    `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
+                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call, even after reading something from outside. Other actions still ask. You can take it back on its page.`
                   )}
                   onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
                 >

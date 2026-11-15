@@ -526,7 +526,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 })}
               </div>
               <p className="hint">
-                <Icon name="shield" size={13} /> {L('Ferramentas sensíveis (publicar código, colocar no ar, apagar, enviar algo pra fora) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".', 'Sensitive tools (publishing code, putting things live, deleting, sending something out) become an approval request in the chat, except the ones you marked as "always allow".')}
+                <Icon name="shield" size={13} /> {L('Ferramentas sensíveis (publicar código, colocar no ar, apagar, enviar algo pra fora) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir": essas rodam sem pedir, mesmo depois de o agente ler algo de fora.', 'Sensitive tools (publishing code, putting things live, deleting, sending something out) become an approval request in the chat, except the ones you marked as "always allow": those run without asking, even after the agent reads something from outside.')}
               </p>
               {!isNew && (draft.autoApprove?.length ?? 0) > 0 && (
                 <div className="always">

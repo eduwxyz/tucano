@@ -272,7 +272,7 @@ export interface RunnerDeps {
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
-  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'outOfReach'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
@@ -1210,7 +1210,11 @@ export class Runner {
       const current = db.agent(agent.id)
       const conversation = db.conversation(conv.id)
       if (!current || current.archived || !conversation || wikiAccess(current) === 'none') return undefined
-      return this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conversation, db.ownerId())))
+      const w = this.deps.wiki
+      if (!w) return undefined
+      // A reply for a restricted member: not the pages that took something from a conversation they don't see.
+      const cut = restricted(requester) ? w.outOfReach((id) => sees.canSeeFrom(requester, id)) : new Set<string>()
+      return w.view(new Set([...w.heldTitles(dmOwner(conversation, db.ownerId())), ...cut]), cut.size ? { everHidden: cut } : {})
     }
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
@@ -1288,7 +1292,7 @@ export class Runner {
     const policyNow = async (): Promise<Policy> => policyOf(db.agent(agent.id), await this.deps.settings())
     // What a connector tool does when the turn starts, for its description (nothing from outside read yet).
     const judged = (t: ConnectorTool, connectorId: string, outside = false): Verdict =>
-      verdict({ cls: t.cls, kinds: kindsOf(t), p: policy, highRisk: t.highRisk, alwaysAllowed: t.cls === 'sensitive' && !!agent.autoApprove?.includes(`${connectorId}:${t.name}`), outside })
+      verdict({ cls: t.cls, kinds: kindsOf(t), p: policy, highRisk: t.highRisk, alwaysAllowed: t.cls !== 'read' && !t.highRisk && !!agent.autoApprove?.includes(`${connectorId}:${t.name}`), outside })
     for (const c of this.deps.connectors?.list() ?? []) {
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
@@ -2137,10 +2141,11 @@ ${note}`,
             true
           )
 
-        // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
+        // "Sempre permitir": a tool approved for good runs without a card, in any call and after reading
+        // something from outside too (never a high-risk one).
         // A runner's call, only when every inner tool that would ask is allowed for good on its own.
         const rules = db.agent(agent.id)?.autoApprove ?? []
-        const always = cls === 'sensitive' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
+        const always = cls !== 'read' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
         // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
         const inner = perCall ? innerActions(current.name, callArgs) : undefined
         const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : kindsOf({ cls, name: current.name })
