@@ -419,17 +419,47 @@ export async function detectHermes(): Promise<{ status: EngineStatus; models: st
   return { status, models }
 }
 
+// `qg models` lines: `  <id> [qg] ctx=… out=… - <label>`; the default model
+// prints as `  [qg] …` with no id, so it's skipped (the turn passes no -m).
+export function parseQgModels(out: string): string[] {
+  const ids: string[] = []
+  for (const line of out.split('\n')) {
+    const id = /^\s*([a-z0-9][a-z0-9._-]*)\s+\[qg\]/.exec(line)?.[1]
+    if (id && !ids.includes(id)) ids.push(id)
+  }
+  return ids
+}
+
+// The Quebra-Galho CLI. `qg models` lists the models the saved key can run:
+// an empty list means no usable sign-in (`qg login` saves the key).
+export async function detectQg(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('qg')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const [v, list] = await Promise.all([run(path, ['--version']), run(path, ['models'], 30_000)])
+  const models = parseQgModels(list.stdout)
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: models.length > 0,
+      ...(models.length ? { route: 'apikey' as const, account: `QG · ${models.length} ${L('modelos', 'models')}`, warning: apiKeyWarning() } : { account: L('Sem login: entre com qg login', 'Not signed in: sign in with qg login') })
+    },
+    models
+  }
+}
+
 export async function detectEngines(codexHome: string, clineLogin: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, antigravity, cursor, grok, cline, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok(), detectCline(clineLogin), detectHermes()])
+  const [claude, codex, opencode, pi, antigravity, cursor, grok, cline, hermes, qg] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok(), detectCline(clineLogin), detectHermes(), detectQg()])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status, cline: cline.status, hermes: hermes.status },
-    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, cline: cline.models, hermes: hermes.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status, cline: cline.status, hermes: hermes.status, qg: qg.status },
+    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, cline: cline.models, hermes: hermes.models, qg: qg.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }
