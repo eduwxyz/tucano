@@ -12199,11 +12199,16 @@ button.agent-card__now:hover {
 .wa-choice strong { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
 .wa-choice span { font-size: 12.5px; color: var(--text-2); }
 .wa-toggles { margin-top: 12px; }
-.wa-limits { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.wa-limit { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.wa-limit__max { margin: 0; }
+.wa-quotas { display: flex; flex-direction: column; }
+.wa-quota { display: grid; grid-template-columns: minmax(0, 190px) 88px minmax(0, 1fr); align-items: center; gap: 4px 14px; padding: 8px 0; }
+.wa-quota + .wa-quota { border-top: 1px solid var(--border); }
+.wa-quota__label { font-size: 13px; font-weight: 500; }
+.wa-quota__use { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .wa-digits { width: 100%; max-width: 160px; font-variant-numeric: tabular-nums; }
-.wa-why { margin: 14px 0; line-height: 1.5; }
+.wa-quota .wa-digits { padding-top: 6px; padding-bottom: 6px; }
+.wa-notes { list-style: none; margin: 10px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.wa-notes li { display: flex; gap: 8px; }
+.wa-notes svg { flex: none; margin-top: 2px; color: var(--text-3, var(--text-2)); }
 .wa-templates { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .wa-template__body { margin-top: 2px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .wa-send { margin: 6px 0 8px; }
@@ -12259,7 +12264,9 @@ button.agent-card__now:hover {
 .wa-people li + li { border-top: 1px solid var(--border); }
 .wa-people__name { font-weight: 500; overflow-wrap: anywhere; }
 @media (max-width: 560px) {
-  .wa-choices, .wa-limits, .wa-opts { grid-template-columns: 1fr; }
+  .wa-choices, .wa-opts { grid-template-columns: 1fr; }
+  .wa-quota { grid-template-columns: minmax(0, 1fr) 88px; }
+  .wa-quota__use { grid-column: 1 / -1; }
   .wa-select, .wa-select--add { flex: 1 1 160px; width: auto; }
   .wa-chat__ctl { width: 100%; }
   .wa-bubble { max-width: 100%; }
