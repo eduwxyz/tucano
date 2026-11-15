@@ -344,6 +344,7 @@ export class Wiki {
       CREATE TABLE IF NOT EXISTS held (title TEXT PRIMARY KEY COLLATE NOCASE, person TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS held_log (title TEXT PRIMARY KEY, person TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS orphaned (key TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS carried (key TEXT NOT NULL, conv TEXT NOT NULL, PRIMARY KEY (key, conv));
     `)
     for (const col of ['status TEXT', 'error TEXT', 'changes INTEGER']) {
       try {
@@ -413,12 +414,44 @@ export class Wiki {
   }
 
   // Another folder: the index is that folder's own; what was in the old one stays there.
+  // Where each page came from goes along (reach): the new index sees its pages as written from
+  // outside, and a restricted member would read again what came from a conversation they don't see.
   relocate(dir: string, indexPath: string): void {
+    const reach = this.reach()
     this.close()
     this.dir = dir
     this.deps = { ...this.deps, dir, indexPath }
     this.init()
+    this.carry(reach)
     this.onChange()
+  }
+
+  // The conversations each page took something from ('' : unknown), for another index (carry).
+  reach(): { key: string; conv: string }[] {
+    const rows = this.db.prepare("SELECT v.key AS key, v.by AS by, v.source_id AS source_id, s.origin AS origin FROM versions v LEFT JOIN sources s ON s.id = v.source_id WHERE v.action != 'delete' AND v.key IS NOT NULL").all() as { key: string; by: string; source_id: string | null; origin: string | null }[]
+    const out = new Map<string, { key: string; conv: string }>()
+    const add = (key: string, conv: string): void => void out.set(`${key}\u0000${conv}`, { key, conv })
+    for (const r of rows) {
+      if (!r.source_id) {
+        if (r.by === 'auto') add(r.key, '')
+        continue
+      }
+      add(r.key, r.origin === null ? '' : ((JSON.parse(r.origin) as WikiSource['origin']).conversationId ?? ''))
+    }
+    for (const r of this.db.prepare('SELECT key FROM orphaned').all() as { key: string }[]) add(r.key, '')
+    for (const r of this.db.prepare('SELECT key, conv FROM carried').all() as { key: string; conv: string }[]) add(r.key, r.conv)
+    return [...out.values()]
+  }
+  carry(rows: { key: string; conv: string }[]): void {
+    const ins = this.db.prepare('INSERT OR IGNORE INTO carried (key, conv) VALUES (?, ?)')
+    this.tx(() => {
+      for (const r of rows) ins.run(r.key, r.conv)
+    })
+  }
+  // A page moved outside save (git moving a file aside): where it came from goes with it.
+  carryKey(from: string, to: string): void {
+    if (from === to) return
+    this.carry(this.reach().filter((r) => r.key === from).map((r) => ({ key: to, conv: r.conv })))
   }
 
   close(): void {
@@ -673,6 +706,8 @@ export class Wiki {
     // Text left by a source deleted since (dropOrphans), and a page with no history at all (its
     // sources deleted before the wiki kept track of that): where it came from is unknown.
     for (const r of this.db.prepare('SELECT key FROM orphaned').all() as { key: string }[]) out.add(r.key)
+    // What another folder's index knew of where a page came from (relocate, carryKey).
+    for (const r of this.db.prepare('SELECT key, conv FROM carried').all() as { key: string; conv: string }[]) if (!r.conv || !sees(r.conv)) out.add(r.key)
     const known = new Set((this.db.prepare('SELECT DISTINCT key FROM versions WHERE key IS NOT NULL').all() as { key: string }[]).map((r) => r.key))
     for (const r of this.db.prepare('SELECT title FROM pages').all() as { title: string }[]) if (!known.has(pageKey(r.title))) out.add(pageKey(r.title))
     return out
@@ -953,6 +988,7 @@ export class Wiki {
         this.db.prepare('INSERT OR IGNORE INTO held_log (title, person) SELECT ?, person FROM held_log WHERE title = ?').run(now, was) // the old name stays unnamed too
         this.db.prepare('UPDATE versions SET key = ? WHERE key = ?').run(now, was)
         this.db.prepare('INSERT OR IGNORE INTO orphaned (key) SELECT ? FROM orphaned WHERE key = ?').run(now, was)
+        this.db.prepare('INSERT OR IGNORE INTO carried (key, conv) SELECT ?, conv FROM carried WHERE key = ?').run(now, was)
       }
     }
     writeFileSync(join(this.pagesDir, file), text)

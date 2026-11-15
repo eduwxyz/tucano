@@ -1,6 +1,6 @@
 // The wiki for a restricted member (PersonAccess): the pages that took something from a conversation
 // they don't see are out of their view, and out of the view of an agent replying to them.
-import { mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -67,6 +67,34 @@ describe('Wiki.outOfReach', () => {
     expect(wiki.outOfReach((id) => id === 'eng').has(pageKey('Folha 2'))).toBe(true)
     wiki.save({ title: 'Manual', body: 'Escrito à mão.', by: 'ana', byName: 'Ana' })
     expect(wiki.outOfReach(() => true).has(pageKey('Manual'))).toBe(false)
+  })
+
+  it('keeps out a page with no history at all (its source deleted before the wiki kept track)', () => {
+    wiki.save({ title: 'Sem histórico', body: 'De algum lugar.', by: 'ana', byName: 'Ana' })
+    // as an index from before this change left it: dropOrphans deleted the versions, nothing else
+    ;(wiki as unknown as { db: { prepare: (q: string) => { run: (...a: unknown[]) => void } } }).db.prepare('DELETE FROM versions WHERE key = ?').run(pageKey('Sem histórico'))
+    expect(wiki.outOfReach(() => true).has(pageKey('Sem histórico'))).toBe(true)
+  })
+
+  it('keeps the cut when the wiki moves to another folder (another folder, git connected)', () => {
+    fromConversation('Salários', 'Folha de novembro.', 'rh')
+    fromConversation('Build', 'O build quebra no Windows.', 'eng')
+    const gone = fromConversation('Antiga', 'De algum lugar.', 'eng')
+    wiki.removeSource(gone)
+    const dir = join(root, 'wiki2')
+    cpSync(join(root, 'wiki'), dir, { recursive: true })
+    wiki.relocate(dir, join(root, 'wiki2.db'))
+    expect(wiki.page('Salários')?.body).toContain('Folha de novembro')
+    const out = wiki.outOfReach((id) => id === 'eng')
+    expect(out.has(pageKey('Salários'))).toBe(true)
+    expect(out.has(pageKey('Antiga'))).toBe(true)
+    expect(out.has(pageKey('Build'))).toBe(false)
+    // and it follows a rename there, and a move made outside save (git moving a file aside)
+    wiki.save({ title: 'Folha', body: 'Folha de novembro.', rename: 'Salários', by: 'ana', byName: 'Ana' })
+    expect(wiki.outOfReach((id) => id === 'eng').has(pageKey('Folha'))).toBe(true)
+    wiki.carryKey(pageKey('Folha'), pageKey('Folha (cópia)'))
+    expect(wiki.outOfReach((id) => id === 'eng').has(pageKey('Folha (cópia)'))).toBe(true)
+    expect(wiki.outOfReach((id) => id === 'eng' || id === 'rh').has(pageKey('Folha (cópia)'))).toBe(false)
   })
 })
 

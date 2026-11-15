@@ -851,8 +851,11 @@ wikiGit = new WikiGit({
   // a held page git moved aside (the repository brought a file by its name): its copy stays held
   movedPrivate: (from, to) => {
     const key = pageKey(from.split('/').pop()!.replace(/\.md$/i, ''))
+    if (!to.endsWith('.md')) return
+    const next = pageKey(to.split('/').pop()!.replace(/\.md$/i, ''))
     const h = wiki.heldKeys().find((x) => x.key === key)
-    if (h && to.endsWith('.md')) wiki.holdKey(pageKey(to.split('/').pop()!.replace(/\.md$/i, '')), h.person)
+    if (h) wiki.holdKey(next, h.person)
+    wiki.carryKey(key, next) // and the cut for a restricted member (PersonAccess)
   },
   quiet: (on) => wiki.quiet(on),
   refresh: () => wiki.refresh(),
