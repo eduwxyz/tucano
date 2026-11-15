@@ -274,7 +274,15 @@ export const NEEDS: Record<Method, Need> = {
   whatsappChats: 'admin',
   whatsappSetAccess: 'admin',
   whatsappTemplates: 'admin',
-  whatsappHistory: 'admin'
+  whatsappHistory: 'admin',
+  // Calls: turning them on is the admins'; an agent's voice is part of editing the agent
+  callsState: 'admin',
+  callsEnable: 'admin',
+  callsDisable: 'admin',
+  callsUpdate: 'admin',
+  callsVoices: 'admin',
+  callsVoice: 'admin',
+  callsSetVoice: 'admin'
 }
 
 // An agent's computer: anyone who sees the agent may look at it again (its page does, opening);

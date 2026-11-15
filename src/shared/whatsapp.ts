@@ -2,6 +2,8 @@
 // conversation. What is shared by the core, the window and the tests lives here: the shapes
 // and the rules that decide a send (who may, how many a day, whether it asks first).
 
+import { clampCallSettings, type CallSettings } from './calls'
+
 // 'qr': a WhatsApp already on a phone, linked as one more device (contacts and groups).
 // 'cloud': Meta's official Cloud API (contacts only; needs a server Meta can reach).
 export type WhatsAppKind = 'qr' | 'cloud'
@@ -30,6 +32,7 @@ export interface WhatsAppSettings {
   newChatsLimit: number // of those, conversations with someone who never wrote to this number
   markRead: boolean // what an agent reads is marked as read on WhatsApp (the other side sees it)
   groupManagers: string[] // agents that may create groups and add or remove people (qr only; each time asks first)
+  calls?: CallSettings // how the number takes calls (src/shared/calls.ts): the official API only
 }
 
 export interface WhatsAppChat {
@@ -154,7 +157,9 @@ export function clampSettings(kind: WhatsAppKind, s: Partial<WhatsAppSettings> |
     newChatsLimit: Math.min(dailyLimit, int(s?.newChatsLimit, d.newChatsLimit, 0, LIMITS[kind].newChatsMax)),
     markRead: s?.markRead === true,
     // Groups only exist on a number linked by QR code.
-    groupManagers: kind === 'qr' && Array.isArray(s?.groupManagers) ? [...new Set(s.groupManagers.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 100))].slice(0, 100) : []
+    groupManagers: kind === 'qr' && Array.isArray(s?.groupManagers) ? [...new Set(s.groupManagers.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 100))].slice(0, 100) : [],
+    // Calls only exist on a number of the official API.
+    ...(kind === 'cloud' && s?.calls && typeof s.calls === 'object' ? { calls: clampCallSettings(s.calls) } : {})
   }
 }
 

@@ -53,6 +53,9 @@ export interface WhatsAppDeps {
   transcribe?: (wav: Buffer) => Promise<string | undefined> // the words of a 16 kHz WAV; undefined: dictation isn't set up
   publicUrl?: string // a server on https only: what makes the official API possible
   log?(text: string): void
+  callPermission?(numberId: string, chat: string, reply: { accepted: boolean; until?: number }): void // a person's answer to "may we call you"
+  numberGone?(id: string): Promise<void> | void // a number is about to be removed: its calls are turned off first
+  dial?(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> // an approved whatsapp_ligar
 }
 
 const gone = (): UserError => new UserError(L('Esse número de WhatsApp não existe mais.', 'That WhatsApp number no longer exists.'))
@@ -104,8 +107,14 @@ export class WhatsApp {
       fail: (e) => this.fail(e),
       media: this.media,
       artifact: (id) => this.deps.artifact(id),
-      speech: (data) => this.arrivals.speech(data)
+      speech: (data) => this.arrivals.speech(data),
+      dial: (agentId, args) => (this.deps.dial ? this.deps.dial(agentId, args) : Promise.resolve({ ok: false, text: generic() }))
     })
+  }
+
+  // What the calls service uses of the numbers: the same store and opened keys; settings go through the usual clamp.
+  forCalls() {
+    return { store: this.store, cloud: (id: string) => this.keys.get(id), number: (id: string) => this.store.number(id), numbers: () => this.store.numbers(), saveCallSettings: (id: string, s: NonNullable<WhatsAppSettings['calls']>) => { const n = this.store.number(id); if (!n) throw gone(); this.store.updateNumber(id, { settings: clampSettings(n.kind, { ...n.settings, calls: s }) }); this.changed() } }
   }
 
   private get store(): WhatsAppStore {
@@ -362,6 +371,7 @@ export class WhatsApp {
     this.need(id)
     this.removing.add(id) // a connect() during the logout must not open a link for a number that is leaving
     try {
+      await Promise.resolve().then(() => this.deps.numberGone?.(id)).catch((e: unknown) => this.fail(e)) // its calls go off at the voice service while the keys and rows still exist
       const r = this.runtimes.get(id)
       this.runtimes.delete(id) // from here on, nothing that number's link says is heard
       this.arrivals.wakes.drop((p) => p.numberId === id)
@@ -547,6 +557,10 @@ export class WhatsApp {
         const to = signers.find((s) => s.keys.phoneId === c.phoneId)
         if (to) this.arrivals.change(to.id, { chat: c.from, target: c.target, kind: 'reaction', emoji: c.emoji, fromMe: false, at: c.at })
       }
+      for (const p of cloud.parsePermissions(json)) {
+        const to = signers.find((s) => s.keys.phoneId === p.phoneId) // a person's answer to "may we call you"
+        try { if (to) this.deps.callPermission?.(to.id, p.from, { accepted: p.accepted, ...(p.until !== undefined ? { until: p.until } : {}) }) } catch (e) { this.fail(e) }
+      }
       return { status: 200, body: 'ok' }
     } catch (e) {
       this.fail(e)
@@ -564,8 +578,8 @@ export class WhatsApp {
     }
   }
 
-  tools(): ToolDef[] {
-    return toolDefs()
+  tools(agentId?: string): ToolDef[] {
+    return toolDefs().filter((t) => t.name !== 'whatsapp_ligar' || (!!agentId && this.agent.canDial(agentId))) // calling is offered only where a number lets this agent call
   }
 
   call(agent: { id: string; name: string }, name: string, args: Record<string, unknown>, ctx?: ToolCtx): Promise<ToolOutcome> {

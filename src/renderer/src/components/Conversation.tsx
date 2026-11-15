@@ -92,6 +92,7 @@ import { canEditChannel,
 import { askWay } from './OrgSectors'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { WhatsAppBody, WhatsAppTitle, whatsappCanAlways } from './WhatsAppApproval'
+import { CallMessage } from './CallParts'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -462,6 +463,13 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
+    // A WhatsApp call an agent answered: the live line, then its card, instead of the plain sentence.
+    if (message.call)
+      return (
+        <div className="wa-call-row" data-id={message.id}>
+          <CallMessage call={message.call} />
+        </div>
+      )
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`} data-id={message.id}>
         <Icon name="spark" size={13} />

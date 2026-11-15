@@ -50,6 +50,7 @@ export interface Host {
   media: WhatsAppMedia // the files of messages
   artifact(id: string): { path: string; name: string } | undefined // a file of a conversation, by id
   speech(data: Buffer): Promise<string | undefined> // an audio's words, when dictation and ffmpeg are there
+  dial(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> // the calls service places an approved call
 }
 
 interface Target {
@@ -187,7 +188,8 @@ export class AgentTools {
       whatsapp_midia: L('Ver arquivo do WhatsApp', 'See a WhatsApp file'),
       whatsapp_reagir: L('Reagir no WhatsApp', 'React on WhatsApp'),
       whatsapp_corrigir: L('Corrigir no WhatsApp', 'Fix on WhatsApp'),
-      whatsapp_grupo: L('Grupo do WhatsApp', 'WhatsApp group')
+      whatsapp_grupo: L('Grupo do WhatsApp', 'WhatsApp group'),
+      whatsapp_ligar: L('Ligar no WhatsApp', 'Call on WhatsApp')
     }
     const label = labels[name] ?? L('Ver conversas do WhatsApp', 'See WhatsApp conversations')
     const a = args && typeof args === 'object' ? args : {}
@@ -199,10 +201,38 @@ export class AgentTools {
       if (name === 'whatsapp_reagir') return await this.extras.react(agent.id, a, label)
       if (name === 'whatsapp_corrigir') return await this.extras.correct(agent.id, a, label)
       if (name === 'whatsapp_grupo') return await this.groups.call(agent.id, a, label)
+      if (name === 'whatsapp_ligar') return this.ligarTool(agent.id, a, label)
       return { text: L('Essa ferramenta de WhatsApp não existe.', "That WhatsApp tool doesn't exist."), isError: true, step: { label, detail: name } }
     } catch (e) {
       if (!(e instanceof UserError)) this.h.fail(e)
       return { text: e instanceof UserError ? e.message : generic(), isError: true, step: { label, detail: str(a['numero']) || name } }
+    }
+  }
+
+  // Calling is offered to an agent only when a number it may answer on takes calls and lets agents call out.
+  canDial(agentId: string): boolean {
+    try {
+      return this.agentNumbers(agentId).some((n) => n.kind === 'cloud' && n.settings.calls?.enabled && n.settings.calls.outbound && this.h.store().access(n.id).some((a) => a.agentId === agentId && a.level === 'reply'))
+    } catch {
+      return false
+    }
+  }
+
+  // A call always waits for a person: it is heard by someone, costs minutes and can't be taken back. The answer and the
+  // limits are checked again when it is approved (calls/outbound.ts).
+  private ligarTool(agentId: string, args: Record<string, unknown>, label: string): ToolOutcome {
+    const n = this.pickNumber(agentId, str(args['numero']))
+    const q = str(args['conversa'])
+    if (!q) throw new UserError(L('Diga para quem ligar (conversa). Veja whatsapp_conversas.', 'Say who to call (conversa). See whatsapp_conversas.'))
+    if (n.kind !== 'cloud' || !n.settings.calls?.enabled) throw new UserError(L('Este número não recebe nem faz ligações.', "This number doesn't take or place calls."))
+    if (!n.settings.calls.outbound) throw new UserError(L('Este número não deixa os agentes ligarem para as pessoas. Quem cuida dele pode ligar essa opção na tela do número.', "This number doesn't let agents call people. Whoever runs it can turn that on in the number's screen."))
+    const chat = pick(this.usable(n, agentId), q, 'chat', true)
+    if (accessFor(this.h.store().access(n.id), agentId, chat.id)?.level !== 'reply') throw new UserError(L(`Para ligar para "${chat.name}", a conversa precisa estar liberada pra você com "Ler e responder".`, `To call "${chat.name}", the conversation must be open to you with "Read and answer".`))
+    const motivo = str(args['motivo']).slice(0, 300)
+    return {
+      text: L('Essa ligação espera a aprovação de uma pessoa antes de sair. Nada foi feito ainda; você será avisado da decisão.', 'This call waits for a person to approve it before it goes out. Nothing was done yet; you will be told the decision.'),
+      step: { label, detail: `${n.name} · ${chat.name}` },
+      approval: { args: { numero_id: n.id, numero: n.name, conversa_id: chat.id, conversa: chat.name, motivo }, why: L(`Ligação para ${chat.name} pelo número ${n.name}.`, `Call to ${chat.name} from the number ${n.name}.`), detail: motivo || chat.name }
     }
   }
 
@@ -336,6 +366,8 @@ export class AgentTools {
     try {
       if (tool === 'whatsapp_corrigir') return { ok: true, text: await this.extras.approvedEdit(agentId, args) }
       if (tool === 'whatsapp_grupo') return { ok: true, text: await this.groups.approved(agentId, args) }
+      // The ids the approval kept are what is called, never the names (two people can share one).
+      if (tool === 'whatsapp_ligar') return await this.h.dial(agentId, { numero: str(args['numero_id']), conversa: str(args['conversa_id']), motivo: str(args['motivo']) })
       const n = this.h.store().number(str(args['numero_id']))
       if (!n) return { ok: false, text: L('Esse número de WhatsApp não existe mais. Nada foi enviado.', 'That WhatsApp number no longer exists. Nothing was sent.') }
       const id = str(args['conversa_id'])
@@ -373,6 +405,7 @@ export class AgentTools {
     const chat = str(args['conversa']) || str(args['conversa_id'])
     const number = str(args['numero']) || str(args['numero_id'])
     if (tool === 'whatsapp_grupo') return this.groups.what(args)
+    if (tool === 'whatsapp_ligar') return L(`ligar para ${chat} pelo número ${number}`, `call ${chat} from the number ${number}`)
     if (tool === 'whatsapp_corrigir') {
       const text = typeof args['texto'] === 'string' ? snippet(args['texto'], 80) : ''
       return L(`corrigir uma mensagem para "${text}" em ${chat} pelo número ${number}`, `fix a message to "${text}" in ${chat} from the number ${number}`)

@@ -8,7 +8,7 @@ import { GROUP_ACTIONS_PER_DAY, GROUP_PEOPLE_PER_ACTION, MAX_TEXT, POLL_OPTIONS_
 import type { ToolDef } from '../gateway'
 import { shortId } from './store'
 
-export const WHATSAPP_TOOL_NAMES: ReadonlySet<string> = new Set(['whatsapp_conversas', 'whatsapp_ler', 'whatsapp_enviar', 'whatsapp_midia', 'whatsapp_reagir', 'whatsapp_corrigir', 'whatsapp_grupo'])
+export const WHATSAPP_TOOL_NAMES: ReadonlySet<string> = new Set(['whatsapp_conversas', 'whatsapp_ler', 'whatsapp_enviar', 'whatsapp_midia', 'whatsapp_reagir', 'whatsapp_corrigir', 'whatsapp_grupo', 'whatsapp_ligar'])
 
 export const READ_DEFAULT = 30
 export const READ_MAX = 100
@@ -162,6 +162,26 @@ export function tools(): ToolDef[] {
             pessoas: { type: 'array', items: { type: 'string' }, description: L('Telefones com código do país, de quem entra ou sai (criar, adicionar, remover).', 'Phones with country code, of who joins or leaves (criar, adicionar, remover).') }
           },
           required: ['numero', 'acao']
+        }
+      }
+    },
+    {
+      name: 'whatsapp_ligar',
+      get description() {
+        return L(
+          'Liga para uma pessoa pelo WhatsApp, com a sua voz, para conversar sobre o motivo. Sempre espera a aprovação de uma pessoa antes de ligar. Só funciona se a pessoa já aceitou receber ligações: se ainda não aceitou, um pedido é enviado a ela por mensagem, e você só liga de novo depois que a pessoa disser que aceitou (nada avisa você sozinho). A ligação usa a sua voz e gasta minutos, então use quando uma mensagem não bastar. O número precisa permitir ligações de saída. Quando a ligação termina, você recebe o resumo e o que foi combinado.',
+          'Calls a person on WhatsApp, with your voice, to talk about the reason. It always waits for a person to approve it before calling. It only works if the person already accepted receiving calls: if they have not, a request is sent to them by message, and you call again only after the person tells you they accepted (nothing warns you automatically). The call uses your voice and costs minutes, so use it when a message would not do. The number must allow outgoing calls. When the call ends, you get the summary and what was agreed.'
+        )
+      },
+      get inputSchema() {
+        return {
+          type: 'object' as const,
+          properties: {
+            numero: numberProp(),
+            conversa: { ...chatProp(), description: L('Nome ou id da conversa (um contato) para quem ligar.', 'Name or id of the conversation (a contact) to call.') },
+            motivo: { type: 'string', description: L('Por que está ligando, em uma frase simples (a pessoa lê isso no pedido de permissão).', 'Why you are calling, in one plain sentence (the person reads this in the permission request).') }
+          },
+          required: ['numero', 'conversa', 'motivo']
         }
       }
     }

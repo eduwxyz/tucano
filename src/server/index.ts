@@ -132,7 +132,7 @@ function fromCore(msg: CoreRequest): void {
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
-  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'whatsapp-webhook-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'whatsapp-webhook-result' || msg.type === 'calls-start-result' || msg.type === 'calls-tool-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   if (personNotice(msg, { signins, grants, viewers, streams })) return
@@ -275,6 +275,30 @@ async function whatsappWebhook(req: IncomingMessage, res: ServerResponse, url: U
   text(out.status, out.body)
 }
 
+// The voice service calls these during a WhatsApp call: `/calls/start` when one begins (who answers) and `/calls/tool/<name>`
+// for what the attendant looks up. No token (the service has none): the secret in the header is what counts, and the core
+// checks it. A request without one is refused before its body is read. Never a 500.
+async function callsDoor(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  const send = (status: number, out = ''): void => void res.writeHead(status, { ...BASE_HEADERS, 'content-type': 'application/json', 'cache-control': 'no-store' }).end(out)
+  const tool = /^\/calls\/tool\/([a-z_]{1,40})$/.exec(url.pathname)?.[1]
+  if (req.method !== 'POST') return send(405)
+  const secret = req.headers['x-tucano-secret']
+  if (typeof secret !== 'string' || !secret || secret.length > 200) return send(401)
+  let raw: string
+  try {
+    raw = await body(req, 256 * 1024)
+  } catch {
+    send(413)
+    req.destroy() // too big: stop the upload here instead of reading the rest of it
+    return
+  }
+  const out = tool
+    ? await ask<{ status: number; body: string }>({ type: 'calls-tool', data: { secret, name: tool, body: raw } }, 8_000)
+    : await ask<{ status: number; body: string }>({ type: 'calls-start', data: { secret, body: raw } }, 3_000)
+  if (!out || typeof out.status !== 'number') return send(503)
+  send(out.status, typeof out.body === 'string' ? out.body : '')
+}
+
 function oauthCallback(url: URL, res: ServerResponse): void {
   const id = randomUUID()
   const answer = (r: { ok: boolean; why?: string }): void => {
@@ -323,6 +347,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
   if (url.pathname === '/whatsapp/webhook')
     return void whatsappWebhook(req, res, url).catch(() => {
+      if (!res.headersSent) res.writeHead(503, BASE_HEADERS).end()
+    })
+  if (url.pathname === '/calls/start' || /^\/calls\/tool\/[a-z_]{1,40}$/.test(url.pathname))
+    return void callsDoor(req, res, url).catch(() => {
       if (!res.headersSent) res.writeHead(503, BASE_HEADERS).end()
     })
   // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,

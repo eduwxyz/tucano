@@ -1,4 +1,5 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { CallCard } from './calls'
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
@@ -421,6 +422,7 @@ export interface Message {
   at: number
   run?: Run
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
+  call?: CallCard // a WhatsApp call an agent answered: the line while it is on, the card when it is over
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
 }

@@ -4,6 +4,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
+import { validZone, type CallHours } from '../../shared/calls'
 import { MEDIA_IN_MAX, MEDIA_OUT_MAX, type WhatsAppMediaKind, type WhatsAppTemplate } from '../../shared/whatsapp'
 
 const GRAPH = 'https://graph.facebook.com/v23.0'
@@ -103,7 +104,8 @@ export function metaError(status: number, body: unknown): UserError {
 }
 
 // `form` is a file upload: fetch sets its own content type (with the boundary).
-async function graph(path: string, token: string, init: { method?: 'GET' | 'POST'; body?: unknown; form?: FormData; timeoutMs?: number } = {}): Promise<unknown> {
+// `onError` lets a feature word the refusals only it has (calling); the rest stay `metaError`'s.
+async function graph(path: string, token: string, init: { method?: 'GET' | 'POST'; body?: unknown; form?: FormData; timeoutMs?: number; onError?: (status: number, body: unknown) => UserError } = {}): Promise<unknown> {
   let res: Response
   try {
     res = await fetch(`${GRAPH}${path}`, {
@@ -116,7 +118,7 @@ async function graph(path: string, token: string, init: { method?: 'GET' | 'POST
     throw new UserError(L('Não consegui falar com a Meta. Confira a internet e tente de novo.', "I couldn't reach Meta. Check the internet and try again."))
   }
   const body: unknown = await res.json().catch(() => null)
-  if (!res.ok) throw metaError(res.status, body)
+  if (!res.ok) throw (init.onError ?? metaError)(res.status, body)
   return body
 }
 
@@ -304,7 +306,7 @@ interface WebhookMessage {
   context?: { id?: string }
   reaction?: { message_id?: string; emoji?: string }
   button?: { text?: string }
-  interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } }
+  interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string }; call_permission_reply?: { response?: string; expiration_timestamp?: number | string; is_permanent?: boolean } }
 }
 
 function textOf(m: WebhookMessage): string | undefined {
@@ -389,4 +391,82 @@ export function parseChanges(body: unknown): CloudChange[] {
     out.push({ phoneId, from: m.from.replace(/\D/g, ''), id: m.id, at, kind: 'reaction', target: m.reaction.message_id, emoji: typeof m.reaction.emoji === 'string' ? m.reaction.emoji : '' })
   })
   return out
+}
+
+// A person's answer to "may we call you". Apart from `parseChanges` so existing readers of that list keep compiling.
+export interface CloudPermission {
+  phoneId: string
+  from: string // their number, digits only
+  id: string
+  at: number
+  accepted: boolean
+  until?: number // when the permission ends (ms); Number.MAX_SAFE_INTEGER when it is permanent; missing when Meta did not say
+}
+
+// Meta's shape here is read defensively: any variant that says accept/reject is understood, the rest is skipped.
+export function parsePermissions(body: unknown): CloudPermission[] {
+  const out: CloudPermission[] = []
+  eachMessage(body, (m, phoneId, _name, at) => {
+    const r = m.interactive?.call_permission_reply
+    if (m.type !== 'interactive' || !r || typeof r.response !== 'string') return
+    const response = r.response.toLowerCase()
+    if (response !== 'accept' && response !== 'reject') return
+    const secs = Number(r.expiration_timestamp)
+    const until = r.is_permanent === true ? Number.MAX_SAFE_INTEGER : Number.isFinite(secs) && secs > 0 ? secs * 1000 : undefined
+    out.push({ phoneId, from: m.from.replace(/\D/g, ''), id: m.id, at, accepted: response === 'accept', ...(until !== undefined && response === 'accept' ? { until } : {}) })
+  })
+  return out
+}
+
+// ---------- calling (WhatsApp Business Calling API) ----------
+
+const WEEK = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY']
+
+// Meta's refusals that only calling has, in words; anything else is the usual sentence.
+function callingError(status: number, body: unknown): UserError {
+  const e = (body as MetaError | null)?.error
+  const text = `${e?.message ?? ''} ${e?.error_user_msg ?? ''} ${e?.error_data?.details ?? ''}`
+  if (/whatsapp_business_management/.test(text) || e?.code === 10 || e?.code === 200)
+    return new UserError(L('A chave de acesso da Meta precisa da permissão "whatsapp_business_management" para ligar as ligações. Gere uma chave com ela no painel da Meta e cole de novo.', 'Meta\'s access token needs the "whatsapp_business_management" permission to turn calls on. Make a token with it in Meta\'s panel and paste it again.'))
+  if (/2000|messaging limit|tier/i.test(text))
+    return new UserError(L('A Meta só libera ligações para números com limite de 2.000 conversas por dia ou mais. Esse número ainda não chegou lá: continue usando-o até a Meta aumentar o limite.', 'Meta only allows calls on numbers with a messaging limit of 2,000 or more. This number has not reached it yet: keep using it until Meta raises the limit.'))
+  return metaError(status, body)
+}
+
+// Turns calls on for the number and points them to the voice service's SIP server. Meant to be repeatable: it also
+// pushes new opening hours (without them the number takes calls at any time).
+export async function callingOn(c: CloudCreds, o: { hostname: string; port: number; hours?: CallHours }): Promise<void> {
+  // The hours are read in their own zone; a server's own zone is often UTC, which would move every window.
+  const h = o.hours
+  const zone = validZone(h?.tz) ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'America/Sao_Paulo'
+  const hours = h?.on
+    ? { status: 'ENABLED', timezone_id: zone, weekly_operating_hours: h.days.map((d) => ({ day_of_week: WEEK[d] ?? 'MONDAY', open_time: h.from.replace(':', ''), close_time: h.to.replace(':', '') })) }
+    : { status: 'DISABLED' }
+  await graph(`/${idPart(c.phoneId)}/settings`, c.token, {
+    method: 'POST',
+    body: { calling: { status: 'ENABLED', call_hours: hours, sip: { status: 'ENABLED', servers: [{ hostname: o.hostname, port: o.port }] }, srtp_key_exchange_protocol: 'SDES', audio: { additional_codecs: ['PCMU', 'PCMA'] } } },
+    onError: callingError
+  })
+}
+
+export async function callingOff(c: CloudCreds): Promise<void> {
+  await graph(`/${idPart(c.phoneId)}/settings`, c.token, { method: 'POST', body: { calling: { status: 'DISABLED', sip: { status: 'DISABLED' } } }, onError: callingError })
+}
+
+// The password the voice service uses to talk to Meta's SIP side; only exists after calling is on.
+export async function sipPassword(c: CloudCreds): Promise<string> {
+  const body = (await graph(`/${idPart(c.phoneId)}/settings?include_sip_credentials=true`, c.token, { onError: callingError })) as { calling?: { sip?: { servers?: { sip_user_password?: string }[] } } } | null
+  const password = body?.calling?.sip?.servers?.find((s) => typeof s?.sip_user_password === 'string' && s.sip_user_password)?.sip_user_password
+  if (!password) throw new UserError(L('A Meta não entregou a senha da ligação. Tente de novo em instantes.', "Meta didn't hand over the call password. Try again in a moment."))
+  return password
+}
+
+// The message with the "allow calls" button. Returns Meta's message id.
+export async function askCallPermission(c: CloudCreds, to: string, text: string): Promise<string> {
+  return sentId(
+    await graph(`/${idPart(c.phoneId)}/messages`, c.token, {
+      method: 'POST',
+      body: { messaging_product: 'whatsapp', to, type: 'interactive', interactive: { type: 'call_permission_request', action: { name: 'call_permission_request' }, body: { text } } }
+    })
+  )
 }

@@ -1,5 +1,5 @@
 // WhatsApp for agents, what an approval card says for each WhatsApp tool: a send (text, answer to a
-// message, file, poll, template), a correction of a sent message, and a group change.
+// message, file, poll, template), a correction of a sent message, a group change and a call.
 // `args` come from the core, but an old approval or another version may have other shapes: every
 // field is read defensively and a card that can't be understood falls back to a plain sentence.
 import type { ReactNode } from 'react'
@@ -51,6 +51,16 @@ export function WhatsAppTitle({ approval, agent }: { approval: Approval; agent: 
       <>
         {agent} {L('quer corrigir uma mensagem', 'wants to correct a message')} {who ? <>{L('em', 'in')} {who}</> : L('no WhatsApp', 'on WhatsApp')}
         {where}
+      </>
+    )
+  }
+
+  if (approval.tool === 'whatsapp_ligar') {
+    const sentence = chat ? <>{L('quer ligar para', 'wants to call')} {who}</> : L('quer fazer uma ligação no WhatsApp', 'wants to make a call on WhatsApp')
+    return (
+      <>
+        {agent} {sentence}
+        {number ? <> {L('pelo número', 'from the number')} {number}</> : null}
       </>
     )
   }
@@ -234,8 +244,25 @@ function GroupBody({ a }: { a: Args }): ReactNode {
   )
 }
 
+// A call: the reason the agent gives, and what a call means for the person and the number's minutes.
+function CallBody({ a }: { a: Args }): ReactNode {
+  const reason = typeof a['motivo'] === 'string' ? a['motivo'].trim() : ''
+  return (
+    <div className="wa-send">
+      {reason ? (
+        <>
+          <span className="wa-edit__label">{L('Motivo', 'Reason')}</span>
+          <div className="wa-bubble">{reason}</div>
+        </>
+      ) : null}
+      <p className="muted small">{L('A pessoa ouve a voz do agente e a ligação gasta minutos do número. Se ela ainda não aceitou receber ligações, o Tucano pede isso por mensagem antes.', 'The person hears the agent’s voice and the call uses the number’s minutes. If they have not accepted receiving calls yet, Tucano asks by message first.')}</p>
+    </div>
+  )
+}
+
 export function WhatsAppBody({ approval }: { approval: Approval }): ReactNode {
   const a = rec(approval.args) ?? {}
+  if (approval.tool === 'whatsapp_ligar') return <CallBody a={a} />
   if (approval.tool === 'whatsapp_corrigir') return <EditBody a={a} />
   if (approval.tool === 'whatsapp_grupo') return <GroupBody a={a} />
   if (approval.tool === 'whatsapp_enviar') return <SendBody a={a} />

@@ -8,6 +8,7 @@ import { useStore, type Agent } from '../store'
 import { confirmDialog } from './Dialogs'
 import { Card } from './Pages'
 import { Qr } from './People'
+import { CallsCard } from './Calls'
 import { AddNumber, ChatPicker } from './WhatsAppAdd'
 import { AccessCard, CloudCard, DraftText, InboundCard, KindTag, LimitsCard, StatusTag, WaIcon, errText, phoneText } from './WhatsAppParts'
 import { AgentAvatar, Icon } from './ui'
@@ -338,6 +339,7 @@ function NumberScreen({ n, agents, cloud, replace, reload, loadError, onBack }: 
 
       <AccessCard n={n} agents={agents} onAccess={(edit) => go(setAccess(edit))} onPick={setPickFor} onGroupManager={groupManager} onRevoke={revoke} />
       <InboundCard n={n} onSettings={settings} />
+      <CallsCard n={n} agents={agents} />
       <LimitsCard n={n} onSettings={settings} />
       {n.kind === 'cloud' && <CloudCard n={n} webhookUrl={cloud.webhookUrl} verifyToken={cloud.verifyToken} />}
 

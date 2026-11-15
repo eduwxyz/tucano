@@ -754,7 +754,7 @@ export class Runner {
   // Resolves with the reply, or undefined when it can't run.
   async runInbound(agent: Agent, conv: Conversation, note: string, task: string): Promise<Message | undefined> {
     if (this.paused || agent.archived) return undefined
-    this.post(conv.id, undefined, note)
+    if (note) this.post(conv.id, undefined, note) // a call's card is already in the conversation: no note
     return this.startReply(agent, conv, { depth: 1, task, outside: true })
   }
 
@@ -1382,7 +1382,7 @@ ${note}`,
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
-      ...(whatsapp?.has(agent.id) ? whatsapp.tools() : []),
+      ...(whatsapp?.has(agent.id) ? whatsapp.tools(agent.id) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...(wiki ? WIKI_TOOLS : [])
@@ -2729,18 +2729,24 @@ ${note}`,
         }
         ok = r.ok
         const sends = ap.tool === 'whatsapp_enviar'
-        outcome = r.ok ? (sends ? L('Enviada.', 'Sent.') : L('Feito.', 'Done.')) : sends ? L(`Não enviou: ${r.text}`, `Didn't send: ${r.text}`) : L(`Não fez: ${r.text}`, `Didn't do it: ${r.text}`)
-        task = r.ok
+        const rings = ap.tool === 'whatsapp_ligar' // a call: it starts now and its summary comes when it ends
+        outcome = r.ok ? (sends ? L('Enviada.', 'Sent.') : rings ? L('Ligando.', 'Calling.') : L('Feito.', 'Done.')) : sends ? L(`Não enviou: ${r.text}`, `Didn't send: ${r.text}`) : rings ? L(`Não ligou: ${r.text}`, `Didn't call: ${r.text}`) : L(`Não fez: ${r.text}`, `Didn't do it: ${r.text}`)
+        task = rings
+          ? r.ok
+            ? L(`${me} aprovou ${what}. ${r.text}\n\nConte a ${me} em uma frase que a ligação começou; o resumo chega quando ela terminar.`, `${me} approved ${what}. ${r.text}\n\nTell ${me} in one sentence that the call has started; the summary comes when it ends.`)
+            : L(`${me} aprovou ${what}, mas a ligação não foi feita: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but the call was not made: ${r.text} Tell ${me} in one sentence.`)
+          : r.ok
           ? L(`${me} aprovou ${what}, e o app ${sends ? 'enviou' : 'fez'}. ${r.text}\n\nSe ainda falta algo, continue; senão, conte a ${me} em uma frase.`, `${me} approved ${what}, and the app ${sends ? 'sent it' : 'did it'}. ${r.text}\n\nIf something is still missing, go on; otherwise tell ${me} in one sentence.`)
           : L(`${me} aprovou ${what}, mas ${sends ? 'não foi enviada' : 'não foi feito'}: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it ${sends ? 'was not sent' : 'was not done'}: ${r.text} Tell ${me} in one sentence.`)
       } else if (decision === 'approved') {
         outcome = L('Não enviou: o WhatsApp não está disponível aqui.', "Didn't send: WhatsApp isn't available here.")
         task = L(`${me} aprovou ${what}, mas o WhatsApp não está disponível agora. Avise ${me} em uma frase.`, `${me} approved ${what}, but WhatsApp isn't available right now. Tell ${me} in one sentence.`)
       } else {
-        outcome = decision === 'refused' ? L('Nada foi enviado.', 'Nothing was sent.') : expired
+        const rings = ap.tool === 'whatsapp_ligar'
+        outcome = decision === 'refused' ? (rings ? L('Ninguém foi ligado.', 'No one was called.') : L('Nada foi enviado.', 'Nothing was sent.')) : expired
         task = L(
-          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi enviado. Responda considerando isso e não tente enviar de novo o mesmo texto.`,
-          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was sent. Reply with that in mind and don't try to send the same text again.`
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. ${rings ? 'Ninguém foi ligado. Responda considerando isso e não tente ligar de novo pelo mesmo motivo.' : 'Nada foi enviado. Responda considerando isso e não tente enviar de novo o mesmo texto.'}`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. ${rings ? "No one was called. Reply with that in mind and don't try to call again for the same reason." : "Nothing was sent. Reply with that in mind and don't try to send the same text again."}`
         )
       }
     } else if (ap.tool === ACCESS_REQUEST) {

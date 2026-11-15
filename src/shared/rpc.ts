@@ -2,6 +2,7 @@
 import type { Answer } from './questions'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
+import type { CallSettings, CallsState, VoiceChoice, VoiceOption } from './calls'
 import type { WhatsAppAccess, WhatsAppChat, WhatsAppNumber, WhatsAppNumberInput, WhatsAppSettings, WhatsAppState, WhatsAppTemplate } from './whatsapp'
 import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
 
@@ -146,6 +147,14 @@ export interface Api {
   whatsappChats(p: { id: string; q?: string }): Promise<WhatsAppChat[]> // the number's conversations, latest first
   whatsappSetAccess(p: { id: string; access: WhatsAppAccess[] }): Promise<WhatsAppNumber> // replaces who may use what
   whatsappTemplates(p: { id: string }): Promise<WhatsAppTemplate[]> // the official API's approved templates
+  // Calls on an official-API number, answered by an agent with a voice service's voice (src/shared/calls.ts).
+  callsState(p: { id: string }): Promise<CallsState>
+  callsEnable(p: { id: string }): Promise<CallsState> // prepares the voice service and Meta; the steps come with the whatsapp event
+  callsDisable(p: { id: string }): Promise<CallsState>
+  callsUpdate(p: { id: string; settings: Partial<CallSettings> }): Promise<CallsState>
+  callsVoices(p: { q?: string }): Promise<VoiceOption[]> // the connected voice service's voices
+  callsVoice(p: { agentId: string }): VoiceChoice | null // the voice an agent answers calls with
+  callsSetVoice(p: { agentId: string; voice: VoiceChoice | null }): void
   whatsappHistory(p: { id: string; chat: string }): Promise<void> // asks the phone for a conversation's earlier messages (qr); they arrive on their own
   exportTeam(): string // the team as Markdown
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file

@@ -8,8 +8,27 @@ import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
 import { ALL_CHATS, clampSettings, type WhatsAppAccess, type WhatsAppChat, type WhatsAppKind, type WhatsAppLevel, type WhatsAppMediaKind, type WhatsAppMessage, type WhatsAppSendMode, type WhatsAppSettings } from '../../shared/whatsapp'
+import type { CallState, CallTurn, VoiceChoice } from '../../shared/calls'
 import type { Cipher } from '../secrets'
 import { REACTION_PREFIX } from './tools'
+
+// A call as it is kept (the window's card is made from it).
+export interface CallRow {
+  id: string
+  numberId: string
+  chat: string // the person's conversation
+  agentId: string
+  conversationId?: string // the voice service's id for the call
+  direction: 'in' | 'out'
+  state: CallState
+  startedAt: number
+  seconds: number
+  summary?: string
+  agreed: string[]
+  turns: CallTurn[]
+  messageId?: string // the message in the agent's conversation that shows the call
+  note?: string
+}
 
 const KEEP_MS = 90 * 24 * 3_600_000 // messages older than this are dropped when the app starts
 const EVENTS_KEEP_MS = 7 * 24 * 3_600_000 // the daily counters only look at today
@@ -97,6 +116,11 @@ export class WhatsAppStore {
         CREATE TABLE IF NOT EXISTS auth (number_id TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY (number_id, k));
         CREATE TABLE IF NOT EXISTS events (number_id TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS events_by_number ON events (number_id, kind, at);
+        CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, number_id TEXT NOT NULL, chat TEXT NOT NULL, agent_id TEXT NOT NULL, conversation_id TEXT, direction TEXT NOT NULL, state TEXT NOT NULL, started_at INTEGER NOT NULL, seconds INTEGER NOT NULL DEFAULT 0, summary TEXT, agreed TEXT, turns TEXT, message_id TEXT, note TEXT);
+        CREATE INDEX IF NOT EXISTS calls_by_number ON calls (number_id, started_at);
+        CREATE INDEX IF NOT EXISTS calls_by_conversation ON calls (conversation_id);
+        CREATE TABLE IF NOT EXISTS voices (agent_id TEXT PRIMARY KEY, provider TEXT NOT NULL, voice_id TEXT NOT NULL, name TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS call_permissions (number_id TEXT NOT NULL, chat TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY (number_id, chat));
       `)
       // A database made by an earlier build lacks the columns added since: each is added once, here.
       const have = (table: string): Set<string> => new Set(this.all(`PRAGMA table_info(${table})`).map((r) => text(r['name'])))
@@ -178,7 +202,7 @@ export class WhatsAppStore {
     this.db.exec('BEGIN')
     try {
       const files = this.all('SELECT file FROM messages WHERE number_id = ? AND file IS NOT NULL', id).map((r) => text(r['file']))
-      for (const table of ['chats', 'access', 'messages', 'auth', 'events']) this.run(`DELETE FROM ${table} WHERE number_id = ?`, id)
+      for (const table of ['chats', 'access', 'messages', 'auth', 'events', 'calls', 'call_permissions']) this.run(`DELETE FROM ${table} WHERE number_id = ?`, id)
       this.run('DELETE FROM numbers WHERE id = ?', id)
       this.db.exec('COMMIT')
       return files
@@ -193,6 +217,7 @@ export class WhatsAppStore {
     const cutoff = now - KEEP_MS
     const files = this.all('SELECT file FROM messages WHERE at < ? AND file IS NOT NULL', cutoff).map((r) => text(r['file']))
     this.run('DELETE FROM messages WHERE at < ?', cutoff)
+    this.run("DELETE FROM calls WHERE started_at < ? AND state != 'live'", cutoff) // a call's turns are big
     return files
   }
 
@@ -303,6 +328,7 @@ export class WhatsAppStore {
 
   dropAgent(agentId: string): void {
     this.run('DELETE FROM access WHERE agent_id = ?', agentId)
+    this.run('DELETE FROM voices WHERE agent_id = ?', agentId)
   }
 
   // Whether some agent may read this conversation, or every conversation of the number.
@@ -445,6 +471,96 @@ export class WhatsAppStore {
 
   groupActionsToday(numberId: string, since: number): number {
     return this.eventsToday(numberId, 'group', since)
+  }
+
+  // ---------- calls ----------
+
+  private callOf(r: Row): CallRow {
+    const list = <T>(v: unknown): T[] => {
+      try {
+        const x: unknown = JSON.parse(text(v as string | null))
+        return Array.isArray(x) ? (x as T[]) : []
+      } catch {
+        return [] // an unreadable list is as good as none
+      }
+    }
+    return {
+      id: text(r['id']),
+      numberId: text(r['number_id']),
+      chat: text(r['chat']),
+      agentId: text(r['agent_id']),
+      ...(r['conversation_id'] ? { conversationId: text(r['conversation_id']) } : {}),
+      direction: r['direction'] === 'out' ? 'out' : 'in',
+      state: (['live', 'done', 'missed', 'failed'] as const).find((s) => s === r['state']) ?? 'failed',
+      startedAt: num(r['started_at']) ?? 0,
+      seconds: num(r['seconds']) ?? 0,
+      ...(r['summary'] ? { summary: text(r['summary']) } : {}),
+      agreed: list<string>(r['agreed']),
+      turns: list<CallTurn>(r['turns']),
+      ...(r['message_id'] ? { messageId: text(r['message_id']) } : {}),
+      ...(r['note'] ? { note: text(r['note']) } : {})
+    }
+  }
+
+  // Adds the call, or replaces the one with this id.
+  putCall(c: CallRow): void {
+    this.run(
+      'INSERT OR REPLACE INTO calls (id, number_id, chat, agent_id, conversation_id, direction, state, started_at, seconds, summary, agreed, turns, message_id, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      c.id, c.numberId, c.chat, c.agentId, c.conversationId ?? null, c.direction, c.state, c.startedAt, Math.max(0, Math.round(c.seconds)), c.summary ?? null, JSON.stringify(c.agreed), JSON.stringify(c.turns), c.messageId ?? null, c.note ?? null
+    )
+  }
+
+  updateCall(id: string, patch: Partial<Omit<CallRow, 'id' | 'numberId'>>): CallRow | undefined {
+    const cur = this.call(id)
+    if (!cur) return undefined
+    const next = { ...cur, ...patch }
+    this.putCall(next)
+    return next
+  }
+
+  call(id: string): CallRow | undefined {
+    const r = this.one('SELECT * FROM calls WHERE id = ?', id)
+    return r ? this.callOf(r) : undefined
+  }
+
+  callByConversation(conversationId: string): CallRow | undefined {
+    const r = this.one('SELECT * FROM calls WHERE conversation_id = ? ORDER BY started_at DESC LIMIT 1', conversationId)
+    return r ? this.callOf(r) : undefined
+  }
+
+  // Calls still on (all numbers, or one); `since` leaves out the ones so old they never got closed.
+  liveCalls(numberId?: string, since = 0): CallRow[] {
+    return this.all(`SELECT * FROM calls WHERE state = 'live' AND started_at >= ?${numberId ? ' AND number_id = ?' : ''}`, since, ...(numberId ? [numberId] : [])).map((r) => this.callOf(r))
+  }
+
+  // Whole minutes talked today (each second counts; a call still on has none yet).
+  minutesToday(numberId: string, since: number): number {
+    return Math.ceil((num(this.one('SELECT COALESCE(SUM(seconds), 0) AS s FROM calls WHERE number_id = ? AND started_at >= ?', numberId, since)?.['s']) ?? 0) / 60)
+  }
+
+  outboundToday(numberId: string, since: number): number {
+    return num(this.one("SELECT COUNT(*) AS n FROM calls WHERE number_id = ? AND direction = 'out' AND started_at >= ?", numberId, since)?.['n']) ?? 0
+  }
+
+  voice(agentId: string): VoiceChoice | undefined {
+    const r = this.one('SELECT * FROM voices WHERE agent_id = ?', agentId)
+    return r && r['provider'] === 'elevenlabs' ? { provider: 'elevenlabs', voiceId: text(r['voice_id']), name: text(r['name']) } : undefined
+  }
+
+  setVoice(agentId: string, v: VoiceChoice | null): void {
+    if (v) this.run('INSERT OR REPLACE INTO voices (agent_id, provider, voice_id, name) VALUES (?, ?, ?, ?)', agentId, v.provider, v.voiceId, v.name)
+    else this.run('DELETE FROM voices WHERE agent_id = ?', agentId)
+  }
+
+  // Until when this person has allowed calls from this number (ms); undefined when never or already over.
+  callPermission(numberId: string, chat: string, now = Date.now()): number | undefined {
+    const until = num(this.one('SELECT until FROM call_permissions WHERE number_id = ? AND chat = ?', numberId, chat)?.['until'])
+    return until !== undefined && until > now ? until : undefined
+  }
+
+  setCallPermission(numberId: string, chat: string, until: number | null): void {
+    if (until === null) this.run('DELETE FROM call_permissions WHERE number_id = ? AND chat = ?', numberId, chat)
+    else this.run('INSERT OR REPLACE INTO call_permissions (number_id, chat, until) VALUES (?, ?, ?)', numberId, chat, until)
   }
 
   // ---------- sealed values ----------

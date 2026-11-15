@@ -88,6 +88,7 @@ import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onG
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
+import { VoiceSection } from './CallParts'
 import { entryOf } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
 import { ruleTool } from '../../../shared/classify'
@@ -427,6 +428,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               {instructionLengthNote(draft.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(draft.instructions.length)}</p>}
             </Card>
           )}
+
+          {pane('perfil') && admin && existing && <VoiceSection agent={existing} />}
 
           {pane('canais') && (
             <Card title={L('Onde participa', 'Where it takes part')}>

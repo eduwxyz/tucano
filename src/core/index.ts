@@ -15,7 +15,7 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, applyOrder, wikiAccess, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
@@ -53,7 +53,7 @@ import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
-import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
+import { cleanTitle, pageKey, Wiki, wikiCall, type WikiView } from './wiki'
 import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
@@ -65,6 +65,10 @@ import { applyForeignTeam, readForeignZip } from './agent-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { lineOf, WhatsApp, type Inbound } from './whatsapp'
+import { Calls } from './calls'
+import { callLine, callTask, toolValue } from './calls/text'
+import { defaultCallSettings, VOICE_PROVIDERS, type CallCard } from '../shared/calls'
+import { accessFor } from '../shared/whatsapp'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
@@ -553,6 +557,7 @@ process.parentPort.on('message', (e) => {
     closing = true
     routines.stop()
     telegram?.stop()
+    calls?.stop()
     whatsapp?.stop()
     hooks.close()
     runner.stopAll()
@@ -633,6 +638,18 @@ process.parentPort.on('message', (e) => {
     void whatsapp
       .webhook({ method: q.method === 'GET' ? 'GET' : 'POST', query: q.query ?? {}, body: typeof q.body === 'string' ? q.body : '', ...(q.signature ? { signature: q.signature } : {}) })
       .then(reply, () => reply({ status: 200, body: 'ok' }))
+    return
+  }
+  // A server's /calls/start and /calls/tool/<name>: the voice service asking who answers, or looking something up
+  // during a call. Always answered; a failure is a 503 (the call is then refused, which is the safe side).
+  if (r?.type === 'calls-start' || r?.type === 'calls-tool') {
+    const type = r.type === 'calls-start' ? 'calls-start-result' : 'calls-tool-result'
+    const reply = (data: { status: number; body: string }): void => process.parentPort.postMessage({ type, id: r.id, data })
+    if (!calls) return reply({ status: 404, body: '' })
+    const q = (r.data ?? {}) as { secret?: string; name?: string; body?: string }
+    const secret = typeof q.secret === 'string' ? q.secret : ''
+    const raw = typeof q.body === 'string' ? q.body : ''
+    void (r.type === 'calls-start' ? calls.start(secret, raw) : calls.tool(secret, typeof q.name === 'string' ? q.name : '', raw)).then(reply, () => reply({ status: 503, body: '' }))
     return
   }
   if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
@@ -1014,8 +1031,88 @@ const whatsapp = defaultWorkspace
       },
       ...(serverMode && publicUrl?.startsWith('https://') ? { publicUrl } : {}),
       wake: wakeAgent,
-      log: (text) => console.log(`[whatsapp] ${text}`)
+      log: (text) => console.log(`[whatsapp] ${text}`),
+      callPermission: (numberId, chat, reply) => calls?.permission(numberId, chat, reply),
+      // A number that leaves takes its calls off at Meta and the voice service first; one that never had them is left alone.
+      numberGone: async (id) => {
+        if (calls && (await calls.state(id)).ready) await calls.disable(id)
+      },
+      dial: async (agentId, args) => (calls ? calls.dial(agentId, args) : { ok: false, text: L('As ligações não estão disponíveis aqui.', "Calls aren't available here.") })
     })
+  : undefined
+
+// The agent's DM with the owner holds the message of each call (its card); the same message is updated as the call goes on.
+const callMessage = (agentId: string, card: CallCard, existing?: string): string | undefined => {
+  try {
+    const conv = db.conversation(dmWith(agentId, db.ownerId()))
+    if (!conv) return undefined
+    const prior = existing ? db.message(existing) : undefined
+    const m: Message = prior ? { ...prior, text: callLine(card), call: card } : { id: randomUUID(), conversationId: conv.id, author: { kind: 'system' }, text: callLine(card), at: Date.now(), call: card }
+    db.saveMessage(m)
+    emit({ type: 'message', message: m })
+    return m.id
+  } catch (e) {
+    console.error('[calls]', e)
+    return undefined
+  }
+}
+
+// What an agent finds in its own wiki, for the attendant on the phone: the same access rule as in a reply, and a page held for one
+// person stays out (whoever is on the phone is nobody's DM).
+const callWiki = (agentId: string, query: string): string => {
+  const agent = db.agent(agentId)
+  if (!agent || agent.archived || wikiAccess(agent) === 'none') return ''
+  const view = wiki.view(wiki.heldTitles())
+  return view.count() > 0 ? wikiCall(view, 'wiki_buscar', { busca: query }).text.slice(0, 6_000) : ''
+}
+
+// Calls on the official-API numbers, answered by an agent with a voice service's voice (src/core/calls). Same store as WhatsApp.
+// Typed by hand: WhatsApp's own deps point back at it.
+// Building the calls opens WhatsApp's database. A corrupt or unwritable file must switch the calls off, not stop the core.
+const openCalls = (build: () => Calls): Calls | undefined => {
+  try {
+    return build()
+  } catch (e) {
+    console.error('[calls]', e instanceof Error ? e.message : String(e))
+    return undefined
+  }
+}
+const calls: Calls | undefined = whatsapp
+  ? openCalls(() => new Calls({
+      ...whatsapp.forCalls(),
+      ...(serverMode && publicUrl?.startsWith('https://') ? { publicUrl } : {}),
+      connector: (provider) => {
+        // Recognised by the host of its address, not by a piece of the text of the address.
+        const found = connectors.list().filter((c) => {
+          try {
+            return new URL(c.url ?? '').hostname === VOICE_PROVIDERS[provider].connector
+          } catch {
+            return false
+          }
+        })
+        const c = found.find((x) => x.status === 'connected') ?? found[0]
+        return c ? { id: c.id, connected: c.status === 'connected' } : undefined
+      },
+      tool: async (connectorId, name, args) => toolValue(await connectors.call(connectorId, name, args)),
+      agent: (id) => {
+        const a = db.agent(id)
+        return a ? { id: a.id, name: a.name, role: a.role, instructions: a.instructions, ...(a.archived ? { archived: true } : {}), wiki: wikiAccess(a) !== 'none' } : undefined
+      },
+      access: (numberId, agentId, chat) => accessFor(whatsapp.forCalls().store.access(numberId), agentId, chat)?.level,
+      chat: (numberId, chat) => whatsapp.forCalls().store.chat(numberId, chat),
+      messages: (numberId, chat, limit) => whatsapp.forCalls().store.messages(numberId, chat, limit),
+      wiki: callWiki,
+      language: () => settings().language,
+      workspace: () => settings().workspaceLabel ?? settings().workspaceName,
+      card: callMessage,
+      // The card is already in the conversation, so the wake has no note of its own.
+      wake: (agentId, card) => {
+        const agent = db.agent(agentId)
+        const conv = agent && !agent.archived ? db.conversation(dmWith(agentId, db.ownerId())) : undefined
+        if (agent && conv) void runner.runInbound(agent, conv, '', callTask(card)).catch((e: unknown) => console.error('[calls]', e))
+      },
+      changed: () => emit({ type: 'whatsapp' })
+    }))
   : undefined
 
 const runner = new Runner({
@@ -1401,6 +1498,10 @@ const needWhatsApp = (): WhatsApp => {
   if (!whatsapp) throw new UserError(whatsappElsewhere())
   return whatsapp
 }
+const needCalls = (): Calls => {
+  if (!calls) throw new UserError(whatsappElsewhere())
+  return calls
+}
 // A routine's rules: the team's are the admins'; a person's, theirs (and the admins').
 const mayRoutine = (ctx: Ctx, r: Pick<Routine, 'scope' | 'owner'> | undefined): void => must(ctx.person, { kind: 'routine', routine: r ?? { scope: 'channel' } })
 // The open pages of the people whose view is cut down read it again (a moment after the answer) when what they see changes.
@@ -1632,6 +1733,7 @@ const api: Handlers = {
       runner.forgetSessions({ agentId: id })
       if (agent.browser) bg(browser.close(id), 'archiveAgent')
       whatsapp?.agentGone(id) // its numbers and conversations go back to nobody
+      calls?.agentGone(id) // a number it answered calls on refuses them until another agent is picked
     }
     db.saveAgent({ ...agent, archived })
     refreshRestricted()
@@ -1864,6 +1966,45 @@ const api: Handlers = {
   whatsappHistory: ({ id, chat }, ctx) => {
     must(ctx.person, { kind: 'admin' })
     return needWhatsApp().history(id, chat)
+  },
+  // Calls on an official-API number (admins only): the screen reads `callsState` again at each `whatsapp` event.
+  callsState: async ({ id }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    if (!calls) return { available: false, why: whatsappElsewhere(), ready: false, settings: defaultCallSettings(), usedToday: 0 }
+    const state = await calls.state(id)
+    const step = calls.step(id)
+    return step ? { ...state, step } : state
+  },
+  callsEnable: async ({ id }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    const state = await needCalls().enable(id, () => emit({ type: 'whatsapp' }))
+    record(ctx, 'whatsapp.updated', id, { name: whatsapp?.forCalls().number(id)?.name, calls: state.ready })
+    return state
+  },
+  callsDisable: async ({ id }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    const state = await needCalls().disable(id)
+    record(ctx, 'whatsapp.updated', id, { name: whatsapp?.forCalls().number(id)?.name, calls: false })
+    return state
+  },
+  callsUpdate: ({ id, settings: patch }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    return needCalls().update(id, patch)
+  },
+  callsVoices: ({ q }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    return needCalls().voices(q)
+  },
+  callsVoice: ({ agentId }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    return needCalls().voice(agentId) ?? null
+  },
+  callsSetVoice: ({ agentId, voice }, ctx) => {
+    must(ctx.person, { kind: 'admin' })
+    const agent = db.agent(agentId)
+    if (!agent) throw new UserError(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    needCalls().setVoice(agentId, voice)
+    record(ctx, 'agent.updated', agentId, { name: agent.name })
   },
   exportTeam: (_, ctx) => exportTeam(db, ctx.person.id),
   importTeam: ({ text }, ctx) => {
