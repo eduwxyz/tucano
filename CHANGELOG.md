@@ -142,6 +142,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A phone app can't start an empty install for the endpoint.** A phone app from before the endpoint listed it among the harnesses, with an **Install** button; on a server, that ran the installer with an empty command. Installing or signing in to the endpoint is now refused with what to do instead: it's an address and a key, in **Settings › Models**, on the computer or in the browser. (#492)
 
+### Fixed
+
+- **Temporary reasoning is forgotten when its display is disabled.** Previously cached text could return when the setting was enabled again, and removed conversations left it behind in memory. Disabling the display, removing a conversation or replacing the snapshot now clears the corresponding cache. Retention is limited to the 200 most recently streamed replies, with at most 20,000 characters per reply. (#235)
+
 ## [0.2.34] - 2026-11-15
 
 > **Em português:**
