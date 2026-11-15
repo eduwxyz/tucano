@@ -11998,6 +11998,16 @@ button.agent-card__now:hover {
   font-size: 14px;
 }
 
+/* Under a person's message: the requests it set off, one status line each. */
+.asked-here {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.msg--me .asked-here .delegation-chip {
+  margin-top: 6px;
+}
 /* What a reply that only handed work on wrote anyway: behind a link, under its steps. */
 .msg__said {
   align-self: flex-start;

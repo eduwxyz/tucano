@@ -1554,6 +1554,15 @@ ${note}`,
           }
           delegated.push(refOf(d))
           msg.run = { ...msg.run!, delegations: [...delegated] }
+          // Out of a thread, a reply that hands work on moves into the thread of the person's message: the
+          // subject lives there from now on (what comes back, questions, the closing), and the person's
+          // message carries the request's status line.
+          const origin = this.originThread(msg)
+          if (!msg.threadId && origin) {
+            db.moveToThread(msg.id, origin)
+            msg.threadId = origin
+            save({ threadId: origin })
+          }
           addSteps({ id: randomUUID(), label: before ? L(`Continuou com ${to.name}`, `Went on with ${to.name}`) : L(`Pediu a ${to.name}`, `Asked ${to.name}`), detail: `${placeOf(channel)} · ${snip(ask.text, 120)}`, status: 'done' })
           return textResult(
             L(

@@ -1228,6 +1228,11 @@ export class Db {
     return r && this.toMessage(r)
   }
 
+  // A reply moved into a thread after it started (one that handed work on goes under the person's message).
+  moveToThread(id: string, threadId: string): void {
+    this.db.prepare('UPDATE messages SET thread_id = ? WHERE id = ? AND thread_id IS NULL').run(threadId, id)
+  }
+
   saveMessage(m: Message): void {
     this.db
       .prepare(

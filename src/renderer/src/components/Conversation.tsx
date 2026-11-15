@@ -608,11 +608,26 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
+        {message.author.kind === 'person' && !message.threadId && <AskedFromHere message={message} />}
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
   )
 })
+
+// What was asked of the team because of a person's message, under it: a status line per request (whom,
+// where, how it stands, an approval it waits on), while the asker's replies stay in the message's thread.
+function AskedFromHere({ message }: { message: Message }): ReactNode {
+  const asked = useStore((s) => s.delegations.filter((d) => d.originConversationId === message.conversationId && d.originThreadId === message.id))
+  if (!asked.length) return null
+  return (
+    <div className="asked-here">
+      {asked.map((d) => (
+        <DelegationChip key={d.id} at={{ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) }} from={d.from} asked />
+      ))}
+    </div>
+  )
+}
 
 // What a routine asked, posted at its time; the agent's reply comes next.
 function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {

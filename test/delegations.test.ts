@@ -110,11 +110,12 @@ describe('work handed down the tree', () => {
     expect(root?.run?.delegation).toEqual({ id: d.id, to: 'clara', conversationId: 'clientes', rootId: root!.id })
 
     // In the DM: Orion's reply that asked, with no text (the line under my message says whom it asked and
-    // how it stands), and Orion closing the subject in the thread of my message. Nothing in Clara's name.
+    // how it stands), and Orion closing the subject, both in the thread of my message. Nothing in Clara's name.
     const dm = db.messages().filter((m) => m.conversationId === 'dm' && m.author.kind === 'agent')
     expect(dm.map((m) => (m.author as { id: string }).id)).toEqual(['orion', 'orion'])
     expect(dm[0]).toMatchObject({ text: '', run: { delegations: [root!.run!.delegation] } })
-    expect(dm[0]?.threadId).toBeUndefined()
+    // The reply that asked moved into the thread of my message: the subject lives there.
+    expect(dm[0]?.threadId).toBe(asked!.id)
     expect(dm[0]?.run?.steps.map((s) => s.label)).toContain('Pediu a Clara')
     expect(dm[1]).toMatchObject({ threadId: asked!.id, text: 'Pronto: o time terminou o que pedi.' })
     expect(db.messages().some((m) => m.conversationId === 'dm' && m.author.kind === 'system')).toBe(false)
@@ -597,7 +598,7 @@ describe('work handed down the tree', () => {
     expect(by('bento', 'eng').length).toBeGreaterThanOrEqual(2)
     // The request ends with Bento's reply to what I wrote, not with the one that was under way.
     expect(db.delegationAt(root!.id)).toMatchObject({ state: 'done', told: true, result: by('bento', 'eng').at(-1)!.id })
-    expect(under(mine('dm')[0]!).filter((m) => m.author.kind === 'agent').map((m) => m.text)).toEqual(['Pronto: o time terminou o que pedi.'])
+    expect(under(mine('dm')[0]!).filter((m) => m.author.kind === 'agent').map((m) => m.text)).toEqual(['', 'Pronto: o time terminou o que pedi.']) // the reply that asked, then the closing
   }, 15_000)
 
   it('keeps a request to someone in the same channel inside the thread, and closes the outer one only when it comes back', async () => {
@@ -621,7 +622,7 @@ describe('work handed down the tree', () => {
     expect(outer).toMatchObject({ state: 'done', told: true, result: thread[3]!.id })
     // Orion heard once, with Bento's closing answer.
     expect(codex.turns.filter((t) => /Voltou do que você pediu/.test(t.prompt))).toHaveLength(1)
-    expect(under(mine('dm')[0]!).filter((m) => m.author.kind === 'agent').map((m) => m.text)).toEqual(['Pronto: o time terminou o que pedi.'])
+    expect(under(mine('dm')[0]!).filter((m) => m.author.kind === 'agent').map((m) => m.text)).toEqual(['', 'Pronto: o time terminou o que pedi.']) // the reply that asked, then the closing
   })
 
   // A request whose thread has nothing after it at all: the one asked never wrote a line, no error
