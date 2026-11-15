@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **The Memory page's bot tabs stay in the bar, however many bots there are.** The strip of tabs (All, You, one per bot with notes, Forgotten) was a plain row that ran past the 720 px column as soon as a few bots had notes, so the tabs after the first few, and the search control with them, could not be reached at all. The strip now scrolls inside the bar, the tab you pick slides to the middle of it, and two borderless arrows page it a screenful at a time, each offered only while there is strip in that direction. (#396)
+
 ### Fixed
 
 - **A dropdown's arrow sits inside the field.** Every native dropdown (a member's role, the invite's role, who covers for you, the activity filters) drew the system's arrow flush against its right border, whatever the padding. It now draws the same caret as the app's other dropdowns, 10 px in from the edge, in the theme's color, light or dark. Thanks, eialanjones! (#477)
@@ -121,7 +125,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
-
 
 ## [0.2.28] - 2026-11-12
 
