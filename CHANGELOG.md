@@ -4,6 +4,16 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **A request to the team reads like a thread at work.** Asking the agent on top for something it passes on used to fill your conversation with it: a line from it right away saying whom it asked, the answer in the name of whoever did the work, a question from them, and then the agent's summary. Now each piece of work happens in a thread in the channel of whoever does it, and nothing reaches you until it's done.
+  - **While it works,** there's no new message. Under the agent's reply, a line per request says whom it asked, where, and how it stands: working, has a question, waiting for your approval, done. An approval shows right there, and you approve it from there.
+  - **When it's done,** the agent answers once, in the thread of your message, and the line offers **See the answer**. What came back from the team goes to the agent, not to your conversation, and the whole answer stays in the request's thread.
+  - **A question** from whoever is doing it goes to the agent that asked, which answers it without writing to you; if it's yours to decide, it asks you in your message's thread.
+  - **A follow-up** written in that thread goes on in the same thread where the work was done, so whoever did it sees what it already did, instead of a new thread starting from nothing.
+  - **What you write in a request's thread** goes to whoever is doing it, and the request ends with their answer to it.
+  - **A request asked in a DM stays in a DM** when other people use the workspace, unless you write the channel's name yourself: it never ends up more visible than where you asked.
+
 ## [0.2.33] - 2026-11-15
 
 > **Em português:**

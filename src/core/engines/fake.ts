@@ -84,7 +84,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const known = /respond[ae] (?:a d[úu]vida|the question) com `([^`]+)`/i.exec(turn.prompt)
         if (waiting && known) {
           await callTool(turn.mcpUrl, 'responder_pedido', { id: waiting[1]!, resposta: known[1]! })
-          reply = 'Respondi a dúvida dele.'
+          reply = '' // answered it itself: nothing for the person to read
         } else if (waiting) {
           await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
           reply = 'Ele precisa de uma decisão sua.'
@@ -93,7 +93,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".
         const out: string[] = []
         for (const m of last.matchAll(/(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/gi)) out.push(textOf(await callTool(turn.mcpUrl, 'pedir', { para: m[1]!, pedido: m[3]!, ...(m[2] ? { canal: m[2] } : {}), ...(/prazo de (\d+) ?h/i.test(m[3]!) ? { prazo_horas: Number(/prazo de (\d+) ?h/i.exec(m[3]!)![1]) } : {}) })))
-        reply = out.join('\n')
+        // Asked: it ends with no text, as told (the person sees whom it asked under their message). What
+        // didn't go out is said.
+        reply = out.filter((t) => !/^(?:Pedido|Request) \[/.test(t)).join('\n')
+      } else if (turn.mcpUrl && /^continue (?:com|with) @?([\w-]+): (.+)/i.test(last)) {
+        // "continue com clara: e mande também pro Beltrano": the request that came back from her, in its thread.
+        const [, who, what] = /^continue (?:com|with) @?([\w-]+): (.+)/i.exec(last)!
+        const code = new RegExp(`\\[([0-9a-f]{8})\\] ${who![0]!.toUpperCase()}${who!.slice(1)},`).exec(turn.prompt)?.[1] ?? ''
+        const out = textOf(await callTool(turn.mcpUrl, 'pedir', { para: who!, pedido: what!, continuar: code }))
+        reply = /^(?:Pedido|Request) \[/.test(out) ? '' : out
       } else if (turn.mcpUrl && /^repasse: (.+)/i.test(last)) {
         // The person's answer to a question that came up from the team, passed on to whoever waits for it.
         const code = /\[([0-9a-f]{8})\][^\n]*(?:esperando uma resposta sua|waiting for an answer from you)/.exec(turn.prompt)?.[1] ?? ''

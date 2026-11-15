@@ -237,6 +237,7 @@ export interface Delegation {
   result?: string // the message it ended with
   told?: boolean // whoever asked has heard how it ended
   lateTold?: boolean // whoever asked has heard it's past its deadline
+  approval?: string // the approval its work last stopped on, shown with the request where it was asked from
   createdAt: number
   endedAt?: number
 }

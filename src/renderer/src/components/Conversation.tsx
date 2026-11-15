@@ -1061,10 +1061,14 @@ function ReturnedLine({ message, at, agent, text, components }: { message: Messa
   )
 }
 
-// reply that handed it; otherwise on what came back from it (an answer, a question).
+// reply that handed it; otherwise on what came back from it (an answer, a question). Under the reply that
+// handed it, it is the request's status line: how it stands now, the approval its work waits on (approved
+// right there), and, once it's done, a way to the answer in the thread of what the person asked.
 function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolean; from?: string }): ReactNode {
   const to = useStore((s) => agentById(s, at.to))
   const agents = useStore((s) => s.agents)
+  const d = useStore((s) => (asked ? s.delegations.find((x) => x.id === at.id) : undefined))
+  const approval = useStore((s) => (d?.state === 'open' && d.approval ? s.approvals.find((a) => a.id === d.approval && a.state === 'pending') : undefined))
   const kind = from && to ? askWay(agents, { from, to: at.to }) : undefined
   const label =
     kind === 'up'
@@ -1074,31 +1078,59 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
         : undefined
   const channel = useStore((s) => s.conversations.find((c) => c.id === at.conversationId))
   if (!channel) return null // a channel this person doesn't see, or one that's gone
+  const state = !d
+    ? null
+    : d.state === 'open'
+      ? d.asking
+        ? { tone: 'is-warn', text: L('com uma dúvida', 'has a question') }
+        : approval
+          ? { tone: 'is-warn', text: L('esperando sua aprovação', 'waiting for your approval') }
+          : { tone: 'is-live', text: L('trabalhando', 'working') }
+      : d.state === 'done'
+        ? { tone: 'is-done', text: L('concluído', 'done') }
+        : d.state === 'cancelled'
+          ? { tone: '', text: L('cancelado', 'cancelled') }
+          : { tone: 'is-warn', text: L('não terminou', 'did not finish') }
+  const answer = d && d.state !== 'open' && d.originThreadId ? d.originThreadId : undefined
   return (
-    <div className="memory-chip delegation-chip">
-      <Icon name="users" size={13} />
-      {label ? (
-        <>
-          <span className="memory-chip__label">{label}</span>
-          {kind === 'up' && <span className="memory-chip__text">{to?.name}</span>}
-        </>
-      ) : (
-        <>
-          <span className="memory-chip__label">{asked ? L('Pediu a', 'Asked') : L('Do pedido a', 'From the request to')}</span>
-          <span className="memory-chip__text">{to?.name ?? L('um agente', 'an agent')}</span>
-        </>
-      )}
-      <span className="muted small">{channel.kind === 'dm' ? 'DM' : `#${channel.name}`}</span>
-      <button
-        className="link"
-        onClick={() => {
-          navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
-          openThread(at.rootId)
-        }}
-      >
-        {L('Abrir a thread', 'Open the thread')}
-      </button>
-    </div>
+    <>
+      <div className="memory-chip delegation-chip">
+        <Icon name="users" size={13} />
+        {label ? (
+          <>
+            <span className="memory-chip__label">{label}</span>
+            {kind === 'up' && <span className="memory-chip__text">{to?.name}</span>}
+          </>
+        ) : (
+          <>
+            <span className="memory-chip__label">{asked ? L('Pediu a', 'Asked') : L('Do pedido a', 'From the request to')}</span>
+            <span className="memory-chip__text">{to?.name ?? L('um agente', 'an agent')}</span>
+          </>
+        )}
+        <span className="muted small">{channel.kind === 'dm' ? 'DM' : `#${channel.name}`}</span>
+        {state && (
+          <span className={`request-note__state ${state.tone}`}>
+            <i />
+            {state.text}
+          </span>
+        )}
+        <button
+          className="link"
+          onClick={() => {
+            navigate({ kind: 'conversation', id: at.conversationId, message: at.rootId })
+            openThread(at.rootId)
+          }}
+        >
+          {L('Abrir a thread', 'Open the thread')}
+        </button>
+        {answer && (
+          <button className="link" onClick={() => openThread(answer)}>
+            {L('Ver a resposta', 'See the answer')}
+          </button>
+        )}
+      </div>
+      {approval && <ApprovalCard approval={approval} compact />}
+    </>
   )
 }
 
