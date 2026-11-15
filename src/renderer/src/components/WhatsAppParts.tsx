@@ -2,13 +2,14 @@
 // what happens when a message arrives, the limits, the official API's address) and the helpers they share.
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { ALL_CHATS, GROUP_ACTIONS_PER_DAY, GROUP_PEOPLE_PER_ACTION, LIMITS, MEDIA_OUT_MAX,type WhatsAppAccess, type WhatsAppChat, type WhatsAppNumber, type WhatsAppSettings, type WhatsAppTemplate } from '../../../shared/whatsapp'
+import { ALL_CHATS, GROUP_ACTIONS_PER_DAY, GROUP_PEOPLE_PER_ACTION, LIMITS, MEDIA_OUT_MAX,type WhatsAppAccess, type WhatsAppChat, type WhatsAppNumber, type WhatsAppSettings } from '../../../shared/whatsapp'
 import { call } from '../rpc'
 import { isTeam, toast, type Agent } from '../store'
 import { confirmDialog } from './Dialogs'
 import { Card, Toggle } from './Pages'
 import { Select } from './Select'
 import { AgentAvatar, Icon, UsageBar } from './ui'
+import { Templates } from './WhatsAppTemplates'
 
 // What a person reads when a call failed: the core's sentence, without the transport's prefix.
 export const errText = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
@@ -496,22 +497,6 @@ function CopyRow({ label, value }: { label: string; value: string }): ReactNode 
 }
 
 export function CloudCard({ n, webhookUrl, verifyToken }: { n: WhatsAppNumber; webhookUrl?: string; verifyToken?: string }): ReactNode {
-  const [templates, setTemplates] = useState<WhatsAppTemplate[] | null>(null)
-  const [error, setError] = useState('')
-  const seq = useRef(0)
-  const load = async (): Promise<void> => {
-    const mine = ++seq.current
-    setError('')
-    try {
-      const list = await call('whatsappTemplates', { id: n.id })
-      if (mine === seq.current) setTemplates(list)
-    } catch (e) {
-      if (mine === seq.current) setError(errText(e))
-    }
-  }
-  useEffect(() => {
-    void load()
-  }, [n.id, n.status])
   return (
     <Card title={L('API oficial: endereço e modelos', 'Official API: address and templates')} lead={L('A Meta avisa o Tucano de cada mensagem nova por este endereço (webhook).', 'Meta tells Tucano about each new message through this address (webhook).')}>
       {webhookUrl && verifyToken ? (
@@ -527,34 +512,7 @@ export function CloudCard({ n, webhookUrl, verifyToken }: { n: WhatsAppNumber; w
       ) : (
         <p className="muted small">{L('O endereço aparece aqui quando o Tucano estiver num servidor com https.', 'The address shows up here when Tucano runs on a server with https.')}</p>
       )}
-      <div className="wa-templates">
-        <strong>{L('Mensagens modelo aprovadas', 'Approved templates')}</strong>
-        {error ? (
-          <div className="note note--error">
-            <p>{error}</p>
-            <button className="btn btn--sm" onClick={() => void load()}>{L('Tentar de novo', 'Try again')}</button>
-          </div>
-        ) : templates === null ? (
-          <p className="muted small"><span className="spinner wa-inline-spinner" />{L('Buscando na Meta…', 'Fetching from Meta…')}</p>
-        ) : templates.length === 0 ? (
-          <p className="muted small">{L('Nenhum modelo aprovado ainda. Crie um no painel da Meta: é com ele que se começa uma conversa.', 'No approved template yet. Create one in Meta’s panel: that’s how a conversation starts.')}</p>
-        ) : (
-          <div className="table">
-            {templates.map((t) => (
-              <div className="table__row wa-template" key={`${t.name}/${t.language}`}>
-                <div className="grow">
-                  <div className="row wa-wrap">
-                    <strong className="mono">{t.name}</strong>
-                    <span className="tag">{t.language}</span>
-                    {t.variables > 0 && <span className="tag">{L(`${t.variables} variáveis`, `${t.variables} variables`)}</span>}
-                  </div>
-                  <div className="muted small wa-template__body">{t.body}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <Templates numberId={n.id} status={n.status} />
     </Card>
   )
 }
