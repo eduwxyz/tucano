@@ -195,6 +195,20 @@ describe('grants', () => {
 describe('approvals', () => {
   const askDelete = (turn: Turn): Plan => (turn.prompt.includes('apaga') && !turn.prompt.includes('aprovou') && !turn.prompt.includes('recusou') ? { tool: 'tarefas__delete_task', args: { id: 2, _motivo: 'está duplicada' } } : null)
 
+  it('keeps the approval handed work stopped on with the request, so the person approves it where they asked', async () => {
+    db.saveAgent({ ...agent('read_write'), reportsTo: 'o1' })
+    db.saveAgent({ ...agent('none'), id: 'o1', name: 'Orion', handle: 'orion', modelId: 'gpt-5.6-luna', grants: {} })
+    db.createConversation({ id: 'do', kind: 'dm', name: 'o1', members: ['o1'] })
+    const r = runner(askDelete)
+    await r.send('do', 'delegue a lia: apaga a tarefa 2')
+    await r.idle()
+    const [d] = db.liveDelegations(0)
+    expect(d).toMatchObject({ from: 'o1', to: 'a1', state: 'open' })
+    expect(db.approval(d!.approval!)).toMatchObject({ state: 'pending', tool: 'delete_task', agentId: 'a1' })
+    // Nothing woke Orion to tell me: the approval shows under its message in the DM.
+    expect(db.messages().filter((m) => m.conversationId === 'do' && m.author.kind === 'agent')).toHaveLength(1)
+  })
+
   it('a sensitive call becomes a pending approval and nothing runs', async () => {
     db.saveAgent(agent('read_write'))
     const r = runner(askDelete)

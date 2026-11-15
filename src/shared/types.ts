@@ -180,6 +180,7 @@ export interface Run {
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
+  handed?: string // the request (Delegation) this reply works on: what it ends with goes back to whoever asked
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
@@ -210,6 +211,7 @@ export interface DelegationRef {
   to: string // the agent doing it
   conversationId: string
   rootId: string
+  threadId?: string // the thread it is worked in, when it was asked inside another's (rootId is then the asking message)
   back?: 'result' // on the message that brought the answer back to where it was asked: shown folded there
 }
 
@@ -221,7 +223,8 @@ export interface Delegation {
   from: string // the agent that asked
   to: string // the agent asked
   conversationId: string // where the work is done
-  rootId: string // the message that opened its thread there
+  rootId: string // the message that asked for it there: it opens its thread, or sits in `threadId`
+  threadId?: string // the thread it is worked in, when asked inside one already there (a request's, in the same channel)
   originConversationId: string // where it was asked from
   originThreadId?: string
   originMessageId: string // the reply that asked
@@ -237,6 +240,7 @@ export interface Delegation {
   result?: string // the message it ended with
   told?: boolean // whoever asked has heard how it ended
   lateTold?: boolean // whoever asked has heard it's past its deadline
+  approval?: string // the approval its work last stopped on, shown with the request where it was asked from
   createdAt: number
   endedAt?: number
 }
