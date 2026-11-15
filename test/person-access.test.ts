@@ -4,9 +4,10 @@ import { accessSummary, cleanAccess, EVERYTHING, visibleAgentIds } from '../src/
 import { setLang } from '../src/shared/lang'
 import type { Snapshot } from '../src/shared/rpc'
 import type { Agent, Person, PersonAccess, Settings } from '../src/shared/types'
-import { assertAgentVisible, assertChannelVisible } from '../src/core/access-policy'
+import { assertAgentVisible, assertChannelVisible, routineCut } from '../src/core/access-policy'
+import { can } from '../src/core/policy-people'
 import { Db } from '../src/core/db'
-import { People } from '../src/core/people'
+import { deciders, People, requesterOf } from '../src/core/people'
 
 const agent = (id: string, extra: Partial<Agent> = {}): Agent => ({ id, name: id, handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const picked = (p: Partial<PersonAccess> = {}): PersonAccess => ({ mode: 'picked', sectors: [], agents: [], channels: [], ...p })
@@ -170,5 +171,68 @@ describe('what a restricted member can reach', () => {
     expect(() => people.setPersonAccess(dani, ana.id, picked())).toThrow()
     expect(people.setPersonAccess(dani, carl.id, picked({ agents: ['hidden'] })).access).toEqual(picked({ agents: ['hidden'] }))
     expect(db.activity({ kind: 'person.access' }).length).toBe(1)
+  })
+})
+
+describe('work an agent hands down for a restricted member', () => {
+  it('runs for the member who asked, not for the owner, all the way down the chain', () => {
+    const { db, ana, bia } = team()
+    const conv = db.conversation('ch2')!
+    const hand = (id: string, rootId: string, requestedBy: string): void =>
+      db.saveDelegation({ id, from: 'head', to: 'w1', conversationId: conv.id, rootId, originConversationId: 'ch', originMessageId: 'm0', requestedBy, text: 'faça', state: 'open', createdAt: 1 })
+    hand('d1', 'root-bia', bia.id)
+    expect(requesterOf(db, conv, [], 'root-bia').id).toBe(bia.id)
+    hand('d2', 'root-ana', ana.id)
+    expect(requesterOf(db, conv, [], 'root-ana').id).toBe(ana.id)
+    expect(requesterOf(db, conv, []).id).toBe(ana.id) // a bare channel, as before
+    expect(requesterOf(db, conv, [], 'no-such-thread').id).toBe(ana.id)
+  })
+
+  it('a person who writes in that thread is who it is for from then on', () => {
+    const { db, ana, bia } = team()
+    const conv = db.conversation('ch2')!
+    db.saveDelegation({ id: 'd1', from: 'head', to: 'w1', conversationId: conv.id, rootId: 'root', originConversationId: 'ch', originMessageId: 'm0', requestedBy: bia.id, text: 'faça', state: 'open', createdAt: 1 })
+    const said = { id: 'm1', conversationId: conv.id, threadId: 'root', author: { kind: 'person', id: ana.id }, text: 'eu assumo', at: 2 } as unknown as Parameters<typeof requesterOf>[2][number]
+    expect(requesterOf(db, conv, [said], 'root').id).toBe(ana.id)
+  })
+})
+
+describe('covering for someone', () => {
+  it('a restricted member cannot be picked to cover; anyone else can', () => {
+    const { people, ana, bia, carl } = team()
+    const week = Date.now() + 7 * 86_400_000
+    expect(() => people.setDelegation(carl, bia.id, week)).toThrow('Bia não vê todo o time, então não pode cobrir ninguém.')
+    setLang('en')
+    expect(() => people.setDelegation(carl, bia.id, week)).toThrow("Bia doesn't see the whole team, so they can't cover for anyone.")
+    expect(() => people.setDelegation(carl, ana.id, week)).not.toThrow()
+  })
+
+  it('one who becomes restricted stops covering, and an old cover to them decides and answers nothing', () => {
+    const { db, people, ana, bia, carl } = team()
+    const week = Date.now() + 7 * 86_400_000
+    db.saveAgent(agent('carls', { owner: carl.id }))
+    // From before the rule: Carl left Bia covering for him.
+    db.setDelegation(carl.id, bia.id, week)
+    expect(deciders(db, 'carls')).not.toContain(bia.id)
+    expect(can(bia, { kind: 'approval', agentOwner: db.person(carl.id) })).toBe(false)
+    db.saveQuestion({ id: 'q1', conversationId: 'ch2', agentId: 'carls', text: 'Qual o orçamento?', askedTo: carl.id, requestedBy: carl.id, state: 'open', deadlineAt: week, createdAt: 1 })
+    expect(people.inbox(db.person(bia.id)!).questions).toHaveLength(0)
+    expect(can(bia, { kind: 'question', question: db.openQuestions()[0]!, askedTo: db.person(carl.id) })).toBe(false)
+    // Dani-less: Carl covers for Ana, then Ana cuts Carl down: the cover ends.
+    db.setDelegation(ana.id, carl.id, week)
+    expect(deciders(db, 'carls')).toContain(carl.id)
+    people.setPersonAccess(ana, carl.id, picked({ agents: ['carls'] }))
+    expect(db.person(ana.id)?.delegateTo).toBeUndefined()
+  })
+})
+
+describe('a restricted member\'s routines', () => {
+  it('stop in a channel they no longer see, even with an agent they still see', () => {
+    const { db, bia, carl } = team()
+    const r = { agentId: 'head', owner: bia.id }
+    expect(routineCut(db, { ...r, conversationId: 'ch' })).toBe(false)
+    expect(routineCut(db, { ...r, conversationId: 'ch2' })).toBe(true)
+    expect(routineCut(db, { ...r, agentId: 'hidden', conversationId: 'ch' })).toBe(true)
+    expect(routineCut(db, { agentId: 'hidden', owner: carl.id, conversationId: 'ch2' })).toBe(false) // sees everything
   })
 })

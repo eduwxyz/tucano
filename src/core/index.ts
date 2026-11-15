@@ -1516,7 +1516,7 @@ const api: Handlers = {
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
-    if (before?.reportsTo !== clean.reportsTo) refreshRestricted() // a sector's reach moves with whom it answers to
+    if (before?.reportsTo !== clean.reportsTo || !!before?.entry !== !!clean.entry) refreshRestricted() // a sector's reach moves with whom it answers to, and with whether it is an entry point
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})

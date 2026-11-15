@@ -64,10 +64,13 @@ export function assertReplyVisible(db: Db, person: Who, messageId: string): void
   if (author?.kind === 'agent' && restricted(person) && !seesAgent(person, db.agents(), author.id)) throw new Error(hiddenAgentError())
 }
 
-// A routine whose person (its owner) can no longer see its agent: it doesn't run.
-export function routineCut(db: Db, r: Pick<Routine, 'agentId' | 'owner'>): boolean {
+// A routine whose person (its owner) can no longer see its agent, or the channel it posts in: it doesn't run.
+export function routineCut(db: Db, r: Pick<Routine, 'agentId' | 'owner' | 'conversationId'>): boolean {
   const owner = r.owner ? db.person(r.owner) : undefined
-  return restricted(owner) && !seesAgent(owner, db.agents(), r.agentId)
+  if (!restricted(owner)) return false
+  if (!seesAgent(owner, db.agents(), r.agentId)) return true
+  const c = db.conversation(r.conversationId)
+  return !!c && !withinAccess(db, owner!, c)
 }
 
 // The people whose view is cut down now: their open pages read it again when what they see changes.

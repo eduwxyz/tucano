@@ -5,12 +5,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
-import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type PersonAccess, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
+import { CODE_SPANS, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type PersonAccess, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
 import { agentsFor, assertAgentVisible, peopleFor, viewedConversations, withinAccess } from './access-policy'
-import { cleanAccess, EVERYTHING, restricted, seesAgent } from '../shared/access'
+import { cleanAccess, covers, EVERYTHING, restricted, seesAgent } from '../shared/access'
 
 export { isAdmin }
 
@@ -40,7 +40,7 @@ export const agentOwner = (db: Db, agentId: string): Person | undefined => {
 // whoever covers for that person now.
 export function deciders(db: Db, agentId: string, now = Date.now()): string[] {
   const owner = agentOwner(db, agentId)
-  return db.people().filter((p) => isAdmin(p) || p.id === owner?.id || delegating(owner, p.id, now)).map((p) => p.id)
+  return db.people().filter((p) => isAdmin(p) || p.id === owner?.id || covers(owner, p, now)).map((p) => p.id)
 }
 
 // A routine's person: whose own it is (a channel routine is the team's: none).
@@ -48,14 +48,18 @@ export const routinePerson = (db: Db, r: Pick<Routine, 'scope' | 'owner'> | unde
   r && r.scope !== 'channel' && r.owner ? db.person(r.owner) : undefined
 
 // Whom a reply is for: a DM's person; in a channel, whoever wrote last in what it reads (a
-// routine's person for a routine run; a channel routine, the Tucano's owner); otherwise the owner.
-export function requesterOf(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[]): Person {
+// routine's person for a routine run; a channel routine, the Tucano's owner); in the thread of work
+// an agent handed down (`pedir`) where no person wrote, the person that work was asked for, so a
+// restricted person's ask stays within what they see all the way down; otherwise the owner.
+export function requesterOf(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], threadId?: string): Person {
   const owner = db.owner()
   const dm = dmOwner(conv, owner.id)
   if (dm) return db.person(dm) ?? owner
   const last = [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine')
   if (last?.author.kind === 'routine') return routinePerson(db, db.routine(last.author.id)) ?? owner
-  return (last?.author.kind === 'person' && db.person(last.author.id)) || owner
+  if (last?.author.kind === 'person') return db.person(last.author.id) ?? owner
+  const handed = threadId ? db.delegationAt(threadId) : undefined
+  return (handed && db.person(handed.requestedBy)) || owner
 }
 
 // The people whose memories ("about me") a reply gets: a DM's person; in a channel, the people who
@@ -468,7 +472,7 @@ export class People {
       const waiting =
         q.confirm === 'pending'
           ? q.requestedBy === person.id
-          : q.askedTo === person.id || delegating(this.db.person(q.askedTo), person.id, now) || (now >= q.deadlineAt && q.requestedBy === person.id)
+          : q.askedTo === person.id || covers(this.db.person(q.askedTo), person, now) || (now >= q.deadlineAt && q.requestedBy === person.id)
       if (!waiting) return []
       // Its decisions, to answer them on the card from here too (the question only, as its text is).
       const run = this.db.message(q.id)?.run
@@ -693,6 +697,7 @@ export class People {
     if (p.role !== 'member') throw new Error(L('Admins e o dono sempre veem tudo.', 'Admins and the owner always see everything.'))
     this.db.setPersonAccess(id, this.cleanAccess(access))
     const now = this.db.person(id)!
+    if (restricted(now)) this.db.dropCoversBy(id) // someone restricted covers for no one (see covers)
     this.db.addActivity({ personId: by.id, kind: 'person.access', target: id, detail: { mode: now.access?.mode ?? 'all', agents: now.access?.agents.length ?? 0, sectors: now.access?.sectors.length ?? 0, channels: now.access?.channels.length ?? 0 } })
     return now
   }
@@ -708,7 +713,9 @@ export class People {
       this.db.addActivity({ personId: by.id, kind: 'person.delegation', target: by.id, detail: { to: null }, at: now })
       return
     }
-    if (to === by.id || !this.db.person(to)) throw new Error(L('Escolha outra pessoa do Tucano.', 'Pick someone else in this Tucano.'))
+    const who = this.db.person(to)
+    if (to === by.id || !who) throw new Error(L('Escolha outra pessoa do Tucano.', 'Pick someone else in this Tucano.'))
+    if (restricted(who)) throw new Error(L(`${who.name} não vê todo o time, então não pode cobrir ninguém.`, `${who.name} doesn't see the whole team, so they can't cover for anyone.`))
     if (typeof until !== 'number' || !Number.isFinite(until) || until <= now) throw new Error(L('Escolha até quando.', 'Pick until when.'))
     this.db.setDelegation(by.id, to, until)
     this.db.addActivity({ personId: by.id, kind: 'person.delegation', target: by.id, detail: { to, until }, at: now })

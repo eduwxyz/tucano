@@ -7,7 +7,6 @@ import {
   amAdmin,
   amOwner,
   createInvite,
-  delegating,
   doneNaming,
   initials,
   inviteLink,
@@ -34,7 +33,7 @@ import {
   type Person,
   type State
 } from '../store'
-import { accessSummary, restricted } from '../../../shared/access'
+import { accessSummary, covers, restricted } from '../../../shared/access'
 import { toolWords } from './Conversation'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -162,7 +161,7 @@ export function PeoplePane(): ReactNode {
                     {p.about && <span className="muted"> · {p.about}</span>}
                   </span>
                   <span className="muted small">
-                    {[seenLine(p), owned.length ? L(`dono de ${owned.join(', ')}`, `owns ${owned.join(', ')}`) : '', p.delegateTo && delegating(p, p.delegateTo) ? L(`coberto por ${personById({ people }, p.delegateTo)?.name ?? '…'}`, `covered by ${personById({ people }, p.delegateTo)?.name ?? '…'}`) : '']
+                    {[seenLine(p), owned.length ? L(`dono de ${owned.join(', ')}`, `owns ${owned.join(', ')}`) : '', p.delegateTo && covers(p, personById({ people }, p.delegateTo)) ? L(`coberto por ${personById({ people }, p.delegateTo)?.name ?? '…'}`, `covered by ${personById({ people }, p.delegateTo)?.name ?? '…'}`) : '']
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
@@ -434,8 +433,9 @@ function MeCard(): ReactNode {
   const [about, setAbout] = useState(me?.about ?? '')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
-  const others = people.filter((p) => p.id !== me?.id)
-  const covering = me?.delegateTo && delegating(me, me.delegateTo) ? personById({ people }, me.delegateTo) : undefined
+  const others = people.filter((p) => p.id !== me?.id && !restricted(p)) // someone restricted covers for no one (see covers)
+  const left = people.some((p) => p.id !== me?.id && restricted(p))
+  const covering = me?.delegateTo && covers(me, personById({ people }, me.delegateTo)) ? personById({ people }, me.delegateTo) : undefined
   const [to, setTo] = useState(others[0]?.id ?? '')
   const [until, setUntil] = useState(dateInput(Date.now() + 7 * 86_400_000))
   useEffect(() => {
@@ -480,9 +480,7 @@ function MeCard(): ReactNode {
                 ? L(`${covering.name} responde e aprova por você até ${time(me.delegateUntil!)}.`, `${covering.name} answers and approves for you until ${time(me.delegateUntil!)}.`)
                 : L('Enquanto você estiver fora, alguém responde às perguntas e decide as aprovações que seriam suas.', 'While you’re away, someone answers the questions and decides the approvals that would be yours.')}
             </p>
-            {!covering && restricted(people.find((p) => p.id === to)) && (
-              <p className="access-cover-hint small">{L(`${people.find((p) => p.id === to)?.name.split(/\s+/)[0]} decide seus pedidos de aprovação, mas só abre as conversas que pode ver.`, `${people.find((p) => p.id === to)?.name.split(/\s+/)[0]} decides your approval requests, but only opens the conversations they can see.`)}</p>
-            )}
+            {!covering && left && <p className="access-cover-hint small">{L('Quem não vê todo o time não aparece aqui: cobrir você é decidir aprovações de qualquer agente.', 'Who doesn’t see the whole team isn’t listed: covering for you means deciding approvals from any agent.')}</p>}
             {!covering && (
               <div className="row row--center cover-row">
                 <select value={to} aria-label={L('Quem', 'Who')} onChange={(e) => setTo(e.target.value)}>

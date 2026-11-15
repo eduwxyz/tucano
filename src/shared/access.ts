@@ -4,7 +4,7 @@
 // below it, as the org chart has it now), and Tuca, who helps everyone. Their own DMs are theirs as always.
 import { headsOf, reportsOf } from './org'
 import { L } from './lang'
-import type { Agent, Conversation, Person, PersonAccess } from './types'
+import { delegating, type Agent, type Conversation, type Person, type PersonAccess } from './types'
 
 type Who = Pick<Person, 'role' | 'access'>
 type AgentNode = Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind' | 'entry'>>
@@ -13,6 +13,11 @@ export const EVERYTHING: PersonAccess = { mode: 'all', sectors: [], agents: [], 
 
 // Whether this person's view is cut down at all.
 export const restricted = (p: Who | undefined): boolean => !!p && p.role === 'member' && p.access?.mode === 'picked'
+
+// Whether `who` covers for `of` right now. Never someone restricted: covering decides another
+// person's approvals and answers their questions, whatever agent or channel they come from.
+export const covers = (of: Pick<Person, 'delegateTo' | 'delegateUntil'> | undefined, who: (Who & Pick<Person, 'id'>) | undefined, now = Date.now()): boolean =>
+  !!who && !restricted(who) && delegating(of, who.id, now)
 
 // The agents this person sees, or undefined when they see them all.
 export function visibleAgentIds(p: Who | undefined, agents: AgentNode[]): Set<string> | undefined {

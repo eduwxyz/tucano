@@ -37,7 +37,6 @@ import {
   type Device,
   type Invite,
   type ActivityEntry,
-  delegating,
   type Routine,
   type RoutineInput,
   type Settings,
@@ -60,6 +59,7 @@ import {
   type ProposalsResult,
   type BackupSummary
 } from '../../shared/types'
+import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
 import { hashToView, viewToHash } from './address'
 
@@ -733,7 +733,7 @@ export const roleLabel = (r: Person['role']): string => (r === 'owner' ? L('Dono
 export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<Approval, 'agentId'>): boolean => {
   if (amAdmin(s)) return true
   const owner = personById(s, s.agents.find((x) => x.id === a.agentId)?.owner)
-  return !!owner && (owner.id === s.you || delegating(owner, s.you))
+  return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))
 }
 // How many things wait on me (approvals I decide, questions, cards members sent).
 export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)

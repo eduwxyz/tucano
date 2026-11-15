@@ -1963,6 +1963,11 @@ export class Db {
     this.db.prepare("UPDATE people SET access = ? WHERE id = ? AND role = 'member'").run(clean.mode === 'all' ? null : JSON.stringify(clean), id)
   }
 
+  // No one is covered by this person any more.
+  dropCoversBy(personId: string): void {
+    this.db.prepare('UPDATE people SET delegate_to = NULL, delegate_until = NULL WHERE delegate_to = ?').run(personId)
+  }
+
   // Someone answering and approving for this person until then; none ends it.
   setDelegation(personId: string, to?: string, until?: number): void {
     this.db.prepare('UPDATE people SET delegate_to = ?, delegate_until = ? WHERE id = ?').run(to ?? null, to && until ? until : null, personId)

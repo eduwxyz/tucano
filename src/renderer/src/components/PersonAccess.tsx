@@ -93,7 +93,7 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
     <div className="access">
       <div className="access-modes" role="radiogroup" aria-label={L('O que a pessoa vê', 'What they see')}>
         {mode('all', L('Vê tudo', 'Sees everything'), L('Todos os agentes e canais, como hoje.', 'All agents and channels, as today.'))}
-        {mode('picked', L('Só o que eu escolher', 'Only what I pick'), L(`${who ? firstName(who) : 'A pessoa'} vê só o que você marcar.`, `${who ? firstName(who) : 'They'} see only what you mark.`))}
+        {mode('picked', L('Só o que eu escolher', 'Only what I pick'), L(`${who ? firstName(who) : 'A pessoa'} vê só o que você marcar.`, who ? `${firstName(who)} sees only what you mark.` : 'They see only what you mark.'))}
       </div>
 
       {picked && (
@@ -113,12 +113,12 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
                   return (
                     <div key={head.id} className="access-sector">
                       <div className="access-sector__head">
-                        <button type="button" role="checkbox" aria-checked={state === 'part' ? 'mixed' : state === 'on'} aria-label={sectorName(head)} className="access-sector__check" onClick={() => toggleSector(head, members)}>
+                        <button type="button" role="checkbox" aria-checked={state === 'part' ? 'mixed' : state === 'on'} aria-label={sectorName(head, L('Setor de', 'Sector of'))} className="access-sector__check" onClick={() => toggleSector(head, members)}>
                           <Box state={state} />
                         </button>
                         <button type="button" className="access-sector__open" aria-expanded={isOpen} onClick={() => setOpen({ ...open, [head.id]: !isOpen })}>
                           <span className="access-sector__name">
-                            <strong>{sectorName(head)}</strong>
+                            <strong>{sectorName(head, L('Setor de', 'Sector of'))}</strong>
                             <span>{others.length === 0 ? head.name : others.length === 1 ? sentence([head.name, others[0]!.name]) : L(`${head.name} e mais ${others.length}`, `${head.name} and ${others.length} more`)}</span>
                           </span>
                           <span className="access-count">{L(`${marked} de ${members.length}`, `${marked} of ${members.length}`)}</span>
@@ -177,7 +177,7 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
             </span>
             {hiddenText.length > 0 && (
               <span className="access-no">
-                {L('Não vai ver:', "Won't see:")} {sentence(hiddenText)}. {L(`Os agentes que ficam de fora também não são chamados a pedido dessa pessoa.`, 'The agents left out are not called on this person’s behalf either.')}
+                {L('Não vai ver:', "Won't see:")} {sentence(hiddenText)}. {L(`Os agentes que ficam de fora também não são chamados a pedido dessa pessoa.`, 'The agents left out are not called on this person’s behalf either.')} {L('A wiki continua aberta a todos, inclusive o que ela resume desses canais.', 'The wiki stays open to everyone, including what it sums up from these channels.')}
               </span>
             )}
           </>

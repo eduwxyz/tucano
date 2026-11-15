@@ -6,7 +6,7 @@ import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -34,6 +34,7 @@ import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { agentsFor } from './access-policy'
+import { covers } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
@@ -1114,7 +1115,7 @@ export class Runner {
     const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
-    const requester = requesterOf(db, conv, windowAll)
+    const requester = requesterOf(db, conv, windowAll, msg.threadId)
     const peers = agentsFor(requester, members).filter((a) => a.id !== agent.id) // a restricted person's reply lists only the peers they see
     // What the person this reply is for can see: never someone else's DM (nor what lives in one), nor
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
@@ -2722,7 +2723,7 @@ ${note}`,
     const { db } = this.deps
     const people = new People(db)
     const target = db.person(q.askedTo)
-    const to = [q.askedTo, ...db.people().filter((p) => delegating(target, p.id)).map((p) => p.id)]
+    const to = [q.askedTo, ...db.people().filter((p) => covers(target, p)).map((p) => p.id)]
     const seeing = to.filter((id) => people.canSeeFrom(db.person(id)!, q.conversationId))
     const title = L(`${agentName} te perguntou`, `${agentName} asked you`)
     if (seeing.length) this.deps.notify?.(title, q.text, q.conversationId, 'question', q.threadId, seeing)
@@ -3021,7 +3022,8 @@ ${note}`,
       // that is the person's to give, whenever they do, and the others shouldn't sit behind it.
       if (open.some((o) => !o.asking && !this.onApproval(o)) && returned.every((r) => r.what === 'done' || r.what === 'cancelled')) return
       for (const r of returned) this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : { ...r.d, told: true })
-      const requester = requesterOf(db, conv, [])
+      // The person the work was asked for, not whoever a bare channel would mean (the owner).
+      const requester = db.person(returned[0]!.d.requestedBy) ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
       this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true }), true)
@@ -3116,7 +3118,7 @@ ${note}`,
           const { messages: all } = contextWindow(db, msg, ROUTER_HISTORY)
           // The router reads what the person it answers may read (see People.visibleAt).
           const sees = new People(db)
-          const who = requesterOf(db, conv, all)
+          const who = requesterOf(db, conv, all, msg.threadId)
           const messages = all.filter((m) => sees.visibleAt(who, m))
           const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: agentsFor(who, this.members(conv)), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd })
           if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
