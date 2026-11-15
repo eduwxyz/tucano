@@ -62,4 +62,12 @@ describe('reasoning retention after access and preference transitions', () => {
     emit({ type: 'conversation_removed', id: 'other-room' })
     expect(store.liveThought('private-reply')).toContain('Private reasoning')
   })
+
+  it('bounds retained replies across a sustained stream of different runs', () => {
+    for (let id = 0; id < 250; id++) emit({ type: 'thinking', id: `batch-${id}`, text: `${id}:` + 'x'.repeat(20_000) })
+    expect(store.liveThought('batch-0')).toBeUndefined()
+    expect(store.liveThought('batch-249')).toHaveLength(20_000)
+    const retained = Array.from({ length: 250 }, (_, id) => store.liveThought(`batch-${id}`)).filter((text) => text !== undefined)
+    expect(retained.length).toBeLessThanOrEqual(200)
+  })
 })
