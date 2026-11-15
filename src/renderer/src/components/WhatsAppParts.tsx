@@ -402,6 +402,20 @@ export function InboundCard({ n, onSettings }: { n: WhatsAppNumber; onSettings: 
 
 // ---------- limits ----------
 
+// One limit on one line: its name, the number, and how much of it today already used.
+export function LimitRow({ label, value, onCommit, used, caption }: { label: string; value: number; onCommit: (n: number) => number; used?: number; caption: string }): ReactNode {
+  return (
+    <div className="wa-quota">
+      <span className="wa-quota__label">{label}</span>
+      <DigitsField label={label} value={value} onCommit={onCommit} />
+      <div className="wa-quota__use">
+        {used !== undefined && <UsageBar used={used} limit={value} />}
+        <span className="muted small">{caption}</span>
+      </div>
+    </div>
+  )
+}
+
 export function LimitsCard({ n, onSettings }: { n: WhatsAppNumber; onSettings: (patch: Partial<WhatsAppSettings>) => WhatsAppSettings }): ReactNode {
   const max = LIMITS[n.kind]
   const s = n.settings
@@ -411,48 +425,47 @@ export function LimitsCard({ n, onSettings }: { n: WhatsAppNumber; onSettings: (
     onSettings(field === 'dailyLimit' ? { dailyLimit: v } : { newChatsLimit: v })[field]
   const fmt = (v: number): string => v.toLocaleString()
   const mb = Math.round(MEDIA_OUT_MAX / 1024 / 1024)
+  const newMax = Math.min(s.dailyLimit, max.newChatsMax) // new conversations never pass the day's messages
   return (
     <Card title={L('Limites', 'Limits')} lead={L('Quantas mensagens os agentes mandam por este número em um dia.', 'How many messages the agents send from this number in a day.')}>
-      <div className="wa-limits">
-        <div className="wa-limit">
-          <span className="field__label">{L('Mensagens por dia', 'Messages per day')}</span>
-          <DigitsField label={L('Mensagens por dia', 'Messages per day')} value={s.dailyLimit} onCommit={(v) => commit('dailyLimit', v)} />
-          <UsageBar used={n.sentToday} limit={s.dailyLimit} />
-          <span className="muted small">{L(`Hoje: ${fmt(n.sentToday)} de ${fmt(s.dailyLimit)}`, `Today: ${fmt(n.sentToday)} of ${fmt(s.dailyLimit)}`)}</span>
-          <span className="hint wa-limit__max">{L(`No máximo ${fmt(max.dailyMax)}`, `At most ${fmt(max.dailyMax)}`)}</span>
-        </div>
-        <div className="wa-limit">
-          <span className="field__label">{L('Conversas novas por dia', 'New conversations per day')}</span>
-          <DigitsField label={L('Conversas novas por dia', 'New conversations per day')} value={s.newChatsLimit} onCommit={(v) => commit('newChatsLimit', v)} />
-          <span className="hint">{L('Conversa nova é com alguém que nunca escreveu para este número. Essa primeira mensagem sempre pede a sua aprovação.', 'A new conversation is with someone who never wrote to this number. That first message always asks for your approval.')}</span>
-          <UsageBar used={n.newToday} limit={s.newChatsLimit} />
-          <span className="muted small">{L(`Hoje: ${fmt(n.newToday)} de ${fmt(s.newChatsLimit)}`, `Today: ${fmt(n.newToday)} of ${fmt(s.newChatsLimit)}`)}</span>
-          <span className="hint wa-limit__max">{L(`No máximo ${fmt(Math.min(s.dailyLimit, max.newChatsMax))}`, `At most ${fmt(Math.min(s.dailyLimit, max.newChatsMax))}`)}</span>
-          <span className="hint">{L('Nunca passa do limite de mensagens por dia.', 'Never above the messages-per-day limit.')}</span>
-        </div>
+      <div className="wa-quotas">
+        <LimitRow
+          label={L('Mensagens por dia', 'Messages per day')}
+          value={s.dailyLimit}
+          onCommit={(v) => commit('dailyLimit', v)}
+          used={n.sentToday}
+          caption={L(`Hoje: ${fmt(n.sentToday)} de ${fmt(s.dailyLimit)} · máximo ${fmt(max.dailyMax)}`, `Today: ${fmt(n.sentToday)} of ${fmt(s.dailyLimit)} · at most ${fmt(max.dailyMax)}`)}
+        />
+        <LimitRow
+          label={L('Conversas novas por dia', 'New conversations per day')}
+          value={s.newChatsLimit}
+          onCommit={(v) => commit('newChatsLimit', v)}
+          used={n.newToday}
+          caption={L(`Hoje: ${fmt(n.newToday)} de ${fmt(s.newChatsLimit)} · máximo ${fmt(newMax)}`, `Today: ${fmt(n.newToday)} of ${fmt(s.newChatsLimit)} · at most ${fmt(newMax)}`)}
+        />
       </div>
-      <p className="hint hint--text wa-why">
-        {n.kind === 'qr'
-          ? L('Um número ligado por QR code não foi feito para envio em massa: o WhatsApp bloqueia números que se comportam como disparador. Por isso o Tucano segura o ritmo e espera alguns segundos entre uma mensagem e outra.', 'A number linked by QR code isn’t made for bulk sending: WhatsApp blocks numbers that behave like a sender. That’s why Tucano keeps the pace and waits a few seconds between messages.')
-          : L('A API oficial é a que aguenta volume, dentro das regras da Meta: passado um dia da última mensagem da pessoa, só vai mensagem modelo aprovada, e a Meta tem os próprios limites.', 'The official API is the one for volume, within Meta’s rules: a day after the person’s last message, only an approved template goes, and Meta has its own limits.')}
-      </p>
-      <div className="key-row">
-        <Icon name="lock" size={16} />
-        <div className="grow">
-          <strong>{L('Primeira mensagem para alguém novo pede aprovação', 'The first message to someone new asks for approval')}</strong>
-          <p className="muted small">{L('Sempre, mesmo em conversa marcada como “Envia sozinho”.', 'Always, even in a conversation set to “Sends on its own”.')}</p>
-        </div>
-      </div>
-      <div className="key-row">
-        <Icon name="clip" size={16} />
-        <div className="grow">
-          <p className="muted small">
+      <ul className="wa-notes">
+        <li>
+          <Icon name="lock" size={14} />
+          <span>{L('A primeira mensagem para alguém novo sempre pede a sua aprovação, mesmo com “Envia sozinho”.', 'The first message to someone new always asks for your approval, even with “Sends on its own”.')}</span>
+        </li>
+        <li>
+          <Icon name="clock" size={14} />
+          <span>
             {n.kind === 'qr'
-              ? L(`Arquivo e enquete contam como uma mensagem (arquivo de até ${mb} MB). Mudanças em grupos: no máximo ${GROUP_ACTIONS_PER_DAY} por dia, ${GROUP_PEOPLE_PER_ACTION} pessoas por vez, sempre com a sua aprovação.`, `A file or a poll counts as one message (files up to ${mb} MB). Group changes: at most ${GROUP_ACTIONS_PER_DAY} a day, ${GROUP_PEOPLE_PER_ACTION} people at a time, always with your approval.`)
-              : L(`Arquivo e enquete contam como uma mensagem (arquivo de até ${mb} MB).`, `A file or a poll counts as one message (files up to ${mb} MB).`)}
-          </p>
-        </div>
-      </div>
+              ? L('Pausa de alguns segundos entre as mensagens: o WhatsApp bloqueia número que dispara em massa.', 'A few seconds between messages: WhatsApp blocks a number that sends in bulk.')
+              : L('Um dia depois da última mensagem da pessoa, só vai mensagem modelo aprovada pela Meta.', 'A day after the person’s last message, only a template Meta approved goes.')}
+          </span>
+        </li>
+        <li>
+          <Icon name="clip" size={14} />
+          <span>
+            {n.kind === 'qr'
+              ? L(`Arquivo (até ${mb} MB) e enquete contam como uma mensagem. Grupos: ${GROUP_ACTIONS_PER_DAY} mudanças por dia, ${GROUP_PEOPLE_PER_ACTION} pessoas por vez.`, `A file (up to ${mb} MB) or a poll counts as one message. Groups: ${GROUP_ACTIONS_PER_DAY} changes a day, ${GROUP_PEOPLE_PER_ACTION} people at a time.`)
+              : L(`Arquivo (até ${mb} MB) e enquete contam como uma mensagem.`, `A file (up to ${mb} MB) or a poll counts as one message.`)}
+          </span>
+        </li>
+      </ul>
     </Card>
   )
 }
