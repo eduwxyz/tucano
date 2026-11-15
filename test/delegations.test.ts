@@ -526,6 +526,18 @@ describe('work handed down the tree', () => {
     expect(by('clara', 'dm').at(-1)?.text).toMatch(/^Sobre o pedido em #clientes:/)
   })
 
+  it('does not start an old silent request out of the blue: it ends, and whoever asked hears it', async () => {
+    const r = runner()
+    // Open and silent for two days (the app was closed, or it predates the knock): no turn now.
+    const rootId = askedButSilent({ createdAt: Date.now() - 2 * 24 * 60 * 60_000 })
+    r.sweepDelegations()
+    await r.idle()
+    expect(db.delegation('pedido-mudo')).toMatchObject({ state: 'failed', told: true })
+    expect(db.delegation('pedido-mudo')?.nudges).toBeUndefined()
+    expect(db.messages().some((m) => m.threadId === rootId && m.author.kind === 'agent')).toBe(false)
+    expect(codex.turns.at(-1)!.prompt).toMatch(/Clara, #clientes: não terminou/)
+  })
+
   it('gives up on a request nobody answered, and whoever asked hears it', async () => {
     const r = runner()
     const rootId = askedButSilent({ nudges: 1, createdAt: Date.now() - 11 * 60_000 })

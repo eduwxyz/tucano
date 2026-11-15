@@ -64,6 +64,9 @@ const MAX_MENTIONS = 3
 // once, and if that comes to nothing either it ends as failed, so whoever asked always hears (delegations).
 const FIRST_NUDGE_MS = 4 * 60_000
 const GIVE_UP_MS = 10 * 60_000
+// Older than this and never knocked on (the app was closed, or it predates the knock): its work is
+// not started out of the blue now; it ends as failed and whoever asked hears it, to ask again if it still matters.
+const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
@@ -3117,6 +3120,10 @@ ${note}`,
       return
     }
     if (now - d.createdAt < FIRST_NUDGE_MS) return
+    if (now - d.createdAt >= STALE_MS) {
+      this.settle(d, 'failed')
+      return
+    }
     const to = db.agent(d.to)
     const conv = db.conversation(d.conversationId)
     if (!to || !conv || to.archived) return
