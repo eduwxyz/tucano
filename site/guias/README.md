@@ -58,6 +58,8 @@ As chaves são as mesmas (em português) nos dois arquivos; só os valores mudam
 - Tabelas com `| a | b |` e a linha `|---|---|` embaixo do cabeçalho.
 - Uma nota destacada com `> ` no começo da linha.
 - Links pra outras páginas do site sem o domínio: `/guias/...` no `pt.md`, `/en/guides/...` no `en.md`.
+- Um link só pode começar com `/`, `#`, `https://`, `http://` ou `mailto:`. Qualquer outro (como `javascript:` ou `data:`) para o build.
+- `ordem` é um número inteiro. Arquivos salvos no Windows (quebra de linha CRLF) funcionam.
 
 Só fatos que dá pra conferir (README, CHANGELOG, o app). Se algo mudar no app, atualize o guia e a data.
 

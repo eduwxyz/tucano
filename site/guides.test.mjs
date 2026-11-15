@@ -49,6 +49,27 @@ test('markdown: raw HTML in the text is escaped, not run', () => {
   assert.doesNotMatch(markdown('<script>alert(1)</script>').html, /<script>/)
 })
 
+test('markdown: links go only to /, #, https://, http:// and mailto:', () => {
+  for (const ok of ['/guias/x/', '#passo', 'https://tucano.sh/', 'http://localhost:3000/', 'mailto:oi@tucano.sh']) {
+    assert.match(markdown(`[x](${ok})`).html, new RegExp(`<a href="${ok.replace(/[/.?]/g, '\\$&')}">x</a>`))
+  }
+  for (const bad of ['javascript:location=1', 'JavaScript:alert(1)', 'data:text/html,hi', 'vbscript:x', '//evil.example/', '/\\evil.example/', 'relative/path']) {
+    assert.throws(() => markdown(`Text [x](${bad}).`, 'en.md'), /en\.md: link .*only addresses starting with/, bad)
+  }
+  assert.throws(() => readGuide(guide('', 'Answer [x](javascript:alert(1)).\n\n## 1. One\n\nA.\n\n## 2. Two\n\nB.\n'), 'en.md'), /link/)
+})
+
+test('markdown: a * in a link address stays in the address', () => {
+  const { html } = markdown('See [*the* page](https://x.example/a*b*c) and *this*.')
+  assert.match(html, /<a href="https:\/\/x\.example\/a\*b\*c"><em>the<\/em> page<\/a> and <em>this<\/em>\./)
+})
+
+test('a guide: Windows line endings and a bad "ordem"', () => {
+  assert.equal(readGuide(guide().replace(/\n/g, '\r\n'), 'en.md').title, 'How do I do X?')
+  assert.equal(readGuide(guide('ordem: 3\n'), 'en.md').order, 3)
+  assert.throws(() => readGuide(guide('ordem: two\n'), 'en.md'), /"ordem" is a whole number/)
+})
+
 test('a guide: the answer, the steps and the questions', () => {
   const g = readGuide(guide(), 'en.md')
   assert.equal(g.answer, 'The answer, first.')

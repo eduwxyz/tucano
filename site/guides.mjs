@@ -12,7 +12,7 @@ const unquote = (v) => {
 }
 
 export function frontMatter(src, file) {
-  const m = src.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
+  const m = src.replace(/\r\n?/g, '\n').match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
   if (!m) throw new Error(`${file}: no front matter (it starts and ends with a line of ---)`)
   const data = {}
   let list = null
@@ -39,12 +39,21 @@ export function frontMatter(src, file) {
 // ---------- Markdown: the part guides need ----------
 // ## and ### headings, paragraphs, - lists, 1. lists, ``` code blocks, | tables |, > notes,
 // and inside a line **bold**, *italic*, `code` and [links](/address/).
-export function inline(s) {
+// Links go only to /, #, https://, http:// and mailto: (no javascript: or data:), and bold/italic
+// are applied before the links go back in, so a * in an address never lands inside the attribute.
+const SAFE_HREF = /^(\/(?![/\\])|#|https?:\/\/|mailto:)/i // not //host or /\host: other sites
+const emphasis = (s) => s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+export function inline(s, file = 'markdown') {
   const codes = []
+  const links = []
   s = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`)
   s = esc(s)
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, href) => `<a href="${href}">${t}</a>`)
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, href) => {
+    if (!SAFE_HREF.test(href)) throw new Error(`${file}: link "${href}": only addresses starting with /, #, https://, http:// or mailto:`)
+    return `\u0001${links.push(`<a href="${href}">${emphasis(t)}</a>`) - 1}\u0001`
+  })
+  s = emphasis(s)
+  s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => links[i])
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`)
 }
 
@@ -79,7 +88,7 @@ export function markdown(md, file = 'markdown') {
       for (let n = 2; ids.has(id); n++) id = `${slugify(h[2])}-${n}`
       ids.add(id)
       headings.push({ level, text: h[2], id })
-      out.push(`<h${level} id="${id}">${inline(h[2])}</h${level}>`)
+      out.push(`<h${level} id="${id}">${inline(h[2], file)}</h${level}>`)
       i++
       continue
     }
@@ -93,7 +102,7 @@ export function markdown(md, file = 'markdown') {
         i++
       }
       const tag = ordered ? 'ol' : 'ul'
-      out.push(`<${tag}>${items.map((t) => `<li>${inline(t)}</li>`).join('')}</${tag}>`)
+      out.push(`<${tag}>${items.map((t) => `<li>${inline(t, file)}</li>`).join('')}</${tag}>`)
       continue
     }
     if (line.startsWith('|')) {
@@ -101,21 +110,21 @@ export function markdown(md, file = 'markdown') {
       while (i < lines.length && lines[i].startsWith('|')) rows.push(lines[i++])
       const cells = (r) => r.replace(/^\||\|\s*$/g, '').split('|').map((c) => c.trim())
       if (rows.length < 2 || !/^\|?\s*:?-{3,}/.test(rows[1])) throw new Error(`${file}: a table needs a header row and a |---| row under it`)
-      const head = cells(rows[0]).map((c) => `<th>${inline(c)}</th>`).join('')
-      const body = rows.slice(2).map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')
+      const head = cells(rows[0]).map((c) => `<th>${inline(c, file)}</th>`).join('')
+      const body = rows.slice(2).map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c, file)}</td>`).join('')}</tr>`).join('')
       out.push(`<div class="table"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`)
       continue
     }
     if (line.startsWith('> ')) {
       const note = []
       while (i < lines.length && lines[i].startsWith('>')) note.push(lines[i++].replace(/^>\s?/, ''))
-      out.push(`<aside class="note"><p>${inline(note.join(' '))}</p></aside>`)
+      out.push(`<aside class="note"><p>${inline(note.join(' '), file)}</p></aside>`)
       continue
     }
     const para = []
     while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) para.push(lines[i++].trim())
     if (!para.length) throw new Error(`${file}: can't read "${line}"`)
-    out.push(`<p>${inline(para.join(' '))}</p>`)
+    out.push(`<p>${inline(para.join(' '), file)}</p>`)
   }
   return { html: out.join('\n'), headings }
 }
@@ -146,6 +155,7 @@ export function readGuide(src, file) {
   const faq = data.faq || []
   if (!Array.isArray(faq)) throw new Error(`${file}: "faq" is a list of - pergunta: / resposta:`)
   for (const f of faq) if (!f.pergunta || !f.resposta) throw new Error(`${file}: every faq item has a "pergunta" and a "resposta"`)
+  if (data.ordem !== undefined && !/^\d+$/.test(data.ordem)) throw new Error(`${file}: "ordem" is a whole number, like 2`)
   const howto = data.howto === 'sim' || data.howto === 'yes' || data.howto === 'true'
   const { html, headings } = markdown(body, file)
   const firstPara = body.split(/\n\s*\n/).map((b) => b.trim()).find((b) => b && !/^(#|```|[-*] |\d+\. |\||>)/.test(b))
