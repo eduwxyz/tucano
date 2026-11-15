@@ -82,7 +82,7 @@ export function mimeOfFile(name: string): string {
 export class WhatsAppMedia {
   private root: string
   private used = new Map<string, number>() // bytes kept per number's folder, as far as this run knows: `trim` reads the real figure
-  private trimming = new Set<string>()
+  private trimming = new Map<string, boolean>() // folders being read now; true when a file arrived meanwhile
 
   constructor(dataDir: string, private limit = MEDIA_NUMBER_MAX) {
     this.root = resolve(dataDir, 'whatsapp-media')
@@ -126,8 +126,11 @@ export class WhatsAppMedia {
       this.used.set(dir, known + added)
       return
     }
-    if (this.trimming.has(dir)) return
-    this.trimming.add(dir)
+    if (this.trimming.has(dir)) {
+      this.trimming.set(dir, true)
+      return
+    }
+    this.trimming.set(dir, false)
     try {
       const files: { path: string; size: number; at: number }[] = []
       for (const name of await readdir(dir)) {
@@ -143,7 +146,9 @@ export class WhatsAppMedia {
           total -= f.size
         }
       }
-      this.used.set(dir, total)
+      // A file that arrived during the reading isn't in this figure: the next save reads the folder again.
+      if (this.trimming.get(dir)) this.used.delete(dir)
+      else this.used.set(dir, total)
     } catch (e) {
       console.error('[whatsapp]', e instanceof Error ? e.message : e) // the file itself was saved: counting it is what failed
     } finally {
