@@ -1,3 +1,5 @@
+// Skills (spec §18): recipes the agents follow, kept like pages to read. Agents
+// propose; I approve, edit, and undo any change from the history.
 import { L } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
@@ -22,6 +24,7 @@ import { Proposal } from './skills/SkillProposal'
 import { SkillForm } from './skills/SkillForm'
 
 type Place = { kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'review' }
+// Skills are the admins': a member reads them (what the agents follow), changes nothing.
 export function SkillsPage(): ReactNode {
   return <Skills admin={useStore(amAdmin)} />
 }

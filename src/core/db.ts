@@ -1,5 +1,6 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
+import { cleanAccess } from '../shared/access'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
@@ -30,6 +31,7 @@ import {
   type MemoryState,
   type Message,
   type Person,
+  type PersonAccess,
   type Question,
   type ActivityEntry,
   type Receipt,
@@ -520,6 +522,8 @@ export const MIGRATIONS = [
     state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'done', 'failed', 'cancelled')),
     asking TEXT,
     asking_told INTEGER NOT NULL DEFAULT 0,
+    parked_told INTEGER NOT NULL DEFAULT 0,
+    nudges INTEGER NOT NULL DEFAULT 0,
     result TEXT,
     told INTEGER NOT NULL DEFAULT 0,
     late_told INTEGER NOT NULL DEFAULT 0,
@@ -550,11 +554,27 @@ const COLUMNS: [string, string, string][] = [
   ['agents', 'sector_name', 'TEXT'],
   ['agents', 'sector_does', 'TEXT'],
   // The person's entry point: an agent over the sectors, chosen by hand (src/shared/org.ts).
-  ['agents', 'entry', 'INTEGER']
+  ['agents', 'entry', 'INTEGER'],
+  // What a person sees of the team (PersonAccess, as JSON; empty: everything), and what an invite grants.
+  ['people', 'access', 'TEXT'],
+  ['invites', 'access', 'TEXT'],
+  // A request that answered as far as it goes before stopping on an approval of mine, and how often
+  // the one asked was knocked on after leaving no reply at all (src/core/delegations.ts).
+  ['delegations', 'parked_told', 'INTEGER NOT NULL DEFAULT 0'],
+  ['delegations', 'nudges', 'INTEGER NOT NULL DEFAULT 0']
 ]
 
 
 type Row = Record<string, unknown>
+
+// A stored access back to its shape; anything unreadable is "everything".
+function parseAccess(v: unknown): PersonAccess | undefined {
+  if (typeof v !== 'string') return undefined
+  try {
+    const a = JSON.parse(v) as PersonAccess
+    return a?.mode === 'picked' ? { mode: 'picked', sectors: a.sectors ?? [], agents: a.agents ?? [], channels: a.channels ?? [] } : undefined
+  } catch { return undefined }
+}
 
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
 const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
@@ -934,9 +954,9 @@ export class Db {
   }
 
   // Only whose a conversation is, for checks on every event (no counts, no members).
-  conversationOwner(id: string): Pick<Conversation, 'kind' | 'owner'> | undefined {
-    const r = this.db.prepare('SELECT kind, owner FROM conversations WHERE id = ?').get(id) as Row | undefined
-    return r && { kind: str(r['kind']) as Conversation['kind'], ...(r['owner'] ? { owner: str(r['owner']) } : {}) }
+  conversationOwner(id: string): Pick<Conversation, 'id' | 'kind' | 'name' | 'owner'> | undefined {
+    const r = this.db.prepare('SELECT id, kind, name, owner FROM conversations WHERE id = ?').get(id) as Row | undefined
+    return r && { id: str(r['id']), kind: str(r['kind']) as Conversation['kind'], name: str(r['name']), ...(r['owner'] ? { owner: str(r['owner']) } : {}) }
   }
 
   // The conversation a message is in, without reading the message.
@@ -1731,7 +1751,8 @@ export class Db {
 
   private toPerson(r: Row): Person {
     const until = r['delegate_until'] == null ? undefined : Number(r['delegate_until'])
-    return { id: str(r['id']), name: str(r['name']), role: str(r['role']) as Role, about: str(r['about']), ...(r['delegate_to'] && until ? { delegateTo: str(r['delegate_to']), delegateUntil: until } : {}) }
+    const access = parseAccess(r['access'])
+    return { id: str(r['id']), name: str(r['name']), role: str(r['role']) as Role, about: str(r['about']), ...(r['delegate_to'] && until ? { delegateTo: str(r['delegate_to']), delegateUntil: until } : {}), ...(access ? { access } : {}) }
   }
 
   // The one owner, from the migration on; read once (every legacy message row asks).
@@ -1802,7 +1823,7 @@ export class Db {
 
   // A new person reads from now on: nothing from before is unread for them.
   addPerson(p: Person): void {
-    this.db.prepare('INSERT INTO people (id, name, role, about, created_at, named) VALUES (?, ?, ?, ?, ?, 1)').run(p.id, p.name, p.role, p.about, Date.now())
+    this.db.prepare('INSERT INTO people (id, name, role, about, created_at, named, access) VALUES (?, ?, ?, ?, ?, 1, ?)').run(p.id, p.name, p.role, p.about, Date.now(), p.access ? JSON.stringify(p.access) : null)
   }
 
   // A removed person back (re-invited): their DMs and memories are still theirs. One whose data
@@ -1899,6 +1920,7 @@ export class Db {
       role: str(r['role']) as Invite['role'],
       about: str(r['about']),
       ...(r['restore'] ? { restore: str(r['restore']) } : {}),
+      ...(parseAccess(r['access']) ? { access: parseAccess(r['access']) } : {}),
       createdBy: str(r['created_by']),
       createdAt: Number(r['created_at']),
       expiresAt: Number(r['expires_at']),
@@ -1908,8 +1930,8 @@ export class Db {
 
   saveInvite(i: Omit<Invite, 'usedAt' | 'usedBy'>): void {
     this.db
-      .prepare('INSERT INTO invites (hash, role, about, restore, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(i.id, i.role, i.about, i.restore ?? null, i.createdBy, i.createdAt, i.expiresAt)
+      .prepare('INSERT INTO invites (hash, role, about, restore, created_by, created_at, expires_at, access) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(i.id, i.role, i.about, i.restore ?? null, i.createdBy, i.createdAt, i.expiresAt, i.access ? JSON.stringify(i.access) : null)
   }
 
   invites(): Invite[] {
@@ -1939,6 +1961,17 @@ export class Db {
 
   setRole(id: string, role: Exclude<Role, 'owner'>): void {
     this.db.prepare("UPDATE people SET role = ? WHERE id = ? AND role <> 'owner'").run(role, id)
+  }
+
+  // What this person sees; 'all' stores nothing. Cleaned of agents and channels that are gone.
+  setPersonAccess(id: string, access: PersonAccess): void {
+    const clean = cleanAccess(access, this.agents().map((a) => a.id), this.conversations().filter((c) => c.kind !== 'dm').map((c) => c.id))
+    this.db.prepare("UPDATE people SET access = ? WHERE id = ? AND role = 'member'").run(clean.mode === 'all' ? null : JSON.stringify(clean), id)
+  }
+
+  // No one is covered by this person any more.
+  dropCoversBy(personId: string): void {
+    this.db.prepare('UPDATE people SET delegate_to = NULL, delegate_until = NULL WHERE delegate_to = ?').run(personId)
   }
 
   // Someone answering and approving for this person until then; none ends it.
@@ -2064,6 +2097,8 @@ export class Db {
       state: str(r['state']) as Delegation['state'],
       ...(r['asking'] ? { asking: str(r['asking']) } : {}),
       ...(r['asking_told'] === 1 ? { askingTold: true } : {}),
+      ...(r['parked_told'] === 1 ? { parkedTold: true } : {}),
+      ...(Number(r['nudges'] ?? 0) ? { nudges: Number(r['nudges']) } : {}),
       ...(r['result'] ? { result: str(r['result']) } : {}),
       ...(r['told'] === 1 ? { told: true } : {}),
       ...(r['late_told'] === 1 ? { lateTold: true } : {}),
@@ -2075,11 +2110,11 @@ export class Db {
   saveDelegation(d: Delegation): void {
     this.db
       .prepare(
-        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, result, told, late_told, created_at, ended_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, result = excluded.result, told = excluded.told, late_told = excluded.late_told, ended_at = excluded.ended_at`
+        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, created_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, ended_at = excluded.ended_at`
       )
-      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.createdAt, d.endedAt ?? null)
+      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.createdAt, d.endedAt ?? null)
   }
 
   delegation(id: string): Delegation | undefined {

@@ -1,30 +1,30 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
+import { L } from '../../../../shared/lang'
+import { compareSkill } from '../../../../shared/skill-diff'
 
+// Line by line: what was removed and what was added.
 export function Diff({ before, after }: { before: string; after: string }): ReactNode {
-  const a = before.split('\n')
-  const b = after.split('\n')
-  // Longest common subsequence, enough for recipes of a few hundred lines.
-  const n = a.length
-  const m = b.length
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!)
-  const lines: { kind: ' ' | '-' | '+'; text: string }[] = []
-  let i = 0
-  let j = 0
-  while (i < n || j < m) {
-    // Removed lines before the ones that replace them.
-    if (i < n && j < m && a[i] === b[j]) lines.push({ kind: ' ', text: a[i++]! }), j++
-    else if (i < n && (j === m || lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) lines.push({ kind: '-', text: a[i++]! })
-    else lines.push({ kind: '+', text: b[j++]! })
-  }
+  const comparison = useMemo(() => compareSkill(before, after), [before, after])
+  if (comparison.kind === 'full') return (
+    <div className="diff-full">
+      <p className="hint">{L('Mudança grande: as duas versões aparecem por inteiro.', 'Large change: both versions are shown in full.')}</p>
+      <section aria-label={L('Antes', 'Before')}>
+        <h4 className="field__label">{L('Antes', 'Before')}</h4>
+        <pre className="diff">{before}</pre>
+      </section>
+      <section aria-label={L('Depois', 'After')}>
+        <h4 className="field__label">{L('Depois', 'After')}</h4>
+        <pre className="diff">{after}</pre>
+      </section>
+    </div>
+  )
   return (
     <pre className="diff">
-      {lines.map((l, k) => (
-        <div key={k} className={l.kind === '+' ? 'diff__add' : l.kind === '-' ? 'diff__del' : 'diff__same'}>
-          {l.kind} {l.text}
+      {comparison.lines.map((line, key) => (
+        <div key={key} className={line.kind === '+' ? 'diff__add' : line.kind === '-' ? 'diff__del' : 'diff__same'}>
+          {line.kind} {line.text}
         </div>
       ))}
     </pre>
   )
 }
-

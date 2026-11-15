@@ -5,6 +5,7 @@ import { RECOMMENDED_SKILL_BODY_LENGTH, skillLengthNote } from '../../../../shar
 import { Icon } from '../ui'
 import { AgentPicker } from './SkillPeople'
 
+// The skills of the user's Claude Code (and its plugins) and Codex: find one, say who uses it.
 export function AddFromTerminal({ onClose }: { onClose: () => void }): ReactNode {
   const skills = useStore((s) => s.skills)
   const [found, setFound] = useState<LocalSkill[] | null>(null)

@@ -4,6 +4,7 @@ import { agentById, useStore, isTeam } from '../../store'
 import { AgentAvatar, Icon } from '../ui'
 
 
+// Who uses a skill, as faces and names.
 export function Who({ ids }: { ids: string[] }): ReactNode {
   const agents = useStore((s) => ids.map((id) => agentById(s, id)).filter((a) => !!a))
   if (ids.length === 0) return <span className="who">{L('todos os agentes', 'all agents')}</span>
@@ -18,6 +19,8 @@ export function Who({ ids }: { ids: string[] }): ReactNode {
   )
 }
 
+// Who uses a skill: every agent, or the ones picked (always at least one;
+// an empty list means everyone).
 export function AgentPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }): ReactNode {
   const agents = useStore((s) => s.agents.filter(isTeam))
   const everyone = value.length === 0

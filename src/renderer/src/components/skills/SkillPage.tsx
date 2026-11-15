@@ -11,6 +11,7 @@ import { ago } from '../ui'
 import { Who, AgentPicker } from './SkillPeople'
 import { History } from './SkillHistory'
 
+// "lida 3 vezes · todas terminaram bem"
 export function result(r?: SkillReport): string {
   const n = r?.reads.replies ?? 0
   if (!r || n === 0) return L('ainda não foi lida', 'not read yet')
@@ -28,6 +29,7 @@ export const from = (k: Skill): string => {
   return L(`do seu ${who}`, `from your ${who}`)
 }
 
+// One skill as a page: when to use it, who does, how it's going, the recipe and its history.
 export function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; stat?: SkillReport; onBack: () => void; onEdit: () => void }): ReactNode {
   const [picking, setPicking] = useState(false)
   const admin = useStore(amAdmin)
