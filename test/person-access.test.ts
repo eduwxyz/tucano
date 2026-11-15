@@ -1,6 +1,6 @@
 // What a person sees of the team (PersonAccess): the shared rule, how it is stored, and what the core enforces.
 import { afterEach, describe, expect, it } from 'vitest'
-import { accessSummary, cleanAccess, EVERYTHING, visibleAgentIds } from '../src/shared/access'
+import { accessSummary, cleanAccess, EVERYTHING, sharedAccess, visibleAgentIds } from '../src/shared/access'
 import { setLang } from '../src/shared/lang'
 import type { Snapshot } from '../src/shared/rpc'
 import type { Agent, Person, PersonAccess, Settings } from '../src/shared/types'
@@ -47,6 +47,18 @@ describe('the shared rule', () => {
     expect(ids(visibleAgentIds(m, moved))).toEqual(['head', 'tuca'])
     // A lead under an entry point is a sector head: picked, its people come with it.
     expect(ids(visibleAgentIds({ role: 'member', access: picked({ sectors: ['lead'] }) }, entry))).toEqual(['lead', 'tuca', 'w1'])
+  })
+
+  it('what several people see together is only what each of them sees', () => {
+    const bia = { role: 'member' as const, access: picked({ sectors: ['head'], channels: ['ch', 'ch2'] }) }
+    const caio = { role: 'member' as const, access: picked({ agents: ['w1', 'solo'], channels: ['ch'] }) }
+    const both = sharedAccess([bia, caio, { role: 'owner' }], org)!
+    expect([...both.agents].sort()).toEqual(['tuca', 'w1'])
+    expect(both.channels).toEqual(['ch'])
+    expect(ids(visibleAgentIds({ role: 'member', access: both }, org))).toEqual(['tuca', 'w1'])
+    // One restricted and others who see everything: that one's view.
+    expect([...sharedAccess([bia, { role: 'admin' }], org)!.agents].sort()).toEqual(['head', 'tuca', 'w1'])
+    expect(sharedAccess([{ role: 'owner' }, { role: 'member' }], org)).toBeUndefined()
   })
 
   it('the summary says what is seen, in the language of the app', () => {

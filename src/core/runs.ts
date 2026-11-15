@@ -34,7 +34,7 @@ import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { agentsFor } from './access-policy'
-import { covers, restricted } from '../shared/access'
+import { covers, restricted, sharedAccess } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
@@ -344,7 +344,7 @@ export interface RoutineEvent {
 // `trigger`: the message this reply answers (a routed one): what people wrote after it, while it
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
-type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string; for?: Person } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -1122,7 +1122,7 @@ export class Runner {
     const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
-    const requester = requesterOf(db, conv, windowAll, msg.threadId)
+    const requester = opts.for ?? requesterOf(db, conv, windowAll, msg.threadId)
     const peers = agentsFor(requester, members).filter((a) => a.id !== agent.id) // a restricted person's reply lists only the peers they see
     // What the person this reply is for can see: never someone else's DM (nor what lives in one), nor
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
@@ -3043,14 +3043,17 @@ ${note}`,
         }
         this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : r.what === 'parked' ? { ...r.d, parkedTold: true } : { ...r.d, told: true })
       }
-      // The person the work was asked for, not whoever a bare channel would mean (the owner). When the
-      // answers back were asked for by different people, the one limited to a part of the team wins, so
-      // the reply never reaches past what someone who reads it may see.
-      const askers = returned.flatMap((r) => db.person(r.d.requestedBy) ?? [])
-      const requester = askers.find((p) => restricted(p)) ?? askers[0] ?? requesterOf(db, conv, [], threadId)
+      // The person the work was asked for, not whoever wrote last where it was asked (maybe the owner),
+      // and the reply runs for them. When the answers back were asked for by different people, it runs
+      // within what all of them see, so it never reaches past what someone who reads it may see.
+      const askers = [...new Map(returned.flatMap((r) => db.person(r.d.requestedBy) ?? []).map((p) => [p.id, p])).values()]
+      const first = askers.find((p) => restricted(p)) ?? askers[0]
+      const shared = askers.length > 1 ? sharedAccess(askers, db.agents()) : undefined
+      const behalf = first && (shared ? { ...first, access: shared } : first)
+      const requester = behalf ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
-      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true }), true)
+      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}) }), true)
     }
     if (this.followups.busy(key)) this.tells.set(key, go)
     else go()

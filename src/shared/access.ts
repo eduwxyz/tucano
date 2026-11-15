@@ -38,6 +38,16 @@ export function visibleAgentIds(p: Who | undefined, agents: AgentNode[]): Set<st
 
 export const seesAgent = (p: Who | undefined, agents: AgentNode[], id: string): boolean => visibleAgentIds(p, agents)?.has(id) ?? true
 
+// What several people see together, for one reply that all of them read: only what every one of
+// them sees. Undefined when none of them is restricted. A sector counts as its agents, as the tree is now.
+export function sharedAccess(people: Who[], agents: AgentNode[]): PersonAccess | undefined {
+  const cut = people.filter((p) => restricted(p))
+  if (!cut.length) return undefined
+  const seen = cut.map((p) => visibleAgentIds(p, agents)!)
+  const both = <T,>(lists: T[][]): T[] => lists.reduce((a, b) => a.filter((x) => b.includes(x)))
+  return { mode: 'picked', sectors: [], agents: both(seen.map((s) => [...s])), channels: both(cut.map((p) => p.access!.channels)) }
+}
+
 // Whether this person sees a channel (a DM is decided by its owner and agent elsewhere).
 export const seesChannel = (p: Who | undefined, channelId: string): boolean => !restricted(p) || p!.access!.channels.includes(channelId)
 
