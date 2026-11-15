@@ -584,5 +584,28 @@ describe('work handed on for a restricted member', () => {
     const { bento } = await ask(false)
     expect(bento).toContain('@clara')
   })
+
+  it('runs the answer back for the member who asked, even when someone else wrote there since', async () => {
+    db.saveAgent({ ...db.agent('orion')!, entry: true })
+    db.saveAgent(agent('lia', { reportsTo: 'clara' }))
+    const r = runner()
+    const people = new People(db)
+    const joined = people.join(people.createInvite(db.owner(), { role: 'member' }).code, 'Bia')
+    if (!('person' in joined)) throw new Error(joined.error)
+    const bia = joined.person.id
+    db.setPersonAccess(bia, { mode: 'picked', sectors: ['bento'], agents: [], channels: ['eng'] })
+    const sent = r.send('eng', '@nico delegue a bento: demore 1s e veja o build', [], undefined, bia)
+    await until(() => db.delegationsFrom('nico', 'eng').length > 0)
+    // The owner writes in the channel while Bento works: the last person there is no longer Bia.
+    const hers = db.messages().find((m) => m.conversationId === 'eng' && m.author.kind === 'person')!
+    db.saveMessage({ ...hers, id: 'edu-later', author: { kind: 'person', id: db.ownerId() }, text: 'bom dia', at: Date.now() })
+    await sent
+    await r.idle()
+    await until(() => db.delegationsFrom('nico', 'eng')[0]?.told === true)
+    await r.idle()
+    const back = claude.turns.filter((t) => t.system.includes('Você é Nico')).at(-1)!
+    expect(back.prompt).toMatch(/Voltou do que você pediu/)
+    for (const hidden of ['@clara', '@lia', '@orion']) expect(`${back.system}\n${back.prompt}`).not.toContain(hidden)
+  })
 })
 
