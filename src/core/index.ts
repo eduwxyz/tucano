@@ -17,6 +17,7 @@ import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rp
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, applyOrder, wikiAccess, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
@@ -880,8 +881,15 @@ wikiGit = new WikiGit({
   // a held page git moved aside (the repository brought a file by its name): its copy stays held
   movedPrivate: (from, to) => {
     const key = pageKey(from.split('/').pop()!.replace(/\.md$/i, ''))
+    if (!to.endsWith('.md')) return
+    const next = pageKey(to.split('/').pop()!.replace(/\.md$/i, ''))
     const h = wiki.heldKeys().find((x) => x.key === key)
-    if (h && to.endsWith('.md')) wiki.holdKey(pageKey(to.split('/').pop()!.replace(/\.md$/i, '')), h.person)
+    if (h) wiki.holdKey(next, h.person)
+  },
+  // any copy git makes of a page (conflict, read-only, moved aside): the cut for a restricted member goes along (PersonAccess)
+  copied: (from, to) => {
+    if (!from.endsWith('.md') || !to.endsWith('.md')) return
+    wiki.carryKey(pageKey(from.split('/').pop()!.replace(/\.md$/i, '')), pageKey(to.split('/').pop()!.replace(/\.md$/i, '')))
   },
   quiet: (on) => wiki.quiet(on),
   refresh: () => wiki.refresh(),
@@ -1548,9 +1556,25 @@ const heritageAt = (): number => Number(db.meta('heritageAt') ?? 0)
 const historySince = (ctx: Ctx): number => (ctx.person.role === 'owner' ? 0 : heritageAt())
 // The wiki as this person reads it: without the pages held for someone else, and (but the owner's)
 // its log from the heritage on.
-const wikiFor = (ctx: Ctx): WikiView => wiki.view(wiki.heldTitles(ctx.person.id), ctx.person.role === 'owner' ? {} : { viewer: ctx.person.id, afterSwitch: true, everHidden: wiki.everHeld(ctx.person.id) })
+// A restricted member (PersonAccess) doesn't read either a page that took something from a conversation they don't see.
+// What a restricted person's wiki leaves out: a read of every version, so once per request. A handler
+// asks many times (the page list, each pending change, each finding); the memo lasts until the
+// current task ends, so the next request (after a save, a new source, a change of access) reads again.
+const reachMemo = new WeakMap<Ctx, Set<string>>()
+const outOfReach = (ctx: Ctx): Set<string> => {
+  if (!restricted(ctx.person)) return new Set()
+  let out = reachMemo.get(ctx)
+  if (!out) {
+    out = wiki.outOfReach((id) => people.canSeeFrom(ctx.person, id))
+    reachMemo.set(ctx, out)
+    setImmediate(() => reachMemo.delete(ctx))
+  }
+  return out
+}
+const hiddenFrom = (ctx: Ctx): Set<string> => new Set([...wiki.heldTitles(ctx.person.id), ...outOfReach(ctx)])
+const wikiFor = (ctx: Ctx): WikiView => wiki.view(hiddenFrom(ctx), ctx.person.role === 'owner' ? {} : { viewer: ctx.person.id, afterSwitch: true, everHidden: new Set([...wiki.everHeld(ctx.person.id), ...outOfReach(ctx)]) })
 // Whether a title (any spelling of it: see pageKey) is a page held for someone else.
-const heldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && wiki.heldTitles(ctx.person.id).has(pageKey(title))
+const heldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && hiddenFrom(ctx).has(pageKey(title))
 // ...or ever was (gone or renamed since, not released): what names it (a change's pages) isn't theirs either.
 const everHeldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && wiki.everHeld(ctx.person.id).has(pageKey(title))
 // A name someone may not take, said the same whether it's a page held for someone else or not.
@@ -2358,7 +2382,7 @@ const api: Handlers = {
   wikiRestore: ({ id }, ctx) => {
     const from = wiki.versionSource(id)
     const v = wiki.versionInfo(id)
-    if (!v || (from && !seesSource(ctx)(from)) || wiki.heldTitles(ctx.person.id).has(v.key) || (v.heldFor && v.heldFor !== ctx.person.id) || v.at < historySince(ctx)) throw new Error(L('Essa versão não existe mais.', 'That version no longer exists.'))
+    if (!v || (from && !seesSource(ctx)(from)) || hiddenFrom(ctx).has(v.key) || (v.heldFor && v.heldFor !== ctx.person.id) || v.at < historySince(ctx)) throw new Error(L('Essa versão não existe mais.', 'That version no longer exists.'))
     const { reheld, ...page } = wiki.restore(id, ctx.person.id, nameOf(ctx))
     // Text from a DM put back on a page the team could read: the page is held again (never published
     // in silence), and its owner hears why.
