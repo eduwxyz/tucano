@@ -12,7 +12,7 @@ export const hiddenAgentError = (): string => L('Esse agente não está disponí
 
 // The agents this person may use (all of them when nothing is cut). `keep`: one that stays anyway,
 // like the agent answering, so a prompt built from the list still has it.
-export function agentsFor<T extends Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind'>>>(person: Who | undefined, agents: T[], keep?: string): T[] {
+export function agentsFor<T extends Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind' | 'entry'>>>(person: Who | undefined, agents: T[], keep?: string): T[] {
   const seen = visibleAgentIds(person, agents)
   return seen ? agents.filter((a) => seen.has(a.id) || a.id === keep) : agents
 }
@@ -78,4 +78,11 @@ export function viewedConversations<T extends Pick<Conversation, 'kind' | 'membe
   if (!restricted(person)) return cs
   const seen = visibleAgentIds(person, db.agents())!
   return cs.map((c) => (c.kind === 'dm' ? c : { ...c, members: c.members.filter((m) => seen.has(m)) }))
+}
+
+// Changing a channel (its name, topic, agents): only one this person still sees, even one they made.
+// Read again: the same request may have just given it to them (a channel card makes one, then fills it).
+export function assertChannelVisible(db: Db, person: Person, c: Pick<Conversation, 'id' | 'kind'>): void {
+  const now = db.person(person.id) ?? person
+  if (!withinAccess(db, now, c)) throw new Error(L('Esse canal não está disponível pra você.', "That channel isn't available to you."))
 }

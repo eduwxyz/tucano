@@ -4,7 +4,7 @@ import { accessSummary, cleanAccess, EVERYTHING, visibleAgentIds } from '../src/
 import { setLang } from '../src/shared/lang'
 import type { Snapshot } from '../src/shared/rpc'
 import type { Agent, Person, PersonAccess, Settings } from '../src/shared/types'
-import { assertAgentVisible } from '../src/core/access-policy'
+import { assertAgentVisible, assertChannelVisible } from '../src/core/access-policy'
 import { Db } from '../src/core/db'
 import { People } from '../src/core/people'
 
@@ -34,6 +34,18 @@ describe('the shared rule', () => {
   it('an archived head contributes nothing', () => {
     const m = { role: 'member' as const, access: picked({ sectors: ['head'] }) }
     expect(ids(visibleAgentIds(m, [agent('head', { archived: true }), agent('w1', { reportsTo: 'head' }), agent('tuca', { kind: 'tuca' })]))).toEqual(['tuca'])
+  })
+
+  it('a sector whose head became an entry point, or now answers to another, is that agent alone, never the tree under it', () => {
+    const m = { role: 'member' as const, access: picked({ sectors: ['head'] }) }
+    // "head" was marked the entry point (#465): the sectors are now its leads, and "head" heads none.
+    const entry = [agent('head', { entry: true }), agent('lead', { reportsTo: 'head' }), agent('w1', { reportsTo: 'lead' }), agent('other', { reportsTo: 'head' }), agent('tuca', { kind: 'tuca' })]
+    expect(ids(visibleAgentIds(m, entry))).toEqual(['head', 'tuca'])
+    // "head" now answers to "boss": the sector is boss's, not head's.
+    const moved = [agent('boss'), agent('head', { reportsTo: 'boss' }), agent('w1', { reportsTo: 'head' }), agent('tuca', { kind: 'tuca' })]
+    expect(ids(visibleAgentIds(m, moved))).toEqual(['head', 'tuca'])
+    // A lead under an entry point is a sector head: picked, its people come with it.
+    expect(ids(visibleAgentIds({ role: 'member', access: picked({ sectors: ['lead'] }) }, entry))).toEqual(['lead', 'tuca', 'w1'])
   })
 
   it('the summary says what is seen, in the language of the app', () => {
@@ -139,6 +151,15 @@ describe('what a restricted member can reach', () => {
     expect(() => assertAgentVisible(db, ana, 'hidden')).not.toThrow()
     setLang('en')
     expect(() => assertAgentVisible(db, bia, 'hidden')).toThrow("That agent isn't available to you.")
+  })
+
+  it('a channel taken out of their access is not theirs to change, even one they made; one given in the same request is', () => {
+    const { db, ana, bia } = team()
+    expect(() => assertChannelVisible(db, bia, { id: 'ch2', kind: 'channel' })).toThrow('Esse canal não está disponível pra você.')
+    expect(() => assertChannelVisible(db, bia, { id: 'ch', kind: 'channel' })).not.toThrow()
+    expect(() => assertChannelVisible(db, ana, { id: 'ch2', kind: 'channel' })).not.toThrow()
+    db.setPersonAccess(bia.id, { ...db.person(bia.id)!.access!, channels: ['ch', 'ch2'] })
+    expect(() => assertChannelVisible(db, bia, { id: 'ch2', kind: 'channel' })).not.toThrow() // bia as the request had her: read again
   })
 
   it('only an admin or the owner changes it, and only for a member', () => {

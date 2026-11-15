@@ -2,12 +2,12 @@
 // and on the page, which shows it: the owner, admins and anyone on 'all' see everything; someone on
 // 'picked' sees the agents and channels marked, every agent of a marked sector (its head and everyone
 // below it, as the org chart has it now), and Tuca, who helps everyone. Their own DMs are theirs as always.
-import { reportsOf } from './org'
+import { headsOf, reportsOf } from './org'
 import { L } from './lang'
 import type { Agent, Conversation, Person, PersonAccess } from './types'
 
 type Who = Pick<Person, 'role' | 'access'>
-type AgentNode = Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind'>>
+type AgentNode = Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind' | 'entry'>>
 
 export const EVERYTHING: PersonAccess = { mode: 'all', sectors: [], agents: [], channels: [] }
 
@@ -19,10 +19,13 @@ export function visibleAgentIds(p: Who | undefined, agents: AgentNode[]): Set<st
   if (!restricted(p)) return undefined
   const a = p!.access!
   const ids = new Set<string>(a.agents)
+  // A sector reaches below its head only while that agent heads one (headsOf, as the tree is now):
+  // one made an entry point since, or moved under another, is that agent alone, never the whole tree under it.
+  const heads = new Set(headsOf(agents).map((h) => h.id))
   for (const head of a.sectors) {
     if (!agents.some((x) => x.id === head && !x.archived)) continue
     ids.add(head)
-    for (const r of reportsOf(agents, head)) ids.add(r.id)
+    if (heads.has(head)) for (const r of reportsOf(agents, head)) ids.add(r.id)
   }
   for (const x of agents) if (x.kind === 'tuca') ids.add(x.id)
   return ids

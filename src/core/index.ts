@@ -17,7 +17,7 @@ import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rp
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
-import { assertAgentVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
+import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
@@ -1555,6 +1555,7 @@ const api: Handlers = {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean && c.id !== id)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
@@ -1565,6 +1566,7 @@ const api: Handlers = {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
@@ -1572,6 +1574,7 @@ const api: Handlers = {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
     db.setMembers(id, membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a))))
     emitConversations([id])
