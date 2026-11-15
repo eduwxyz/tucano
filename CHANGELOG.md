@@ -11,7 +11,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **Retrying an older reply uses its original conversation context.** History is bounded by the reply timestamp before applying the SQL limit, and a summary written after that reply is excluded. (#389)
-
+- **Large skill comparisons keep both complete versions available.** Detailed comparisons use a bounded matrix; larger changes show the complete Before and After text in scrolling panels instead of allocating an unbounded comparison. (#454)
 
 ## [0.2.32] - 2026-11-14
 
