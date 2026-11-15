@@ -343,6 +343,7 @@ export class Wiki {
       CREATE INDEX IF NOT EXISTS provenance_by_title ON provenance (title COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS held (title TEXT PRIMARY KEY COLLATE NOCASE, person TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS held_log (title TEXT PRIMARY KEY, person TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS orphaned (key TEXT PRIMARY KEY);
     `)
     for (const col of ['status TEXT', 'error TEXT', 'changes INTEGER']) {
       try {
@@ -669,6 +670,11 @@ export class Wiki {
       const conv = (JSON.parse(r.origin) as WikiSource['origin']).conversationId
       if (conv && !sees(conv)) out.add(r.key)
     }
+    // Text left by a source deleted since (dropOrphans), and a page with no history at all (its
+    // sources deleted before the wiki kept track of that): where it came from is unknown.
+    for (const r of this.db.prepare('SELECT key FROM orphaned').all() as { key: string }[]) out.add(r.key)
+    const known = new Set((this.db.prepare('SELECT DISTINCT key FROM versions WHERE key IS NOT NULL').all() as { key: string }[]).map((r) => r.key))
+    for (const r of this.db.prepare('SELECT title FROM pages').all() as { title: string }[]) if (!known.has(pageKey(r.title))) out.add(pageKey(r.title))
     return out
   }
 
@@ -762,6 +768,8 @@ export class Wiki {
     const gone = (this.db.prepare('SELECT id FROM changes WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').all() as { id: string }[]).map((r) => r.id)
     for (const id of gone) this.db.prepare('DELETE FROM findings WHERE change_id = ?').run(id)
     this.db.prepare('DELETE FROM changes WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
+    // The page keeps the text those versions wrote: where it came from is now unknown (outOfReach).
+    this.db.prepare('INSERT OR IGNORE INTO orphaned (key) SELECT DISTINCT key FROM versions WHERE key IS NOT NULL AND source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
     this.db.prepare('DELETE FROM versions WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
   }
 
@@ -944,6 +952,7 @@ export class Wiki {
         this.db.prepare('UPDATE OR REPLACE held SET title = ? WHERE title = ?').run(now, was)
         this.db.prepare('INSERT OR IGNORE INTO held_log (title, person) SELECT ?, person FROM held_log WHERE title = ?').run(now, was) // the old name stays unnamed too
         this.db.prepare('UPDATE versions SET key = ? WHERE key = ?').run(now, was)
+        this.db.prepare('INSERT OR IGNORE INTO orphaned (key) SELECT ? FROM orphaned WHERE key = ?').run(now, was)
       }
     }
     writeFileSync(join(this.pagesDir, file), text)

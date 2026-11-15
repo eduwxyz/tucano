@@ -1363,7 +1363,20 @@ const historySince = (ctx: Ctx): number => (ctx.person.role === 'owner' ? 0 : he
 // The wiki as this person reads it: without the pages held for someone else, and (but the owner's)
 // its log from the heritage on.
 // A restricted member (PersonAccess) doesn't read either a page that took something from a conversation they don't see.
-const outOfReach = (ctx: Ctx): Set<string> => (restricted(ctx.person) ? wiki.outOfReach((id) => people.canSeeFrom(ctx.person, id)) : new Set())
+// What a restricted person's wiki leaves out: a read of every version, so once per request. A handler
+// asks many times (the page list, each pending change, each finding); the memo lasts until the
+// current task ends, so the next request (after a save, a new source, a change of access) reads again.
+const reachMemo = new WeakMap<Ctx, Set<string>>()
+const outOfReach = (ctx: Ctx): Set<string> => {
+  if (!restricted(ctx.person)) return new Set()
+  let out = reachMemo.get(ctx)
+  if (!out) {
+    out = wiki.outOfReach((id) => people.canSeeFrom(ctx.person, id))
+    reachMemo.set(ctx, out)
+    setImmediate(() => reachMemo.delete(ctx))
+  }
+  return out
+}
 const hiddenFrom = (ctx: Ctx): Set<string> => new Set([...wiki.heldTitles(ctx.person.id), ...outOfReach(ctx)])
 const wikiFor = (ctx: Ctx): WikiView => wiki.view(hiddenFrom(ctx), ctx.person.role === 'owner' ? {} : { viewer: ctx.person.id, afterSwitch: true, everHidden: new Set([...wiki.everHeld(ctx.person.id), ...outOfReach(ctx)]) })
 // Whether a title (any spelling of it: see pageKey) is a page held for someone else.

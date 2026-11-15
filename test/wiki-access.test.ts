@@ -54,7 +54,19 @@ describe('Wiki.outOfReach', () => {
     wiki.removeSource(gone)
     wiki.save({ title: 'Do curador', body: 'Sem fonte.', by: 'auto', byName: 'Curador' })
     const out = wiki.outOfReach(() => true)
+    expect(out.has(pageKey('Antiga'))).toBe(true)
     expect(out.has(pageKey('Do curador'))).toBe(true)
+  })
+
+  it('keeps a page out after its source is deleted, also renamed, and one with no history at all', () => {
+    const gone = fromConversation('Folha', 'Folha confidencial.', 'rh')
+    wiki.removeSource(gone)
+    expect(wiki.page('Folha')?.body).toContain('Folha confidencial')
+    expect(wiki.outOfReach((id) => id === 'eng').has(pageKey('Folha'))).toBe(true)
+    wiki.save({ title: 'Folha 2', body: 'Folha confidencial.', rename: 'Folha', by: 'ana', byName: 'Ana' })
+    expect(wiki.outOfReach((id) => id === 'eng').has(pageKey('Folha 2'))).toBe(true)
+    wiki.save({ title: 'Manual', body: 'Escrito à mão.', by: 'ana', byName: 'Ana' })
+    expect(wiki.outOfReach(() => true).has(pageKey('Manual'))).toBe(false)
   })
 })
 
