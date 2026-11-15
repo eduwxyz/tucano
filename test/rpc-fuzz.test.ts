@@ -23,7 +23,9 @@ beforeAll(async () => {
   process.on('uncaughtException', onCrash)
   owner = (await bootCore({ server: true })).connect()
   await owner.call('snapshot')
-}, 30_000)
+  // Booting a core with a server, under three other shards on the same Windows runner: 30 s was
+  // enough until this shard was starved, and the hook timed out there on an unchanged commit.
+}, process.platform === 'win32' ? 60_000 : 30_000)
 afterAll(() => {
   process.off('unhandledRejection', onCrash)
   process.off('uncaughtException', onCrash)
