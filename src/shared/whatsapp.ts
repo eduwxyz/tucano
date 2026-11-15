@@ -28,6 +28,8 @@ export interface WhatsAppSettings {
   pauseOnHumanMin: number // someone answered from the phone: agents stay quiet this long (0: never)
   dailyLimit: number // messages agents send from this number in a day
   newChatsLimit: number // of those, conversations with someone who never wrote to this number
+  markRead: boolean // what an agent reads is marked as read on WhatsApp (the other side sees it)
+  groupManagers: string[] // agents that may create groups and add or remove people (qr only; each time asks first)
 }
 
 export interface WhatsAppChat {
@@ -49,7 +51,14 @@ export interface WhatsAppMessage {
   text: string
   at: number
   agentId?: string // sent by this agent
+  media?: WhatsAppMediaKind // it carries a file: `text` is its label and caption (or, for audio, what was said)
+  fileName?: string
+  quoted?: { id: string; text: string; sender?: string } // the message this one answers
+  edited?: boolean
+  deleted?: boolean
 }
+
+export type WhatsAppMediaKind = 'image' | 'audio' | 'video' | 'document' | 'sticker'
 
 export interface WhatsAppNumber {
   id: string
@@ -111,6 +120,13 @@ export const NAME_MAX = 60
 export const DESCRIPTION_MAX = 300
 export const SERVICE_WINDOW_MS = 24 * 3_600_000 // the official API: free text only this long after they wrote
 export const PAUSE_MAX_MIN = 24 * 60
+export const MEDIA_IN_MAX = 25 * 1024 * 1024 // a file that arrives: bigger ones are noted, not kept
+export const MEDIA_OUT_MAX = 16 * 1024 * 1024 // a file an agent sends
+export const GROUP_ACTIONS_PER_DAY = 5 // groups created or changed in a day, per number: never raised from the screen
+export const GROUP_PEOPLE_PER_ACTION = 20
+export const REACTIONS_PER_DAY = 200 // a reaction isn't a message, but a number that reacts all day looks like a bot
+export const POLL_OPTIONS_MAX = 12
+export const EDIT_WINDOW_MS = 15 * 60_000 // WhatsApp lets a message be edited this long after it was sent
 export const ACCESS_MAX = 2_000 // rows of who-may-use-what one number keeps
 export const CHAT_ID_MAX = 200
 
@@ -123,7 +139,7 @@ const int = (v: unknown, fallback: number, min: number, max: number): number => 
 }
 
 export function defaultSettings(kind: WhatsAppKind): WhatsAppSettings {
-  return { inbound: 'wake', groupsOnlyMention: true, pauseOnHumanMin: 30, dailyLimit: LIMITS[kind].daily, newChatsLimit: LIMITS[kind].newChats }
+  return { inbound: 'wake', groupsOnlyMention: true, pauseOnHumanMin: 30, dailyLimit: LIMITS[kind].daily, newChatsLimit: LIMITS[kind].newChats, markRead: false, groupManagers: [] }
 }
 
 // What the screen (or an old row) asks for, brought inside what's allowed: never an error.
@@ -135,7 +151,10 @@ export function clampSettings(kind: WhatsAppKind, s: Partial<WhatsAppSettings> |
     groupsOnlyMention: s?.groupsOnlyMention !== false,
     pauseOnHumanMin: int(s?.pauseOnHumanMin, d.pauseOnHumanMin, 0, PAUSE_MAX_MIN),
     dailyLimit,
-    newChatsLimit: Math.min(dailyLimit, int(s?.newChatsLimit, d.newChatsLimit, 0, LIMITS[kind].newChatsMax))
+    newChatsLimit: Math.min(dailyLimit, int(s?.newChatsLimit, d.newChatsLimit, 0, LIMITS[kind].newChatsMax)),
+    markRead: s?.markRead === true,
+    // Groups only exist on a number linked by QR code.
+    groupManagers: kind === 'qr' && Array.isArray(s?.groupManagers) ? [...new Set(s.groupManagers.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 100))].slice(0, 100) : []
   }
 }
 

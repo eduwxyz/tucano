@@ -91,7 +91,7 @@ import { canEditChannel,
 } from '../store'
 import { askWay } from './OrgSectors'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
-import { WhatsAppSend } from './WhatsAppParts'
+import { WhatsAppBody, WhatsAppTitle, whatsappCanAlways } from './WhatsAppApproval'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -1482,7 +1482,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
   // A WhatsApp send: shown as the message itself. "Always" means that conversation's sends go alone, never for a first contact.
   const whatsapp = approval.connectorId === 'whatsapp'
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0) && !(whatsapp && approval.args['primeiro_contato'] === true)
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0) && !(whatsapp && !whatsappCanAlways(approval))
   const alwaysTitle = whatsapp
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} envia sozinho nesta conversa, sem pedir. Dá pra mudar em Configurações › WhatsApp.`, `From now on ${agent?.name ?? 'the agent'} sends on its own in this conversation, without asking. You can change it in Settings › WhatsApp.`)
     : onComputer
@@ -1504,9 +1504,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
             {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
           </>
         ) : whatsapp ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer enviar no WhatsApp para', 'wants to send on WhatsApp to')} <strong>{String(approval.args['conversa'] ?? '')}</strong> ({String(approval.args['numero'] ?? '')})
-          </>
+          <WhatsAppTitle approval={approval} agent={agent?.name ?? L('Agente', 'Agent')} />
         ) : onComputer ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
@@ -1560,7 +1558,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         </div>
       )}
       {approval.why && <p className="approval__why">{approval.why}</p>}
-      {whatsapp && <WhatsAppSend args={approval.args} />}
+      {whatsapp && <WhatsAppBody approval={approval} />}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}

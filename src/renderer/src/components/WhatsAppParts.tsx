@@ -2,7 +2,7 @@
 // what happens when a message arrives, the limits, the official API's address) and the helpers they share.
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { ALL_CHATS, LIMITS, type WhatsAppAccess, type WhatsAppChat, type WhatsAppNumber, type WhatsAppSettings, type WhatsAppTemplate } from '../../../shared/whatsapp'
+import { ALL_CHATS, GROUP_ACTIONS_PER_DAY, GROUP_PEOPLE_PER_ACTION, LIMITS, MEDIA_OUT_MAX,type WhatsAppAccess, type WhatsAppChat, type WhatsAppNumber, type WhatsAppSettings, type WhatsAppTemplate } from '../../../shared/whatsapp'
 import { call } from '../rpc'
 import { isTeam, toast, type Agent } from '../store'
 import { confirmDialog } from './Dialogs'
@@ -150,7 +150,50 @@ export function DigitsField({ value, onCommit, label }: { value: number; onCommi
 
 // ---------- who may use the number ----------
 
+type HistoryNote = { ok: boolean; text: string }
+
+// Asks the phone for the conversation's earlier messages. Only a connected QR number can, and only
+// for one specific conversation. The answer (or the reason it failed) goes up to the row, which shows it under itself.
+function HistoryButton({ n, chat, onNote }: { n: WhatsAppNumber; chat: string; onNote: (note: HistoryNote | null) => void }): ReactNode {
+  const [busy, setBusy] = useState(false)
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+  const run = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    onNote(null)
+    try {
+      await call('whatsappHistory', { id: n.id, chat })
+      if (alive.current) onNote({ ok: true, text: L('Pedi ao celular. Se ele estiver ligado, as mensagens aparecem em instantes.', 'Asked the phone. If it is on, the messages show up in a moment.') })
+    } catch (e) {
+      if (alive.current) onNote({ ok: false, text: errText(e) })
+    } finally {
+      if (alive.current) setBusy(false)
+    }
+  }
+  const label = L('Trazer mensagens anteriores', 'Bring earlier messages')
+  return (
+    <button className="icon-btn icon-btn--sm" title={label} aria-label={label} disabled={busy} onClick={() => void run()}>
+      {busy ? <span className="spinner wa-inline-spinner wa-spin" /> : <Icon name="clock" size={14} />}
+    </button>
+  )
+}
+
 function AccessRow({ n, a, onChange, onRemove }: { n: WhatsAppNumber; a: WhatsAppAccess; onChange: (patch: Partial<WhatsAppAccess>) => void; onRemove: () => void }): ReactNode {
+  const [note, setNote] = useState<HistoryNote | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  // The note stays under the row for a few seconds; a problem stays a little longer so it can be read.
+  const onNote = (next: HistoryNote | null): void => {
+    clearTimeout(timer.current)
+    setNote(next)
+    if (next) timer.current = setTimeout(() => setNote(null), next.ok ? 5000 : 8000)
+  }
   const all = a.chat === ALL_CHATS
   const chat = all ? undefined : n.chats.find((c) => c.id === a.chat)
   const name = all ? L('Todas as conversas', 'Every conversation') : (chat?.name ?? L('Conversa sem nome', 'Unnamed conversation'))
@@ -164,6 +207,7 @@ function AccessRow({ n, a, onChange, onRemove }: { n: WhatsAppNumber; a: WhatsAp
         </div>
       </div>
       <div className="wa-chat__ctl">
+        {!all && n.kind === 'qr' && n.status === 'connected' && <HistoryButton n={n} chat={a.chat} onNote={onNote} />}
         <div className="segmented" role="radiogroup" aria-label={L('O que o agente pode fazer', 'What the agent may do')}>
           <button type="button" role="radio" aria-checked={a.level === 'read'} className={a.level === 'read' ? 'is-active' : ''} onClick={() => a.level !== 'read' && onChange({ level: 'read', send: 'ask' })}>
             {L('Só ler', 'Read only')}
@@ -189,6 +233,11 @@ function AccessRow({ n, a, onChange, onRemove }: { n: WhatsAppNumber; a: WhatsAp
           <Icon name="x" size={14} />
         </button>
       </div>
+      {note && (
+        <p className={`hint wa-history ${note.ok ? 'wa-history--ok' : 'wa-history--err'}`} role={note.ok ? 'status' : 'alert'}>
+          {note.text}
+        </p>
+      )}
       {all && a.level === 'reply' && a.send === 'auto' && (
         <p className="hint hint--warn wa-chat__warn">
           <Icon name="shield" size={13} />
@@ -199,12 +248,16 @@ function AccessRow({ n, a, onChange, onRemove }: { n: WhatsAppNumber; a: WhatsAp
   )
 }
 
-export function AccessCard({ n, agents, onAccess, onPick }: {
+export function AccessCard({ n, agents, onAccess, onPick, onGroupManager, onRevoke }: {
   n: WhatsAppNumber
   agents: Agent[]
   // Changes the list by what it is now: the screen applies the change to the newest copy of it.
   onAccess: (edit: (rows: WhatsAppAccess[]) => WhatsAppAccess[]) => void
   onPick: (agentId: string) => void
+  // Adds or takes one agent from the group managers, built from the newest settings so the others stay.
+  onGroupManager: (agentId: string, on: boolean) => void
+  // Takes an agent off this number: all its conversations, or only the one row given.
+  onRevoke: (agentId: string, row?: WhatsAppAccess) => void
 }): ReactNode {
   const byAgent = new Map<string, WhatsAppAccess[]>()
   for (const a of n.access) byAgent.set(a.agentId, [...(byAgent.get(a.agentId) ?? []), a])
@@ -231,10 +284,10 @@ export function AccessCard({ n, agents, onAccess, onPick }: {
       confirm: L('Tirar', 'Remove'),
       danger: true
     })
-    if (ok) onAccess((rows) => rows.filter((r) => r.agentId !== agentId))
+    if (ok) onRevoke(agentId)
   }
   return (
-    <Card title={L('Quem pode usar', 'Who can use it')} lead={L('O agente não enxerga nenhuma conversa fora desta lista.', 'The agent can’t see any conversation outside this list.')} action={byAgent.size > 0 ? adder : undefined}>
+    <Card title={L('Quem pode usar', 'Who can use it')} lead={L('O agente não enxerga nenhuma conversa fora desta lista. Os agentes leem texto, imagem, documento e áudio (o áudio precisa do ditado ligado em Configurações › Geral), e podem responder, reagir, enviar arquivo e enquete.', 'The agent can’t see any conversation outside this list. Agents read text, images, documents and audio (audio needs dictation turned on in Settings › General), and can answer, react, send files and polls.')} action={byAgent.size > 0 ? adder : undefined}>
       {byAgent.size === 0 ? (
         <div className="wa-empty">
           <p>
@@ -264,13 +317,22 @@ export function AccessCard({ n, agents, onAccess, onPick }: {
                   <Icon name="trash" size={14} />
                 </button>
               </div>
+              {agent && n.kind === 'qr' && (
+                <div className="key-row wa-agent__perm" role="group" aria-labelledby={`wa-gm-${agentId}`}>
+                  <div className="grow">
+                    <strong id={`wa-gm-${agentId}`}>{L('Pode cuidar de grupos', 'Can manage groups')}</strong>
+                    <p className="muted small">{L('Criar grupo, adicionar ou tirar pessoas e gerar link de convite. Sempre pede a sua aprovação.', 'Create a group, add or remove people and make an invite link. Always asks for your approval.')}</p>
+                  </div>
+                  <Toggle on={n.settings.groupManagers.includes(agentId)} onChange={(v) => onGroupManager(agentId, v)} />
+                </div>
+              )}
               {ordered(rows).map((a) => (
                 <AccessRow
                   key={a.chat}
                   n={n}
                   a={a}
                   onChange={(patch) => onAccess((rows) => rows.map((r) => (same(r, a) ? { ...r, ...patch } : r)))}
-                  onRemove={() => onAccess((rows) => rows.filter((r) => !same(r, a)))}
+                  onRemove={() => onRevoke(agentId, a)}
                 />
               ))}
             </div>
@@ -302,6 +364,15 @@ export function InboundCard({ n, onSettings }: { n: WhatsAppNumber; onSettings: 
           </>,
           L('O agente é avisado na hora e prepara a resposta. Ela espera você ou sai sozinha, conforme o que você marcou em cada conversa.', 'The agent is told right away and prepares the answer. It waits for you or goes on its own, depending on what you set for each conversation.')
         )}
+      </div>
+      <div className="wa-toggles">
+        <div className="key-row" role="group" aria-labelledby="wa-read-title">
+          <div className="grow">
+            <strong id="wa-read-title">{L('Marcar como lida quando o agente ler', 'Mark as read when the agent reads')}</strong>
+            <p className="muted small">{L('Nas conversas com “Ler e responder”. A outra pessoa vê os tiques azuis, e a mensagem deixa de aparecer como não lida no seu celular.', 'In conversations with “Read and answer”. The other person sees the blue ticks, and the message stops showing as unread on your phone.')}</p>
+          </div>
+          <Toggle on={s.markRead} onChange={(v) => onSettings({ markRead: v })} />
+        </div>
       </div>
       {n.kind === 'qr' && (
         <div className="wa-toggles">
@@ -339,6 +410,7 @@ export function LimitsCard({ n, onSettings }: { n: WhatsAppNumber; onSettings: (
   const commit = (field: 'dailyLimit' | 'newChatsLimit', v: number): number =>
     onSettings(field === 'dailyLimit' ? { dailyLimit: v } : { newChatsLimit: v })[field]
   const fmt = (v: number): string => v.toLocaleString()
+  const mb = Math.round(MEDIA_OUT_MAX / 1024 / 1024)
   return (
     <Card title={L('Limites', 'Limits')} lead={L('Quantas mensagens os agentes mandam por este número em um dia.', 'How many messages the agents send from this number in a day.')}>
       <div className="wa-limits">
@@ -369,6 +441,16 @@ export function LimitsCard({ n, onSettings }: { n: WhatsAppNumber; onSettings: (
         <div className="grow">
           <strong>{L('Primeira mensagem para alguém novo pede aprovação', 'The first message to someone new asks for approval')}</strong>
           <p className="muted small">{L('Sempre, mesmo em conversa marcada como “Envia sozinho”.', 'Always, even in a conversation set to “Sends on its own”.')}</p>
+        </div>
+      </div>
+      <div className="key-row">
+        <Icon name="clip" size={16} />
+        <div className="grow">
+          <p className="muted small">
+            {n.kind === 'qr'
+              ? L(`Arquivo e enquete contam como uma mensagem (arquivo de até ${mb} MB). Mudanças em grupos: no máximo ${GROUP_ACTIONS_PER_DAY} por dia, ${GROUP_PEOPLE_PER_ACTION} pessoas por vez, sempre com a sua aprovação.`, `A file or a poll counts as one message (files up to ${mb} MB). Group changes: at most ${GROUP_ACTIONS_PER_DAY} a day, ${GROUP_PEOPLE_PER_ACTION} people at a time, always with your approval.`)
+              : L(`Arquivo e enquete contam como uma mensagem (arquivo de até ${mb} MB).`, `A file or a poll counts as one message (files up to ${mb} MB).`)}
+          </p>
         </div>
       </div>
     </Card>
@@ -461,36 +543,5 @@ export function CloudCard({ n, webhookUrl, verifyToken }: { n: WhatsAppNumber; w
         )}
       </div>
     </Card>
-  )
-}
-
-// ---------- the send an agent asks approval for (Conversation.tsx) ----------
-
-// The message as it will look in WhatsApp, not as JSON. A template goes by its name and values.
-export function WhatsAppSend({ args }: { args: Record<string, unknown> }): ReactNode {
-  const text = typeof args['texto'] === 'string' ? args['texto'] : ''
-  const model = typeof args['modelo'] === 'object' && args['modelo'] !== null ? (args['modelo'] as Record<string, unknown>) : undefined
-  const raw: unknown = model?.['variaveis']
-  const values = Array.isArray(raw) ? raw.map(String).join(', ') : ''
-  const first = args['primeiro_contato'] === true
-  return (
-    <div className="wa-send">
-      {first && (
-        <p className="wa-send__first">
-          <span className="tag tag--warn">{L('Primeiro contato', 'First contact')}</span>
-          <span className="muted small">{L('Essa pessoa nunca escreveu para este número.', 'This person has never written to this number.')}</span>
-        </p>
-      )}
-      <div className="wa-bubble">
-        {model ? (
-          <>
-            <strong>{L('Mensagem modelo', 'Template message')} “{String(model['nome'] ?? '')}”</strong>
-            {values && <div>{values}</div>}
-          </>
-        ) : (
-          text
-        )}
-      </div>
-    </div>
   )
 }

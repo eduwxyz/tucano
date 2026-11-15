@@ -146,6 +146,7 @@ export interface Api {
   whatsappChats(p: { id: string; q?: string }): Promise<WhatsAppChat[]> // the number's conversations, latest first
   whatsappSetAccess(p: { id: string; access: WhatsAppAccess[] }): Promise<WhatsAppNumber> // replaces who may use what
   whatsappTemplates(p: { id: string }): Promise<WhatsAppTemplate[]> // the official API's approved templates
+  whatsappHistory(p: { id: string; chat: string }): Promise<void> // asks the phone for a conversation's earlier messages (qr); they arrive on their own
   exportTeam(): string // the team as Markdown
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added

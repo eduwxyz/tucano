@@ -1,21 +1,32 @@
-// What agents do with WhatsApp: the three tools (list, read, send), the judging of every send
-// against the number's limits, and the sending itself, one message at a time per number. The
-// service in index.ts owns the numbers and hands this class what it needs (the host).
+// What agents do with WhatsApp: listing, reading and sending (the other tools are in extras.ts and
+// groups.ts), the judging of every send against the number's limits, and the sending itself, one
+// message at a time per number. The service in index.ts owns the numbers and hands this class what it
+// needs (the host).
+import { readFile } from 'node:fs/promises'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
 import { ALL_CHATS, accessFor, dayStart, judgeSend, phoneDigits, type SendVerdict, type WhatsAppChat, type WhatsAppNumber } from '../../shared/whatsapp'
 import * as cloud from './cloud'
+import { describePlan, Extras, notConnected, type Plan, type Spec } from './extras'
+import { Groups } from './groups'
+import type { WhatsAppMedia } from './media'
 import { jidPhone, Unconfirmed, type QrDriver, type QrStatus } from './qr'
 import type { NumberRow, WhatsAppStore } from './store'
-import { linesOf, pick, READ_DEFAULT, READ_MAX, refusalText, stamp, str, templateOf, type Template } from './tools'
+import { linesOf, listOf, pick, pollOf, READ_DEFAULT, READ_MAX, refusalText, snippet, stamp, str, templateOf } from './tools'
 
 export interface ToolOutcome {
   text: string
   isError?: boolean
   outside?: boolean // it read other people's text
+  image?: { data: string; mimeType: string } // base64: what an image message looks like, shown to the agent after the text
   step: { label: string; detail: string }
-  // Present when the send waits for a person: nothing was sent.
-  approval?: { args: Record<string, unknown>; why: string; detail: string }
+  // Present when the action waits for a person: nothing was done.
+  approval?: { args: Record<string, unknown>; why: string; detail: string; highRisk?: boolean }
+}
+
+// What the runner lends a call: the files of the conversation the agent is in, found by their exact name.
+export interface ToolCtx {
+  file(name: string): { id: string; path: string; name: string } | undefined
 }
 
 export interface Runtime {
@@ -36,6 +47,9 @@ export interface Host {
   stub(id: string): WhatsAppChat
   changed(): void
   fail(e: unknown): void
+  media: WhatsAppMedia // the files of messages
+  artifact(id: string): { path: string; name: string } | undefined // a file of a conversation, by id
+  speech(data: Buffer): Promise<string | undefined> // an audio's words, when dictation and ffmpeg are there
 }
 
 interface Target {
@@ -46,10 +60,21 @@ interface Target {
 }
 
 export const generic = (): string => L('Algo deu errado com o WhatsApp. Nada foi enviado. Tente de novo em instantes.', 'Something went wrong with WhatsApp. Nothing was sent. Try again in a moment.')
-const notConnected = (): UserError => new UserError(L('Esse número não está conectado ao WhatsApp agora. Conecte-o e tente de novo.', "That number isn't connected to WhatsApp right now. Connect it and try again."))
 
 export class AgentTools {
-  constructor(private h: Host) {}
+  private extras: Extras
+  private groups: Groups
+
+  constructor(private h: Host) {
+    const shared = { pickNumber: (agentId: string, query: string) => this.pickNumber(agentId, query), usable: (n: NumberRow, agentId: string) => this.usable(n, agentId) }
+    this.extras = new Extras(h, shared)
+    this.groups = new Groups(h, shared)
+  }
+
+  // Asks the phone for a conversation's earlier messages (the screen's button).
+  history(n: NumberRow, chat: unknown): Promise<void> {
+    return this.extras.history(n, chat)
+  }
 
   // ---------- sending ----------
 
@@ -76,10 +101,10 @@ export class AgentTools {
   }
 
   // One send at a time per number, judged again at the moment it goes (the day may have filled up while it waited).
-  private deliver(n: NumberRow, agentId: string, target: Target, text: string, tpl?: Template): Promise<string> {
+  private deliver(n: NumberRow, agentId: string, target: Target, plan: Plan): Promise<string> {
     const r = this.h.rt(n.id)
     const run = r.tail.then(async () => {
-      const v = this.judge(n, agentId, target.id, text, !!tpl)
+      const v = this.judge(n, agentId, target.id, plan.judged, !!plan.tpl)
       if (!v.ok) throw new UserError(this.refusal(n, target.name, v.why))
       // Read before the send: a conversation nobody had written in yet is a new one for the day's limit, even after they answer.
       const first = this.h.store().chat(n.id, target.id)?.inboundAt === undefined
@@ -87,19 +112,23 @@ export class AgentTools {
       try {
         if (n.kind === 'qr') {
           if (!r.driver || r.view.status !== 'connected') throw notConnected()
-          id = await r.driver.send(target.id, text)
+          id = await r.driver.send(target.id, await this.extras.outgoing(plan))
         } else {
           const keys = this.h.keys.get(n.id)
           if (!keys || !this.h.cloudOk()) throw notConnected()
-          id = tpl ? await cloud.sendTemplate(keys, target.id, tpl.nome, tpl.idioma, tpl.variaveis) : await cloud.sendText(keys, target.id, text)
+          if (plan.tpl) id = await cloud.sendTemplate(keys, target.id, plan.tpl.nome, plan.tpl.idioma, plan.tpl.variaveis)
+          else if (plan.file) {
+            const mediaId = await cloud.upload(keys, await readFile(plan.file.path), plan.file.mime, plan.file.name)
+            id = await cloud.sendMedia(keys, target.id, plan.file.kind, mediaId, plan.sent.trim() || undefined, plan.file.name, plan.reply?.id)
+          } else id = await cloud.sendText(keys, target.id, plan.sent, plan.reply?.id)
         }
       } catch (e) {
         // Not confirmed in time: it may have left, so it is kept (it counts toward the limits) and the agent is still told not to resend.
-        if (e instanceof Unconfirmed) this.record(n, agentId, target, e.id, text, tpl, first)
+        if (e instanceof Unconfirmed) this.record(n, agentId, target, e.id, plan, first)
         throw e
       }
       // The message has left: from here on, a failure is logged, never reported to the agent as a failed send.
-      this.record(n, agentId, target, id, text, tpl, first)
+      this.record(n, agentId, target, id, plan, first)
       return this.reply(n, target)
     })
     r.tail = run.catch(() => undefined)
@@ -107,12 +136,13 @@ export class AgentTools {
   }
 
   // Writes the sent message down as the agent's. A failure here is logged: the message has already gone.
-  private record(n: NumberRow, agentId: string, target: Target, id: string, text: string, tpl: Template | undefined, first: boolean): void {
+  private record(n: NumberRow, agentId: string, target: Target, id: string, plan: Plan, first: boolean): void {
     try {
       const known = this.h.store().chat(n.id, target.id)
       const at = Date.now()
       this.h.store().upsertChat(n.id, { id: target.id, kind: target.kind, ...(known ? {} : { name: target.name }), ...(target.phone ? { phone: target.phone } : {}), lastAt: at })
-      this.h.store().addMessage(n.id, { id, chat: target.id, fromMe: true, text: tpl ? `[${tpl.nome}] ${tpl.variaveis.join(' · ')}`.trim() : text, at, agentId, first })
+      const quoted = plan.reply ? { quoted: { id: plan.reply.id, text: snippet(plan.reply.text, 120), ...(plan.reply.sender ? { sender: plan.reply.sender } : {}) } } : {}
+      this.h.store().addMessage(n.id, { id, chat: target.id, fromMe: true, at, agentId, first, ...describePlan(plan), ...quoted })
       this.h.changed()
     } catch (e) {
       this.h.fail(e)
@@ -150,13 +180,25 @@ export class AgentTools {
     return pick(mine, query, 'number')
   }
 
-  async call(agent: { id: string; name: string }, name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
-    const label = name === 'whatsapp_ler' ? L('Ler no WhatsApp', 'Read on WhatsApp') : name === 'whatsapp_enviar' ? L('Enviar no WhatsApp', 'Send on WhatsApp') : L('Ver conversas do WhatsApp', 'See WhatsApp conversations')
+  async call(agent: { id: string; name: string }, name: string, args: Record<string, unknown>, ctx?: ToolCtx): Promise<ToolOutcome> {
+    const labels: Record<string, string> = {
+      whatsapp_ler: L('Ler no WhatsApp', 'Read on WhatsApp'),
+      whatsapp_enviar: L('Enviar no WhatsApp', 'Send on WhatsApp'),
+      whatsapp_midia: L('Ver arquivo do WhatsApp', 'See a WhatsApp file'),
+      whatsapp_reagir: L('Reagir no WhatsApp', 'React on WhatsApp'),
+      whatsapp_corrigir: L('Corrigir no WhatsApp', 'Fix on WhatsApp'),
+      whatsapp_grupo: L('Grupo do WhatsApp', 'WhatsApp group')
+    }
+    const label = labels[name] ?? L('Ver conversas do WhatsApp', 'See WhatsApp conversations')
     const a = args && typeof args === 'object' ? args : {}
     try {
       if (name === 'whatsapp_conversas') return this.listTool(agent.id, label)
       if (name === 'whatsapp_ler') return this.readTool(agent.id, a, label)
-      if (name === 'whatsapp_enviar') return await this.sendTool(agent.id, a, label)
+      if (name === 'whatsapp_enviar') return await this.sendTool(agent.id, a, label, ctx)
+      if (name === 'whatsapp_midia') return await this.extras.media(agent.id, a, label)
+      if (name === 'whatsapp_reagir') return await this.extras.react(agent.id, a, label)
+      if (name === 'whatsapp_corrigir') return await this.extras.correct(agent.id, a, label)
+      if (name === 'whatsapp_grupo') return await this.groups.call(agent.id, a, label)
       return { text: L('Essa ferramenta de WhatsApp não existe.', "That WhatsApp tool doesn't exist."), isError: true, step: { label, detail: name } }
     } catch (e) {
       if (!(e instanceof UserError)) this.h.fail(e)
@@ -173,6 +215,7 @@ export class AgentTools {
       const kind = n.kind === 'cloud' ? L('API oficial', 'official API') : L('QR code', 'QR code')
       lines.push(L(`Número "${n.name}" (id ${n.id}) · ${kind} · ${state}${n.description ? ` · serve para: ${n.description}` : ''}`, `Number "${n.name}" (id ${n.id}) · ${kind} · ${state}${n.description ? ` · used for: ${n.description}` : ''}`))
       lines.push(L(`  Hoje: ${v.sentToday} de ${n.settings.dailyLimit} mensagens enviadas (restam ${Math.max(0, n.settings.dailyLimit - v.sentToday)}); ${v.newToday} de ${n.settings.newChatsLimit} conversas novas.`, `  Today: ${v.sentToday} of ${n.settings.dailyLimit} messages sent (${Math.max(0, n.settings.dailyLimit - v.sentToday)} left); ${v.newToday} of ${n.settings.newChatsLimit} new conversations.`))
+      if (n.settings.groupManagers.includes(agentId)) lines.push(L('  Você pode cuidar de grupos neste número (sempre com aprovação).', '  You may manage groups on this number (always with approval).'))
       const access = this.h.store().access(n.id)
       const all = access.some((x) => x.agentId === agentId && x.chat === ALL_CHATS)
       const chats = this.usable(n, agentId).slice(0, 30)
@@ -195,6 +238,7 @@ export class AgentTools {
     const count = Number.isFinite(asked) && asked >= 1 ? Math.min(READ_MAX, Math.floor(asked)) : READ_DEFAULT
     const messages = this.h.store().messages(n.id, chat.id, count)
     const text = messages.length ? linesOf(messages, chat.name) : L('Nenhuma mensagem guardada nessa conversa ainda (só as que chegaram depois da liberação ficam guardadas).', 'No message kept in this conversation yet (only those that arrived after it was opened are kept).')
+    this.extras.markRead(n, agentId, chat, messages)
     return { text, outside: true, step: { label, detail: `${n.name} · ${chat.name}` } }
   }
 
@@ -216,43 +260,95 @@ export class AgentTools {
     return this.h.store().chat(n.id, id) ?? { id, name: digits, kind: 'contact', phone: digits }
   }
 
-  private async sendTool(agentId: string, args: Record<string, unknown>, label: string): Promise<ToolOutcome> {
-    const n = this.pickNumber(agentId, str(args['numero']))
-    const text = typeof args['texto'] === 'string' ? args['texto'] : ''
+  // What one send carries, from the agent's arguments: each one is read for its type, never trusted.
+  private specOf(args: Record<string, unknown>, ctx: ToolCtx | undefined): Spec {
+    if (args['arquivo'] !== undefined && typeof args['arquivo'] !== 'string') throw new UserError(L('"arquivo" é o nome do arquivo (um texto).', '"arquivo" is the name of the file (text).'))
+    if (args['responder_a'] !== undefined && typeof args['responder_a'] !== 'string') throw new UserError(L('"responder_a" é o id curto da mensagem (um texto).', '"responder_a" is the short id of the message (text).'))
+    const nome = str(args['arquivo'])
+    const file = nome ? ctx?.file(nome) : undefined
+    if (nome && !file) throw new UserError(L(`Não achei o arquivo "${nome}". Só dá para enviar um arquivo desta conversa: um que você mostrou com show_file ou que uma pessoa anexou, pelo nome exato. Nada foi enviado.`, `I couldn't find the file "${nome}". Only a file of this conversation can be sent: one you showed with show_file or that a person attached, by its exact name. Nothing was sent.`))
     const tpl = templateOf(args['modelo'])
-    if (tpl && n.kind !== 'cloud') throw new UserError(L('Modelo só existe na API oficial. Neste número, envie o texto em "texto".', 'Templates only exist on the official API. On this number, send the text in "texto".'))
+    const poll = pollOf(args['enquete'])
+    const replyId = str(args['responder_a'])
+    return { text: typeof args['texto'] === 'string' ? args['texto'] : '', ...(tpl ? { tpl } : {}), ...(replyId ? { replyId } : {}), mention: listOf(args['mencionar'], 20), ...(file ? { file } : {}), ...(poll ? { poll } : {}) }
+  }
+
+  private async sendTool(agentId: string, args: Record<string, unknown>, label: string, ctx: ToolCtx | undefined): Promise<ToolOutcome> {
+    const n = this.pickNumber(agentId, str(args['numero']))
+    const spec = this.specOf(args, ctx)
+    if (spec.tpl && n.kind !== 'cloud') throw new UserError(L('Modelo só existe na API oficial. Neste número, envie o texto em "texto".', 'Templates only exist on the official API. On this number, send the text in "texto".'))
     const conversa = str(args['conversa'])
     const telefone = str(args['telefone'])
     if (!conversa && !telefone) throw new UserError(L('Diga para quem enviar: conversa (uma que já existe) ou telefone (alguém novo).', 'Say who to send to: conversa (an existing one) or telefone (someone new).'))
     const target: Target = conversa ? pick(this.usable(n, agentId), conversa, 'chat', true) : await this.newTarget(n, agentId, telefone)
     const step = { label, detail: `${n.name} · ${target.name}` }
-    const v = this.judge(n, agentId, target.id, text, !!tpl)
+    // A refusal that needs no looking at the file or the group comes first, so nothing is read or asked for nothing.
+    const early = this.judge(n, agentId, target.id, spec.text || spec.file?.name || spec.poll?.pergunta || '', !!spec.tpl)
+    if (!early.ok) return { text: this.refusal(n, target.name, early.why), isError: true, step }
+    const plan = await this.extras.plan(n, target, spec)
+    const v = this.judge(n, agentId, target.id, plan.judged, !!plan.tpl)
     if (!v.ok) return { text: this.refusal(n, target.name, v.why), isError: true, step }
     if (v.ask) {
+      const tpl = plan.tpl
+      // Who is tagged is kept as it was resolved (the name, or the phone when there is none), never as the agent typed it.
       const approval = {
-        args: { numero_id: n.id, numero: n.name, conversa_id: target.id, conversa: target.name, texto: text, ...(tpl ? { modelo: tpl } : {}), ...(v.firstContact ? { primeiro_contato: true } : {}) },
+        args: {
+          numero_id: n.id,
+          numero: n.name,
+          conversa_id: target.id,
+          conversa: target.name,
+          texto: plan.text,
+          ...(tpl ? { modelo: tpl } : {}),
+          ...(v.firstContact ? { primeiro_contato: true } : {}),
+          ...(plan.reply ? { responder_a: { id: plan.reply.id, texto: snippet(plan.reply.text, 120) } } : {}),
+          ...(plan.mentions.length ? { mencionar: plan.mentions.map((x) => x.name ?? x.phone) } : {}),
+          ...(plan.file ? { arquivo: { id: plan.file.id, nome: plan.file.name } } : {}),
+          ...(plan.poll ? { enquete: plan.poll } : {})
+        },
         why: v.firstContact ? L(`Primeira mensagem para ${target.name}, que nunca escreveu para este número.`, `First message to ${target.name}, who never wrote to this number.`) : L(`Mensagem para ${target.name} pelo número ${n.name}.`, `Message to ${target.name} from the number ${n.name}.`),
-        detail: tpl ? `${tpl.nome} (${tpl.idioma})${tpl.variaveis.length ? `: ${tpl.variaveis.join(' · ')}` : ''}` : text
+        detail: tpl ? `${tpl.nome} (${tpl.idioma})${tpl.variaveis.length ? `: ${tpl.variaveis.join(' · ')}` : ''}` : plan.file ? `${plan.file.name}${plan.text.trim() ? `: ${plan.text}` : ''}` : plan.poll ? `${plan.poll.pergunta}: ${plan.poll.opcoes.join(' / ')}` : plan.sent
       }
       return { text: L('Essa mensagem espera a aprovação de uma pessoa antes de sair. Nada foi enviado ainda; você será avisado da decisão.', 'This message waits for a person to approve it before it leaves. Nothing was sent yet; you will be told the decision.'), step, approval }
     }
-    return { text: await this.deliver(n, agentId, target, text, tpl), step }
+    return { text: await this.deliver(n, agentId, target, plan), step }
   }
 
-  // Sends exactly what was approved. Access, the day's limit and the connection are checked again now.
-  async approved(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
+  // What was approved, read back from the stored arguments (the file is found again by its id: it may be gone).
+  private specOfApproval(args: Record<string, unknown>): Spec {
+    const tpl = templateOf(args['modelo'])
+    const poll = pollOf(args['enquete'])
+    const arq = args['arquivo'] && typeof args['arquivo'] === 'object' ? (args['arquivo'] as Record<string, unknown>) : undefined
+    const found = arq ? this.h.artifact(str(arq['id'])) : undefined
+    if (arq && !found) throw new UserError(L(`O arquivo "${str(arq['nome'])}" não existe mais. Nada foi enviado.`, `The file "${str(arq['nome'])}" no longer exists. Nothing was sent.`))
+    const reply = args['responder_a'] && typeof args['responder_a'] === 'object' ? str((args['responder_a'] as Record<string, unknown>)['id']) : ''
+    return {
+      text: typeof args['texto'] === 'string' ? args['texto'] : '',
+      ...(tpl ? { tpl } : {}),
+      ...(reply ? { replyId: reply } : {}),
+      mention: listOf(args['mencionar'], 20),
+      ...(arq && found ? { file: { id: str(arq['id']), name: found.name, path: found.path } } : {}),
+      ...(poll ? { poll } : {})
+    }
+  }
+
+  // Does what was approved. Access, the day's limit and the connection are checked again now.
+  async approved(agentId: string, args: Record<string, unknown>, tool?: string): Promise<{ ok: boolean; text: string }> {
     try {
+      if (tool === 'whatsapp_corrigir') return { ok: true, text: await this.extras.approvedEdit(agentId, args) }
+      if (tool === 'whatsapp_grupo') return { ok: true, text: await this.groups.approved(agentId, args) }
       const n = this.h.store().number(str(args['numero_id']))
       if (!n) return { ok: false, text: L('Esse número de WhatsApp não existe mais. Nada foi enviado.', 'That WhatsApp number no longer exists. Nothing was sent.') }
       const id = str(args['conversa_id'])
-      const text = typeof args['texto'] === 'string' ? args['texto'] : ''
-      const tpl = templateOf(args['modelo'])
       if (!id) return { ok: false, text: generic() }
       const name = this.h.store().chat(n.id, id)?.name ?? (str(args['conversa']) || id.split('@')[0] || id)
-      const v = this.judge(n, agentId, id, text, !!tpl)
-      if (!v.ok) return { ok: false, text: this.refusal(n, name, v.why) }
+      const spec = this.specOfApproval(args)
+      const early = this.judge(n, agentId, id, spec.text || spec.file?.name || spec.poll?.pergunta || '', !!spec.tpl)
+      if (!early.ok) return { ok: false, text: this.refusal(n, name, early.why) }
       const target: Target = this.h.store().chat(n.id, id) ?? { id, name, kind: id.endsWith('@g.us') ? 'group' : 'contact', ...(jidPhone(id) ? { phone: jidPhone(id) } : {}) }
-      return { ok: true, text: await this.deliver(n, agentId, target, text, tpl) }
+      const plan = await this.extras.plan(n, target, spec)
+      const v = this.judge(n, agentId, id, plan.judged, !!plan.tpl)
+      if (!v.ok) return { ok: false, text: this.refusal(n, name, v.why) }
+      return { ok: true, text: await this.deliver(n, agentId, target, plan) }
     } catch (e) {
       if (!(e instanceof UserError)) this.h.fail(e)
       return { ok: false, text: e instanceof UserError ? e.message : generic() }
@@ -272,13 +368,22 @@ export class AgentTools {
     }
   }
 
-  // The sentence of a decision: what is being asked to send, and where.
-  what(args: Record<string, unknown>): string {
-    const text = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
-    const tpl = templateOf(args['modelo'])
-    const shown = tpl ? tpl.nome : text.length > 80 ? `${text.slice(0, 80)}…` : text
+  // The sentence of a decision: what is being asked to do, and where.
+  what(args: Record<string, unknown>, tool?: string): string {
     const chat = str(args['conversa']) || str(args['conversa_id'])
     const number = str(args['numero']) || str(args['numero_id'])
+    if (tool === 'whatsapp_grupo') return this.groups.what(args)
+    if (tool === 'whatsapp_corrigir') {
+      const text = typeof args['texto'] === 'string' ? snippet(args['texto'], 80) : ''
+      return L(`corrigir uma mensagem para "${text}" em ${chat} pelo número ${number}`, `fix a message to "${text}" in ${chat} from the number ${number}`)
+    }
+    const text = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
+    const tpl = templateOf(args['modelo'])
+    const arq = args['arquivo'] && typeof args['arquivo'] === 'object' ? str((args['arquivo'] as Record<string, unknown>)['nome']) : ''
+    const poll = args['enquete'] && typeof args['enquete'] === 'object' ? str((args['enquete'] as Record<string, unknown>)['pergunta']) : ''
+    if (arq) return L(`enviar o arquivo "${arq}" para ${chat} pelo número ${number}`, `send the file "${arq}" to ${chat} from the number ${number}`)
+    if (poll) return L(`enviar a enquete "${snippet(poll, 80)}" para ${chat} pelo número ${number}`, `send the poll "${snippet(poll, 80)}" to ${chat} from the number ${number}`)
+    const shown = tpl ? tpl.nome : text.length > 80 ? `${text.slice(0, 80)}…` : text
     return tpl ? L(`enviar o modelo "${shown}" para ${chat} pelo número ${number}`, `send the template "${shown}" to ${chat} from the number ${number}`) : L(`enviar "${shown}" para ${chat} pelo número ${number}`, `send "${shown}" to ${chat} from the number ${number}`)
   }
 }

@@ -7,10 +7,12 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
-import { ALL_CHATS, clampSettings, type WhatsAppAccess, type WhatsAppChat, type WhatsAppKind, type WhatsAppLevel, type WhatsAppMessage, type WhatsAppSendMode, type WhatsAppSettings } from '../../shared/whatsapp'
+import { ALL_CHATS, clampSettings, type WhatsAppAccess, type WhatsAppChat, type WhatsAppKind, type WhatsAppLevel, type WhatsAppMediaKind, type WhatsAppMessage, type WhatsAppSendMode, type WhatsAppSettings } from '../../shared/whatsapp'
 import type { Cipher } from '../secrets'
+import { REACTION_PREFIX } from './tools'
 
 const KEEP_MS = 90 * 24 * 3_600_000 // messages older than this are dropped when the app starts
+const EVENTS_KEEP_MS = 7 * 24 * 3_600_000 // the daily counters only look at today
 
 export interface NumberRow {
   id: string
@@ -34,14 +36,49 @@ export interface ChatPatch {
   inboundAt?: number
 }
 
+// A message as it is kept: what the window shows, plus what is needed to answer it, react to it or read its file.
+// `file` is a path inside the media folder (see media.ts), never one the other side chose.
+export type StoredMessage = WhatsAppMessage & { first?: boolean; file?: string; mime?: string; size?: number; participant?: string }
+
+// The oldest message seen in a conversation (stored or not): where "earlier messages" is asked backwards from.
+export interface ChatAnchor {
+  id: string
+  fromMe: boolean
+  participant?: string
+  at: number
+}
+
 type Row = Record<string, string | number | null>
 type Param = string | number | null
 
 const text = (v: string | number | null | undefined): string => (v === null || v === undefined ? '' : String(v))
 const num = (v: string | number | null | undefined): number | undefined => (typeof v === 'number' ? v : undefined)
 
+const MEDIA_KINDS: readonly WhatsAppMediaKind[] = ['image', 'audio', 'video', 'document', 'sticker']
+
+// The id an agent sees and quotes: the last six characters, upper-case.
+export const shortId = (id: string): string => id.slice(-6).toUpperCase()
+
+// Columns a database made by an earlier build does not have yet: each is added once, at start.
+const NEW_MESSAGE_COLUMNS: [string, string][] = [
+  ['media', 'TEXT'],
+  ['file', 'TEXT'],
+  ['file_name', 'TEXT'],
+  ['mime', 'TEXT'],
+  ['size', 'INTEGER'],
+  ['participant', 'TEXT'],
+  ['quoted_id', 'TEXT'],
+  ['quoted_text', 'TEXT'],
+  ['quoted_sender', 'TEXT'],
+  ['edited', 'INTEGER NOT NULL DEFAULT 0'],
+  ['deleted', 'INTEGER NOT NULL DEFAULT 0']
+]
+
+const likeEscape = (v: string): string => v.replace(/[\\%_]/g, (c) => `\\${c}`)
+
 export class WhatsAppStore {
   private db: DatabaseSync
+  private expired: string[] = [] // files of the messages the start-up prune dropped, until the service deletes them
 
   constructor(
     dir: string,
@@ -53,15 +90,22 @@ export class WhatsAppStore {
       this.db.exec('PRAGMA journal_mode = WAL')
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS numbers (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, kind TEXT NOT NULL, phone TEXT, settings TEXT NOT NULL, created_at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS chats (number_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER, phone TEXT, last_at INTEGER, inbound_at INTEGER, PRIMARY KEY (number_id, id));
+        CREATE TABLE IF NOT EXISTS chats (number_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER, phone TEXT, last_at INTEGER, inbound_at INTEGER, anchor TEXT, PRIMARY KEY (number_id, id));
         CREATE TABLE IF NOT EXISTS access (number_id TEXT NOT NULL, agent_id TEXT NOT NULL, chat TEXT NOT NULL, level TEXT NOT NULL, send TEXT NOT NULL, PRIMARY KEY (number_id, agent_id, chat));
-        CREATE TABLE IF NOT EXISTS messages (number_id TEXT NOT NULL, chat TEXT NOT NULL, id TEXT NOT NULL, from_me INTEGER NOT NULL, sender TEXT, text TEXT NOT NULL, at INTEGER NOT NULL, agent_id TEXT, "first" INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (number_id, chat, id));
+        CREATE TABLE IF NOT EXISTS messages (number_id TEXT NOT NULL, chat TEXT NOT NULL, id TEXT NOT NULL, from_me INTEGER NOT NULL, sender TEXT, text TEXT NOT NULL, at INTEGER NOT NULL, agent_id TEXT, "first" INTEGER NOT NULL DEFAULT 0, ${NEW_MESSAGE_COLUMNS.map(([n, t]) => `${n} ${t}`).join(', ')}, PRIMARY KEY (number_id, chat, id));
         CREATE INDEX IF NOT EXISTS messages_by_chat ON messages (number_id, chat, at);
         CREATE TABLE IF NOT EXISTS auth (number_id TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY (number_id, k));
+        CREATE TABLE IF NOT EXISTS events (number_id TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS events_by_number ON events (number_id, kind, at);
       `)
-      // A database made by an earlier build has no "first" column yet: it is added once, here.
-      if (!this.all('PRAGMA table_info(messages)').some((r) => r['name'] === 'first')) this.db.exec('ALTER TABLE messages ADD COLUMN "first" INTEGER NOT NULL DEFAULT 0')
-      this.db.prepare('DELETE FROM messages WHERE at < ?').run(Date.now() - KEEP_MS)
+      // A database made by an earlier build lacks the columns added since: each is added once, here.
+      const have = (table: string): Set<string> => new Set(this.all(`PRAGMA table_info(${table})`).map((r) => text(r['name'])))
+      const message = have('messages')
+      if (!message.has('first')) this.db.exec('ALTER TABLE messages ADD COLUMN "first" INTEGER NOT NULL DEFAULT 0')
+      for (const [name, type] of NEW_MESSAGE_COLUMNS) if (!message.has(name)) this.db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${type}`)
+      if (!have('chats').has('anchor')) this.db.exec('ALTER TABLE chats ADD COLUMN anchor TEXT')
+      this.expired = this.prune()
+      this.db.prepare('DELETE FROM events WHERE at < ?').run(Date.now() - EVENTS_KEEP_MS)
     } catch (e) {
       console.error('[whatsapp]', e)
       throw new UserError(L('Não consegui abrir os dados do WhatsApp neste computador. Feche o app e abra de novo.', "I couldn't open the WhatsApp data on this computer. Close the app and open it again."))
@@ -129,16 +173,34 @@ export class WhatsAppStore {
   }
 
   // A number leaves with everything that belonged to it: conversations, rules, messages and keys.
-  removeNumber(id: string): void {
+  // Returns the files its messages had, for the service to delete.
+  removeNumber(id: string): string[] {
     this.db.exec('BEGIN')
     try {
-      for (const table of ['chats', 'access', 'messages', 'auth']) this.run(`DELETE FROM ${table} WHERE number_id = ?`, id)
+      const files = this.all('SELECT file FROM messages WHERE number_id = ? AND file IS NOT NULL', id).map((r) => text(r['file']))
+      for (const table of ['chats', 'access', 'messages', 'auth', 'events']) this.run(`DELETE FROM ${table} WHERE number_id = ?`, id)
       this.run('DELETE FROM numbers WHERE id = ?', id)
       this.db.exec('COMMIT')
+      return files
     } catch (e) {
       this.db.exec('ROLLBACK')
       throw e
     }
+  }
+
+  // Drops the messages older than 90 days; returns the files they had, for the service to delete.
+  prune(now = Date.now()): string[] {
+    const cutoff = now - KEEP_MS
+    const files = this.all('SELECT file FROM messages WHERE at < ? AND file IS NOT NULL', cutoff).map((r) => text(r['file']))
+    this.run('DELETE FROM messages WHERE at < ?', cutoff)
+    return files
+  }
+
+  // What the prune at start-up dropped: handed over once.
+  takeExpired(): string[] {
+    const files = this.expired
+    this.expired = []
+    return files
   }
 
   // ---------- conversations ----------
@@ -173,7 +235,7 @@ export class WhatsAppStore {
     const old = this.one('SELECT * FROM chats WHERE number_id = ? AND id = ?', numberId, p.id)
     const later = (a: number | undefined, b: number | undefined): number | null => (a === undefined ? (b ?? null) : b === undefined ? a : Math.max(a, b))
     this.run(
-      'INSERT OR REPLACE INTO chats (number_id, id, name, kind, size, phone, last_at, inbound_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO chats (number_id, id, name, kind, size, phone, last_at, inbound_at, anchor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       numberId,
       p.id,
       p.name?.trim() || text(old?.['name']) || p.softName?.trim() || '',
@@ -181,8 +243,31 @@ export class WhatsAppStore {
       p.size ?? num(old?.['size']) ?? null,
       p.phone ?? (old?.['phone'] ? text(old['phone']) : null),
       later(num(old?.['last_at']), p.lastAt),
-      later(num(old?.['inbound_at']), p.inboundAt)
+      later(num(old?.['inbound_at']), p.inboundAt),
+      old?.['anchor'] ? text(old['anchor']) : null // the row is replaced, so what it already holds is carried over
     )
+  }
+
+  // The oldest message seen in a conversation. A message not older than the one already kept changes nothing,
+  // so the anchor only ever moves back in time (history arrives in any order).
+  setAnchor(numberId: string, chat: string, a: ChatAnchor): void {
+    if (!chat || !a.id) return
+    const cur = this.anchor(numberId, chat)
+    if (cur && cur.at <= a.at) return
+    if (!this.chat(numberId, chat)) this.upsertChat(numberId, { id: chat, kind: chat.endsWith('@g.us') ? 'group' : 'contact' })
+    this.run('UPDATE chats SET anchor = ? WHERE number_id = ? AND id = ?', JSON.stringify({ id: a.id, fromMe: a.fromMe, ...(a.participant ? { participant: a.participant } : {}), at: a.at }), numberId, chat)
+  }
+
+  anchor(numberId: string, chat: string): ChatAnchor | undefined {
+    const raw = this.one('SELECT anchor FROM chats WHERE number_id = ? AND id = ?', numberId, chat)?.['anchor']
+    if (!raw) return undefined
+    try {
+      const a = JSON.parse(text(raw)) as Partial<ChatAnchor> | null
+      if (!a || typeof a.id !== 'string' || !a.id || typeof a.at !== 'number') return undefined
+      return { id: a.id, fromMe: a.fromMe === true, ...(typeof a.participant === 'string' && a.participant ? { participant: a.participant } : {}), at: a.at }
+    } catch {
+      return undefined // an unreadable anchor is as good as none
+    }
   }
 
   // ---------- who may do what ----------
@@ -229,23 +314,104 @@ export class WhatsAppStore {
 
   // False when the message was already there (WhatsApp and Meta both deliver the same one twice now and then).
   // "first" marks an agent's message that opened a conversation with someone who had not written: it counts toward the day's new conversations for good.
-  addMessage(numberId: string, m: WhatsAppMessage & { first?: boolean }): boolean {
-    return this.run('INSERT OR IGNORE INTO messages (number_id, chat, id, from_me, sender, text, at, agent_id, "first") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', numberId, m.chat, m.id, m.fromMe ? 1 : 0, m.sender ?? null, m.text, m.at, m.agentId ?? null, m.first ? 1 : 0) > 0
+  addMessage(numberId: string, m: StoredMessage): boolean {
+    return (
+      this.run(
+        'INSERT OR IGNORE INTO messages (number_id, chat, id, from_me, sender, text, at, agent_id, "first", media, file, file_name, mime, size, participant, quoted_id, quoted_text, quoted_sender, edited, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        numberId,
+        m.chat,
+        m.id,
+        m.fromMe ? 1 : 0,
+        m.sender ?? null,
+        m.text,
+        m.at,
+        m.agentId ?? null,
+        m.first ? 1 : 0,
+        m.media ?? null,
+        m.file ?? null,
+        m.fileName ?? null,
+        m.mime ?? null,
+        m.size ?? null,
+        m.participant ?? null,
+        m.quoted?.id ?? null,
+        m.quoted?.text ?? null,
+        m.quoted?.sender ?? null,
+        m.edited ? 1 : 0,
+        m.deleted ? 1 : 0
+      ) > 0
+    )
+  }
+
+  private messageOf(r: Row): WhatsAppMessage {
+    const media = MEDIA_KINDS.find((k) => k === r['media'])
+    return {
+      id: text(r['id']),
+      chat: text(r['chat']),
+      fromMe: r['from_me'] === 1,
+      ...(r['sender'] ? { sender: text(r['sender']) } : {}),
+      text: text(r['text']),
+      at: num(r['at']) ?? 0,
+      ...(r['agent_id'] ? { agentId: text(r['agent_id']) } : {}),
+      ...(media ? { media } : {}),
+      ...(r['file_name'] ? { fileName: text(r['file_name']) } : {}),
+      ...(r['quoted_id'] ? { quoted: { id: text(r['quoted_id']), text: text(r['quoted_text']), ...(r['quoted_sender'] ? { sender: text(r['quoted_sender']) } : {}) } } : {}),
+      ...(r['edited'] === 1 ? { edited: true } : {}),
+      ...(r['deleted'] === 1 ? { deleted: true } : {})
+    }
   }
 
   // The latest messages of a conversation, oldest first.
   messages(numberId: string, chat: string, limit: number): WhatsAppMessage[] {
     return this.all('SELECT * FROM messages WHERE number_id = ? AND chat = ? ORDER BY at DESC, rowid DESC LIMIT ?', numberId, chat, limit)
       .reverse()
-      .map((r) => ({
-        id: text(r['id']),
-        chat: text(r['chat']),
-        fromMe: r['from_me'] === 1,
-        ...(r['sender'] ? { sender: text(r['sender']) } : {}),
-        text: text(r['text']),
-        at: num(r['at']) ?? 0,
-        ...(r['agent_id'] ? { agentId: text(r['agent_id']) } : {})
-      }))
+      .map((r) => this.messageOf(r))
+  }
+
+  // One message, by its full id or by the short one agents see (the last six characters, any case): the match must be unique.
+  message(numberId: string, chat: string, idOrShort: string): StoredMessage | undefined {
+    // Agents copy the short id as the list shows it, "(#ABC123)", or without the brackets or the hash: those are not part of it.
+    const key = idOrShort.trim().replace(/^\(?#?/, '').replace(/\)$/, '')
+    if (!key || key.length > 200) return undefined
+    let r = this.one('SELECT * FROM messages WHERE number_id = ? AND chat = ? AND id = ?', numberId, chat, key)
+    if (!r && key.length >= 6) {
+      const like = likeEscape(key.toUpperCase())
+      const found = this.all("SELECT * FROM messages WHERE number_id = ? AND chat = ? AND (UPPER(id) LIKE ? ESCAPE '\\' OR UPPER(id) LIKE ? ESCAPE '\\') LIMIT 2", numberId, chat, `${like}%`, `%${like}`)
+      if (found.length === 1) r = found[0]
+    }
+    if (!r) return undefined
+    const size = num(r['size'])
+    return {
+      ...this.messageOf(r),
+      ...(r['first'] === 1 ? { first: true } : {}),
+      ...(r['file'] ? { file: text(r['file']) } : {}),
+      ...(r['mime'] ? { mime: text(r['mime']) } : {}),
+      ...(size !== undefined ? { size } : {}),
+      ...(r['participant'] ? { participant: text(r['participant']) } : {})
+    }
+  }
+
+  // An edit that arrived or was made: the words change and the message is marked as edited.
+  setText(numberId: string, chat: string, id: string, newText: string, edited: boolean): boolean {
+    return this.run('UPDATE messages SET text = ?, edited = ? WHERE number_id = ? AND chat = ? AND id = ?', newText, edited ? 1 : 0, numberId, chat, id) > 0
+  }
+
+  // The file of a message arrived after the message was stored. False when the message is gone or was taken
+  // back meanwhile: the caller then deletes the file it just saved.
+  setFile(numberId: string, chat: string, id: string, file: string, size: number): boolean {
+    return this.run('UPDATE messages SET file = ?, size = ? WHERE number_id = ? AND chat = ? AND id = ? AND deleted = 0', file, size, numberId, chat, id) > 0
+  }
+
+  // A message taken back for everyone: it stays as a marker, but its words and file are gone (the sender
+  // meant to retract them). Returns the file it had, for the service to delete.
+  setDeleted(numberId: string, chat: string, id: string): { found: boolean; file?: string } {
+    const r = this.one('SELECT file FROM messages WHERE number_id = ? AND chat = ? AND id = ?', numberId, chat, id)
+    if (!r) return { found: false }
+    this.run("UPDATE messages SET deleted = 1, text = '', file = NULL, file_name = NULL, quoted_text = NULL WHERE number_id = ? AND chat = ? AND id = ?", numberId, chat, id)
+    // What was taken back does not survive elsewhere: a reply keeps its own words but not the words it quoted...
+    this.run('UPDATE messages SET quoted_text = NULL WHERE number_id = ? AND chat = ? AND quoted_id = ?', numberId, chat, id)
+    // ...and the reactions to it go with it (their ids are the reaction prefix, the id, then who and when).
+    this.run('DELETE FROM messages WHERE number_id = ? AND chat = ? AND instr(id, ?) = 1', numberId, chat, `${REACTION_PREFIX}${id}:`)
+    return { found: true, ...(r['file'] ? { file: text(r['file']) } : {}) }
   }
 
   // ---------- counting (what the daily limits look at) ----------
@@ -262,6 +428,23 @@ export class WhatsAppStore {
 
   contactedToday(numberId: string, chat: string, since: number): boolean {
     return this.one('SELECT 1 AS x FROM messages WHERE number_id = ? AND chat = ? AND agent_id IS NOT NULL AND at >= ? LIMIT 1', numberId, chat, since) !== undefined
+  }
+
+  // Things an agent did that are not messages but still count against a number (a reaction, a group change).
+  addEvent(numberId: string, kind: 'reaction' | 'group', at = Date.now()): void {
+    this.run('INSERT INTO events (number_id, kind, at) VALUES (?, ?, ?)', numberId, kind, at)
+  }
+
+  private eventsToday(numberId: string, kind: string, since: number): number {
+    return num(this.one('SELECT COUNT(*) AS n FROM events WHERE number_id = ? AND kind = ? AND at >= ?', numberId, kind, since)?.['n']) ?? 0
+  }
+
+  reactionsToday(numberId: string, since: number): number {
+    return this.eventsToday(numberId, 'reaction', since)
+  }
+
+  groupActionsToday(numberId: string, since: number): number {
+    return this.eventsToday(numberId, 'group', since)
   }
 
   // ---------- sealed values ----------

@@ -6,14 +6,15 @@
 import type * as Baileys from 'baileys'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
-import { SEND_GAP_MS, type WhatsAppStatus } from '../../shared/whatsapp'
+import { SEND_GAP_MS, type WhatsAppMediaKind, type WhatsAppStatus } from '../../shared/whatsapp'
+import { downloadFile, messageOf, type Outgoing } from './qr-actions'
 import type { ChatPatch, WhatsAppStore } from './store'
-import { contextOf, describe, isGroup, isLid, isPn, jidPhone, keep, norm, statusOf, toMs, unwrap } from './wire'
+import { chatPatchOf, contactPatchOf, contextOf, describe, endOfLink, groupPatchOf, isGroup, isLid, isPn, jidPhone, keep, log, logger, mediaOf, noop, norm, quotedOf, sealedKeys, statusOf, toMs, Unconfirmed, unwrap, withTimeout } from './wire'
 
-export { describe, jidPhone } from './wire'
+export { describe, jidPhone, Unconfirmed } from './wire'
+export type { Outgoing } from './qr-actions'
 
 type Sock = Baileys.WASocket
-type Logger = NonNullable<Parameters<typeof Baileys.makeCacheableSignalKeyStore>[1]>
 
 export interface QrStatus {
   status: WhatsAppStatus
@@ -31,54 +32,42 @@ export interface QrMessage {
   ours: boolean // this driver sent it (an agent), as opposed to a person answering from the phone
   group: boolean
   sender?: string // in a group, who wrote
+  participant?: string // in a group, the id of who wrote (what quoting or reacting to it needs)
   chatName?: string // a contact's own profile name, for a conversation that has no other name
   text: string
   at: number
   mentioned: boolean // the number was tagged, or one of its messages was answered
   live: boolean // it arrived now (not history delivered after being offline): only these wake agents or pause a conversation
+  media?: { kind: WhatsAppMediaKind; mime: string; fileName?: string; size?: number } // it carries a file (its words are in `text`)
+  quoted?: { id: string; text: string; sender?: string } // the message it answers
+  download?: () => Promise<Buffer> // the bytes, only when called; UserError past MEDIA_IN_MAX or after 60 s
+}
+
+// Something that happened to a message that already exists: someone edited it, took it back, or reacted to it.
+export interface QrChange {
+  chat: string
+  target: string // the id of that message
+  kind: 'edit' | 'delete' | 'reaction'
+  text?: string // 'edit': the new words
+  emoji?: string // 'reaction': empty means the reaction was taken back
+  fromMe: boolean // done from the phone (or another device) of this number
+  sender?: string // in a group, who did it (a phone, when known)
+  participant?: string // in a group, the id of who did it, as WhatsApp knows them: an edit or a delete is only the author's to make
+  at: number
 }
 
 export interface QrHooks {
   status(s: QrStatus): void
   chat(c: ChatPatch): void
   message(m: QrMessage): void
+  change?(c: QrChange): void
 }
 
 const RETRY_FIRST_MS = 2_000
 const RETRY_MAX_MS = 60_000
 const SEND_TIMEOUT_MS = 60_000
+const FILE_TIMEOUT_MS = 120_000 // a file goes up slower than a text
 const SENT_KEPT = 500
-
-const noop = (): void => {}
-const logger: Logger = {
-  level: 'silent',
-  child: () => logger,
-  trace: noop,
-  debug: noop,
-  info: noop,
-  warn: noop,
-  // Only the library's sentence: the object it came with can hold keys.
-  error: (_obj, msg) => {
-    if (typeof msg === 'string') console.error('[whatsapp]', msg)
-  }
-}
-
-const log = (e: unknown): void => console.error('[whatsapp]', e instanceof Error ? e.message : e)
-
-function withTimeout<T>(p: Promise<T>, ms: number, onTimeout?: () => Error): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(onTimeout?.() ?? new UserError(L('O WhatsApp demorou demais para responder. Tente de novo.', 'WhatsApp took too long to answer. Try again.'))), ms)
-    t.unref()
-    p.then(resolve, reject).finally(() => clearTimeout(t))
-  })
-}
-
-// The message was handed to WhatsApp but no confirmation came back in time: it may have been delivered.
-export class Unconfirmed extends UserError {
-  constructor(readonly id: string) {
-    super(L('O WhatsApp não confirmou o envio a tempo. A mensagem pode ter sido entregue: não envie de novo sem conferir a conversa.', 'WhatsApp did not confirm the send in time. The message may have been delivered: do not send it again without checking the conversation.'))
-  }
-}
 
 export class QrDriver {
   private b?: typeof Baileys
@@ -202,7 +191,7 @@ export class QrDriver {
       )
       if (gen !== this.gen || this.ended) return
       const sock = B.makeWASocket({
-        auth: { creds, keys: B.makeCacheableSignalKeyStore(this.keys(B), logger) },
+        auth: { creds, keys: B.makeCacheableSignalKeyStore(sealedKeys(B, this.store, this.numberId, (e) => this.write(e)), logger) },
         logger,
         // The pairing code only works for a browser WhatsApp knows by name.
         browser: B.Browsers.macOS('Chrome'),
@@ -231,28 +220,6 @@ export class QrDriver {
     if (this.ended) return Promise.resolve()
     this.saving = this.saving.then(() => this.store.authSet(this.numberId, entries)).catch(log)
     return this.saving
-  }
-
-  private keys(B: typeof Baileys): Baileys.SignalKeyStore {
-    return {
-      get: async <T extends keyof Baileys.SignalDataTypeMap>(type: T, ids: string[]) => {
-        const out: { [id: string]: Baileys.SignalDataTypeMap[T] } = {}
-        await Promise.all(
-          ids.map(async (id) => {
-            const raw = await this.store.authGet(this.numberId, `${type}:${id}`)
-            if (raw === undefined) return
-            const value = JSON.parse(raw, B.BufferJSON.reviver) as object
-            out[id] = (type === 'app-state-sync-key' ? B.proto.Message.AppStateSyncKeyData.fromObject(value) : value) as unknown as Baileys.SignalDataTypeMap[T]
-          })
-        )
-        return out
-      },
-      set: async (data) => {
-        const entries: [string, string | undefined][] = []
-        for (const [type, byId] of Object.entries(data)) for (const [id, v] of Object.entries(byId ?? {})) entries.push([`${type}:${id}`, v ? JSON.stringify(v, B.BufferJSON.replacer) : undefined])
-        await this.write(entries)
-      }
-    }
   }
 
   // ---------- events ----------
@@ -287,10 +254,15 @@ export class QrDriver {
     on('groups.upsert', (gs) => gs.forEach((g) => this.groupEvent(g)))
     on('groups.update', (gs) => gs.forEach((g) => this.groupEvent(g)))
     on('lid-mapping.update', (m) => this.learn(m.lid, m.pn))
-    on('messaging-history.set', (h) => {
+    // Edits, deletes and reactions come as these two events (their carrier messages have no words, so `incoming` drops them).
+    on('messages.update', async (us) => void (await Promise.all(us.map((u) => this.updated(sock, u).catch(log)))))
+    on('messages.reaction', async (rs) => void (await Promise.all(rs.map((r) => this.reacted(sock, r).catch(log)))))
+    on('messaging-history.set', async (h) => {
       for (const m of h.lidPnMappings ?? []) this.learn(m.lid, m.pn)
       h.contacts.forEach((c) => this.contactEvent(c))
       h.chats.forEach((c) => this.chatEvent(c))
+      // Earlier messages (also what `fetchMessageHistory` asked for): kept, but they never wake anyone.
+      for (const m of h.messages) await this.incoming(sock, m, false).catch(log)
     })
   }
 
@@ -335,21 +307,9 @@ export class QrDriver {
     this.sock = undefined
     this.clearSteady()
     // 401 and 411 mean WhatsApp itself ended the link. Other errors (Baileys reports any unknown stream error as 500) are often a server hiccup: the link stays.
-    if (code === 401 || code === 411) {
-      await this.finish(
-        code === 401
-          ? L('O WhatsApp saiu deste número (foi desconectado pelo celular). Conecte de novo para ler o código.', 'WhatsApp signed out of this number (it was unlinked from the phone). Connect again to read the code.')
-          : L('A ligação com o WhatsApp ficou inválida. Conecte de novo para refazer.', 'The link with WhatsApp became invalid. Connect again to redo it.'),
-        true
-      )
-      return
-    }
-    if (code === 440) {
-      await this.finish(L('Este número foi aberto em outro lugar e o WhatsApp encerrou esta conexão. Conecte de novo quando quiser.', 'This number was opened somewhere else and WhatsApp ended this connection. Connect again when you want.'))
-      return
-    }
-    if (code === 403) {
-      await this.finish(L('O WhatsApp recusou a conexão deste número. Veja no celular se ele está com algum aviso.', 'WhatsApp refused this number\'s connection. Check the phone for a warning.'))
+    const over = endOfLink(code)
+    if (over) {
+      await this.finish(over.error, over.wipe)
       return
     }
     // After the phone scans, WhatsApp asks for a fresh connection once: that is part of linking.
@@ -402,31 +362,22 @@ export class QrDriver {
     }
   }
 
+  // What the directory events say, read by wire.ts; the ids they carry go through this driver's own (LID → phone) map.
+  private readonly ids = { canon: (jid: string, alt?: string | null): string => this.canon(jid, alt), learn: (lid: string | null | undefined, pn: string | null | undefined): void => this.learn(lid, pn) }
+
   private chatEvent(c: Baileys.ChatUpdate): void {
-    const raw = c.id
-    if (!raw || !keep(raw)) return
-    this.learn(c.lidJid ?? (isLid(raw) ? raw : undefined), c.pnJid ?? undefined)
-    const id = this.canon(raw, c.pnJid)
-    const group = isGroup(id)
-    const name = c.name ?? c.displayName ?? undefined
-    this.hooks.chat({ id, kind: group ? 'group' : 'contact', ...(name ? { name } : {}), ...(!group && jidPhone(id) ? { phone: jidPhone(id) } : {}), ...(toMs(c.conversationTimestamp) ? { lastAt: toMs(c.conversationTimestamp) } : {}) })
+    const p = chatPatchOf(c, this.ids)
+    if (p) this.hooks.chat(p)
   }
 
   private contactEvent(c: Partial<Baileys.Contact>): void {
-    if (!c.id || !keep(c.id) || isGroup(c.id)) return
-    const pn = c.phoneNumber ?? (isPn(c.id) ? c.id : undefined)
-    this.learn(c.lid ?? (isLid(c.id) ? c.id : undefined), pn)
-    const id = this.canon(c.id, pn)
-    // The name saved on the phone wins; the one the person chose for themselves only fills a gap.
-    const name = c.name ?? c.verifiedName
-    this.hooks.chat({ id, kind: 'contact', ...(name ? { name } : {}), ...(c.notify ? { softName: c.notify } : {}), ...(jidPhone(id) ? { phone: jidPhone(id) } : {}) })
+    const p = contactPatchOf(c, this.ids)
+    if (p) this.hooks.chat(p)
   }
 
   private groupEvent(g: Partial<Baileys.GroupMetadata>): void {
-    if (!g.id || !isGroup(g.id)) return
-    const id = norm(g.id)
-    const size = g.size ?? g.participants?.length
-    this.hooks.chat({ id, kind: 'group', ...(g.subject ? { name: g.subject } : {}), ...(size ? { size } : {}) })
+    const p = groupPatchOf(g)
+    if (p) this.hooks.chat(p)
   }
 
   // ---------- what arrives ----------
@@ -451,18 +402,22 @@ export class QrDriver {
     const fromMe = !!key.fromMe
     const ours = fromMe && this.sent.has(key.id)
     let sender: string | undefined
+    let participant: string | undefined
     if (group && !fromMe && key.participant) {
       const who = this.canon(key.participant, key.participantAlt)
       sender = msg.pushName || jidPhone(who) || undefined
+      participant = norm(key.participant) || undefined // as WhatsApp knows them: quoting or reacting needs this one, not the phone
     }
     const me = [sock.user?.id, sock.user?.lid].map(norm).filter(Boolean)
     const ctx = contextOf(content)
     const mentioned = !!(ctx?.mentionedJid?.some((j) => me.includes(norm(j))) || (ctx?.participant && me.includes(norm(ctx.participant))) || (ctx?.stanzaId && this.sent.has(ctx.stanzaId)))
-    if (group && !this.asked.has(chat)) {
-      // A group the directory has not named yet: its name is asked for once.
+    if (live && group && !this.asked.has(chat)) {
+      // A group the directory has not named yet: its name is asked for once (not for every group of a history batch).
       this.asked.add(chat)
       void sock.groupMetadata(chat).then((g) => this.groupEvent(g), noop)
     }
+    const media = mediaOf(content)
+    const quoted = quotedOf(content)
     this.hooks.message({
       chat,
       id: key.id,
@@ -470,12 +425,68 @@ export class QrDriver {
       ours,
       group,
       ...(sender ? { sender } : {}),
+      ...(participant ? { participant } : {}),
       ...(!group && !fromMe && msg.pushName ? { chatName: msg.pushName } : {}),
       text,
       at: toMs(msg.messageTimestamp) ?? Date.now(),
       mentioned,
-      live
+      live,
+      ...(media ? { media: { kind: media.kind, mime: media.mime, ...(media.fileName ? { fileName: media.fileName } : {}), ...(media.size !== undefined ? { size: media.size } : {}) }, download: () => this.fetch(sock, msg, media.size) } : {}),
+      ...(quoted ? { quoted } : {})
     })
+  }
+
+  private fetch(sock: Sock, msg: Baileys.WAMessage, size: number | undefined): Promise<Buffer> {
+    if (this.ended || !this.b) return Promise.reject(new UserError(L('A conexão com o WhatsApp foi encerrada.', 'The connection to WhatsApp was closed.')))
+    return downloadFile(this.b, sock, msg, size)
+  }
+
+  // ---------- what happened to a message that already exists ----------
+
+  // The conversation a key belongs to, in the id it is kept under.
+  private async chatOf(sock: Sock, key: Baileys.WAMessageKey): Promise<string | undefined> {
+    const remote = key.remoteJid
+    if (!remote || !keep(remote)) return undefined
+    let chat = this.canon(remote, key.remoteJidAlt)
+    if (isLid(chat)) {
+      const pn = await sock.signalRepository.lidMapping.getPNForLID(chat).catch(() => null)
+      this.learn(chat, pn)
+      chat = this.canon(chat)
+    }
+    return chat
+  }
+
+  private who(key: Baileys.WAMessageKey): string | undefined {
+    return key.participant ? jidPhone(this.canon(key.participant, key.participantAlt)) : undefined
+  }
+
+  // An edit or a delete: the key's id is the message it is about.
+  private async updated(sock: Sock, u: Baileys.WAMessageUpdate): Promise<void> {
+    const target = u.key.id
+    const chat = await this.chatOf(sock, u.key)
+    if (!target || !chat) return
+    const sender = this.who(u.key)
+    // The change's own key (Baileys builds an edit's and a delete's key from the carrier message's), so its participant is who sent it.
+    const participant = norm(u.key.participant) || undefined
+    const base = { chat, target, fromMe: !!u.key.fromMe, ...(sender ? { sender } : {}), ...(participant ? { participant } : {}) }
+    if (u.update.messageStubType === this.b!.WAMessageStubType.REVOKE) {
+      const carrier = u.update.key?.id // the delete's own message: one this driver sent is already known by the service
+      if (carrier && this.sent.has(carrier)) return
+      this.hooks.change?.({ ...base, kind: 'delete', at: Date.now() })
+      return
+    }
+    const words = describe(unwrap(u.update.message?.editedMessage?.message))
+    if (words) this.hooks.change?.({ ...base, kind: 'edit', text: words, at: toMs(u.update.messageTimestamp) ?? Date.now() })
+  }
+
+  // A reaction: `key` is the message reacted to, `reaction.key` the reaction's own message (so who reacted).
+  private async reacted(sock: Sock, r: { key: Baileys.WAMessageKey; reaction: Baileys.proto.IReaction }): Promise<void> {
+    const chat = await this.chatOf(sock, r.key)
+    const target = r.key.id
+    const by = r.reaction.key
+    if (!target || !chat || (by?.id && this.sent.has(by.id))) return
+    const sender = by?.participant ? jidPhone(this.canon(by.participant)) : undefined
+    this.hooks.change?.({ chat, target, kind: 'reaction', emoji: r.reaction.text ?? '', fromMe: !!by?.fromMe, ...(sender ? { sender } : {}), ...(by?.participant ? { participant: norm(by.participant) } : {}), at: Date.now() })
   }
 
   // ---------- what goes out ----------
@@ -502,23 +513,47 @@ export class QrDriver {
   }
 
   // One message at a time: "typing…", a person's pause, then the message; returns its id.
-  send(chat: string, text: string): Promise<string> {
-    const run = this.tail.then(() => this.sendNow(chat, text))
+  // A string is plain text; an `Outgoing` can also quote, mention, carry a file or be a poll.
+  send(chat: string, content: string | Outgoing): Promise<string> {
+    const out: Outgoing = typeof content === 'string' ? { text: content } : content
+    const run = this.tail.then(() => this.sendNow(chat, out))
     this.tail = run.catch(noop)
     return run
   }
 
-  private async sendNow(chat: string, text: string): Promise<string> {
+  // Runs something on the live socket after the sends already waiting (so it never jumps ahead of a message),
+  // with a time limit; anything it throws that is not already a sentence becomes one.
+  use<T>(fn: (sock: Sock, B: typeof Baileys) => Promise<T>, timeoutMs = 30_000): Promise<T> {
+    const run = this.tail.then(async () => {
+      const sock = this.live()
+      try {
+        return await withTimeout(fn(sock, this.b!), timeoutMs)
+      } catch (e) {
+        if (e instanceof UserError) throw e
+        log(e)
+        throw new UserError(L('O WhatsApp não aceitou o pedido. Confira se o número ainda está conectado e tente de novo.', 'WhatsApp did not accept the request. Check that the number is still connected and try again.'))
+      }
+    })
+    this.tail = run.catch(noop)
+    return run
+  }
+
+  // The id is ours before it leaves, so the copy WhatsApp echoes back is not taken for a person typing on the phone.
+  markSent(id: string): void {
+    this.sent.add(id)
+    if (this.sent.size > SENT_KEPT) this.sent.delete(this.sent.values().next().value as string)
+  }
+
+  private async sendNow(chat: string, out: Outgoing): Promise<string> {
+    const { content, quoted } = messageOf(out, chat) // refuses what can't go, before the typing pause
     const sock = this.live()
     await sock.sendPresenceUpdate('composing', chat).catch(noop)
     await this.wait(SEND_GAP_MS[0] + Math.random() * (SEND_GAP_MS[1] - SEND_GAP_MS[0]))
     const live = this.live()
-    // The id is ours before it leaves, so the copy WhatsApp echoes back is not taken for a person typing on the phone.
     const id = this.b!.generateMessageIDV2(live.user?.id)
-    this.sent.add(id)
-    if (this.sent.size > SENT_KEPT) this.sent.delete(this.sent.values().next().value as string)
+    this.markSent(id)
     try {
-      const res = await withTimeout(live.sendMessage(chat, { text }, { messageId: id }), SEND_TIMEOUT_MS, () => new Unconfirmed(id))
+      const res = await withTimeout(live.sendMessage(chat, content, { messageId: id, ...(quoted ? { quoted } : {}) }), out.file ? FILE_TIMEOUT_MS : SEND_TIMEOUT_MS, () => new Unconfirmed(id))
       return res?.key.id ?? id
     } catch (e) {
       if (e instanceof UserError) throw e

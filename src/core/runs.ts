@@ -2016,9 +2016,14 @@ ${note}`,
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          // A file the agent may send: one of this conversation that it showed or a person attached, by its exact name, the newest first.
+          const file = (nome: string): { id: string; path: string; name: string } | undefined => {
+            const found = this.deps.dataDir ? db.artifacts().filter((a) => a.conversationId === conv.id && a.name === nome && (a.agentId === '' || a.agentId === agent.id) && (ids.has(a.messageId) || a.messageId === msg.id)).sort((x, y) => y.createdAt - x.createdAt)[0] : undefined
+            return found ? { id: found.id, path: join(this.deps.dataDir!, 'artifacts', found.id, found.name), name: found.name } : undefined
+          }
           let out: Awaited<ReturnType<typeof whatsapp.call>>
           try {
-            out = await whatsapp.call({ id: agent.id, name: agent.name }, name, args)
+            out = await whatsapp.call({ id: agent.id, name: agent.name }, name, args, { file })
           } catch (e) {
             msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
             stepStarted = Date.now()
@@ -2044,7 +2049,7 @@ ${note}`,
               tool: name,
               args: out.approval.args,
               why: out.approval.why,
-              highRisk: false,
+              highRisk: out.approval.highRisk ?? false, // a group change is always marked: its card says so and never offers "always"
               state: 'pending',
               createdAt: Date.now(),
               expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000,
@@ -2059,14 +2064,16 @@ ${note}`,
             notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`)
             return textResult(
               L(
-                `Pedido de aprovação criado. A mensagem ainda NÃO foi enviada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
-                `Approval request created. The message has NOT been sent yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+                `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                `Approval request created. The action has NOT happened yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
               )
             )
           }
           msg.run = { ...msg.run!, steps: [...close(out.isError ? 'error' : 'done', shown), thinking()] }
           stepStarted = Date.now()
           save()
+          // An image of a message goes in as an image (like ver_imagem), with its words after it.
+          if (out.image) return clip({ content: [{ type: 'image', data: out.image.data, mimeType: out.image.mimeType }, { type: 'text', text: out.text }] })
           return clip(textResult(out.text, !!out.isError))
         }
 
@@ -2614,7 +2621,8 @@ ${note}`,
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: fresh.map((r) => r.slice(r.indexOf(':') + 1)).join(', ') } })
     }
     // "Always" on a WhatsApp send: that conversation's sends go alone from now on (the number's page shows it).
-    if (always && decision === 'approved' && ap.connectorId === WHATSAPP && !ap.args['primeiro_contato'] && this.deps.whatsapp) {
+    // Never for a fix or a group change, nor for something marked high risk or a first contact.
+    if (always && decision === 'approved' && ap.connectorId === WHATSAPP && ap.tool === 'whatsapp_enviar' && !ap.highRisk && !ap.args['primeiro_contato'] && this.deps.whatsapp) {
       this.deps.whatsapp.always(ap.agentId, ap.args)
       db.addActivity({ personId: decider, kind: 'approval.always', target: ap.agentId, detail: { connector: ap.connectorName, tool: ap.tool } })
     }
@@ -2709,21 +2717,22 @@ ${note}`,
         )
       }
     } else if (ap.connectorId === WHATSAPP) {
-      // A WhatsApp message: sent exactly as approved, with the day's limits and the agent's access checked again.
+      // A WhatsApp message, fix or group change: done exactly as approved, with the limits, the permission and the agent's access checked again.
       const wa = this.deps.whatsapp
-      const what = wa ? wa.what(ap.args) : L('enviar uma mensagem no WhatsApp', 'sending a WhatsApp message')
+      const what = wa ? wa.what(ap.args, ap.tool) : L('enviar uma mensagem no WhatsApp', 'sending a WhatsApp message')
       if (decision === 'approved' && wa) {
         let r: { ok: boolean; text: string }
         try {
-          r = await wa.approved(ap.agentId, ap.args)
+          r = await wa.approved(ap.agentId, ap.args, ap.tool)
         } catch (e) {
           r = { ok: false, text: e instanceof Error && e.message ? e.message : L('o WhatsApp não respondeu.', "WhatsApp didn't answer.") }
         }
         ok = r.ok
-        outcome = r.ok ? L('Enviada.', 'Sent.') : L(`Não enviou: ${r.text}`, `Didn't send: ${r.text}`)
+        const sends = ap.tool === 'whatsapp_enviar'
+        outcome = r.ok ? (sends ? L('Enviada.', 'Sent.') : L('Feito.', 'Done.')) : sends ? L(`Não enviou: ${r.text}`, `Didn't send: ${r.text}`) : L(`Não fez: ${r.text}`, `Didn't do it: ${r.text}`)
         task = r.ok
-          ? L(`${me} aprovou ${what}, e o app enviou. ${r.text}\n\nSe ainda falta algo, continue; senão, conte a ${me} em uma frase.`, `${me} approved ${what}, and the app sent it. ${r.text}\n\nIf something is still missing, go on; otherwise tell ${me} in one sentence.`)
-          : L(`${me} aprovou ${what}, mas não foi enviada: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it was not sent: ${r.text} Tell ${me} in one sentence.`)
+          ? L(`${me} aprovou ${what}, e o app ${sends ? 'enviou' : 'fez'}. ${r.text}\n\nSe ainda falta algo, continue; senão, conte a ${me} em uma frase.`, `${me} approved ${what}, and the app ${sends ? 'sent it' : 'did it'}. ${r.text}\n\nIf something is still missing, go on; otherwise tell ${me} in one sentence.`)
+          : L(`${me} aprovou ${what}, mas ${sends ? 'não foi enviada' : 'não foi feito'}: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it ${sends ? 'was not sent' : 'was not done'}: ${r.text} Tell ${me} in one sentence.`)
       } else if (decision === 'approved') {
         outcome = L('Não enviou: o WhatsApp não está disponível aqui.', "Didn't send: WhatsApp isn't available here.")
         task = L(`${me} aprovou ${what}, mas o WhatsApp não está disponível agora. Avise ${me} em uma frase.`, `${me} approved ${what}, but WhatsApp isn't available right now. Tell ${me} in one sentence.`)

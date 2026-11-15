@@ -253,15 +253,27 @@ function NumberScreen({ n, agents, cloud, replace, reload, loadError, onBack }: 
   const settings = (patch: Partial<WhatsAppSettings>): WhatsAppSettings => {
     const base = latest.current
     const next = clampSettings(base.kind, { ...base.settings, ...patch })
-    const same = (Object.keys(next) as (keyof WhatsAppSettings)[]).every((k) => next[k] === base.settings[k])
+    // A list is compared by its content: clamping always builds a new one.
+    const same = (Object.keys(next) as (keyof WhatsAppSettings)[]).every((k) => JSON.stringify(next[k]) === JSON.stringify(base.settings[k]))
     if (!same) go(save({ ...base, settings: next }, () => call('whatsappUpdate', { id: n.id, settings: next })))
     return next
+  }
+  // One agent in or out of the group managers; the others are kept because it starts from the newest list.
+  const groupManager = (agentId: string, on: boolean): void => {
+    const cur = latest.current.settings.groupManagers
+    settings({ groupManagers: on ? [...cur.filter((id) => id !== agentId), agentId] : cur.filter((id) => id !== agentId) })
   }
   // The access list is one whole list on the core, so each change is applied to its newest copy.
   const setAccess = (edit: (rows: WhatsAppAccess[]) => WhatsAppAccess[], names: WhatsAppChat[] = []): Promise<void> => {
     const base = latest.current
     const next = edit(base.access)
     return save({ ...base, access: next, chats: [...base.chats.filter((c) => !names.some((x) => x.id === c.id)), ...names] }, () => call('whatsappSetAccess', { id: n.id, access: next }))
+  }
+  // Takes an agent off this number: all its conversations, or only the one row given. An agent left with no
+  // access here also leaves the group managers, so it can't keep the right to change groups. Reads the newest copy.
+  const revoke = (agentId: string, row?: WhatsAppAccess): void => {
+    go(setAccess((rows) => rows.filter((r) => r.agentId !== agentId || (row !== undefined && r.chat !== row.chat))))
+    if (!latest.current.access.some((r) => r.agentId === agentId) && latest.current.settings.groupManagers.includes(agentId)) groupManager(agentId, false)
   }
 
   const remove = async (): Promise<void> => {
@@ -318,7 +330,7 @@ function NumberScreen({ n, agents, cloud, replace, reload, loadError, onBack }: 
 
       <ConnectionCard n={n} busy={busy} onConnect={(phone) => void act('connect', () => call('whatsappConnect', { id: n.id, ...(phone ? { phone } : {}) }))} onDisconnect={(ask) => void disconnect(ask)} />
 
-      <AccessCard n={n} agents={agents} onAccess={(edit) => go(setAccess(edit))} onPick={setPickFor} />
+      <AccessCard n={n} agents={agents} onAccess={(edit) => go(setAccess(edit))} onPick={setPickFor} onGroupManager={groupManager} onRevoke={revoke} />
       <InboundCard n={n} onSettings={settings} />
       <LimitsCard n={n} onSettings={settings} />
       {n.kind === 'cloud' && <CloudCard n={n} webhookUrl={cloud.webhookUrl} verifyToken={cloud.verifyToken} />}

@@ -9,7 +9,6 @@ import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
 import {
   ALL_CHATS,
-  accessFor,
   clampSettings,
   cleanAccess,
   dayStart,
@@ -19,7 +18,6 @@ import {
   phoneDigits,
   type WhatsAppAccess,
   type WhatsAppChat,
-  type WhatsAppMessage,
   type WhatsAppNumber,
   type WhatsAppNumberInput,
   type WhatsAppSettings,
@@ -29,27 +27,21 @@ import {
 import type { Cipher } from '../secrets'
 import type { ToolDef } from '../gateway'
 import * as cloud from './cloud'
-import { jidPhone, QrDriver, type QrMessage, type QrStatus } from './qr'
+import { QrDriver, type QrStatus } from './qr'
 import { WhatsAppStore, type NumberRow } from './store'
-import { AgentTools, generic, type Runtime, type ToolOutcome } from './agent'
+import { AgentTools, generic, type Runtime, type ToolCtx, type ToolOutcome } from './agent'
 import { fold, tools as toolDefs } from './tools'
-import { Wakes, type Pending } from './inbound'
+import { Arrivals, type Inbound } from './inbound'
+import { WhatsAppMedia } from './media'
 
-export { WHATSAPP_TOOL_NAMES } from './tools'
-export type { ToolOutcome } from './agent'
+export { WHATSAPP_TOOL_NAMES, lineOf } from './tools'
+export { shortId } from './store'
+export type { ToolOutcome, ToolCtx } from './agent'
+export type { Inbound } from './inbound'
 
 export const WHATSAPP = 'whatsapp' // the "connector" of its send approvals
 
-const STORED_TEXT_MAX = 8_000
 const CHANGED_EVERY_MS = 300
-
-export interface Inbound {
-  numberId: string
-  numberName: string
-  chat: WhatsAppChat
-  messages: WhatsAppMessage[] // what arrived, oldest first
-  send: 'ask' | 'auto' // how this agent's answers leave that conversation
-}
 
 export interface WhatsAppDeps {
   dir: string // the data folder
@@ -57,13 +49,10 @@ export interface WhatsAppDeps {
   agents(): { id: string; name: string; archived?: boolean }[]
   changed(): void // a number's state changed: the screen reads again
   wake(agentId: string, inbound: Inbound): void
+  artifact(id: string): { path: string; name: string } | undefined // a file of a conversation: where it is on disk
+  transcribe?: (wav: Buffer) => Promise<string | undefined> // the words of a 16 kHz WAV; undefined: dictation isn't set up
   publicUrl?: string // a server on https only: what makes the official API possible
   log?(text: string): void
-}
-
-// A message from either kind of number, in the same shape.
-interface Incoming extends QrMessage {
-  phone?: string
 }
 
 const gone = (): UserError => new UserError(L('Esse número de WhatsApp não existe mais.', 'That WhatsApp number no longer exists.'))
@@ -81,17 +70,29 @@ export class WhatsApp {
   private db?: WhatsAppStore
   private runtimes = new Map<string, Runtime>()
   private keys = new Map<string, cloud.CloudCreds>() // official-API numbers: their opened keys
-  private wakes = new Wakes({
-    deliver: (p) => this.deliver(p),
-    fail: (e) => this.fail(e)
-  })
   private removing = new Set<string>() // numbers being removed: nothing may link them again meanwhile
   private token?: Promise<string>
   private notify?: NodeJS.Timeout
   private closed = false
+  private media: WhatsAppMedia // the files of messages
+  private arrivals: Arrivals // what comes in: stored, filed, and turned into wakes
   private agent: AgentTools
 
   constructor(private deps: WhatsAppDeps) {
+    this.media = new WhatsAppMedia(deps.dir)
+    const transcribe = deps.transcribe
+    this.arrivals = new Arrivals({
+      store: () => this.store,
+      rt: (id) => this.rt(id),
+      live: (id) => this.runtimes.has(id),
+      agents: () => this.deps.agents(),
+      media: this.media,
+      ...(transcribe ? { transcribe } : {}),
+      withPause: (id, c) => this.withPause(id, c),
+      wake: (agentId, inbound) => this.deps.wake(agentId, inbound),
+      changed: () => this.changed(),
+      fail: (e) => this.fail(e)
+    })
     this.agent = new AgentTools({
       store: () => this.store,
       rt: (id) => this.rt(id),
@@ -100,7 +101,10 @@ export class WhatsApp {
       view: (n, since) => this.view(n, since),
       stub: (id) => this.stub(id),
       changed: () => this.changed(),
-      fail: (e) => this.fail(e)
+      fail: (e) => this.fail(e),
+      media: this.media,
+      artifact: (id) => this.deps.artifact(id),
+      speech: (data) => this.arrivals.speech(data)
     })
   }
 
@@ -158,6 +162,8 @@ export class WhatsApp {
       this.fail(e)
       return
     }
+    // The files of what the 90-day clean-up dropped when the data opened.
+    void this.media.remove(this.store.takeExpired()).catch((e: unknown) => this.fail(e))
     for (const n of rows) {
       try {
         if (n.kind === 'cloud') await this.openKeys(n.id)
@@ -172,7 +178,7 @@ export class WhatsApp {
     this.closed = true
     if (this.notify) clearTimeout(this.notify)
     this.notify = undefined
-    this.wakes.clear()
+    this.arrivals.clear()
     for (const r of this.runtimes.values()) r.driver?.stop()
     this.runtimes.clear()
     this.db?.close()
@@ -202,7 +208,8 @@ export class WhatsApp {
       chat: (c) => {
         if (this.runtimes.has(id)) this.store.upsertChat(id, c)
       },
-      message: (m) => this.onMessage(id, m)
+      message: (m) => this.arrivals.message(id, m),
+      change: (c) => this.arrivals.change(id, c)
     })
     r.driver = driver
     this.changed()
@@ -357,15 +364,16 @@ export class WhatsApp {
     try {
       const r = this.runtimes.get(id)
       this.runtimes.delete(id) // from here on, nothing that number's link says is heard
-      this.wakes.drop((p) => p.numberId === id)
-      this.wakes.forget(id)
+      this.arrivals.wakes.drop((p) => p.numberId === id)
+      this.arrivals.wakes.forget(id)
       try {
         await r?.driver?.logout()
       } catch (e) {
         this.fail(e) // the number leaves either way
       }
       this.keys.delete(id)
-      this.store.removeNumber(id)
+      await this.media.remove(this.store.removeNumber(id)) // its messages' files go with it
+      await this.media.removeNumber(id)
       this.changed()
     } finally {
       this.removing.delete(id)
@@ -406,7 +414,7 @@ export class WhatsApp {
     const driver = r.driver
     r.driver = undefined
     r.view = { status: 'disconnected' }
-    this.wakes.drop((p) => p.numberId === id)
+    this.arrivals.wakes.drop((p) => p.numberId === id)
     this.changed()
     try {
       await driver?.logout()
@@ -438,6 +446,7 @@ export class WhatsApp {
     // The official API has no groups.
     if (n.kind === 'cloud') rows = rows.filter((a) => a.chat === ALL_CHATS || (this.store.chat(id, a.chat)?.kind !== 'group' && !a.chat.endsWith('@g.us')))
     this.store.setAccess(id, rows)
+    this.dropOrphanManagers(n)
     this.changed()
     return this.numberView(id)
   }
@@ -450,63 +459,38 @@ export class WhatsApp {
     return cloud.templates(keys)
   }
 
+  // A group manager with no access row left on a number stops being one there: "can manage groups" follows the access.
+  private dropOrphanManagers(n: NumberRow): void {
+    const withAccess = new Set(this.store.access(n.id).map((a) => a.agentId))
+    const kept = n.settings.groupManagers.filter((id) => withAccess.has(id))
+    if (kept.length === n.settings.groupManagers.length) return
+    this.store.updateNumber(n.id, { settings: clampSettings(n.kind, { ...n.settings, groupManagers: kept }) })
+  }
+
   agentGone(agentId: string): void {
     try {
       this.store.dropAgent(agentId)
-      this.wakes.drop((p) => p.agentId === agentId)
+      for (const n of this.store.numbers()) this.dropOrphanManagers(n)
+      this.arrivals.wakes.drop((p) => p.agentId === agentId)
       this.changed()
     } catch (e) {
       this.fail(e)
     }
   }
 
-  // ---------- what arrives ----------
+  // ---------- earlier messages ----------
 
-  private onMessage(numberId: string, m: QrMessage): void {
-    try {
-      if (this.runtimes.has(numberId)) this.inbound(numberId, m)
-    } catch (e) {
-      this.fail(e)
-    }
+  // The screen's "bring earlier messages" button (QR numbers): the phone is asked and they arrive on their own.
+  async history(id: string, chat: string): Promise<void> {
+    await this.agent.history(this.need(id), chat)
   }
 
-  private inbound(numberId: string, m: Incoming): void {
-    const n = this.store.number(numberId)
-    if (!n || m.ours) return // what an agent sent is stored when it is sent
-    const phone = m.phone ?? (m.group ? undefined : jidPhone(m.chat))
-    this.store.upsertChat(numberId, { id: m.chat, kind: m.group ? 'group' : 'contact', ...(m.chatName ? { softName: m.chatName } : {}), ...(phone ? { phone } : {}), lastAt: m.at, ...(m.fromMe ? {} : { inboundAt: m.at }) })
-    const msg: WhatsAppMessage = { id: m.id, chat: m.chat, fromMe: m.fromMe, ...(m.sender ? { sender: m.sender } : {}), text: m.text.slice(0, STORED_TEXT_MAX), at: m.at }
-    const readable = this.store.readable(numberId, m.chat)
-    if (readable && !this.store.addMessage(numberId, msg)) return // the same message delivered twice
-    if (m.live === false) return // history delivered after a reconnect: stored, but it wakes no one and pauses nothing
-    const r = this.rt(numberId)
-    if (m.fromMe) {
-      // A person answered from the phone: the agents leave that conversation to them for a while.
-      if (n.settings.pauseOnHumanMin > 0) {
-        r.paused.set(m.chat, Date.now() + n.settings.pauseOnHumanMin * 60_000)
-        this.wakes.drop((p) => p.numberId === numberId && p.chat === m.chat)
-      }
-      this.changed()
-      return
-    }
-    if (!readable || n.settings.inbound !== 'wake') return
-    if ((r.paused.get(m.chat) ?? 0) > Date.now()) return
-    if (m.group && n.settings.groupsOnlyMention && !m.mentioned) return
-    const access = this.store.access(numberId)
-    const agents = new Map(this.deps.agents().map((a) => [a.id, a]))
-    for (const agentId of new Set(access.map((a) => a.agentId))) {
-      const agent = agents.get(agentId)
-      if (accessFor(access, agentId, m.chat)?.level === 'reply' && agent && !agent.archived) this.wakes.debounce(numberId, m.chat, agentId, msg)
-    }
-  }
+  // ---------- what arrives (inbound.ts stores it and decides the wakes) ----------
 
-  // A burst that is still due when it fires: the conversation must still be open to the agent, and not paused.
-  private deliver(p: Pending): void {
-    const n = this.store.number(p.numberId)
-    const chat = this.store.chat(p.numberId, p.chat)
-    const a = accessFor(this.store.access(p.numberId), p.agentId, p.chat)
-    if (!n || !chat || a?.level !== 'reply' || (this.runtimes.get(p.numberId)?.paused.get(p.chat) ?? 0) > Date.now()) return
-    this.deps.wake(p.agentId, { numberId: n.id, numberName: n.name, chat: this.withPause(n.id, chat), messages: p.messages, send: a.send })
+  // The message a reply from Meta answers, as far as it is kept here.
+  private quotedOf(numberId: string, chat: string, id: string): { id: string; text: string } {
+    const q = this.store.message(numberId, chat, id)
+    return { id, text: q && !q.deleted ? q.text : '' }
   }
 
   // Meta's webhook. It never throws: Meta retries what it thinks failed, so every case gets an answer.
@@ -536,10 +520,32 @@ export class WhatsApp {
         const to = signers.find((s) => s.keys.phoneId === m.phoneId)
         if (!to) continue // a number this app does not know: ignored, and Meta is told all is well
         try {
-          this.inbound(to.id, { chat: m.from, id: m.id, fromMe: false, ours: false, group: false, live: true, chatName: m.name, phone: m.from, text: m.text, at: m.at, mentioned: false })
+          const file = m.media
+          const quoted = m.quotedId ? this.quotedOf(to.id, m.from, m.quotedId) : undefined
+          this.arrivals.message(to.id, {
+            chat: m.from,
+            id: m.id,
+            fromMe: false,
+            ours: false,
+            group: false,
+            live: true,
+            chatName: m.name,
+            phone: m.from,
+            text: m.text,
+            at: m.at,
+            mentioned: false,
+            // Meta gives a media id; the bytes are fetched only if the conversation is kept.
+            ...(file ? { media: { kind: file.kind, mime: file.mime, ...(file.fileName ? { fileName: file.fileName } : {}) }, download: async () => (await cloud.download(to.keys, file.id)).data } : {}),
+            ...(quoted ? { quoted } : {})
+          })
         } catch (e) {
           this.fail(e)
         }
+      }
+      // Reactions that arrived: they change what is stored, they never wake anyone.
+      for (const c of cloud.parseChanges(json)) {
+        const to = signers.find((s) => s.keys.phoneId === c.phoneId)
+        if (to) this.arrivals.change(to.id, { chat: c.from, target: c.target, kind: 'reaction', emoji: c.emoji, fromMe: false, at: c.at })
       }
       return { status: 200, body: 'ok' }
     } catch (e) {
@@ -562,19 +568,19 @@ export class WhatsApp {
     return toolDefs()
   }
 
-  call(agent: { id: string; name: string }, name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
-    return this.agent.call(agent, name, args)
+  call(agent: { id: string; name: string }, name: string, args: Record<string, unknown>, ctx?: ToolCtx): Promise<ToolOutcome> {
+    return this.agent.call(agent, name, args, ctx)
   }
 
-  approved(agentId: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
-    return this.agent.approved(agentId, args)
+  approved(agentId: string, args: Record<string, unknown>, tool?: string): Promise<{ ok: boolean; text: string }> {
+    return this.agent.approved(agentId, args, tool)
   }
 
   always(agentId: string, args: Record<string, unknown>): void {
     this.agent.always(agentId, args)
   }
 
-  what(args: Record<string, unknown>): string {
-    return this.agent.what(args)
+  what(args: Record<string, unknown>, tool?: string): string {
+    return this.agent.what(args, tool)
   }
 }

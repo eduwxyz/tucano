@@ -273,7 +273,8 @@ export const NEEDS: Record<Method, Need> = {
   whatsappDisconnect: 'admin',
   whatsappChats: 'admin',
   whatsappSetAccess: 'admin',
-  whatsappTemplates: 'admin'
+  whatsappTemplates: 'admin',
+  whatsappHistory: 'admin'
 }
 
 // An agent's computer: anyone who sees the agent may look at it again (its page does, opening);
