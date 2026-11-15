@@ -208,7 +208,7 @@ export const CATALOG: CatalogEntry[] = [
   e('canva', 'Canva', 'https://mcp.canva.com/mcp', 'design', 'Designs, modelos e exportações', 'Designs, templates and exports'),
   // Takes no registration: it reads the app's description from an https address (src/shared/oauth-client.ts),
   // so only a Tucano on a server with one gets in. Generating spends the account's credits: said in its line.
-  e('elevenlabs', 'ElevenLabs', 'https://api.elevenlabs.io/v1/mcp', 'design', 'Voz, transcrição e agentes de voz · gasta créditos da sua conta', 'Speech, transcription and voice agents · spends your account’s credits'),
+  e('elevenlabs', 'ElevenLabs', 'https://api.elevenlabs.io/v1/mcp', 'design', 'Voz e transcrição · gasta créditos', 'Speech and transcription · spends credits'),
   e('webflow', 'Webflow', 'https://mcp.webflow.com/mcp', 'design', 'Sites, páginas e CMS', 'Sites, pages and CMS'),
   e('wix', 'Wix', 'https://mcp.wix.com/mcp', 'design', 'Sites e lojas', 'Sites and stores'),
 
