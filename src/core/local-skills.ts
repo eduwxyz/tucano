@@ -37,7 +37,7 @@ const dirs = (d: string): string[] => {
 
 // name and description from the YAML frontmatter, including "description: |" blocks.
 export function frontmatter(text: string): { name?: string; description?: string; body: string } {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text)
+  const m = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text)
   if (!m) return { body: text }
   const lines = m[1]!.split(/\r?\n/)
   const field = (key: string): string | undefined => {
@@ -53,6 +53,55 @@ export function frontmatter(text: string): { name?: string; description?: string
     return block.join(' ').trim() || undefined
   }
   return { name: field('name'), description: field('description'), body: text.slice(m[0].length) }
+}
+
+const unquote = (v: string): string => v.trim().replace(/^(["'])(.*)\1$/, '$2')
+
+// The lines under "key:" (deeper than it), and what follows the colon on its own line.
+function section(lines: string[], key: string): { inline: string; body: string[] } | undefined {
+  const indent = (l: string): number => /^\s*/.exec(l)![0].length
+  const base = Math.min(...lines.filter((l) => l.trim() && !l.trim().startsWith('#')).map(indent))
+  const i = lines.findIndex((l) => indent(l) === base && l.slice(base).startsWith(`${key}:`))
+  if (i < 0) return undefined
+  const body: string[] = []
+  for (const l of lines.slice(i + 1)) {
+    if (l.trim() && indent(l) <= base) break
+    body.push(l)
+  }
+  return { inline: lines[i]!.slice(base + key.length + 1).trim(), body }
+}
+
+// category, version, tags and allowed-tools from the frontmatter. Hermes keeps them nested:
+// "metadata: { version, hermes: { tags } }"; a plain name/description frontmatter has none.
+export function skillMeta(text: string): { category?: string; version?: string; allowedTools?: string; tags: string[] } {
+  const m = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+  if (!m) return { tags: [] }
+  const lines = m[1]!.split(/\r?\n/)
+  const scalar = (s: { inline: string } | undefined): string | undefined => (s && unquote(s.inline) ? unquote(s.inline) : undefined)
+  // "[a, b]", or the "- a" lines under the key (73 Hermes skills write allowed-tools that way), or one value.
+  const list = (s: { inline: string; body: string[] } | undefined): string[] | undefined => {
+    if (!s) return undefined
+    const flow = /^\[(.*)\]$/.exec(s.inline)
+    const items = flow ? flow[1]!.split(',') : s.inline ? [s.inline] : s.body.map((l) => /^\s*-\s+(.*)$/.exec(l)?.[1] ?? '')
+    return items.map(unquote).filter(Boolean)
+  }
+  const meta = section(lines, 'metadata')
+  const hermes = meta && meta.body.length ? section(meta.body, 'hermes') : undefined
+  const tagsAt = hermes && hermes.body.length ? section(hermes.body, 'tags') : undefined
+  let tags: string[] = []
+  if (tagsAt) {
+    const flow = /^\[(.*)\]$/.exec(tagsAt.inline)
+    tags = flow ? flow[1]!.split(',') : tagsAt.body.map((l) => /^\s*-\s+(.*)$/.exec(l)?.[1] ?? '')
+    tags = tags.map(unquote).filter(Boolean)
+  }
+  // Without metadata.hermes.tags, a top-level "tags:" (a list in either form) stands in.
+  if (!tags.length) tags = list(section(lines, 'tags')) ?? []
+  return {
+    category: scalar(section(lines, 'category')),
+    version: scalar(section(lines, 'version')) ?? scalar(meta && meta.body.length ? section(meta.body, 'version') : undefined),
+    allowedTools: list(section(lines, 'allowed-tools'))?.join(', ') || undefined,
+    tags
+  }
 }
 
 // The other files of a skill: text ones it may point to, and whether it has scripts.
@@ -82,9 +131,22 @@ function contents(dir: string): { files: string[]; scripts: boolean } {
 
 function skill(file: string, origin: string): LocalSkill | undefined {
   try {
-    const fm = frontmatter(readFileSync(file, 'utf8'))
+    const text = readFileSync(file, 'utf8')
+    const fm = frontmatter(text)
     const dir = dirname(file)
-    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...contents(dir) }
+    const meta = skillMeta(text)
+    return {
+      source: file,
+      name: fm.name || basename(dir),
+      description: fm.description || '',
+      bodyLength: fm.body.trim().length,
+      origin,
+      ...contents(dir),
+      ...(meta.category ? { category: meta.category } : {}),
+      ...(meta.version ? { version: meta.version } : {}),
+      ...(meta.tags.length ? { tags: meta.tags } : {}),
+      ...(meta.allowedTools ? { allowedTools: meta.allowedTools } : {})
+    }
   } catch {
     return undefined
   }
@@ -94,6 +156,31 @@ const inDirs = (root: string, origin: string): LocalSkill[] =>
   dirs(root)
     .map((d) => skill(join(d, 'SKILL.md'), origin))
     .filter((s): s is LocalSkill => !!s)
+
+// Folders a skill keeps its own files in: under a category with no SKILL.md they are not skills.
+const RESOURCE = new Set(['scripts', 'references', 'assets', 'templates'])
+
+const visible = (d: string): string[] => dirs(d).filter((p) => !basename(p).startsWith('.') && basename(p) !== 'node_modules')
+
+// A skills folder with category folders, like Hermes keeps it: <name>/SKILL.md or
+// <category>/<name>/SKILL.md. A folder with its own SKILL.md is a skill, so its scripts/ and
+// references/ never count as categories. Folders that start with a dot (.archive, .git) are skipped.
+// The folder names the skill: when the frontmatter name differs, the folder wins.
+export function findHermesSkills(root: string, origin: string): LocalSkill[] {
+  const found: LocalSkill[] = []
+  for (const d of visible(root)) {
+    const own = skill(join(d, 'SKILL.md'), origin)
+    if (own) {
+      found.push({ ...own, name: basename(d) })
+      continue
+    }
+    for (const c of visible(d).filter((c) => !RESOURCE.has(basename(c)))) {
+      const s = skill(join(c, 'SKILL.md'), origin)
+      if (s) found.push({ ...s, name: basename(c), category: s.category ?? basename(d) })
+    }
+  }
+  return found
+}
 
 // The newest version folder of each plugin the user turned on in Claude Code.
 function pluginSkills(claude: string): LocalSkill[] {
@@ -142,6 +229,28 @@ export function findLocalSkills(home = homedir()): LocalSkill[] {
   const claude = process.env['CLAUDE_CONFIG_DIR'] || join(home, '.claude')
   const codex = process.env['CODEX_HOME'] || join(home, '.codex')
   return [...inDirs(join(claude, 'skills'), 'Claude Code'), ...pluginSkills(claude), ...inDirs(join(codex, 'skills'), 'Codex')]
+}
+
+// "~" and "~/x" are the user's home: the Settings placeholder is ~/.hermes/skills, and a shell
+// never expands it inside TUCANO_SKILLS_DIR or a typed field.
+const expandHome = (p: string, home: string): string => (p === '~' ? home : /^~[/\\]/.test(p) ? join(home, p.slice(2)) : p)
+
+// Every skill on this Mac, plus the ones in an extra directory (TUCANO_SKILLS_DIR or Settings,
+// empty by default; <category>/<name>/SKILL.md or flat). A skill reached twice, say a link from
+// ~/.codex/skills into that directory, is listed once, by the real path of its SKILL.md.
+export function findSkills(home = homedir(), extraDir?: string): LocalSkill[] {
+  const extra = extraDir?.trim() ? findHermesSkills(expandHome(extraDir.trim(), home), 'Hermes') : []
+  const seen = new Set<string>()
+  return [...findLocalSkills(home), ...extra].filter((s) => {
+    let key = s.source
+    try {
+      key = realpathSync(s.source)
+    } catch {
+      // keep the path as it is
+    }
+    if (process.platform === 'win32') key = key.toLowerCase() // C:\Skills and c:\skills are one folder there
+    return !seen.has(key) && !!seen.add(key)
+  })
 }
 
 // A linked skill's recipe, or one of its files; never a file outside its folder.
