@@ -4,11 +4,11 @@
 // failed conversion: that is an `undefined`.
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { L } from '../../shared/lang'
 import { UserError } from '../../shared/errors'
-import { MEDIA_IN_MAX } from '../../shared/whatsapp'
+import { MEDIA_IN_MAX, MEDIA_NUMBER_MAX } from '../../shared/whatsapp'
 import { findOnPath, spawnable } from '../platform'
 
 const WAV_TIMEOUT_MS = 60_000
@@ -81,8 +81,10 @@ export function mimeOfFile(name: string): string {
 
 export class WhatsAppMedia {
   private root: string
+  private used = new Map<string, number>() // bytes kept per number's folder, as far as this run knows: `trim` reads the real figure
+  private trimming = new Set<string>()
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, private limit = MEDIA_NUMBER_MAX) {
     this.root = resolve(dataDir, 'whatsapp-media')
   }
 
@@ -108,11 +110,45 @@ export class WhatsAppMedia {
       await mkdir(join(full, '..'), { recursive: true, mode: 0o700 })
       await writeFile(full, data, { mode: 0o600 })
       await chmod(full, 0o600).catch(() => {}) // a file that already existed keeps its old mode otherwise
+      await this.count(join(full, '..'), data.length)
     } catch (e) {
       console.error('[whatsapp]', e instanceof Error ? e.message : e)
       throw new UserError(L('Não consegui guardar esse arquivo no computador.', "I couldn't save that file on this computer."))
     }
     return rel
+  }
+
+  // A number's files never pass the limit (MEDIA_NUMBER_MAX): past it the oldest go until a fifth of the room is free again, so
+  // a number that gets files all day can't fill the disk. A message whose file went says so when someone asks for it.
+  private async count(dir: string, added: number): Promise<void> {
+    const known = this.used.get(dir)
+    if (known !== undefined && known + added <= this.limit) {
+      this.used.set(dir, known + added)
+      return
+    }
+    if (this.trimming.has(dir)) return
+    this.trimming.add(dir)
+    try {
+      const files: { path: string; size: number; at: number }[] = []
+      for (const name of await readdir(dir)) {
+        const path = join(dir, name)
+        const s = await stat(path).catch(() => undefined)
+        if (s?.isFile()) files.push({ path, size: s.size, at: s.mtimeMs })
+      }
+      let total = files.reduce((sum, f) => sum + f.size, 0)
+      if (total > this.limit) {
+        for (const f of files.sort((a, b) => a.at - b.at)) {
+          if (total <= this.limit * 0.8) break
+          await unlink(f.path).catch(() => {})
+          total -= f.size
+        }
+      }
+      this.used.set(dir, total)
+    } catch (e) {
+      console.error('[whatsapp]', e instanceof Error ? e.message : e) // the file itself was saved: counting it is what failed
+    } finally {
+      this.trimming.delete(dir)
+    }
   }
 
   // The bytes of a saved file. Refuses a path that leads outside the folder (also through a link).
@@ -141,7 +177,9 @@ export class WhatsAppMedia {
 
   async removeNumber(numberId: string): Promise<void> {
     const full = this.inside(safe(numberId).slice(0, 80) || 'number')
-    if (full) await rm(full, { recursive: true, force: true }).catch(() => {})
+    if (!full) return
+    await rm(full, { recursive: true, force: true }).catch(() => {})
+    this.used.delete(full)
   }
 }
 
