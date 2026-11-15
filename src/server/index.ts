@@ -132,7 +132,7 @@ function fromCore(msg: CoreRequest): void {
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
-  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'whatsapp-webhook-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   if (personNotice(msg, { signins, grants, viewers, streams })) return
@@ -251,6 +251,30 @@ function index(): string {
 }
 
 
+// Meta's official WhatsApp API calls this: a GET handshake and POSTs of events, signed with the app's secret.
+// No token here (Meta has none); the core checks the verify token and the signature. Never a 500.
+async function whatsappWebhook(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  const text = (status: number, out = ''): void => void res.writeHead(status, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }).end(out)
+  if (req.method !== 'GET' && req.method !== 'POST') return text(405)
+  const sig = req.headers['x-hub-signature-256']
+  let raw = ''
+  if (req.method === 'POST') {
+    // A POST without a well-formed signature costs nothing: it is refused before its body is read or the core is asked.
+    if (typeof sig !== 'string' || !/^sha256=[0-9a-f]{64}$/i.test(sig)) return text(401)
+    try {
+      raw = await body(req, 1024 * 1024)
+    } catch {
+      text(413)
+      req.destroy() // too big: stop the upload here instead of reading the rest of it
+      return
+    }
+  }
+  const query = Object.fromEntries(['hub.mode', 'hub.verify_token', 'hub.challenge'].flatMap((k) => (url.searchParams.has(k) ? [[k, url.searchParams.get(k)!]] : [])))
+  const out = await ask<{ status: number; body: string }>({ type: 'whatsapp-webhook', data: { method: req.method, query, body: raw, ...(typeof sig === 'string' ? { signature: sig } : {}) } }, 5_000)
+  if (!out) return text(503)
+  text(out.status, out.body)
+}
+
 function oauthCallback(url: URL, res: ServerResponse): void {
   const id = randomUUID()
   const answer = (r: { ok: boolean; why?: string }): void => {
@@ -297,6 +321,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  if (url.pathname === '/whatsapp/webhook')
+    return void whatsappWebhook(req, res, url).catch(() => {
+      if (!res.headersSent) res.writeHead(503, BASE_HEADERS).end()
+    })
   // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,
   // and so does the page a browser's /?code= opens (opening it spends nothing: see pair-http.ts).
   // No sign-in: the code is what counts, and a wrong one counts as a guess.

@@ -361,6 +361,9 @@ export class People {
       case 'skill_removed':
       case 'wiki':
         return event
+      // A number's state (its link code among it) is the admins' to read.
+      case 'whatsapp':
+        return isAdmin(person) ? event : undefined
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.
         const unknown: never = event

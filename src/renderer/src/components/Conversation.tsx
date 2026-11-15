@@ -91,6 +91,7 @@ import { canEditChannel,
 } from '../store'
 import { askWay } from './OrgSectors'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { WhatsAppSend } from './WhatsAppParts'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -1479,9 +1480,13 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const onComputer = approval.connectorId === COMPUTADOR
   const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
-  const alwaysTitle = onComputer
-    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
+  // A WhatsApp send: shown as the message itself. "Always" means that conversation's sends go alone, never for a first contact.
+  const whatsapp = approval.connectorId === 'whatsapp'
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0) && !(whatsapp && approval.args['primeiro_contato'] === true)
+  const alwaysTitle = whatsapp
+    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} envia sozinho nesta conversa, sem pedir. Dá pra mudar em Configurações › WhatsApp.`, `From now on ${agent?.name ?? 'the agent'} sends on its own in this conversation, without asking. You can change it in Settings › WhatsApp.`)
+    : onComputer
+    ?L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking. You can take it back on its page.`)
 
   return (
@@ -1497,6 +1502,10 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         {approval.tool === ACCESS_REQUEST ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
+          </>
+        ) : whatsapp ? (
+          <>
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer enviar no WhatsApp para', 'wants to send on WhatsApp to')} <strong>{String(approval.args['conversa'] ?? '')}</strong> ({String(approval.args['numero'] ?? '')})
           </>
         ) : onComputer ? (
           <>
@@ -1551,10 +1560,11 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         </div>
       )}
       {approval.why && <p className="approval__why">{approval.why}</p>}
+      {whatsapp && <WhatsAppSend args={approval.args} />}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && !onComputer && summary.shown.length > 0 && (
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !whatsapp && !runner && !onComputer && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1644,7 +1654,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               </button>
               {canAlways && (
                 <button className="btn approval__always" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
-                  {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                  {whatsapp ? L('Aprovar e sempre enviar nesta conversa', 'Approve and always send in this conversation') : L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
               {forGood && (

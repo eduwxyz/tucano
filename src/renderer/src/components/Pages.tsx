@@ -80,6 +80,7 @@ import {
   type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
+import { WhatsAppPane } from './WhatsApp'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
@@ -1859,7 +1860,8 @@ export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList
     ? ([
         ['modelos', L('Modelos', 'Models')],
         ['agentes', L('Agentes', 'Agents')],
-        ...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])
+        ...(owner ? [['integracoes', L('Celular', 'Phone')]] : []),
+        ['whatsapp', 'WhatsApp']
       ] as [string, string][])
     : []),
   ...(team ? [['pessoas', L('Pessoas', 'People')] as [string, string]] : []),
@@ -2541,6 +2543,7 @@ export function SettingsPage(): ReactNode {
       <div className="agent-form">
         {pane('pessoas') && <PeoplePane />}
         {pane('atividade') && admin && <ActivityPane />}
+        {pane('whatsapp') && admin && <WhatsAppPane />}
         {/* A member's own: the language, the theme and the sounds (their name is in Pessoas). */}
         {pane('geral') && !admin && (
           <Card title={L('Pra você', 'Yours')} lead={L('Como o Tucano aparece pra você. Muda só pra você.', 'How Tucano looks to you. It changes only for you.')}>

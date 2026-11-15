@@ -153,6 +153,7 @@ describe('G. every event reaches only who may see what it is about', () => {
       skill: { event: { type: 'skill', skill: { id: 's1', name: 'x' } as unknown as Skill }, is: 'shown' },
       skill_removed: { event: { type: 'skill_removed', id: 's1' }, is: 'shown' },
       wiki: { event: { type: 'wiki' }, is: 'shown' },
+      whatsapp: { event: { type: 'whatsapp' }, is: 'hidden' },
       people: { event: { type: 'people', people: db.people() }, is: 'shown' },
       inbox: { event: { type: 'inbox' }, is: 'own' },
       delegations: { event: { type: 'delegations' }, is: 'own' }
