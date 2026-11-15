@@ -4,7 +4,8 @@
 // The desktop's one person is the owner, so on a desktop everything is allowed, as always.
 import { L } from '../shared/lang'
 import type { Method } from '../shared/rpc'
-import { delegating, scopePerson, type Person, type Question, type Role, type Routine, type Settings } from '../shared/types'
+import { covers } from '../shared/access'
+import { scopePerson, type Person, type Question, type Role, type Routine, type Settings } from '../shared/types'
 
 export const isAdmin = (p: Pick<Person, 'role'>): boolean => p.role === 'owner' || p.role === 'admin'
 
@@ -42,14 +43,14 @@ export function can(person: Person, action: Action): boolean {
     case 'routine':
       return action.routine.scope === 'channel' ? isAdmin(person) : isAdmin(person) || action.routine.owner === person.id
     case 'approval':
-      return isAdmin(person) || action.agentOwner?.id === person.id || delegating(action.agentOwner, person.id)
+      return isAdmin(person) || action.agentOwner?.id === person.id || covers(action.agentOwner, person)
     case 'question': {
       const q = action.question
       if (q.state !== 'open') return false
       // Waiting on the DM's person to say yes: no one else has seen it yet.
       if (q.confirm === 'pending') return person.id === q.requestedBy
       const late = (action.now ?? Date.now()) >= q.deadlineAt
-      return person.id === q.askedTo || isAdmin(person) || delegating(action.askedTo, person.id, action.now) || (late && person.id === q.requestedBy)
+      return person.id === q.askedTo || isAdmin(person) || covers(action.askedTo, person, action.now) || (late && person.id === q.requestedBy)
     }
     case 'confirm':
       return action.question.state === 'open' && action.question.confirm === 'pending' && person.id === action.question.requestedBy
@@ -257,6 +258,7 @@ export const NEEDS: Record<Method, Need> = {
   removeDevice: 'anyone', // one's own (the core looks only among theirs)
   removePerson: 'target',
   setRole: 'target',
+  setPersonAccess: 'target', // the admins change members' (the owner, admins' too: always everything)
   activity: 'admin',
   purgePerson: 'owner',
   leave: 'anyone', // one's own access (the owner is refused in the core)

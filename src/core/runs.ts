@@ -6,7 +6,7 @@ import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -33,11 +33,13 @@ import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permi
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
 import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
+import { agentsFor } from './access-policy'
+import { covers, restricted, sharedAccess } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
-import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, questionMessage, RESPONDER_PEDIDO, resultMessage, returnTask, teamMember, teamSection, type Returned } from './delegations'
+import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, questionMessage, RESPONDER_PEDIDO, resultMessage, returnTask, soFarMessage, teamMember, teamSection, type Returned } from './delegations'
 import { askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
@@ -60,6 +62,13 @@ export const MAX_CONCURRENT_URGENT = 6
 const MAX_TURN_IMAGES = 6 // attached images a reply sees as images; older ones only by name
 const mimeOf = (name: string): string => ({ png: 'image/png', gif: 'image/gif', webp: 'image/webp' })[name.split('.').pop()!.toLowerCase()] ?? 'image/jpeg'
 const MAX_MENTIONS = 3
+// A request whose thread has nothing after it at all: the one asked never got going. It's knocked on
+// once, and if that comes to nothing either it ends as failed, so whoever asked always hears (delegations).
+const FIRST_NUDGE_MS = 4 * 60_000
+const GIVE_UP_MS = 10 * 60_000
+// Older than this and never knocked on (the app was closed, or it predates the knock): its work is
+// not started out of the blue now; it ends as failed and whoever asked hears it, to ask again if it still matters.
+const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
@@ -261,7 +270,7 @@ export interface RunnerDeps {
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
-  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles'> // without it, agents have no wiki
+  wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'outOfReach'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
 }
@@ -335,7 +344,7 @@ export interface RoutineEvent {
 // `trigger`: the message this reply answers (a routed one): what people wrote after it, while it
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
-type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string }
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string; for?: Person } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -552,7 +561,8 @@ export class Runner {
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
-    let responders = mentioned(typed, members).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
+    const may = agentsFor(writer, members) // a restricted member never calls an agent they can't see, by name or through the router
+    let responders = mentioned(typed, may).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -569,7 +579,7 @@ export class Runner {
       // A question on handed work that a person answered right there: whoever asked for the work has nothing left to answer.
       const handed = asked.threadId ? db.delegationAt(asked.threadId) : undefined
       if (handed?.asking === asked.id) this.keep({ ...handed, asking: undefined, askingTold: false })
-      const asker = members.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
+      const asker = may.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
       const target = q && q.askedTo !== writer.id ? db.people({ removed: true }).find((p) => p.id === q.askedTo) : undefined
       if (asker && q && target)
@@ -603,9 +613,9 @@ export class Runner {
       return
     }
     if (responders.length === 0) {
-      if (conv.kind === 'dm' || members.length === 1) responders = members
-      else if (members.length > 1) {
-        void this.routeAndRun(conv, members, replyIn, mine.id)
+      if (conv.kind === 'dm' || may.length === 1) responders = may
+      else if (may.length > 1) {
+        void this.routeAndRun(conv, may, replyIn, mine.id)
         return
       }
     }
@@ -1108,12 +1118,12 @@ export class Runner {
     const cwd = join(this.deps.workDir, agent.id)
     mkdirSync(cwd, { recursive: true })
     const members = this.members(conv)
-    const peers = members.filter((a) => a.id !== agent.id)
     const memory = this.deps.memory
     const { summary, messages: windowAll, before: beforeAll = [] } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? contextWindow(db, msg, HISTORY_LIMIT)
     // Whom this reply is for: the person every "ask", "tell" and "approve" in its prompt and tools
     // means. The owner reads by the workspace's name, so one person's prompts stay as they were.
-    const requester = requesterOf(db, conv, windowAll)
+    const requester = opts.for ?? requesterOf(db, conv, windowAll, msg.threadId)
+    const peers = agentsFor(requester, members).filter((a) => a.id !== agent.id) // a restricted person's reply lists only the peers they see
     // What the person this reply is for can see: never someone else's DM (nor what lives in one), nor
     // what a channel held before the Tucano had more people (the owner's: see People.visibleAt).
     const sees = new People(db)
@@ -1167,7 +1177,7 @@ export class Runner {
     // does. It hands them work (src/core/delegations.ts).
     // And when this reply is itself such work (in the thread a request opened), whose request it is:
     // what it asks goes up to that one, and what it ends with goes back to where that one asked.
-    const team = this.deps.gateway ? reachOf(db.agents(), agent.id) : []
+    const team = this.deps.gateway ? agentsFor(requester, reachOf(db.agents(), agent.id)) : [] // a restricted person's agent hands work only to what they see
     const handed = this.handedIn(msg)
     const boss = handed ? db.agent(handed.from) : undefined
     const delegated: DelegationRef[] = []
@@ -1188,7 +1198,11 @@ export class Runner {
       const current = db.agent(agent.id)
       const conversation = db.conversation(conv.id)
       if (!current || current.archived || !conversation || wikiAccess(current) === 'none') return undefined
-      return this.deps.wiki?.view(this.deps.wiki.heldTitles(dmOwner(conversation, db.ownerId())))
+      const w = this.deps.wiki
+      if (!w) return undefined
+      // A reply for a restricted member: not the pages that took something from a conversation they don't see.
+      const cut = restricted(requester) ? w.outOfReach((id) => sees.canSeeFrom(requester, id)) : new Set<string>()
+      return w.view(new Set([...w.heldTitles(dmOwner(conversation, db.ownerId())), ...cut]), cut.size ? { everHidden: cut } : {})
     }
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
@@ -1486,7 +1500,7 @@ ${note}`,
         if (name === PEDIR.name && team.length) {
           const ask = parseAsk(args)
           if ('error' in ask) return textResult(ask.error, true)
-          const now = reachOf(db.agents(), agent.id) // as the tree is now: it may have changed mid-turn
+          const now = agentsFor(requester, reachOf(db.agents(), agent.id)) // as the tree is now: it may have changed mid-turn
           const to = teamMember(now, args['para'])
           if (!to) return textResult(L(`Você não alcança ninguém chamado "${String(args['para'] ?? '')}". Quem você alcança: ${now.map((a) => `@${a.handle}`).join(', ')}.`, `You reach no one called "${String(args['para'] ?? '')}". Whom you reach: ${now.map((a) => `@${a.handle}`).join(', ')}.`), true)
           // This reply is itself a request's work: nothing goes back to whoever is already waiting on it, and it only stacks so far.
@@ -1549,7 +1563,7 @@ ${note}`,
             workspaceState(args['area'], {
               settings: await this.deps.settings(),
               connectors: this.deps.connectors?.list() ?? [],
-              agents: db.agents().filter((a) => a.kind !== 'tuca'),
+              agents: agentsFor(requester, db.agents()).filter((a) => a.kind !== 'tuca'),
               // What the person he's helping sees: never someone else's DM, nor what came from one.
               conversations: db.conversations(requester.id).filter((c) => seen.canSeeConversation(requester, c)),
               routines: db.routines().filter((r) => seen.canSeeFrom(requester, r.conversationId)),
@@ -1570,7 +1584,7 @@ ${note}`,
           const r =
             name === PROPOR_TIME.name
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
+              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
           if (!r.proposal) return textResult(r.error!, true)
           // Several in one reply, each its own card; one about the same thing as an earlier one replaces it.
           const list = proposalsOf(msg.run)
@@ -2235,9 +2249,9 @@ ${note}`,
       connectors: exposed.size > 0,
       github,
       people,
-      team: team.length ? teamSection({ agent, agents: db.agents(), conversations: db.conversations().filter((c) => sees.canSeeConversation(requester, c)), connectors: this.deps.connectors?.list() ?? [], open: db.openDelegations(), me: settings.workspaceName }) : undefined,
+      team: team.length ? teamSection({ agent, agents: agentsFor(requester, db.agents(), agent.id), conversations: db.conversations().filter((c) => sees.canSeeConversation(requester, c)), connectors: this.deps.connectors?.list() ?? [], open: db.openDelegations(), me: settings.workspaceName }) : undefined,
       builder: proposes
-        ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: db.agents().filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
+        ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
         : undefined,
       builderGuide: proposes ? [builderGuide({ tuca: helps, me: settings.workspaceName }), helps && helperSection()].filter(Boolean).join('\n\n') : undefined
     }
@@ -2455,7 +2469,8 @@ ${note}`,
       // The inbox shows a question's decisions from its message, which has them only now.
       if (question) emit({ type: 'inbox' })
       if (question && up) this.askedUp(up, agent, msg, question)
-      // Handed work that stopped at an approval: what else was asked from there may be told now.
+      // Handed work that stopped at an approval: what else was asked from there may be told now, and
+      // whoever asked hears that this one answered as far as it goes (tellAsker brings what it wrote).
       if (approval && handedNow) this.tellAsker(handedNow.from, handedNow.originConversationId, handedNow.originThreadId)
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
@@ -2467,7 +2482,7 @@ ${note}`,
         }
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
-        const next = this.mentions(agent, conv, msg).filter((a) => a.id !== handedNow?.from)
+        const next = agentsFor(requester, this.mentions(agent, conv, msg, requester)).filter((a) => a.id !== handedNow?.from)
         if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
         else finished()
       }
@@ -2720,7 +2735,7 @@ ${note}`,
     const { db } = this.deps
     const people = new People(db)
     const target = db.person(q.askedTo)
-    const to = [q.askedTo, ...db.people().filter((p) => delegating(target, p.id)).map((p) => p.id)]
+    const to = [q.askedTo, ...db.people().filter((p) => covers(target, p)).map((p) => p.id)]
     const seeing = to.filter((id) => people.canSeeFrom(db.person(id)!, q.conversationId))
     const title = L(`${agentName} te perguntou`, `${agentName} asked you`)
     if (seeing.length) this.deps.notify?.(title, q.text, q.conversationId, 'question', q.threadId, seeing)
@@ -2984,7 +2999,10 @@ ${note}`,
   private askedUp(d: Delegation, agent: Agent, msg: Message, question: string): void {
     const { db } = this.deps
     this.keep({ ...d, asking: msg.id, askingTold: false })
-    this.say(agent.id, d.originConversationId, d.originThreadId, questionMessage(db.conversation(d.conversationId), question), refOf(d))
+    const channel = db.conversation(d.conversationId)
+    // What it wrote before stopping goes back too: the asker is never left with the question alone.
+    if (msg.text.trim()) this.say(agent.id, d.originConversationId, d.originThreadId, soFarMessage(channel, msg.text), { ...refOf(d), back: 'result' })
+    this.say(agent.id, d.originConversationId, d.originThreadId, questionMessage(channel, question), refOf(d))
     this.tellAsker(d.from, d.originConversationId, d.originThreadId)
   }
 
@@ -3010,6 +3028,8 @@ ${note}`,
       const returned: Returned[] = all.flatMap((d): Returned[] => {
         if (d.state !== 'open') return d.told ? [] : [{ ...place(d), what: d.state, ...(d.state === 'failed' && d.result ? { why: db.message(d.result)?.run?.error } : {}) }]
         if (d.asking && !d.askingTold) return [{ ...place(d), what: 'asking' }]
+        // Held on an approval of mine: it answered as far as it goes, and that is mine to hear too.
+        if (!d.asking && !d.parkedTold && this.onApproval(d)) return [{ ...place(d), what: 'parked' }]
         if (d.dueAt && d.dueAt < now && !d.lateTold && !d.asking) return [{ ...place(d), what: 'late' }]
         return []
       })
@@ -3018,11 +3038,26 @@ ${note}`,
       // Answers alone wait for the rest, so the person hears it once. Not for one held on an approval:
       // that is the person's to give, whenever they do, and the others shouldn't sit behind it.
       if (open.some((o) => !o.asking && !this.onApproval(o)) && returned.every((r) => r.what === 'done' || r.what === 'cancelled')) return
-      for (const r of returned) this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : { ...r.d, told: true })
-      const requester = requesterOf(db, conv, [])
+      for (const r of returned) {
+        // Held on an approval of mine: what it wrote before stopping goes back with the news, so waiting
+        // for my yes never takes its answer away from whoever asked.
+        if (r.what === 'parked') {
+          const last = db.recentMessages(r.d.conversationId, 1, r.d.rootId)[0]
+          if (last?.author.kind === 'agent' && last.text.trim()) this.say(last.author.id, r.d.originConversationId, r.d.originThreadId, soFarMessage(db.conversation(r.d.conversationId), last.text), { ...refOf(r.d), back: 'result' })
+        }
+        this.keep(r.what === 'asking' ? { ...r.d, askingTold: true } : r.what === 'late' ? { ...r.d, lateTold: true } : r.what === 'parked' ? { ...r.d, parkedTold: true } : { ...r.d, told: true })
+      }
+      // The person the work was asked for, not whoever wrote last where it was asked (maybe the owner),
+      // and the reply runs for them. When the answers back were asked for by different people, it runs
+      // within what all of them see, so it never reaches past what someone who reads it may see.
+      const askers = [...new Map(returned.flatMap((r) => db.person(r.d.requestedBy) ?? []).map((p) => [p.id, p])).values()]
+      const first = askers.find((p) => restricted(p)) ?? askers[0]
+      const shared = askers.length > 1 ? sharedAccess(askers, db.agents()) : undefined
+      const behalf = first && (shared ? { ...first, access: shared } : first)
+      const requester = behalf ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
-      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true }), true)
+      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}) }), true)
     }
     if (this.followups.busy(key)) this.tells.set(key, go)
     else go()
@@ -3070,20 +3105,52 @@ ${note}`,
     for (const d of db.openDelegations()) {
       if (d.asking) continue
       const last = db.recentMessages(d.conversationId, 1, d.rootId)[0]
-      if (last?.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
+      // Nothing at all after the request: its turn never got going, so it's knocked on (see knockOn).
+      if (!last) {
+        this.knockOn(d, now)
+        continue
+      }
+      if (last.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
       if (now - (last.run.endedAt ?? last.at) < 60_000) continue // its own reply settles it; this is for the ones that never got to
       this.settle(d, last.run.status === 'stopped' ? 'cancelled' : 'failed', last)
     }
     const places = new Map(db.untoldDelegations(now).map((d) => [replyKey(d.from, d.originConversationId, d.originThreadId), d]))
+    // A request that answered as far as it goes and now waits on an approval of mine: whoever asked
+    // hears of it, including what it has of the answer, and then again when it ends.
+    for (const d of db.openDelegations()) if (!d.asking && !d.parkedTold && this.onApproval(d)) places.set(replyKey(d.from, d.originConversationId, d.originThreadId), d)
     for (const d of places.values()) this.tellAsker(d.from, d.originConversationId, d.originThreadId, now)
+  }
+
+  // A request whose thread still has nothing after it: the one asked never even started (no text, no
+  // error, nothing). It's knocked on once with what it has to do, and if that comes to nothing either,
+  // the request ends as failed so whoever asked hears of it instead of waiting for good.
+  private knockOn(d: Delegation, now: number): void {
+    const { db } = this.deps
+    const key = replyKey(d.to, d.conversationId, d.rootId)
+    // No message yet can mean a real reply is queued behind occupied execution slots.
+    if (this.followups.busy(key)) return
+    if (d.nudges) {
+      if (now - d.createdAt >= GIVE_UP_MS) this.settle(d, 'failed')
+      return
+    }
+    if (now - d.createdAt < FIRST_NUDGE_MS) return
+    if (now - d.createdAt >= STALE_MS) {
+      this.settle(d, 'failed')
+      return
+    }
+    const to = db.agent(d.to)
+    const conv = db.conversation(d.conversationId)
+    if (!to || !conv || to.archived) return
+    this.keep({ ...d, nudges: 1 })
+    void this.startReply(to, conv, { depth: 1, threadId: d.rootId, task: L('Seu turno anterior nesta thread não deixou nenhuma resposta: nenhum texto, nenhum erro, nada. Faça o pedido acima agora e escreva a resposta aqui, com o que fez, o que achou e o que falta.', 'Your previous turn in this thread left no reply at all: no text, no error, nothing. Do the request above now and write the answer here, with what you did, what you found and what is left.') }, { urgent: true })
   }
 
   // An agent that mentions another agent of the conversation may hand it the turn,
   // up to the limit set in Settings (chainDepth) without a human message in between.
   // The agents a reply mentions (none while paused).
-  private mentions(agent: Agent, conv: Conversation, msg: Message): Agent[] {
+  private mentions(agent: Agent, conv: Conversation, msg: Message, requester: Person): Agent[] {
     if (this.paused) return []
-    return mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
+    return mentioned(msg.text, agentsFor(requester, this.members(conv)).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
   }
 
   // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
@@ -3114,8 +3181,9 @@ ${note}`,
           const { messages: all } = contextWindow(db, msg, ROUTER_HISTORY)
           // The router reads what the person it answers may read (see People.visibleAt).
           const sees = new People(db)
-          const messages = all.filter((m) => sees.visibleAt(requesterOf(db, conv, all), m))
-          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: this.members(conv), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd })
+          const who = requesterOf(db, conv, all, msg.threadId)
+          const messages = all.filter((m) => sees.visibleAt(who, m))
+          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: agentsFor(who, this.members(conv)), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd })
           if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
           step.ms = r.ms
           if ('error' in r) failed(r.error)
