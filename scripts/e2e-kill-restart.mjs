@@ -142,6 +142,8 @@ const buttons = (win) => win.evaluate(() => [...document.querySelectorAll('.retr
   const db = new DatabaseSync(dbFile)
   // Exercise the manual Continue path even on branches that also offer startup recovery.
   db.prepare("INSERT INTO settings (key, value) VALUES ('resumeInterrupted', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run()
+  db.prepare("UPDATE people SET name = 'Review user' WHERE role = 'owner'").run()
+  db.prepare("INSERT INTO settings (key, value) VALUES ('workspaceName', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify('Review user'))
   const now = Date.now()
   const me = db.prepare("SELECT id FROM people WHERE role = 'owner' LIMIT 1").get()
   const put = db.prepare(
