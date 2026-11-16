@@ -668,7 +668,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     return 'shown'
   }
   // The server's folders, in the app's own dialog look: a browser can't show the server's disk.
-  const pickFolder = () =>
+  const pickFolder = (o) =>
     new Promise((done) => {
       const pt = document.documentElement.lang !== 'en'
       const t = (a, b) => (pt ? a : b)
@@ -725,14 +725,16 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
             if (!r.folders.length) list.append(el('p', 'small muted', t('Nenhuma pasta aqui dentro.', 'No folders in here.')))
           })
           .catch(() => (where.textContent = t('Não consegui abrir essa pasta.', "Couldn't open that folder.")))
-      go('')
+      // o.start (from the home folder, like ".hermes"), or the home folder when it is not there
+      if (o && typeof o.start === 'string') fetch('./folders?path=' + encodeURIComponent(o.start)).then((r) => go(r.ok ? o.start : ''), () => go(''))
+      else go('')
       choose.focus()
     })
   if (!desktop && notifyState() === 'ask')
     document.addEventListener('pointerdown', () => void Notification.requestPermission().catch(() => {}), { once: true })
   window.tucano = {
     connect,
-    pickFolder: () => pickFolder(),
+    pickFolder: (o) => pickFolder(o),
     // A file from this computer up to the server; where it landed there.
     upload: (file, purpose) =>
       fetch('./upload?name=' + encodeURIComponent(file.name) + (purpose === 'message' ? '&for=message' : ''), { method: 'POST', body: file }).then((r) =>

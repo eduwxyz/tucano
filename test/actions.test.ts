@@ -186,4 +186,22 @@ describe('what happens to a call', () => {
     expect(v({ p: { ...normal, agentRules: { send: 'auto' } }, cls: 'sensitive', kinds: ['send'], outside: true })).toMatchObject({ run: false, why: 'guard' })
     expect(v({ p: { ...free, guard: false }, cls: 'sensitive', kinds: ['send'], outside: true }).run).toBe(true)
   })
+
+  it('a tool allowed for good ("sempre permitir") runs after something from outside too, at every level but careful', () => {
+    // No guardrails: the guard used to ask before it (#449).
+    expect(v({ p: free, cls: 'sensitive', kinds: ['send'], outside: true, alwaysAllowed: true })).toMatchObject({ run: true, why: 'always' })
+    expect(v({ p: free, cls: 'sensitive', outside: true, alwaysAllowed: true })).toMatchObject({ run: true, why: 'always' })
+    expect(v({ p: free, cls: 'write', kinds: ['publish'], outside: true, alwaysAllowed: true })).toMatchObject({ run: true, why: 'always' })
+    // A rule that lets it do it alone.
+    expect(v({ p: { ...normal, agentRules: { send: 'auto' } }, cls: 'sensitive', kinds: ['send'], outside: true, alwaysAllowed: true })).toMatchObject({ run: true, why: 'always' })
+    // Normal, as it already was.
+    expect(v({ cls: 'sensitive', kinds: ['delete'], outside: true, alwaysAllowed: true })).toMatchObject({ run: true, why: 'always' })
+    // What still stops it: careful, a rule that asks or says never, a high-risk tool.
+    expect(v({ p: careful, cls: 'sensitive', kinds: ['send'], outside: true, alwaysAllowed: true }).run).toBe(false)
+    expect(v({ p: { ...free, agentRules: { send: 'ask' } }, cls: 'sensitive', kinds: ['send'], outside: true, alwaysAllowed: true })).toMatchObject({ run: false, why: 'rule' })
+    expect(v({ p: { ...free, agentRules: { send: 'off' } }, cls: 'sensitive', kinds: ['send'], outside: true, alwaysAllowed: true })).toMatchObject({ run: false, off: true })
+    expect(v({ p: free, cls: 'sensitive', kinds: ['send'], outside: true, alwaysAllowed: true, highRisk: true })).toMatchObject({ run: false, why: 'risk' })
+    // Not allowed for good: the guard still asks.
+    expect(v({ p: free, cls: 'sensitive', kinds: ['send'], outside: true })).toMatchObject({ run: false, why: 'guard' })
+  })
 })

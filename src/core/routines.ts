@@ -6,8 +6,9 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
 import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
-import { dateAt, describeSchedule, isoDay, MAX_AGENT_ROUTINES, nextRun, routineCap, validDate, validTime, type Schedule, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
+import { cleanTimes, dateAt, describeSchedule, isoDay, MAX_AGENT_ROUTINES, MAX_TIMES, nextRun, routineCap, validDate, validTime, type Schedule, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { routineCut } from './access-policy'
 import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
@@ -29,8 +30,8 @@ export const AGENDAR: ToolDef = {
   name: 'agendar_rotina',
   get description() {
     return L(
-      'Agenda uma rotina pra você mesmo: no horário, o app posta o pedido nesta conversa e você roda sozinho, sem ninguém pedir. Use quando pedirem algo pra depois ("daqui a 10 minutos", "toda segunda às 9h", "amanhã cedo", "dia 17 às 9h", "todo dia 5"). Uma data específica, mesmo daqui a semanas ou meses, vai em data (roda uma vez só, naquele dia); todo mês num dia, em dia_do_mes. Também muda uma rotina sua, com substitui.',
-      'Schedules a routine for yourself: at the time, the app posts the request in this conversation and you run on your own, without anyone asking. Use it when someone asks for something later ("in 10 minutes", "every Monday at 9am", "tomorrow morning", "on the 17th at 9am", "on the 5th of every month"). A specific date, even weeks or months ahead, goes in data (it runs once, on that day); every month on a day, in dia_do_mes. It also changes one of your routines, with substitui.'
+      'Agenda uma rotina pra você mesmo: no horário, o app posta o pedido nesta conversa e você roda sozinho, sem ninguém pedir. Use quando pedirem algo pra depois ("daqui a 10 minutos", "toda segunda às 9h", "amanhã cedo", "dia 17 às 9h", "todo dia 5"). Uma data específica, mesmo daqui a semanas ou meses, vai em data (roda uma vez só, naquele dia); todo mês num dia, em dia_do_mes. Mais de um horário no mesmo dia ("às 9h e às 15h") é uma rotina só, com horarios. Também muda uma rotina sua, com substitui.',
+      'Schedules a routine for yourself: at the time, the app posts the request in this conversation and you run on your own, without anyone asking. Use it when someone asks for something later ("in 10 minutes", "every Monday at 9am", "tomorrow morning", "on the 17th at 9am", "on the 5th of every month"). A specific date, even weeks or months ahead, goes in data (it runs once, on that day); every month on a day, in dia_do_mes. More than one time on the same day ("at 9am and 3pm") is one routine, with horarios. It also changes one of your routines, with substitui.'
     )
   },
   get inputSchema() {
@@ -46,6 +47,14 @@ export const AGENDAR: ToolDef = {
           )
         },
         horario: { type: 'string', description: L('HH:MM, 24 h, no horário local (o mesmo das mensagens). Pode faltar se data já traz a hora.', 'HH:MM, 24 h, in local time (the same as the messages). May be left out when data has the time.') },
+        horarios: {
+          type: 'array',
+          items: { type: 'string' },
+          description: L(
+            `Vários horários no mesmo dia, cada um HH:MM (ex.: ["09:00", "13:00", "17:00"]), até ${MAX_TIMES}: uma rotina só, que roda em cada um. Vale com dias ou dia_do_mes; no lugar de horario. Com substitui, mande todos os horários que ela deve ter: o que ficar de fora sai.`,
+            `Several times on the same day, each HH:MM (e.g. ["09:00", "13:00", "17:00"]), up to ${MAX_TIMES}: one routine, which runs at each. Goes with dias or dia_do_mes; instead of horario. With substitui, send every time it should have: one left out is taken off.`
+          )
+        },
         data: {
           type: 'string',
           description: L(
@@ -158,9 +167,12 @@ export class Routines {
     for (const r of this.deps.db.routines()) {
       if (r.enabled && r.trigger?.kind === 'poll' && now - (r.trigger.checkedAt ?? 0) >= r.trigger.everyMinutes * 60_000) void this.check(r)
       if (!r.enabled || r.trigger || r.nextAt === undefined || r.nextAt > now) continue
-      const scheduledAt = r.nextAt
-      this.store(r.schedule.once ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: nextRun(r.schedule, now) })
-      if (now - scheduledAt > LATE_GRACE_MS) continue
+      // Of the times it missed (asleep, closed), the latest within LATE_GRACE_MS runs, once.
+      const scheduledAt = lastMissed(r.schedule, r.nextAt, now)
+      // A one-off with no date that missed its time by too much waits for its next matching day.
+      const later = r.schedule.once && scheduledAt === undefined && r.schedule.date === undefined ? nextRun(r.schedule, now) : undefined
+      this.store(r.schedule.once && later === undefined ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: later ?? nextRun(r.schedule, now) })
+      if (scheduledAt === undefined) continue
       this.fire(r.id, { scheduledAt, late: now - scheduledAt > LATE_AFTER_MS })
     }
   }
@@ -186,17 +198,25 @@ export class Routines {
     if (!trigger && date !== undefined && !validDate(date)) throw new Error(L('Data inválida: use AAAA-MM-DD.', 'Invalid date: use YYYY-MM-DD.'))
     if (!trigger && date === undefined && monthDay !== undefined && !(Number.isInteger(monthDay) && monthDay >= 1 && monthDay <= 31)) throw new Error(L('O dia do mês vai de 1 a 31.', 'The day of the month goes from 1 to 31.'))
     if (!trigger && date === undefined && monthDay === undefined && days.length === 0) throw new Error(L('Escolha pelo menos um dia.', 'Pick at least one day.'))
-    if (!trigger && !validTime(input.schedule.time)) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    // Several times a day repeat (a week's days, a day of the month); a date or "once" runs at the first.
+    // A client that knows of one time (an older phone app) keeps the others while it keeps the first.
+    const given = input.schedule.times ?? (prev?.schedule.times && prev.schedule.time === input.schedule.time ? prev.schedule.times : [input.schedule.time])
+    if (!trigger && given.some((t) => !validTime(t.trim()))) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    const times = cleanTimes(date !== undefined || input.schedule.once ? given.slice(0, 1) : given)
+    if (!trigger && !times.length) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    if (times.length > MAX_TIMES) throw new Error(L(`Uma rotina roda em até ${MAX_TIMES} horários por dia.`, `A routine runs at up to ${MAX_TIMES} times a day.`))
+    const time = times[0] ?? input.schedule.time
+    const many = times.length > 1 ? { times } : {}
     const scope = input.scope ?? prev?.scope
     if (scope === 'channel' && conv.kind !== 'channel') throw new Error(L('Uma rotina do canal posta num canal.', 'A channel routine posts in a channel.'))
 
     // A date runs once, on its weekday; a day of the month repeats.
     const schedule: Schedule =
       date !== undefined
-        ? { days: [new Date(dateAt(date, '12:00')).getDay()], time: input.schedule.time, once: true, date }
+        ? { days: [new Date(dateAt(date, '12:00')).getDay()], time, once: true, date }
         : monthDay !== undefined
-          ? { days: [0, 1, 2, 3, 4, 5, 6], time: input.schedule.time, monthDay }
-          : { days, time: input.schedule.time, ...(input.schedule.once ? { once: true } : {}) }
+          ? { days: [0, 1, 2, 3, 4, 5, 6], time, ...many, monthDay }
+          : { days, time, ...many, ...(input.schedule.once ? { once: true } : {}) }
     // A date that's past is refused when it's turned on (an old one that already ran can still be edited, off).
     if (!trigger && date !== undefined && input.enabled && nextRun(schedule, this.now()) === undefined)
       throw new Error(L(`Essa data já passou (${describeSchedule(schedule).replace(/^Uma vez, /, '')}). Escolha um dia e horário que ainda vão chegar.`, `That date has already passed (${describeSchedule(schedule).replace(/^Once, /, '')}). Pick a day and time still to come.`))
@@ -269,9 +289,15 @@ export class Routines {
       const latest = this.deps.db.routine(r.id)
       if (latest?.trigger?.kind !== 'poll') return
       const seen = latest.trigger.seen
-      const fresh = seen ? items.filter((i) => !seen.includes(i.key)) : []
+      const known = new Set(seen ?? items.map((i) => i.key))
+      const fresh = seen ? items.filter((i) => !known.has(i.key)) : []
       const next = fresh[0]
-      const keep = [...(seen ?? items.map((i) => i.key)), ...(next ? [next.key] : [])].slice(-MAX_SEEN)
+      // Everything in the answer that's been seen stays remembered, however long the list: dropping
+      // one would make it new again, and fire again. Room left goes to the latest of those gone from it.
+      const listed = new Set(items.map((i) => i.key))
+      const here = [...listed].filter((k) => known.has(k) || k === next?.key)
+      const gone = [...known].filter((k) => !listed.has(k))
+      const keep = [...here, ...gone.slice(Math.max(0, gone.length - Math.max(0, MAX_SEEN - here.length)))]
       this.store({ ...latest, trigger: { ...latest.trigger, seen: keep, checkedAt: this.now(), error: undefined } })
       if (next && latest.enabled) this.fire(r.id, { scheduledAt: this.now(), late: false, event: { source, title: next.title, body: next.body } }, fresh.length > 1)
     } catch (e) {
@@ -317,8 +343,11 @@ export class Routines {
     if (keys.includes(-1)) return fail(L(`Dias inválidos: use ${DAY_KEYS.join(', ')}.`, `Invalid days: use ${DAY_KEYS.join(', ')}.`))
     const when = text('data') ? dateArg(text('data')) : undefined
     if (when === null) return fail(L(`Data inválida: "${text('data')}". Use "2026-11-17" ou "2026-11-17T09:00".`, `Invalid date: "${text('data')}". Use "2026-11-17" or "2026-11-17T09:00".`))
-    const time = (text('horario') || when?.time || '').padStart(5, '0')
+    const several = Array.isArray(args['horarios']) ? (args['horarios'] as unknown[]).map((t) => String(t).trim().padStart(5, '0')) : []
+    const time = (several[0] || text('horario') || when?.time || '').padStart(5, '0')
     if (!time.trim() || time === '00000') return fail(L('Falta o horario (HH:MM).', 'Missing horario (HH:MM).'))
+    // Always the whole list, even of one: with `substitui`, a time left out is a time taken off.
+    const times = { times: several.length && !when ? several : [time] }
     const monthDay = typeof args['dia_do_mes'] === 'number' || (typeof args['dia_do_mes'] === 'string' && args['dia_do_mes'] !== '') ? Number(args['dia_do_mes']) : undefined
     try {
       const routine = this.save({
@@ -327,7 +356,7 @@ export class Routines {
         prompt: text('pedido'),
         agentId: agent.id,
         conversationId: prev?.conversationId ?? conv.id,
-        schedule: when ? { days: [], time, once: true, date: when.date } : monthDay !== undefined ? { days: [], time, monthDay } : { days: keys.length ? keys : [0, 1, 2, 3, 4, 5, 6], time, once: args['uma_vez'] === true },
+        schedule: when ? { days: [], time, once: true, date: when.date } : monthDay !== undefined ? { days: [], time, ...times, monthDay } : { days: keys.length ? keys : [0, 1, 2, 3, 4, 5, 6], time, ...times, once: args['uma_vez'] === true },
         enabled: true,
         createdBy: agent.id
       }, owner)
@@ -432,6 +461,7 @@ export class Routines {
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
+    if (routineCut(this.deps.db, r)) return // its person can no longer see its agent: it doesn't run (until they can)
     this.running.add(id)
     // The first tick comes before the connectors have connected, with what was missed while the
     // app was closed and what is due right then: a run waits for them (a little), or the agent
@@ -457,6 +487,18 @@ export class Routines {
       })
     this.runs.add(run)
   }
+}
+
+// The latest time a schedule was due at, from `due` (its nextAt, already past) up to `now`, no
+// older than LATE_GRACE_MS. undefined: all of them are older (or it isn't due).
+export function lastMissed(s: Schedule, due: number, now: number): number | undefined {
+  if (due > now) return undefined
+  const from = Math.max(due, now - LATE_GRACE_MS)
+  let at = from === due ? due : nextRun(s, from - 1)
+  if (at === undefined || at > now) return undefined
+  // A one-off runs at its one time; a repeating one, at the latest it reached.
+  for (let next = s.once ? undefined : nextRun(s, at); next !== undefined && next <= now; next = nextRun(s, at)) at = next
+  return at
 }
 
 // Runs a routine, and a reply that failed again in place up to RETRY_WAITS_MS.length times.

@@ -3,6 +3,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
+import type { HermesPreview } from '../../shared/hermes-import'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
@@ -31,12 +32,12 @@ import {
   type Message,
   type Model,
   type Person,
+  type PersonAccess,
   type Delegation,
   type Inbox,
   type Device,
   type Invite,
   type ActivityEntry,
-  delegating,
   type Routine,
   type RoutineInput,
   type Settings,
@@ -59,6 +60,7 @@ import {
   type ProposalsResult,
   type BackupSummary
 } from '../../shared/types'
+import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
 import { hashToView, viewToHash } from './address'
 
@@ -171,7 +173,7 @@ let state: State = {
   settings: {
     workspaceName: '',
     context: '',
-    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
+    engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false }, opencode: { installed: false, loggedIn: false }, pi: { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false }, endpoint: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     memoryModel: 'haiku',
     memoryLearning: 'approve',
@@ -732,7 +734,7 @@ export const roleLabel = (r: Person['role']): string => (r === 'owner' ? L('Dono
 export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<Approval, 'agentId'>): boolean => {
   if (amAdmin(s)) return true
   const owner = personById(s, s.agents.find((x) => x.id === a.agentId)?.owner)
-  return !!owner && (owner.id === s.you || delegating(owner, s.you))
+  return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))
 }
 // How many things wait on me (approvals I decide, questions, cards members sent).
 export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)
@@ -1005,6 +1007,7 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
+export const revealArtifact = (id: string): void => void fire(L('Não consegui mostrar o arquivo.', "I couldn't show the file."), 'revealArtifact', { id })
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
@@ -1047,6 +1050,9 @@ export const openExternal = (url: string): void =>
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
+// An address in OpenAI's format the agents run on with no harness: tried (what it lists), then saved.
+export const probeEndpoint = (baseUrl: string, key?: string): Promise<{ models: string[]; error?: string }> => call('probeEndpoint', { baseUrl, ...(key ? { key } : {}) })
+export const setEndpoint = (baseUrl: string, models: string[], key?: string | null): Promise<void> => call('setEndpoint', { baseUrl, models, ...(key !== undefined ? { key } : {}) })
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
@@ -1070,6 +1076,8 @@ export const restoreApply = (): Promise<void> => call('restoreApply')
 export const restoreCancel = (): Promise<void> => call('restoreCancel')
 export const restoreInfo = (): Promise<{ at: number; routines: number } | null> => call('restoreInfo')
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
+export const hermesPreview = (path?: string): Promise<HermesPreview> => call('hermesPreview', { path })
+export const importHermes = (path: string, profiles: string[]): Promise<string> => call('importHermes', { path, profiles })
 export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
@@ -1079,7 +1087,8 @@ export const removeRoutine = (id: string): void => void fire(L('Não consegui re
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })
 export const doneNaming = (): void => set((s) => ({ ...s, needsName: false }))
 export const setDelegation = (to: string | null, until?: number): Promise<void> => call('setDelegation', { to, ...(until ? { until } : {}) })
-export const createInvite = (role: 'admin' | 'member', about: string, restore?: string): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}) })
+export const createInvite = (role: 'admin' | 'member', about: string, restore?: string, access?: PersonAccess): Promise<{ code: string; expiresAt: number }> => call('createInvite', { role, about, ...(restore ? { restore } : {}), ...(access ? { access } : {}) })
+export const setPersonAccess = (id: string, access: PersonAccess): Promise<void> => call('setPersonAccess', { id, access })
 export const revokeInvite = (id: string): Promise<void> => call('revokeInvite', { id })
 export const listInvites = (): Promise<Invite[]> => call('listInvites')
 export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => call('removedPeople')

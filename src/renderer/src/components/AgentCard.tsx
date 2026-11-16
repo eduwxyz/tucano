@@ -7,7 +7,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { L } from '../../../shared/lang'
 import { ENGINES } from '../../../shared/types'
 import { agentById, canDecide, modelById, navigate, openDialog, openDm, personName, useStore } from '../store'
-import { agentChannels, agentNow, cardState, placeCard, type AgentNow, type CardOpen, type CardOptions } from '../agent-card'
+import { agentChannels, agentNow, cardState, placeCard, scrollMovesAnchor, type AgentNow, type CardOpen, type CardOptions } from '../agent-card'
 import { AgentAvatar, Icon, ago, ownColor } from './ui'
 
 type Open = CardOpen<HTMLElement>
@@ -132,7 +132,7 @@ function AgentCard({ open }: { open: Open }): ReactNode {
       closeAgentCard(open.via === 'click') // a hovered card never had the focus to give back
     }
     const onDown = (e: PointerEvent): void => void (!inside(e.target) && closeAgentCard())
-    const onScroll = (e: Event): void => void (!(e.target instanceof Node && card.current?.contains(e.target)) && closeAgentCard())
+    const onScroll = (e: Event): void => void (scrollMovesAnchor(e.target, open.anchor) && closeAgentCard())
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('scroll', onScroll, true)

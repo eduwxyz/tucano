@@ -12,15 +12,17 @@ import { basename, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
-import { errorFor } from '../shared/errors'
+import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type CodexQuota, type Quota, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { restricted } from '../shared/access'
+import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
-import { listModels, quietClaude, quietCodex, withChoice } from './harness'
+import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
@@ -32,6 +34,7 @@ import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
 import { hermesAppDir, hermesEngine } from './engines/hermes'
+import { endpointEngine, type EndpointTarget } from './engines/endpoint'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
@@ -61,6 +64,7 @@ import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
 import { applyForeignTeam, readForeignZip } from './agent-import'
+import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
@@ -154,7 +158,7 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } , endpoint: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
@@ -305,7 +309,7 @@ const lastCheck = new Map<string, number>()
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })), ...(accountChecks.size ? { accountChecks: Object.fromEntries(accountChecks) } : {}) }
+  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })), ...(accountChecks.size ? { accountChecks: Object.fromEntries(accountChecks) } : {}) }
 }
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
@@ -456,7 +460,7 @@ function checkLogins(force = false): void {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -466,7 +470,8 @@ const engineImpls: Record<EngineId, Engine> = fake
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
       grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok')),
       cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline')),
-      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes'))
+      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes')),
+      endpoint: endpointEngine(endpointTarget)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -484,6 +489,35 @@ async function foundMcps(): Promise<FoundMcp[]> {
 }
 
 // Where a harness on a gateway sends its requests, and with which key, as its own config says.
+// The address in OpenAI's format the agents run on with no harness, and its key (a secret: it never
+// reaches the window). Unset until someone saves one in Settings › Models.
+const ENDPOINT_SECRET = 'endpoint:key'
+// An endpoint has no program to install and no login: what a phone from before it asks of it.
+const NOTHING_TO_INSTALL = (): string => L('O endpoint não se instala nem tem login: é um endereço e uma chave, em Configurações › Modelos, no computador ou no navegador.', 'The endpoint has nothing to install and no sign-in: it’s an address and a key, in Settings › Models, on the computer or in the browser.')
+async function endpointTarget(): Promise<EndpointTarget | undefined> {
+  const e = db.getSettings(DEFAULTS).endpoint
+  if (!e?.baseUrl) return undefined
+  const key = await secrets.get(ENDPOINT_SECRET)
+  return { baseUrl: e.baseUrl, ...(key ? { key } : {}) }
+}
+// How it shows among the harnesses: there once it has an address, usable once a model is picked.
+function endpointStatus(e: Settings['endpoint']): EngineStatus {
+  if (!e?.baseUrl) return { installed: false, loggedIn: false }
+  let host = e.baseUrl
+  try {
+    host = new URL(e.baseUrl).host
+  } catch {
+    // shown as typed
+  }
+  const n = e.models.length
+  return { installed: true, loggedIn: n > 0, route: 'endpoint', gateway: host, account: `${host} · ${n === 1 ? L('1 modelo', '1 model') : L(`${n} modelos`, `${n} models`)}` }
+}
+// What each harness lists, the endpoint's picked models with them.
+const allListed = (): Partial<Record<EngineId, string[]>> => {
+  const e = db.getSettings(DEFAULTS).endpoint
+  return e?.models.length ? { ...listed, endpoint: e.models } : listed
+}
+
 async function gatewayTarget(engine: EngineId): Promise<{ baseUrl: string; key?: string } | undefined> {
   if (engine === 'claude') {
     const c = userProvider()
@@ -952,8 +986,15 @@ wikiGit = new WikiGit({
   // a held page git moved aside (the repository brought a file by its name): its copy stays held
   movedPrivate: (from, to) => {
     const key = pageKey(from.split('/').pop()!.replace(/\.md$/i, ''))
+    if (!to.endsWith('.md')) return
+    const next = pageKey(to.split('/').pop()!.replace(/\.md$/i, ''))
     const h = wiki.heldKeys().find((x) => x.key === key)
-    if (h && to.endsWith('.md')) wiki.holdKey(pageKey(to.split('/').pop()!.replace(/\.md$/i, '')), h.person)
+    if (h) wiki.holdKey(next, h.person)
+  },
+  // any copy git makes of a page (conflict, read-only, moved aside): the cut for a restricted member goes along (PersonAccess)
+  copied: (from, to) => {
+    if (!from.endsWith('.md') || !to.endsWith('.md')) return
+    wiki.carryKey(pageKey(from.split('/').pop()!.replace(/\.md$/i, '')), pageKey(to.split('/').pop()!.replace(/\.md$/i, '')))
   },
   quiet: (on) => wiki.quiet(on),
   refresh: () => wiki.refresh(),
@@ -1058,7 +1099,7 @@ const runner = new Runner({
   skills,
   wiki,
   wikiCurator: curator,
-  models: () => availableModels(settings(), listed),
+  models: () => availableModels(settings(), allListed()),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
   notify: (title, body, conversationId, kind, threadId, to) => {
     if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
@@ -1209,7 +1250,7 @@ function worksWith(s: Settings): (id: string) => boolean {
 // The first that runs: the one given, a plan's, the router's or the memory's, or any a harness lists.
 function readyModel(s: Settings, first?: string): string | undefined {
   const works = worksWith(s)
-  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, allListed())[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
 }
 
 // `person`: whose builder screen it is: each person has their own DM with him.
@@ -1334,6 +1375,7 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { 
   } else if (p.kind === 'routine') {
     if (p.routine.conversationId) reach(ctx, p.routine.conversationId)
     const agentId = needed[0] ?? p.routine.agentId
+    assertAgentVisible(db, ctx.person, agentId)
     const conversationId = p.routine.conversationId || api.openDm({ agentId }, ctx)
     const made = routines.save({ ...p.routine, agentId, conversationId }, ctx.person.id)
     id = made.id
@@ -1417,8 +1459,13 @@ const record = (ctx: Ctx | undefined, kind: string, target?: string, detail?: Re
   void db.addActivity({ ...(ctx ? { personId: ctx.person.id } : {}), kind, ...(target ? { target } : {}), ...(detail ? { detail } : {}) })
 // A routine's rules: the team's are the admins'; a person's, theirs (and the admins').
 const mayRoutine = (ctx: Ctx, r: Pick<Routine, 'scope' | 'owner'> | undefined): void => must(ctx.person, { kind: 'routine', routine: r ?? { scope: 'channel' } })
+// The open pages of the people whose view is cut down read it again (a moment after the answer) when what they see changes.
+const refreshRestricted = (): void => {
+  for (const id of restrictedIds(db)) setTimeout(() => hub.closeFor(id), 200)
+}
 // A browser working for a conversation this person sees is theirs to take over; any other, the admins'.
 function mayBrowser(ctx: Ctx, agentId: string): void {
+  assertAgentVisible(db, ctx.person, agentId)
   if (!people.canSeeFrom(ctx.person, browser.view(agentId)?.conversationId) || !browser.view(agentId)?.conversationId) must(ctx.person, { kind: 'admin' })
 }
 // What a removed person's DMs had running stops; their files go from the disk, and what the wiki
@@ -1456,9 +1503,25 @@ const heritageAt = (): number => Number(db.meta('heritageAt') ?? 0)
 const historySince = (ctx: Ctx): number => (ctx.person.role === 'owner' ? 0 : heritageAt())
 // The wiki as this person reads it: without the pages held for someone else, and (but the owner's)
 // its log from the heritage on.
-const wikiFor = (ctx: Ctx): WikiView => wiki.view(wiki.heldTitles(ctx.person.id), ctx.person.role === 'owner' ? {} : { viewer: ctx.person.id, afterSwitch: true, everHidden: wiki.everHeld(ctx.person.id) })
+// A restricted member (PersonAccess) doesn't read either a page that took something from a conversation they don't see.
+// What a restricted person's wiki leaves out: a read of every version, so once per request. A handler
+// asks many times (the page list, each pending change, each finding); the memo lasts until the
+// current task ends, so the next request (after a save, a new source, a change of access) reads again.
+const reachMemo = new WeakMap<Ctx, Set<string>>()
+const outOfReach = (ctx: Ctx): Set<string> => {
+  if (!restricted(ctx.person)) return new Set()
+  let out = reachMemo.get(ctx)
+  if (!out) {
+    out = wiki.outOfReach((id) => people.canSeeFrom(ctx.person, id))
+    reachMemo.set(ctx, out)
+    setImmediate(() => reachMemo.delete(ctx))
+  }
+  return out
+}
+const hiddenFrom = (ctx: Ctx): Set<string> => new Set([...wiki.heldTitles(ctx.person.id), ...outOfReach(ctx)])
+const wikiFor = (ctx: Ctx): WikiView => wiki.view(hiddenFrom(ctx), ctx.person.role === 'owner' ? {} : { viewer: ctx.person.id, afterSwitch: true, everHidden: new Set([...wiki.everHeld(ctx.person.id), ...outOfReach(ctx)]) })
 // Whether a title (any spelling of it: see pageKey) is a page held for someone else.
-const heldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && wiki.heldTitles(ctx.person.id).has(pageKey(title))
+const heldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && hiddenFrom(ctx).has(pageKey(title))
 // ...or ever was (gone or renamed since, not released): what names it (a change's pages) isn't theirs either.
 const everHeldFrom = (ctx: Ctx, title: string | undefined): boolean => !!title && wiki.everHeld(ctx.person.id).has(pageKey(title))
 // A name someone may not take, said the same whether it's a page held for someone else or not.
@@ -1484,6 +1547,21 @@ const api: Handlers = {
     } catch {
       return null
     }
+  },
+
+  // Only reveals: opening a file of any other type could run an app or a script.
+  // And only on the computer's own window: a paired device (it comes with a device key) or a member would open a Finder on a screen they can't see.
+  revealArtifact: ({ id }, ctx) => {
+    if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
+    const a = db.artifact(id)
+    if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
+    // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
+    const root = resolve(dataDir, 'artifacts')
+    const folder = resolve(root, a.id)
+    const file = resolve(folder, a.name)
+    const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
+    if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
+    toMain({ type: 'open_local', path: file, how: 'reveal' })
   },
 
   snapshot: (_, ctx) => people.snapshotFor(ctx.person, {
@@ -1537,9 +1615,9 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
-  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.retry(messageId)),
+  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
 
-  continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), bg(runner.continue(messageId), 'continueRun')),
+  continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
 
   setAgentModels: ({ agentIds, modelId }, ctx) => {
     const value = modelId.trim()
@@ -1581,9 +1659,22 @@ const api: Handlers = {
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
+    // An entry point is chosen by hand, and only for an agent that answers to no one. Absent keeps the stored one.
+    if ((clean.entry === undefined ? db.agent(clean.id)?.entry : clean.entry) === true && !clean.reportsTo && clean.kind !== 'tuca') clean.entry = true
+    else delete clean.entry
+    // A sector's name and what it solves (on its head): trimmed and capped; empty clears it. Absent keeps the stored one (other callers don't send them).
+    const sectorName = (clean.sectorName === undefined ? db.agent(clean.id)?.sectorName : clean.sectorName)
+    const nameNext = typeof sectorName === 'string' ? sectorName.trim().slice(0, 40) : ''
+    if (nameNext) clean.sectorName = nameNext
+    else delete clean.sectorName
+    const sectorDoes = (clean.sectorDoes === undefined ? db.agent(clean.id)?.sectorDoes : clean.sectorDoes)
+    const doesNext = typeof sectorDoes === 'string' ? sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
+    if (doesNext) clean.sectorDoes = doesNext
+    else delete clean.sectorDoes
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
+    if (before?.reportsTo !== clean.reportsTo || !!before?.entry !== !!clean.entry) refreshRestricted() // a sector's reach moves with whom it answers to, and with whether it is an entry point
     // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
     // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
     if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
@@ -1614,6 +1705,7 @@ const api: Handlers = {
       if (agent.browser) bg(browser.close(id), 'archiveAgent')
     }
     db.saveAgent({ ...agent, archived })
+    refreshRestricted()
     emit({ type: 'agent', agent: db.agent(id)! })
     emitConversations()
   },
@@ -1621,6 +1713,7 @@ const api: Handlers = {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     const clean = channelName(name)
     if (!clean) throw new Error(L('Dê um nome ao canal.', 'Give the channel a name.'))
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean && c.id !== id)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
@@ -1631,6 +1724,7 @@ const api: Handlers = {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
@@ -1638,8 +1732,9 @@ const api: Handlers = {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    db.setMembers(id, agentIds.filter((a) => known.has(a)))
+    db.setMembers(id, membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a))))
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
@@ -1684,6 +1779,7 @@ const api: Handlers = {
     if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(L(`Já existe o canal #${clean}.`, `There's already a #${clean} channel.`))
     const id = randomUUID()
     db.createConversation({ id, kind: 'channel', name: clean, members: [], createdBy: ctx.person.id, ...(threads ? { threads } : {}) })
+    grantOwnChannel(db, ctx.person, id)
     emitConversations([id])
     record(ctx, 'channel.created', id, { name: clean })
     return id
@@ -1764,6 +1860,7 @@ const api: Handlers = {
   },
   // One DM per agent and person.
   openDm: ({ agentId }, ctx) => {
+    assertAgentVisible(db, ctx.person, agentId)
     const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
     if (existing) return existing.id
     const id = randomUUID()
@@ -1823,6 +1920,20 @@ const api: Handlers = {
       zip.close()
     }
   },
+  // Hermes Agent (spec §26): its folder, read where it is (src/core/hermes-import.ts). The preview adds
+  // nothing; the import adds the chosen profiles the same way as an OpenBot export.
+  hermesPreview: ({ path }) => hermesPreview(readHermes(path?.trim() || hermesRoot())),
+  importHermes: ({ path, profiles }, ctx) => {
+    record(ctx, 'team.imported')
+    const s = settings()
+    const r = applyForeignTeam(db, hermesTeam(readHermes(path), profiles), { defaultLimit: s.defaultLimit, defaultModel: readyModel(s) ?? 'sonnet', works: worksWith(s), personId: ctx.person.id })
+    for (const id of r.agents) emit({ type: 'agent', agent: db.agent(id)! })
+    emitConversations()
+    for (const k of db.skills()) emit({ type: 'skill', skill: k })
+    for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
+    for (const m of r.memories) emit({ type: 'memory', memory: m })
+    return r.summary
+  },
   backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
   // Everything in one .zip in Downloads, shown in the Finder: to take to a server, which restores it.
   exportBackup: () => {
@@ -1874,13 +1985,43 @@ const api: Handlers = {
     emit({ type: 'settings', settings: settings() })
   },
 
+  // An address in OpenAI's format and its key, tried before anything is saved: the models it lists, or
+  // why it can't be used. With no key given, the one saved goes (trying it again after a change of URL).
+  probeEndpoint: async ({ baseUrl, key }) => {
+    const base = cleanEndpoint(baseUrl)
+    try {
+      const models = await listModels('endpoint', base, key?.trim() || (await secrets.get(ENDPOINT_SECRET)))
+      if (!models.length) return { models: [], error: L('O endpoint respondeu, mas não listou nenhum modelo.', 'The endpoint answered, but listed no models.') }
+      return { models }
+    } catch (e) {
+      return { models: [], error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+  // Saved as the person left it: the address, the models the agents may use and the key (undefined
+  // keeps the saved one, null removes it). An empty address takes the endpoint away.
+  setEndpoint: async ({ baseUrl, models, key }) => {
+    const base = baseUrl.trim() ? cleanEndpoint(baseUrl) : ''
+    if (key !== undefined) await secrets.set(ENDPOINT_SECRET, key?.trim() || undefined)
+    if (!base) {
+      db.deleteSetting('endpoint')
+      await secrets.set(ENDPOINT_SECRET, undefined)
+    } else {
+      const picked = [...new Set(models.map((m) => m.trim()).filter(Boolean))].slice(0, 200)
+      db.setSettings({ endpoint: { baseUrl: base, models: picked } })
+      // Someone who chose which harnesses to use has picked this one too, by setting it up.
+      const chosen = db.getSettings(DEFAULTS).harnesses
+      if (chosen && !chosen.includes('endpoint')) db.setSettings({ harnesses: [...chosen, 'endpoint'] })
+    }
+    emit({ type: 'settings', settings: settings() })
+  },
+
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
     if (!engineCheck.known) await enginesReady
     if (engine === 'codex' && codexCatalog.length)
       return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
-    if (listed[engine]) return { models: listed[engine]! }
+    if (allListed()[engine]) return { models: allListed()[engine]! }
     if (engines[engine].route !== 'gateway') return { models: [] }
     if (!gatewayLists.has(engine))
       gatewayLists.set(
@@ -1929,7 +2070,7 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)
@@ -2048,6 +2189,7 @@ const api: Handlers = {
 
   computerAction: ({ agentId, action }, ctx) => {
     admitComputer(ctx.person, action)
+    assertAgentVisible(db, ctx.person, agentId)
     const agent = db.agent(agentId)
     if (!agent) return
     if (action === 'open_folder') {
@@ -2149,7 +2291,7 @@ const api: Handlers = {
   wikiRestore: ({ id }, ctx) => {
     const from = wiki.versionSource(id)
     const v = wiki.versionInfo(id)
-    if (!v || (from && !seesSource(ctx)(from)) || wiki.heldTitles(ctx.person.id).has(v.key) || (v.heldFor && v.heldFor !== ctx.person.id) || v.at < historySince(ctx)) throw new Error(L('Essa versão não existe mais.', 'That version no longer exists.'))
+    if (!v || (from && !seesSource(ctx)(from)) || hiddenFrom(ctx).has(v.key) || (v.heldFor && v.heldFor !== ctx.person.id) || v.at < historySince(ctx)) throw new Error(L('Essa versão não existe mais.', 'That version no longer exists.'))
     const { reheld, ...page } = wiki.restore(id, ctx.person.id, nameOf(ctx))
     // Text from a DM put back on a page the team could read: the page is held again (never published
     // in silence), and its owner hears why.
@@ -2386,6 +2528,15 @@ const api: Handlers = {
     toMain({ type: 'person-changed', id })
     emitPeople()
     emit({ type: 'inbox' })
+    setTimeout(() => hub.closeFor(id), 200) // their open pages read the view again: a new role changes what they see
+  },
+  setPersonAccess: ({ id, access }, ctx) => {
+    people.setPersonAccess(ctx.person, id, access)
+    toMain({ type: 'person-changed', id })
+    emitPeople()
+    emit({ type: 'inbox' })
+    // Their open pages reconnect and read the snapshot again with the new view (a moment after the answer).
+    setTimeout(() => hub.closeFor(id), 200)
   },
   purgePerson: ({ id }, ctx) => purged([people.purge(ctx.person, id)]),
   // Leaving on one's own: gone now, with what was theirs alone. Their own line closes a moment after
@@ -2414,6 +2565,7 @@ const api: Handlers = {
   runRoutine: ({ id }, ctx) => {
     const r = db.routine(id)
     if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))
+    assertAgentVisible(db, ctx.person, r.agentId)
     reach(ctx, r.conversationId)
     mayRoutine(ctx, r)
     return routines.runNow(id)
@@ -2427,6 +2579,7 @@ const api: Handlers = {
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex and Cline log into the app's own folders (see codexEnv, clineLoginEnv), separate from the user's.
   loginEngine: ({ engine, screen }) => {
+    if (engine === 'endpoint') throw new UserError(NOTHING_TO_INSTALL())
     // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
     const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
     if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
@@ -2504,6 +2657,7 @@ const api: Handlers = {
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
   installEngine: ({ engine }) => {
+    if (engine === 'endpoint') throw new UserError(NOTHING_TO_INSTALL())
     const r = installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install)
     // It installs in a terminal: check again until it lands, wherever the person is.
     if (r.opened) watchEngine(engine, (st) => st.installed)

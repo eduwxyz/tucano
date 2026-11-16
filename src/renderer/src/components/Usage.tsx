@@ -41,7 +41,8 @@ const PAYS = (): Record<NonNullable<EngineStatus['route']>, string> => ({
   plan: L('na assinatura', 'on the subscription'),
   apikey: L('cobrado por token, na chave de API', 'billed per token, on the API key'),
   gateway: L('pelo gateway', 'through the gateway'),
-  providers: L('pelos provedores em que está logado', 'through the providers it’s signed in to')
+  providers: L('pelos provedores em que está logado', 'through the providers it’s signed in to'),
+  endpoint: L('cobrado por token, no seu endpoint', 'billed per token, on your endpoint')
 })
 
 function useBilling(u: UsageReport | null): { id: EngineId; label: string; status: EngineStatus }[] {

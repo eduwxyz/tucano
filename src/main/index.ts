@@ -2,9 +2,10 @@ import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, normalize, sep } from 'node:path'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { homedir } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
@@ -14,6 +15,7 @@ import { serverNote } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
+import { backgroundOptions } from './background-qa'
 import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
@@ -21,6 +23,15 @@ import { proxyFromPac } from '../core/network'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+const launch = (() => {
+  try {
+    return backgroundOptions(process.argv, process.env, [app.getPath('userData'), join(app.getPath('appData'), NAME), join(app.getPath('appData'), `${NAME} Dev`)], [47717, 47718])
+  } catch (error) {
+    // Electron's uncaught-error dialog would itself interrupt a background test.
+    console.error(error)
+    process.exit(1)
+  }
+})()
 // Set here and not in the menu entry, so it holds when an update restarts the app. Someone who
 // chose a store with --password-store keeps it.
 const passwordStore = electronPasswordStore()
@@ -214,6 +225,7 @@ const player = ((): ((file: string) => [string, string[]]) | null => {
   return null
 })()
 function chirp(sound: 'chama' | 'pronto'): void {
+  if (launch.qa) return
   if (!player || Date.now() - chirpedAt < 1500) return
   chirpedAt = Date.now()
   const [bin, args] = player(join(resource('sounds'), `tucano-${sound}.wav`))
@@ -271,7 +283,7 @@ function setTray(): void {
 // Linux shows a notification with the icon it's given (a Mac uses the app's own).
 const noteIcon = (): { icon?: string } => (process.platform === 'linux' ? { icon: resource('icon.png') } : {})
 function stillOpen(): void {
-  if (process.platform === 'darwin' || quitting || toldStillOpen || !Notification.isSupported()) return
+  if (launch.qa || process.platform === 'darwin' || quitting || toldStillOpen || !Notification.isSupported()) return
   toldStillOpen = true
   new Notification({
     ...noteIcon(),
@@ -346,7 +358,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     const sound = chirpOf(msg.kind, msg.sound)
     if (sound) chirp(sound)
-    if (!Notification.isSupported()) return
+    if (launch.qa || !Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId, msg.page, msg.threadId)).catch(console.error) })
     n.show()
@@ -388,6 +400,7 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
   if (!/^https?:\/\//.test(o.url)) throw new Error(L('Só dá pra capturar endereços http e https.', 'Only http and https addresses can be captured.'))
   const win = new BrowserWindow({
     show: false,
+    ...(launch.qa ? { focusable: false, skipTaskbar: true } : {}),
     width: o.width,
     height: o.height,
     useContentSize: true,
@@ -609,6 +622,7 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 let mainWindow: BrowserWindow | null = null
 
 function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
+  if (launch.qa) return
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
@@ -671,10 +685,17 @@ ipcMain.on('server:update-install', (e) => {
 })
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
-ipcMain.handle('pick-folder', async (event) => {
+// `start`: where it opens, from the home folder (".hermes"); `hidden`: show folders starting with a dot.
+ipcMain.handle('pick-folder', async (event, o?: { start?: string; hidden?: boolean }) => {
   if (!fromApp(event)) return null
   const win = BrowserWindow.fromWebContents(event.sender)
-  const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
+  const start = typeof o?.start === 'string' ? resolve(homedir(), o.start) : undefined
+  const opts = {
+    title: L('Escolher pasta', 'Choose a folder'),
+    buttonLabel: L('Escolher', 'Choose'),
+    properties: (o?.hidden ? ['openDirectory', 'showHiddenFiles'] : ['openDirectory']) as ('openDirectory' | 'showHiddenFiles')[],
+    ...(start && existsSync(start) ? { defaultPath: start } : {})
+  }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
@@ -686,6 +707,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    ...(launch.qa ? { focusable: false, skipTaskbar: true } : {}),
     title: NAME,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     // Off a Mac the menu lives in the window: hidden until Alt, so the app looks the same.
@@ -702,7 +724,11 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    if (launch.qa) return
+    if (launch.background) win.showInactive()
+    else win.show()
+  })
   mainWindow = win
   // A server on screen keeps the window's size (servers.ts), and comes back in a window made again.
   win.on('resize', () => servers.place())
@@ -786,7 +812,7 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
   const frame = e.senderFrame
   const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
   const note = id ? serverNote(raw) : null
-  if (!id || !note || !Notification.isSupported()) return
+  if (launch.qa || !id || !note || !Notification.isSupported()) return
   const now = Date.now()
   const recent = (serverNotes.get(id) ?? []).filter((t) => now - t < 60_000)
   if (recent.length >= 20) return
@@ -800,7 +826,7 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.
 ipcMain.handle('notify:test', (e) => {
-  if (!fromApp(e) || !Notification.isSupported()) return 'unsupported'
+  if (launch.qa || !fromApp(e) || !Notification.isSupported()) return 'unsupported'
   new Notification({ title: NAME, body: L('As notificações estão chegando.', 'Notifications are coming through.'), silent: true, ...noteIcon() }).show()
   return 'shown'
 })
@@ -820,7 +846,7 @@ app.on('second-instance', (_e, argv) => {
   if (argv.includes('--quit')) return app.quit()
   const link = linkIn(argv)
   if (link) openLink(link)
-  else showWindow()
+  else if (!argv.includes('--background') && !argv.includes('--qa-background')) showWindow()
 })
 
 // The app's own menu, in the app's language (Electron's would be in English).
@@ -876,7 +902,7 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   })
   setMenu()
   protocol.handle('tucano', serveArtifact)
-  registry = new Workspaces(dataDir())
+  registry = new Workspaces(dataDir(), launch.ports)
   nativeTheme.themeSource = registry.theme() ?? 'system'
   systemProxyRead = readSystemProxy()
   void systemProxyRead.then(startWorkspaces)
@@ -894,18 +920,18 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     },
     publish: (state) => mainWindow?.webContents.send('home-phone', state)
   })
-  void phone.restore()
+  if (!launch.qa) void phone.restore()
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
   powerMonitor.on('suspend', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: false }) })
   powerMonitor.on('resume', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: true }) })
   createWindow()
-  setTray()
-  updates.start()
+  if (!launch.qa) setTray()
+  if (!launch.qa) updates.start()
   // Only the installed app takes tucano:// links: a development run would take them from it.
-  if (app.isPackaged) app.setAsDefaultProtocolClient('tucano')
-  servers.restore()
-  if (pendingLink) void servers.pairFromOutside(pendingLink)
+  if (app.isPackaged && !launch.qa) app.setAsDefaultProtocolClient('tucano')
+  if (!launch.qa) servers.restore()
+  if (pendingLink && !launch.qa) void servers.pairFromOutside(pendingLink)
   pendingLink = undefined
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow()
