@@ -100,7 +100,7 @@ import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, 
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import type { NotifyState } from '../rpc'
-import { hasServers, ServersCard } from './Servers'
+import { hasServers, NodeCard, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
@@ -2783,6 +2783,7 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && admin && <TeamCard />}
         {pane('geral') && <BackupCard />}
         {pane('servidores') && <ServersCard />}
+        {pane('servidores') && <NodeCard />}
 
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>

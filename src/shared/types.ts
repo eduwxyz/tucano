@@ -479,6 +479,7 @@ export interface EndpointSettings {
 }
 
 export interface Settings {
+  node?: { on: boolean; port: number; apps?: AgentApp[] } // this computer as a node of a server's Tucano (core/node-server.ts), and the apps it lends
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
@@ -1130,6 +1131,16 @@ export interface Skill {
   source?: string // linked to a SKILL.md of the user's Claude Code or Codex: read from there, not edited here
   createdAt: number
   updatedAt: number
+}
+
+// This computer as a node: whether it listens, where, and its key (the owner's, to copy into the server).
+export interface NodeInfo {
+  on: boolean
+  running: boolean
+  port: number
+  apps: AgentApp[] // the apps the node lends the server's agents
+  key?: string
+  error?: string // why it couldn't listen (the port is taken)
 }
 
 // A skill already on this Mac (Claude Code, its plugins, Codex), that can be linked.
