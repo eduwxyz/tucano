@@ -5,11 +5,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import {
   agentById,
   checkTrigger,
+  cleanTimes,
   dateAt,
   describeSchedule,
   isoDay,
+  MAX_TIMES,
   nextRun,
   POLL_MINUTES,
+  timesOf,
   WEBHOOK_PORT,
   dmWith,
   navigate,
@@ -717,18 +720,38 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
   const days = draft.schedule.days
   // How a routine at a time repeats: the days of each week, once, on a date, or a day of every month.
   const mode: Repeat = draft.schedule.date !== undefined ? 'date' : draft.schedule.monthDay !== undefined ? 'month' : draft.schedule.once ? 'once' : 'week'
+  // Several times a day go with a week's days and a day of the month; once and a date run at one.
+  const several = mode === 'week' || mode === 'month'
+  const times = several ? timesOf(draft.schedule) : [draft.schedule.time]
   const repeat = (m: Repeat): void => {
     const time = draft.schedule.time
+    const many = (m === 'week' || m === 'month') && draft.schedule.times ? { times: draft.schedule.times } : {}
     const schedule: Schedule =
       m === 'date'
         ? { days: [], time, once: true, date: isoDay(Date.now() + 86_400_000) }
         : m === 'month'
-          ? { days: EVERY_DAY, time, monthDay: new Date().getDate() }
+          ? { days: EVERY_DAY, time, ...many, monthDay: new Date().getDate() }
           : m === 'once'
             ? { days: EVERY_DAY, time, once: true }
-            : { days: mode === 'week' ? days : WEEKDAYS, time }
+            : { days: mode === 'week' ? days : WEEKDAYS, time, ...many }
     set({ schedule })
   }
+  // The list as it's typed (put in order once a field is left); the first is also `time`.
+  const setTimes = (list: string[]): void => set({ schedule: { ...draft.schedule, time: list[0] ?? '', times: list.length > 1 ? list : undefined } })
+  const tidyTimes = (): void => {
+    const clean = cleanTimes(times)
+    if (clean.length && clean.join() !== times.join()) setTimes(clean)
+  }
+  // A new time an hour after the last one, or the next free hour.
+  const addTime = (): void => {
+    const last = Number((times.at(-1) ?? '08:00').slice(0, 2))
+    const min = (times.at(-1) ?? '08:00').slice(3, 5)
+    for (let h = 1; h < 24; h++) {
+      const next = `${String((last + h) % 24).padStart(2, '0')}:${min}`
+      if (!times.includes(next)) return setTimes(cleanTimes([...times, next]))
+    }
+  }
+  const repeated = times.filter((x, i) => times.indexOf(x) !== i)
   const past = mode === 'date' && !!draft.schedule.date && dateAt(draft.schedule.date, draft.schedule.time || '00:00') <= Date.now()
   const toggleDay = (d: number): void => set({ schedule: { ...draft.schedule, days: days.includes(d) ? days.filter((x) => x !== d) : [...days, d] } })
   const connectors = useStore((s) => s.connectors.filter((c) => c.tools.some((t) => t.cls === 'read' && t.enabled)))
@@ -767,7 +790,9 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
     setError(null)
     try {
       const conversationId = target || dm?.id || (await dmWith(draft.agentId))
-      const r = await saveRoutine({ ...draft, trigger: withArgs(draft.trigger), conversationId })
+      // Every time it has, even one: without them, the server would keep the ones it had.
+      const schedule = draft.trigger ? draft.schedule : { ...draft.schedule, times: cleanTimes(timesOf(draft.schedule)) }
+      const r = await saveRoutine({ ...draft, schedule, trigger: withArgs(draft.trigger), conversationId })
       if (team && r.scope === 'channel' && watch !== !!r.watchers?.includes(you)) watchRoutine(r.id, watch)
       onClose()
     } catch (e) {
@@ -922,8 +947,43 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
               </div>
               )}
             </Field>
-            <Field label={L('Horário', 'Time')} hint={mode === 'once' ? L('No próximo dia marcado em que esse horário ainda não passou.', 'On the next checked day this time hasn’t passed yet.') : mode === 'month' ? L('Hora do seu computador. Num mês sem esse dia, roda no último.', 'Your computer’s time. In a month without that day, it runs on the last one.') : L('Hora do seu computador.', 'Your computer’s time.')}>
-              <input type="time" value={draft.schedule.time} onChange={(e) => set({ schedule: { ...draft.schedule, time: e.target.value } })} />
+            <Field
+              group={several}
+              label={several && times.length > 1 ? L('Horários', 'Times') : L('Horário', 'Time')}
+              error={repeated.length ? L('Esse horário já está na lista.', 'That time is already on the list.') : null}
+              hint={
+                mode === 'once'
+                  ? L('No próximo dia marcado em que esse horário ainda não passou.', 'On the next checked day this time hasn’t passed yet.')
+                  : `${L('Hora do seu computador.', 'Your computer’s time.')}${times.length > 1 ? (mode === 'month' ? L(' Todos os horários, no mesmo dia.', ' Every time, on the same day.') : L(' Os dias valem pra todos os horários.', ' The days go for every time.')) : ''}${mode === 'month' ? L(' Num mês sem esse dia, roda no último.', ' In a month without that day, it runs on the last one.') : ''}`
+              }
+            >
+              {several ? (
+                <div className="routine-times">
+                  {times.map((time, i) => (
+                    <div key={i} className="routine-times__one">
+                      <input
+                        type="time"
+                        aria-label={times.length > 1 ? L(`Horário ${i + 1}`, `Time ${i + 1}`) : L('Horário', 'Time')}
+                        value={time}
+                        onChange={(e) => setTimes(times.map((x, j) => (j === i ? e.target.value : x)))}
+                        onBlur={tidyTimes}
+                      />
+                      {times.length > 1 && (
+                        <button type="button" className="icon-btn" title={L('Tirar este horário', 'Remove this time')} aria-label={L(`Tirar ${time}`, `Remove ${time}`)} onClick={() => setTimes(times.filter((_, j) => j !== i))}>
+                          <Icon name="x" />
+                        </button>
+                      )}
+                      {i === times.length - 1 && times.length < MAX_TIMES && (
+                        <button type="button" className="link small" onClick={addTime}>
+                          {L('+ horário', '+ time')}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <input type="time" value={draft.schedule.time} onChange={(e) => set({ schedule: { ...draft.schedule, time: e.target.value, times: undefined } })} />
+              )}
             </Field>
           </div>
         )}

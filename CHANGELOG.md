@@ -5,10 +5,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Novo:** uma rotina roda em **vários horários no mesmo dia**. No horário da rotina, **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um. Os dias valem pra todos, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
 > - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
 
 ### Added
 
+- **One routine at several times a day.** A routine had one time, so "weekdays at 9, 1 and 5" took three copies of the same routine, each edited on its own. Now **+ time** under the routine's time adds another (an hour after the last), **×** takes one off, and the days go for every time; the sentence under the form says them all ("Seg a sex às 9h, 13h e 17h"), the week shows each run, and editing or deleting changes them all. It goes with a week's days and a day of the month (up to 12 times); once and a date keep one. Agents ask for it with `horarios` in `agendar_rotina` and Tuca with `horas`, a team file carries the times, and a phone app that knows of one time keeps the others as long as it keeps the first.
 - **An official Docker image for the server.** Running Tucano on a VPS meant cloning, building with Node and installing each harness over SSH, and nothing said a container was a supported way. Now each release publishes `ghcr.io/eduwxyz/tucano` (the version and `latest`, x64 and ARM64), the image the Tucano Pro servers run: Tucano, Chromium for the agents' browsers and the harnesses, with everything a person makes in one volume. `docs/server.md` has the `docker run`, a Compose file with the Pro servers' restrictions (no privileges, a read-only system), updating, and why the container gets no Docker socket. The server is no longer called experimental there.
 
 ## [0.2.35] - 2026-11-16

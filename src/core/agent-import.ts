@@ -13,7 +13,7 @@
 // format "tucano-agent-import", version 1), read by `readTucanoImport`.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { channelName, codexValue, customModel, dateAt, MAX_AGENT_ROUTINES, personScope, validDate, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
+import { channelName, cleanTimes, codexValue, customModel, dateAt, MAX_AGENT_ROUTINES, MAX_TIMES, personScope, validDate, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
@@ -385,10 +385,13 @@ export function tucanoSchedule(r: Record<string, unknown>): Schedule | undefined
   const t = time(r['time'])
   if (t && typeof r['date'] === 'string' && validDate(r['date'])) return { days: [new Date(dateAt(r['date'], t)).getDay()], time: t, once: true, date: r['date'] }
   const md = r['monthDay']
-  if (t && typeof md === 'number' && Number.isInteger(md) && md >= 1 && md <= 31) return { days: [0, 1, 2, 3, 4, 5, 6], time: t, monthDay: md }
+  // Several times a day, as a team file from a version with them carries them.
+  const all = t && r['once'] !== true ? cleanTimes([t, ...arr(r['times']).map((x) => time(x)).filter((x): x is string => !!x)]).slice(0, MAX_TIMES) : []
+  const many = all.length > 1 ? { time: all[0]!, times: all } : {}
+  if (t && typeof md === 'number' && Number.isInteger(md) && md >= 1 && md <= 31) return { days: [0, 1, 2, 3, 4, 5, 6], time: t, ...many, monthDay: md }
   const days = arr(r['days']).map((d) => (typeof d === 'string' ? DAYS.indexOf(d.toLowerCase().slice(0, 3)) : -1))
   if (!t || !days.length || days.some((d) => d < 0)) return undefined
-  return { days: [...new Set(days)].sort(), time: t, ...(r['once'] === true ? { once: true } : {}) }
+  return { days: [...new Set(days)].sort(), time: t, ...many, ...(r['once'] === true ? { once: true } : {}) }
 }
 
 // ---------- adding it here ----------

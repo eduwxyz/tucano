@@ -3903,6 +3903,23 @@ table.csv th {
 .routine-form .row {
   gap: 8px;
 }
+/* Several times a day: one per row, × to remove, + time after the last */
+.routine-times {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.routine-times__one {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.routine-times__one input {
+  width: 124px;
+}
+.routine-times__one .link {
+  margin-left: 4px;
+}
 .routine-days {
   gap: 10px;
   white-space: nowrap;
