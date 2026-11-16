@@ -101,6 +101,7 @@ import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
+import { RequestRow, RequestStrip, requestPlace, requestState, stripRoots } from './RequestRows'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -244,6 +245,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
+        {dmAgent && <RequestStrip conversationId={id} agent={dmAgent} replies={replies} />}
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
         <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
@@ -262,7 +264,9 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
-  const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  // In a DM, the requests the strip above shows aren't said again here.
+  const inStrip = useStore((s) => stripRoots(s, conversationId))
+  const messages = useMemo(() => asShown(inStrip.length ? all.filter((m) => !inStrip.includes(m.id)) : all, cardAnswers(everything)), [all, everything, inStrip])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -433,13 +437,16 @@ const NO_ATTACHED: Artifact[] = []
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
+// `plain`: as a thread's own heading, where a request reads whole.
+const MessageRow = memo(function MessageRow({ message, grouped, replies, plain }: { message: Message; grouped: boolean; replies?: Message[]; plain?: boolean }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
   const team = useStore(teamMode)
+  // In a DM, a request another agent made to this one: a folded row (or nothing, when the strip above shows it).
+  const place = useStore((s) => (plain ? undefined : requestPlace(s, message)))
   // Someone else's message reads with their name and initials; mine, as always.
   const other = useStore((s) => (message.author.kind === 'person' && !isMine(s, message.author) ? personName(s, message.author.id) : undefined))
   const attached = useStore((s) => (message.author.kind === 'person' ? attachedTo(s, message.id) : NO_ATTACHED))
@@ -480,6 +487,9 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   // its own channel; here only whoever I asked does.
   const from = message.run?.delegation
   if (message.author.kind === 'agent' && from && from.to === message.author.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
+
+  if (place === 'strip') return null
+  if (place === 'row') return <RequestRow message={message} replies={replies ?? NO_REPLIES} />
 
   // An agent the server hides from this member (restricted view): a neutral voice, never my own name.
   const ghost = message.author.kind === 'agent' && !agent
@@ -834,7 +844,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   }, [])
   const lead = root && (
     <div className="thread__lead">
-      <MessageRow message={root} grouped={false} />
+      <MessageRow message={root} grouped={false} plain />
       <div className="thread__divider">
         {replying.length > 0 ? (
           <span key="replying" className="shimmer">
@@ -1042,17 +1052,7 @@ function MemoryChip({ id }: { id: string }): ReactNode {
 // Under a request, where it was delivered: how it stands, and where its answer goes. One quiet line.
 function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactNode {
   const d = useStore((s) => s.delegations.find((x) => x.id === at.id))
-  const state = !d
-    ? null
-    : d.state === 'open'
-      ? d.asking
-        ? { tone: 'is-warn', text: L('esperando uma resposta', 'waiting on an answer') }
-        : { tone: 'is-live', text: L('em andamento', 'under way') }
-      : d.state === 'done'
-        ? { tone: 'is-done', text: L('terminado', 'done') }
-        : d.state === 'cancelled'
-          ? { tone: '', text: L('cancelado', 'cancelled') }
-          : { tone: 'is-warn', text: L('não terminou', 'did not finish') }
+  const state = requestState(d)
   return (
     <div className="request-note">
       <Icon name="users" size={12} />

@@ -1063,6 +1063,14 @@ export class Db {
     return all.includes(dm) ? [dm] : []
   }
 
+  // The message that asked for handed work, or one in the thread it is worked in.
+  private inRequest(message: Message): boolean {
+    // The asking message is said a moment before its request is saved: it carries the request itself.
+    if (message.run?.delegation?.rootId === message.id && message.run.delegation.conversationId === message.conversationId) return true
+    // Only a thread a request opened: one asked inside a person's thread leaves that thread theirs.
+    return !!this.db.prepare('SELECT 1 FROM delegations WHERE root_id = ? AND conversation_id = ? LIMIT 1').get(message.threadId ?? message.id, message.conversationId)
+  }
+
   // True when this made someone's unread count go up: a new reply, or a running one that finished.
   // A running reply counts once. If it was read while running, its completion is new content, but
   // repeated terminal events and deltas must not count again. The rule is applied for each person
@@ -1072,6 +1080,10 @@ export class Db {
     if (message.author.kind !== 'agent' && message.author.kind !== 'routine') return false
     const phase = message.run?.status ?? 'message'
     if (phase !== 'message' && !['working', 'done', 'failed', 'limit_reached', 'waiting_input', 'waiting_approval'].includes(phase)) return false
+    // Work one agent asked of another, where it is done: the request and what is said in its thread are
+    // between the two, so nobody's count goes up: a question there is for whoever asked, who brings it to
+    // the person where they talk. An approval is a person's to give, so that one still counts.
+    if (phase !== 'waiting_approval' && this.inRequest(message)) return false
     return this.tx(() => {
       const r = this.db.prepare('INSERT OR IGNORE INTO message_notifications (message_id, phase) VALUES (?, ?)').run(message.id, phase)
       if (Number(r.changes) === 0) return false
