@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -347,6 +347,24 @@ describe('Antigravity config', () => {
     expect(existsSync(join(linux.home, 'Library'))).toBe(false)
     expect(JSON.parse(readFileSync(join(linux.home, '.gemini', 'config', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: {} })
     expect(linux.root).not.toBe(dirs.root)
+  })
+
+  // The path is Linux-only, and a symlink on Windows needs privileges the test runner may not have.
+  it.skipIf(process.platform === 'win32')('on a Linux server, links the login file the CLI keeps in its own folder, and nothing else of it', () => {
+    const real = mkdtempSync(join(tmpdir(), 'ag-real-'))
+    mkdirSync(join(real, '.gemini', 'antigravity-cli'), { recursive: true })
+    writeFileSync(join(real, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'token')
+    writeFileSync(join(real, '.gemini', 'antigravity-cli', 'settings.json'), '{"mine":true}')
+    const appDir = mkdtempSync(join(tmpdir(), 'ag-app-'))
+    const dirs = antigravityTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'linux', real)
+    const cli = join(dirs.home, '.gemini', 'antigravity-cli')
+    expect(readFileSync(join(cli, 'antigravity-oauth-token'), 'utf8')).toBe('token')
+    expect(JSON.parse(readFileSync(join(cli, 'settings.json'), 'utf8'))).not.toHaveProperty('mine')
+    rmSync(dirs.root, { recursive: true, force: true })
+    expect(readFileSync(join(real, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'utf8')).toBe('token')
+    const signedOut = mkdtempSync(join(tmpdir(), 'ag-real-'))
+    const none = antigravityTurnDirs(appDir, { system: 'x', mcpUrl: undefined, web: false }, 'linux', signedOut)
+    expect(existsSync(join(none.home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'))).toBe(false)
   })
 
   it('puts instructions too long for a rules file at the top of the prompt instead', () => {

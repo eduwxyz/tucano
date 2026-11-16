@@ -189,6 +189,15 @@ export function antigravityTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 
       // without it the CLI says it isn't signed in, and the turn shows that
     }
   }
+  // On a Linux with no Secret Service (a server), the CLI keeps its login in a file of its own folder.
+  const token = join(realHome, '.gemini', 'antigravity-cli', 'antigravity-oauth-token')
+  if (os === 'linux' && existsSync(token)) {
+    try {
+      symlinkSync(token, join(cli, 'antigravity-oauth-token'))
+    } catch {
+      // without it the CLI says it isn't signed in, and the turn shows that
+    }
+  }
   writeFileSync(join(cli, 'settings.json'), JSON.stringify(antigravitySettings(turn), null, 2))
   writeFileSync(join(config, 'mcp_config.json'), JSON.stringify({ mcpServers: turn.mcpUrl ? { [GATEWAY_NAME]: { url: turn.mcpUrl } } : {} }, null, 2))
   if (turn.system && Buffer.byteLength(turn.system, 'utf8') <= RULES_MAX) writeFileSync(join(workspace, 'GEMINI.md'), turn.system)
