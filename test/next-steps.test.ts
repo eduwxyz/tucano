@@ -145,13 +145,14 @@ describe('the card an agent gets', () => {
     cursor: fakeEngine('cursor'),
     grok: fakeEngine('grok'),
     cline: fakeEngine('cline'),
-    hermes: fakeEngine('hermes')
+    hermes: fakeEngine('hermes'),
+    endpoint: fakeEngine('endpoint')
   })
   const asked = (): Message | undefined => db.messages().find((m) => m.author.kind === 'agent' && m.run?.status === 'waiting_input')
 
   beforeEach(async () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'steps-')), 'test.db'))
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     db.saveAgent(agent('a1', 'lia'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     gateway = new Gateway()
