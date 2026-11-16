@@ -20,6 +20,8 @@
 //   cron/jobs.json              { jobs: [{ name, prompt, schedule: { kind: once|interval|cron,
 //                               run_at | minutes | expr }, timezone?, no_agent?, script? }] }
 //   config.yaml                 model, agent.reasoning_effort, mcp_servers, platforms (gateways)
+//   gateway_state.json          what the gateway wrote when it last ran; only its platforms' names
+//                               are taken (a gateway set up in .env alone shows only here)
 //   profiles/<name>/            each one the same layout again: one more agent
 import { createHash } from 'node:crypto'
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, type Stats } from 'node:fs'
@@ -41,7 +43,7 @@ const ENTRY = '\n§\n' // Hermes's memory entries
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 
 // The only files read, relative to a profile's folder. Skills are read as <dir>/SKILL.md under skills/.
-const ALLOWED = new Set(['SOUL.md', 'config.yaml', 'memories/MEMORY.md', 'memories/USER.md', 'cron/jobs.json', 'skills/.bundled_manifest'])
+const ALLOWED = new Set(['SOUL.md', 'config.yaml', 'memories/MEMORY.md', 'memories/USER.md', 'cron/jobs.json', 'skills/.bundled_manifest', 'gateway_state.json'])
 
 // Where Hermes lives when the person doesn't say: $HERMES_HOME (a profile's folder points back to
 // its root, profiles/<name> → the folder above) or ~/.hermes.
@@ -55,6 +57,10 @@ export function hermesRoot(env: NodeJS.ProcessEnv = process.env, home = homedir(
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const str = (v: unknown, max = 10_000): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+const uniq = (xs: string[]): string[] => [...new Set(xs)]
+// Hermes's is_truthy_value / _bool_token (utils.py, gateway/config.py): a bool, a number, or 1/true/yes/on.
+const truthy = (v: unknown): boolean => (typeof v === 'string' ? ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase()) : !!v)
+const falsy = (v: unknown): boolean => (typeof v === 'string' ? ['0', 'false', 'no', 'off'].includes(v.trim().toLowerCase()) : v === false || v === 0)
 
 export interface HermesReadOpts {
   // Every file opened, for the tests that prove .env and auth.json never are.
@@ -161,9 +167,30 @@ const allowed = (r: Reader, dir: string, file: string, max?: number): string | u
 
 // ---------- the parts of one profile ----------
 
-// SOUL.md, unless it's only the comment scaffold old installers wrote (it carries nothing).
+// The SOUL.md texts Hermes writes by itself, with no word from the person (hermes_cli/default_soul.py):
+// DEFAULT_SOUL_MD, seeded on the first run and by `hermes profile create`, its "--" variant
+// (install.ps1), and _LEGACY_TEMPLATE_SOULS (the comment scaffolds and the previous default).
+const H_DEFAULT =
+  'You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask \u2014 a one-line question gets a one-line answer, and finished work gets a short report of what changed, what\'s verified, and what\'s left, never a replay of the process. No filler ("Great question," "I\'d be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it\'s right, not because the user said it. Depth is earned \u2014 give it when the user asks for detail, teaches, or the stakes demand it, not by default.'
+const H_HEAD = "# Hermes Agent Persona\n\n<!--\nThis file defines the agent's personality and tone.\nThe agent will embody whatever you write here.\nEdit this to customize how Hermes communicates with you.\n\n"
+const H_TAIL = 'This file is loaded fresh each message -- no restart needed.\nDelete the contents (or this file) to use the default personality.\n-->'
+// Hermes's _normalize_soul: line endings unified, no BOM, trimmed.
+const normalSoul = (t: string): string => t.replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '').trim()
+const SEEDED_SOULS = new Set(
+  [
+    H_DEFAULT,
+    H_DEFAULT.split('\u2014').join('--'),
+    H_HEAD + 'Examples:\n  - "You are a warm, playful assistant who uses kaomoji occasionally."\n  - "You are a concise technical expert. No fluff, just facts."\n  - "You speak like a friendly coworker who happens to know everything."\n\n' + H_TAIL,
+    H_HEAD + H_TAIL,
+    'You are Hermes Agent, an intelligent AI assistant created by Nous Research. You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools. You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose unless otherwise directed below. Be targeted and efficient in your exploration and investigations.'
+  ].map(normalSoul)
+)
+
+// SOUL.md, unless Hermes wrote it by itself (it carries nothing of the person): one of the texts it
+// seeds, or only a comment scaffold.
 function soulOf(text: string): string {
-  const t = text.replace(/\r\n?/g, '\n').trim()
+  const t = normalSoul(text)
+  if (SEEDED_SOULS.has(t)) return ''
   const bare = t.replace(/<!--[\s\S]*?-->/g, '').replace(/^#\s*Hermes Agent Persona\s*$/m, '').trim()
   return bare ? t : ''
 }
@@ -449,13 +476,20 @@ function configOf(r: Reader, dir: string, notes: string[]): Config {
     notes.push(L('as configurações (config.yaml grande demais ou ilegível)', 'the settings (config.yaml too big or unreadable)'))
     return { servers: [], gateways: [] }
   }
-  // Names only: nothing of a server's command, URL or env is kept.
-  const servers = Object.entries(obj(c['mcp_servers']))
-    .filter(([, v]) => obj(v)['enabled'] !== false && obj(v)['disabled'] !== true)
-    .map(([k]) => k.slice(0, 128))
-  // A platform block may sit in platforms:, gateway.platforms: or at the top, by its name.
-  const blocks = { ...obj(obj(c['gateway'])['platforms']), ...obj(c['platforms']), ...Object.fromEntries(Object.keys(PLATFORMS).filter((k) => k in c).map((k) => [k, c[k]])) }
-  const gateways = [...new Set(Object.entries(blocks).filter(([k, v]) => PLATFORMS[k] && obj(v)['enabled'] !== false).map(([k]) => PLATFORMS[k]!))]
+  // Names only: nothing of a server's command, URL or env is kept. One turned off in Hermes (hermes
+  // mcp add saves it so when its connection test fails) is said, not dropped without a word.
+  const all = Object.entries(obj(c['mcp_servers'])).map(([k, v]) => [k.slice(0, 128), falsy(obj(v)['enabled']) || truthy(obj(v)['disabled'])] as const)
+  const servers = all.filter(([, off]) => !off).map(([k]) => k)
+  const off = all.filter(([, off]) => off).map(([k]) => k)
+  if (off.length) notes.push(L(`os servidores MCP desligados no Hermes: ${off.slice(0, 10).join(', ')}${off.length > 10 ? ` e mais ${off.length - 10}` : ''}`, `the MCP servers turned off in Hermes: ${off.slice(0, 10).join(', ')}${off.length > 10 ? ` and ${off.length - 10} more` : ''}`))
+  // Where Hermes reads a platform block (gateway/config_loader.py merge_platform_sections), later
+  // winning: gateway.platforms, platforms, then gateway.<platform>. A block at the top, by its name,
+  // is only settings (discord.require_mention…). With no `enabled`, Hermes keeps it off.
+  const gw = obj(c['gateway'])
+  const on = new Map<string, boolean>()
+  for (const source of [obj(gw['platforms']), obj(c['platforms']), Object.fromEntries(Object.entries(gw).filter(([k]) => k !== 'platforms' && PLATFORMS[k]))])
+    for (const [k, v] of Object.entries(source)) if (PLATFORMS[k] && v && typeof v === 'object' && 'enabled' in obj(v)) on.set(k, truthy(obj(v)['enabled']))
+  const gateways = [...new Set([...on].filter(([, yes]) => yes).map(([k]) => PLATFORMS[k]!))]
   const m = c['model']
   const mo = obj(m)
   const model = typeof m === 'string' ? str(m, 256) : str(mo['default'], 256) || str(mo['model'], 256)
@@ -465,6 +499,27 @@ function configOf(r: Reader, dir: string, notes: string[]): Config {
   const effort: Effort | undefined = e === 'xhigh' ? 'xhigh' : e === 'high' ? 'high' : e === 'medium' ? 'medium' : e === 'low' || e === 'minimal' || e === 'none' ? 'low' : undefined
   return { servers, gateways, ...(model ? { model: { provider, model } } : {}), ...(effort ? { effort } : {}) }
 }
+
+// The platforms in the gateway_state.json the gateway writes as it runs: { platforms: { telegram: {…},
+// "<profile>:discord": {…} } } (gateway/status.py; the second form when one gateway serves many
+// profiles). Only the names are taken; it's a hint, so one that can't be read is nothing.
+function gatewayState(r: Reader, dir: string): string[] {
+  const raw = allowed(r, dir, 'gateway_state.json')
+  if (!raw) return []
+  try {
+    return Object.keys(obj(obj(JSON.parse(raw))['platforms'])).slice(0, 200)
+  } catch {
+    return []
+  }
+}
+
+// The ones of a profile: bare in its own folder's file, "<profile>:<platform>" in the root's.
+const statePlatforms = (keys: string[], profile?: string): string[] =>
+  keys.flatMap((k) => {
+    const i = k.indexOf(':')
+    const name = i < 0 ? (profile ? undefined : k) : profile && k.slice(0, i) === profile ? k.slice(i + 1) : undefined
+    return name && PLATFORMS[name] ? [PLATFORMS[name]!] : []
+  })
 
 // ---------- one profile, the whole folder ----------
 
@@ -481,7 +536,7 @@ const titled = (key: string): string => {
   return words ? words[0]!.toUpperCase() + words.slice(1) : key
 }
 
-function readProfile(r: Reader, dir: string, key: string, now: number): HermesProfileRead {
+function readProfile(r: Reader, dir: string, key: string, now: number, running: string[] = []): HermesProfileRead {
   const notes: string[] = []
   const soulText = allowed(r, dir, 'SOUL.md')
   if (soulText === null) notes.push(L('o SOUL.md (grande demais ou ilegível)', 'SOUL.md (too big or unreadable)'))
@@ -493,6 +548,7 @@ function readProfile(r: Reader, dir: string, key: string, now: number): HermesPr
   if (stock) notes.push(L(`${stock} skill${stock > 1 ? 's' : ''} que já ${stock > 1 ? 'vêm' : 'vem'} com o Hermes, sem mudança (não ${stock > 1 ? 'são suas' : 'é sua'})`, `${stock} skill${stock > 1 ? 's' : ''} that come${stock > 1 ? '' : 's'} with Hermes, unchanged (not yours)`))
   const { routines, asNames } = routinesOf(r, dir, now, notes)
   const config = configOf(r, dir, notes)
+  config.gateways = uniq([...config.gateways, ...running])
   // The same model on the Hermes engine here, when its provider is named; else this app's default.
   const m = config.model
   const modelId = m && m.provider && m.provider !== 'auto' ? customModel('hermes', `${m.provider}/${m.model}`) : undefined
@@ -542,10 +598,14 @@ export function readHermes(path: string, opts: HermesReadOpts = {}): HermesRead 
   const now = opts.now ?? Date.now()
   const profiles: HermesProfileRead[] = []
   const notes: string[] = []
-  if (isHermes(r, root)) profiles.push(readProfile(r, root, 'default', now))
+  const rootState = gatewayState(r, root)
+  if (isHermes(r, root)) profiles.push(readProfile(r, root, 'default', now, statePlatforms(rootState)))
   const names = r.list(join(root, 'profiles')).filter((n) => PROFILE.test(n) && r.isDir(join(root, 'profiles', n)) && isHermes(r, join(root, 'profiles', n)))
   const room = IMPORT_CAPS.agents - profiles.length
-  for (const n of names.slice(0, room)) profiles.push(readProfile(r, join(root, 'profiles', n), n, now))
+  for (const n of names.slice(0, room)) {
+    const dir = join(root, 'profiles', n)
+    profiles.push(readProfile(r, dir, n, now, [...statePlatforms(rootState, n), ...statePlatforms(gatewayState(r, dir))]))
+  }
   const over = names.length - room
   if (over > 0) notes.push(L(`${over} perfi${over > 1 ? 's' : 'l'} além de ${IMPORT_CAPS.agents}`, `${over} profile${over > 1 ? 's' : ''} beyond ${IMPORT_CAPS.agents}`))
   if (!profiles.length) throw new Error(L(`${root} não parece uma pasta do Hermes: não tem SOUL.md, memórias, a lista de skills do Hermes nem um config.yaml do Hermes.`, `${root} doesn't look like a Hermes folder: it has no SOUL.md, memories, Hermes's skills list or a Hermes config.yaml.`))
@@ -553,8 +613,6 @@ export function readHermes(path: string, opts: HermesReadOpts = {}): HermesRead 
   if (r.isDir(join(root, 'sessions')) || r.exists(join(root, 'state.db'))) notes.push(L('as conversas e o histórico (sessions, state.db)', 'the conversations and history (sessions, state.db)'))
   return { path: r.real, profiles, notes }
 }
-
-const uniq = (xs: string[]): string[] => [...new Set(xs)]
 
 export function hermesPreview(read: HermesRead): HermesPreview {
   const all = read.profiles
