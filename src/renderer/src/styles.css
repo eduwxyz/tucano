@@ -2654,6 +2654,48 @@ h3 {
   color: var(--warn);
   margin: 0 0 12px;
 }
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+  transition: var(--transition-ui);
+}
+.theme-card:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.theme-card.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--text);
+  font-weight: 500;
+}
+.theme-card__swatches {
+  display: flex;
+}
+.theme-card__swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.theme-card__swatch + .theme-card__swatch {
+  margin-left: -6px;
+  outline: 2px solid var(--panel);
+}
 .models {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -4,6 +4,7 @@ import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import { THEMES, themeById, themeTokens } from '../../../shared/themes'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
@@ -3609,6 +3610,7 @@ function SettingsSearchField({ value, onChange }: { value: string; onChange: (va
 
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
+  const themeId = themeById(settings.themeId).id
   const packaged = useStore((s) => s.packaged)
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
@@ -3712,16 +3714,33 @@ export function SettingsPage(): ReactNode {
               <div className="key-row">
                 <Icon name="sun" />
                 <div className="grow">
-                  <strong>{L('Tema', 'Theme')}</strong>
+                  <strong>{L('Claro ou escuro', 'Light or dark')}</strong>
                   <p className="muted small">{L('Do sistema segue o claro e o escuro do computador ao longo do dia.', 'System follows the computer’s light or dark theme.')}</p>
                 </div>
-                <div className="segmented" role="radiogroup" aria-label={L('Tema', 'Theme')}>
+                <div className="segmented" role="radiogroup" aria-label={L('Claro ou escuro', 'Light or dark')}>
                   {(['system', 'light', 'dark'] as const).map((t) => (
                     <button key={t} type="button" role="radio" aria-checked={(settings.theme ?? 'system') === t} className={(settings.theme ?? 'system') === t ? 'is-active' : ''} onClick={() => updateSettings({ theme: t })}>
                       {t === 'system' ? L('Do sistema', 'System') : t === 'light' ? L('Claro', 'Light') : L('Escuro', 'Dark')}
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="field">
+                <span className="field__label">{L('Temas', 'Themes')}</span>
+                <div className="theme-grid" role="radiogroup" aria-label={L('Temas', 'Themes')}>
+                  {THEMES.map((theme) => (
+                    <button key={theme.id} type="button" role="radio" aria-checked={theme.id === themeId} className={`theme-card ${theme.id === themeId ? 'is-active' : ''}`} onClick={() => updateSettings({ themeId: theme.id })}>
+                      <span className="theme-card__swatches">
+                        {(['light', 'dark'] as const).map((scheme) => {
+                          const { bg, accent } = themeTokens(theme, scheme)
+                          return <span key={scheme} className="theme-card__swatch" title={scheme === 'light' ? L('Claro', 'Light') : L('Escuro', 'Dark')} style={{ background: `linear-gradient(135deg, ${bg} 50%, ${accent} 50%)` }} />
+                        })}
+                      </span>
+                      <span className="theme-card__name">{theme.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="hint">{L('Cada tema tem uma versão clara e uma escura; o modo acima escolhe qual aparece.', 'Each theme has a light and a dark version; the mode above picks which one shows.')}</span>
               </div>
               {/* A member's language is their own; an admin's is the workspace's, in Geral. */}
               {!admin && (

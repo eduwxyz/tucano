@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { L } from '../../shared/lang'
 import { getState, navigate, openDialog, setNav, useStore } from './store'
+import { paintTheme } from './theme'
 import { Sidebar } from './components/Sidebar'
 import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
@@ -30,6 +31,7 @@ import { NameModal } from './components/People'
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
+  const themeId = useStore((s) => s.settings.themeId)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
   const guest = useStore(guestWelcome)
@@ -50,6 +52,14 @@ export function App(): ReactNode {
     if (theme === 'system') delete document.documentElement.dataset['theme']
     else document.documentElement.dataset['theme'] = theme
   }, [theme])
+
+  useEffect(() => {
+    const systemDark = matchMedia('(prefers-color-scheme: dark)')
+    const paint = (): void => paintTheme(themeId, theme)
+    paint()
+    systemDark.addEventListener('change', paint)
+    return () => systemDark.removeEventListener('change', paint)
+  }, [theme, themeId])
 
   // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings (Ctrl off a Mac)
   useEffect(() => {
