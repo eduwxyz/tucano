@@ -5,12 +5,12 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { VOICE_PROVIDERS, type CallCard, type VoiceChoice, type VoiceOption } from '../../../shared/calls'
 import { call } from '../rpc'
-import { navigate, useStore, type Agent } from '../store'
+import { navigate, toast, useStore, type Agent } from '../store'
 import { Card } from './Pages'
 import { Icon, time } from './ui'
 import { errText } from './WhatsAppParts'
 
-const VOICES_SHOWN = 8
+const VOICES_SHOWN = 30 // the list scrolls inside its own box
 const SEARCH_MS = 350
 const SAID_MAX = 80
 
@@ -23,6 +23,7 @@ export function VoiceSection({ agent }: { agent: Agent }): ReactNode {
   // Whether the voice service's connector is connected, as the connector list says.
   const connected = useStore((s) => s.connectors.find((c) => c.url?.includes(service.connector))?.status === 'connected')
   const [choice, setChoice] = useState<VoiceChoice | null | undefined>(undefined)
+  const [open, setOpen] = useState(false) // the list of voices shows only while one is being picked
   const [q, setQ] = useState('')
   const [voices, setVoices] = useState<VoiceOption[] | null>(null)
   const [voicesError, setVoicesError] = useState('')
@@ -49,6 +50,8 @@ export function VoiceSection({ agent }: { agent: Agent }): ReactNode {
     let current = true
     setChoice(undefined)
     setNote(null)
+    setOpen(false)
+    setQ('')
     call('callsVoice', { agentId: agent.id })
       .then((v) => current && setChoice(v ?? null))
       .catch((e: unknown) => {
@@ -66,6 +69,7 @@ export function VoiceSection({ agent }: { agent: Agent }): ReactNode {
     const mine = ++seq.current
     setVoicesError('')
     setVoices(null)
+    if (!open) return
     const timer = setTimeout(
       () => {
         call('callsVoices', q.trim() ? { q: q.trim() } : {})
@@ -82,7 +86,7 @@ export function VoiceSection({ agent }: { agent: Agent }): ReactNode {
       q.trim() ? SEARCH_MS : 0
     )
     return () => clearTimeout(timer)
-  }, [q, connected, retry])
+  }, [q, connected, retry, open])
 
   // One sample at a time: starting another stops the one playing.
   const play = (v: VoiceOption): void => {
@@ -116,7 +120,11 @@ export function VoiceSection({ agent }: { agent: Agent }): ReactNode {
       await call('callsSetVoice', { agentId: agent.id, voice })
       if (!alive.current) return
       setChoice(voice)
-      setNote({ ok: true, text: v ? L(`Pronto: ${name} atende com a voz ${v.name}.`, `Done: ${name} answers with the voice ${v.name}.`) : L('Voz tirada.', 'Voice removed.') })
+      setOpen(false)
+      setQ('')
+      audio.current?.pause()
+      setPlaying(null)
+      toast(v ? L(`Pronto: ${name} atende com a voz ${v.name}.`, `Done: ${name} answers with the voice ${v.name}.`) : L('Voz tirada.', 'Voice removed.'))
     } catch (e) {
       if (alive.current) setNote({ ok: false, text: errText(e) })
     } finally {
@@ -124,89 +132,110 @@ export function VoiceSection({ agent }: { agent: Agent }): ReactNode {
     }
   }
 
-  const lead = L(`Como ${name} soa quando atende uma ligação. O que ele diz vem das instruções do agente.`, `How ${name} sounds when answering a call. What it says comes from the agent’s instructions.`)
+  const lead = L(`Como ${name} soa em uma ligação. O que diz vem das instruções do agente.`, `How ${name} sounds on a call. What it says comes from the agent’s instructions.`)
   const title = L('Voz', 'Voice')
 
   // No voice service: the chosen voice still shows; only the search and the list give way to the core's sentence.
   const offline = Boolean(voicesError) && !connected
   const list = (voices ?? []).filter((v) => v && typeof v.voiceId === 'string' && v.voiceId && typeof v.name === 'string').slice(0, VOICES_SHOWN)
   const loading = voices === null && !voicesError
+  // "Bella - Professional, Bright, Warm": the name, and what comes after it as a quieter line.
+  const parts = (full: string): [string, string] => {
+    const at = full.indexOf(' - ')
+    return at > 0 ? [full.slice(0, at), full.slice(at + 3)] : [full, '']
+  }
+  const close = (): void => {
+    setOpen(false)
+    setQ('')
+    audio.current?.pause()
+    setPlaying(null)
+  }
+  const [chosenName, chosenStyle] = parts(choice?.name ?? '')
   return (
     <Card title={title} lead={lead}>
       {choice === undefined ? (
-        <div className="wa-skeleton" aria-hidden />
-      ) : choice ? (
-        <div className="wa-voice is-on">
+        <div className="wa-skeleton wa-skeleton--line" aria-hidden />
+      ) : (
+        <div className={`wa-voice wa-voice--now ${choice ? 'is-on' : ''}`}>
           <span className="wa-voice__play wa-voice__play--none" aria-hidden><Icon name="volume" size={15} /></span>
           <div className="grow">
-            <strong>{choice.name}</strong> <span className="muted small">{L('a voz de', 'the voice of')} {name}</span>
+            {choice ? (
+              <>
+                <strong>{chosenName}</strong> {chosenStyle && <span className="muted small">{chosenStyle}</span>}
+              </>
+            ) : (
+              <span className="muted small">{L('Sem voz escolhida: atende com a voz padrão.', 'No voice chosen: it answers with the default voice.')}</span>
+            )}
           </div>
-          <span className="tag tag--agent">{L('Escolhida', 'Chosen')}</span>
-          <button className="btn btn--sm btn--ghost" disabled={busy !== ''} onClick={() => void choose(null)}>
-            {busy === 'clear' ? L('Tirando…', 'Removing…') : L('Tirar a voz', 'Remove the voice')}
+          {choice && !open && (
+            <button className="btn btn--sm btn--ghost" disabled={busy !== ''} onClick={() => void choose(null)}>
+              {busy === 'clear' ? L('Tirando…', 'Removing…') : L('Tirar', 'Remove')}
+            </button>
+          )}
+          <button className="btn btn--sm" aria-expanded={open} disabled={busy !== ''} onClick={() => (open ? close() : setOpen(true))}>
+            {open ? L('Fechar', 'Close') : choice ? L('Trocar', 'Change') : L('Escolher voz', 'Choose a voice')}
           </button>
         </div>
-      ) : (
-        <p className="muted small wa-voice__text">{offline ? L('Sem voz escolhida.', 'No voice chosen.') : L(`Sem voz escolhida. Escolha uma abaixo para ${name} atender com ela.`, `No voice chosen. Pick one below for ${name} to answer with.`)}</p>
       )}
 
-      {offline ? (
-        <div className="wa-voice__offline">
-          <p className="muted small wa-voice__text">{voicesError}</p>
-          <button className="btn btn--primary btn--sm" onClick={() => navigate({ kind: 'connectors' })}>{L('Conectar', 'Connect')}</button>
-        </div>
-      ) : (
-        <>
-          <label className="wa-voice__search">
-            <Icon name="search" size={14} />
-            <input value={q} maxLength={60} placeholder={L('Buscar uma voz pelo nome', 'Search a voice by name')} aria-label={L('Buscar uma voz pelo nome', 'Search a voice by name')} onChange={(e) => setQ(e.target.value)} />
-          </label>
-
-          {voicesError ? (
-            <div className="note note--error" role="alert">
-              <p>{voicesError}</p>
-              <button className="btn btn--sm" onClick={() => setRetry((r) => r + 1)}>{L('Tentar de novo', 'Try again')}</button>
-            </div>
-          ) : loading ? (
-            <div aria-hidden>
-              <div className="wa-skeleton" />
-              <div className="wa-skeleton" />
-              <div className="wa-skeleton" />
-            </div>
-          ) : list.length === 0 ? (
-            <p className="muted small wa-voice__text">{q.trim() ? L('Nenhuma voz com esse nome.', 'No voice with that name.') : L('O serviço de voz não trouxe nenhuma voz.', 'The voice service brought no voices.')}</p>
-          ) : (
-            <ul className="wa-voice__list">
-              {list.map((v) => {
-                const on = choice?.voiceId === v.voiceId
-                const going = playing === v.voiceId
-                const label = going ? L(`Parar a amostra de ${v.name}`, `Stop ${v.name}’s sample`) : L(`Ouvir a voz ${v.name}`, `Listen to the voice ${v.name}`)
-                return (
-                  <li key={v.voiceId} className={`wa-voice ${on ? 'is-on' : ''}`}>
-                    {v.preview ? (
-                      <button className="icon-btn wa-voice__play" title={label} aria-label={label} aria-pressed={going} onClick={() => play(v)}>
-                        <Icon name={going ? 'pause' : 'play'} size={14} />
-                      </button>
-                    ) : (
-                      <span className="wa-voice__play wa-voice__play--none" aria-hidden />
-                    )}
-                    <div className="grow">
-                      <strong>{v.name}</strong> {v.description && <span className="muted small">{v.description}</span>}
-                    </div>
-                    {on ? (
-                      <span className="tag tag--agent">{L('Escolhida', 'Chosen')}</span>
-                    ) : (
-                      <button className="btn btn--sm" disabled={busy !== ''} onClick={() => void choose(v)}>
-                        {busy === v.voiceId ? L('Escolhendo…', 'Choosing…') : L('Escolher', 'Choose')}
-                      </button>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </>
-      )}
+      {open &&
+        (offline ? (
+          <div className="wa-voice__offline">
+            <p className="muted small wa-voice__text">{voicesError}</p>
+            <button className="btn btn--primary btn--sm" onClick={() => navigate({ kind: 'connectors' })}>{L('Conectar', 'Connect')}</button>
+          </div>
+        ) : (
+          <div className="wa-voice__picker">
+            <label className="wa-voice__search">
+              <Icon name="search" size={14} />
+              <input autoFocus value={q} maxLength={60} placeholder={L('Buscar uma voz pelo nome', 'Search a voice by name')} aria-label={L('Buscar uma voz pelo nome', 'Search a voice by name')} onChange={(e) => setQ(e.target.value)} />
+            </label>
+            {voicesError ? (
+              <div className="note note--error" role="alert">
+                <p>{voicesError}</p>
+                <button className="btn btn--sm" onClick={() => setRetry((r) => r + 1)}>{L('Tentar de novo', 'Try again')}</button>
+              </div>
+            ) : loading ? (
+              <div className="wa-voice__list" aria-hidden>
+                <div className="wa-skeleton wa-skeleton--line" />
+                <div className="wa-skeleton wa-skeleton--line" />
+                <div className="wa-skeleton wa-skeleton--line" />
+              </div>
+            ) : list.length === 0 ? (
+              <p className="muted small wa-voice__text">{q.trim() ? L('Nenhuma voz com esse nome.', 'No voice with that name.') : L('O serviço de voz não trouxe nenhuma voz.', 'The voice service brought no voices.')}</p>
+            ) : (
+              <ul className="wa-voice__list">
+                {list.map((v) => {
+                  const on = choice?.voiceId === v.voiceId
+                  const going = playing === v.voiceId
+                  const label = going ? L(`Parar a amostra de ${v.name}`, `Stop ${v.name}’s sample`) : L(`Ouvir a voz ${v.name}`, `Listen to the voice ${v.name}`)
+                  const [head, style] = parts(v.name)
+                  return (
+                    <li key={v.voiceId} className={`wa-voice__row ${on ? 'is-on' : ''}`}>
+                      {v.preview ? (
+                        <button className="icon-btn wa-voice__play" title={label} aria-label={label} aria-pressed={going} onClick={() => play(v)}>
+                          <Icon name={going ? 'pause' : 'play'} size={13} />
+                        </button>
+                      ) : (
+                        <span className="wa-voice__play wa-voice__play--none" aria-hidden />
+                      )}
+                      <div className="grow">
+                        <strong>{head}</strong> <span className="muted small">{[style, v.description].filter(Boolean).join(' · ')}</span>
+                      </div>
+                      {on ? (
+                        <span className="tag tag--agent">{L('Escolhida', 'Chosen')}</span>
+                      ) : (
+                        <button className="btn btn--sm btn--ghost" disabled={busy !== ''} onClick={() => void choose(v)}>
+                          {busy === v.voiceId ? L('Escolhendo…', 'Choosing…') : L('Escolher', 'Choose')}
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ))}
       {note && <p className={`hint wa-voice__note ${note.ok ? 'wa-voice__note--ok' : 'wa-voice__note--err'}`} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
     </Card>
   )
