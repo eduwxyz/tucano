@@ -17,9 +17,9 @@
 import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, relative, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -347,13 +347,19 @@ function list(dir: string): CallToolResult {
 
 const inside = (path: string, folder: string): boolean => path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep)
 // The real path of what may not exist yet (a file about to be written): the nearest folder that does, resolved, and the rest.
-function realish(p: string): string {
+// A link that points nowhere yet is followed by hand: writing through it would create its target.
+function realish(p: string, depth = 0): string {
   let head = p
   const rest: string[] = []
   for (;;) {
     try {
       return join(realpathSync.native(head), ...rest.reverse())
     } catch {
+      try {
+        if (depth < 20 && lstatSync(head).isSymbolicLink()) return realish(join(resolve(dirname(head), readlinkSync(head)), ...rest.reverse()), depth + 1)
+      } catch {
+        // not there at all: go up
+      }
       const up = dirname(head)
       if (up === head) return p
       rest.push(basename(head))

