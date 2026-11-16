@@ -9,6 +9,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
 > - **Corrigido:** uma rotina que perdeu horários com o Mac dormindo roda o mais recente (até 12 h), e uma "uma vez" em vários dias espera o próximo dia em vez de desligar sem rodar.
 > - **Corrigido:** ligar uma rotina com data vencida diz por que não ligou, e um horário apagado no formulário avisa em vez de sumir.
+> - **Corrigido:** o cartão de uma rotina no calendário abria deslocado, cortado no canto da tela, sem os botões de editar. Agora abre ao lado da rotina.
 > - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
 
 ### Added
@@ -26,6 +27,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **Turning on a date routine that has passed says why** (in the off list and the card), instead of doing nothing.
 - **A late run tells the agent it is late, not that the app was closed**: quiet hours, a pause or the Mac asleep make it late too.
 - **A time cleared in the form says so and holds the save**, instead of being dropped.
+- **A routine's card opens beside it again.** Pages rise in when they open, and the animation kept its (empty) transform after ending, which made the page the box that fixed things inside it are placed in. The card was placed by the window's measures inside the page's box, so it opened off to the side, was cut by the page, and its Edit and Delete were out of reach. The animation now ends with nothing left on the page.
 
 ## [0.2.35] - 2026-11-16
 
