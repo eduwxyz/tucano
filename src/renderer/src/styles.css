@@ -5220,6 +5220,18 @@ table.csv th {
 .modal__card.hermes-import {
   width: min(520px, calc(100vw - 32px));
 }
+/* Profiles are boxes here, not the divided skill list: the last one keeps its border. */
+.hermes-import .checks--skills {
+  gap: 6px;
+}
+.hermes-import .check--skill,
+.hermes-import .check--skill:last-child {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.hermes-import .check--skill:has(input:checked) {
+  border-color: var(--accent);
+}
 .hermes-import__where {
   display: flex;
   align-items: center;
