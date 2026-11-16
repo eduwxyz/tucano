@@ -1,12 +1,13 @@
 // Importing from Hermes Agent's own folder (spec §26, src/core/hermes-import.ts), on a synthetic
 // ~/.hermes laid out the way Hermes writes it.
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { applyForeignTeam, IMPORT_CAPS } from '../src/core/agent-import'
-import { hermesPreview, hermesRoot, hermesSchedule, hermesTeam, readHermes } from '../src/core/hermes-import'
+import { gatewaysNote, hermesPreview, hermesRoot, hermesSchedule, hermesTeam, readHermes } from '../src/core/hermes-import'
 import { personScope } from '../src/shared/types'
 
 const fresh = (): Db => new Db(join(mkdtempSync(join(tmpdir(), 'hermes-import-db-')), 'test.db'))
@@ -24,13 +25,17 @@ function folder(files: Record<string, string>): string {
 
 const skill = (name: string, body = `# ${name}\n\nDo it well.`): string => `---\nname: ${name}\ndescription: The ${name} recipe.\n---\n${body}\n`
 
+// Hermes's dir_hash for a folder whose only file is SKILL.md (no separator in the path: the same on Windows).
+const md5 = (...parts: string[]): string => parts.reduce((h, p) => h.update(p), createHash('md5')).digest('hex')
+const onlySkill = (text: string): string => md5('SKILL.md', text)
+
 const base: Record<string, string> = {
   '.env': `ANTHROPIC_API_KEY=${SECRET}\nTELEGRAM_BOT_TOKEN=${SECRET}\n`,
   'auth.json': JSON.stringify({ token: SECRET }),
   'SOUL.md': 'You are Hermes, my research partner. Answer in Portuguese.',
   'memories/MEMORY.md': 'The repo is eduwxyz/tucano.\n§\nRun npm test before a PR.',
   'memories/USER.md': 'Eduardo prefers small PRs.\n§\nEduardo lives in São Paulo.',
-  'skills/.bundled_manifest': 'arxiv:abc123\ngithub-pr-workflow\n',
+  'skills/.bundled_manifest': `arxiv:${onlySkill(skill('arxiv'))}\ngithub-pr-workflow\n`,
   'skills/research/arxiv/SKILL.md': skill('arxiv'), // came with Hermes
   'skills/github/github-pr-workflow/SKILL.md': skill('github-pr-workflow'), // came with Hermes
   'skills/.hub/lock.json': '{}',
@@ -137,6 +142,32 @@ describe('Hermes import: reading the folder', () => {
     expect(() => readHermes(folder({ 'notes.txt': 'hi', '.env': SECRET }))).toThrow(/Hermes/)
   })
 
+  it('does not take ~/.claude or a project with a config.yaml for Hermes, in pt and en', () => {
+    const claude = folder({ 'settings.json': '{}', 'CLAUDE.md': 'Be brief.', 'skills/pdf/SKILL.md': skill('pdf'), 'config.yaml': 'theme: dark\n' })
+    const project = folder({ 'config.yaml': 'model: gpt-4\nmcp_servers:\n  x:\n    command: y\n', 'cron/jobs.json': '{"jobs": []}', 'README.md': '# a project' })
+    for (const root of [claude, project]) {
+      expect(() => readHermes(root)).toThrow(/não parece uma pasta do Hermes|doesn't look like a Hermes folder/)
+    }
+  })
+
+  it('knows Hermes by its own signs: SOUL.md, memories, the skills manifest, state.db, a config.yaml with _config_version', () => {
+    for (const files of [
+      { 'SOUL.md': 'x' },
+      { 'memories/USER.md': 'x' },
+      { 'skills/.bundled_manifest': 'arxiv:abc\n' },
+      { 'state.db': SECRET, 'skills/mine/SKILL.md': skill('mine') },
+      { 'config.yaml': '_config_version: 14\nmodel: x\n' }
+    ] as Record<string, string>[]) {
+      const read: string[] = []
+      expect(readHermes(folder(files), { onRead: (p) => read.push(p) }).profiles).toHaveLength(1)
+      // state.db is only seen, never opened.
+      expect(read.some((p) => p.endsWith('state.db'))).toBe(false)
+    }
+    // The sample folder, and a profile with only a SOUL.md, still pass.
+    expect(readHermes(folder(base)).profiles).toHaveLength(1)
+    expect(readHermes(folder({ ...base, 'profiles/coder/SOUL.md': 'You write code.', 'profiles/junk/config.yaml': 'a: 1\n' })).profiles.map((p) => p.meta.key)).toEqual(['default', 'coder'])
+  })
+
   it('leaves out the old comment-only SOUL.md scaffold', () => {
     const r = readHermes(folder({ 'SOUL.md': '# Hermes Agent Persona\n\n<!--\nEdit this to customize.\n-->\n', 'memories/MEMORY.md': 'x' }))
     expect(r.profiles[0]!.agent.instructions).toBe('')
@@ -176,6 +207,158 @@ describe('Hermes import: reading the folder', () => {
     const r = readHermes(root)
     expect(JSON.stringify(r)).not.toContain(SECRET)
     expect(r.profiles[0]!.agent.notes.join('\n')).toMatch(/SOUL\.md/)
+  })
+})
+
+describe('Hermes import: links inside the Hermes folder', () => {
+  // Hermes never makes links in its folder: a link, even one that stays inside, isn't followed.
+  const link = (target: string, path: string, ctx: { skip: () => void }): boolean => {
+    try {
+      symlinkSync(target, path)
+      return true
+    } catch (e) {
+      if (process.platform === 'win32' && (e as NodeJS.ErrnoException).code === 'EPERM') {
+        ctx.skip()
+        return false
+      }
+      throw e
+    }
+  }
+
+  it('does not open .env through a SOUL.md or a SKILL.md that points at it', (ctx) => {
+    const root = folder({ '.env': `KEY=${SECRET}\n`, 'memories/MEMORY.md': 'x', 'skills/mine/notes.md': 'n' })
+    if (!link(join(root, '.env'), join(root, 'SOUL.md'), ctx)) return
+    link(join('..', '..', '.env'), join(root, 'skills', 'mine', 'SKILL.md'), ctx)
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(read.some((p) => p.endsWith('.env'))).toBe(false)
+    expect(read.some((p) => p.endsWith('SOUL.md') || p.endsWith('SKILL.md'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+    expect(JSON.stringify(hermesPreview(r))).not.toContain(SECRET)
+  })
+
+  it('does not open .env to hash a stock skill whose file points at it', (ctx) => {
+    const ARXIV = skill('arxiv')
+    const root = folder({
+      '.env': `KEY=${SECRET}\n`,
+      'SOUL.md': 'x',
+      'skills/.bundled_manifest': `arxiv:${onlySkill(ARXIV)}\n`,
+      'skills/arxiv/SKILL.md': ARXIV
+    })
+    if (!link(join('..', '..', '.env'), join(root, 'skills', 'arxiv', 'notes.md'), ctx)) return
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(read.some((p) => p.endsWith('.env') || p.endsWith('notes.md'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+  })
+
+  it('does not walk into a linked folder inside the Hermes folder', (ctx) => {
+    const root = folder({ 'SOUL.md': 'x', 'sessions/s1/SKILL.md': skill('s1', SECRET) })
+    mkdirSync(join(root, 'skills'), { recursive: true })
+    if (!link(join(root, 'sessions', 's1'), join(root, 'skills', 's1'), ctx)) return
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(read.some((p) => p.includes('sessions') || p.includes('s1'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+  })
+
+  it('still reads a Hermes folder that is itself a link (~/.hermes -> elsewhere)', (ctx) => {
+    const real = folder({ 'SOUL.md': 'You are Hermes.' })
+    const alias = join(mkdtempSync(join(tmpdir(), 'alias-')), '.hermes')
+    if (!link(real, alias, ctx)) return
+    expect(readHermes(alias).profiles[0]!.agent.instructions).toContain('You are Hermes.')
+  })
+})
+
+describe('Hermes import: skills that came with Hermes', () => {
+  const ARXIV = skill('arxiv')
+
+  it('leaves out one as Hermes put it, and brings it when the person edited it', () => {
+    const root = folder({
+      'SOUL.md': 'x',
+      'skills/.bundled_manifest': `arxiv:${onlySkill(ARXIV)}\nplan:${onlySkill(skill('plan'))}\n`,
+      'skills/research/arxiv/SKILL.md': ARXIV, // as it came
+      'skills/plan/SKILL.md': skill('plan', '# plan\n\nMy own way of planning.') // edited
+    })
+    const p = readHermes(root).profiles[0]!
+    expect(p.agent.skills.map((k) => k.name)).toEqual(['plan'])
+    expect(p.agent.skills[0]!.body).toContain('My own way of planning.')
+    expect(p.agent.notes.join('\n')).toMatch(/1 skill que já vem com o Hermes, sem mudança \(não é sua\)|1 skill that comes with Hermes, unchanged/)
+  })
+
+  it('counts a file added to it as an edit, and never opens a credential found there', () => {
+    const root = folder({
+      'SOUL.md': 'x',
+      'skills/.bundled_manifest': `arxiv:${onlySkill(ARXIV)}\nplan:${onlySkill(skill('plan'))}\n`,
+      'skills/arxiv/SKILL.md': ARXIV,
+      'skills/arxiv/notes.md': 'my notes',
+      'skills/plan/SKILL.md': skill('plan'),
+      'skills/plan/.env': SECRET
+    })
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(r.profiles[0]!.agent.skills.map((k) => k.name).sort()).toEqual(['arxiv', 'plan'])
+    expect(read.some((p) => /\.env$/.test(p))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+  })
+
+  it('without a hash (a v1 manifest) or without a manifest, keeps what it did', () => {
+    const v1 = readHermes(folder({ 'SOUL.md': 'x', 'skills/.bundled_manifest': 'arxiv\n', 'skills/arxiv/SKILL.md': skill('arxiv', 'edited') })).profiles[0]!.agent
+    expect(v1.skills).toHaveLength(0)
+    const none = readHermes(folder({ 'SOUL.md': 'x', 'skills/arxiv/SKILL.md': ARXIV })).profiles[0]!.agent
+    expect(none.skills.map((k) => k.name)).toEqual(['arxiv'])
+  })
+
+  it('hashes a folder the way Hermes does (a vector from its own dir_hash)', (ctx) => {
+    // Python's str(path) uses "\\" on Windows: this vector, made on macOS, holds elsewhere.
+    if (process.platform === 'win32') return ctx.skip()
+    // tools/skills_sync.py dir_hash on this folder: sorted by path parts (a/ before a-b/), with the
+    // __pycache__ left out ("clean") and, for old manifests, kept in ("legacy").
+    const files = {
+      'skills/arxiv/SKILL.md': '---\nname: arxiv\ndescription: The arxiv recipe.\n---\n# arxiv\n\nDo it well.\n',
+      'skills/arxiv/references/a.md': 'refs',
+      'skills/arxiv/scripts/run.py': 'print(1)',
+      'skills/arxiv/scripts/__pycache__/run.cpython-312.pyc': 'junk',
+      'skills/arxiv/a-b/z.md': 'x',
+      'skills/arxiv/a/y.md': 'y',
+      'SOUL.md': 'x'
+    }
+    for (const h of ['92ba43b2689b01fb940eb54d045fa49a', '00fb835d24349d1c075d9cb9952c4495']) {
+      const r = readHermes(folder({ ...files, 'skills/.bundled_manifest': `arxiv:${h}\n` }))
+      expect(r.profiles[0]!.agent.skills).toHaveLength(0)
+    }
+    const edited = readHermes(folder({ ...files, 'skills/arxiv/a/y.md': 'changed', 'skills/.bundled_manifest': 'arxiv:92ba43b2689b01fb940eb54d045fa49a\n' }))
+    expect(edited.profiles[0]!.agent.skills.map((k) => k.name)).toEqual(['arxiv'])
+  })
+})
+
+describe('Hermes import: many skills', () => {
+  it('stops opening skills at the limit, and still counts the rest right', () => {
+    const files: Record<string, string> = { 'SOUL.md': 'x', 'skills/.bundled_manifest': 'zz-stock:abc\n', 'skills/zz-stock/SKILL.md': skill('zz-stock') }
+    for (let i = 0; i < IMPORT_CAPS.skills + 5; i++) files[`skills/s${String(i).padStart(2, '0')}/SKILL.md`] = skill(`s${String(i).padStart(2, '0')}`)
+    const read: string[] = []
+    const r = readHermes(folder(files), { onRead: (p) => read.push(p.split('\\').join('/')) })
+    const opened = read.filter((p) => p.endsWith('/SKILL.md')).map((p) => p.split('/').slice(-2)[0])
+    expect(opened).toHaveLength(IMPORT_CAPS.skills)
+    for (let i = IMPORT_CAPS.skills; i < IMPORT_CAPS.skills + 5; i++) expect(opened).not.toContain(`s${i}`)
+    expect(opened).not.toContain('zz-stock')
+    const a = r.profiles[0]!.agent
+    expect(a.skills).toHaveLength(IMPORT_CAPS.skills)
+    expect(a.notes.join('\n')).toMatch(/5 skills além de 20|5 skills beyond 20/)
+    expect(a.notes.join('\n')).toMatch(/1 skill que já vem com o Hermes, sem mudança \(não é sua\)|1 skill that comes with Hermes, unchanged/)
+  })
+})
+
+describe('Hermes import: the gateways note', () => {
+  it('names only the gateways it had, and Telegram only when it was one', () => {
+    const only = gatewaysNote(['Discord'])
+    expect(only).toMatch(/Discord/)
+    expect(only).not.toMatch(/Telegram/)
+    expect(gatewaysNote(['Telegram', 'Discord'])).toMatch(/Telegram se liga|Telegram is turned on/)
+    const r = readHermes(folder({ 'SOUL.md': 'x', 'config.yaml': 'discord:\n  require_mention: true\n' }))
+    const notes = hermesTeam(r, []).notes.join('\n')
+    expect(notes).toMatch(/Discord/)
+    expect(notes).not.toMatch(/Telegram/)
   })
 })
 
