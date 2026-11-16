@@ -70,11 +70,14 @@ const base: Record<string, string> = {
     '    enabled: false',
     'platforms:',
     '  telegram:',
+    '    enabled: true',
     '    reply_to_mode: first',
-    'discord:',
+    'discord:', // settings only, at the top: it turns nothing on
     '  require_mention: true',
     ''
   ].join('\n'),
+  // What the gateway wrote when it last ran: only the platforms' names are taken from it.
+  'gateway_state.json': JSON.stringify({ gateway_state: 'running', platforms: { slack: { state: 'fatal', error_message: `bad token ${SECRET}` } } }),
   'sessions/s1.json': `{"text": "${SECRET}"}`,
   'state.db': SECRET,
   'logs/errors.log': SECRET
@@ -88,7 +91,7 @@ describe('Hermes import: reading the folder', () => {
     const rel = read.map((p) => p.slice(root.length + 1).split('\\').join('/'))
     expect(rel.some((p) => /(^|\/)(\.env|auth\.json)$/.test(p))).toBe(false)
     expect(rel.some((p) => /^(sessions|logs|cron\/output)\/|state\.db/.test(p))).toBe(false)
-    expect(rel.every((p) => /^(profiles\/[a-z0-9_-]+\/)?(SOUL\.md|config\.yaml|memories\/(MEMORY|USER)\.md|cron\/jobs\.json|skills\/\.bundled_manifest|skills\/.+\/SKILL\.md)$/.test(p))).toBe(true)
+    expect(rel.every((p) => /^(profiles\/[a-z0-9_-]+\/)?(SOUL\.md|config\.yaml|memories\/(MEMORY|USER)\.md|cron\/jobs\.json|gateway_state\.json|skills\/\.bundled_manifest|skills\/.+\/SKILL\.md)$/.test(p))).toBe(true)
     // Not one byte of a secret makes it out, not even the one inside an MCP server's env.
     expect(JSON.stringify(r)).not.toContain(SECRET)
     expect(JSON.stringify(hermesPreview(r))).not.toContain(SECRET)
@@ -100,7 +103,7 @@ describe('Hermes import: reading the folder', () => {
       { key: 'default', name: 'Hermes', instructions: true, memories: 2, userMemories: 2, skills: 2, routines: 2, routinesAsNames: ['Every 30 minutes', 'Twice a day', 'Backup script'] }
     ])
     expect(p.servers).toEqual(['github', 'notion'])
-    expect(p.gateways.sort()).toEqual(['Discord', 'Telegram'])
+    expect(p.gateways.sort()).toEqual(['Slack', 'Telegram'])
     expect(p.models).toEqual(['openrouter/anthropic/claude-opus-4.6'])
     expect(p.notes.join('\n')).toMatch(/2 skills que já vêm com o Hermes|2 skills that come with Hermes/)
     expect(p.notes.join('\n')).toMatch(/sessions, state\.db/)
@@ -355,10 +358,131 @@ describe('Hermes import: the gateways note', () => {
     expect(only).toMatch(/Discord/)
     expect(only).not.toMatch(/Telegram/)
     expect(gatewaysNote(['Telegram', 'Discord'])).toMatch(/Telegram se liga|Telegram is turned on/)
-    const r = readHermes(folder({ 'SOUL.md': 'x', 'config.yaml': 'discord:\n  require_mention: true\n' }))
+    const r = readHermes(folder({ 'SOUL.md': 'x', 'config.yaml': 'platforms:\n  discord:\n    enabled: true\n' }))
     const notes = hermesTeam(r, []).notes.join('\n')
     expect(notes).toMatch(/Discord/)
     expect(notes).not.toMatch(/Telegram/)
+  })
+})
+
+// The SOUL.md texts Hermes writes by itself (hermes_cli/default_soul.py, NousResearch/hermes-agent
+// 0309b005): DEFAULT_SOUL_MD, its "--" variant (install.ps1) and _LEGACY_TEMPLATE_SOULS. Copied
+// here on purpose, so a change on our side that drifts from Hermes's text fails.
+const H_DEFAULT =
+  'You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask — a one-line question gets a one-line answer, and finished work gets a short report of what changed, what\'s verified, and what\'s left, never a replay of the process. No filler ("Great question," "I\'d be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it\'s right, not because the user said it. Depth is earned — give it when the user asks for detail, teaches, or the stakes demand it, not by default.'
+const H_HEAD = "# Hermes Agent Persona\n\n<!--\nThis file defines the agent's personality and tone.\nThe agent will embody whatever you write here.\nEdit this to customize how Hermes communicates with you.\n\n"
+const H_TAIL = 'This file is loaded fresh each message -- no restart needed.\nDelete the contents (or this file) to use the default personality.\n-->'
+const H_SEEDED = {
+  default: H_DEFAULT,
+  ascii: H_DEFAULT.split('—').join('--'),
+  previous:
+    'You are Hermes Agent, an intelligent AI assistant created by Nous Research. You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools. You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose unless otherwise directed below. Be targeted and efficient in your exploration and investigations.',
+  scaffold: H_HEAD + 'Examples:\n  - "You are a warm, playful assistant who uses kaomoji occasionally."\n  - "You are a concise technical expert. No fluff, just facts."\n  - "You speak like a friendly coworker who happens to know everything."\n\n' + H_TAIL,
+  bare: H_HEAD + H_TAIL
+}
+
+describe('Hermes import: a SOUL.md Hermes wrote by itself', () => {
+  const soul = (text: string) => readHermes(folder({ 'SOUL.md': text, 'memories/MEMORY.md': 'x' })).profiles[0]!
+
+  it('brings no instructions from any SOUL.md Hermes seeds, normalized the way Hermes does', () => {
+    for (const [which, text] of Object.entries(H_SEEDED)) {
+      for (const variant of [text, `\uFEFF${text}`, `\n  ${text.replace(/\n/g, '\r\n')}  \n`, text.replace(/\n/g, '\r')]) {
+        const p = soul(variant)
+        expect(p.agent.instructions, which).toBe('')
+        expect(p.meta.instructions, which).toBe(false)
+        expect(p.agent.notes.join('\n'), which).toMatch(/não havia um SOUL\.md escrito|there was no written SOUL\.md/)
+      }
+    }
+  })
+
+  it('in a profile too (hermes profile create seeds the same text)', () => {
+    const r = readHermes(folder({ 'SOUL.md': H_DEFAULT, 'profiles/coder/SOUL.md': H_DEFAULT, 'profiles/coder/memories/MEMORY.md': 'x' }))
+    expect(r.profiles.map((p) => p.agent.instructions)).toEqual(['', ''])
+  })
+
+  it('brings one the person wrote, even when it starts like Hermes’s', () => {
+    const edited = `${H_DEFAULT}\n\nAnswer in Portuguese.`
+    expect(soul(edited).agent.instructions).toBe(edited)
+    expect(soul(H_DEFAULT.replace('Be direct', 'Be very direct')).meta.instructions).toBe(true)
+    expect(soul('You are Hermes Agent, built by Nous Research.').meta.instructions).toBe(true)
+  })
+})
+
+describe('Hermes import: where Hermes chatted', () => {
+  const gw = (files: Record<string, string>) => readHermes(folder({ 'SOUL.md': 'x', ...files })).profiles.map((p) => [p.meta.key, p.config.gateways.sort()])
+
+  it('a gateway set up only in .env shows by the state the gateway wrote, never opening .env', () => {
+    const root = folder({
+      'SOUL.md': 'x',
+      '.env': `TELEGRAM_BOT_TOKEN=${SECRET}\n`,
+      'config.yaml': '_config_version: 30\n',
+      'gateway_state.json': JSON.stringify({ gateway_state: 'running', platforms: { telegram: { state: 'fatal', error_code: 'adapter_unavailable', error_message: `token ${SECRET}` } } })
+    })
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(hermesPreview(r).gateways).toEqual(['Telegram'])
+    expect(hermesTeam(r, []).notes.join('\n')).toMatch(/Telegram se liga|Telegram is turned on/)
+    expect(read.some((p) => p.endsWith('.env'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+  })
+
+  it('a gateway serving many profiles writes theirs as "<profile>:<platform>", and a profile may have its own', () => {
+    expect(
+      gw({
+        'gateway_state.json': JSON.stringify({ platforms: { telegram: {}, 'coder:discord': {}, 'coder:nope': {}, 'ghost:slack': {} } }),
+        'profiles/coder/SOUL.md': 'y',
+        'profiles/writer/SOUL.md': 'z',
+        'profiles/writer/gateway_state.json': JSON.stringify({ platforms: { signal: { state: 'connected' } } })
+      })
+    ).toEqual([
+      ['default', ['Telegram']],
+      ['coder', ['Discord']],
+      ['writer', ['Signal']]
+    ])
+  })
+
+  it('counts a platform block only when it is turned on, where Hermes reads one', () => {
+    const cfg = (y: string) => gw({ 'config.yaml': y })[0]![1]
+    // At the top with no `enabled`, a block is only settings (require_mention…): it turns nothing on.
+    expect(cfg('discord:\n  require_mention: true\n')).toEqual([])
+    // With `enabled`, the top block wins over all the others (config_loader.py bridge_platform_shared_keys).
+    expect(cfg('telegram:\n  enabled: true\n')).toEqual(['Telegram'])
+    expect(cfg('platforms:\n  telegram:\n    enabled: true\ntelegram:\n  enabled: false\n')).toEqual([])
+    expect(cfg('gateway:\n  telegram:\n    enabled: false\ntelegram:\n  enabled: true\n')).toEqual(['Telegram'])
+    expect(cfg('platforms:\n  telegram:\n    enabled: true\ntelegram:\n  require_mention: true\n')).toEqual(['Telegram'])
+    // With no `enabled`, Hermes keeps it off (persist_home_channel writes blocks like that).
+    expect(cfg('platforms:\n  slack:\n    home_channel: { chat_id: "1" }\n')).toEqual([])
+    expect(cfg('platforms:\n  slack:\n    enabled: false\n')).toEqual([])
+    expect(cfg('platforms:\n  slack:\n    enabled: "no"\n')).toEqual([])
+    expect(cfg('platforms:\n  slack:\n    enabled: true\n')).toEqual(['Slack'])
+    expect(cfg('platforms:\n  slack:\n    enabled: "yes"\n')).toEqual(['Slack'])
+    expect(cfg('gateway:\n  platforms:\n    matrix:\n      enabled: on\n')).toEqual(['Matrix'])
+    expect(cfg('gateway:\n  signal:\n    enabled: 1\n')).toEqual(['Signal'])
+    // Later wins, as in Hermes: gateway.platforms, then platforms.
+    expect(cfg('gateway:\n  platforms:\n    slack:\n      enabled: true\nplatforms:\n  slack:\n    enabled: false\n')).toEqual([])
+  })
+
+  it('a platform turned off in config.yaml, or that the gateway stood down, does not come from an older state', () => {
+    const state = JSON.stringify({ platforms: { telegram: { state: 'connected' }, slack: { state: 'disabled' }, discord: { state: 'fatal' } } })
+    expect(gw({ 'gateway_state.json': state })[0]![1]).toEqual(['Discord', 'Telegram'])
+    expect(gw({ 'gateway_state.json': state, 'config.yaml': 'platforms:\n  telegram:\n    enabled: false\n' })[0]![1]).toEqual(['Discord'])
+    expect(gw({ 'gateway_state.json': state, 'config.yaml': 'discord:\n  enabled: false\n' })[0]![1]).toEqual(['Telegram'])
+  })
+
+  it('leaves a gateway state it can’t read as nothing, without a word', () => {
+    for (const bad of ['not json', '[]', JSON.stringify({ platforms: ['telegram'] }), JSON.stringify({ platforms: { telegram: {} }, pad: 'x'.repeat(1_100_000) })]) {
+      const r = readHermes(folder({ 'SOUL.md': 'x', 'gateway_state.json': bad }))
+      expect(r.profiles[0]!.config.gateways).toEqual([])
+      expect(r.profiles[0]!.agent.notes.join('\n')).not.toMatch(/gateway/i)
+    }
+  })
+})
+
+describe('Hermes import: MCP servers turned off in Hermes', () => {
+  it('names them in a note instead of dropping them without a word', () => {
+    const r = readHermes(folder({ 'SOUL.md': 'x', 'config.yaml': 'mcp_servers:\n  github:\n    command: npx\n    enabled: false\n  deepwiki:\n    url: https://x\n    enabled: "off"\n  notion:\n    url: https://y\n' }))
+    expect(r.profiles[0]!.config.servers).toEqual(['notion'])
+    expect(hermesPreview(r).notes.join('\n')).toMatch(/(desligados no Hermes|turned off in Hermes)[^\n]*github, deepwiki/)
   })
 })
 
