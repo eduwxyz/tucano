@@ -3,6 +3,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
+import type { HermesPreview } from '../../shared/hermes-import'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
@@ -1073,6 +1074,8 @@ export const restoreApply = (): Promise<void> => call('restoreApply')
 export const restoreCancel = (): Promise<void> => call('restoreCancel')
 export const restoreInfo = (): Promise<{ at: number; routines: number } | null> => call('restoreInfo')
 export const importAgents = (p: { path?: string; data?: string }): Promise<string> => call('importAgents', p)
+export const hermesPreview = (path?: string): Promise<HermesPreview> => call('hermesPreview', { path })
+export const importHermes = (path: string, profiles: string[]): Promise<string> => call('importHermes', { path, profiles })
 export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })

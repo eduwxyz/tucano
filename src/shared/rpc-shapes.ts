@@ -112,6 +112,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   exportTeam: {},
   importTeam: { text: 's' },
   importAgents: { path: 's?', data: 's?' },
+  hermesPreview: { path: 's?' },
+  importHermes: { path: 's', profiles: 'S' },
   backupNow: {},
   exportBackup: {},
   restoreCheck: { path: 's' },

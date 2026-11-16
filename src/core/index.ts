@@ -1817,6 +1817,13 @@ const api: Handlers = {
       zip.close()
     }
   },
+  // Hermes Agent (spec §26): the reader is Ravi's, in progress on this branch.
+  hermesPreview: () => {
+    throw new Error(L('A importação do Hermes ainda não está pronta.', "Importing from Hermes isn't ready yet."))
+  },
+  importHermes: () => {
+    throw new Error(L('A importação do Hermes ainda não está pronta.', "Importing from Hermes isn't ready yet."))
+  },
   backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
   // Everything in one .zip in Downloads, shown in the Finder: to take to a server, which restores it.
   exportBackup: () => {

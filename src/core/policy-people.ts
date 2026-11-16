@@ -199,6 +199,8 @@ export const NEEDS: Record<Method, Need> = {
   exportTeam: 'admin',
   importTeam: 'admin',
   importAgents: 'admin',
+  hermesPreview: 'admin',
+  importHermes: 'admin',
   exportBackup: 'owner',
   restoreCheck: 'owner',
   restoreApply: 'owner',
