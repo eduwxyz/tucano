@@ -1,5 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
+import type { HermesPreview } from './hermes-import'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
@@ -140,6 +141,10 @@ export interface Api {
   exportTeam(): string // the team as Markdown
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
+  // Hermes Agent's folder, read where it is (no path: $HERMES_HOME or ~/.hermes): what would come in,
+  // adding nothing. Throws, in the person's words, when the folder isn't Hermes's or has nothing to bring.
+  hermesPreview(p: { path?: string }): HermesPreview
+  importHermes(p: { path: string; profiles: string[] }): string // the chosen profiles (by key) as agents; what was added
   backupNow(): string // where the copy went
   // Everything in one .zip, to take this Tucano to a server (desktop): where it went, and what's in it.
   exportBackup(): { path: string } & BackupSummary

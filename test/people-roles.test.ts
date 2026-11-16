@@ -65,6 +65,8 @@ describe('the permissions policy', () => {
       expect(() => admit(dani, m), m).not.toThrow()
       expect(() => admit(ana, m), m).not.toThrow()
     }
+    // Hermes reads the server's own ~/.hermes (the owner's SOUL.md and USER.md): never an invited admin.
+    expect([NEEDS.hermesPreview, NEEDS.importHermes]).toEqual(['owner', 'owner'])
     for (const m of (Object.keys(NEEDS) as Method[]).filter((x) => NEEDS[x] === 'owner')) {
       expect(() => admit(dani, m), m).toThrow()
       expect(() => admit(ana, m), m).not.toThrow()

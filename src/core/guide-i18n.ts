@@ -17,7 +17,7 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   },
   backup: {
     title: 'Team, import and backups',
-    summary: 'Exporting and importing the team as a .md file, bringing agents over from OpenBot or Grok Bot, and the database backups.'
+    summary: 'Exporting and importing the team as a .md file, bringing agents over from OpenBot, Grok Bot or Hermes, and the database backups.'
   },
   celular: {
     title: 'Phone (iPhone and Telegram)',

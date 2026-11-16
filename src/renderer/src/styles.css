@@ -5216,6 +5216,72 @@ table.csv th {
 .whats-new__back svg {
   transform: scaleX(-1);
 }
+/* Importing from Hermes: where it reads, then what comes in, scrolling while the buttons stay. */
+.modal__card.hermes-import {
+  width: min(520px, calc(100vw - 32px));
+}
+/* Profiles are boxes here, not the divided skill list: the last one keeps its border. */
+.hermes-import .checks--skills {
+  gap: 6px;
+}
+.hermes-import .check--skill,
+.hermes-import .check--skill:last-child {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.hermes-import .check--skill:has(input:checked) {
+  border-color: var(--accent);
+}
+.hermes-import__where {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hermes-import__where > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hermes-import__body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.hermes-import__body h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.hermes-import__body ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+}
+.hermes-import__names {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.hermes-import__names > div {
+  display: flex;
+  gap: 8px;
+}
+.hermes-import__names dt {
+  flex: 0 0 110px;
+}
+.hermes-import__names dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .modal__foot {
   display: flex;
   align-items: center;
