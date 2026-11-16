@@ -2035,6 +2035,7 @@ const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base6
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
   const [hermes, setHermes] = useState(false)
+  const owner = useStore(amOwner) // Hermes reads the server's folder: the owner's
   const settings = useStore((s) => s.settings)
   // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
   const grokSkill = (): void => {
@@ -2118,13 +2119,13 @@ function TeamCard(): ReactNode {
             }}
           />
         </label>
-        <button
+        {owner && <button
           className="btn btn--sm"
           onClick={() => (setNote(''), setHermes(true))}
           title={L('Lê a pasta do Hermes Agent (normalmente ~/.hermes) e mostra o que entra antes de importar.', 'Reads the Hermes Agent folder (usually ~/.hermes) and shows what comes in before importing.')}
         >
           {L('Importar do Hermes…', 'Import from Hermes…')}
-        </button>
+        </button>}
         <button
           className="btn btn--sm"
           onClick={grokSkill}
@@ -2134,7 +2135,7 @@ function TeamCard(): ReactNode {
         </button>
       </div>
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
-      {hermes && <HermesImport onClose={() => setHermes(false)} onDone={setNote} />}
+      {owner && hermes && <HermesImport onClose={() => setHermes(false)} onDone={setNote} />}
     </Card>
   )
 }
