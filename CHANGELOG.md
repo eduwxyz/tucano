@@ -4,8 +4,17 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novo:** **oriente uma resposta em curso** pelo rodapé dos passos dela. Enquanto um agente trabalha, uma pílula discreta **Orientar** fica sob a caixa dos passos; ela abre um campo, e o que você escreve vai para aquela resposta no próximo chamado de ferramenta dela, com Ctrl+Enter ou o botão, e Esc fecha sem enviar nada. Uma orientação não é um prompt: nada dela é publicado no canal ou na DM, e ela aparece na cadeia da resposta como uma linha própria, com as suas palavras, que passa de em curso para lida quando a resposta a recebe no chamado seguinte. Uma resposta que termina antes de ler deixa aquela linha na cadeia, marcada como não lida, em vez de virar uma mensagem. Com nada em curso ali, o mesmo texto é um prompt comum, e a pílula some com o trabalho.
+> - **Corrigido:** o campo de uma orientação abre na largura da cadeia, de onde o texto dos passos começa até onde ela termina, em janela larga e estreita, sem rolagem lateral.
+
 ### Added
 
+- **Steering a reply that is still working.** A reply at work could be stopped, but not directed: what to do next had to be a message of its own, answered after it finished. Now an **Orientar** (steer) pill sits under the box of steps of a working reply; it opens a field, and what the person writes reaches that reply at its next tool call, sent with Ctrl+Enter or the button, and Esc closes it without sending. A steer is not a prompt: nothing of it is posted in the channel or the DM, and it becomes a row of that reply's chain in their words, marked as taken when the reply reads it at the following call. A reply that ends before reading one leaves its row in the chain, marked as not read, instead of turning into a message. With nothing running in that place, the same text is an ordinary prompt. The steer carries the reply's id, so a second reply of the same agent in a DM isn't steered by what was written for the first. Agents read it with the tool result that follows, said in so many words as what the person wrote while they worked.
+
+### Fixed
+
+- **The steer field is as wide as the chain.** The pill opened a 520 px field inside a 583 px chain, and its box ran to the edge of the message body instead of stopping with the chain. The field now runs from where the steps' text starts to where the chain ends, with the pill on the steps' rail, in a wide or a narrow window, without sideways scrolling.
 - **Sort the whole sidebar by hand: hold a row, see where it lands, or move it with the keyboard.** Press and hold a row for a moment to pick it up: it dims, and an orange line shows where it will land as you move. Let go there and the order is saved; let go where it was and it just opens, like a click. It works for the items at the top (Aprovações, Quadro, Conhecimento, Operação; the Tuca stays first), the channels (let go on a group's name to put a channel in that group), the agents, and the sectors. An agent moves only within its sector. With the keyboard, **Alt+↑** and **Alt+↓** move the row you're on. Before, only channels could be moved, by dragging. An item you took out of the sidebar stays out, and keeps its place for when it comes back. In a team, the order is yours alone, like the channel groups. Thanks to Apostol Apostolov.
 
 ## [0.2.44] - 2026-11-21

@@ -1589,8 +1589,9 @@ h3 {
 .steps__steer {
   display: grid;
   gap: 8px;
-  margin: 2px 0 4px 3px;
-  padding-left: 14px;
+  margin: 2px 0 4px;
+  padding-left: 17px;
+  max-width: 600px;
 }
 .steps__steer-pill {
   justify-self: start;
@@ -1613,7 +1614,8 @@ h3 {
 .steps__steer-note {
   display: grid;
   gap: 8px;
-  max-width: 520px;
+  width: 100%;
+  max-width: none;
 }
 .steps__steer-note textarea {
   width: 100%;
