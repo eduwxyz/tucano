@@ -1,5 +1,5 @@
 // Colour themes: a few seeds per colour scheme, the rest derived. The Tucano theme must look
-// exactly as styles.css does, and every other theme must read (WCAG AA).
+// exactly as the app did before themes, and every other theme must read (WCAG AA).
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -11,16 +11,24 @@ function block(selector: string): Record<string, string> {
   const body = css.slice(start, css.indexOf('}', start))
   return Object.fromEntries([...body.matchAll(/^\s*(--[\w-]+):\s*(.+?);(?:\s*\/\*.*\*\/)?\s*$/gm)].map((m) => [m[1]!, m[2]!]))
 }
-const stylesheet = { light: block(':root'), dark: block(":root[data-theme='dark']") }
+const stylesheet = { light: block(':root'), dark: block(":root[data-theme='dark']"), systemDark: block(":root:not([data-theme='light'])") }
+// The colour tokens of styles.css before themes: light, dark picked by hand, and dark from the system.
+const beforeThemes = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures/tucano-tokens.json'), 'utf8')) as Record<keyof typeof stylesheet, Record<string, string>>
+const newTokenWas: Record<string, string> = { '--selected': '--panel', '--selected-ink': '--text', '--selected-ring': '--border', '--focus-ring': '--border-strong' }
+const schemeOf = { light: 'light', dark: 'dark', systemDark: 'dark' } as const
 
 const derivedOnly = THEMES.filter((t) => t.id !== DEFAULT_THEME_ID)
 const tucanoSeedsOnly: Theme = { id: 'seeds', name: 'Seeds', light: { ...THEMES[0]!.light, tokens: undefined }, dark: { ...THEMES[0]!.dark, tokens: undefined } }
 
 describe('the Tucano theme', () => {
-  it.each(['light', 'dark'] as const)("sets every %s token to exactly what styles.css has", (scheme) => {
-    const variables = themeVariables(themeById(DEFAULT_THEME_ID), scheme)
-    for (const [name, value] of Object.entries(variables)) expect([name, value]).toEqual([name, stylesheet[scheme][name]])
+  it.each(['light', 'dark', 'systemDark'] as const)('sets every %s token to what it was before themes', (block) => {
+    const variables = themeVariables(themeById(DEFAULT_THEME_ID), schemeOf[block])
     expect(Object.keys(variables)).toHaveLength(THEME_TOKENS.length + 1)
+    for (const [name, value] of Object.entries(variables)) expect([name, value]).toEqual([name, beforeThemes[block][newTokenWas[name] ?? name]])
+  })
+
+  it.each(['light', 'dark', 'systemDark'] as const)("matches the stylesheet's own %s defaults, so the first frame is the same", (block) => {
+    for (const [name, value] of Object.entries(themeVariables(themeById(DEFAULT_THEME_ID), schemeOf[block]))) expect([name, value]).toEqual([name, stylesheet[block][name]])
   })
 
   it('is what an unknown or unset theme falls back to', () => {
@@ -59,8 +67,44 @@ describe('a derived theme', () => {
     expect(light.accent).not.toBe('#f5d90a')
     expect(contrast(light['accent-text'], light.accent)).toBeGreaterThanOrEqual(AA_TEXT)
     expect(contrast(dark['accent-text'], dark.accent)).toBeGreaterThanOrEqual(AA_TEXT)
-    expect(readable('#777777', ['#ffffff'], AA_TEXT)).not.toBe('#777777')
+  })
+})
+
+describe('a readable colour', () => {
+  const worst = (color: string, backgrounds: string[]): number => Math.min(...backgrounds.map((bg) => contrast(color, bg)))
+
+  it('is the colour itself when it already reads', () => {
     expect(readable('#000000', ['#ffffff'], AA_TEXT)).toBe('#000000')
+    expect(readable('#ffffff', ['#000000'], AA_TEXT)).toBe('#ffffff')
+  })
+
+  it('goes whichever way really reaches the contrast, not the one the background suggests', () => {
+    expect(contrast('#ffffff', '#777777')).toBeLessThan(AA_TEXT)
+    const out = readable('#ffffff', ['#777777'], AA_TEXT)
+    expect(contrast(out, '#777777')).toBeGreaterThanOrEqual(AA_TEXT)
+    expect(readable('#777777', ['#ffffff'], AA_TEXT)).not.toBe('#777777')
+    expect(contrast(readable('#777777', ['#ffffff'], AA_TEXT), '#ffffff')).toBeGreaterThanOrEqual(AA_TEXT)
+    expect(contrast(readable('#888888', ['#111111'], AA_TEXT), '#111111')).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  it('reads on several backgrounds at once', () => {
+    const backgrounds = ['#f3f0ea', '#fffefb', '#e8e3da']
+    const out = readable('#a09080', backgrounds, AA_TEXT)
+    expect(worst(out, backgrounds)).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  it('comes as close as it can when no colour reads on all of them', () => {
+    const backgrounds = ['#000000', '#ffffff']
+    const out = readable('#336699', backgrounds, 7)
+    expect(worst(out, backgrounds)).toBeLessThan(7)
+    expect(worst(out, backgrounds)).toBeGreaterThan(worst('#336699', backgrounds))
+    expect(worst(out, backgrounds)).toBeGreaterThan(4.4) // mid-grey, the most anything gets against both, is about 4.58
+  })
+
+  it('takes a full set of overrides as it is, without deriving anything', () => {
+    const tokens = themeTokens(themeById(DEFAULT_THEME_ID), 'light')
+    const full: Theme = { id: 'full', name: 'Full', light: { canvas: 'not a colour', accent: 'not a colour', tokens }, dark: { canvas: '#111111', accent: '#88aadd' } }
+    expect(themeTokens(full, 'light')).toEqual(tokens)
   })
 
   it('takes a direct override over what it derives', () => {
