@@ -4,11 +4,18 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.34] - 2026-11-15
+
+> **Em português:**
+> - **Novo:** um **endpoint próprio**, sem instalar nada. Em **Configurações › Modelos**, cole o endereço de um endpoint no padrão da OpenAI (OpenRouter, OmniRoute, Ollama, LM Studio, vLLM) e a chave, busque os modelos e marque os que os agentes podem usar. O Tucano conversa direto com ele, sem Claude Code nem Codex, com todas as ferramentas dos agentes. Com **Web** ligada, eles também buscam na web e leem páginas.
+> - **Mudou:** pedir algo a um agente que passa adiante agora parece uma thread de trabalho. O pedido acontece numa thread no canal de quem faz, embaixo da sua mensagem aparece uma linha com quem está fazendo e como está (com a aprovação ali mesmo, quando houver), e você recebe uma resposta só, na thread da sua mensagem, quando tudo voltar. Responder nessa thread continua o mesmo assunto, na mesma thread de quem fez.
+> - **Correção:** "Aprovar e sempre permitir" vale sempre, mesmo depois de o agente ler algo de fora (um e-mail, uma issue). O botão de responder em thread não some numa resposta longa, a seta das listas fica dentro do campo e as abas da Memória não fogem da tela com muitos agentes.
+
 ### Added
 
 - **Your own endpoint, with nothing to install.** Agents could only run on a program installed on the computer (Claude Code, Codex, OpenCode…), so a fresh PC or a bare VPS had to install and set one up first. Now **Settings › Models › Your own endpoint** takes an address in OpenAI's format and its key: OpenRouter, OmniRoute, Ollama, LM Studio, vLLM or a company's proxy, with shortcuts for the first ones. **Fetch the models** lists what it offers, you tick the ones the agents may use, and each agent picks one like any other model. There's no harness in between: the app calls `/chat/completions` itself, with the app's own tools (asking another agent, asking you, connectors, memory, the wiki, the computer), runs the ones the model asks for, and calls again until it answers. The key is kept encrypted in the app and never reaches the window. The model must handle tool calls. Billed per token, on the endpoint.
 - **Web search and page reading for agents on an endpoint.** A harness brings its own web search; an endpoint doesn't. An agent on one, with Web on, gets the app's own: **buscar_na_web** searches through Exa's public search (the one OpenCode uses by default, no key needed), and **ler_pagina** reads a page or a PDF the way the wiki reads a link, its main text only, through the guard that keeps the inside of the network out of reach.
-- **The Memory page's bot tabs stay in the bar, however many bots there are.** The strip of tabs (All, You, one per bot with notes, Forgotten) was a plain row that ran past the 720 px column as soon as a few bots had notes, so the tabs after the first few, and the search control with them, could not be reached at all. The strip now scrolls inside the bar, the tab you pick slides to the middle of it, and two borderless arrows page it a screenful at a time, each offered only while there is strip in that direction. (#396)
+- **The Memory page's bot tabs stay in the bar, however many bots there are.** The strip of tabs (All, You, one per bot with notes, Forgotten) was a plain row that ran past the 720 px column as soon as a few bots had notes, so the tabs after the first few, and the search control with them, could not be reached at all. The strip now scrolls inside the bar, the tab you pick slides to the middle of it, and two borderless arrows page it a screenful at a time, each offered only while there is strip in that direction. Thanks, apoapostolov! (#397)
 
 ### Changed
 
@@ -26,6 +33,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **A dropdown's arrow sits inside the field.** Every native dropdown (a member's role, the invite's role, who covers for you, the activity filters) drew the system's arrow flush against its right border, whatever the padding. It now draws the same caret as the app's other dropdowns, 10 px in from the edge, in the theme's color, light or dark. Thanks, eialanjones! (#477)
+- **"Approve and always allow" holds after the agent reads something from outside.** Allowing a tool for good already saved it for that agent, with no expiry and for any arguments. But at the **No guardrails** level, or under a "does it alone" rule, the guard against outside content was checked before that: once the agent had read an issue, an email or a connector's result, a tool you had allowed for good asked again on every call. It now runs, as it already did at the Normal level. Thanks, FernandoBolzan, for pinning it down! (#489)
+- **The way into a thread stays on screen in a long run.** In a reply with a run taller than the window, **Reply in thread** sat at the top corner of the message and scrolled away with the first steps. It now rides the top of the run as you scroll through it. Thanks, apoapostolov! (#275)
 
 ## [0.2.33] - 2026-11-15
 
