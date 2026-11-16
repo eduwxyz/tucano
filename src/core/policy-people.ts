@@ -242,7 +242,6 @@ export const NEEDS: Record<Method, Need> = {
   setEndpoint: 'admin',
   nodeInfo: 'owner',
   setNode: 'owner',
-  rotateNodeKey: 'owner',
   addNodeFolder: 'owner',
   removeNodeFolder: 'owner',
   nodeLog: 'owner',

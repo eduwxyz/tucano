@@ -125,9 +125,8 @@ export interface Api {
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
   probeEndpoint(p: { baseUrl: string; key?: string }): Promise<{ models: string[]; error?: string }> // an OpenAI-format address tried: what it lists, or why not
   setEndpoint(p: { baseUrl: string; models: string[]; key?: string | null }): Promise<void> // saved; key undefined keeps the saved one, null removes it
-  nodeInfo(): Promise<NodeInfo> // this computer as a node of a server (core/node-server.ts)
-  setNode(p: { on: boolean; port?: number; apps?: AgentApp[] }): Promise<NodeInfo>
-  rotateNodeKey(): Promise<NodeInfo> // a new key: the server's connector needs it again
+  nodeInfo(): Promise<NodeInfo> // this computer lent to servers (core/node-server.ts, core/node-link.ts)
+  setNode(p: { apps: AgentApp[] }): Promise<NodeInfo> // the apps this computer lends the servers it's lent to
   addNodeFolder(p: { path: string }): Promise<NodeInfo> // lends a folder to the server's agents; throws why not (outside home, Library, a dot folder, Tucano's data)
   removeNodeFolder(p: { path: string }): Promise<NodeInfo>
   nodeLog(p: { limit?: number }): Promise<NodeLogEntry[]> // what the server ran here, newest first (up to 500)
@@ -239,6 +238,7 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 
 export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
+  | { type: 'node'; info: NodeInfo } // this computer's lines to the servers it's lent to, as they change
   | { type: 'message'; message: Message }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
@@ -264,7 +264,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

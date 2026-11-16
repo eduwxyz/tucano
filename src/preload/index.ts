@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('tucano', {
     open: (id: string): void => ipcRenderer.send('servers:open', id),
     local: (): void => ipcRenderer.send('servers:local'),
     forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
+    setNode: (id: string, on: boolean): void => ipcRenderer.send('servers:node', id, on),
     // Returns how to stop listening: each screen showing the list listens while it's open.
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()

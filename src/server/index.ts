@@ -20,6 +20,7 @@ import { Forwarder, isPrivate } from './forward'
 import { ARTIFACT_CSP, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
+import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { applyRestore } from '../core/restore'
@@ -113,6 +114,8 @@ function ask<T>(msg: Record<string, unknown>, timeoutMs = 10_000): Promise<T | u
     toCore({ ...msg, id })
   })
 }
+// Computers lent to this server (shared/node-link.ts): each link's port goes to the core, as a page's does.
+const nodeLinks = new NodeLinkHttp((data, port) => toCore(data, [port as unknown as Port]))
 const signins = new Signins((key) => ask<Person | { removed: true } | undefined>({ type: 'auth', key }))
 const grants = new Grants((person, what) => ask<boolean>({ type: 'access', person, ...what }))
 
@@ -135,6 +138,9 @@ function fromCore(msg: CoreRequest): void {
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
+  // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
+  // computer calls again in a moment, with its key checked anew: a removed one is turned away.
+  if ((msg.type === 'person-removed' || msg.type === 'person-changed') && msg.id) nodeLinks.closeAll(msg.id)
   if (personNotice(msg, { signins, grants, viewers, streams })) return
   // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
@@ -427,6 +433,9 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     req.pipe(out).on('finish', () => !res.headersSent && res.writeHead(200, { ...BASE_HEADERS, 'content-type': 'application/json' }).end(JSON.stringify({ path })))
     return
   }
+
+  // A computer lent to this server, calling in with its own key (shared/node-link.ts).
+  if (nodeLinks.handles(url)) return nodeLinks.handle(req, res, url, who, BASE_HEADERS)
 
   if (url.pathname === '/events') {
     // Once the line is closed (the person removed, a device disconnected), a late answer goes nowhere.

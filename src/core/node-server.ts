@@ -2,26 +2,20 @@
 // reach this machine's terminal and files the way they reach any connector, so a Tucano on a VPS
 // keeps every agent synced and still works on the computers where the person's apps and files are.
 //
-// It's an MCP server over HTTP, on a port of this computer, that answers only a bearer key the
-// person copies into the server's connector (Settings › Servers › This computer as a node). It
-// listens on 127.0.0.1 by default: the way in from the server is a private network in front of it
-// (`tailscale serve`), never the open internet. The tools run as the person, with what's installed
-// here, through the same MacComputer an agent "on your computer" uses; on the server, a command is
-// judged like one on this computer (shellActions), so the autonomy and approvals are the same.
+// It's an MCP server the app serves over the line it opens to each server it's lent to (core/node-link.ts):
+// this computer calls out, so nothing listens here and no port is open. The tools run as the person, with
+// what's installed here, through the same MacComputer an agent "on your computer" uses; on the server, a
+// command is judged like one on this computer (shellActions), so the autonomy and approvals are the same.
 //
 // What the server can't loosen, the node says in each tool's _meta (META_FLOOR, META_HIGH_RISK): a
 // command or a file write is at least a write, a tool the owner marked high risk here stays so there.
 // The file tools reach only the folders the owner lends (and the node's own working folder), never a
 // credentials folder or Tucano's data, and never write what runs later (.git, a shell profile). Every
 // call is kept in a log here (NodeLog), for the owner to read what the server ran.
-import { timingSafeEqual } from 'node:crypto'
-import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js'
 import { L } from '../shared/lang'
 import type { Agent, AgentApp, ConnectorStatus, ConnectorTool, NodeLogEntry, ToolClass } from '../shared/types'
@@ -135,21 +129,7 @@ const approvedTool = (): Tool => ({
   _meta: meta('sensitive')
 })
 
-const sameKey = (a: string, b: string): boolean => {
-  const x = Buffer.from(a)
-  const y = Buffer.from(b)
-  return x.length === y.length && timingSafeEqual(x, y)
-}
-
-export interface NodeOptions {
-  port: number // 0: any free port (tests)
-  host?: string // 127.0.0.1 unless the person chose a private address
-  key: string
-}
-
 export class NodeServer {
-  private http: HttpServer | null = null
-  private listening = 0
 
   constructor(
     private mac: Pick<MacComputer, 'call' | 'cwd'>,
@@ -191,55 +171,12 @@ export class NodeServer {
       })
   }
 
-  get port(): number {
-    return this.listening
-  }
-
-  get running(): boolean {
-    return !!this.http
-  }
-
-  async start(opts: NodeOptions): Promise<number> {
-    await this.stop()
-    const http = createServer((req, res) => {
-      void this.handle(req, res, opts.key).catch((e: unknown) => {
-        console.error('[node]', e)
-        if (!res.headersSent) res.writeHead(500).end()
-      })
-    })
-    await new Promise<void>((resolve, reject) => {
-      http.once('error', reject)
-      http.listen(opts.port, opts.host ?? '127.0.0.1', () => resolve())
-    })
-    this.http = http
-    this.listening = (http.address() as AddressInfo).port
-    return this.listening
-  }
-
-  async stop(): Promise<void> {
-    const http = this.http
-    this.http = null
-    this.listening = 0
-    if (!http) return
-    http.closeAllConnections()
-    await new Promise<void>((resolve) => http.close(() => resolve()))
-  }
-
-  private async handle(req: IncomingMessage, res: ServerResponse, key: string): Promise<void> {
-    const url = new URL(req.url ?? '/', 'http://node')
-    if (url.pathname !== '/mcp') return void res.writeHead(404).end()
-    const given = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1] ?? ''
-    if (!key || !sameKey(given, key)) return void res.writeHead(401, { 'www-authenticate': 'Bearer' }).end()
+  // An MCP server with this node's tools, for one line to a server (core/node-link.ts makes one per link).
+  mcp(): Server {
     const server = new Server({ name: 'tucano-node', version: '1.0.0' }, { capabilities: { tools: {} } })
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: this.tools() }))
     server.setRequestHandler(CallToolRequestSchema, async (r) => this.call(r.params.name, (r.params.arguments ?? {}) as Record<string, unknown>))
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
-    res.on('close', () => {
-      void transport.close()
-      void server.close()
-    })
-    await server.connect(transport)
-    await transport.handleRequest(req, res)
+    return server
   }
 
   // Each call the server makes, kept in the log here with what it asked and how it ended.

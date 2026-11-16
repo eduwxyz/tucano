@@ -1,18 +1,16 @@
-// This computer as a node of a server's Tucano: an MCP server over HTTP that only answers its key, and
-// runs the server's calls here, as the person (docs/local-node.md). Through a real MCP client.
+// This computer as a node of a server's Tucano: an MCP server that runs the server's calls here, as the
+// person (docs/local-node.md). Through a real MCP client, in memory; the line itself is node-link.test.ts.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { MacComputer } from '../src/core/mac'
 import { NODE_APPROVED, NODE_BASH, NODE_TOOLS, NodeLog, NodeServer, onlyHere, summary, type NodeReach } from '../src/core/node-server'
 import { META_FLOOR, META_HIGH_RISK } from '../src/shared/classify'
 import { shellActions } from '../src/shared/actions'
-import { ConnectorManager } from '../src/core/connectors'
-import { plainCipher, Secrets } from '../src/core/secrets'
 
 let dir: string // Tucano's data
 let lent: string // a folder the person lent
@@ -20,7 +18,6 @@ let outside: string // one they didn't
 let db: Db
 let node: NodeServer
 let log: NodeLog
-const KEY = 'k'.repeat(48)
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'tucano-node-'))
@@ -30,22 +27,23 @@ beforeEach(() => {
   log = new NodeLog(join(dir, 'node', 'log.jsonl'))
   node = new NodeServer(new MacComputer({ db, dataDir: dir, emit: () => {}, env: async () => process.env }), { folders: () => [lent], dataDir: dir, log })
 })
-afterEach(async () => {
-  await node.stop()
+afterEach(() => {
   db.close()
 })
 
-const client = async (port: number, key: string): Promise<Client> => {
+// The server's side of one line to this node.
+const client = async (n: NodeServer = node): Promise<Client> => {
+  const [here, there] = InMemoryTransport.createLinkedPair()
+  await n.mcp().connect(here)
   const c = new Client({ name: 'server', version: '1' })
-  await c.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${key}` } } }))
+  await c.connect(there)
   return c
 }
 const text = (r: unknown): string => ((r as { content: { type: string; text?: string }[] }).content.find((b) => b.type === 'text')?.text ?? '')
 
 describe('this computer as a node', () => {
   it("lists its tools and runs the server's calls here: a command, a file written and read back", async () => {
-    const port = await node.start({ port: 0, key: KEY })
-    const c = await client(port, KEY)
+    const c = await client()
     const { tools } = await c.listTools()
     expect(tools.map((t) => t.name).sort()).toEqual([...NODE_TOOLS].sort())
     expect(tools.find((t) => t.name === 'node_read_file')?.annotations?.readOnlyHint).toBe(true)
@@ -148,32 +146,9 @@ describe('this computer as a node', () => {
     expect(tools.get('node_edit_file')?._meta?.[META_FLOOR]).toBe('write')
   })
 
-  it('answers only its key, and stops answering when turned off', async () => {
-    const port = await node.start({ port: 0, key: KEY })
-    await expect(client(port, 'wrong')).rejects.toThrow()
-    await expect(client(port, '')).rejects.toThrow()
-    await node.stop()
-    expect(node.running).toBe(false)
-    await expect(client(port, KEY)).rejects.toThrow()
-  })
-
   it('a command on a node is judged like one on this computer: reading asks nothing, a push is a push', () => {
     expect(shellActions('git status && ls -la')).toEqual([])
     expect(shellActions('git push origin main')).toContain('push')
-  })
-
-  it("is a connector like any other for a server's Tucano: added with its key, its tools listed, a command run", async () => {
-    const port = await node.start({ port: 0, key: KEY })
-    const server = new Db(join(dir, 'server.db'))
-    const connectors = new ConnectorManager({ db: server, secrets: new Secrets(server, plainCipher), emit: () => {}, openUrl: () => {}, oauthCallbackUrl: () => 'http://127.0.0.1:1/cb' })
-    const id = await connectors.add({ name: 'Windows do Jaques', kind: 'remote', url: `http://127.0.0.1:${port}/mcp`, auth: 'token', token: KEY })
-    await connectors.connect(id)
-    expect(connectors.get(id)!.status).toBe('connected')
-    expect(connectors.get(id)!.tools.map((t) => t.name)).toContain(NODE_BASH)
-    const r = await connectors.call(id, NODE_BASH, { command: 'echo pelo-servidor' })
-    expect(text(r)).toContain('pelo-servidor')
-    await connectors.closeAll()
-    server.close()
   })
 
   it("offers this computer's connectors, browser and lent apps, each tool in the class the server asks by", async () => {
@@ -209,8 +184,7 @@ describe('this computer as a node', () => {
       apps: { tools: () => [], call: async () => ({ result: { content: [] } }), approved: () => ({ ok: true, text: '' }), lent: () => [] }
     }
     const rich = new NodeServer(new MacComputer({ db, dataDir: dir, emit: () => {}, env: async () => process.env }), reach)
-    const port = await rich.start({ port: 0, key: KEY })
-    const c = await client(port, KEY)
+    const c = await client(rich)
     const { tools } = await c.listTools()
     const byName = new Map(tools.map((t) => [t.name, t]))
     expect(byName.get('premiere_pro__export_sequence')?.annotations).toEqual({ readOnlyHint: false })
@@ -240,7 +214,6 @@ describe('this computer as a node', () => {
     expect(text(done)).toBe('Clicou em Comprar.')
     expect(approved).toEqual([{ alvo: 'Comprar' }])
     await c.close()
-    await rich.stop()
   })
 
   it('lends only what exists on this computer alone', () => {

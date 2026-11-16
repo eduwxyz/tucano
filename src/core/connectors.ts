@@ -17,6 +17,7 @@ import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
 import { floorOf, saysHighRisk } from '../shared/classify'
+import { nodeOf } from '../shared/node-link'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
@@ -464,6 +465,11 @@ export class ConnectorManager {
   private async doConnect(id: string, interactive: boolean): Promise<void> {
     const c = this.deps.db.connector(id)
     if (!c) return
+    // A computer lent to this server calls in by itself (attachNode): there's nowhere to call it at.
+    if (nodeOf(c.url)) {
+      if (!this.live.get(id)?.client) this.setStatus(id, 'disconnected')
+      return
+    }
     await this.disconnect(id)
     this.setStatus(id, 'connecting')
 
@@ -588,6 +594,42 @@ export class ConnectorManager {
         l.client = undefined
         this.setStatus(id, 'disconnected')
         this.reconnectLater(id)
+      }
+    }
+    try {
+      await this.refreshTools(id)
+      this.setStatus(id, 'connected')
+    } catch (e) {
+      this.setStatus(id, 'error', e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  // A computer lent to this server called in (core/node-link.ts): its connector connects over that line, in
+  // place of one it had, and goes back to disconnected when the computer hangs up (it calls again by itself).
+  async attachNode(id: string, transport: Transport): Promise<void> {
+    if (!nodeOf(this.deps.db.connector(id)?.url)) throw new Error('not a computer')
+    await this.disconnect(id)
+    this.setStatus(id, 'connecting')
+    const client = new Client({ name: 'tucano', version: '0.1.0' }, { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } })
+    try {
+      await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS })
+    } catch (e) {
+      await client.close().catch(() => {})
+      this.setStatus(id, 'disconnected', e instanceof Error ? e.message : String(e))
+      return
+    }
+    const l = this.live.get(id)!
+    l.client = client
+    l.transport = transport
+    l.failures = 0
+    // After the SDK's own (which fails the calls under way at once, instead of at their timeout).
+    const sdk = transport.onclose
+    transport.onclose = () => {
+      sdk?.()
+      if (this.live.get(id)?.client === client) {
+        l.client = undefined
+        l.transport = undefined
+        this.setStatus(id, 'disconnected')
       }
     }
     try {

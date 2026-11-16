@@ -31,6 +31,6 @@ Variáveis: `TUCANO_DATA` (a pasta de dados, `~/.tucano-server` por padrão), `T
 - Conector com OAuth: a autorização abre no seu navegador; ao terminar, você cola o endereço em que a página parou.
 - Escolher uma pasta pede o caminho dela no servidor.
 - A wiki pode usar o seu cofre do Obsidian guardado num repositório git: **Ajustes da wiki** › **Sincronizar com git**. Veja **wiki-git**.
-- Apps do computador não existem no servidor (não há tela).
+- Apps do computador não existem no servidor (não há tela). Pra os agentes de lá usarem o seu computador (terminal, pastas, navegador e apps), no app do computador ligue **Configurações › Servidores** › **Deixar este servidor usar este computador**. Só quando trabalham pra você, com as aprovações do servidor.
 - Um Tucano por pasta de dados: não rode o app e o servidor na mesma pasta ao mesmo tempo.
 - Um servidor é um workspace só (o da pasta de dados).

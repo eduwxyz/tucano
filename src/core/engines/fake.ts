@@ -114,6 +114,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
         // A thank-you that mentions someone: the hand-off screening lets no one answer it.
         reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
+      } else if (turn.mcpUrl && /^rode no computador: (.+)/i.test(last)) {
+        // A command on a computer lent to this server (core/node-link.ts), for trying the line end to end.
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'node_bash'), { command: /^rode no computador: (.+)/i.exec(last)![1]! })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'list_tasks'), {})
         reply = `Suas tarefas:\n\n${textOf(r)}`

@@ -1,4 +1,5 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { UplinkStatus } from './node-link'
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
@@ -479,7 +480,7 @@ export interface EndpointSettings {
 }
 
 export interface Settings {
-  node?: { on: boolean; port: number; apps?: AgentApp[]; folders?: string[] } // this computer as a node of a server's Tucano (core/node-server.ts), the apps and the folders it lends
+  node?: { apps?: AgentApp[]; folders?: string[]; device?: string } // this computer lent to servers' Tucanos (core/node-server.ts): the apps and folders it lends, and its id there
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
@@ -1135,15 +1136,11 @@ export interface Skill {
   updatedAt: number
 }
 
-// This computer as a node: whether it listens, where, and its key (the owner's, to copy into the server).
+// This computer lent to servers' Tucanos: what it lends, and how each server's line is doing.
 export interface NodeInfo {
-  on: boolean
-  running: boolean
-  port: number
-  apps: AgentApp[] // the apps the node lends the server's agents
-  folders: string[] // the folders it lends: the server's file tools reach only these (absolute, real paths)
-  key?: string
-  error?: string // why it couldn't listen (the port is taken)
+  apps: AgentApp[] // the apps the node lends the servers' agents
+  folders: string[] // the folders it lends: the servers' file tools reach only these (absolute, real paths)
+  links: UplinkStatus[] // one per server it's lent to (Settings › Servers)
 }
 
 // One call the server made on this computer as a node, kept here for the owner to read (newest first).

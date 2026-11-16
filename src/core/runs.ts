@@ -5,6 +5,7 @@ import { L, locale } from '../shared/lang'
 import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
 import { NODE_APPROVED, NODE_BASH } from './node-server'
+import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
@@ -1300,7 +1301,14 @@ export class Runner {
     // What a connector tool does when the turn starts, for its description (nothing from outside read yet).
     const judged = (t: ConnectorTool, connectorId: string, outside = false): Verdict =>
       verdict({ cls: t.cls, kinds: kindsOf(t), p: policy, highRisk: t.highRisk, alwaysAllowed: t.cls !== 'read' && !t.highRisk && !!agent.autoApprove?.includes(`${connectorId}:${t.name}`), outside })
+    // A computer lent to this server is its person's: an agent reaches it only working for them (a routine of
+    // theirs, their DM, what they asked in a channel), never for someone else on the same server.
+    const notYours = (c: Connector): boolean => {
+      const n = nodeOf(c.url)
+      return !!n && (n.owner ?? db.ownerId()) !== requester.id
+    }
     for (const c of this.deps.connectors?.list() ?? []) {
+      if (notYours(c)) continue
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
       if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
@@ -1309,7 +1317,7 @@ export class Runner {
     // GitHub through its connector, as this turn has it: the prompt says how to publish and what waits (context.ts).
     const github = githubAccess(this.deps.connectors?.list() ?? [], agent, exposed, policy)
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
-    const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
+    const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write' && !notYours(c))
     const accessTool: ToolDef | undefined =
       this.deps.gateway && lacking.length
         ? {
@@ -2258,7 +2266,7 @@ ${note}`,
           // says what's left, instead of retrying a machine that isn't there.
           // A call that ran out of time is a slow call, not a computer that's gone: it says how long it waited.
           const timedOut = e instanceof Error && e.cause instanceof McpError && e.cause.code === ErrorCode.RequestTimeout
-          const offline = isNode && !timedOut && /não está conectado|isn't connected|não respondeu|didn't answer|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOTFOUND|fetch failed|offline/i.test(why)
+          const offline = isNode && !timedOut && /não está conectado|isn't connected|não respondeu|didn't answer|connection closed|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOTFOUND|fetch failed|offline/i.test(why)
           if (offline) {
             finish('error', L(`${hit.connector.name} está desligado ou fora da rede`, `${hit.connector.name} is off or out of the network`))
             return textResult(

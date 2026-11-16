@@ -10,14 +10,17 @@ import { AppsCard } from './Apps'
 import { call } from '../rpc'
 import { updateSettings, useStore } from '../store'
 import type { NodeInfo, NodeLogEntry } from '../../../shared/types'
+import type { UplinkStatus } from '../../../shared/node-link'
 import { FoldToggle } from './Fold'
 
-type Server = { id: string; name: string; origin: string; open: boolean }
+type Server = { id: string; name: string; origin: string; open: boolean; node: boolean }
 
 export const hasServers = (): boolean => !!window.tucano?.servers
 
 export function ServersCard(): ReactNode {
   const api = window.tucano.servers!
+  const links = useNodeInfo()?.links ?? []
+  const main = useStore((s) => s.defaultWorkspace)
   const [list, setList] = useState<Server[]>([])
   const [link, setLink] = useState('')
   const [error, setError] = useState('')
@@ -70,20 +73,23 @@ export function ServersCard(): ReactNode {
           </div>
         </div>
         {list.map((s) => (
-          <div key={s.id} className="key-row">
-            <Icon name="globe" />
-            <div className="grow">
-              <strong>{s.name}</strong>
-              <p className="muted small">{s.open ? L('Aberto numa janela', 'Open in a window') : L('Pareado com este computador', 'Paired with this computer')}</p>
+          <div key={s.id} className="server-row">
+            <div className="key-row">
+              <Icon name="globe" />
+              <div className="grow">
+                <strong>{s.name}</strong>
+                <p className="muted small">{s.open ? L('Aberto numa janela', 'Open in a window') : L('Pareado com este computador', 'Paired with this computer')}</p>
+              </div>
+              <div className="row">
+                <button className="btn btn--sm btn--primary" onClick={() => api.open(s.id)}>
+                  {s.open ? L('Mostrar', 'Show') : L('Abrir', 'Open')}
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={() => void forget(s)}>
+                  {L('Esquecer', 'Forget')}
+                </button>
+              </div>
             </div>
-            <div className="row">
-              <button className="btn btn--sm btn--primary" onClick={() => api.open(s.id)}>
-                {s.open ? L('Mostrar', 'Show') : L('Abrir', 'Open')}
-              </button>
-              <button className="btn btn--sm btn--ghost" onClick={() => void forget(s)}>
-                {L('Esquecer', 'Forget')}
-              </button>
-            </div>
+            <Lend server={s} status={links.find((l) => l.serverId === s.id)} main={main} />
           </div>
         ))}
       </Card>
@@ -158,33 +164,81 @@ export function ServerBar(): ReactNode {
   )
 }
 
-// This computer as a node of a server's Tucano (docs/local-node.md): the server's agents reach this
-// machine's terminal and files like a connector, under the approvals set on the server, not the ones here. Off by
-// default; the way in is a private network (Tailscale), with the key below.
+// What this computer lends the servers it's lent to, and how each line is doing: from the core, live.
+function useNodeInfo(): NodeInfo | null {
+  const live = useStore((s) => s.node)
+  const [first, setFirst] = useState<NodeInfo | null>(null)
+  useEffect(() => {
+    void call('nodeInfo').then(setFirst, () => {})
+  }, [])
+  return live ?? first
+}
+
+const LINK: Record<UplinkStatus['state'], { pt: string; en: string; tone: string }> = {
+  connected: { pt: 'Conectado: os agentes de lá podem usar este computador quando trabalham pra você.', en: 'Connected: its agents can use this computer when they work for you.', tone: 'is-ok' },
+  connecting: { pt: 'Conectando…', en: 'Connecting…', tone: '' },
+  refused: { pt: '', en: '', tone: 'is-bad' },
+  outdated: { pt: '', en: '', tone: 'is-bad' },
+  error: { pt: '', en: '', tone: 'is-bad' }
+}
+
+// Under a server: lend it this computer (its terminal, the folders lent below, its browser and apps), or stop.
+// Asked once, with what it means; off, the line hangs up at once.
+function Lend({ server, status, main }: { server: Server; status?: UplinkStatus; main: boolean }): ReactNode {
+  const api = window.tucano.servers!
+  const turn = async (on: boolean): Promise<void> => {
+    if (on) {
+      const ok = await confirmDialog({
+        title: L(`Deixar o Tucano em ${server.name} usar este computador?`, `Let the Tucano at ${server.name} use this computer?`),
+        body: L(
+          'Os agentes de lá passam a usar o terminal, as pastas que você emprestar, o navegador e os apps deste computador, só quando trabalham pra você, com as aprovações configuradas lá. Funciona enquanto este app estiver aberto. Desligue aqui a qualquer hora.',
+          'Its agents get to use this computer’s terminal, the folders you lend, its browser and apps, only when they work for you, under the approvals set there. It works while this app is open. Turn it off here any time.'
+        ),
+        confirm: L('Deixar usar', 'Let it')
+      })
+      if (!ok) return
+    }
+    api.setNode(server.id, on)
+  }
+  const shown = status && server.node ? LINK[status.state] : undefined
+  return (
+    <div className="server-lend">
+      <Toggle on={server.node} label={L(`Deixar ${server.name} usar este computador`, `Let ${server.name} use this computer`)} onChange={(on) => void turn(on)} />
+      <div className="grow">
+        <span className="small">{L('Deixar este servidor usar este computador', 'Let this server use this computer')}</span>
+        {server.node && !main && <p className="muted small">{L('Quem empresta é o workspace principal: as pastas e os apps estão nas Configurações dele.', 'The main workspace lends it: the folders and apps are in its Settings.')}</p>}
+        {shown && (
+          <p className={`small server-lend__state ${shown.tone}`} role={shown.tone === 'is-bad' ? 'alert' : undefined}>
+            {status!.error ?? L(shown.pt, shown.en)}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// What this computer lends the servers it's lent to (docs/local-node.md): the folders their file tools reach, the
+// apps, and a log of what they ran here. The terminal, the browser and the local connectors come along by themselves.
 export function NodeCard(): ReactNode {
+  const live = useNodeInfo()
   const [info, setInfo] = useState<NodeInfo | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const servers = useServers()
+  const main = useStore((s) => s.defaultWorkspace)
   // Once the agents live on the server, the ones here would answer and run routines a second time.
   const paused = useStore((s) => !!s.settings.paused)
   const running = useStore((s) => s.routines.filter((r) => r.enabled).length)
-  useEffect(() => {
-    void call('nodeInfo').then(setInfo, () => {})
-  }, [])
-  if (!info) return null
-  const run = (p: Promise<NodeInfo>): void => {
-    setBusy(true)
-    void p.then(setInfo, () => {}).finally(() => setBusy(false))
-  }
-  const copy = (text: string): void => void navigator.clipboard.writeText(text).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))
+  useEffect(() => setInfo(live), [live])
+  const lent = servers.filter((s) => s.node)
+  if (!info || !main || !lent.length) return null
   return (
     <Card
-      title={L('Este computador como nó', 'This computer as a node')}
-      lead={L('Os agentes de um Tucano num servidor usam o terminal, os arquivos, os conectores, o navegador e os apps deste computador, seguindo as aprovações configuradas no servidor, não as daqui.', "The agents of a Tucano on a server use this computer's terminal, files, connectors, browser and apps, following the approvals set on the server, not the ones here.")}
-      action={<Toggle on={info.on} disabled={busy} label={L('Este computador como nó', 'This computer as a node')} onChange={(on) => run(call('setNode', { on }))} />}
+      title={L('O que este computador empresta', 'What this computer lends')}
+      lead={L(
+        `Pra ${lent.map((s) => s.name).join(', ')}: o terminal, o navegador e os conectores deste computador vão junto; as pastas e os apps, só os de baixo. Tudo segue as aprovações configuradas no servidor.`,
+        `To ${lent.map((s) => s.name).join(', ')}: this computer’s terminal, browser and connectors come along; folders and apps, only the ones below. Everything follows the approvals set on the server.`
+      )}
     >
-      {info.error && <p className="field__error">{info.error}</p>}
-      {info.on && !paused && (
+      {!paused && (
         // No duplicates: the agents and routines that moved to the server stop here. The node keeps serving.
         <div className="node-card__twice">
           <span>
@@ -197,52 +251,16 @@ export function NodeCard(): ReactNode {
           </button>
         </div>
       )}
-      {info.on && info.running && (
-        <div className="node-card">
-          <div className="node-card__row">
-            <span className="muted small">{L('Escutando em', 'Listening on')}</span>
-            <code>http://127.0.0.1:{info.port}/mcp</code>
-          </div>
-          {info.key && (
-            <div className="node-card__row">
-              <span className="muted small">{L('Chave', 'Key')}</span>
-              <code className="node-card__key">{info.key.slice(0, 6)}…{info.key.slice(-4)}</code>
-              <button className="btn btn--sm" onClick={() => copy(info.key!)}>
-                {copied ? L('Copiada', 'Copied') : L('Copiar', 'Copy')}
-              </button>
-              <button
-                className="btn btn--sm btn--ghost"
-                disabled={busy}
-                onClick={() =>
-                  void confirmDialog({
-                    title: L('Trocar a chave?', 'Change the key?'),
-                    body: L('A chave atual para de funcionar: cole a nova no conector do servidor.', "The current key stops working: paste the new one into the server's connector."),
-                    confirm: L('Trocar a chave', 'Change the key')
-                  }).then((ok) => ok && run(call('rotateNodeKey')))
-                }
-              >
-                {L('Trocar', 'Change')}
-              </button>
-            </div>
-          )}
-          <ol className="small node-card__steps">
-            <li>
-              {L('Neste computador, com o Tailscale aberto:', 'On this computer, with Tailscale open:')} <code>tailscale serve --bg {info.port}</code>
-            </li>
-            <li>{L('No Tucano do servidor: Conectores › Adicionar personalizado › Remoto, com o endereço https://<este-computador>.<sua-rede>.ts.net/mcp e autenticação Token, colando a chave.', "In the server's Tucano: Connectors › Add custom › Remote, with the address https://<this-computer>.<your-tailnet>.ts.net/mcp and Token authentication, pasting the key.")}</li>
-            <li>{L('Dê acesso aos agentes que vão usar este computador, em Ferramentas.', 'Give access to the agents that will use this computer, under Tools.')}</li>
-          </ol>
-          <p className="node-card__twice">{L('Use tailscale serve, nunca tailscale funnel: o funnel abre este computador pra internet inteira.', 'Use tailscale serve, never tailscale funnel: funnel opens this computer to the whole internet.')}</p>
-          <NodeFolders info={info} onChange={setInfo} />
-          <NodeLog />
-          {/* The apps the server's agents may use here (Premiere, Notes…), each to read or to change: the
-              same picker as an agent's page. Its connectors and browser come with the node on their own. */}
-          <div className="node-card__apps">
-            <span className="field__label">{L('Apps que ele empresta', 'Apps it lends')}</span>
-            <AppsCard apps={info.apps} onChange={(apps) => run(call('setNode', { on: info.on, apps }))} />
-          </div>
+      <div className="node-card">
+        <NodeFolders info={info} onChange={setInfo} />
+        {/* The apps the servers' agents may use here (Premiere, Notes…), each to read or to change: the
+            same picker as an agent's page. */}
+        <div className="node-card__apps">
+          <span className="field__label">{L('Apps que ele empresta', 'Apps it lends')}</span>
+          <AppsCard apps={info.apps} onChange={(apps) => void call('setNode', { apps }).then(setInfo, () => {})} />
         </div>
-      )}
+        <NodeLog />
+      </div>
     </Card>
   )
 }
@@ -268,8 +286,8 @@ function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: Node
       <span className="field__label">{L('Pastas que ele empresta', 'Folders it lends')}</span>
       <p className="muted small">
         {folders.length
-          ? L('As ferramentas de arquivo do servidor só alcançam estas pastas. O terminal continua sendo um terminal, e passa pelas aprovações.', "The server's file tools only reach these folders. The terminal is still a terminal, and goes through approvals.")
-          : L('Nenhuma pasta: as ferramentas de arquivo do servidor não leem nem gravam nada neste computador. O terminal continua passando pelas aprovações.', "No folders: the server's file tools don't read or write anything on this computer. The terminal still goes through approvals.")}
+          ? L('As ferramentas de arquivo do servidor só alcançam estas pastas. O terminal alcança o que você alcança, com as mesmas aprovações de um agente neste computador.', "The server's file tools only reach these folders. The terminal reaches what you reach, under the same approvals as an agent on this computer.")
+          : L('Nenhuma pasta ainda: as ferramentas de arquivo do servidor não leem nem gravam nada aqui. Empreste as pastas dos seus projetos. O terminal alcança o que você alcança, com as mesmas aprovações de um agente neste computador.', "No folders yet: the server's file tools don't read or write anything here. Lend your projects' folders. The terminal reaches what you reach, under the same approvals as an agent on this computer.")}
       </p>
       {folders.length > 0 && (
         <div className="apps-list">

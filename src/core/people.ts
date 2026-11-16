@@ -355,6 +355,9 @@ export class People {
         return this.agentHidden(person, event.agent.id) ? undefined : event
       case 'people':
         return { type: 'people', people: peopleFor(person, event.people), ...(event.former ? { former: event.former } : {}) }
+      // This computer's lines to the servers it's lent to: its owner's only.
+      case 'node':
+        return person.role === 'owner' ? event : undefined
       case 'voice':
       case 'connector_removed':
       case 'skill':

@@ -1,5 +1,5 @@
 // A node (a person's computer, reached from a server's Tucano) under the server's approvals, end to end:
-// a real node over HTTP, added on the server as a connector, called by a scripted agent. What the node
+// a real node calling a real /node/link over HTTP, a connector on the server, called by a scripted agent. What the node
 // does on a risky click, a command or a file write can't get past what the same thing does on this
 // computer: a click's rule holds ("never" refuses), it's never allowed for good, and the class of a
 // command or a write can't be lowered on the server's connector card.
@@ -19,10 +19,10 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway, textResult } from '../src/core/gateway'
 import { NODE_APPROVED, NODE_BASH, NodeServer, type NodeReach } from '../src/core/node-server'
 import { Runner } from '../src/core/runs'
+import { lend, until, type Lent } from './helpers/node-link'
 import { plainCipher, Secrets } from '../src/core/secrets'
 
 const ready = { installed: true, loggedIn: true }
-const KEY = 'n'.repeat(48)
 type Plan = { tool: string; args: Record<string, unknown> } | null
 
 // A "model" that makes at most one call per turn, to the tool whose name ends with the plan's.
@@ -54,6 +54,7 @@ let db: Db // the server's
 let gateway: Gateway
 let connectors: ConnectorManager
 let node: NodeServer
+let lent: Lent
 let settings: Settings
 let nodeId: string
 let results: unknown[]
@@ -118,15 +119,15 @@ beforeEach(async () => {
     }
   }
   node = new NodeServer(mac as never, reach)
-  const port = await node.start({ port: 0, key: KEY })
 
   db = new Db(join(dir, 'server.db'))
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: () => {}, openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })
-  nodeId = await connectors.add({ name: 'Mac do Edu', kind: 'remote', url: `http://127.0.0.1:${port}/mcp`, auth: 'token', token: KEY })
-  await connectors.connect(nodeId)
+  lent = await lend({ node, db, connectors })
+  await until(() => connectors.get(lent.id() ?? '')?.status === 'connected')
+  nodeId = lent.id()!
   db.saveAgent(agent())
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
 })
@@ -134,7 +135,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await connectors.closeAll()
   await gateway.stop()
-  await node.stop()
+  await lent.stop()
   db.close()
 })
 
@@ -249,13 +250,14 @@ describe("a node's command and file write keep their class on the server", () =>
   })
 })
 
-// The server with a short call timeout (tests can't wait the real 120 s), the node added again as its connector.
+// The server with a short call timeout (tests can't wait the real 120 s), the computer lent to it again.
 async function shortTimeout(ms: number): Promise<void> {
   await connectors.closeAll()
+  await lent.stop()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: () => {}, openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback'), callTimeoutMs: ms })
-  const port = Number(new URL(db.connector(nodeId)!.url!).port)
-  nodeId = await connectors.add({ name: 'Mac do Edu 2', kind: 'remote', url: `http://127.0.0.1:${port}/mcp`, auth: 'token', token: KEY })
-  await connectors.connect(nodeId)
+  lent = await lend({ node, db, connectors })
+  await until(() => connectors.get(lent.id() ?? '')?.status === 'connected')
+  nodeId = lent.id()!
   db.saveAgent(agent({ autonomy: 'free' }))
 }
 
@@ -294,5 +296,30 @@ describe('a slow call on a node is not taken for a computer that is off', () => 
     const text = textOf(results[0])
     expect(text).not.toMatch(/desligado ou fora da rede|off or out of the network/)
     expect(text).toMatch(/não respondeu em|didn't answer in/)
+  })
+})
+
+describe("someone's computer on a team server is theirs", () => {
+  it("an agent reaches Maria's computer working for her, never working for someone else", async () => {
+    await lent.stop()
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    db.createConversation({ id: 'd-maria', kind: 'dm', name: 'a1', members: ['a1'], owner: 'maria' })
+    lent = await lend({ node, db, connectors, keys: { 'maria-key': { person: 'maria' } }, device: 'mac-maria', name: 'iMac' })
+    await until(() => connectors.get(lent.id() ?? '')?.status === 'connected')
+    nodeId = lent.id()!
+    db.saveAgent(agent({ autonomy: 'free' }))
+
+    // In the owner's DM: the tool isn't there at all.
+    const forOwner = runner(calls({ tool: NODE_BASH, args: { command: 'ls ~' } }))
+    await forOwner.send('d1', 'liste a pasta')
+    await forOwner.idle()
+    expect(textOf(results[0])).toBe(`not exposed: ${NODE_BASH}`)
+    expect(ran).toEqual([])
+
+    // In Maria's: it runs on her computer.
+    const forMaria = runner(calls({ tool: NODE_BASH, args: { command: 'ls ~' } }))
+    await forMaria.send('d-maria', 'liste a pasta')
+    await forMaria.idle()
+    expect(ran).toEqual(['ls ~'])
   })
 })
