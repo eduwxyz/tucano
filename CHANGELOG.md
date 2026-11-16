@@ -5,6 +5,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Corrigido:** agentes com modelos do **Antigravity** (Gemini Argon, Hydrogen, Flash) agora veem as imagens que você anexa. Antes eles respondiam que não conseguiam ver o print.
 > - **Novo:** **empreste o seu computador a um Tucano num servidor** (o seu ou o Tucano Pro). Em **Configurações › Servidores**, ligue **Deixar este servidor usar este computador** e empreste as pastas dos seus projetos: os agentes de lá passam a usar o terminal, os arquivos, o navegador, os apps e os conectores deste computador, com as aprovações do servidor. Não precisa abrir porta nem configurar rede: o app liga para o servidor. Num servidor com várias pessoas, um agente só alcança o seu computador quando trabalha pra você. Ideia e primeira versão do @pedrojaques99.
 > - **Novo:** uma rotina roda em **vários horários no mesmo dia**. Em **Às**, cada horário é uma pílula: **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um, e o × tira. Os dias valem pra todos, o resumo embaixo diz quantas vezes por semana, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
 > - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
@@ -21,6 +22,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **Agents on Antigravity models see attached images.** Antigravity CLI takes text only in the prompt, so Tucano left images out and told the agent to say it couldn't see them, and it did ("Não consegui ver o print que você anexou"). The CLI does pass on an image a tool returns, though: the agent is now told to open an attached image with `ver_imagem`, which the gateway already offered. Checked with gemini-4-argon-high on agy 1.5.9: it calls the tool on its own and reads the picture. With no tools (no gateway) it still says it can't see it.
 - **A "when something new shows up" routine no longer runs forever on a long list.** It remembered the last 500 ids it had seen, so a read tool that returned more than that (or a filter whose old items outlived 500 new ones) made forgotten items look new again, and each one became a full agent reply. Now every id still in the answer stays remembered, and the room left goes to the latest ones that left it.
 - **After a long sleep, a routine runs the latest time it missed.** It only looked at the first missed time, so with 9:00 and 21:30, a Mac asleep until 22:00 skipped both (9:00 was past the 12 h) and a run at 10:05 said it was due at 9:00. A "once" routine on several days that missed one by more than 12 h now waits for the next of its days instead of turning off without running.
 - **An agent that changes a routine with `substitui` can take times off.** Sending one time kept the others, because the server kept them for older clients; the tool now always sends the whole list.
