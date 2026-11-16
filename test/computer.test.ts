@@ -72,6 +72,10 @@ describe('lent folders', () => {
     expect(check('nada')).toMatch(/não existe/)
     expect(checkFolder(tmpdir(), { home, dataDir })).toMatch(/dentro da sua pasta/)
     expect(checkFolder(join(home, 'projetos'), { home, dataDir: join(home, 'projetos/app/.dados') })).toMatch(/dados do próprio/)
+    // Named: the refusal says which folder, as ~/…, so a wrong pick in the dialog is plain.
+    expect(checkFolder(join(home, '.ssh'), { home, dataDir, named: true })).toMatch(/^~\/\.ssh: .*credenciais/)
+    expect(checkFolder(home, { home, dataDir, named: true })).toMatch(/^~: .*dentro da sua pasta/)
+    expect(checkFolder(join(home, 'projetos/app'), { home, dataDir, named: true })).toBeNull()
   })
 
   it('names each folder after itself, safely and without repeats', () => {

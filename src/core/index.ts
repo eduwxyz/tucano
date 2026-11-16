@@ -1927,7 +1927,7 @@ const api: Handlers = {
   },
   // A folder lent to the server's agents: inside home, not Library, a dot folder or Tucano's data (checkFolder).
   addNodeFolder: async ({ path }) => {
-    const why = checkFolder(path, { dataDir })
+    const why = checkFolder(path, { dataDir, named: true })
     if (why) throw new UserError(why)
     const real = realpathSync(path)
     const prev = settings().node ?? { on: false, port: NODE_PORT }
