@@ -2,9 +2,10 @@ import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, normalize, sep } from 'node:path'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { homedir } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
@@ -684,10 +685,17 @@ ipcMain.on('server:update-install', (e) => {
 })
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
-ipcMain.handle('pick-folder', async (event) => {
+// `start`: where it opens, from the home folder (".hermes"); `hidden`: show folders starting with a dot.
+ipcMain.handle('pick-folder', async (event, o?: { start?: string; hidden?: boolean }) => {
   if (!fromApp(event)) return null
   const win = BrowserWindow.fromWebContents(event.sender)
-  const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
+  const start = typeof o?.start === 'string' ? resolve(homedir(), o.start) : undefined
+  const opts = {
+    title: L('Escolher pasta', 'Choose a folder'),
+    buttonLabel: L('Escolher', 'Choose'),
+    properties: (o?.hidden ? ['openDirectory', 'showHiddenFiles'] : ['openDirectory']) as ('openDirectory' | 'showHiddenFiles')[],
+    ...(start && existsSync(start) ? { defaultPath: start } : {})
+  }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
