@@ -12,7 +12,7 @@ import { basename, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
-import { errorFor } from '../shared/errors'
+import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
@@ -388,6 +388,8 @@ async function foundMcps(): Promise<FoundMcp[]> {
 // The address in OpenAI's format the agents run on with no harness, and its key (a secret: it never
 // reaches the window). Unset until someone saves one in Settings › Models.
 const ENDPOINT_SECRET = 'endpoint:key'
+// An endpoint has no program to install and no login: what a phone from before it asks of it.
+const NOTHING_TO_INSTALL = (): string => L('O endpoint não se instala nem tem login: é um endereço e uma chave, em Configurações › Modelos, no computador ou no navegador.', 'The endpoint has nothing to install and no sign-in: it’s an address and a key, in Settings › Models, on the computer or in the browser.')
 async function endpointTarget(): Promise<EndpointTarget | undefined> {
   const e = db.getSettings(DEFAULTS).endpoint
   if (!e?.baseUrl) return undefined
@@ -2458,6 +2460,7 @@ const api: Handlers = {
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex and Cline log into the app's own folders (see codexEnv, clineLoginEnv), separate from the user's.
   loginEngine: ({ engine, screen }) => {
+    if (engine === 'endpoint') throw new UserError(NOTHING_TO_INSTALL())
     // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
     const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
     if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
@@ -2526,6 +2529,7 @@ const api: Handlers = {
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
   installEngine: ({ engine }) => {
+    if (engine === 'endpoint') throw new UserError(NOTHING_TO_INSTALL())
     const r = installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install)
     // It installs in a terminal: check again until it lands, wherever the person is.
     if (r.opened) watchEngine(engine, (st) => st.installed)
