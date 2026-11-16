@@ -41,6 +41,7 @@ import { FoldToggle, useFold } from './Fold'
 import { MissionsCard, useSidebarParts } from './Missions'
 import { UpdateNote } from './Update'
 import { WorkspaceSelector } from './Workspaces'
+import { MacMark } from './MacMark'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
 
 // The wiki stays lit on any of its pages.
@@ -516,9 +517,7 @@ const AgentItem = memo(function AgentItem({ id, owner }: { id: string; owner?: s
       <span className="nav-item__label">{agent.name}</span>
       <RoleMeta role={agent.role} owner={owner} />
       {agent.computer && agent.computerKind === 'mac' && (
-        <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
-          <Icon name="laptop" size={13} />
-        </span>
+        <MacMark label={L('Roda no seu computador', 'Runs on your computer')} />
       )}
       {pct !== undefined && pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title={pct >= 1 ? L('Bateu o limite do mês', 'Hit the monthly limit') : L('Já usou mais de 80% do limite', 'Over 80% of the limit used')} />}
     </button>

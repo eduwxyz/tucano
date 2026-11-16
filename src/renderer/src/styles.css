@@ -4158,8 +4158,9 @@ table.csv th {
 }
 
 /* An agent whose computer is the user's Mac (spec §23) */
-.nav-item__mac {
+.mac-mark {
   display: inline-flex;
+  align-self: center;
   color: var(--warn);
   flex-shrink: 0;
 }

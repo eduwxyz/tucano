@@ -90,6 +90,7 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { askWay } from './OrgSectors'
+import { MacMark } from './MacMark'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
@@ -507,12 +508,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ) : (
               <span className="msg__author">{name}</span>
             )}
-            {agent?.computer && agent.computerKind === 'mac' && (
-              <span className="tag tag--warn" title={L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')}>
-                {L('no seu computador', 'on your computer')}
-              </span>
-            )}
             <span className="msg__time">{time(saidAt(message))}</span>
+            {agent?.computer && agent.computerKind === 'mac' && <MacMark label={L('No seu computador', 'On your computer')} />}
           </div>
         )}
         {/* A run is taller than the screen, so the way into the thread can't sit at its start: it rides the
