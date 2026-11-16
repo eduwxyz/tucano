@@ -3,9 +3,9 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L, locale } from '../../../shared/lang'
 import { saidAt, type Agent, type Delegation, type Message } from '../../../shared/types'
-import { agentById, isMine, messageById, openThread, useStore, type State } from '../store'
+import { agentById, isMine, openThread, useStore, type State } from '../store'
 import { safeUrl } from '../links'
-import { AgentAvatar, Icon, MeAvatar, ago } from './ui'
+import { AgentAvatar, Icon, MeAvatar, ago, time } from './ui'
 import { localLinkFor } from './LocalLink'
 
 // How a request stands, in the words people read ("under way", "done"): the line under a request and the chip on its row.
@@ -17,38 +17,13 @@ export function requestState(d: Delegation | undefined): { tone: string; text: s
   return { tone: 'is-warn', text: L('não terminou', 'did not finish') }
 }
 
-const NONE: Delegation[] = []
-const NO_REPLIES: Message[] = []
-const SHOWN = 3 // rows the strip shows before "N more"
-
-// The requests other agents made to this DM's agent that are still current (open, or ended in the last day),
-// open first, then the newest. Each opened its own thread, so none was asked inside another's.
-function activeRequests(s: State, conversationId: string): Delegation[] {
-  const conv = s.conversations.find((c) => c.id === conversationId)
-  const agentId = conv?.kind === 'dm' ? conv.members[0] : undefined
-  if (!agentId) return NONE
-  return s.delegations
-    .filter((d) => d.conversationId === conversationId && !d.threadId && d.from !== agentId)
-    .sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.createdAt - a.createdAt)
-}
-
-// The root messages the strip shows, by id: the list under it leaves them out.
-export const stripRoots = (s: State, conversationId: string): string[] => activeRequests(s, conversationId).map((d) => d.rootId)
-
-// Whether a request's root message is one of the strip's (the same filter the strip uses).
-export const inStrip = (s: State, message: Message): boolean => {
-  const id = message.run?.delegation?.id
-  return !!id && activeRequests(s, message.conversationId).some((d) => d.id === id)
-}
-
-// How a message reads in a DM: nothing for a request the strip shows, a folded row for an older one, undefined
-// for anything else (an ordinary message, or any message outside a DM).
-export function requestPlace(s: State, message: Message): 'strip' | 'row' | undefined {
+// In a DM, a request another agent made to this one reads as a folded line where it came in the conversation,
+// not as that agent talking here. Anything else (an ordinary message, or any message outside a DM): false.
+export function isRequestRow(s: State, message: Message): boolean {
   const at = message.run?.delegation
-  if (!at || at.rootId !== message.id || message.author.kind !== 'agent') return undefined
+  if (!at || at.rootId !== message.id || message.author.kind !== 'agent') return false
   const conv = s.conversations.find((c) => c.id === message.conversationId)
-  if (conv?.kind !== 'dm' || conv.members[0] === message.author.id) return undefined
-  return inStrip(s, message) ? 'strip' : 'row'
+  return conv?.kind === 'dm' && conv.members[0] !== message.author.id
 }
 
 const clock = (at: number): string => new Date(at).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -105,6 +80,7 @@ export const RequestRow = memo(function RequestRow({ message, replies }: { messa
         <span className="request-row__main">
           <span className="request-row__who">
             <b>{L(`${askerName} pediu a ${askedName}`, `${askerName} asked ${askedName}`)}</b>
+            <span className="msg__time">{time(saidAt(message))}</span>
             {state && (
               <span className={`request-note__state ${state.tone}`}>
                 <i />
@@ -140,29 +116,3 @@ export const RequestRow = memo(function RequestRow({ message, replies }: { messa
     </div>
   )
 })
-
-// At the top of a DM, outside the scroll: what other agents asked of this one and is still current.
-// Nothing when there is none.
-export function RequestStrip({ conversationId, agent, replies }: { conversationId: string; agent: Agent; replies?: Map<string, Message[]> }): ReactNode {
-  // The roots, in the order the requests come (open first, newest first): a root not loaded here is left out.
-  const roots = useStore((s) => activeRequests(s, conversationId).flatMap((d) => messageById(s, d.rootId, conversationId) ?? []))
-  const [all, setAll] = useState(false)
-  if (roots.length === 0) return null
-  const hidden = roots.length - SHOWN
-  const shown = all || hidden <= 0 ? roots : roots.slice(0, SHOWN)
-  return (
-    <section className="request-strip" aria-labelledby="request-strip-title">
-      <h2 className="request-strip__title" id="request-strip-title">{L(`Pedidos de outros agentes pra ${agent.name} · ${roots.length}`, `Requests from other agents to ${agent.name} · ${roots.length}`)}</h2>
-      <div className="request-strip__list">
-        {shown.map((m) => (
-          <RequestRow key={m.id} message={m} replies={replies?.get(m.id) ?? NO_REPLIES} />
-        ))}
-      </div>
-      {hidden > 0 && (
-        <button className="link request-strip__more" onClick={() => setAll(!all)}>
-          {all ? L('mostrar menos', 'show fewer') : hidden === 1 ? L('mais 1 pedido', '1 more request') : L(`mais ${hidden} pedidos`, `${hidden} more requests`)}
-        </button>
-      )}
-    </section>
-  )
-}

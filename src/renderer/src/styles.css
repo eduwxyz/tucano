@@ -12352,33 +12352,14 @@ button.agent-card__now:hover {
 }
 /* Requests other agents made to a DM's agent: a strip at the top of the DM, outside the scroll, and the same
    folded row for an older one in the timeline. */
-.request-strip {
-  flex: 0 0 auto;
-  max-height: 45%;
-  overflow-y: auto;
-  padding: 10px 20px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-.request-strip__title {
-  margin: 0 0 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-3);
-}
-.request-strip__list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.request-strip__more {
-  margin-top: 6px;
-  font-size: 12.5px;
-}
+/* In the conversation it keeps the messages' column: their width and their side padding. */
 .messages > .request-row {
-  max-width: 812px;
+  width: calc(100% - 56px);
+  max-width: 804px;
   margin: 6px auto;
+}
+.request-row__who .msg__time {
+  flex: none;
 }
 .request-row {
   container-type: inline-size;
