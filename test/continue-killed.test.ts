@@ -45,7 +45,7 @@ function runner(): Runner {
     },
     codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'),
     antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'),
-    cline: fakeEngine('cline'), hermes: fakeEngine('hermes')
+    cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint')
   }
   const workDir = mkdtempSync(join(tmpdir(), 'ad-cut-'))
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir, gateway })
@@ -59,7 +59,7 @@ beforeEach(async () => {
   turns = []
   settings = {
     workspaceName: 'Edu', context: '',
-    engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready },
+    engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready },
     routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1_000_000, approvalTtlHours: 24,
     theme: 'system', language: 'en'
   }

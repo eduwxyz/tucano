@@ -14,6 +14,7 @@ import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser 
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { extractFile } from './wiki-extract'
+import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
@@ -253,6 +254,8 @@ function cleanAnswer(question: Decision, raw: Answer): Answer | undefined {
 export const QUESTION_DEADLINE_HOURS = 4
 
 export interface RunnerDeps {
+  // The web, for agents with no harness's own (an endpoint): a search and a page read (src/core/web-tools.ts).
+  web?: { search: (query: string, count: number) => Promise<WebResult[]>; read: (url: string) => Promise<string> }
   db: Db
   engines: Record<EngineId, Engine>
   settings: () => Promise<Settings> // resolves once engine detection is done
@@ -1368,6 +1371,8 @@ ${note}`,
       }
     }
     const canReadFiles = !!this.deps.gateway && filed.length > 0
+    // On an endpoint there's no harness to search the web: the app's own search and page read, for an agent with Web on.
+    const ownWeb = !!this.deps.gateway && !!agent.web && engineId === 'endpoint'
     // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
     const ownTools: ToolDef[] = [
@@ -1386,7 +1391,8 @@ ${note}`,
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
-      ...(wiki ? WIKI_TOOLS : [])
+      ...(wiki ? WIKI_TOOLS : []),
+      ...(ownWeb ? WEB_TOOLS : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
     const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
@@ -1590,6 +1596,33 @@ ${note}`,
           answeredUp = true
           addSteps({ id: randomUUID(), label: L(`Respondeu a ${who}`, `Answered ${who}`), detail: snip(answer, 120), status: 'done' })
           return textResult(L(`Resposta entregue a ${who}, que continua o pedido [${codeOf(d)}]. O resultado volta pra você. Se não há mais nada a dizer a ${settings.workspaceName}, encerre sem texto.`, `Answer delivered to ${who}, who goes on with request [${codeOf(d)}]. The result comes back to you. If there is nothing else to tell ${settings.workspaceName}, end with no text.`))
+        }
+
+        if (name === BUSCAR_NA_WEB.name && ownWeb) {
+          const query = typeof args['busca'] === 'string' ? args['busca'].trim() : ''
+          if (!query) return textResult(L('Diga o que buscar em "busca".', 'Say what to search for in "busca".'), true)
+          const count = typeof args['quantos'] === 'number' ? args['quantos'] : 6
+          try {
+            const found = await (this.deps.web?.search ?? ((q: string, n: number) => searchWeb(q, n)))(query, count)
+            addSteps({ id: randomUUID(), label: L('Buscou na web', 'Searched the web'), detail: `${query} · ${found.length}`, status: 'done' })
+            return textResult(formatResults(query, found))
+          } catch (e) {
+            addSteps({ id: randomUUID(), label: L('Buscou na web', 'Searched the web'), detail: query, status: 'error' })
+            return textResult(L(`A busca falhou: ${e instanceof Error ? e.message : String(e)}`, `The search failed: ${e instanceof Error ? e.message : String(e)}`), true)
+          }
+        }
+
+        if (name === LER_PAGINA.name && ownWeb) {
+          const url = typeof args['url'] === 'string' ? args['url'].trim() : ''
+          if (!url) return textResult(L('Diga o endereço em "url".', 'Say the address in "url".'), true)
+          try {
+            const page = await (this.deps.web?.read ?? readPage)(url)
+            addSteps({ id: randomUUID(), label: L('Leu a página', 'Read the page'), detail: url, status: 'done' })
+            return textResult(page)
+          } catch (e) {
+            addSteps({ id: randomUUID(), label: L('Leu a página', 'Read the page'), detail: url, status: 'error' })
+            return textResult(L(`Não consegui ler a página: ${e instanceof Error ? e.message : String(e)}`, `I couldn't read the page: ${e instanceof Error ? e.message : String(e)}`), true)
+          }
         }
 
         if (name === LER_GUIA.name && helps) {

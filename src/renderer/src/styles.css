@@ -4968,6 +4968,49 @@ table.csv th {
   font-size: 12.5px;
   user-select: all;
 }
+/* Your own endpoint: the address and key, then the models it lists, to tick. */
+.endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.endpoint__presets,
+.endpoint__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.endpoint__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.endpoint__filter {
+  max-width: 220px;
+}
+.endpoint__models {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 2px 12px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.endpoint__model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  min-width: 0;
+}
+.endpoint__model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .harness__test {
   display: flex;
   gap: 8px;

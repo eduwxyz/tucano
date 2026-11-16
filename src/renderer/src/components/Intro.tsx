@@ -547,7 +547,7 @@ function ConnectAi({ name, onBack, onNext }: { name: string; onBack: () => void;
             <Plans engines={engines} chosen={chosen} setup={setup} begin={begin} cancel={() => (cancelSetup(), setChosen(null))} models={models} listed={listed} onNext={onNext} />
           )}
           <button className="intro-link" onClick={() => setMode('advanced')}>
-            {L('Uso chave de API, gateway da empresa ou outro programa', 'I use an API key, a company gateway or another program')}
+            {L('Uso OpenRouter, Ollama, chave de API, gateway da empresa ou outro programa', 'I use OpenRouter, Ollama, an API key, a company gateway or another program')}
           </button>
         </div>
       </section>
@@ -989,7 +989,7 @@ function Advanced({ models, setModels, onBack, onNext }: { models: { router: str
       <aside className="intro-side intro-side--teal">
         <TucaHead />
         <Bubble>{L('Sem problema. O Tucano usa o Claude Code, o Codex, o OpenCode e outros do jeito que você configurou: no plano, no gateway da empresa ou com os seus provedores.', 'No problem. Tucano uses Claude Code, Codex, OpenCode and others the way you set them up: on a plan, your company’s gateway or your providers.')}</Bubble>
-        <Bubble>{L('Ele só lê essa configuração. Nunca vê nem guarda as suas senhas e chaves.', 'It only reads that setup. It never sees or stores your passwords and keys.')}</Bubble>
+        <Bubble>{L('Ele só lê essa configuração. Ou, sem instalar nada, cole o endereço de um endpoint (OpenRouter, OmniRoute, Ollama) e a chave dele: ela fica guardada cifrada aqui.', 'It only reads that setup. Or, with nothing to install, paste the address of an endpoint (OpenRouter, OmniRoute, Ollama) and its key: it’s kept here, encrypted.')}</Bubble>
       </aside>
       <section className="intro__main intro__main--scroll">
         <Top at={1} onBack={onBack} />
