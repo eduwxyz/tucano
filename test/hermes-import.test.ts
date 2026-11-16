@@ -2,7 +2,7 @@
 // ~/.hermes laid out the way Hermes writes it.
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { applyForeignTeam, IMPORT_CAPS } from '../src/core/agent-import'
@@ -128,8 +128,8 @@ describe('Hermes import: reading the folder', () => {
 
   it('reads $HERMES_HOME, and a profile folder there points back to its root', () => {
     expect(hermesRoot({}, '/Users/x')).toBe(join('/Users/x', '.hermes'))
-    expect(hermesRoot({ HERMES_HOME: '/opt/hermes' }, '/Users/x')).toBe('/opt/hermes')
-    expect(hermesRoot({ HERMES_HOME: '/Users/x/.hermes/profiles/coder' }, '/Users/x')).toBe('/Users/x/.hermes')
+    expect(hermesRoot({ HERMES_HOME: '/opt/hermes' }, '/Users/x')).toBe(resolve('/opt/hermes'))
+    expect(hermesRoot({ HERMES_HOME: '/Users/x/.hermes/profiles/coder' }, '/Users/x')).toBe(resolve('/Users/x/.hermes'))
   })
 
   it('says, in the person’s words, when the folder is not Hermes’s', () => {
@@ -160,11 +160,17 @@ describe('Hermes import: reading the folder', () => {
     expect(notes).toMatch(/4 memórias além de 40|4 memories beyond 40/)
   })
 
-  it('does not follow a link out of the Hermes folder', () => {
+  it('does not follow a link out of the Hermes folder', (ctx) => {
     const outside = mkdtempSync(join(tmpdir(), 'outside-'))
     writeFileSync(join(outside, 'secret.md'), SECRET)
     const root = folder({ 'memories/MEMORY.md': 'x' })
-    symlinkSync(join(outside, 'secret.md'), join(root, 'SOUL.md'))
+    try {
+      symlinkSync(join(outside, 'secret.md'), join(root, 'SOUL.md'))
+    } catch (e) {
+      // Windows without Developer Mode can't make links: only there, skip; everywhere else it must run.
+      if (process.platform === 'win32' && (e as NodeJS.ErrnoException).code === 'EPERM') return ctx.skip()
+      throw e
+    }
     mkdirSync(join(root, 'skills', 'linked'), { recursive: true })
     symlinkSync(join(outside, 'secret.md'), join(root, 'skills', 'linked', 'SKILL.md'))
     const r = readHermes(root)
