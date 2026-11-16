@@ -479,7 +479,7 @@ export interface EndpointSettings {
 }
 
 export interface Settings {
-  node?: { on: boolean; port: number; apps?: AgentApp[] } // this computer as a node of a server's Tucano (core/node-server.ts), and the apps it lends
+  node?: { on: boolean; port: number; apps?: AgentApp[]; folders?: string[] } // this computer as a node of a server's Tucano (core/node-server.ts), the apps and the folders it lends
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
@@ -776,6 +776,8 @@ export interface ConnectorTool {
   enabled: boolean
   highRisk: boolean
   isNew: boolean // appeared after the first sync; starts disabled until reviewed
+  floor?: ToolClass // the server says it's at least this (a node's command or file write): the class can't go below it
+  lockedHighRisk?: boolean // the server marks it high risk (a computer's owner did, on a node): it can't be unmarked here
 }
 
 export type ConnectorAuth = 'none' | 'token' | 'oauth'
@@ -1139,8 +1141,19 @@ export interface NodeInfo {
   running: boolean
   port: number
   apps: AgentApp[] // the apps the node lends the server's agents
+  folders: string[] // the folders it lends: the server's file tools reach only these (absolute, real paths)
   key?: string
   error?: string // why it couldn't listen (the port is taken)
+}
+
+// One call the server made on this computer as a node, kept here for the owner to read (newest first).
+export interface NodeLogEntry {
+  at: number // when it started (ms)
+  tool: string // node_bash, node_read_file, navegador_clicar, premiere_pro__export…
+  summary: string // the command, the path, or the arguments, cut short and with secrets masked
+  ok: boolean
+  ms: number
+  error?: string // why it failed or was refused (outside the lent folders…)
 }
 
 // A skill already on this Mac (Claude Code, its plugins, Codex), that can be linked.

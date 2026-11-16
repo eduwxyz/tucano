@@ -16,6 +16,7 @@ import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connect
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
+import { floorOf, saysHighRisk } from '../shared/classify'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
@@ -624,7 +625,7 @@ export class ConnectorManager {
     do {
       const page = await client.listTools(cursor ? { cursor } : undefined)
       for (const t of page.tools) {
-        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t) })
+        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
       }
       cursor = page.nextCursor
     } while (cursor)

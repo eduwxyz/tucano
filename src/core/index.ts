@@ -5,7 +5,7 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join, resolve, sep } from 'node:path'
@@ -74,7 +74,7 @@ import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { loginEnv, MacComputer } from './mac'
-import { NodeServer } from './node-server'
+import { NodeLog, NodeServer } from './node-server'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
@@ -835,10 +835,14 @@ const computers = new Computers({ db, dataDir, emit, shoot })
 // Its key is a secret; the port and on/off are settings. Not in server mode: a server is the one calling.
 const NODE_KEY = 'node:key'
 const NODE_PORT = 7441
+const nodeLog = new NodeLog(join(dataDir, 'node', 'log.jsonl'))
 const nodeServer = new NodeServer(new MacComputer({ db, dataDir, emit, shoot }), {
   connectors: { list: () => connectors.list(), tools: (id) => db.tools(id), call: (id, name, args) => connectors.call(id, name, args) },
   browser: { tools: browserTools, call: (agent, name, args, ctx) => browser.call(agent, name, args, ctx), approved: (agent, args) => browser.approved(agent, args) },
-  apps: { tools: appTools, call: (agent, name, args) => desktopApps.call(agent, name, args), approved: (agent, args) => desktopApps.approved(agent, args), lent: () => settings().node?.apps ?? [] }
+  apps: { tools: appTools, call: (agent, name, args) => desktopApps.call(agent, name, args), approved: (agent, args) => desktopApps.approved(agent, args), lent: () => settings().node?.apps ?? [] },
+  folders: () => settings().node?.folders ?? [],
+  dataDir,
+  log: nodeLog
 })
 let nodeError: string | undefined
 async function nodeKey(fresh = false): Promise<string> {
@@ -850,7 +854,7 @@ async function nodeKey(fresh = false): Promise<string> {
 }
 async function nodeInfo(): Promise<NodeInfo> {
   const n = settings().node ?? { on: false, port: NODE_PORT }
-  return { on: n.on, port: n.port, apps: n.apps ?? [], running: nodeServer.running, key: n.on ? await nodeKey() : undefined, ...(nodeError ? { error: nodeError } : {}) }
+  return { on: n.on, port: n.port, apps: n.apps ?? [], folders: n.folders ?? [], running: nodeServer.running, key: n.on ? await nodeKey() : undefined, ...(nodeError ? { error: nodeError } : {}) }
 }
 async function applyNode(): Promise<void> {
   const n = settings().node
@@ -1911,7 +1915,7 @@ const api: Handlers = {
   nodeInfo: () => nodeInfo(),
   setNode: async ({ on, port, apps }) => {
     const prev = settings().node ?? { on: false, port: NODE_PORT }
-    const next = { on, port: port && port > 1024 && port < 65536 ? Math.round(port) : prev.port, apps: apps ?? prev.apps ?? [] }
+    const next = { ...prev, on, port: port && port > 1024 && port < 65536 ? Math.round(port) : prev.port, apps: apps ?? prev.apps ?? [] }
     db.setSettings({ node: next })
     await applyNode()
     return nodeInfo()
@@ -1921,6 +1925,22 @@ const api: Handlers = {
     await applyNode()
     return nodeInfo()
   },
+  // A folder lent to the server's agents: inside home, not Library, a dot folder or Tucano's data (checkFolder).
+  addNodeFolder: async ({ path }) => {
+    const why = checkFolder(path, { dataDir })
+    if (why) throw new UserError(why)
+    const real = realpathSync(path)
+    const prev = settings().node ?? { on: false, port: NODE_PORT }
+    const folders = prev.folders ?? []
+    if (!folders.includes(real)) db.setSettings({ node: { ...prev, folders: [...folders, real] } })
+    return nodeInfo()
+  },
+  removeNodeFolder: async ({ path }) => {
+    const prev = settings().node ?? { on: false, port: NODE_PORT }
+    db.setSettings({ node: { ...prev, folders: (prev.folders ?? []).filter((f) => f !== path) } })
+    return nodeInfo()
+  },
+  nodeLog: async ({ limit }) => nodeLog.read(limit ?? 100),
   setJevKey: async ({ key }) => {
     const k = key?.trim()
     if (k) await checkJevKey(k)

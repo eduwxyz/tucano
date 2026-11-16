@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
-import { NODE_BASH } from './node-server'
+import { NODE_APPROVED, NODE_BASH } from './node-server'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
@@ -2144,11 +2144,17 @@ ${note}`,
         const always = cls !== 'read' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
         // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
         const inner = perCall ? innerActions(current.name, callArgs) : undefined
-        // A command on a node (a person's computer reached from this server) is judged like one on this computer.
-        const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : current.name === NODE_BASH ? shellActions(String(callArgs['command'] ?? '')) : kindsOf({ cls, name: current.name })
+        // A risky click or key on a node (a person's computer reached from this server) is judged as one in
+        // this computer's browser or apps: by that rule ("never" refuses), asking when none decides, never for good.
+        const risky: ActionKind | null | undefined = current.name === NODE_APPROVED ? (callArgs['kind'] === 'browser' ? 'browser' : callArgs['kind'] === 'apps' ? 'apps' : null) : undefined
+        if (risky === null) return textResult(L('Recusada: o "kind" tem que ser "browser" ou "apps", exatamente como a ferramenta devolveu.', 'Refused: "kind" has to be "browser" or "apps", exactly as the tool returned it.'), true)
+        // A command on a node is judged like one on this computer.
+        const kinds: ActionKind[] = risky ? [risky] : inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : current.name === NODE_BASH ? shellActions(String(callArgs['command'] ?? '')) : kindsOf({ cls, name: current.name })
         const unplaced = perCall && cls === 'sensitive' && !runnerRules(hit.connector.id, current.name, callArgs)
         // How far it goes on its own, read now: the rules may have changed since the turn started.
-        const judgedNow = verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
+        const judgedNow = risky
+          ? verdict({ cls: 'write', kinds, p: await policyNow(), highRisk: current.highRisk || readerLink, outside, askByDefault: true })
+          : verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
         if (judgedNow.off) return textResult(L(`Não rodei: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
         if (!judgedNow.run) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
