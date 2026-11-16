@@ -68,8 +68,22 @@ describe('the agents outside the conversation', () => {
   it('opens the DM of the row that was clicked', async () => {
     await type(dm, '@')
     const button = document.querySelectorAll('.mention-menu__outsider button')[1]!
-    await act(async () => void button.dispatchEvent(new window.Event('mousedown', { bubbles: true, cancelable: true })))
+    await act(async () => void button.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true })))
     expect(openDm).toHaveBeenCalledExactlyOnceWith('mc')
+  })
+  it('does not open a DM on a mouse press, which only keeps the focus in the composer', async () => {
+    await type(dm, '@')
+    const press = new window.Event('mousedown', { bubbles: true, cancelable: true })
+    await act(async () => void document.querySelector('.mention-menu__outsider button')!.dispatchEvent(press))
+    expect(press.defaultPrevented).toBe(true)
+    expect(openDm).not.toHaveBeenCalled()
+  })
+  it('is a real button, so Enter and Space activate it as a click', async () => {
+    await type(dm, '@')
+    const button = document.querySelector('.mention-menu__outsider button')!
+    expect(button.tagName).toBe('BUTTON')
+    expect(button.getAttribute('type') ?? 'button').toBe('button')
+    expect(button.hasAttribute('tabindex')).toBe(false)
   })
   it('narrows the list to the typed name', async () => {
     await type(dm, '@th')

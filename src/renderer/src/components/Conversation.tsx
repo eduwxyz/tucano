@@ -2382,9 +2382,10 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
                 {outsiders.map((a) => (
                   <div key={a.id} className="mention-menu__outsider">
                     <AgentAvatar agent={a} size={20} />
-                    <strong>{a.name}</strong>
-                    <span className="muted">@{a.handle}</span>
-                    <button className="link" onMouseDown={(e) => (e.preventDefault(), openDm(a.id))}>
+                    <span className="mention-menu__who">
+                      <strong>{a.name}</strong> <span className="muted">@{a.handle}</span>
+                    </span>
+                    <button className="link" onMouseDown={(e) => e.preventDefault()} onClick={() => void openDm(a.id)}>
                       {L('Abrir DM', 'Open DM')}
                     </button>
                   </div>

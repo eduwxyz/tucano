@@ -1885,6 +1885,7 @@ h3 {
 }
 .mention-menu__outsiders {
   max-height: 168px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 .mention-menu__outsider {
@@ -1893,8 +1894,16 @@ h3 {
   gap: 8px;
   padding: 6px 8px;
 }
+.mention-menu__who {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mention-menu__outsider .link {
   margin-left: auto;
+  flex-shrink: 0;
   font-size: 12px;
 }
 
