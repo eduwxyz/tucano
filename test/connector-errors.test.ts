@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, Message, Settings } from '../src/shared/types'
-import { callError, ConnectorManager, errorReason, GOOGLE_PREVIEW_URL, googlePreviewHint } from '../src/core/connectors'
+import { callError, ConnectorManager, connectorCallTimeoutMs, errorReason, GOOGLE_PREVIEW_URL, googlePreviewHint } from '../src/core/connectors'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -187,6 +187,14 @@ describe('callError and errorReason', () => {
     expect(callError(new Error('fetch failed'))).toBe('fetch failed')
     expect(errorReason({ content: [{ type: 'text', text: 'bad SQL' }] })).toBe('bad SQL')
     expect(errorReason({ content: [] })).toMatch(/no message/)
+  })
+})
+
+describe('connectorCallTimeoutMs', () => {
+  it('reads TUCANO_CONNECTOR_TIMEOUT_MS, and keeps two minutes for anything that is not a positive number', () => {
+    expect(connectorCallTimeoutMs({})).toBe(120_000)
+    expect(connectorCallTimeoutMs({ TUCANO_CONNECTOR_TIMEOUT_MS: '600000' })).toBe(600_000)
+    for (const bad of ['', '0', '-5', 'abc', 'Infinity']) expect(connectorCallTimeoutMs({ TUCANO_CONNECTOR_TIMEOUT_MS: bad })).toBe(120_000)
   })
 })
 

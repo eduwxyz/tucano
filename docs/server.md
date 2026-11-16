@@ -113,6 +113,7 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 | `TUCANO_TRUST_PROXY` | off | `1` behind a reverse proxy: each visitor's address comes from `X-Forwarded-For` |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | none | An outbound proxy for connectors and the server's other requests (`http://user:password@proxy:3128`); `localhost` never goes through it |
 | `TUCANO_SYSTEM_CA` | on | Tucano trusts the system's root certificates (`/etc/ssl`) as well as Node's, for a network that inspects HTTPS; `0` turns that off |
+| `TUCANO_CONNECTOR_TIMEOUT_MS` | `120000` | How long a connector tool call may take before it's cancelled, in milliseconds. Raise it for tools that take longer (renders, builds) |
 
 Once a browser has the cookie, the server answers only its own page: a page of another site (a sibling subdomain included) can't call it, and no site can show it inside a frame. Twenty wrong tokens from one address in ten minutes lock that address out for ten minutes.
 

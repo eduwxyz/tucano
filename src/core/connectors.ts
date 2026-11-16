@@ -19,7 +19,13 @@ import { classify, legacyClassify } from './policy'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
-const CALL_TIMEOUT_MS = 120_000
+// How long a connector tool call may take. TUCANO_CONNECTOR_TIMEOUT_MS raises it for slow tools (renders,
+// builds); anything that isn't a positive number keeps the default.
+export function connectorCallTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const ms = Number(env['TUCANO_CONNECTOR_TIMEOUT_MS'])
+  return Number.isFinite(ms) && ms > 0 ? ms : 120_000
+}
+const CALL_TIMEOUT_MS = connectorCallTimeoutMs()
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
 const CONNECT_TIMEOUT_MS = 20_000
 const MAX_STDIO_FAILURES = 3
