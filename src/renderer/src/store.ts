@@ -595,6 +595,7 @@ function apply(e: CoreEvent): void {
       case 'node':
         return { ...s, node: e.info }
       case 'message': {
+        if (e.attemptStart) thoughts.clear([e.message.id])
         const id = e.message.conversationId
         const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
         // What I just wrote in a conversation that answers in threads opens its thread, where the
