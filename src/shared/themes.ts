@@ -196,13 +196,21 @@ export function contrast(a: string, b: string): number {
   return (x + 0.05) / (y + 0.05)
 }
 
+// The smallest lightness change, either way, that reads on every background; when none does,
+// the one that comes closest.
 export function readable(hex: string, backgrounds: string[], min: number): string {
-  const darker = backgrounds.reduce((sum, bg) => sum + oklchOf(bg).l, 0) / backgrounds.length > 0.6
+  const worst = (color: string): number => Math.min(...backgrounds.map((bg) => contrast(color, bg)))
+  if (worst(hex) >= min) return hex
   const start = oklchOf(hex)
-  let out = hex
-  for (let step = 0; step <= 100 && backgrounds.some((bg) => contrast(out, bg) < min); step++)
-    out = hexOfOklch({ ...start, l: start.l + (darker ? -step : step) * 0.01 })
-  return out
+  let best = hex
+  for (let step = 1; step <= 100; step++)
+    for (const l of [start.l - step * 0.01, start.l + step * 0.01]) {
+      if (l < 0 || l > 1) continue
+      const candidate = hexOfOklch({ ...start, l })
+      if (worst(candidate) >= min) return candidate
+      if (worst(candidate) > worst(best)) best = candidate
+    }
+  return best
 }
 
 function derived(seeds: ThemeSeeds, scheme: ColorScheme): ThemeTokens {
@@ -250,7 +258,9 @@ function derived(seeds: ThemeSeeds, scheme: ColorScheme): ThemeTokens {
 
 export function themeTokens(theme: Theme, scheme: ColorScheme): ThemeTokens {
   const seeds = theme[scheme]
-  return { ...derived(seeds, scheme), ...seeds.tokens }
+  const overrides = seeds.tokens ?? {}
+  if (THEME_TOKENS.every((token) => overrides[token] !== undefined)) return { ...overrides } as ThemeTokens
+  return { ...derived(seeds, scheme), ...overrides }
 }
 
 const selectCaret = (stroke: string): string =>
