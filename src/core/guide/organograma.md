@@ -23,7 +23,7 @@ Clicar num agente mostra canais, time e pedidos; **Agora** lista os abertos.
 
 Você pode escrever na thread de um pedido: quem faz te responde ali, e isso entra no resultado.
 
-Onde fica: no canal cujo **Tema** cobre o assunto; o que não é de canal nenhum, ou um agente sem canal, vai pra DM dele com você. Nessa DM o pedido aparece como uma linha dobrada no topo (**Pedidos de outros agentes**), não como mensagem de conversa: clique nela pra ler o pedido inteiro. Com mais pessoas no Tucano, um pedido feito numa DM fica numa DM, a não ser que você escreva o canal (**#engenharia**).
+Onde fica: no canal cujo **Tema** cobre o assunto; o que não é de canal nenhum, ou um agente sem canal, vai pra DM dele com você. Lá ele aparece como uma linha dobrada no topo. Com mais pessoas no Tucano, um pedido feito numa DM fica numa DM, a não ser que você escreva o canal (**#engenharia**).
 
 ## Perguntas
 A dúvida de quem recebeu vai pra quem pediu. Ele responde o que sabe sem te escrever; o que for decisão sua ele pergunta na thread da sua mensagem, e repassa. Ou responda na thread do pedido.
