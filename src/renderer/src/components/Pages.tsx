@@ -2689,7 +2689,7 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
         label={L('Também responde a', 'Also answers to')}
         help={L(
           'Mais de um só quando o mesmo agente serve a mais de um time: cada um deles pode pedir trabalho a ele e recebe a resposta. No organograma ele fica sob o primeiro, com uma linha tracejada até cada outro.',
-          'More than one only when the same agent serves more than one team: each of them can ask it for work and gets the answer. On the board it sits under the first one, with a dashed line to each of the others.'
+          'Other bosses can assign work and receive replies. The agent stays under its primary boss, with dashed lines to the others.'
         )}
       >
         <Select
