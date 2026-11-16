@@ -45,11 +45,12 @@ declare global {
       }
       servers?: {
         // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
-        list: () => Promise<{ id: string; name: string; origin: string; open: boolean }[]>
+        list: () => Promise<{ id: string; name: string; origin: string; open: boolean; node: boolean }[]>
         pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe' | 'used' | 'unreachable'>
         open: (id: string) => void
         local: () => void // back to this computer's Tucano
         forget: (id: string) => Promise<boolean>
+        setNode: (id: string, on: boolean) => void // lends this computer to that server, or stops
         onChanged: (cb: () => void) => () => void // returns the unsubscribe
       }
     }

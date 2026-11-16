@@ -100,7 +100,7 @@ import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, 
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import type { NotifyState } from '../rpc'
-import { hasServers, ServersCard } from './Servers'
+import { hasServers, NodeCard, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
@@ -1407,6 +1407,7 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
 
 // ---------- Connectors ----------
 
+const CLASS_ORDER: ToolClass[] = ['read', 'write', 'sensitive']
 const CLASS_LABEL = (): Record<ToolClass, string> => ({ read: L('leitura', 'read'), write: L('escrita', 'write'), sensitive: L('sensível', 'sensitive') })
 
 export const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
@@ -1599,14 +1600,17 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
                 <Select
                   value={t.cls ?? null}
                   onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
-                  options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
+                  // The server's floor (a node's command or file write): the classes under it aren't offered.
+                  options={CLASS_ORDER.slice(t.floor ? CLASS_ORDER.indexOf(t.floor) : 0).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
                   placeholder={L('Escolha a classe', 'Pick a class')}
                 />
               )}
               <input
                 type="checkbox"
-                disabled={t.cls !== 'sensitive' && !runner}
-                checked={t.highRisk && (t.cls === 'sensitive' || runner)}
+                // Marked by the computer's owner (a node): it stays on.
+                disabled={t.lockedHighRisk || (t.cls !== 'sensitive' && !runner)}
+                checked={t.lockedHighRisk || (t.highRisk && (t.cls === 'sensitive' || runner))}
+                title={t.lockedHighRisk ? L('O dono do computador marcou como alto risco: não dá pra desmarcar aqui.', "The computer's owner marked it high risk: it can't be unmarked here.") : undefined}
                 onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
               />
               <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
@@ -2009,8 +2013,9 @@ export function ModelSelect(p: { value: string; onChange: (v: string) => void; j
   return <ModelPicker {...p} />
 }
 
-export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
-  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
+// `label` names it for a screen reader when no text sits next to it (a card's action, say).
+export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
 }
 
 // ---------- Settings ----------
@@ -2783,6 +2788,7 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && admin && <TeamCard />}
         {pane('geral') && <BackupCard />}
         {pane('servidores') && <ServersCard />}
+        {pane('servidores') && <NodeCard />}
 
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>

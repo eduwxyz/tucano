@@ -46,6 +46,7 @@ import {
   type ToolClass,
   type Trigger
 } from '../shared/types'
+import { stricter } from '../shared/classify'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
@@ -566,7 +567,11 @@ const COLUMNS: [string, string, string][] = [
   // The approval a request's work stopped on, shown with the request where it was asked from.
   ['delegations', 'approval', 'TEXT'],
   // The thread a request is worked in, when it was asked inside another's in the same channel.
-  ['delegations', 'thread_id', 'TEXT']
+  ['delegations', 'thread_id', 'TEXT'],
+  // What a connector's server says can't be loosened here (META_FLOOR, META_HIGH_RISK in shared/classify.ts):
+  // the class a tool can't go below, and that it's high risk. A node says both for the person's computer.
+  ['connector_tools', 'cls_floor', 'TEXT'],
+  ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0']
 ]
 
 
@@ -1374,15 +1379,22 @@ export class Db {
 
   tools(connectorId: string): (ConnectorTool & { inputSchema: Record<string, unknown> })[] {
     const rows = this.db.prepare('SELECT * FROM connector_tools WHERE connector_id = ? ORDER BY rowid').all(connectorId) as Row[]
-    return rows.map((r) => ({
-      name: str(r['name']),
-      description: str(r['description']),
-      inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
-      cls: str(r['cls']) as ToolClass,
-      enabled: r['enabled'] === 1,
-      highRisk: r['high_risk'] === 1,
-      isNew: r['is_new'] === 1
-    }))
+    return rows.map((r) => {
+      // What the server said can't be loosened: a class under its floor reads as the floor, its high-risk mark holds.
+      const floor = r['cls_floor'] ? (str(r['cls_floor']) as ToolClass) : undefined
+      const locked = r['remote_high_risk'] === 1
+      return {
+        name: str(r['name']),
+        description: str(r['description']),
+        inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
+        cls: stricter(str(r['cls']) as ToolClass, floor),
+        enabled: r['enabled'] === 1,
+        highRisk: r['high_risk'] === 1 || locked,
+        isNew: r['is_new'] === 1,
+        ...(floor ? { floor } : {}),
+        ...(locked ? { lockedHighRisk: true } : {})
+      }
+    })
   }
 
   // Applies the server's current tool list. On the first sync every tool comes
@@ -1390,7 +1402,8 @@ export class Db {
   // `cls`: the class the rules give the tool now; `legacyCls`, the one the rules before outbound verbs
   // gave it, which tells an automatic class from a hand-picked one on a tool synced before cls_auto.
   // A class still automatic follows the rules; one chosen by hand stays.
-  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass }[]): void {
+  // `floor` and `highRisk`: what the server says can't be loosened here (a node's command, its owner's mark).
+  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass; floor?: ToolClass; highRisk?: boolean }[]): void {
     this.tx(() => {
       const first = !(this.db.prepare('SELECT synced FROM connectors WHERE id = ?').get(connectorId) as { synced: number } | undefined)?.synced
       const stored = new Map((this.db.prepare('SELECT name, cls, cls_auto FROM connector_tools WHERE connector_id = ?').all(connectorId) as Row[]).map((r) => [str(r['name']), { cls: str(r['cls']), auto: r['cls_auto'] == null ? undefined : str(r['cls_auto']) }]))
@@ -1399,12 +1412,12 @@ export class Db {
         if (was) {
           const automatic = was.cls === (was.auto ?? t.legacyCls ?? t.cls)
           this.db
-            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ? WHERE connector_id = ? AND name = ?')
-            .run(t.description, JSON.stringify(t.inputSchema), automatic ? t.cls : was.cls, t.cls, connectorId, t.name)
+            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ?, cls_floor = ?, remote_high_risk = ? WHERE connector_id = ? AND name = ?')
+            .run(t.description, JSON.stringify(t.inputSchema), stricter(automatic ? t.cls : (was.cls as ToolClass), t.floor), t.cls, t.floor ?? null, t.highRisk ? 1 : 0, connectorId, t.name)
         } else {
           this.db
-            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)')
-            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), t.cls, t.cls, first ? 1 : 0, first ? 0 : 1)
+            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, cls_floor, remote_high_risk, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
+            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), stricter(t.cls, t.floor), t.cls, t.floor ?? null, t.highRisk ? 1 : 0, first ? 1 : 0, first ? 0 : 1)
         }
       }
       const known = stored.keys()
@@ -1418,10 +1431,12 @@ export class Db {
   updateTool(connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void {
     const t = this.tools(connectorId).find((x) => x.name === name)
     if (!t) return
-    const next = { ...t, ...patch }
+    // A class under the server's floor is kept at the floor; the mark the server set holds (tools() reads it back).
+    const next = { ...t, ...patch, cls: stricter(patch.cls ?? t.cls, t.floor) }
+    const stored = this.db.prepare('SELECT high_risk FROM connector_tools WHERE connector_id = ? AND name = ?').get(connectorId, name) as { high_risk: number }
     this.db
       .prepare('UPDATE connector_tools SET cls = ?, enabled = ?, high_risk = ?, is_new = 0 WHERE connector_id = ? AND name = ?')
-      .run(next.cls, next.enabled ? 1 : 0, next.highRisk ? 1 : 0, connectorId, name)
+      .run(next.cls, next.enabled ? 1 : 0, (patch.highRisk ?? stored.high_risk === 1) ? 1 : 0, connectorId, name)
   }
 
   // ---------- secrets (already encrypted by the caller) ----------

@@ -1,16 +1,17 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
+import { thisDevice } from './redeem'
 import { serverNote } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
@@ -116,6 +117,7 @@ function startCore(workspace: Workspace): Runtime {
       runtime.summary.status = 'ready'
       resolve()
       publishWorkspaces()
+      if (workspace.isDefault) lendTo()
     } else if (msg.type === 'workspace-summary') {
       registry.rename(workspace.id, msg.name)
       runtime.summary = { ...runtime.summary, name: msg.name || runtime.summary.name, paused: msg.paused, unread: msg.unread, approvals: msg.approvals }
@@ -795,8 +797,28 @@ const servers = new Servers({
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
   },
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
-  showLocal: () => showWindow()
+  showLocal: () => showWindow(),
+  lent: (links) => lendTo(links)
 })
+// The servers this computer is lent to go to the default workspace's core, which calls them (core/node-link.ts).
+function lendTo(links = servers.lentLinks()): void {
+  const core = [...cores.entries()].find(([id]) => registry.list().find((w) => w.id === id)?.isDefault)?.[1]
+  if (core?.summary.status === 'ready') core.child.postMessage({ type: 'node-uplinks', name: machineName(), links })
+}
+// This computer's name as people see it: a Mac's from its Sharing settings ("MacBook Pro de Eduardo"), not the hostname.
+let machine = ''
+function machineName(): string {
+  if (machine) return machine
+  if (process.platform === 'darwin') {
+    try {
+      machine = execFileSync('scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim()
+    } catch {
+      // the hostname below
+    }
+  }
+  machine ||= thisDevice(hostname(), process.platform).name.replace(/-/g, ' ')
+  return machine
+}
 // Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
 // pasted link, opening and forgetting.
 ipcMain.handle('servers:list', (e) => (fromApp(e) ? servers.summary() : []))
@@ -804,6 +826,7 @@ ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link 
 ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
+ipcMain.on('servers:node', (e, id: unknown, on: unknown) => fromApp(e) && typeof id === 'string' && typeof on === 'boolean' && servers.setNode(id, on))
 // A server's page in this window hands its notifications here (src/preload/server.ts): the app
 // shows them as its own, and a click puts that server, and what it's about, on screen. The page
 // already left out the conversation being read there; a server can't send more than a few a minute.

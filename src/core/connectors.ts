@@ -16,6 +16,8 @@ import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connect
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
+import { floorOf, saysHighRisk } from '../shared/classify'
+import { nodeOf } from '../shared/node-link'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
@@ -463,6 +465,11 @@ export class ConnectorManager {
   private async doConnect(id: string, interactive: boolean): Promise<void> {
     const c = this.deps.db.connector(id)
     if (!c) return
+    // A computer lent to this server calls in by itself (attachNode): there's nowhere to call it at.
+    if (nodeOf(c.url)) {
+      if (!this.live.get(id)?.client) this.setStatus(id, 'disconnected')
+      return
+    }
     await this.disconnect(id)
     this.setStatus(id, 'connecting')
 
@@ -597,6 +604,52 @@ export class ConnectorManager {
     }
   }
 
+  // A computer lent to this server called in (core/node-link.ts): its connector connects over that line, in
+  // place of one it had, and goes back to disconnected when the computer hangs up (it calls again by itself).
+  // One at a time per computer: two calls-in at once would each think the other's client was theirs.
+  private attaching = new Map<string, Promise<void>>()
+  attachNode(id: string, transport: Transport): Promise<void> {
+    const p = (this.attaching.get(id) ?? Promise.resolve()).then(() => this.attachNow(id, transport))
+    const kept = p.catch(() => {})
+    this.attaching.set(id, kept)
+    void kept.then(() => this.attaching.get(id) === kept && this.attaching.delete(id))
+    return p
+  }
+
+  private async attachNow(id: string, transport: Transport): Promise<void> {
+    if (!nodeOf(this.deps.db.connector(id)?.url)) throw new Error('not a computer')
+    await this.disconnect(id)
+    this.setStatus(id, 'connecting')
+    const client = new Client({ name: 'tucano', version: '0.1.0' }, { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } })
+    try {
+      await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS })
+    } catch (e) {
+      await client.close().catch(() => {})
+      this.setStatus(id, 'disconnected', e instanceof Error ? e.message : String(e))
+      return
+    }
+    const l = this.live.get(id)!
+    l.client = client
+    l.transport = transport
+    l.failures = 0
+    // After the SDK's own (which fails the calls under way at once, instead of at their timeout).
+    const sdk = transport.onclose
+    transport.onclose = () => {
+      sdk?.()
+      if (this.live.get(id)?.client === client) {
+        l.client = undefined
+        l.transport = undefined
+        this.setStatus(id, 'disconnected')
+      }
+    }
+    try {
+      await this.refreshTools(id)
+      this.setStatus(id, 'connected')
+    } catch (e) {
+      this.setStatus(id, 'error', e instanceof Error ? e.message : String(e))
+    }
+  }
+
   // Connects again after a wait that grows with each try, while the connector exists and nothing else has
   // brought it back. A failure that won't pass by itself (a refused token, a sign-in to finish) stops it.
   private reconnectLater(id: string): void {
@@ -624,7 +677,7 @@ export class ConnectorManager {
     do {
       const page = await client.listTools(cursor ? { cursor } : undefined)
       for (const t of page.tools) {
-        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t) })
+        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
       }
       cursor = page.nextCursor
     } while (cursor)
@@ -634,8 +687,9 @@ export class ConnectorManager {
 
   // Runs a tool on the real server, reconnecting on demand. Stdio servers that
   // keep failing are marked as having a problem. What it throws says why, in words.
-  async call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    const timeout = this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS
+  // A call that may take longer by design (a command on a node, up to 600 s) passes its own timeoutMs; never less than the usual.
+  async call(id: string, name: string, args: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<CallToolResult> {
+    const timeout = Math.max(this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS, opts.timeoutMs ?? 0)
     let l = this.live.get(id)
     if (!l?.client) {
       await this.connect(id)

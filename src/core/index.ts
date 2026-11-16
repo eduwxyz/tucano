@@ -5,17 +5,17 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -44,7 +44,7 @@ import { LoginTerminal, type LoginKey } from './login-terminal'
 import { Push, pushUrl } from './push'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
-import { DesktopApps, macApps, SELF } from './apps'
+import { appTools, DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
 import { ConnectorManager, notAuthorized } from './connectors'
@@ -68,12 +68,15 @@ import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-impo
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
-import { Browser, type BrowserHost } from './browser'
+import { Browser, browserTools, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
-import { loginEnv } from './mac'
+import { loginEnv, MacComputer } from './mac'
+import { NodeLog, NodeServer } from './node-server'
+import { NodeLinks, NodeUplink, type LinkPort } from './node-link'
+import { nodeOf } from '../shared/node-link'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
@@ -644,7 +647,11 @@ process.parentPort.on('message', (e) => {
     if (out) emitPeople()
     return toMain({ type: 'device-key-result', id: r.id, data: out ?? {} })
   }
-  if (r?.type === 'power') return routines.setAwake(r.awake === true)
+  if (r?.type === 'power') {
+    // Awake again: a line to a server that dropped while it slept calls back now, not at the end of its wait.
+    if (r.awake === true) for (const u of uplinks.values()) u.link.nudge()
+    return routines.setAwake(r.awake === true)
+  }
   // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
   if (r?.type === 'oauth-callback') {
     const { state = '', code = '', error = '' } = (r.data ?? {}) as { state?: string; code?: string; error?: string }
@@ -655,6 +662,12 @@ process.parentPort.on('message', (e) => {
       (e: unknown) => reply(false, e instanceof Error ? e.message : String(e))
     )
     return
+  }
+  // The main process: the servers this computer is lent to now, with their keys (Settings › Servers).
+  if (r?.type === 'node-uplinks') {
+    const m = e.data as { name?: unknown; links?: unknown }
+    const links = Array.isArray(m.links) ? (m.links as { serverId?: unknown; origin?: unknown; token?: unknown }[]).filter((l): l is { serverId: string; origin: string; token: string } => typeof l?.serverId === 'string' && typeof l.origin === 'string' && typeof l.token === 'string') : []
+    return setUplinks(typeof m.name === 'string' ? m.name : '', links)
   }
   if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
   if (r?.type === 'browser-result') {
@@ -829,6 +842,51 @@ gateway.route('/oauth/callback', oauthCallback)
 const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
+
+// This computer lent to servers' Tucanos (core/node-server.ts, core/node-link.ts): the app calls each server it
+// was paired with and lends it (Settings › Servers), and that server's agents use this computer's terminal, files,
+// browser, apps and local connectors under the server's approvals. The main process says which servers, with
+// their keys (it keeps them in the keychain): only the default workspace lends, and never a server's own core.
+const nodeLog = new NodeLog(join(dataDir, 'node', 'log.jsonl'))
+const nodeServer = new NodeServer(new MacComputer({ db, dataDir, emit, shoot }), {
+  connectors: { list: () => connectors.list().filter((c) => !nodeOf(c.url)), tools: (id) => db.tools(id), call: (id, name, args) => connectors.call(id, name, args) },
+  browser: { tools: browserTools, call: (agent, name, args, ctx) => browser.call(agent, name, args, ctx), approved: (agent, args) => browser.approved(agent, args) },
+  apps: { tools: appTools, call: (agent, name, args) => desktopApps.call(agent, name, args), approved: (agent, args) => desktopApps.approved(agent, args), lent: () => settings().node?.apps ?? [] },
+  folders: () => settings().node?.folders ?? [],
+  dataDir,
+  log: nodeLog
+})
+const uplinks = new Map<string, { origin: string; token: string; link: NodeUplink }>()
+// This computer's id on the servers it's lent to: made once, kept in its settings.
+function nodeDevice(): string {
+  const had = settings().node?.device
+  if (had) return had
+  const device = randomBytes(12).toString('base64url')
+  db.setSettings({ node: { ...(settings().node ?? {}), device } })
+  return device
+}
+function nodeInfo(): NodeInfo {
+  const n = settings().node ?? {}
+  return { apps: n.apps ?? [], folders: n.folders ?? [], links: [...uplinks.values()].map((u) => u.link.state) }
+}
+// The servers to lend this computer to now: a new one calls, one no longer there (or with another key) hangs up.
+function setUplinks(name: string, links: { serverId: string; origin: string; token: string }[]): void {
+  if (serverMode || !defaultWorkspace) return
+  const wanted = new Map(links.map((l) => [l.serverId, l]))
+  for (const [id, u] of uplinks) {
+    const w = wanted.get(id)
+    if (!w || w.origin !== u.origin || w.token !== u.token) (u.link.stop(), uplinks.delete(id))
+  }
+  for (const l of links) {
+    if (uplinks.has(l.serverId)) continue
+    const link = new NodeUplink({ serverId: l.serverId, origin: l.origin, token: l.token, device: nodeDevice(), name, server: () => nodeServer.mcp(), onStatus: () => emit({ type: 'node', info: nodeInfo() }) })
+    uplinks.set(l.serverId, { origin: l.origin, token: l.token, link })
+    link.start()
+  }
+  emit({ type: 'node', info: nodeInfo() })
+}
+// A server's side: a computer that called in (src/server/node-link-http.ts) becomes its person's connector.
+const nodeLinks = new NodeLinks({ db, attach: (id, transport) => connectors.attachNode(id, transport), connected: (id) => connectors.get(id)?.status === 'connected', remove: (id) => connectors.remove(id) })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -1874,6 +1932,27 @@ const api: Handlers = {
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
   // Checked with TypeSafe before it's saved; null removes it.
+  nodeInfo: async () => nodeInfo(),
+  setNode: async ({ apps }) => {
+    db.setSettings({ node: { ...(settings().node ?? {}), apps } })
+    return nodeInfo()
+  },
+  // A folder lent to the servers' agents: inside home, not Library, a dot folder or Tucano's data (checkFolder).
+  addNodeFolder: async ({ path }) => {
+    const why = checkFolder(path, { dataDir, named: true })
+    if (why) throw new UserError(why)
+    const real = realpathSync(path)
+    const prev = settings().node ?? {}
+    const folders = prev.folders ?? []
+    if (!folders.includes(real)) db.setSettings({ node: { ...prev, folders: [...folders, real] } })
+    return nodeInfo()
+  },
+  removeNodeFolder: async ({ path }) => {
+    const prev = settings().node ?? {}
+    db.setSettings({ node: { ...prev, folders: (prev.folders ?? []).filter((f) => f !== path) } })
+    return nodeInfo()
+  },
+  nodeLog: async ({ limit }) => nodeLog.read(limit ?? 100),
   setJevKey: async ({ key }) => {
     const k = key?.trim()
     if (k) await checkJevKey(k)
@@ -2056,6 +2135,7 @@ const api: Handlers = {
     if (!a) return
     if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
     must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
+    if (!people.canDecide(ctx.person, a)) throw new UserError(L('Isso roda no computador de outra pessoa: só ela decide.', "That runs on someone else's computer: only they decide."))
     bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
   },
 
@@ -2617,6 +2697,13 @@ function handle(port: MessagePortMain, req: Request): void {
 process.parentPort.on('message', (e) => {
   const port = e.ports[0]
   if (!port) return
+  // A computer lent to this server, calling in (src/server/node-link-http.ts): a connector of its person's.
+  const link = e.data as { type?: unknown; person?: unknown; device?: unknown; name?: unknown } | null
+  if (link?.type === 'node-link') {
+    if (!serverMode) return port.close()
+    nodeLinks.attach(port as unknown as LinkPort, { person: typeof link.person === 'string' ? link.person : undefined, device: link.device, name: link.name })
+    return
+  }
   if (!hub.add(port, e.data)) return
   port.on('message', (m) => handle(port, m.data as Request))
   port.on('close', () => hub.delete(port))

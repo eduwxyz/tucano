@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import { monthlyCeiling } from '../shared/limits'
 import { friendly, toolLabel } from '../shared/errors'
+import { NODE_APPROVED, NODE_BASH } from './node-server'
+import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
@@ -32,7 +34,7 @@ import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
-import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
+import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { agentsFor } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
@@ -51,6 +53,9 @@ const workThread = (d: Pick<Delegation, 'rootId' | 'threadId'>): string => d.thr
 
 // An old approval of the push-from-the-computer PRs (they left Tucano): still decided, never run.
 const GITHUB = 'github'
+// How long the server waits for a command on a node: what it asked for (1 to 600 s, 120 by default, as the
+// node's terminal clamps it), plus a margin for the way back.
+const nodeCommandMs = (args: Record<string, unknown>): number => (Math.min(600, Math.max(1, Number(args['timeout_seconds']) || 120)) + 30) * 1000
 const ABRIR_PR = 'abrir_pr'
 
 const MAX_CONCURRENT = 4
@@ -283,7 +288,7 @@ export interface RunnerDeps {
 // What the runner needs from the connector manager.
 export interface Connectors {
   list(): Connector[]
-  call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult>
+  call(id: string, name: string, args: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<CallToolResult>
 }
 
 type Exposed = { connector: Connector; tool: ConnectorTool & { inputSchema: Record<string, unknown> } }
@@ -1296,7 +1301,16 @@ export class Runner {
     // What a connector tool does when the turn starts, for its description (nothing from outside read yet).
     const judged = (t: ConnectorTool, connectorId: string, outside = false): Verdict =>
       verdict({ cls: t.cls, kinds: kindsOf(t), p: policy, highRisk: t.highRisk, alwaysAllowed: t.cls !== 'read' && !t.highRisk && !!agent.autoApprove?.includes(`${connectorId}:${t.name}`), outside })
+    // A computer lent to this server is its person's: an agent reaches it only working for them (a routine of
+    // theirs, their DM, what they asked in a channel), never for someone else on the same server.
+    // Only someone named counts here: a channel routine (the team's) or a turn with no one to go by reaches no one's.
+    const computerFor = opts.for?.id ?? namedRequester(db, conv, windowAll, msg.threadId)
+    const notYours = (c: Connector): boolean => {
+      const n = nodeOf(c.url)
+      return !!n && (n.owner ?? db.ownerId()) !== computerFor
+    }
     for (const c of this.deps.connectors?.list() ?? []) {
+      if (notYours(c)) continue
       // Dropped for a moment, its tools stay: the next call connects again. An error that needs the person
       // (a refused token, a sign-in to finish) takes them away.
       if (c.status !== 'connected' && c.status !== 'disconnected' && c.status !== 'connecting') continue
@@ -1305,7 +1319,7 @@ export class Runner {
     // GitHub through its connector, as this turn has it: the prompt says how to publish and what waits (context.ts).
     const github = githubAccess(this.deps.connectors?.list() ?? [], agent, exposed, policy)
     // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
-    const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
+    const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write' && !notYours(c))
     const accessTool: ToolDef | undefined =
       this.deps.gateway && lacking.length
         ? {
@@ -1807,7 +1821,7 @@ ${note}`,
 
         if (routines && ROUTINE_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id) ?? agent
-          const r = name === AGENDAR.name ? routines.schedule(current, conv, args, requester.id, visible) : routines.cancel(current, typeof args['id'] === 'string' ? args['id'] : '', visible)
+          const r = name === AGENDAR.name ? routines.schedule(current, conv, args, requester.id, visible) : routines.cancel(current, typeof args['id'] === 'string' ? args['id'] : '', visible, requester.id)
           if (!r.routine) return textResult(r.reply, r.error)
           if (name === AGENDAR.name && !routineIds.includes(r.routine.id)) routineIds.push(r.routine.id)
           msg.run = { ...msg.run!, routineIds: routineIds.length ? [...routineIds] : undefined }
@@ -2123,6 +2137,9 @@ ${note}`,
         const readerLink = grant === 'read' && linksAccounts(hit.connector.url, hit.tool.name)
         if (!current || !allowed(current, grant, forReaders(hit.connector.url, hit.tool.name))) return textResult(L(`Ferramenta não permitida agora: ${name}`, `Tool not allowed right now: ${name}`), true)
         const detail = `${hit.connector.name} · ${current.name}`
+        // A node (a person's computer reached from this server): its connector offers node_bash. Only there do
+        // node_approved and node_bash mean the node's; a third party's tool with the same name keeps its class.
+        const isNode = db.tools(hit.connector.id).some((t) => t.name === NODE_BASH)
         // What runs is exactly what was judged: these arguments, classified here, go to the server (or into the approval) as they are.
         const { [REASON_PARAM]: why, ...callArgs } = args
         // A runner (Composio's) counts as what this call runs; any other tool, as its class.
@@ -2143,10 +2160,17 @@ ${note}`,
         const always = cls !== 'read' && !current.highRisk && (perCall ? runnerAllowed(hit.connector.id, current.name, callArgs, rules) : !neverAllowedForGood(current.name) && rules.includes(`${hit.connector.id}:${current.name}`))
         // A runner's call counts as the actions it runs; one that can't be placed (raw requests, code) asks at every level.
         const inner = perCall ? innerActions(current.name, callArgs) : undefined
-        const kinds = inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : kindsOf({ cls, name: current.name })
+        // A risky click or key on a node (a person's computer reached from this server) is judged as one in
+        // this computer's browser or apps: by that rule ("never" refuses), asking when none decides, never for good.
+        const risky: ActionKind | null | undefined = isNode && current.name === NODE_APPROVED ? (callArgs['kind'] === 'browser' ? 'browser' : callArgs['kind'] === 'apps' ? 'apps' : null) : undefined
+        if (risky === null) return textResult(L('Recusada: o "kind" tem que ser "browser" ou "apps", exatamente como a ferramenta devolveu.', 'Refused: "kind" has to be "browser" or "apps", exactly as the tool returned it.'), true)
+        // A command on a node is judged like one on this computer.
+        const kinds: ActionKind[] = risky ? [risky] : inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : isNode && current.name === NODE_BASH ? shellActions(String(callArgs['command'] ?? '')) : kindsOf({ cls, name: current.name })
         const unplaced = perCall && cls === 'sensitive' && !runnerRules(hit.connector.id, current.name, callArgs)
         // How far it goes on its own, read now: the rules may have changed since the turn started.
-        const judgedNow = verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
+        const judgedNow = risky
+          ? verdict({ cls: 'write', kinds, p: await policyNow(), highRisk: current.highRisk || readerLink, outside, askByDefault: true })
+          : verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
         if (judgedNow.off) return textResult(L(`Não rodei: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
         if (!judgedNow.run) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -2161,7 +2185,8 @@ ${note}`,
             tool: current.name,
             args: callArgs,
             why: typeof why === 'string' ? why.trim() : '',
-            highRisk: current.highRisk,
+            // A delete on a node is held to approve and never allowed for good, as on this computer.
+            highRisk: current.highRisk || (current.name === NODE_BASH && kinds.includes('delete')),
             state: 'pending',
             createdAt: Date.now(),
             expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000,
@@ -2199,7 +2224,8 @@ ${note}`,
           save()
         }
         try {
-          const first = await this.deps.connectors!.call(hit.connector.id, current.name, callArgs)
+          // A command on a node runs up to the time it asked for (as on this computer, at most 600 s): the call waits that, and a little more.
+          const first = await this.deps.connectors!.call(hit.connector.id, current.name, callArgs, isNode && current.name === NODE_BASH ? { timeoutMs: nodeCommandMs(callArgs) } : {})
           sawOutside() // what a connector answers is someone else's text: an email, an issue, a page
           // A query still running: the app waits for it here, with the connector's own status tool, instead
           // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
@@ -2238,6 +2264,21 @@ ${note}`,
           }
         } catch (e) {
           const why = callError(e)
+          // A node (a person's computer) that's off or out of the network: the agent goes on without it and
+          // says what's left, instead of retrying a machine that isn't there.
+          // A call that ran out of time is a slow call, not a computer that's gone: it says how long it waited.
+          const timedOut = e instanceof Error && e.cause instanceof McpError && e.cause.code === ErrorCode.RequestTimeout
+          const offline = isNode && !timedOut && /não está conectado|isn't connected|não respondeu|didn't answer|connection closed|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOTFOUND|fetch failed|offline/i.test(why)
+          if (offline) {
+            finish('error', L(`${hit.connector.name} está desligado ou fora da rede`, `${hit.connector.name} is off or out of the network`))
+            return textResult(
+              L(
+                `O computador "${hit.connector.name}" está desligado ou fora da rede agora. Não tente de novo nesta resposta: faça o que der sem ele e diga a ${settings.workspaceName} o que ficou pendente pra quando ele voltar.`,
+                `The computer "${hit.connector.name}" is off or out of the network right now. Don't retry it in this reply: do what you can without it and tell ${settings.workspaceName} what's left for when it's back.`
+              ),
+              true
+            )
+          }
           finish('error', why)
           return textResult(L(`A ferramenta falhou: ${why}`, `The tool failed: ${why}`), true)
         }
@@ -2606,6 +2647,9 @@ ${note}`,
     const { db, emit } = this.deps
     const ap = db.approval(id)
     const decider = decision === 'expired' ? undefined : (by ?? db.ownerId())
+    // Someone's lent computer: only they allow or refuse what runs on it (not an admin, not Telegram's owner).
+    const computer = ap && decision !== 'expired' ? computerOwner(db, ap.connectorId) : undefined
+    if (computer && decider !== computer) return
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason, decider)) return
     // Everyone who sees the card learns it's decided (and by whom) now, not after the call it allowed.
     emit({ type: 'approval', approval: db.approval(id)! })
@@ -2623,7 +2667,7 @@ ${note}`,
     const rules = runner ? (runnerRules(ap.connectorId, ap.tool, ap.args) ?? []) : neverAllowedForGood(ap.tool) ? [] : [`${ap.connectorId}:${ap.tool}`]
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
     // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
-    const kinds: ActionKind[] = ap.connectorId === COMPUTADOR ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
+    const kinds: ActionKind[] = ap.connectorId === COMPUTADOR || ap.tool === NODE_BASH ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
     if (always && decision === 'approved' && owner && !ap.highRisk && kinds.length) {
       db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
@@ -2756,7 +2800,8 @@ ${note}`,
         )
       } else {
         try {
-          const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
+          const onNode = ap.tool === NODE_BASH && db.tools(ap.connectorId).some((t) => t.name === NODE_BASH)
+          const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args, onNode ? { timeoutMs: nodeCommandMs(ap.args) } : {})
           ok = !r.isError
           outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
           task = L(

@@ -109,7 +109,7 @@ By default the server only listens on the server itself (`127.0.0.1`), because a
 
 - **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the printed link on your computer.
 - **Tailscale** (or another private network): set `TUCANO_HOST` to the server's Tailscale address, then open `http://<that address>:7337/?token=…` from any of your devices, including your phone.
-- **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Set `TUCANO_URL` to the address people open, so `link` prints it, and `TUCANO_TRUST_PROXY=1`, so wrong tokens are counted per visitor rather than all as the proxy. Turn off response buffering for `/events`, which is a live event stream, and keep the proxy's access log off or without query strings, since the first link carries the token. For example, with Caddy:
+- **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Set `TUCANO_URL` to the address people open, so `link` prints it, and `TUCANO_TRUST_PROXY=1`, so wrong tokens are counted per visitor rather than all as the proxy. Turn off response buffering for `/events` and `/node/link`, which are live event streams, and keep the proxy's access log off or without query strings, since the first link carries the token. For example, with Caddy:
 
   ```
   tucano.example.com {
@@ -163,6 +163,7 @@ Once a browser has the cookie, the server answers only its own page: a page of a
 
 ## How it differs from the desktop app
 
+- **Your computer's terminal, files, browser and apps** stay on your computer. To let the server's agents use them, lend it from the desktop app (**Settings › Servers › Let this server use this computer**): see [Your computer lent to a server](local-node.md).
 - **Connectors that sign in with OAuth** (an **Authorize in the browser** button): Tucano opens the authorization page in your browser. When you allow access, the page ends on an address starting with `http://127.0.0.1` that doesn't load, because that address is the server's own. Copy the whole address from the address bar and paste it into Tucano.
 - **Secrets** (connector keys, Telegram, GitHub) are encrypted with AES-256-GCM. The key is in `server.key` in the data folder, and only your user can read that file. A desktop app keeps that key in the system's keychain instead. Back the key up together with the data folder: the secrets can't be read without it.
 - **Notifications:** the Tucano desktop app shows the notifications of the servers connected to it (**Settings › Servers**) as its own, while the app runs, and the iPhone app gets them too. A browser shows them only over HTTPS (a reverse proxy, or `tailscale serve`): over plain `http://` on a Tailscale or home address, browsers show none. Telegram (**Settings › Phone**) works either way. **Settings › General › Notifications › Send one** tests them.

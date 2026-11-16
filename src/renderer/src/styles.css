@@ -2353,6 +2353,10 @@ h3 {
 .toggle.is-on:active::after {
   transform: translateX(14px) scaleX(1.15);
 }
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .key-row {
   display: flex;
   align-items: center;
@@ -12451,3 +12455,29 @@ button.agent-card__now:hover {
 .access-fine { margin: 0; font-size: 12.5px; color: var(--text-3); line-height: 1.4; }
 .access button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 560px) { .access-modes, .access-agents { grid-template-columns: 1fr; } }
+
+/* A server it's paired with, and under it whether this computer is lent to it, with how the line is doing. */
+.server-row + .server-row { border-top: 1px solid var(--border); }
+.server-lend { display: flex; align-items: flex-start; gap: 10px; margin: -2px 0 10px 30px; }
+.server-lend .toggle { flex: none; margin-top: 1px; }
+.server-lend p { margin: 2px 0 0; }
+.server-lend__state.is-ok { color: var(--ok, var(--text-2)); }
+.server-lend__state.is-bad { color: var(--danger); }
+/* What this computer lends (NodeCard): folders, apps, and what the servers ran here. */
+.node-card { display: grid; gap: 10px; }
+.node-card__apps { display: grid; gap: 8px; margin-top: 6px; }
+.node-card__apps > p { margin: 0; }
+.node-card__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-card__twice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-soft); font-size: 12.5px; line-height: 1.45; }
+.node-card__twice > span { flex: 1 1 260px; }
+/* What the server ran here: time, tool, what it ran, ok or error. Wraps under the time on a narrow window. */
+.node-log__head { display: flex; align-items: center; gap: 8px; }
+.node-log { display: grid; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.node-log__row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: baseline; gap: 4px 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.node-log__row:last-child { border-bottom: 0; }
+.node-log__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.node-log__error { grid-column: 1 / -1; color: var(--danger); overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .node-log__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .node-log__summary { grid-column: 1 / -1; }
+}

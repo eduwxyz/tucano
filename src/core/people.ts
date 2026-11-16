@@ -1,6 +1,7 @@
 // The people of a Tucano: who a connection is, what each one may see, and how someone new
 // comes in (an invite, then a key). A desktop has one person, its owner; a server has
 // whoever was invited. A DM is its person's alone: not even the owner reads it.
+import { nodeOf } from '../shared/node-link'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
@@ -60,6 +61,28 @@ export function requesterOf(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, 
   if (last?.author.kind === 'person') return db.person(last.author.id) ?? owner
   const handed = threadId ? db.delegationAt(threadId) : undefined
   return (handed && db.person(handed.requestedBy)) || owner
+}
+
+// Whom a reply is for, only when someone is named: a DM's person, the person who wrote last, a personal
+// routine's person (one with no owner set is the Tucano owner's), or whom handed-down work was for. A channel
+// routine, or nothing to go by, is no one: what's a person's own (their lent computer) isn't reached then.
+export function namedRequester(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], threadId?: string): string | undefined {
+  const dm = dmOwner(conv, db.ownerId())
+  if (dm) return dm
+  const last = [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine')
+  if (last?.author.kind === 'routine') {
+    const r = db.routine(last.author.id)
+    return r && r.scope !== 'channel' ? (r.owner ?? db.ownerId()) : undefined
+  }
+  if (last?.author.kind === 'person') return last.author.id
+  const handed = threadId ? db.delegationAt(threadId) : undefined
+  return handed?.requestedBy
+}
+
+// A lent computer's person, when a connector is one (shared/node-link.ts): unset owner is the Tucano owner.
+export const computerOwner = (db: Db, connectorId: string | undefined): string | undefined => {
+  const n = nodeOf(connectorId ? db.connector(connectorId)?.url : undefined)
+  return n ? (n.owner ?? db.ownerId()) : undefined
 }
 
 // The people whose memories ("about me") a reply gets: a DM's person; in a channel, the people who
@@ -355,6 +378,9 @@ export class People {
         return this.agentHidden(person, event.agent.id) ? undefined : event
       case 'people':
         return { type: 'people', people: peopleFor(person, event.people), ...(event.former ? { former: event.former } : {}) }
+      // This computer's lines to the servers it's lent to: its owner's only.
+      case 'node':
+        return person.role === 'owner' ? event : undefined
       case 'voice':
       case 'connector_removed':
       case 'skill':
@@ -444,7 +470,10 @@ export class People {
 
   // ---------- what waits on someone ----------
 
-  canDecide(person: Person, a: Pick<Approval, 'agentId'>): boolean {
+  canDecide(person: Person, a: Pick<Approval, 'agentId'> & { connectorId?: string }): boolean {
+    // A command or a click on someone's lent computer is theirs alone to allow.
+    const computer = computerOwner(this.db, a.connectorId)
+    if (computer) return computer === person.id
     return can(person, { kind: 'approval', agentOwner: agentOwner(this.db, a.agentId) })
   }
 

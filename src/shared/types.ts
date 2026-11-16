@@ -1,4 +1,5 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { UplinkStatus } from './node-link'
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
@@ -479,6 +480,7 @@ export interface EndpointSettings {
 }
 
 export interface Settings {
+  node?: { apps?: AgentApp[]; folders?: string[]; device?: string } // this computer lent to servers' Tucanos (core/node-server.ts): the apps and folders it lends, and its id there
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
@@ -775,6 +777,8 @@ export interface ConnectorTool {
   enabled: boolean
   highRisk: boolean
   isNew: boolean // appeared after the first sync; starts disabled until reviewed
+  floor?: ToolClass // the server says it's at least this (a node's command or file write): the class can't go below it
+  lockedHighRisk?: boolean // the server marks it high risk (a computer's owner did, on a node): it can't be unmarked here
 }
 
 export type ConnectorAuth = 'none' | 'token' | 'oauth'
@@ -1130,6 +1134,23 @@ export interface Skill {
   source?: string // linked to a SKILL.md of the user's Claude Code or Codex: read from there, not edited here
   createdAt: number
   updatedAt: number
+}
+
+// This computer lent to servers' Tucanos: what it lends, and how each server's line is doing.
+export interface NodeInfo {
+  apps: AgentApp[] // the apps the node lends the servers' agents
+  folders: string[] // the folders it lends: the servers' file tools reach only these (absolute, real paths)
+  links: UplinkStatus[] // one per server it's lent to (Settings › Servers)
+}
+
+// One call the server made on this computer as a node, kept here for the owner to read (newest first).
+export interface NodeLogEntry {
+  at: number // when it started (ms)
+  tool: string // node_bash, node_read_file, navegador_clicar, premiere_pro__export…
+  summary: string // the command, the path, or the arguments, cut short and with secrets masked
+  ok: boolean
+  ms: number
+  error?: string // why it failed or was refused (outside the lent folders…)
 }
 
 // A skill already on this Mac (Claude Code, its plugins, Codex), that can be linked.
