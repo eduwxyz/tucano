@@ -32,17 +32,21 @@ const nina = agent('a2', 'nina', 'Conteúdo')
 const astra = agent('a3', 'astra', 'Auditoria de segurança e planos')
 const said = (text: string): Message => ({ id: 'm1', conversationId: 'c1', author: { kind: 'person', id: 'me' }, text, at: 1 })
 
-// A stand-in for TypeSafe: answers the listen question (who + needed) and the router's (who only),
-// and records every request so the prompt can be read.
+// A stand-in for TypeSafe: answers the listen question (who, plus needed when it is asked) and the
+// router's (who only), and records every request so the prompt can be read.
 function typesafe(opts: { listen?: Record<string, number>; needed?: string; route?: Record<string, number> }) {
   const requests: { url: string; init: RequestInit }[] = []
   const top = (p: Record<string, number>): string => Object.entries(p).sort((a, b) => b[1] - a[1])[0]![0]
   const f = (async (url: string, init: RequestInit) => {
     requests.push({ url, init })
     const body = JSON.parse(init.body as string) as { questions: Record<string, { criteria: Record<string, string> }> }
-    if (body.questions['needed']) {
+    // The listen call is the one offering "nobody" beside the listeners; the router's offers agents only.
+    if ('__ninguem' in (body.questions['who']?.criteria ?? {})) {
       const choice = top(opts.listen ?? { __ninguem: 1 })
-      return Response.json({ answers: { who: { type: 'choice', choice, probabilities: opts.listen ?? {} }, needed: { type: 'choice', choice: opts.needed ?? '__nao', probabilities: {} } } })
+      const answers: Record<string, unknown> = { who: { type: 'choice', choice, probabilities: opts.listen ?? {} } }
+      // Asked only when someone is already answering in the room.
+      if (body.questions['needed']) answers['needed'] = { type: 'choice', choice: opts.needed ?? '__nao', probabilities: {} }
+      return Response.json({ answers })
     }
     const choice = top(opts.route ?? { lia: 1 })
     return Response.json({ answers: { who: { type: 'choice', choice, probabilities: opts.route ?? {} } } })
@@ -77,6 +81,15 @@ describe('the listen question', () => {
 
   it('keeps it out when the message asks nothing of it', async () => {
     expect(await ask(typesafe({ listen: { __ninguem: 0.9, astra: 0.1 } }))).toMatchObject({ agents: [], reason: '' })
+  })
+
+  it('asks only who when nobody is in the room to answer', async () => {
+    // Empty room: "can whoever is already here handle it?" has no one to weigh against, so it isn't
+    // asked and a model's "yes" can't keep the only agent who could do the work out.
+    const api = typesafe({ listen: { astra: 0.93, __ninguem: 0.07 }, needed: '__sim' })
+    const r = await listenJev({ key: 'ts-key', messages: [], trigger: said('preciso de uma auditoria'), listeners: [astra], answering: [], me: 'Edu', fetch: api.f })
+    expect(r).toMatchObject({ agents: [astra], reason: 'Astra, 93%' })
+    expect(Object.keys(api.bodies()[0]!.questions)).toEqual(['who'])
   })
 
   it('says what went wrong instead of guessing', async () => {
