@@ -4,9 +4,19 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.35] - 2026-11-16
+
+> **Em português:**
+> - **Novo:** quem vem do **Hermes Agent** (Nous Research) traz o que construiu lá. Em **Configurações › Geral › Time › Importar do Hermes…**, o Tucano lê a pasta do Hermes neste computador, mostra o que entra antes de adicionar qualquer coisa e, com vários perfis, deixa escolher quais. Cada perfil vira um agente: o SOUL.md vira as instruções (o texto padrão que o Hermes escreve sozinho não conta), as memórias chegam esperando o seu sim, e entram as skills que você criou ou editou e as tarefas agendadas, como rotinas desligadas. Servidores MCP, os canais onde o Hermes conversava (Telegram, Discord…) e o modelo vêm só pelo nome. O `.env`, o `auth.json`, as conversas e os logs nunca são abertos.
+> - **Correção:** num servidor, o botão **Instalar** que um app de celular anterior ao endpoint mostrava para ele não roda mais um instalador vazio: o Tucano explica que o endpoint é só um endereço e uma chave, em Configurações › Modelos.
+
 ### Added
 
-- **Bring your Hermes Agent over.** Someone who has used Hermes (Nous Research) for a long time had no way to bring what they built there. **Settings › General › Team › Import from Hermes…** reads the Hermes folder where it is, on this computer (`$HERMES_HOME`, `~/.hermes`, or one you pick), and shows what comes in before adding anything; with profiles, you choose which. Each profile becomes an agent: its `SOUL.md` as instructions, its memories, what it knew about you (as your memories), the skills you made or installed (and the ones that came with Hermes that you edited), and the scheduled jobs that fit a routine here. As with OpenBot and Grok Bot, the agents come with no connector, web search off and no computer, the routines off and every memory waiting for your yes; MCP servers, messaging gateways (Telegram, Discord…), jobs whose schedule has no match here and the model are only named in the summary. Only a list of files is opened, by name: never `.env`, `auth.json`, the sessions or the logs, and no link inside the folder is followed.
+- **Bring your Hermes Agent over.** Someone who has used Hermes (Nous Research) for a long time had no way to bring what they built there. **Settings › General › Team › Import from Hermes…** reads the Hermes folder where it is, on this computer (`$HERMES_HOME`, `~/.hermes`, or one you pick), and shows what comes in before adding anything; with profiles, you choose which. Each profile becomes an agent: its `SOUL.md` as instructions, its memories, what it knew about you (as your memories), the skills you made or installed (and the ones that came with Hermes that you edited), and the scheduled jobs that fit a routine here. As with OpenBot and Grok Bot, the agents come with no connector, web search off and no computer, the routines off and every memory waiting for your yes; MCP servers, messaging gateways (Telegram, Discord…), jobs whose schedule has no match here and the model are only named in the summary. Only a list of files is opened, by name: never `.env`, `auth.json`, the sessions or the logs, and no link inside the folder is followed. The `SOUL.md` Hermes writes by itself on first run ("You are Hermes Agent…", and the templates before it) counts as no instructions, and the preview says so; one you edited comes in. A gateway is named only where Hermes would turn it on (its `config.yaml`, with `enabled`, or the platform names in `gateway_state.json`, never its error text), so one set up only in `.env` shows once its gateway has run; MCP servers turned off in Hermes get a note instead of vanishing. (#493, #502, #503)
+
+### Fixed
+
+- **A phone app can't start an empty install for the endpoint.** A phone app from before the endpoint listed it among the harnesses, with an **Install** button; on a server, that ran the installer with an empty command. Installing or signing in to the endpoint is now refused with what to do instead: it's an address and a key, in **Settings › Models**, on the computer or in the browser. (#492)
 
 ## [0.2.34] - 2026-11-15
 
