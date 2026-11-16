@@ -163,6 +163,7 @@ Once a browser has the cookie, the server answers only its own page: a page of a
 
 ## How it differs from the desktop app
 
+- **Your computer's terminal, files, browser and apps** stay on your computer. To let the server's agents use them, turn your desktop app into a node: see [Your computer as a node](local-node.md).
 - **Connectors that sign in with OAuth** (an **Authorize in the browser** button): Tucano opens the authorization page in your browser. When you allow access, the page ends on an address starting with `http://127.0.0.1` that doesn't load, because that address is the server's own. Copy the whole address from the address bar and paste it into Tucano.
 - **Secrets** (connector keys, Telegram, GitHub) are encrypted with AES-256-GCM. The key is in `server.key` in the data folder, and only your user can read that file. A desktop app keeps that key in the system's keychain instead. Back the key up together with the data folder: the secrets can't be read without it.
 - **Notifications:** the Tucano desktop app shows the notifications of the servers connected to it (**Settings › Servers**) as its own, while the app runs, and the iPhone app gets them too. A browser shows them only over HTTPS (a reverse proxy, or `tailscale serve`): over plain `http://` on a Tailscale or home address, browsers show none. Telegram (**Settings › Phone**) works either way. **Settings › General › Notifications › Send one** tests them.
