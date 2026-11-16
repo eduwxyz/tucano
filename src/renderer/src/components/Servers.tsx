@@ -158,7 +158,7 @@ export function ServerBar(): ReactNode {
   )
 }
 
-// This computer as a node of a server's Tucano (docs/plan-local-node.md): the server's agents reach this
+// This computer as a node of a server's Tucano (docs/local-node.md): the server's agents reach this
 // machine's terminal and files like a connector, with the same autonomy and approvals as here. Off by
 // default; the way in is a private network (Tailscale), with the key below.
 export function NodeCard(): ReactNode {

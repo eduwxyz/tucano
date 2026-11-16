@@ -1,4 +1,4 @@
-// This computer as a "node" of a Tucano on a server (docs/plan-local-node.md): the server's agents
+// This computer as a "node" of a Tucano on a server (docs/local-node.md): the server's agents
 // reach this machine's terminal and files the way they reach any connector, so a Tucano on a VPS
 // keeps every agent synced and still works on the computers where the person's apps and files are.
 //

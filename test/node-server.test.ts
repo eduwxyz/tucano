@@ -1,5 +1,5 @@
 // This computer as a node of a server's Tucano: an MCP server over HTTP that only answers its key, and
-// runs the server's calls here, as the person (docs/plan-local-node.md). Through a real MCP client.
+// runs the server's calls here, as the person (docs/local-node.md). Through a real MCP client.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
