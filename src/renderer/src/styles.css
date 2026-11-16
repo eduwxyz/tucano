@@ -338,8 +338,10 @@ h3 {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-panel);
 }
+/* backwards, not both: a transform left on the page after it rises would make it the box that
+   fixed things inside it (the routine card, menus) are placed in, off from where they're measured. */
 .main > * {
-  animation: rise var(--dur-enter) var(--ease-out) both;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
 
 /* ---------- motion: the few moves everything uses ---------- */
