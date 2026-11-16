@@ -9,7 +9,8 @@ import { Icon } from './ui'
 import { AppsCard } from './Apps'
 import { call } from '../rpc'
 import { updateSettings, useStore } from '../store'
-import type { NodeInfo } from '../../../shared/types'
+import type { NodeInfo, NodeLogEntry } from '../../../shared/types'
+import { FoldToggle } from './Fold'
 
 type Server = { id: string; name: string; origin: string; open: boolean }
 
@@ -231,7 +232,9 @@ export function NodeCard(): ReactNode {
             <li>{L('No Tucano do servidor: Conectores › Adicionar personalizado › Remoto, com o endereço https://<este-computador>.<sua-rede>.ts.net/mcp e autenticação Token, colando a chave.', "In the server's Tucano: Connectors › Add custom › Remote, with the address https://<this-computer>.<your-tailnet>.ts.net/mcp and Token authentication, pasting the key.")}</li>
             <li>{L('Dê acesso aos agentes que vão usar este computador, em Ferramentas.', 'Give access to the agents that will use this computer, under Tools.')}</li>
           </ol>
+          <p className="node-card__twice">{L('Use tailscale serve, nunca tailscale funnel: o funnel abre este computador pra internet inteira.', 'Use tailscale serve, never tailscale funnel: funnel opens this computer to the whole internet.')}</p>
           <NodeFolders info={info} onChange={setInfo} />
+          <NodeLog />
           {/* The apps the server's agents may use here (Premiere, Notes…), each to read or to change: the
               same picker as an agent's page. Its connectors and browser come with the node on their own. */}
           <div className="node-card__apps">
@@ -244,17 +247,19 @@ export function NodeCard(): ReactNode {
   )
 }
 
-// The folders the node lends: the only ones the server's agents read and write here. Keys and passwords
-// (.ssh, .aws, Keychains…) never go in: the core refuses them, and says why.
+// The folders the node lends: the only ones the server's file tools reach here. The core refuses what
+// can't be lent (outside the home folder, Library, a dot folder, Tucano's data) and says why.
+const shortPath = (path: string): string => path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+const why = (e: unknown): string => (e instanceof Error ? e.message : String(e)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+
 function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: NodeInfo) => void }): ReactNode {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> } | undefined)?.pickFolder
-  const short = (path: string): string => (info.home && (path === info.home || path.startsWith(info.home + '/')) ? '~' + path.slice(info.home.length) : path)
+  const pick = (window.tucano as { pickFolder?: () => Promise<string | null> } | undefined)?.pickFolder // desktop only
   const run = (p: Promise<NodeInfo>): void => {
     setError('')
     setBusy(true)
-    void p.then(onChange, (e: Error) => setError(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))).finally(() => setBusy(false))
+    void p.then(onChange, (e: unknown) => setError(why(e))).finally(() => setBusy(false))
   }
   const add = (): void => void pick?.().then((path) => path && run(call('addNodeFolder', { path })))
   const folders = info.folders ?? []
@@ -263,8 +268,8 @@ function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: Node
       <span className="field__label">{L('Pastas que ele empresta', 'Folders it lends')}</span>
       <p className="muted small">
         {folders.length
-          ? L('Os agentes do servidor só leem e gravam dentro destas pastas. Chaves e senhas (.ssh, .aws, Keychains) ficam fora mesmo assim.', "The server's agents only read and write inside these folders. Keys and passwords (.ssh, .aws, Keychains) stay out even so.")
-          : L('Nenhuma pasta: os agentes do servidor não leem nem gravam arquivo nenhum deste computador.', "No folders: the server's agents don't read or write any file on this computer.")}
+          ? L('As ferramentas de arquivo do servidor só alcançam estas pastas. O terminal continua sendo um terminal, e passa pelas aprovações.', "The server's file tools only reach these folders. The terminal is still a terminal, and goes through approvals.")
+          : L('Nenhuma pasta: as ferramentas de arquivo do servidor não leem nem gravam nada neste computador. O terminal continua passando pelas aprovações.', "No folders: the server's file tools don't read or write anything on this computer. The terminal still goes through approvals.")}
       </p>
       {folders.length > 0 && (
         <div className="apps-list">
@@ -272,9 +277,9 @@ function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: Node
             <div key={f} className="apps-row">
               <Icon name="folder" />
               <code className="node-card__path grow" title={f}>
-                {short(f)}
+                {shortPath(f)}
               </code>
-              <button className="icon-btn icon-btn--sm" title={L('Parar de emprestar', 'Stop lending')} aria-label={L(`Parar de emprestar ${short(f)}`, `Stop lending ${short(f)}`)} disabled={busy} onClick={() => run(call('removeNodeFolder', { path: f }))}>
+              <button className="icon-btn icon-btn--sm" title={L('Parar de emprestar', 'Stop lending')} aria-label={L(`Parar de emprestar ${shortPath(f)}`, `Stop lending ${shortPath(f)}`)} disabled={busy} onClick={() => run(call('removeNodeFolder', { path: f }))}>
                 <Icon name="x" size={14} />
               </button>
             </div>
@@ -286,6 +291,50 @@ function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: Node
         <button className="btn btn--sm apps-add" disabled={busy} onClick={add}>
           <Icon name="plus" size={14} /> {folders.length ? L('Emprestar outra pasta', 'Lend another folder') : L('Emprestar uma pasta', 'Lend a folder')}
         </button>
+      )}
+    </div>
+  )
+}
+
+// What the server ran here through the node, kept on this computer (newest first). No push: a button reloads it.
+function NodeLog(): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [entries, setEntries] = useState<NodeLogEntry[] | null>(null)
+  const [error, setError] = useState('')
+  const load = (): void => {
+    setError('')
+    void call('nodeLog', { limit: 100 }).then(setEntries, (e: unknown) => setError(why(e)))
+  }
+  useEffect(() => {
+    if (open && !entries) load()
+  }, [open])
+  const time = (at: number): string => new Date(at).toLocaleString(L('pt-BR', 'en-US'), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return (
+    <div className="node-card__apps">
+      <div className="node-log__head">
+        <FoldToggle open={open} onToggle={() => setOpen(!open)}>
+          {L('O que o servidor rodou aqui', 'What the server ran here')}
+        </FoldToggle>
+        {open && (
+          <button className="btn btn--sm btn--ghost" onClick={load}>
+            {L('Atualizar', 'Refresh')}
+          </button>
+        )}
+      </div>
+      {open && error && <p className="note note--error">{error}</p>}
+      {open && entries && !entries.length && <p className="muted small">{L('Nada ainda: o servidor não rodou nada neste computador.', "Nothing yet: the server hasn't run anything on this computer.")}</p>}
+      {open && entries && entries.length > 0 && (
+        <div className="node-log">
+          {entries.map((e, i) => (
+            <div key={`${e.at}-${i}`} className={`node-log__row ${e.ok ? '' : 'is-error'}`} title={e.error}>
+              <span className="muted small node-log__time">{time(e.at)}</span>
+              <code className="node-log__tool">{e.tool}</code>
+              <code className="node-log__summary">{e.summary}</code>
+              <span className={`tag ${e.ok ? '' : 'tag--danger'}`}>{e.ok ? 'ok' : L('erro', 'error')}</span>
+              {!e.ok && e.error && <span className="small node-log__error">{e.error}</span>}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

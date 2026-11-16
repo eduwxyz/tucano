@@ -1407,6 +1407,7 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
 
 // ---------- Connectors ----------
 
+const CLASS_ORDER: ToolClass[] = ['read', 'write', 'sensitive']
 const CLASS_LABEL = (): Record<ToolClass, string> => ({ read: L('leitura', 'read'), write: L('escrita', 'write'), sensitive: L('sensível', 'sensitive') })
 
 export const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
@@ -1599,14 +1600,17 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
                 <Select
                   value={t.cls ?? null}
                   onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
-                  options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
+                  // The server's floor (a node's command or file write): the classes under it aren't offered.
+                  options={CLASS_ORDER.slice(t.floor ? CLASS_ORDER.indexOf(t.floor) : 0).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
                   placeholder={L('Escolha a classe', 'Pick a class')}
                 />
               )}
               <input
                 type="checkbox"
-                disabled={t.cls !== 'sensitive' && !runner}
-                checked={t.highRisk && (t.cls === 'sensitive' || runner)}
+                // Marked by the computer's owner (a node): it stays on.
+                disabled={t.lockedHighRisk || (t.cls !== 'sensitive' && !runner)}
+                checked={t.lockedHighRisk || (t.highRisk && (t.cls === 'sensitive' || runner))}
+                title={t.lockedHighRisk ? L('O dono do computador marcou como alto risco: não dá pra desmarcar aqui.', "The computer's owner marked it high risk: it can't be unmarked here.") : undefined}
                 onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
               />
               <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />

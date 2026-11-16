@@ -12468,3 +12468,14 @@ button.agent-card__now:hover {
 .node-card__twice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-soft); font-size: 12.5px; line-height: 1.45; }
 .node-card__twice > span { flex: 1 1 260px; }
 .node-card__steps code, .node-card__row code { overflow-wrap: anywhere; }
+/* What the server ran here: time, tool, what it ran, ok or error. Wraps under the time on a narrow window. */
+.node-log__head { display: flex; align-items: center; gap: 8px; }
+.node-log { display: grid; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.node-log__row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: baseline; gap: 4px 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.node-log__row:last-child { border-bottom: 0; }
+.node-log__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.node-log__error { grid-column: 1 / -1; color: var(--danger); overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .node-log__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .node-log__summary { grid-column: 1 / -1; }
+}
