@@ -58,6 +58,18 @@ Open the first line on the phone (or show it as a QR code and point the Camera a
 
 Someone you invite can also open the invite link in the app: it asks their name, and they're in.
 
+### Installing it on Android, with notifications
+
+In a browser, the server's page can be installed as an app and get notifications while it's closed (Web Push), with no iPhone app or relay involved:
+
+1. Open the server's HTTPS address in Chrome and sign in.
+2. Chrome's menu › **Install app** (or **Add to Home screen**). Tucano opens full screen, with its icon.
+3. In the installed app: **Settings › General › Notifications › Turn on notifications on this device**, and allow them. **Send a test** sends one to this device; **Turn off** stops them.
+
+The same notifications the page shows (approvals, questions, finished replies) then reach each person's subscribed browsers, Chrome and Edge on a computer too. Web Push needs HTTPS. The server makes its VAPID keys on the first run, in `TUCANO_DATA/webpush-vapid.json`, and keeps the subscriptions in `TUCANO_DATA/webpush-subscriptions.json`; a subscription goes when its sign-in or its person does. It only sends to the push services of Chrome, Firefox, Safari and Edge, over HTTPS. Behind an auth proxy, the manifest is requested with credentials, like the page.
+
+The routes, signed in and same-origin only: `GET /webpush/key`, `POST /webpush/subscribe`, `POST /webpush/unsubscribe` and `POST /webpush/test`. The page also gets `/manifest.webmanifest`, `/sw.js` (a service worker that caches only the hashed files in `/assets/`) and the icons.
+
 ## Reaching it
 
 By default the server only listens on the server itself (`127.0.0.1`), because anyone who has the token controls your agents. Pick one of these ways to reach it:
@@ -110,6 +122,7 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 | `TUCANO_TOKEN` | a random token, kept in `server-token` | Set it to use a token of your own |
 | `TUCANO_URL` | where it listens | The address people open, behind a proxy (`https://tucano.example.com`): what `link` prints |
 | `TUCANO_PUSH_URL` | `https://tucano.sh/api/push` | The relay that delivers notifications to the iPhone app while it's closed (`site/push.js`), or `off`. The relay gets each notification's title and line, and the phone's handle, and keeps nothing |
+| `TUCANO_WEBPUSH` | on | `off` turns off the installable page and Web Push: no manifest, the `/webpush/` routes answer 404, and a service worker already installed unregisters itself the next time the browser checks it. The VAPID subject is `TUCANO_URL` when it's HTTPS (Apple and Mozilla may refuse `mailto:tucano@localhost`, the fallback) |
 | `TUCANO_TRUST_PROXY` | off | `1` behind a reverse proxy: each visitor's address comes from `X-Forwarded-For` |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | none | An outbound proxy for connectors and the server's other requests (`http://user:password@proxy:3128`); `localhost` never goes through it |
 | `TUCANO_SYSTEM_CA` | on | Tucano trusts the system's root certificates (`/etc/ssl`) as well as Node's, for a network that inspects HTTPS; `0` turns that off |
