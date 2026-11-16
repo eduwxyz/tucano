@@ -6,7 +6,7 @@ import { L } from '../shared/lang'
 import { safeLimit } from '../shared/limits'
 import { usedShare } from '../shared/limits'
 import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
-import { channelName, cleanTimes, dateAt, ENGINES, MAX_TIMES, modelInfo, nextRun, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
+import { channelName, cleanTimes, dateAt, ENGINES, MAX_TIMES, modelInfo, nextRun, timesOf, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { dateArg } from './routines'
 
@@ -105,7 +105,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     const lines = x.routines.map((r) => {
       const last = x.lastRun(r)
       const t = r.trigger
-      const kind = t?.kind === 'webhook' ? L('chamada local (webhook)', 'local call (webhook)') : t?.kind === 'poll' ? L(`quando aparece algo em ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, a cada ${t.everyMinutes} min`, `when something new shows in ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, every ${t.everyMinutes} min`) : `${r.schedule.date ?? (r.schedule.monthDay !== undefined ? L(`dia ${r.schedule.monthDay} de todo mês`, `day ${r.schedule.monthDay} of every month`) : r.schedule.days.join(','))} ${r.schedule.time}${r.schedule.once ? L(' (uma vez)', ' (once)') : ''}`
+      const kind = t?.kind === 'webhook' ? L('chamada local (webhook)', 'local call (webhook)') : t?.kind === 'poll' ? L(`quando aparece algo em ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, a cada ${t.everyMinutes} min`, `when something new shows in ${x.connectors.find((c) => c.id === t.connectorId)?.name ?? t.connectorId} · ${t.tool}, every ${t.everyMinutes} min`) : `${r.schedule.date ?? (r.schedule.monthDay !== undefined ? L(`dia ${r.schedule.monthDay} de todo mês`, `day ${r.schedule.monthDay} of every month`) : r.schedule.days.join(','))} ${(r.schedule.date === undefined && !r.schedule.once ? timesOf(r.schedule) : [r.schedule.time]).join(', ')}${r.schedule.once ? L(' (uma vez)', ' (once)') : ''}`
       return `- ${r.name} (${agentName(r.agentId)}, ${where(r.conversationId)}): ${r.enabled ? L('ligada', 'on') : L('desligada', 'off')} · ${kind} · ${L('próxima', 'next')} ${r.enabled && r.nextAt ? when(r.nextAt, x.now) : '—'} · ${L('última', 'last')} ${when(r.lastAt, x.now)}${last?.status ? ` (${last.status}${last.error ? `: ${last.error}` : ''})` : ''}${t?.kind === 'poll' && t.error ? L(` · erro ao checar: ${t.error}`, ` · check error: ${t.error}`) : ''}`
     })
     out.push(`## ${L('Rotinas', 'Routines')}\n${lines.join('\n') || L('nenhuma', 'none')}`)

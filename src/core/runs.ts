@@ -15,7 +15,7 @@ import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './app
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { extractFile } from './wiki-extract'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
-import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, type Routines } from './routines'
+import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
@@ -774,7 +774,9 @@ export class Runner {
     const { event } = when
     const person = r.scope === 'channel' ? undefined : r.owner && r.owner !== this.deps.db.ownerId() ? this.deps.db.person(r.owner) : undefined
     const me = r.scope === 'channel' ? L('o time', 'the team') : (person?.name ?? owner)
-    const hm = new Date(when.scheduledAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+    // Late for whatever reason (the app closed, the Mac asleep, quiet hours, paused): it only says when.
+    const sameDay = new Date(when.scheduledAt).toDateString() === new Date().toDateString()
+    const hm = sameDay ? new Date(when.scheduledAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : whenText(when.scheduledAt)
     return [
       event
         ? L(
@@ -782,8 +784,8 @@ export class Runner {
             `This is the routine "${r.name}", which ${me} set up to run when an event happens: ${event.source}. It just happened: ${event.title}.`
           )
         : L(
-            `Esta é a rotina "${r.name}" (${describeSchedule(r.schedule).toLowerCase()}), que ${me} agendou pra você${when.late ? `. Era pra ter rodado às ${hm}, mas o app estava fechado` : ''}.`,
-            `This is the routine "${r.name}" (${describeSchedule(r.schedule).toLowerCase()}), which ${me} scheduled for you${when.late ? `. It should have run at ${hm}, but the app was closed` : ''}.`
+            `Esta é a rotina "${r.name}" (${describeSchedule(r.schedule).toLowerCase()}), que ${me} agendou pra você${when.late ? `. Era pra ter rodado ${sameDay ? 'às ' : ''}${hm} e está rodando atrasada` : ''}.`,
+            `This is the routine "${r.name}" (${describeSchedule(r.schedule).toLowerCase()}), which ${me} scheduled for you${when.late ? `. It was due ${sameDay ? 'at ' : ''}${hm} and is running late` : ''}.`
           ),
       L(
         `${me} pode não estar olhando agora: faça o que a última mensagem pede, do começo ao fim, e responda com o resultado. Só pergunte se for impossível continuar sem ${me}.`,

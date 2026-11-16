@@ -51,8 +51,8 @@ export const AGENDAR: ToolDef = {
           type: 'array',
           items: { type: 'string' },
           description: L(
-            `Vários horários no mesmo dia, cada um HH:MM (ex.: ["09:00", "13:00", "17:00"]), até ${MAX_TIMES}: uma rotina só, que roda em cada um. Vale com dias ou dia_do_mes; no lugar de horario.`,
-            `Several times on the same day, each HH:MM (e.g. ["09:00", "13:00", "17:00"]), up to ${MAX_TIMES}: one routine, which runs at each. Goes with dias or dia_do_mes; instead of horario.`
+            `Vários horários no mesmo dia, cada um HH:MM (ex.: ["09:00", "13:00", "17:00"]), até ${MAX_TIMES}: uma rotina só, que roda em cada um. Vale com dias ou dia_do_mes; no lugar de horario. Com substitui, mande todos os horários que ela deve ter: o que ficar de fora sai.`,
+            `Several times on the same day, each HH:MM (e.g. ["09:00", "13:00", "17:00"]), up to ${MAX_TIMES}: one routine, which runs at each. Goes with dias or dia_do_mes; instead of horario. With substitui, send every time it should have: one left out is taken off.`
           )
         },
         data: {
@@ -167,9 +167,12 @@ export class Routines {
     for (const r of this.deps.db.routines()) {
       if (r.enabled && r.trigger?.kind === 'poll' && now - (r.trigger.checkedAt ?? 0) >= r.trigger.everyMinutes * 60_000) void this.check(r)
       if (!r.enabled || r.trigger || r.nextAt === undefined || r.nextAt > now) continue
-      const scheduledAt = r.nextAt
-      this.store(r.schedule.once ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: nextRun(r.schedule, now) })
-      if (now - scheduledAt > LATE_GRACE_MS) continue
+      // Of the times it missed (asleep, closed), the latest within LATE_GRACE_MS runs, once.
+      const scheduledAt = lastMissed(r.schedule, r.nextAt, now)
+      // A one-off with no date that missed its time by too much waits for its next matching day.
+      const later = r.schedule.once && scheduledAt === undefined && r.schedule.date === undefined ? nextRun(r.schedule, now) : undefined
+      this.store(r.schedule.once && later === undefined ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: later ?? nextRun(r.schedule, now) })
+      if (scheduledAt === undefined) continue
       this.fire(r.id, { scheduledAt, late: now - scheduledAt > LATE_AFTER_MS })
     }
   }
@@ -286,9 +289,15 @@ export class Routines {
       const latest = this.deps.db.routine(r.id)
       if (latest?.trigger?.kind !== 'poll') return
       const seen = latest.trigger.seen
-      const fresh = seen ? items.filter((i) => !seen.includes(i.key)) : []
+      const known = new Set(seen ?? items.map((i) => i.key))
+      const fresh = seen ? items.filter((i) => !known.has(i.key)) : []
       const next = fresh[0]
-      const keep = [...(seen ?? items.map((i) => i.key)), ...(next ? [next.key] : [])].slice(-MAX_SEEN)
+      // Everything in the answer that's been seen stays remembered, however long the list: dropping
+      // one would make it new again, and fire again. Room left goes to the latest of those gone from it.
+      const listed = new Set(items.map((i) => i.key))
+      const here = [...listed].filter((k) => known.has(k) || k === next?.key)
+      const gone = [...known].filter((k) => !listed.has(k))
+      const keep = [...here, ...gone.slice(Math.max(0, gone.length - Math.max(0, MAX_SEEN - here.length)))]
       this.store({ ...latest, trigger: { ...latest.trigger, seen: keep, checkedAt: this.now(), error: undefined } })
       if (next && latest.enabled) this.fire(r.id, { scheduledAt: this.now(), late: false, event: { source, title: next.title, body: next.body } }, fresh.length > 1)
     } catch (e) {
@@ -337,7 +346,8 @@ export class Routines {
     const several = Array.isArray(args['horarios']) ? (args['horarios'] as unknown[]).map((t) => String(t).trim().padStart(5, '0')) : []
     const time = (several[0] || text('horario') || when?.time || '').padStart(5, '0')
     if (!time.trim() || time === '00000') return fail(L('Falta o horario (HH:MM).', 'Missing horario (HH:MM).'))
-    const times = several.length > 1 && !when ? { times: several } : {}
+    // Always the whole list, even of one: with `substitui`, a time left out is a time taken off.
+    const times = { times: several.length && !when ? several : [time] }
     const monthDay = typeof args['dia_do_mes'] === 'number' || (typeof args['dia_do_mes'] === 'string' && args['dia_do_mes'] !== '') ? Number(args['dia_do_mes']) : undefined
     try {
       const routine = this.save({
@@ -477,6 +487,18 @@ export class Routines {
       })
     this.runs.add(run)
   }
+}
+
+// The latest time a schedule was due at, from `due` (its nextAt, already past) up to `now`, no
+// older than LATE_GRACE_MS. undefined: all of them are older (or it isn't due).
+export function lastMissed(s: Schedule, due: number, now: number): number | undefined {
+  if (due > now) return undefined
+  const from = Math.max(due, now - LATE_GRACE_MS)
+  let at = from === due ? due : nextRun(s, from - 1)
+  if (at === undefined || at > now) return undefined
+  // A one-off runs at its one time; a repeating one, at the latest it reached.
+  for (let next = s.once ? undefined : nextRun(s, at); next !== undefined && next <= now; next = nextRun(s, at)) at = next
+  return at
 }
 
 // Runs a routine, and a reply that failed again in place up to RETRY_WAITS_MS.length times.

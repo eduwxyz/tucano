@@ -7,8 +7,8 @@ Uma rotina é um pedido que o app manda pra um agente sozinho, numa DM ou num ca
 1. Em **Rotinas** (um calendário da semana), clique num horário ou em **Nova rotina** (N).
 2. **Nome**, **Agente** e **O que fazer**: escreva como numa mensagem. Ele usa as ferramentas, os conectores e o computador que já tem.
 3. **Quando roda**:
-   - **Num horário**: **Horário**, na hora do seu computador, e como repete. **+ horário** põe mais de um no dia (9h, 13h e 17h), na mesma rotina, em **Repete** e **Todo mês**.
-     - **Repete**: nos **Dias da semana** escolhidos (seg a sex, todo dia ou escolhidos), toda semana.
+   - **Num horário**: como repete, os dias e **Às**, na hora do seu computador. **+ horário** põe mais de um no dia (9h, 13h e 17h), em **Toda semana** e **Todo mês**; o × tira.
+     - **Toda semana**: nos **Dias** escolhidos (seg a sex, todo dia ou escolhidos).
      - **Uma vez**: no próximo dia marcado em que o horário ainda não passou; depois de rodar, desliga sozinha.
      - **Numa data**: num dia do calendário (ex.: 17/11 às 9h), mesmo daqui a meses. Roda uma vez e desliga.
      - **Todo mês**: num dia do mês (ex.: todo dia 5). Num mês sem esse dia (31 em novembro), roda no último.

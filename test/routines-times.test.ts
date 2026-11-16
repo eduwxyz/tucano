@@ -10,9 +10,9 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
-import { Routines } from '../src/core/routines'
+import { lastMissed, LATE_GRACE_MS, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
-import { proposalFrom } from '../src/core/tuca-help'
+import { proposalFrom, workspaceState } from '../src/core/tuca-help'
 import { tucanoSchedule } from '../src/core/agent-import'
 
 const at = (y: number, mo: number, d: number, h = 0, mi = 0): number => new Date(y, mo - 1, d, h, mi).getTime()
@@ -53,6 +53,7 @@ describe('routines at several times', () => {
   let gateway: Gateway
   let runner: Runner
   let routines: Routines
+  let prompts: string[]
   let clock: number
   let dir: string
 
@@ -62,7 +63,11 @@ describe('routines at several times', () => {
     db.saveAgent(agent('a1', 'lia'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     clock = at(2026, 11, 9, 7) // Monday 9 Nov, 7:00
-    const engines = Object.fromEntries((['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok'] as EngineId[]).map((e) => [e, fakeEngine(e, { delayMs: 1 })])) as Record<EngineId, Engine>
+    prompts = []
+    const engines = Object.fromEntries((['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok'] as EngineId[]).map((e) => {
+      const base = fakeEngine(e, { delayMs: 1 })
+      return [e, { ...base, run: (t: Parameters<Engine['run']>[0]) => (prompts.push(t.prompt), base.run(t)) }]
+    })) as Record<EngineId, Engine>
     const emit = (_: CoreEvent): void => {}
     gateway = new Gateway()
     await gateway.start()
@@ -147,5 +152,51 @@ describe('routines at several times', () => {
   it('a team file brings the times along', () => {
     expect(tucanoSchedule({ days: ['mon', 'fri'], time: '09:00', times: ['09:00', '18:00'] })).toEqual({ days: [1, 5], time: '09:00', times: ['09:00', '18:00'] })
     expect(tucanoSchedule({ days: ['mon'], time: '09:00' })).toEqual({ days: [1], time: '09:00' })
+  })
+  it('an agent that sends one time with substitui takes the others off', () => {
+    const lia = db.agent('a1')!
+    const dm = db.conversation('d1')!
+    const r = routines.schedule(lia, dm, { nome: 'Pedidos', pedido: 'Olha os pedidos.', horarios: ['09:00', '15:00'], dias: ['seg'] }).routine!
+    expect(routines.schedule(lia, dm, { nome: 'Pedidos', pedido: 'Olha os pedidos.', horario: '09:00', dias: ['seg'], substitui: r.id }).routine?.schedule).toEqual({ days: [1], time: '09:00' })
+    const again = routines.schedule(lia, dm, { nome: 'Pedidos', pedido: 'Olha os pedidos.', horarios: ['09:00', '15:00'], dias: ['seg'], substitui: r.id }).routine!
+    expect(routines.schedule(lia, dm, { nome: 'Pedidos', pedido: 'Olha os pedidos.', horarios: ['09:00'], dias: ['seg', 'ter'], substitui: again.id }).routine?.schedule).toEqual({ days: [1, 2], time: '09:00' })
+  })
+
+  it('after a long sleep, runs the latest time it missed (within 12 h), once, and says when that was', async () => {
+    create({ days: WEEKDAYS, time: '09:00', times: ['09:00', '21:30'] })
+    clock = at(2026, 11, 9, 22) // asleep from 7:00 to 22:00: 9:00 is 13 h late, 21:30 half an hour
+    routines.tick()
+    await settle()
+    expect(asks().map((m) => m.routine)).toEqual([expect.objectContaining({ late: true, scheduledAt: at(2026, 11, 9, 21, 30) })])
+    expect(prompts.at(-1)).toMatch(/Era pra ter rodado [^.]*21:30 e está rodando atrasada/) // the runner's clock is the real one: "às 21:30" today, the date otherwise
+    expect(prompts.at(-1)).not.toContain('app estava fechado')
+    expect(db.routines()[0]!.nextAt).toBe(at(2026, 11, 10, 9))
+  })
+
+  it('the latest missed time: none past the grace, a one-off keeps its own', () => {
+    const s = { days: WEEKDAYS, time: '09:00', times: ['09:00', '10:00'] }
+    expect(lastMissed(s, at(2026, 11, 9, 9), at(2026, 11, 9, 10, 5))).toBe(at(2026, 11, 9, 10))
+    expect(lastMissed(s, at(2026, 11, 9, 9), at(2026, 11, 9, 9) + LATE_GRACE_MS + HOUR + 1)).toBeUndefined()
+    expect(lastMissed({ days: [1, 3], time: '09:00', once: true }, at(2026, 11, 9, 9), at(2026, 11, 9, 11))).toBe(at(2026, 11, 9, 9))
+  })
+
+  it('once, on Monday or Wednesday, missed all Monday: waits for Wednesday instead of turning off', async () => {
+    const r = create({ days: [1, 3], time: '09:00', once: true })
+    clock = at(2026, 11, 10, 10) // Tuesday
+    routines.tick()
+    await settle()
+    expect(asks()).toHaveLength(0)
+    expect(db.routine(r.id)).toMatchObject({ enabled: true, nextAt: at(2026, 11, 11, 9) })
+    clock = at(2026, 11, 11, 9, 1)
+    routines.tick()
+    await settle()
+    expect(asks()).toHaveLength(1)
+    expect(db.routine(r.id)!.enabled).toBe(false)
+  })
+
+  it('Tuca reads every time of a routine', () => {
+    create({ days: WEEKDAYS, time: '09:00', times: ['09:00', '15:00'] })
+    const out = workspaceState('routines', { settings, connectors: [], agents: db.agents(), conversations: db.conversations(), routines: db.routines(), approvals: [], failures: [], lastRun: () => undefined, now: clock })
+    expect(out).toContain('1,2,3,4,5 09:00, 15:00')
   })
 })

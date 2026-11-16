@@ -1,5 +1,5 @@
-// The routine editor with several times a day: + time adds the next hour, × takes one off, the
-// sentence says them all, and saving sends every one. Once and a date take one time. The core is a stand-in.
+// The routine editor with several times a day, as pills: + time adds the next hour, × takes one off, the
+// sentence says them all (and how many a week), and saving sends every one. Once and a date take one time. The core is a stand-in.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -20,10 +20,11 @@ vi.mock('../src/renderer/src/store', async (original) => {
     useStore: <T,>(select: (s: State) => T): T => select(fake),
     saveRoutine: vi.fn(async (r: Routine) => ({ ...r, id: 'r1' })),
     dmWith: vi.fn(async () => 'd1'),
+    toast: vi.fn(),
     navigate: vi.fn()
   }
 })
-const { getState, saveRoutine } = await import('../src/renderer/src/store')
+const { getState, saveRoutine, toast } = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { RoutinesPage } = await import('../src/renderer/src/components/Routines')
 
@@ -76,9 +77,9 @@ describe('several times in one routine, in the editor', () => {
     await click(button(/^\+ horário$/))
     await click(button(/^\+ horário$/))
     expect(times()).toEqual(['09:00', '10:00', '11:00'])
-    expect(text()).toContain('Horários')
-    expect(text()).toContain('às 9h, 10h e 11h')
-    expect(text()).toContain('Os dias valem pra todos os horários.')
+    expect(document.querySelectorAll('.time-pill')).toHaveLength(3)
+    expect(text()).toContain('Seg a sex às 9h, 10h e 11h')
+    expect(text()).toContain('15 vezes por semana')
     await click(document.querySelector('button[aria-label="Tirar 10:00"]')!)
     expect(times()).toEqual(['09:00', '11:00'])
     await click(button(/^Criar rotina$/))
@@ -93,13 +94,34 @@ describe('several times in one routine, in the editor', () => {
     expect(vi.mocked(saveRoutine).mock.calls[0]![0].schedule).toMatchObject({ time: '09:00', times: ['09:00'] })
   })
 
+  it('a time left empty says so and holds the save, instead of going quietly', async () => {
+    await start()
+    await click(button(/^\+ horário$/))
+    await type(document.querySelectorAll('.routine-form input[type="time"]')[1]!, '')
+    expect(times()).toEqual(['09:00', ''])
+    expect(text()).toContain('Preencha cada horário, ou tire o que sobrou.')
+    expect(button(/^Criar rotina$/).disabled).toBe(true)
+    await click(document.querySelector('button[aria-label="Tirar "]')!)
+    expect(button(/^Criar rotina$/).disabled).toBe(false)
+  })
+
   it('once takes one time, with no + time', async () => {
     await start()
     await click(button(/^\+ horário$/))
     await click(button(/^Uma vez$/))
     expect(times()).toEqual(['09:00'])
     expect(text()).not.toContain('+ horário')
-    await click(button(/^Repete$/))
+    await click(button(/^Toda semana$/))
     expect(times()).toEqual(['09:00'])
+  })
+
+  it('turning on a date that has passed says why, instead of nothing', async () => {
+    const old: Routine = { id: 'r9', name: 'Reunião', agentId: 'a1', conversationId: 'd1', prompt: 'Me lembre.', schedule: { days: [2], time: '09:00', once: true, date: '2026-01-06' }, enabled: false, createdAt: 0 }
+    fake = { ...fake, routines: [old] }
+    vi.mocked(saveRoutine).mockRejectedValueOnce(new Error('Essa data já passou (ter, 6 jan às 9h). Escolha um dia e horário que ainda vão chegar.'))
+    await act(async () => root.render(<RoutinesPage />))
+    await click(button(/1 rotina desligada/))
+    await click(document.querySelector('.cal-off [role="switch"]')!)
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('Essa data já passou'))
   })
 })

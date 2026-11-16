@@ -124,7 +124,7 @@ describe('routines', () => {
     await settle()
     expect(posted().filter((m) => m.author.kind === 'routine')).toHaveLength(1)
     expect(posted()[0]!.routine).toMatchObject({ late: true, scheduledAt: at(2026, 10, 19, 9, 0) })
-    expect(turns.at(-1)!.prompt).toContain('Era pra ter rodado às 09:00')
+    expect(turns.at(-1)!.prompt).toMatch(/Era pra ter rodado [^.]*09:00 e está rodando atrasada/) // the runner's clock is the real one
 
     clock = at(2026, 10, 20, 9, 0) + LATE_GRACE_MS + 60_000 // Tuesday's run, missed by more than the grace
     routines.tick()
