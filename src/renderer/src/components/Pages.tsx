@@ -97,6 +97,7 @@ import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { WebPushRow } from './WebPushRow'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import type { NotifyState } from '../rpc'
@@ -2626,6 +2627,7 @@ export function SettingsPage(): ReactNode {
               <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
             </div>
             <NotifyTest />
+            <WebPushRow />
           </Card>
         )}
 

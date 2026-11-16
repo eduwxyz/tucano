@@ -26,6 +26,7 @@ import { applyRestore } from '../core/restore'
 import { verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
+import { deviceOf, PWA_HEAD, pwaFile, vapidKeys, WebPush, webPushOn, webPushRoute } from './webpush'
 import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
 import type { Person } from '../shared/types'
 
@@ -83,6 +84,10 @@ const { seal, open } = vault(key)
 // The core signs the files it has checked a message may show (local-paths.ts); /local/ serves only those.
 // A new key each start: an old address stops working with the process that made it.
 const localKey = randomBytes(32).toString('base64url')
+// Web Push (webpush.ts): the same notifications, to the browsers people subscribed, while no page is open.
+const webPush = webPushOn()
+  ? new WebPush({ dataDir, vapid: vapidKeys(dataDir), subject: publicUrl.startsWith('https://') ? publicUrl : 'mailto:tucano@localhost', devicesOf: (p) => devicesOf(p), ownerDevice: deviceOf(token) })
+  : undefined
 
 // Electron's MessagePortMain and parentPort, as far as the core uses them.
 class Port extends EventEmitter {
@@ -134,11 +139,20 @@ function fromCore(msg: CoreRequest): void {
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
+  // Web Push follows (webpush.ts); a failure there never stops the removal itself.
+  try {
+    if (msg.type === 'person-removed' && id) webPush?.forget(id)
+    else if (msg.type === 'person-changed' && id) webPush?.prune(id).catch((e: unknown) => console.error('[webpush]', e))
+  } catch (e) {
+    console.error('[webpush]', e instanceof Error ? e.message : e)
+  }
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   if (personNotice(msg, { signins, grants, viewers, streams })) return
   // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
-    streams.deliver(notifyNote(msg as unknown as Record<string, unknown>), Array.isArray(msg.to) ? msg.to : undefined, ownerId)
+    const note = notifyNote(msg as unknown as Record<string, unknown>)
+    streams.deliver(note, Array.isArray(msg.to) ? msg.to : undefined, ownerId)
+    void webPush?.send(note.notify as { title: string; body: string }, Array.isArray(msg.to) ? msg.to : undefined)
     return
   }
   if (msg.type === 'secret') {
@@ -248,6 +262,7 @@ function index(): string {
   return readFileSync(join(page, 'index.html'), 'utf8')
     .replace('frame-src tucano:', `frame-src 'self' tucano:${privateHost ? ` http://${host}:*` : ''}${publicHost ? ` https://*.${publicHost.split('.').slice(1).join('.')}` : ''}`)
     .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
+    .replace('<title>', (webPush ? PWA_HEAD : '') + '<title>') // after tucano-web.js: it adds to window.tucano
 }
 
 
@@ -297,6 +312,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  if (req.method === 'GET' && pwaFile(url.pathname, res, page, !!webPush)) return
   // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,
   // and so does the page a browser's /?code= opens (opening it spends nothing: see pair-http.ts).
   // No sign-in: the code is what counts, and a wrong one counts as a guess.
@@ -387,6 +403,8 @@ function authed(req: IncomingMessage, res: ServerResponse, url: URL, who: Who): 
 function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who): void {
   // Signed in, but asked from another site's page: a sibling subdomain shares the cookie's site.
   if ((url.pathname === '/events' || url.pathname === '/rpc' || url.pathname === '/upload' || url.pathname === '/viewing' || url.pathname === '/pair/new') && !sameOrigin(req)) return void res.writeHead(403, BASE_HEADERS).end()
+
+  if (url.pathname.startsWith('/webpush/')) return void webPushRoute(webPush, req, res, url.pathname, { person: who.owner ? ownerId : who.person, device: deviceOf(cookieToken(req)) })
 
   // Conectar um celular: a one-time code for whoever asks (their own person), as the link the phone
   // opens and as the browser's.
@@ -770,6 +788,24 @@ process.env['TUCANO_VERSION'] ??= version
 await import(pathToFileURL(join(import.meta.dirname, 'core.js')).href)
 toCore(null, [watcher])
 watcher.emit('message', { data: { id: 1, method: 'snapshot' } })
+
+// A person's sign-ins now (their keys' hashes), asked of the core as them, as their page would.
+// Undefined when the core turns the port away or doesn't answer: never taken for "no devices".
+let deviceAsks = 0
+function devicesOf(person: string): Promise<string[] | undefined> {
+  const id = 1e9 + ++deviceAsks
+  return new Promise((done) => {
+    const port = new Port((m) => {
+      const r = m as { id?: number; result?: { id: string }[] }
+      if (r.id === id) (done(r.result?.map((d) => d.id)), port.close())
+    })
+    const timer = setTimeout(() => (done(undefined), port.close()), 10_000)
+    port.once('close', () => (clearTimeout(timer), done(undefined)))
+    toCore({ person }, [port])
+    port.emit('message', { data: { id, method: 'myDevices' } })
+  })
+}
+webPush?.pruneAll().catch((e: unknown) => console.error('[webpush]', e))
 
 // WebSockets: only an agent's page at its preview address has any (a dev server reloading itself).
 server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
