@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } fr
 import Markdown from 'react-markdown'
 import changelog from '../../../../CHANGELOG.md?raw'
 import { L, lang, locale } from '../../../shared/lang'
-import { newsPages, newsSince, type NewsPage } from '../../../shared/release-notes'
+import { newsPages, newsSince, shouldMarkSeen, type NewsPage } from '../../../shared/release-notes'
 import type { UpdateState } from '../../../shared/types'
 import { updateSettings, useStore, workingAgents } from '../store'
 import { Modal } from './Modal'
@@ -170,9 +170,10 @@ export function WhatsNew(): ReactNode {
   const pages = useMemo(() => newsPages(news, lang() === 'pt'), [news])
   const [page, setPage] = useState(0)
   const [closed, setClosed] = useState(false)
-  // A version with nothing written (or an older one, after going back): seen, quietly.
+  // A newer version with nothing written: seen, quietly. Never an older one: another app of the
+  // workspace on a newer version would write its own back, and the two would trade it forever.
   useEffect(() => {
-    if (version && seen !== version && news.length === 0) updateSettings({ seenVersion: version })
+    if (shouldMarkSeen(version, seen) && news.length === 0) updateSettings({ seenVersion: version })
   }, [version, seen, news.length])
   const open = !!version && !closed && news.length > 0
   // ← and → turn the pages (before the page's own keys: the routines' calendar turns weeks with them).
