@@ -135,6 +135,7 @@ if (TURNSTILE_SITE_KEY.startsWith('1x0000')) console.warn('build.mjs: the waitli
 const PAGES = [
   { file: 'alternativa-grok-bot.html', 'pt-BR': 'alternativa-grok-bot/', en: 'en/grok-bot-alternative/' },
   { file: 'alternativa-openclaw.html', 'pt-BR': 'alternativa-openclaw/', en: 'en/openclaw-alternative/' },
+  { file: 'alternativa-hermes.html', 'pt-BR': 'alternativa-hermes/', en: 'en/hermes-alternative/' },
   { file: 'suporte.html', 'pt-BR': 'suporte/', en: 'en/support/' },
   { file: 'privacidade.html', 'pt-BR': 'privacidade/', en: 'en/privacy/', faq: false }, // no questions: no FAQPage
   { file: 'pro.html', 'pt-BR': 'pro/', en: 'en/pro/' },
@@ -390,6 +391,7 @@ Every page exists in English and in Portuguese (pt-BR).
 ${line('Tucano (home)', `${SITE}/en/`, 'what Tucano is, what it does, how to install it, questions')}
 ${line('Tucano Pro', `${SITE}/en/pro/`, 'Tucano hosted for you, always on')}
 ${line('OpenClaw alternative', `${SITE}/en/openclaw-alternative/`, 'Tucano compared with OpenClaw, Hermes Agent and NanoClaw')}
+${line('Hermes Agent alternative', `${SITE}/en/hermes-alternative/`, 'Tucano compared with Hermes Agent, which Tucano can run as an engine')}
 ${line('Grok Bot alternative', `${SITE}/en/grok-bot-alternative/`, 'Tucano compared with Grok Bot, MausBot, OpenBot and Rerun')}
 ${line('Support', `${SITE}/en/support/`, '')}
 ${line('Source code', 'https://github.com/eduwxyz/tucano', 'README, changelog and releases')}
