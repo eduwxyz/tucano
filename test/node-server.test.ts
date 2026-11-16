@@ -8,7 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { MacComputer } from '../src/core/mac'
-import { NODE_APPROVED, NODE_BASH, NODE_TOOLS, NodeLog, NodeServer, onlyHere, type NodeReach } from '../src/core/node-server'
+import { NODE_APPROVED, NODE_BASH, NODE_TOOLS, NodeLog, NodeServer, onlyHere, summary, type NodeReach } from '../src/core/node-server'
 import { META_FLOOR, META_HIGH_RISK } from '../src/shared/classify'
 import { shellActions } from '../src/shared/actions'
 import { ConnectorManager } from '../src/core/connectors'
@@ -111,6 +111,34 @@ describe('this computer as a node', () => {
     expect(last).toMatchObject({ tool: 'node_read_file', ok: false, summary: join(outside, 'nada.txt') })
     expect(last!.error).toContain('emprestadas')
     expect(typeof first!.at).toBe('number')
+  })
+
+  it('keeps no text typed in a page or an app, only how long it was', () => {
+    const pw = 'Senha-Muito-Secreta-42'
+    for (const [tool, args] of [
+      ['navegador_digitar', { alvo: 'Senha', texto: pw, enter: true }],
+      ['app_escrever', { app: 'Banco', alvo: 'Senha', texto: pw }],
+      ['node_approved', { kind: 'browser', args: { alvo: 'Senha', texto: pw } }],
+      ['premiere__set_text', { text: pw, value: pw, content: pw }]
+    ] as const) {
+      const s = summary(tool, args as Record<string, unknown>)
+      expect(s, tool).not.toContain(pw)
+      expect(s, tool).toContain('22')
+      if (tool !== 'premiere__set_text') expect(s, tool).toContain('Senha') // the field it typed in stays
+    }
+  })
+
+  it('stays at the last 2000 calls, across restarts of the app', () => {
+    const file = join(dir, 'node', 'trim.jsonl')
+    const e = (i: number) => ({ at: i, tool: NODE_BASH, summary: `c${i}`, ok: true, ms: 1 })
+    for (let run = 0; run < 15; run++) {
+      const l = new NodeLog(file) // a new NodeLog per run: the app restarted
+      for (let i = 0; i < 199; i++) l.add(e(run * 199 + i))
+    }
+    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean)
+    expect(lines.length).toBeLessThanOrEqual(2200)
+    expect(lines.length).toBeGreaterThanOrEqual(2000)
+    expect(new NodeLog(file).read(1)[0]!.summary).toBe(`c${15 * 199 - 1}`)
   })
 
   it("tells the server what it can't loosen: a command's and a write's class, the owner's high-risk mark", async () => {

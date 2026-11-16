@@ -635,8 +635,9 @@ export class ConnectorManager {
 
   // Runs a tool on the real server, reconnecting on demand. Stdio servers that
   // keep failing are marked as having a problem. What it throws says why, in words.
-  async call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    const timeout = this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS
+  // A call that may take longer by design (a command on a node, up to 600 s) passes its own timeoutMs; never less than the usual.
+  async call(id: string, name: string, args: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<CallToolResult> {
+    const timeout = Math.max(this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS, opts.timeoutMs ?? 0)
     let l = this.live.get(id)
     if (!l?.client) {
       await this.connect(id)

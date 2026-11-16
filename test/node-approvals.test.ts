@@ -60,6 +60,7 @@ let results: unknown[]
 let ran: string[] // the commands the node ran on "the person's computer"
 let clicked: Record<string, unknown>[] // the risky clicks the node's browser did
 let appActs: Record<string, unknown>[]
+let slowMs: number // how long a command or a local connector takes on "the person's computer"
 
 const agent = (o: { actionRules?: ActionRules; autonomy?: Autonomy; grant?: 'read' | 'read_write' } = {}): Agent => ({
   id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low',
@@ -90,25 +91,30 @@ beforeEach(async () => {
   ran = []
   clicked = []
   appActs = []
+  slowMs = 0
   // The person's computer: a command and a click are only recorded.
   const mac = {
     cwd: () => dir,
     call: async (_a: Agent, name: string, args: Record<string, unknown>) => {
       if (name === 'bash') ran.push(String(args['command']))
+      if (slowMs) await new Promise((r) => setTimeout(r, slowMs))
       return { result: textResult(`ok: ${name}`) }
     }
   }
   const reach: NodeReach = {
     browser: {
-      tools: () => [{ name: 'navegador_clicar', description: 'Clicks', inputSchema: { type: 'object' } }],
-      call: async () => ({ result: textResult('waits'), approval: { args: { alvo: 'Comprar' }, why: 'compra', detail: 'Comprar' } }),
+      tools: () => [
+        { name: 'navegador_clicar', description: 'Clicks', inputSchema: { type: 'object' } },
+        { name: 'navegador_ler', description: 'Reads the page', inputSchema: { type: 'object' } }
+      ],
+      call: async (_a, name) => name === 'navegador_ler' ? (slowMs && (await new Promise((r) => setTimeout(r, slowMs))), { result: textResult('a página') }) : ({ result: textResult('waits'), approval: { args: { alvo: 'Comprar' }, why: 'compra', detail: 'Comprar' } }),
       approved: async (_a, args) => (clicked.push(args), { ok: true, text: 'Clicou.' })
     },
     apps: { tools: () => [], call: async () => ({ result: textResult('') }), approved: (_a, args) => (appActs.push(args), { ok: true, text: '' }), lent: () => [] },
     connectors: {
       list: () => [{ id: 'p', name: 'Premiere Pro', status: 'connected', kind: 'stdio', command: 'node' }],
       tools: () => [{ name: 'delete_project', description: 'Deletes', inputSchema: { type: 'object' }, cls: 'sensitive', enabled: true, highRisk: true, isNew: false }],
-      call: async () => textResult('deleted')
+      call: async () => (slowMs && (await new Promise((r) => setTimeout(r, slowMs))), textResult('deleted'))
     }
   }
   node = new NodeServer(mac as never, reach)
@@ -240,5 +246,53 @@ describe("a node's command and file write keep their class on the server", () =>
     expect(t).toMatchObject({ highRisk: true, lockedHighRisk: true, cls: 'sensitive' })
     db.updateTool(nodeId, t.name, { highRisk: false, cls: 'read' })
     expect(db.tools(nodeId).find((x) => x.name === t.name)).toMatchObject({ highRisk: true, cls: 'sensitive' })
+  })
+})
+
+// The server with a short call timeout (tests can't wait the real 120 s), the node added again as its connector.
+async function shortTimeout(ms: number): Promise<void> {
+  await connectors.closeAll()
+  connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: () => {}, openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback'), callTimeoutMs: ms })
+  const port = Number(new URL(db.connector(nodeId)!.url!).port)
+  nodeId = await connectors.add({ name: 'Mac do Edu 2', kind: 'remote', url: `http://127.0.0.1:${port}/mcp`, auth: 'token', token: KEY })
+  await connectors.connect(nodeId)
+  db.saveAgent(agent({ autonomy: 'free' }))
+}
+
+describe('a slow call on a node is not taken for a computer that is off', () => {
+  it('a command longer than the usual call timeout gets the time it asked for (up to 600 s)', async () => {
+    await shortTimeout(150)
+    slowMs = 600
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'npm test', timeout_seconds: 300 } }))
+    await r.send('d1', 'rode os testes')
+    await r.idle()
+    expect(ran).toEqual(['npm test'])
+    expect(textOf(results[0])).toBe('ok: bash')
+  })
+
+  it('an approved command on the node gets that time too', async () => {
+    await shortTimeout(150)
+    db.saveAgent(agent({ autonomy: 'careful' }))
+    slowMs = 600
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'git push', timeout_seconds: 300 } }))
+    await r.send('d1', 'publique')
+    await r.idle()
+    const ap = db.approvals()[0]!
+    await r.decide(ap.id, 'approved')
+    await r.idle()
+    expect(ran).toEqual(['git push'])
+    expect(db.approvals()[0]).toMatchObject({ state: 'approved' })
+    expect(JSON.stringify(db.messages())).not.toMatch(/não respondeu em|didn't answer in/)
+  })
+
+  it('a call that does time out says it took too long, not that the computer is off', async () => {
+    await shortTimeout(150)
+    slowMs = 600
+    const r = runner(calls({ tool: 'navegador_ler', args: {} }))
+    await r.send('d1', 'leia a página')
+    await r.idle()
+    const text = textOf(results[0])
+    expect(text).not.toMatch(/desligado ou fora da rede|off or out of the network/)
+    expect(text).toMatch(/não respondeu em|didn't answer in/)
   })
 })

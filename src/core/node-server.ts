@@ -398,33 +398,51 @@ const clipText = (t: string): string => {
   const m = maskSecrets(t.replace(/\s+/g, ' ').trim())
   return m.length > MAX_SUMMARY ? `${m.slice(0, MAX_SUMMARY)}…` : m
 }
-// What a call asked, in a line: the command, the path, or the arguments.
+// Text typed into a page, an app or a local connector (a password, a message) never goes into the log as it
+// was: only how long it was. The field it went into stays, to tell what happened.
+const TYPED = new Set(['texto', 'text', 'value', 'valor', 'content', 'conteudo', 'password', 'senha', 'input', 'message', 'mensagem', 'body', 'query'])
+function untyped(v: unknown, key = ''): unknown {
+  if (typeof v === 'string') return TYPED.has(key.toLowerCase()) ? L(`(${v.length} caracteres)`, `(${v.length} characters)`) : v
+  if (Array.isArray(v)) return v.map((x) => untyped(x, key))
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, untyped(x, k)]))
+  return v
+}
+
+// What a call asked, in a line: the command, the path, or the arguments (typed text only as its length).
 export function summary(name: string, args: Record<string, unknown>): string {
   if (name === NODE_BASH) return clipText(String(args['command'] ?? ''))
   if (name === 'node_write_file') return clipText(`${String(args['path'] ?? '')} (${String(args['content'] ?? '').length} B)`)
   if (name === 'node_read_file' || name === 'node_edit_file' || name === 'node_list') return clipText(String(args['path'] ?? ''))
-  return clipText(JSON.stringify(args))
+  return clipText(JSON.stringify(untyped(args)))
 }
 
 const MAX_LOG = 2000
-// The node's log: one JSON line per call, in Tucano's data; trimmed to the last MAX_LOG as it grows.
+const SLACK = 200 // lines over MAX_LOG before it's cut back, so a call doesn't rewrite the file each time
+// The node's log: one JSON line per call, in Tucano's data; kept at the last MAX_LOG (up to MAX_LOG + SLACK).
+// The count starts from what the file has when the app opens, so a restart doesn't let it grow past that.
 export class NodeLog {
-  private added = 0
+  private lines: number | undefined
   constructor(private file: string) {}
 
   add(e: NodeLogEntry): void {
     try {
       mkdirSync(dirname(this.file), { recursive: true })
+      this.lines ??= this.count()
       appendFileSync(this.file, `${JSON.stringify(e)}\n`)
-      if (++this.added % 200 === 0) this.trim()
+      if (++this.lines > MAX_LOG + SLACK) this.trim()
     } catch (err) {
       console.error('[node] log', err)
     }
   }
 
+  private count(): number {
+    return existsSync(this.file) ? readFileSync(this.file, 'utf8').split('\n').filter(Boolean).length : 0
+  }
+
   private trim(): void {
     const lines = readFileSync(this.file, 'utf8').split('\n').filter(Boolean)
     if (lines.length > MAX_LOG) writeFileSync(this.file, `${lines.slice(-MAX_LOG).join('\n')}\n`)
+    this.lines = Math.min(lines.length, MAX_LOG)
   }
 
   // Newest first.
