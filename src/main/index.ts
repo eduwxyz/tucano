@@ -17,6 +17,7 @@ import { Updates } from './updates'
 import { Workspaces } from './workspaces'
 import { backgroundOptions } from './background-qa'
 import { homePhone } from './home-phone'
+import { themeById, themeTokens } from '../shared/themes'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
 import { proxyFromPac } from '../core/network'
@@ -168,6 +169,7 @@ function startWorkspaces(): void {
 
 type CoreRequest =
   | { type: 'theme'; theme: Settings['theme']; initial?: boolean }
+  | { type: 'theme-id'; themeId: string | undefined }
   | { type: 'ready' }
   | { type: 'workspace-summary'; name: string; paused: boolean; unread: number; approvals: number }
   | { type: 'workspace-cleaned'; agentIds?: string[]; error?: string }
@@ -201,6 +203,9 @@ function fromApp(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
 
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
+ipcMain.on('theme:first-paint', (e) => {
+  e.returnValue = fromApp(e) ? (registry.selected().themeId ?? null) : null
+})
 ipcMain.on('viewing', (e, id: unknown) => {
   if (!fromApp(e)) return
   viewing = typeof id === 'string' ? id : null
@@ -365,6 +370,9 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
   } else if (msg.type === 'busy') {
     runtime.busy = msg.busy
     syncBusy()
+  } else if (msg.type === 'theme-id') {
+    registry.setThemeId(workspace.id, msg.themeId)
+    if (registry.selected().id === workspace.id) paintWindow()
   } else if (msg.type === 'lang') {
     if (registry.selected().id !== workspace.id) return
     setLang(msg.lang)
@@ -471,6 +479,7 @@ async function switchWorkspace(id: string): Promise<void> {
     cores.get(registry.selected().id)?.child.postMessage({ type: 'viewing', conversationId: null })
     registry.select(id)
     viewing = null
+    paintWindow()
     mainWindow?.reload()
   } finally { switching = false }
 }
@@ -620,6 +629,8 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 // optionally opening a conversation (and a thread in it).
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
+const windowCanvas = (): string => themeTokens(themeById(registry.selected().themeId), nativeTheme.shouldUseDarkColors ? 'dark' : 'light').bg
+const paintWindow = (): void => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowCanvas()) }
 
 function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
   if (launch.qa) return
@@ -714,7 +725,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: process.platform !== 'darwin',
     ...(process.platform === 'linux' ? { icon: resource('icon.png') } : {}),
     trafficLightPosition: { x: 16, y: 18 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121110' : '#f3f0ea',
+    backgroundColor: windowCanvas(),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
       sandbox: true,
@@ -904,6 +915,7 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   protocol.handle('tucano', serveArtifact)
   registry = new Workspaces(dataDir(), launch.ports)
   nativeTheme.themeSource = registry.theme() ?? 'system'
+  nativeTheme.on('updated', paintWindow)
   systemProxyRead = readSystemProxy()
   void systemProxyRead.then(startWorkspaces)
   phone = homePhone({

@@ -55,6 +55,7 @@ export class Workspaces {
     const ports = new Set<number>()
     for (const w of r.workspaces) {
       if (!w || typeof w.id !== 'string' || !UUID7.test(w.id) || ids.has(w.id) || typeof w.name !== 'string' || !w.name.trim() || typeof w.isDefault !== 'boolean') fail()
+      if (w.themeId !== undefined && typeof w.themeId !== 'string') fail()
       ids.add(w.id)
       const expected = w.isDefault ? this.root : join(this.root, 'workspaces', w.id)
       if (w.dataDir !== expected || (existsSync(expected) && realpathSync(expected) !== expected)) fail()
@@ -102,6 +103,11 @@ export class Workspaces {
   select(id: string): void {
     this.get(id)
     this.save({ ...this.state, selected: id })
+  }
+
+  setThemeId(id: string, themeId: string | undefined): void {
+    if (this.get(id).themeId === themeId) return
+    this.save({ ...this.state, workspaces: this.list().map((w) => w.id === id ? { ...w, themeId } : w) })
   }
 
   rename(id: string, name: string): void {

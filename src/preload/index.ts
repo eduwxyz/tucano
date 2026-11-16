@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('tucano', {
     }
   },
   connect: (): void => ipcRenderer.send('core:connect'),
+  themeId: ipcRenderer.sendSync('theme:first-paint') as string | null,
   pickFolder: (o?: { start?: string; hidden?: boolean }): Promise<string | null> => ipcRenderer.invoke('pick-folder', o) as Promise<string | null>,
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),

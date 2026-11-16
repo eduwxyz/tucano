@@ -21,6 +21,7 @@ declare global {
         subscribe: (cb: (list: WorkspaceList) => void) => () => void
       }
       connect: () => void
+      themeId?: string | null // desktop only: the workspace's theme, for the first paint
       pickFolder: (o?: { start?: string; hidden?: boolean }) => Promise<string | null> // start: from the home folder
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
