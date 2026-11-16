@@ -22,7 +22,7 @@ const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', gra
 export function CatalogLogo({ entry, size = 36 }: { entry: CatalogEntry; size?: number }): ReactNode {
   const logo = LOGOS[entry.id]
   const hex = logo?.hex ?? OWN_COLOR[entry.id] ?? '64748B'
-  const ink = light(hex) ? '#111' : '#fff'
+  const ink = light(hex) ? 'var(--on-light)' : 'var(--on-solid)'
   return (
     <span className="catalog__logo" style={{ width: size, height: size, background: `#${hex}`, color: ink }} aria-hidden>
       {logo ? (
