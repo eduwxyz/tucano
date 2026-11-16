@@ -106,6 +106,9 @@ export const THEMES: readonly Theme[] = [
 ]
 export const THEME_IDS = THEMES.map((t) => t.id)
 
+// A cleared theme (null), or anything not a string, is Tucano's.
+export const themeIdOf = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
+
 export const themeById = (id: string | undefined): Theme => THEMES.find((t) => t.id === id) ?? THEMES[0]!
 
 export const colorSchemeOf = (mode: 'system' | 'light' | 'dark', systemDark: boolean): ColorScheme =>

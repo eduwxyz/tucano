@@ -1,13 +1,31 @@
 // The colour theme is a personal setting beside the light/dark mode: each person's own, kept in
 // the settings for the owner, copied with a workspace's general settings.
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { People } from '../src/core/people'
 import { can, PERSONAL_SETTINGS } from '../src/core/policy-people'
 import { settingsPatchError } from '../src/core/settings-patch'
 import { GENERAL_SETTINGS } from '../src/shared/workspaces'
-import { THEME_IDS } from '../src/shared/themes'
+import { DEFAULT_THEME_ID, THEME_IDS, themeById, themeIdOf } from '../src/shared/themes'
+import { Workspaces } from '../src/main/workspaces'
+
+const dirs: string[] = []
+const scratch = (): string => { const dir = mkdtempSync(join(tmpdir(), 'tucano-theme-setting-')); dirs.push(dir); return dir }
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
+
+// Starting a workspace: the core reads its saved theme, main keeps it for the window's first paint.
+function restart(dbFile: string, registryDir: string): string {
+  const db = new Db(dbFile)
+  const saved = db.getSettings(base).themeId
+  db.close()
+  const registry = new Workspaces(registryDir)
+  registry.setThemeId(registry.selected().id, saved)
+  return themeById(new Workspaces(registryDir).selected().themeId).id
+}
 
 const ready = { installed: true, loggedIn: true }
 const base: Settings = {
@@ -42,6 +60,40 @@ describe('the theme setting', () => {
     expect(db.getSettings(base).themeId).toBeUndefined()
     db.setSettings({ themeId: 'acai' })
     expect(db.getSettings(base).themeId).toBe('acai')
+  })
+
+  it('a theme cleared to null survives a restart and falls back to Tucano', () => {
+    const [dir, registryDir] = [scratch(), scratch()]
+    const db = new Db(join(dir, 'tucano.db'))
+    db.setSettings({ themeId: 'acai' })
+    db.setSettings({ themeId: null as unknown as string })
+    db.close()
+    expect(() => restart(join(dir, 'tucano.db'), registryDir)).not.toThrow()
+    expect(restart(join(dir, 'tucano.db'), registryDir)).toBe(DEFAULT_THEME_ID)
+  })
+
+  it('a theme that no longer exists (gone in a later version) falls back to Tucano', () => {
+    const [dir, registryDir] = [scratch(), scratch()]
+    const db = new Db(join(dir, 'tucano.db'))
+    db.setSettings({ themeId: 'gone-in-a-later-version' })
+    db.close()
+    expect(restart(join(dir, 'tucano.db'), registryDir)).toBe(DEFAULT_THEME_ID)
+  })
+
+  it('null, or anything not a string, is no theme', () => {
+    expect(themeIdOf(null)).toBeUndefined()
+    expect(themeIdOf(3)).toBeUndefined()
+    expect(themeIdOf('acai')).toBe('acai')
+  })
+
+  it('the registry takes null, or anything not a string, as no theme', () => {
+    const registry = new Workspaces(scratch())
+    const id = registry.selected().id
+    registry.setThemeId(id, 'mata')
+    registry.setThemeId(id, null)
+    expect(registry.selected().themeId).toBeUndefined()
+    registry.setThemeId(id, 7 as unknown as string)
+    expect(registry.selected().themeId).toBeUndefined()
   })
 
   it("a member's pick is kept on them; until they pick they see the owner's", () => {

@@ -389,7 +389,11 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     runtime.busy = msg.busy
     syncBusy()
   } else if (msg.type === 'theme-id') {
-    registry.setThemeId(workspace.id, msg.themeId)
+    try {
+      registry.setThemeId(workspace.id, msg.themeId)
+    } catch (e) {
+      console.error('[main] could not keep the theme for the first paint:', e)
+    }
     if (registry.selected().id === workspace.id) paintWindow()
   } else if (msg.type === 'lang') {
     if (registry.selected().id !== workspace.id) return

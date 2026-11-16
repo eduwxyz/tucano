@@ -97,6 +97,7 @@ import { accessCard, agentStamp, appliesNow, changedSince, routineStamp, splitCh
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
+import { themeIdOf } from '../shared/themes'
 import { isNewQuestion } from '../shared/questions'
 import { companyNetwork } from './network'
 
@@ -613,7 +614,7 @@ const toMain = (msg: ToMain): void =>
 // The menu is the main process's: it follows the language picked here.
 toMain({ type: 'lang', lang: db.getSettings(DEFAULTS).language })
 if (!serverMode && defaultWorkspace) toMain({ type: 'theme', theme: db.getSettings(DEFAULTS).theme, initial: true })
-if (!serverMode) toMain({ type: 'theme-id', themeId: db.getSettings(DEFAULTS).themeId })
+if (!serverMode) toMain({ type: 'theme-id', themeId: themeIdOf(db.getSettings(DEFAULTS).themeId) })
 
 // Screenshots use Electron's Chromium, which lives in the main process.
 const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error) => void }>()
@@ -2633,7 +2634,7 @@ const api: Handlers = {
       emitPeople()
     }
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
-    if (!serverMode && 'themeId' in patch) toMain({ type: 'theme-id', themeId: patch.themeId ?? undefined })
+    if (!serverMode && 'themeId' in patch) toMain({ type: 'theme-id', themeId: themeIdOf(patch.themeId) })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
