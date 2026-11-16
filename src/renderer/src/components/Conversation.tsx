@@ -2290,6 +2290,7 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const personOptions = mention && !isDm && team ? peopleHandles(people).filter((x) => x.person.id !== you && x.handle.startsWith(fold(mention.query))) : []
   const options: { key: string; handle: string; agent?: Agent; person?: Person }[] = [...agentOptions.map((a) => ({ key: a.id, handle: a.handle, agent: a })), ...personOptions.map((x) => ({ key: x.person.id, handle: x.handle, person: x.person }))]
   const outsiders = mention ? allAgents.filter((a) => !members.includes(a) && a.handle.startsWith(mention.query.toLowerCase())) : []
+  const outsiderNames = outsiders.map((a) => a.name).join(', ')
 
   const updateMention = (value: string, caret: number): void => {
     const before = value.slice(0, caret)
@@ -2373,7 +2374,9 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
           ))}
           {outsiders.length > 0 && (
             <div className="mention-menu__hint">
-              {outsiders.map((a) => a.name).join(', ')} {L(`não ${outsiders.length === 1 ? 'está' : 'estão'} neste canal.`, `${outsiders.length === 1 ? 'isn’t' : 'aren’t'} in this channel.`)}{' '}
+              {isDm
+                ? L(`Só ${members[0]?.name ?? 'o agente'} responde aqui; mencionar ${outsiderNames} não chama ninguém.`, `Only ${members[0]?.name ?? 'the agent'} replies here; ${outsiderNames} won’t be called.`)
+                : `${outsiderNames} ${L(`não ${outsiders.length === 1 ? 'está' : 'estão'} neste canal.`, `${outsiders.length === 1 ? 'isn’t' : 'aren’t'} in this channel.`)}`}{' '}
               <button className="link" onMouseDown={(e) => (e.preventDefault(), openDm(outsiders[0]!.id))}>
                 {L('Abrir DM', 'Open DM')}
               </button>
