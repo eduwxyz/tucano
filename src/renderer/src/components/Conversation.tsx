@@ -2290,7 +2290,6 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
   const personOptions = mention && !isDm && team ? peopleHandles(people).filter((x) => x.person.id !== you && x.handle.startsWith(fold(mention.query))) : []
   const options: { key: string; handle: string; agent?: Agent; person?: Person }[] = [...agentOptions.map((a) => ({ key: a.id, handle: a.handle, agent: a })), ...personOptions.map((x) => ({ key: x.person.id, handle: x.handle, person: x.person }))]
   const outsiders = mention ? allAgents.filter((a) => !members.includes(a) && a.handle.startsWith(mention.query.toLowerCase())) : []
-  const outsiderNames = outsiders.map((a) => a.name).join(', ')
 
   const updateMention = (value: string, caret: number): void => {
     const before = value.slice(0, caret)
@@ -2373,14 +2372,25 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
             </button>
           ))}
           {outsiders.length > 0 && (
-            <div className="mention-menu__hint">
-              {isDm
-                ? L(`Só ${members[0]?.name ?? 'o agente'} responde aqui; mencionar ${outsiderNames} não chama ninguém.`, `Only ${members[0]?.name ?? 'the agent'} replies here; ${outsiderNames} won’t be called.`)
-                : `${outsiderNames} ${L(`não ${outsiders.length === 1 ? 'está' : 'estão'} neste canal.`, `${outsiders.length === 1 ? 'isn’t' : 'aren’t'} in this channel.`)}`}{' '}
-              <button className="link" onMouseDown={(e) => (e.preventDefault(), openDm(outsiders[0]!.id))}>
-                {L('Abrir DM', 'Open DM')}
-              </button>
-            </div>
+            <>
+              <div className={`mention-menu__hint ${options.length > 0 ? 'has-divider' : ''}`}>
+                {isDm
+                  ? L(`Só ${members[0]?.name ?? 'o agente'} responde aqui; mencioná-los não chama ninguém.`, `Only ${members[0]?.name ?? 'the agent'} replies here; mentioning these won’t call them.`)
+                  : L('Fora deste canal', 'Not in this channel')}
+              </div>
+              <div className="mention-menu__outsiders">
+                {outsiders.map((a) => (
+                  <div key={a.id} className="mention-menu__outsider">
+                    <AgentAvatar agent={a} size={20} />
+                    <strong>{a.name}</strong>
+                    <span className="muted">@{a.handle}</span>
+                    <button className="link" onMouseDown={(e) => (e.preventDefault(), openDm(a.id))}>
+                      {L('Abrir DM', 'Open DM')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}

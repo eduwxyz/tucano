@@ -1,5 +1,6 @@
-// Typing @ and the start of an agent who is not in the conversation: in a channel the hint says the
-// agent isn't there, in a DM it says only the DM's agent replies, since a mention there calls no one.
+// Typing @ in a conversation lists the agents who are not in it, one row each with its own Open DM.
+// In a channel the header says they are outside it; in a DM it says only the DM's agent replies,
+// since a mention there calls no one.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -17,9 +18,10 @@ Object.assign(globalThis, { ResizeObserver: class { observe(): void {} unobserve
 vi.mock('open-bot-avatar/dom', () => ({ mountAvatar: () => new Proxy({}, { get: () => () => {} }) }))
 
 let fake: State
+const openDm = vi.fn()
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
-  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake), getState: () => fake, voiceStatus: vi.fn(() => new Promise(() => {})) }
+  return { ...real, openDm: (id: string) => openDm(id), useStore: <T,>(select: (s: State) => T): T => select(fake), getState: () => fake, voiceStatus: vi.fn(() => new Promise(() => {})) }
 })
 const { createRoot } = await import('react-dom/client')
 const { Composer } = await import('../src/renderer/src/components/Conversation')
@@ -27,11 +29,13 @@ const base = (await vi.importActual<typeof import('../src/renderer/src/store')>(
 
 const agent = (id: string, name: string): Agent => ({ id, name, handle: name.toLowerCase(), role: '', color: 'sky', instructions: 'x', modelId: 'sonnet', effort: 'low', limit: 2_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }) as Agent
 const lia = agent('lia', 'Lia')
+const leo = agent('leo', 'Leo')
 const mastercard = agent('mc', 'Mastercard')
+const theo = agent('theo', 'Theo')
 
 let root: Root
-const hintWhenTyping = async (conversation: Conversation, typed: string): Promise<string | undefined> => {
-  fake = { ...base, ready: true, people: [{ id: 'ana', name: 'Ana', role: 'owner', about: '' }], you: 'ana', agents: [lia, mastercard], conversations: [conversation], messages: {} } as unknown as State
+const type = async (conversation: Conversation, typed: string): Promise<void> => {
+  fake = { ...base, ready: true, people: [{ id: 'ana', name: 'Ana', role: 'owner', about: '' }], you: 'ana', agents: [lia, leo, mastercard, theo], conversations: [conversation], messages: {} } as unknown as State
   await act(async () => root.render(<Composer conversationId={conversation.id} members={[lia]} placeholder="" />))
   const field = document.querySelector('textarea')!
   await act(async () => {
@@ -39,31 +43,65 @@ const hintWhenTyping = async (conversation: Conversation, typed: string): Promis
     Object.defineProperty(field, 'selectionStart', { configurable: true, value: typed.length })
     field.dispatchEvent(new window.Event('input', { bubbles: true }))
   })
-  return document.querySelector('.mention-menu__hint')?.textContent?.trim()
 }
+const header = (): string | undefined => document.querySelector('.mention-menu__hint')?.textContent?.trim()
+const rows = (): string[] => [...document.querySelectorAll('.mention-menu__outsider')].map((r) => r.querySelector('strong')!.textContent!)
 
-beforeEach(() => (root = createRoot(document.getElementById('root')!)))
+beforeEach(() => {
+  root = createRoot(document.getElementById('root')!)
+  openDm.mockClear()
+})
 afterEach(async () => {
   await act(async () => root.unmount())
   setLang('pt')
 })
 
-describe('the hint for an agent outside the conversation', () => {
-  const dm = { id: 'd1', kind: 'dm', name: 'lia', members: ['lia'] } as unknown as Conversation
-  const channel = { id: 'c1', kind: 'channel', name: 'geral', members: ['lia'] } as unknown as Conversation
+const dm = { id: 'd1', kind: 'dm', name: 'lia', members: ['lia'] } as unknown as Conversation
+const channel = { id: 'c1', kind: 'channel', name: 'geral', members: ['lia'] } as unknown as Conversation
 
+describe('the agents outside the conversation', () => {
+  it('lists one row for each, with its own Open DM', async () => {
+    await type(dm, '@')
+    expect(rows()).toEqual(['Leo', 'Mastercard', 'Theo'])
+    expect(document.querySelectorAll('.mention-menu__outsider button')).toHaveLength(3)
+  })
+  it('opens the DM of the row that was clicked', async () => {
+    await type(dm, '@')
+    const button = document.querySelectorAll('.mention-menu__outsider button')[1]!
+    await act(async () => void button.dispatchEvent(new window.Event('mousedown', { bubbles: true, cancelable: true })))
+    expect(openDm).toHaveBeenCalledExactlyOnceWith('mc')
+  })
+  it('narrows the list to the typed name', async () => {
+    await type(dm, '@th')
+    expect(rows()).toEqual(['Theo'])
+  })
   it('says who replies in a DM, in English', async () => {
     setLang('en')
-    expect(await hintWhenTyping(dm, '@maste')).toBe('Only Lia replies here; Mastercard won’t be called. Open DM')
+    await type(dm, '@th')
+    expect(header()).toBe('Only Lia replies here; mentioning these won’t call them.')
   })
   it('says who replies in a DM, in Portuguese', async () => {
-    expect(await hintWhenTyping(dm, '@maste')).toBe('Só Lia responde aqui; mencionar Mastercard não chama ninguém. Abrir DM')
+    await type(dm, '@th')
+    expect(header()).toBe('Só Lia responde aqui; mencioná-los não chama ninguém.')
   })
-  it('keeps saying the agent is not in the channel', async () => {
+  it('says they are outside a channel, in English', async () => {
     setLang('en')
-    expect(await hintWhenTyping(channel, '@maste')).toBe('Mastercard isn’t in this channel. Open DM')
+    await type(channel, '@th')
+    expect(header()).toBe('Not in this channel')
   })
-  it('keeps the Portuguese channel text', async () => {
-    expect(await hintWhenTyping(channel, '@maste')).toBe('Mastercard não está neste canal. Abrir DM')
+  it('says they are outside a channel, in Portuguese', async () => {
+    await type(channel, '@th')
+    expect(header()).toBe('Fora deste canal')
+  })
+  it('starts with no divider when no member is listed above', async () => {
+    await type(dm, '@th')
+    expect(document.querySelector('.mention-menu__item')).toBeNull()
+    expect(document.querySelector('.mention-menu__hint')!.classList.contains('has-divider')).toBe(false)
+  })
+  it('draws the divider when members are listed above', async () => {
+    await type(dm, '@l')
+    expect(document.querySelector('.mention-menu__item')).not.toBeNull()
+    expect(rows()).toEqual(['Leo'])
+    expect(document.querySelector('.mention-menu__hint')!.classList.contains('has-divider')).toBe(true)
   })
 })
