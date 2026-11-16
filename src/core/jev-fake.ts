@@ -2,9 +2,7 @@
 // TypeSafe key. Wired in only in fake engines mode, and only when TUCANO_FAKE_LISTEN names who
 // should be brought in (`<handle>`) or says that nobody is (`none`), so a listening channel can be
 // driven in the built app and in a test without spending a real question.
-import { LISTEN_NONE } from './jev'
-
-const LISTEN_NO = '__nao'
+import { LISTEN_NO, LISTEN_NONE } from './jev'
 
 type Question = { criteria?: Record<string, string> }
 type Body = { questions?: Record<string, Question> }
