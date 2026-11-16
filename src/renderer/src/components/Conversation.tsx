@@ -466,13 +466,13 @@ function ResumeActions({ messageId }: { messageId: string }): ReactNode {
         {L('Intervir', 'Intervene')}
       </button>
       {open && createPortal(
-        <Modal title={L('Intervir na execução', 'Intervene in the run')} onClose={() => !submitting.current && setOpen(false)}>
+        <Modal className="intervention-modal" title={L('Intervir na execução', 'Intervene in the run')} onClose={() => !submitting.current && setOpen(false)}>
           <p className="small modal__lead">{L('O agente retomará de onde parou, considerando sua nova orientação.', 'The agent will pick up where it left off, taking your new guidance into account.')}</p>
           <form className="intervention" onSubmit={(e) => { e.preventDefault(); void submit() }}>
             <div className="composer">
               <textarea
                 autoFocus
-                rows={4}
+                rows={6}
                 aria-label={L('Nova orientação', 'New guidance')}
                 placeholder={L('O que o agente precisa considerar ao continuar?', 'What should the agent consider as it continues?')}
                 value={text}
@@ -664,22 +664,24 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             </div>
           </>
         )}
-        {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
-            is in the task the new reply reads, so nothing it already did is done twice (#390). */}
-        {message.run && canContinue(message.run) && (
-          <ResumeActions messageId={message.id} />
-        )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
-            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
-            {L('Tentar de novo', 'Try again')}
-          </button>
-        )}
-        {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
-          <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
-            {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
-          </button>
+        {message.run && (canContinue(message.run) || ['failed', 'stopped', 'interrupted', 'limit_reached'].includes(message.run.status)) && (
+          <div className="run-actions">
+            {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
+                is in the task the new reply reads, so nothing it already did is done twice (#390). */}
+            {canContinue(message.run) && <ResumeActions messageId={message.id} />}
+            {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
+                With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
+            {(['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
+              <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
+                {L('Tentar de novo', 'Try again')}
+              </button>
+            )}
+            {message.run.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
+              <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+                {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
+              </button>
+            )}
+          </div>
         )}
         {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
         {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (

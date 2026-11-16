@@ -88,6 +88,7 @@ describe('a reply the app cut', () => {
     fake = { ...fake, messages: { d1: [cut([step('Thought', 'done'), step('Read src/core/runs.ts', 'done', 'src/core/runs.ts')])] } }
     await render(<ConversationView id="d1" />)
     expect(buttons()).toEqual(['Continue', 'Intervene', 'Try again'])
+    expect([...document.querySelectorAll('.run-actions > button.retry')].map((b) => b.textContent)).toEqual(['Continue', 'Intervene', 'Try again'])
   })
 
   it('offers only Try again when all it did was think', async () => {
