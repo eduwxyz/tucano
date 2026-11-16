@@ -122,6 +122,8 @@ export interface Api {
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
+  probeEndpoint(p: { baseUrl: string; key?: string }): Promise<{ models: string[]; error?: string }> // an OpenAI-format address tried: what it lists, or why not
+  setEndpoint(p: { baseUrl: string; models: string[]; key?: string | null }): Promise<void> // saved; key undefined keeps the saved one, null removes it
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form

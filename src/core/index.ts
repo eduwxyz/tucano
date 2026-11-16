@@ -22,7 +22,7 @@ import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnC
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
-import { listModels, quietClaude, quietCodex, withChoice } from './harness'
+import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
@@ -34,6 +34,7 @@ import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
 import { hermesAppDir, hermesEngine } from './engines/hermes'
+import { endpointEngine, type EndpointTarget } from './engines/endpoint'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
@@ -153,7 +154,7 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } , endpoint: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
@@ -301,7 +302,7 @@ const ready = gateway.start()
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
 }
 
 // More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
@@ -355,7 +356,7 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -365,7 +366,8 @@ const engineImpls: Record<EngineId, Engine> = fake
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
       grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok')),
       cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline')),
-      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes'))
+      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes')),
+      endpoint: endpointEngine(endpointTarget)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -383,6 +385,33 @@ async function foundMcps(): Promise<FoundMcp[]> {
 }
 
 // Where a harness on a gateway sends its requests, and with which key, as its own config says.
+// The address in OpenAI's format the agents run on with no harness, and its key (a secret: it never
+// reaches the window). Unset until someone saves one in Settings › Models.
+const ENDPOINT_SECRET = 'endpoint:key'
+async function endpointTarget(): Promise<EndpointTarget | undefined> {
+  const e = db.getSettings(DEFAULTS).endpoint
+  if (!e?.baseUrl) return undefined
+  const key = await secrets.get(ENDPOINT_SECRET)
+  return { baseUrl: e.baseUrl, ...(key ? { key } : {}) }
+}
+// How it shows among the harnesses: there once it has an address, usable once a model is picked.
+function endpointStatus(e: Settings['endpoint']): EngineStatus {
+  if (!e?.baseUrl) return { installed: false, loggedIn: false }
+  let host = e.baseUrl
+  try {
+    host = new URL(e.baseUrl).host
+  } catch {
+    // shown as typed
+  }
+  const n = e.models.length
+  return { installed: true, loggedIn: n > 0, route: 'endpoint', gateway: host, account: `${host} · ${n === 1 ? L('1 modelo', '1 model') : L(`${n} modelos`, `${n} models`)}` }
+}
+// What each harness lists, the endpoint's picked models with them.
+const allListed = (): Partial<Record<EngineId, string[]>> => {
+  const e = db.getSettings(DEFAULTS).endpoint
+  return e?.models.length ? { ...listed, endpoint: e.models } : listed
+}
+
 async function gatewayTarget(engine: EngineId): Promise<{ baseUrl: string; key?: string } | undefined> {
   if (engine === 'claude') {
     const c = userProvider()
@@ -964,7 +993,7 @@ const runner = new Runner({
   skills,
   wiki,
   wikiCurator: curator,
-  models: () => availableModels(settings(), listed),
+  models: () => availableModels(settings(), allListed()),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
   notify: (title, body, conversationId, kind, threadId, to) => {
     if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
@@ -1116,7 +1145,7 @@ function worksWith(s: Settings): (id: string) => boolean {
 // The first that runs: the one given, a plan's, the router's or the memory's, or any a harness lists.
 function readyModel(s: Settings, first?: string): string | undefined {
   const works = worksWith(s)
-  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, allListed())[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
 }
 
 // `person`: whose builder screen it is: each person has their own DM with him.
@@ -1836,13 +1865,43 @@ const api: Handlers = {
     emit({ type: 'settings', settings: settings() })
   },
 
+  // An address in OpenAI's format and its key, tried before anything is saved: the models it lists, or
+  // why it can't be used. With no key given, the one saved goes (trying it again after a change of URL).
+  probeEndpoint: async ({ baseUrl, key }) => {
+    const base = cleanEndpoint(baseUrl)
+    try {
+      const models = await listModels('endpoint', base, key?.trim() || (await secrets.get(ENDPOINT_SECRET)))
+      if (!models.length) return { models: [], error: L('O endpoint respondeu, mas não listou nenhum modelo.', 'The endpoint answered, but listed no models.') }
+      return { models }
+    } catch (e) {
+      return { models: [], error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+  // Saved as the person left it: the address, the models the agents may use and the key (undefined
+  // keeps the saved one, null removes it). An empty address takes the endpoint away.
+  setEndpoint: async ({ baseUrl, models, key }) => {
+    const base = baseUrl.trim() ? cleanEndpoint(baseUrl) : ''
+    if (key !== undefined) await secrets.set(ENDPOINT_SECRET, key?.trim() || undefined)
+    if (!base) {
+      db.deleteSetting('endpoint')
+      await secrets.set(ENDPOINT_SECRET, undefined)
+    } else {
+      const picked = [...new Set(models.map((m) => m.trim()).filter(Boolean))].slice(0, 200)
+      db.setSettings({ endpoint: { baseUrl: base, models: picked } })
+      // Someone who chose which harnesses to use has picked this one too, by setting it up.
+      const chosen = db.getSettings(DEFAULTS).harnesses
+      if (chosen && !chosen.includes('endpoint')) db.setSettings({ harnesses: [...chosen, 'endpoint'] })
+    }
+    emit({ type: 'settings', settings: settings() })
+  },
+
   // The models a harness offers, besides the app's list for a plan: what OpenCode
   // and Pi list, or what the gateway in Claude Code's or Codex's config lists.
   engineModels: async ({ engine }) => {
     if (!engineCheck.known) await enginesReady
     if (engine === 'codex' && codexCatalog.length)
       return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
-    if (listed[engine]) return { models: listed[engine]! }
+    if (allListed()[engine]) return { models: allListed()[engine]! }
     if (engines[engine].route !== 'gateway') return { models: [] }
     if (!gatewayLists.has(engine))
       gatewayLists.set(
@@ -1891,7 +1950,7 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)

@@ -815,6 +815,11 @@ export class Db {
     return { ...defaults, ...stored }
   }
 
+  // A setting gone, back to its default (setSettings skips what is undefined).
+  deleteSetting(key: keyof Omit<Settings, 'engines'>): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+  }
+
   setSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
     const stmt = this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
     this.tx(() => {

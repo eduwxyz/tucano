@@ -8,7 +8,7 @@ import { L, lang, locale, type Lang } from './lang'
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'endpoint'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -45,7 +45,7 @@ export interface EngineStatus {
   warning?: string // e.g. logged in with an API key instead of a subscription
   // Where it sends requests, read from its own config: the person's plan, a gateway
   // (a company's, or a provider like OpenCode Go), an API key, or the providers it has logins for.
-  route?: 'plan' | 'gateway' | 'apikey' | 'providers'
+  route?: 'plan' | 'gateway' | 'apikey' | 'providers' | 'endpoint'
   gateway?: string // the gateway's host
   off?: boolean // the person didn't pick this harness: no agent runs on it
   soon?: boolean // the app can't run agents on it yet
@@ -472,6 +472,12 @@ export interface LocalInfo {
   download?: string // on a server, where the file isn't on this computer: to save it here
 }
 
+export interface EndpointSettings {
+  baseUrl: string // e.g. https://openrouter.ai/api/v1, http://localhost:11434/v1
+  models: string[] // the ones the agents may run on
+  hasKey?: boolean // computed: a key is saved
+}
+
 export interface Settings {
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
@@ -479,6 +485,9 @@ export interface Settings {
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  // An address in OpenAI's format the agents run on with no harness: its base URL and the models picked
+  // from what it lists. The key is a secret (ENDPOINT_SECRET); `hasKey` only says one is saved.
+  endpoint?: EndpointSettings
   voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
@@ -668,7 +677,10 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
   cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' },
-  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' }
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' },
+  // No program to install: the app itself talks to an address in OpenAI's format (OpenRouter, OmniRoute,
+  // Ollama, LM Studio, vLLM…) with a key, and runs each reply's tools itself (src/core/engines/endpoint.ts).
+  endpoint: { label: 'Endpoint', cli: '', login: '', install: '', site: 'https://openrouter.ai' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
 

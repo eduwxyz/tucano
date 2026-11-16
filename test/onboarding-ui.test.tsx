@@ -63,7 +63,7 @@ const { Dialogs } = await import('../src/renderer/src/components/Dialogs')
 const { askBody, askTitle } = await import('../src/renderer/src/components/Coach')
 
 const off = (): EngineStatus => ({ installed: false, loggedIn: false })
-const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), antigravity: off(), cursor: off(), grok: off(), cline: off(), hermes: off(), ...p })
+const engines = (p: Partial<Record<EngineId, EngineStatus>> = {}): Settings['engines'] => ({ claude: off(), codex: off(), opencode: off(), pi: off(), antigravity: off(), cursor: off(), grok: off(), cline: off(), hermes: off(), endpoint: off(), ...p })
 
 let root: Root
 const base = (await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')).getState()
@@ -115,7 +115,7 @@ describe('the first run', () => {
     await click(/^Começar$/)
     expect(text()).toContain('Conectar a IA')
     expect(text()).toContain('O login é feito no site deles. O Tucano nunca vê a sua senha.')
-    expect(text()).toContain('Uso chave de API, gateway da empresa ou outro programa')
+    expect(text()).toContain('Uso OpenRouter, Ollama, chave de API, gateway da empresa ou outro programa')
     await click(/Não assino nenhuma/)
     expect(text()).toContain('você paga direto pra empresa, não pro Tucano')
     await click(button(/Ver os planos/))
