@@ -4,15 +4,17 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.36] - 2026-11-16
+
 > **Em português:**
-> - **Corrigido:** agentes com modelos do **Antigravity** (Gemini Argon, Hydrogen, Flash) agora veem as imagens que você anexa. Antes eles respondiam que não conseguiam ver o print.
 > - **Novo:** **empreste o seu computador a um Tucano num servidor** (o seu ou o Tucano Pro). Em **Configurações › Servidores**, ligue **Deixar este servidor usar este computador** e empreste as pastas dos seus projetos: os agentes de lá passam a usar o terminal, os arquivos, o navegador, os apps e os conectores deste computador, com as aprovações do servidor. Não precisa abrir porta nem configurar rede: o app liga para o servidor. Num servidor com várias pessoas, um agente só alcança o seu computador quando trabalha pra você. Ideia e primeira versão do @pedrojaques99.
 > - **Novo:** uma rotina roda em **vários horários no mesmo dia**. Em **Às**, cada horário é uma pílula: **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um, e o × tira. Os dias valem pra todos, o resumo embaixo diz quantas vezes por semana, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
+> - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
+> - **Corrigido:** agentes com modelos do **Antigravity** (Gemini Argon, Hydrogen, Flash) agora veem as imagens que você anexa. Antes eles respondiam que não conseguiam ver o print.
 > - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
 > - **Corrigido:** uma rotina que perdeu horários com o Mac dormindo roda o mais recente (até 12 h), e uma "uma vez" em vários dias espera o próximo dia em vez de desligar sem rodar.
 > - **Corrigido:** ligar uma rotina com data vencida diz por que não ligou, e um horário apagado no formulário avisa em vez de sumir.
 > - **Corrigido:** o cartão de uma rotina no calendário abria deslocado, cortado no canto da tela, sem os botões de editar. Agora abre ao lado da rotina.
-> - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
 
 ### Added
 
