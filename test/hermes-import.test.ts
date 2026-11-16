@@ -443,8 +443,13 @@ describe('Hermes import: where Hermes chatted', () => {
 
   it('counts a platform block only when it is turned on, where Hermes reads one', () => {
     const cfg = (y: string) => gw({ 'config.yaml': y })[0]![1]
-    // At the top, a block is only settings (require_mention…): it turns nothing on.
-    expect(cfg('discord:\n  require_mention: true\ntelegram:\n  enabled: true\n')).toEqual([])
+    // At the top with no `enabled`, a block is only settings (require_mention…): it turns nothing on.
+    expect(cfg('discord:\n  require_mention: true\n')).toEqual([])
+    // With `enabled`, the top block wins over all the others (config_loader.py bridge_platform_shared_keys).
+    expect(cfg('telegram:\n  enabled: true\n')).toEqual(['Telegram'])
+    expect(cfg('platforms:\n  telegram:\n    enabled: true\ntelegram:\n  enabled: false\n')).toEqual([])
+    expect(cfg('gateway:\n  telegram:\n    enabled: false\ntelegram:\n  enabled: true\n')).toEqual(['Telegram'])
+    expect(cfg('platforms:\n  telegram:\n    enabled: true\ntelegram:\n  require_mention: true\n')).toEqual(['Telegram'])
     // With no `enabled`, Hermes keeps it off (persist_home_channel writes blocks like that).
     expect(cfg('platforms:\n  slack:\n    home_channel: { chat_id: "1" }\n')).toEqual([])
     expect(cfg('platforms:\n  slack:\n    enabled: false\n')).toEqual([])
@@ -455,6 +460,13 @@ describe('Hermes import: where Hermes chatted', () => {
     expect(cfg('gateway:\n  signal:\n    enabled: 1\n')).toEqual(['Signal'])
     // Later wins, as in Hermes: gateway.platforms, then platforms.
     expect(cfg('gateway:\n  platforms:\n    slack:\n      enabled: true\nplatforms:\n  slack:\n    enabled: false\n')).toEqual([])
+  })
+
+  it('a platform turned off in config.yaml, or that the gateway stood down, does not come from an older state', () => {
+    const state = JSON.stringify({ platforms: { telegram: { state: 'connected' }, slack: { state: 'disabled' }, discord: { state: 'fatal' } } })
+    expect(gw({ 'gateway_state.json': state })[0]![1]).toEqual(['Discord', 'Telegram'])
+    expect(gw({ 'gateway_state.json': state, 'config.yaml': 'platforms:\n  telegram:\n    enabled: false\n' })[0]![1]).toEqual(['Discord'])
+    expect(gw({ 'gateway_state.json': state, 'config.yaml': 'discord:\n  enabled: false\n' })[0]![1]).toEqual(['Telegram'])
   })
 
   it('leaves a gateway state it can’t read as nothing, without a word', () => {

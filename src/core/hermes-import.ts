@@ -461,20 +461,21 @@ const PLATFORMS: Record<string, string> = {
 interface Config {
   servers: string[]
   gateways: string[]
+  off: string[] // platforms config.yaml turns off by name: an older gateway_state.json doesn't bring them back
   model?: { provider: string; model: string }
   effort?: Effort
 }
 
 function configOf(r: Reader, dir: string, notes: string[]): Config {
   const raw = allowed(r, dir, 'config.yaml')
-  if (raw === undefined) return { servers: [], gateways: [] }
+  if (raw === undefined) return { servers: [], gateways: [], off: [] }
   let c: Record<string, unknown>
   try {
     if (raw === null) throw new Error()
     c = obj(parseYaml(raw, { maxAliasCount: 100 }))
   } catch {
     notes.push(L('as configurações (config.yaml grande demais ou ilegível)', 'the settings (config.yaml too big or unreadable)'))
-    return { servers: [], gateways: [] }
+    return { servers: [], gateways: [], off: [] }
   }
   // Names only: nothing of a server's command, URL or env is kept. One turned off in Hermes (hermes
   // mcp add saves it so when its connection test fails) is said, not dropped without a word.
@@ -484,12 +485,18 @@ function configOf(r: Reader, dir: string, notes: string[]): Config {
   if (off.length) notes.push(L(`os servidores MCP desligados no Hermes: ${off.slice(0, 10).join(', ')}${off.length > 10 ? ` e mais ${off.length - 10}` : ''}`, `the MCP servers turned off in Hermes: ${off.slice(0, 10).join(', ')}${off.length > 10 ? ` and ${off.length - 10} more` : ''}`))
   // Where Hermes reads a platform block (gateway/config_loader.py merge_platform_sections), later
   // winning: gateway.platforms, platforms, then gateway.<platform>. A block at the top, by its name,
-  // is only settings (discord.require_mention…). With no `enabled`, Hermes keeps it off.
+  // wins over them all when it has `enabled` (bridge_platform_shared_keys); without it, it is only
+  // settings (discord.require_mention…). With no `enabled` anywhere, Hermes keeps it off.
   const gw = obj(c['gateway'])
   const on = new Map<string, boolean>()
   for (const source of [obj(gw['platforms']), obj(c['platforms']), Object.fromEntries(Object.entries(gw).filter(([k]) => k !== 'platforms' && PLATFORMS[k]))])
     for (const [k, v] of Object.entries(source)) if (PLATFORMS[k] && v && typeof v === 'object' && 'enabled' in obj(v)) on.set(k, truthy(obj(v)['enabled']))
+  for (const k of Object.keys(PLATFORMS)) {
+    const top = c[k]
+    if (top && typeof top === 'object' && !Array.isArray(top) && 'enabled' in obj(top)) on.set(k, truthy(obj(top)['enabled']))
+  }
   const gateways = [...new Set([...on].filter(([, yes]) => yes).map(([k]) => PLATFORMS[k]!))]
+  const offNames = [...new Set([...on].filter(([, yes]) => !yes).map(([k]) => PLATFORMS[k]!))].filter((n) => !gateways.includes(n))
   const m = c['model']
   const mo = obj(m)
   const model = typeof m === 'string' ? str(m, 256) : str(mo['default'], 256) || str(mo['model'], 256)
@@ -497,17 +504,18 @@ function configOf(r: Reader, dir: string, notes: string[]): Config {
   const re = obj(c['agent'])['reasoning_effort']
   const e = typeof re === 'string' ? re : str(obj(re)['effort'], 32)
   const effort: Effort | undefined = e === 'xhigh' ? 'xhigh' : e === 'high' ? 'high' : e === 'medium' ? 'medium' : e === 'low' || e === 'minimal' || e === 'none' ? 'low' : undefined
-  return { servers, gateways, ...(model ? { model: { provider, model } } : {}), ...(effort ? { effort } : {}) }
+  return { servers, gateways, off: offNames, ...(model ? { model: { provider, model } } : {}), ...(effort ? { effort } : {}) }
 }
 
 // The platforms in the gateway_state.json the gateway writes as it runs: { platforms: { telegram: {…},
-// "<profile>:discord": {…} } } (gateway/status.py; the second form when one gateway serves many
-// profiles). Only the names are taken; it's a hint, so one that can't be read is nothing.
+// "<profile>:discord": {…} } } (gateway/status.py write_runtime_status; the second form when one
+// gateway serves many profiles, gateway/run_adapters_recovery.py). Only the names are taken, less
+// the ones it stood down (state "disabled"); it's a hint, so one that can't be read is nothing.
 function gatewayState(r: Reader, dir: string): string[] {
   const raw = allowed(r, dir, 'gateway_state.json')
   if (!raw) return []
   try {
-    return Object.keys(obj(obj(JSON.parse(raw))['platforms'])).slice(0, 200)
+    return Object.entries(obj(obj(JSON.parse(raw))['platforms'])).filter(([, v]) => obj(v)['state'] !== 'disabled').map(([k]) => k).slice(0, 200)
   } catch {
     return []
   }
@@ -548,7 +556,7 @@ function readProfile(r: Reader, dir: string, key: string, now: number, running: 
   if (stock) notes.push(L(`${stock} skill${stock > 1 ? 's' : ''} que já ${stock > 1 ? 'vêm' : 'vem'} com o Hermes, sem mudança (não ${stock > 1 ? 'são suas' : 'é sua'})`, `${stock} skill${stock > 1 ? 's' : ''} that come${stock > 1 ? '' : 's'} with Hermes, unchanged (not yours)`))
   const { routines, asNames } = routinesOf(r, dir, now, notes)
   const config = configOf(r, dir, notes)
-  config.gateways = uniq([...config.gateways, ...running])
+  config.gateways = uniq([...config.gateways, ...running.filter((n) => !config.off.includes(n))])
   // The same model on the Hermes engine here, when its provider is named; else this app's default.
   const m = config.model
   const modelId = m && m.provider && m.provider !== 'auto' ? customModel('hermes', `${m.provider}/${m.model}`) : undefined
