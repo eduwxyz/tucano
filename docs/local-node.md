@@ -57,11 +57,11 @@ The file tools reach only the folders you lend on the card, plus the node's own 
 - `~/Library`, `AppData` and any folder starting with a dot (`.ssh`, `.aws`, `.config`…)
 - Tucano's own data
 
-`node_bash` is still a real terminal: a command can read what you can read. That's why it goes through the command rules and asks on Careful, instead of running silently like a read.
+`node_bash` is still a real terminal: a command can read what you can read. That's why it goes through the command rules and asks on Careful, instead of running silently like a read. On Normal, the default level, a command that only reads (like `cat ~/.ssh/id_rsa`) runs without asking, just like a local terminal. **Put the server agents that use the node on Careful.**
 
 ## What the server ran here
 
-The card's **What the server ran here** lists every call the server made through the node, newest first: time, tool, a short summary (command, path or arguments, with secrets masked), and whether it worked. It's kept on your computer (`<Tucano data>/node/log.jsonl`, the last 2000 calls) and only you see it. Press **Refresh** to update it.
+The card's **What the server ran here** lists every call the server made through the node, newest first: time, tool, a short summary (command, path or arguments, with secrets masked; typed text shows only as its length), and whether it worked. It's kept on your computer (`<Tucano data>/node/log.jsonl`, the last 2000 calls) and only you see it. Press **Refresh** to update it.
 
 ## Limits
 

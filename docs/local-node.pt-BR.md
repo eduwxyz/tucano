@@ -57,11 +57,11 @@ As ferramentas de arquivo só alcançam as pastas que você empresta no cartão,
 - `~/Library`, `AppData` e qualquer pasta que começa com ponto (`.ssh`, `.aws`, `.config`…)
 - os dados do próprio Tucano
 
-O `node_bash` continua sendo um terminal de verdade: um comando lê o que você lê. Por isso ele passa pelas regras de comando e pede aprovação no nível Cuidadoso, em vez de rodar calado como uma leitura.
+O `node_bash` continua sendo um terminal de verdade: um comando lê o que você lê. Por isso ele passa pelas regras de comando e pede aprovação no nível Cuidadoso, em vez de rodar calado como uma leitura. No nível Normal, o padrão, um comando que só lê (como `cat ~/.ssh/id_rsa`) roda sem pedir, igual a um terminal local. **Deixe no nível Cuidadoso os agentes do servidor que usam o nó.**
 
 ## O que o servidor rodou aqui
 
-A lista **O que o servidor rodou aqui**, no cartão, mostra cada chamada que o servidor fez pelo nó, da mais nova para a mais antiga: hora, ferramenta, um resumo curto (comando, caminho ou argumentos, com segredos mascarados) e se deu certo. Ela fica no seu computador (`<dados do Tucano>/node/log.jsonl`, as últimas 2000 chamadas) e só você vê. Aperte **Atualizar** para ver as novas.
+A lista **O que o servidor rodou aqui**, no cartão, mostra cada chamada que o servidor fez pelo nó, da mais nova para a mais antiga: hora, ferramenta, um resumo curto (comando, caminho ou argumentos, com segredos mascarados; o texto digitado aparece só como tamanho) e se deu certo. Ela fica no seu computador (`<dados do Tucano>/node/log.jsonl`, as últimas 2000 chamadas) e só você vê. Aperte **Atualizar** para ver as novas.
 
 ## Limites
 
