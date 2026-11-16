@@ -64,6 +64,7 @@ import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
 import { applyForeignTeam, readForeignZip } from './agent-import'
+import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
@@ -1817,12 +1818,19 @@ const api: Handlers = {
       zip.close()
     }
   },
-  // Hermes Agent (spec §26): the reader is Ravi's, in progress on this branch.
-  hermesPreview: () => {
-    throw new Error(L('A importação do Hermes ainda não está pronta.', "Importing from Hermes isn't ready yet."))
-  },
-  importHermes: () => {
-    throw new Error(L('A importação do Hermes ainda não está pronta.', "Importing from Hermes isn't ready yet."))
+  // Hermes Agent (spec §26): its folder, read where it is (src/core/hermes-import.ts). The preview adds
+  // nothing; the import adds the chosen profiles the same way as an OpenBot export.
+  hermesPreview: ({ path }) => hermesPreview(readHermes(path?.trim() || hermesRoot())),
+  importHermes: ({ path, profiles }, ctx) => {
+    record(ctx, 'team.imported')
+    const s = settings()
+    const r = applyForeignTeam(db, hermesTeam(readHermes(path), profiles), { defaultLimit: s.defaultLimit, defaultModel: readyModel(s) ?? 'sonnet', works: worksWith(s), personId: ctx.person.id })
+    for (const id of r.agents) emit({ type: 'agent', agent: db.agent(id)! })
+    emitConversations()
+    for (const k of db.skills()) emit({ type: 'skill', skill: k })
+    for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
+    for (const m of r.memories) emit({ type: 'memory', memory: m })
+    return r.summary
   },
   backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
   // Everything in one .zip in Downloads, shown in the Finder: to take to a server, which restores it.
