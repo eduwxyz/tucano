@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, 
 import { join } from 'node:path'
 import { isTheme, type Workspace } from '../shared/workspaces'
 import type { Settings } from '../shared/types'
+import { themeIdOf } from '../shared/themes'
 
 const UUID7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -105,7 +106,8 @@ export class Workspaces {
     this.save({ ...this.state, selected: id })
   }
 
-  setThemeId(id: string, themeId: string | undefined): void {
+  setThemeId(id: string, value: string | null | undefined): void {
+    const themeId = themeIdOf(value)
     if (this.get(id).themeId === themeId) return
     this.save({ ...this.state, workspaces: this.list().map((w) => w.id === id ? { ...w, themeId } : w) })
   }
