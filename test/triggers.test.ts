@@ -59,6 +59,39 @@ const create = (trigger: Trigger = poll): Routine =>
 const posted = () => db.messages().filter((m) => m.author.kind === 'routine')
 
 describe('a connector trigger', () => {
+  it('a list longer than what it remembers runs nothing old, check after check', async () => {
+    issues = Array.from({ length: 600 }, (_, i) => issue(i + 1, `Issue ${i + 1}`))
+    const r = create()
+    await settle()
+    for (let i = 0; i < 3; i++) {
+      clock += 5 * 60_000
+      routines.tick()
+      await settle()
+    }
+    expect(posted()).toHaveLength(0)
+    issues = [issue(601, 'Nova de verdade'), ...issues]
+    clock += 5 * 60_000
+    routines.tick()
+    await settle()
+    expect(posted().map((m) => m.routine?.event?.title)).toEqual(['SIM-601 · Nova de verdade'])
+    expect(db.routine(r.id)!.trigger).toMatchObject({ seen: expect.arrayContaining(['uuid-1', 'uuid-600', 'uuid-601']) as string[] })
+  })
+
+  it('remembers what left the list, as long as there is room', async () => {
+    const r = create()
+    await settle()
+    issues = [issue(2, 'Outra')] // SIM-1 closed
+    clock += 5 * 60_000
+    routines.tick()
+    await settle()
+    issues = [issue(1, 'Lembrete duplicado'), issue(2, 'Outra')] // and reopened: not new
+    clock += 5 * 60_000
+    routines.tick()
+    await settle()
+    expect(posted().map((m) => m.routine?.event?.title)).toEqual(['SIM-2 · Outra'])
+    expect(db.routine(r.id)!.trigger).toMatchObject({ seen: ['uuid-1', 'uuid-2'] })
+  })
+
   it('learns what is there when it starts, then runs once for each new item, with the item in the task', async () => {
     const r = create()
     await settle()

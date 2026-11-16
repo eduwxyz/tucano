@@ -548,6 +548,7 @@ const COLUMNS: [string, string, string][] = [
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
+  ['routines', 'times', 'TEXT'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
   ['agents', 'reports_to', 'TEXT'],
   // A sector head's name for its sector and what it solves, in a line (src/shared/org.ts).
@@ -1646,7 +1647,8 @@ export class Db {
         time: str(r['time']),
         ...(r['once'] === 1 ? { once: true } : {}),
         ...(r['date'] ? { date: str(r['date']) } : {}),
-        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {})
+        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {}),
+        ...(r['times'] ? { times: JSON.parse(str(r['times'])) as string[] } : {})
       },
       enabled: r['enabled'] === 1,
       nextAt: r['next_at'] == null ? undefined : Number(r['next_at']),
@@ -1674,10 +1676,10 @@ export class Db {
   saveRoutine(r: Routine): void {
     this.db
       .prepare(
-        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger, times)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
-           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
+           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, times = excluded.times, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
            last_message_id = excluded.last_message_id, trigger = excluded.trigger`
       )
       .run(
@@ -1697,7 +1699,8 @@ export class Db {
         r.lastMessageId ?? null,
         r.createdBy ?? null,
         r.createdAt,
-        r.trigger ? JSON.stringify(r.trigger) : null
+        r.trigger ? JSON.stringify(r.trigger) : null,
+        r.schedule.times && r.schedule.times.length > 1 ? JSON.stringify(r.schedule.times) : null
       )
     // A routine nobody says is the team's is a person's own: the Tucano owner's when no one is named.
     this.db.prepare('UPDATE routines SET scope = ?, owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(r.scope === 'channel' ? 'channel' : 'me', r.owner ?? null, 'owner', r.id)

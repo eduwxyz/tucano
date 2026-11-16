@@ -5,11 +5,27 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Novo:** uma rotina roda em **vários horários no mesmo dia**. Em **Às**, cada horário é uma pílula: **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um, e o × tira. Os dias valem pra todos, o resumo embaixo diz quantas vezes por semana, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
+> - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
+> - **Corrigido:** uma rotina que perdeu horários com o Mac dormindo roda o mais recente (até 12 h), e uma "uma vez" em vários dias espera o próximo dia em vez de desligar sem rodar.
+> - **Corrigido:** ligar uma rotina com data vencida diz por que não ligou, e um horário apagado no formulário avisa em vez de sumir.
 > - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
 
 ### Added
 
+- **One routine at several times a day.** A routine had one time, so "weekdays at 9, 1 and 5" took three copies of the same routine, each edited on its own. Now the times are pills in one row: **+ time** adds another (an hour after the last), **×** takes one off, and the days go for every time; repeats, days and times sit in one block whose last line says them all and how often ("Seg a sex às 9h, 13h e 17h · 15 vezes por semana"), the week shows each run, and editing or deleting changes them all. It goes with a week's days and a day of the month (up to 12 times); once and a date keep one. Agents ask for it with `horarios` in `agendar_rotina` and Tuca with `horas`, a team file carries the times, and a phone app that knows of one time keeps the others as long as it keeps the first.
 - **An official Docker image for the server.** Running Tucano on a VPS meant cloning, building with Node and installing each harness over SSH, and nothing said a container was a supported way. Now each release publishes `ghcr.io/eduwxyz/tucano` (the version and `latest`, x64 and ARM64), the image the Tucano Pro servers run: Tucano, Chromium for the agents' browsers and the harnesses, with everything a person makes in one volume. `docs/server.md` has the `docker run`, a Compose file with the Pro servers' restrictions (no privileges, a read-only system), updating, and why the container gets no Docker socket. The server is no longer called experimental there.
+
+### Fixed
+
+- **A "when something new shows up" routine no longer runs forever on a long list.** It remembered the last 500 ids it had seen, so a read tool that returned more than that (or a filter whose old items outlived 500 new ones) made forgotten items look new again, and each one became a full agent reply. Now every id still in the answer stays remembered, and the room left goes to the latest ones that left it.
+- **After a long sleep, a routine runs the latest time it missed.** It only looked at the first missed time, so with 9:00 and 21:30, a Mac asleep until 22:00 skipped both (9:00 was past the 12 h) and a run at 10:05 said it was due at 9:00. A "once" routine on several days that missed one by more than 12 h now waits for the next of its days instead of turning off without running.
+- **An agent that changes a routine with `substitui` can take times off.** Sending one time kept the others, because the server kept them for older clients; the tool now always sends the whole list.
+- **Tuca sees every time of a routine**, not only the first, in `ver_estado`.
+- **The week view puts each routine on its day when the clock changes** (US and Europe): a day there is 23 or 25 hours, and a 23:30 run vanished or a 0:30 one showed twice.
+- **Turning on a date routine that has passed says why** (in the off list and the card), instead of doing nothing.
+- **A late run tells the agent it is late, not that the app was closed**: quiet hours, a pause or the Mac asleep make it late too.
+- **A time cleared in the form says so and holds the save**, instead of being dropped.
 
 ## [0.2.35] - 2026-11-16
 

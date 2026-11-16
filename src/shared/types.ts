@@ -953,7 +953,8 @@ export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
 
 export interface Schedule {
   days: number[] // 0 = Sunday … 6 = Saturday
-  time: string // "HH:MM", Mac local time
+  time: string // "HH:MM", Mac local time; with `times`, the first of them
+  times?: string[] // several times a day (a week's days or a day of the month): every one, sorted, two or more; unset with one
   once?: boolean // runs at the next matching time, then turns itself off
   date?: string // "YYYY-MM-DD": that day only, at `time` (always once; `days` is its weekday)
   monthDay?: number // 1–31: every month on that day (a shorter month's last day), at `time`
@@ -1040,8 +1041,21 @@ export const isoDay = (at: number): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// The first time after `after` that matches the schedule.
+// How many times one routine runs a day, at most.
+export const MAX_TIMES = 12
+
+// A schedule's times of day: `times` when it has several, else its one `time`.
+export const timesOf = (s: Pick<Schedule, 'time' | 'times'>): string[] => (s.times && s.times.length > 1 ? s.times : [s.time])
+
+// Times as a schedule keeps them: valid, each once, in order.
+export const cleanTimes = (list: string[]): string[] => [...new Set(list.map((t) => t.trim()).filter(validTime))].sort()
+
+// The first time after `after` that matches the schedule (the earliest of its times).
 export function nextRun(s: Schedule, after: number): number | undefined {
+  if (s.times && s.times.length > 1 && s.date === undefined && !s.once) {
+    const all = s.times.map((time) => nextRun({ ...s, time, times: undefined }, after)).filter((t): t is number => t !== undefined)
+    return all.length ? Math.min(...all) : undefined
+  }
   if (!validTime(s.time)) return undefined
   if (s.date !== undefined) {
     if (!validDate(s.date)) return undefined
@@ -1072,8 +1086,9 @@ const ordinal = (n: number): string => `${n}${n % 10 === 1 && n !== 11 ? 'st' : 
 
 export function describeSchedule(s: Schedule): string {
   const days = [...new Set(s.days)].sort()
-  const hour = L(s.time.replace(/^0(\d)/, '$1').replace(':00', 'h'), s.time.replace(/^0(\d)/, '$1'))
   const and = L(' e ', ' and ')
+  const one = (t: string): string => L(t.replace(/^0(\d)/, '$1').replace(':00', 'h'), t.replace(/^0(\d)/, '$1'))
+  const hour = (s.date === undefined && !s.once ? timesOf(s) : [s.time]).map(one).join(', ').replace(/, ([^,]+)$/, `${and}$1`)
   const when =
     days.length === 7
       ? L('Todo dia', 'Every day')
