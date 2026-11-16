@@ -1,0 +1,173 @@
+/* Tucano on a phone (a server's page in the browser, or installed from it): what the screens still
+   got wrong at 760 px and below. Only this width, as in styles.css: a desktop window never gets this narrow. */
+@media (max-width: 760px) {
+  /* Nothing widens the page: a row too wide for the screen would also cut every window open over it. */
+  html,
+  body {
+    overflow-x: clip;
+  }
+  /* Windows fit the screen as it is now (the address bar shown, the keyboard up), not its tallest. */
+  .modal {
+    padding: 16px;
+  }
+  .modal__card {
+    width: min(460px, 100%);
+    max-height: calc(100dvh - 32px);
+  }
+  .modal__card.google-setup {
+    width: min(560px, 100%);
+    max-height: calc(100dvh - 32px);
+  }
+  .modal__card.access-dialog {
+    width: min(580px, 100%);
+    max-height: calc(100dvh - 32px);
+  }
+  .form-modal {
+    max-height: calc(100dvh - 32px);
+  }
+  .agent-card {
+    max-height: calc(100dvh - 24px);
+  }
+  .whats-new__body--paged {
+    height: min(400px, calc(100dvh - 200px));
+  }
+  /* A channel's avatars: the first three, then the + that lists them all. */
+  .conversation .topbar .stack__item:nth-child(n + 4) {
+    display: none;
+  }
+  /* Empty screens keep a margin, and the wiki's two buttons wrap instead of passing both edges. */
+  .empty {
+    padding: 0 20px;
+  }
+  .wk-empty {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 20px;
+  }
+  .wk-empty__actions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  /* Pages use the width a phone has. */
+  .page__inner {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .missions {
+    padding: 56px 16px 32px;
+  }
+  /* Tab bars (Settings, an agent's page) scroll on their own instead of widening the whole page. */
+  .tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs button {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* Two fields side by side share the width, never take their content's. */
+  .grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* A settings row and a person's row: the text keeps a readable width, and what's beside it (buttons,
+     the access chip) goes below when it doesn't fit, instead of squeezing the text to a word a line. */
+  .key-row,
+  .person-row {
+    flex-wrap: wrap;
+  }
+  .key-row > .grow,
+  .person-row > .grow {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+  /* A command to paste (Settings › Models) breaks anywhere rather than run past the card. */
+  .harness__cmd {
+    overflow-wrap: anywhere;
+  }
+  .harness__body {
+    margin-left: 0;
+  }
+  /* A harness's line: its name and account keep a readable width; the tag and the button wrap. */
+  .harness__head {
+    flex-wrap: wrap;
+  }
+  .harness__name {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  /* A DM's top: the agent's role gives its room to the name. */
+  .topbar__role {
+    display: none;
+  }
+  /* Any page's top: one line for the name (cut short), the buttons keep theirs. */
+  .topbar__title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .topbar__actions > .btn--ghost {
+    padding: 0 6px;
+  }
+  .topbar__title h1,
+  .topbar__title h1 > .row {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* A finger finds every button within 40 px, with the buttons looking as they do. */
+  /* The menu button keeps its 36 px (the pages' titles start right below it); its touch area is 44. */
+  .mobile-nav::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+  }
+  input:not([type='checkbox'], [type='radio'], [type='color'], [type='range']),
+  select {
+    min-height: 40px;
+  }
+  :where(.icon-btn, .btn, .segmented button, .text-btn, .swatch, .cal-nav button, .wk-search-btn, .topbar__name, .org-tools__k) {
+    position: relative;
+  }
+  .icon-btn::after,
+  .btn--icon::after {
+    content: '';
+    position: absolute;
+    inset: -7px;
+  }
+  .icon-btn--sm::after {
+    inset: -10px;
+  }
+  .btn:not(.btn--icon)::after,
+  .segmented button::after,
+  .text-btn::after,
+  .wk-search-btn::after,
+  .topbar__name::after,
+  .org-tools__k::after {
+    content: '';
+    position: absolute;
+    inset: -7px 0;
+  }
+  /* Small squares in a row (colours, the week's arrows, icon-only buttons): wider too. */
+  .swatch::after,
+  .cal-nav button::after,
+  .btn.wk-icon-btn::after,
+  .conversation .topbar__actions > .btn--ghost::after {
+    content: '';
+    position: absolute;
+    inset: -7px -10px;
+  }
+  /* The colour picker's square lets its touch area out (its input fills the square). */
+  .swatch--custom {
+    overflow: visible;
+  }
+}
+
+/* A narrow phone: fields one above the other. */
+@media (max-width: 480px) {
+  .grid2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

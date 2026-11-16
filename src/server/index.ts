@@ -247,7 +247,7 @@ function sawPeople(list: Person[]): void {
 function index(): string {
   return readFileSync(join(page, 'index.html'), 'utf8')
     .replace('frame-src tucano:', `frame-src 'self' tucano:${privateHost ? ` http://${host}:*` : ''}${publicHost ? ` https://*.${publicHost.split('.').slice(1).join('.')}` : ''}`)
-    .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
+    .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />\n    <script src="./tucano-web.js"></script>\n    <title>')
 }
 
 
