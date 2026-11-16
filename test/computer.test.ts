@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
@@ -72,8 +72,8 @@ describe('lent folders', () => {
     expect(check('nada')).toMatch(/não existe/)
     expect(checkFolder(tmpdir(), { home, dataDir })).toMatch(/dentro da sua pasta/)
     expect(checkFolder(join(home, 'projetos'), { home, dataDir: join(home, 'projetos/app/.dados') })).toMatch(/dados do próprio/)
-    // Named: the refusal says which folder, as ~/…, so a wrong pick in the dialog is plain.
-    expect(checkFolder(join(home, '.ssh'), { home, dataDir, named: true })).toMatch(/^~\/\.ssh: .*credenciais/)
+    // Named: the refusal says which folder, as ~/… (~\… on Windows), so a wrong pick in the dialog is plain.
+    expect(checkFolder(join(home, '.ssh'), { home, dataDir, named: true })).toMatch(new RegExp(`^~\\${sep}\\.ssh: .*credenciais`))
     expect(checkFolder(home, { home, dataDir, named: true })).toMatch(/^~: .*dentro da sua pasta/)
     expect(checkFolder(join(home, 'projetos/app'), { home, dataDir, named: true })).toBeNull()
   })

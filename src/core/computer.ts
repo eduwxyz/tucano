@@ -29,7 +29,7 @@ const MAX_SHOW_BYTES = 50 * 1024 * 1024
 
 // Why a folder can't be lent, or null. Only folders inside the home folder,
 // never the home itself, Library, hidden folders (~/.ssh, ~/.config…) or the app's own data.
-// named: the refusal starts with the folder, as ~/… (the node's lent folders, where a wrong pick is easy).
+// named: the refusal starts with the folder, as ~/… (~\… on Windows) (the node's lent folders, where a wrong pick is easy).
 export function checkFolder(path: string, opts: { home?: string; dataDir: string; named?: boolean }): string | null {
   const why = folderRefusal(path, opts)
   if (!why || !opts.named) return why
