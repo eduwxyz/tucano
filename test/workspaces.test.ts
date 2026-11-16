@@ -54,6 +54,25 @@ it('persists one app theme across workspace selection, creation and removal', ()
   expect(new Workspaces(dir).theme()).toBe('system')
 })
 
+it("keeps each workspace's colour theme, for the window to paint before its core answers", () => {
+  const dir = root()
+  const registry = new Workspaces(dir)
+  const first = registry.selected()
+  const second = registry.create()
+  registry.setThemeId(first.id, 'acai')
+  registry.setThemeId(second.id, 'sertao')
+  const reread = new Workspaces(dir)
+  expect(reread.get(first.id).themeId).toBe('acai')
+  expect(reread.get(second.id).themeId).toBe('sertao')
+  reread.setThemeId(first.id, undefined)
+  expect(new Workspaces(dir).get(first.id).themeId).toBeUndefined()
+  const file = join(dir, 'workspaces.json')
+  const raw = JSON.parse(readFileSync(file, 'utf8'))
+  raw.workspaces[0].themeId = 7
+  writeFileSync(file, JSON.stringify(raw))
+  expect(() => new Workspaces(dir)).toThrow('Invalid workspaces.json')
+})
+
 it('adopts the existing folder without moving its data and persists selection', () => {
   const dir = root()
   writeFileSync(join(dir, 'tucano.db'), 'existing data')

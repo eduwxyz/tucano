@@ -32,6 +32,7 @@ export interface Workspace {
   webhookPort: number
   gitPort: number
   isDefault: boolean
+  themeId?: string // a copy of its Settings.themeId, for the window's first paint
 }
 
 export interface WorkspaceSummary {

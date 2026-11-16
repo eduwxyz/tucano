@@ -32,6 +32,7 @@ export function App(): ReactNode {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
   const themeId = useStore((s) => s.settings.themeId)
+  const ready = useStore((s) => s.ready)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
   const guest = useStore(guestWelcome)
@@ -54,12 +55,13 @@ export function App(): ReactNode {
   }, [theme])
 
   useEffect(() => {
+    if (!ready) return // until the settings come, the theme main.tsx painted first stays
     const systemDark = matchMedia('(prefers-color-scheme: dark)')
     const paint = (): void => paintTheme(themeId, theme)
     paint()
     systemDark.addEventListener('change', paint)
     return () => systemDark.removeEventListener('change', paint)
-  }, [theme, themeId])
+  }, [ready, theme, themeId])
 
   // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings (Ctrl off a Mac)
   useEffect(() => {
