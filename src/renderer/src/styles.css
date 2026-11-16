@@ -31,6 +31,22 @@
   --shadow: 0 1px 2px rgba(60, 40, 20, 0.05), 0 4px 16px rgba(60, 40, 20, 0.07);
   --shadow-lg: 0 12px 40px rgba(40, 25, 10, 0.16);
   --shadow-panel: 0 0 0 1px rgba(60, 40, 20, 0.06), 0 1px 3px rgba(60, 40, 20, 0.05), 0 10px 30px rgba(60, 40, 20, 0.06);
+  --shadow-tint: 60, 40, 20;
+  --shadow-tint-deep: 40, 25, 10;
+  --ink-tint: 29, 26, 22;
+  --black-tint: 0, 0, 0;
+  --white-tint: 255, 255, 255;
+  --on-solid: #fff;
+  --on-light: #111;
+  --paper: #fff;
+  --overlay: rgba(10, 10, 12, 0.35);
+  --overlay-strong: rgba(12, 11, 10, 0.94);
+  --ink: #1d1a16;
+  --on-ink: #f4efe6;
+  --on-ink-soft: #d6cdbf;
+  --on-ink-dim: #cfc7ba;
+  --on-ink-muted: #a89f92;
+  --ember: #f6a36b;
 
   --c-sky: #3b9eea;
   --c-indigo: #5b6cf0;
