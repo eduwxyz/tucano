@@ -210,6 +210,66 @@ describe('Hermes import: reading the folder', () => {
   })
 })
 
+describe('Hermes import: links inside the Hermes folder', () => {
+  // Hermes never makes links in its folder: a link, even one that stays inside, isn't followed.
+  const link = (target: string, path: string, ctx: { skip: () => void }): boolean => {
+    try {
+      symlinkSync(target, path)
+      return true
+    } catch (e) {
+      if (process.platform === 'win32' && (e as NodeJS.ErrnoException).code === 'EPERM') {
+        ctx.skip()
+        return false
+      }
+      throw e
+    }
+  }
+
+  it('does not open .env through a SOUL.md or a SKILL.md that points at it', (ctx) => {
+    const root = folder({ '.env': `KEY=${SECRET}\n`, 'memories/MEMORY.md': 'x', 'skills/mine/notes.md': 'n' })
+    if (!link(join(root, '.env'), join(root, 'SOUL.md'), ctx)) return
+    link(join('..', '..', '.env'), join(root, 'skills', 'mine', 'SKILL.md'), ctx)
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(read.some((p) => p.endsWith('.env'))).toBe(false)
+    expect(read.some((p) => p.endsWith('SOUL.md') || p.endsWith('SKILL.md'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+    expect(JSON.stringify(hermesPreview(r))).not.toContain(SECRET)
+  })
+
+  it('does not open .env to hash a stock skill whose file points at it', (ctx) => {
+    const ARXIV = skill('arxiv')
+    const root = folder({
+      '.env': `KEY=${SECRET}\n`,
+      'SOUL.md': 'x',
+      'skills/.bundled_manifest': `arxiv:${onlySkill(ARXIV)}\n`,
+      'skills/arxiv/SKILL.md': ARXIV
+    })
+    if (!link(join('..', '..', '.env'), join(root, 'skills', 'arxiv', 'notes.md'), ctx)) return
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(read.some((p) => p.endsWith('.env') || p.endsWith('notes.md'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+  })
+
+  it('does not walk into a linked folder inside the Hermes folder', (ctx) => {
+    const root = folder({ 'SOUL.md': 'x', 'sessions/s1/SKILL.md': skill('s1', SECRET) })
+    mkdirSync(join(root, 'skills'), { recursive: true })
+    if (!link(join(root, 'sessions', 's1'), join(root, 'skills', 's1'), ctx)) return
+    const read: string[] = []
+    const r = readHermes(root, { onRead: (p) => read.push(p) })
+    expect(read.some((p) => p.includes('sessions') || p.includes('s1'))).toBe(false)
+    expect(JSON.stringify(r)).not.toContain(SECRET)
+  })
+
+  it('still reads a Hermes folder that is itself a link (~/.hermes -> elsewhere)', (ctx) => {
+    const real = folder({ 'SOUL.md': 'You are Hermes.' })
+    const alias = join(mkdtempSync(join(tmpdir(), 'alias-')), '.hermes')
+    if (!link(real, alias, ctx)) return
+    expect(readHermes(alias).profiles[0]!.agent.instructions).toContain('You are Hermes.')
+  })
+})
+
 describe('Hermes import: skills that came with Hermes', () => {
   const ARXIV = skill('arxiv')
 

@@ -17,7 +17,7 @@ No card **Time** (Team):
 **Importar do Hermes…** lê a pasta do Hermes Agent neste computador (`HERMES_HOME` ou `~/.hermes`, ou outra que você escolher) e mostra o que vem antes de importar. Cada perfil vira um agente; com vários, você escolhe.
 - **Vem:** o `SOUL.md` como instruções, as memórias dele e as suas (`USER.md`), as skills que você criou ou instalou, as que vieram com o Hermes e você editou, e as tarefas agendadas que cabem numa rotina daqui.
 - **Só o nome, no resumo:** servidores MCP, Telegram/Discord/Slack, tarefas de horário sem equivalente (a cada 30 minutos, várias horas por dia) e o modelo.
-- **Nunca:** `.env`, `auth.json`, conversas, histórico, logs e as skills que vieram com o Hermes sem mudança.
+- **Nunca:** `.env`, `auth.json`, conversas, histórico, logs e as skills que vieram com o Hermes sem mudança. Um link dentro da pasta do Hermes não é seguido.
 
 Os agentes importados entram sem nenhum conector, com a busca na web desligada, as rotinas desligadas e as memórias esperando você confirmar. Um servidor MCP do outro app só aparece no resumo; nunca vira conector sozinho.
 

@@ -22,9 +22,9 @@
 //   config.yaml                 model, agent.reasoning_effort, mcp_servers, platforms (gateways)
 //   profiles/<name>/            each one the same layout again: one more agent
 import { createHash } from 'node:crypto'
-import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, type Stats } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { L } from '../shared/lang'
 import { customModel, type Effort, type Schedule } from '../shared/types'
@@ -62,20 +62,29 @@ export interface HermesReadOpts {
   now?: number
 }
 
-// A reader confined to one folder: only regular files, only inside it (a link out isn't followed).
+// A reader confined to one folder: only regular files and folders, never through a link. Hermes
+// makes none in its folder, so a link (out of it, or to .env, auth.json, sessions/ inside it) isn't
+// followed. Only the folder itself may be a link (~/.hermes -> elsewhere).
 function reader(root: string, opts: HermesReadOpts) {
   const real = realpathSync(root)
-  const within = (p: string): boolean => {
-    try {
-      const r = realpathSync(p)
-      return r === real || r.startsWith(real + sep)
-    } catch {
-      return false
+  const base = resolve(root)
+  // What p is, without following a link at any step below the folder; undefined when not plain.
+  const plain = (p: string): Stats | undefined => {
+    const rel = relative(base, resolve(p))
+    if (rel === '') return statSync(real)
+    if (isAbsolute(rel) || rel === '..' || rel.startsWith('..' + sep)) return undefined
+    let here = real
+    let st: Stats | undefined
+    for (const part of rel.split(sep)) {
+      here = join(here, part)
+      st = lstatSync(here)
+      if (!st.isFile() && !st.isDirectory()) return undefined
     }
+    return st
   }
   const isDir = (p: string): boolean => {
     try {
-      return within(p) && statSync(p).isDirectory()
+      return !!plain(p)?.isDirectory()
     } catch {
       return false
     }
@@ -88,9 +97,8 @@ function reader(root: string, opts: HermesReadOpts) {
       return undefined
     }
     try {
-      if (!within(p)) return null
-      const st = statSync(p)
-      if (!st.isFile() || st.size > max) return null
+      const st = plain(p)
+      if (!st?.isFile() || st.size > max) return null
       opts.onRead?.(p)
       return readFileSync(p, 'utf8').replace(/^﻿/, '')
     } catch {
@@ -126,9 +134,8 @@ function reader(root: string, opts: HermesReadOpts) {
   // The bytes of a regular file inside the folder, or undefined.
   const bytes = (p: string, max: number): Buffer | undefined => {
     try {
-      if (!within(p)) return undefined
-      const st = statSync(p)
-      if (!st.isFile() || st.size > max) return undefined
+      const st = plain(p)
+      if (!st?.isFile() || st.size > max) return undefined
       opts.onRead?.(p)
       return readFileSync(p)
     } catch {
@@ -137,7 +144,7 @@ function reader(root: string, opts: HermesReadOpts) {
   }
   const isFile = (p: string): boolean => {
     try {
-      return within(p) && statSync(p).isFile()
+      return !!plain(p)?.isFile()
     } catch {
       return false
     }
