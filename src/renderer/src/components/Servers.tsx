@@ -159,7 +159,7 @@ export function ServerBar(): ReactNode {
 }
 
 // This computer as a node of a server's Tucano (docs/local-node.md): the server's agents reach this
-// machine's terminal and files like a connector, with the same autonomy and approvals as here. Off by
+// machine's terminal and files like a connector, under the approvals set on the server, not the ones here. Off by
 // default; the way in is a private network (Tailscale), with the key below.
 export function NodeCard(): ReactNode {
   const [info, setInfo] = useState<NodeInfo | null>(null)
@@ -180,7 +180,7 @@ export function NodeCard(): ReactNode {
   return (
     <Card
       title={L('Este computador como nó', 'This computer as a node')}
-      lead={L('Os agentes de um Tucano num servidor usam o terminal, os arquivos, os conectores, o navegador e os apps deste computador, com a mesma autonomia daqui.', "The agents of a Tucano on a server use this computer's terminal, files, connectors, browser and apps, with the same autonomy as here.")}
+      lead={L('Os agentes de um Tucano num servidor usam o terminal, os arquivos, os conectores, o navegador e os apps deste computador, seguindo as aprovações configuradas no servidor, não as daqui.', "The agents of a Tucano on a server use this computer's terminal, files, connectors, browser and apps, following the approvals set on the server, not the ones here.")}
       action={<Toggle on={info.on} disabled={busy} label={L('Este computador como nó', 'This computer as a node')} onChange={(on) => run(call('setNode', { on }))} />}
     >
       {info.error && <p className="field__error">{info.error}</p>}
