@@ -2353,6 +2353,10 @@ h3 {
 .toggle.is-on:active::after {
   transform: translateX(14px) scaleX(1.15);
 }
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .key-row {
   display: flex;
   align-items: center;
@@ -12452,29 +12456,15 @@ button.agent-card__now:hover {
 .access button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 560px) { .access-modes, .access-agents { grid-template-columns: 1fr; } }
 
-/* This computer as a node (NodeCard): where it listens, its key, and the way in. */
-.node-card {
-  gap: 10px;
-.node-card__row {
-  flex-wrap: wrap;
-  gap: 10px;
-.node-card__row > .muted {
-  min-width: 90px;
-.node-card__key {
-  letter-spacing: 0.02em;
-.node-card__steps {
-  margin: 4px 0 0;
-  padding-left: 18px;
-
-.node-card__apps {
-  margin-top: 6px;
-
-.node-card__twice {
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  background: var(--warn-soft, var(--hover));
-  line-height: 1.45;
-.node-card__twice > span {
-  flex: 1 1 260px;
+/* This computer as a node (NodeCard): where it listens, its key, the way in, and what it lends. */
+.node-card { display: grid; gap: 10px; }
+.node-card__row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.node-card__row > .muted { min-width: 90px; }
+.node-card__key { letter-spacing: 0.02em; }
+.node-card__steps { display: grid; gap: 6px; margin: 4px 0 0; padding-left: 18px; color: var(--text-2); }
+.node-card__apps { display: grid; gap: 8px; margin-top: 6px; }
+.node-card__apps > p { margin: 0; }
+.node-card__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-card__twice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-soft); font-size: 12.5px; line-height: 1.45; }
+.node-card__twice > span { flex: 1 1 260px; }
+.node-card__steps code, .node-card__row code { overflow-wrap: anywhere; }

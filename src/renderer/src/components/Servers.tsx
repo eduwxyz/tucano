@@ -4,8 +4,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { pairProblem } from '../../../shared/servers'
 import { confirmDialog } from './Dialogs'
-import { Card } from './Pages'
-import { Icon, Toggle } from './ui'
+import { Card, Toggle } from './Pages'
+import { Icon } from './ui'
 import { AppsCard } from './Apps'
 import { call } from '../rpc'
 import { updateSettings, useStore } from '../store'
@@ -231,6 +231,7 @@ export function NodeCard(): ReactNode {
             <li>{L('No Tucano do servidor: Conectores › Adicionar personalizado › Remoto, com o endereço https://<este-computador>.<sua-rede>.ts.net/mcp e autenticação Token, colando a chave.', "In the server's Tucano: Connectors › Add custom › Remote, with the address https://<this-computer>.<your-tailnet>.ts.net/mcp and Token authentication, pasting the key.")}</li>
             <li>{L('Dê acesso aos agentes que vão usar este computador, em Ferramentas.', 'Give access to the agents that will use this computer, under Tools.')}</li>
           </ol>
+          <NodeFolders info={info} onChange={setInfo} />
           {/* The apps the server's agents may use here (Premiere, Notes…), each to read or to change: the
               same picker as an agent's page. Its connectors and browser come with the node on their own. */}
           <div className="node-card__apps">
@@ -240,5 +241,52 @@ export function NodeCard(): ReactNode {
         </div>
       )}
     </Card>
+  )
+}
+
+// The folders the node lends: the only ones the server's agents read and write here. Keys and passwords
+// (.ssh, .aws, Keychains…) never go in: the core refuses them, and says why.
+function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: NodeInfo) => void }): ReactNode {
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> } | undefined)?.pickFolder
+  const short = (path: string): string => (info.home && (path === info.home || path.startsWith(info.home + '/')) ? '~' + path.slice(info.home.length) : path)
+  const run = (p: Promise<NodeInfo>): void => {
+    setError('')
+    setBusy(true)
+    void p.then(onChange, (e: Error) => setError(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))).finally(() => setBusy(false))
+  }
+  const add = (): void => void pick?.().then((path) => path && run(call('addNodeFolder', { path })))
+  const folders = info.folders ?? []
+  return (
+    <div className="node-card__apps">
+      <span className="field__label">{L('Pastas que ele empresta', 'Folders it lends')}</span>
+      <p className="muted small">
+        {folders.length
+          ? L('Os agentes do servidor só leem e gravam dentro destas pastas. Chaves e senhas (.ssh, .aws, Keychains) ficam fora mesmo assim.', "The server's agents only read and write inside these folders. Keys and passwords (.ssh, .aws, Keychains) stay out even so.")
+          : L('Nenhuma pasta: os agentes do servidor não leem nem gravam arquivo nenhum deste computador.', "No folders: the server's agents don't read or write any file on this computer.")}
+      </p>
+      {folders.length > 0 && (
+        <div className="apps-list">
+          {folders.map((f) => (
+            <div key={f} className="apps-row">
+              <Icon name="folder" />
+              <code className="node-card__path grow" title={f}>
+                {short(f)}
+              </code>
+              <button className="icon-btn icon-btn--sm" title={L('Parar de emprestar', 'Stop lending')} aria-label={L(`Parar de emprestar ${short(f)}`, `Stop lending ${short(f)}`)} disabled={busy} onClick={() => run(call('removeNodeFolder', { path: f }))}>
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <p className="note note--error">{error}</p>}
+      {pick && (
+        <button className="btn btn--sm apps-add" disabled={busy} onClick={add}>
+          <Icon name="plus" size={14} /> {folders.length ? L('Emprestar outra pasta', 'Lend another folder') : L('Emprestar uma pasta', 'Lend a folder')}
+        </button>
+      )}
+    </div>
   )
 }
