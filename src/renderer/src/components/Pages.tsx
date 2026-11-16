@@ -2935,6 +2935,7 @@ function VoiceCard(): ReactNode {
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
+  const platform = useStore((s) => s.platform)
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
   const work = onGateway(settings)
@@ -3012,6 +3013,20 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('geral') && admin && <VoiceCard />}
+
+        {/* A Mac's desktop app only: the server's page and Linux or Windows have no Dock. */}
+        {pane('geral') && platform === 'mac' && defaultWorkspace && !!window.tucano.workspaces && (
+          <Card title={L('Barra de menus', 'Menu bar')}>
+            <div className="key-row">
+              <Icon name="eye" />
+              <div className="grow">
+                <strong>{L('Só na barra de menus', 'Menu bar only')}</strong>
+                <p className="muted small">{L('Tira o Tucano do Dock. O tucano na barra de menus mostra e esconde a janela; com o botão direito, os servidores, Mostrar no Dock e Encerrar.', 'Takes Tucano out of the Dock. The toucan in the menu bar shows and hides the window; right-click it for your servers, Show in Dock and Quit.')}</p>
+              </div>
+              <Toggle on={!!settings.menuBarOnly} onChange={(v) => updateSettings({ menuBarOnly: v })} />
+            </div>
+          </Card>
+        )}
 
         {pane('geral') && (
           <Card title={L('Notificações', 'Notifications')}>

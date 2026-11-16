@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
 import { readInstall } from '../core/feedback'
-import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, type NativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
@@ -184,6 +184,7 @@ type CoreRequest =
   | { type: 'wiki_dir'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
+  | { type: 'dock'; hide: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
@@ -263,25 +264,66 @@ function openAtLogin(open: boolean): void {
 // On Linux and Windows, closing the window keeps the app running (routines, triggers,
 // Telegram), as the Dock does on a Mac; the tray icon brings it back or quits it. A desktop
 // without a tray (plain GNOME) reopens it from the app menu: a second launch shows it.
+// A Mac gets the icon in the menu bar too: with a Tucano on a server, it's the shortest way
+// to put that server's channels on screen without going through the Dock.
 let tray: Tray | null = null
 let quitting = false
 let toldStillOpen = false
-function setTray(): void {
-  if (process.platform === 'darwin') return
+function trayIcon(): NativeImage {
+  const icon = nativeImage.createFromPath(resource('tray.png'))
+  // The menu bar is 18 pt tall: drawn at twice that, so it stays sharp on a Retina screen.
+  if (process.platform === 'darwin') return nativeImage.createFromBuffer(icon.resize({ width: 36, height: 36 }).toPNG(), { scaleFactor: 2 })
   // Windows draws tray icons at 16 px (scaled up on a high-DPI screen); Linux panels at 22.
   const size = process.platform === 'win32' ? 16 : 22
-  tray ??= new Tray(nativeImage.createFromPath(resource('tray.png')).resize({ width: size, height: size }))
+  return icon.resize({ width: size, height: size })
+}
+function setTray(): void {
+  tray ??= new Tray(trayIcon())
   tray.setToolTip(NAME)
   tray.removeAllListeners('click')
-  tray.on('click', () => showWindow())
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: L(`Abrir o ${NAME}`, `Open ${NAME}`), click: () => showWindow() },
-      ...(servers.list().length ? [{ type: 'separator' as const }, ...servers.windowsMenu()] : []),
-      { type: 'separator' },
-      { label: L(`Encerrar o ${NAME}`, `Quit ${NAME}`), click: () => app.quit() }
-    ])
-  )
+  tray.removeAllListeners('right-click')
+  tray.on('click', toggleWindow)
+  // A Mac's menu bar icon would open its menu on any click: there, a click shows or hides the
+  // window, and the menu waits for a right-click (or a Control-click), made then, so it's current.
+  if (process.platform !== 'darwin') return tray.setContextMenu(trayMenu())
+  tray.on('right-click', () => tray?.popUpContextMenu(trayMenu()))
+}
+function trayMenu(): Menu {
+  return Menu.buildFromTemplate([
+    { label: L(`Abrir o ${NAME}`, `Open ${NAME}`), click: () => showWindow() },
+    ...(servers.list().length ? [{ type: 'separator' as const }, ...servers.windowsMenu()] : []),
+    ...(process.platform === 'darwin'
+      ? [{ type: 'separator' as const }, { label: L('Mostrar no Dock', 'Show in Dock'), type: 'checkbox' as const, checked: !menuBarOnly, click: (item: Electron.MenuItem) => askMenuBarOnly(!item.checked) }]
+      : []),
+    { type: 'separator' },
+    { label: L(`Encerrar o ${NAME}`, `Quit ${NAME}`), click: () => app.quit() }
+  ])
+}
+// A click in a Mac's menu bar doesn't take the focus from the app in front: the window in front
+// goes away, as a second click on a menu bar icon closes what the first opened. Anywhere else,
+// and on Linux and Windows, it comes back.
+function toggleWindow(): void {
+  const win = mainWindow
+  if (process.platform === 'darwin' && win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return win.hide()
+  showWindow()
+}
+
+// Settings › General › Menu bar: on a Mac, Tucano can live in the menu bar only, out of the Dock
+// (and out of ⌘Tab); the toucan up there brings the window back.
+let menuBarOnly = false
+function setDock(hide: boolean): void {
+  if (process.platform !== 'darwin' || !app.dock) return
+  menuBarOnly = hide
+  if (hide) app.dock.hide()
+  else void app.dock.show()
+}
+// The tray's Show in Dock: the setting is the default workspace's, so its core keeps it and says
+// so back (a 'dock' message), the way the switch in Settings does.
+function askMenuBarOnly(on: boolean): void {
+  const home = registry.list().find((w) => w.isDefault)
+  const core = home && cores.get(home.id)
+  if (core) core.child.postMessage({ type: 'menu-bar-only', on })
+  else setDock(on)
 }
 // Linux shows a notification with the icon it's given (a Mac uses the app's own).
 const noteIcon = (): { icon?: string } => (process.platform === 'linux' ? { icon: resource('icon.png') } : {})
@@ -365,6 +407,8 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId, msg.page, msg.threadId)).catch(console.error) })
     n.show()
+  } else if (msg.type === 'dock') {
+    if (workspace.isDefault) setDock(msg.hide)
   } else if (msg.type === 'busy') {
     runtime.busy = msg.busy
     syncBusy()
