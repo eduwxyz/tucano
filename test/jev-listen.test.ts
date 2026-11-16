@@ -100,7 +100,8 @@ describe('in a channel with an agent listening', () => {
     cursor: fakeEngine('cursor'),
     grok: fakeEngine('grok'),
     cline: fakeEngine('cline'),
-    hermes: fakeEngine('hermes')
+    hermes: fakeEngine('hermes'),
+    endpoint: fakeEngine('endpoint')
   })
   const runner = (f: typeof fetch, key: string | undefined): Runner =>
     new Runner({ db, engines: engines(), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), jev: { key: async () => key, fetch: f } })
@@ -121,7 +122,7 @@ describe('in a channel with an agent listening', () => {
 
   beforeEach(() => {
     seed()
-    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
+    settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'jev', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'en' }
   })
 
   it('keeps one mode per agent, and drops the mode of whoever leaves the channel', () => {
