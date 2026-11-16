@@ -322,4 +322,26 @@ describe("someone's computer on a team server is theirs", () => {
     await forMaria.idle()
     expect(ran).toEqual(['ls ~'])
   })
+
+  it('what waits for approval on her computer is hers alone to allow: not an admin, not the owner', async () => {
+    await lent.stop()
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    db.createConversation({ id: 'd-maria', kind: 'dm', name: 'a1', members: ['a1'], owner: 'maria' })
+    lent = await lend({ node, db, connectors, keys: { 'maria-key': { person: 'maria' } }, device: 'mac-maria', name: 'iMac' })
+    await until(() => connectors.get(lent.id() ?? '')?.status === 'connected')
+    nodeId = lent.id()!
+    db.saveAgent(agent({ autonomy: 'careful' }))
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'git push origin main' } }, null))
+    await r.send('d-maria', 'publique')
+    await r.idle()
+    const ap = db.approvals().find((a) => a.state === 'pending')!
+    expect(ap).toBeTruthy()
+    await r.decide(ap.id, 'approved', undefined, false, db.ownerId()) // the Tucano's owner
+    await r.decide(ap.id, 'approved') // Telegram's, which is the owner's
+    expect(db.approval(ap.id)?.state).toBe('pending')
+    expect(ran).toEqual([])
+    await r.decide(ap.id, 'approved', undefined, false, 'maria')
+    await r.idle()
+    expect(ran).toEqual(['git push origin main'])
+  })
 })

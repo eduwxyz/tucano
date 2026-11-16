@@ -9,7 +9,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ConnectorManager } from '../src/core/connectors'
 import { Db } from '../src/core/db'
 import { textResult } from '../src/core/gateway'
-import { events, NodeUplink } from '../src/core/node-link'
+import { events, MAX_COMPUTERS, NodeLinks, NodeUplink, type LinkPort } from '../src/core/node-link'
+import { Routines } from '../src/core/routines'
+import { namedRequester } from '../src/core/people'
 import { NODE_BASH, NodeServer } from '../src/core/node-server'
 import { plainCipher, Secrets } from '../src/core/secrets'
 import { NODE_LINK_HEADER, NODE_LINK_PATH, nodeOf, nodeUrl, type UplinkStatus } from '../src/shared/node-link'
@@ -60,7 +62,7 @@ describe('a computer lent to a server', () => {
     lent = await lend({ node, db, connectors, keys: { 'maria-key': { person: 'maria' } }, name: 'iMac' })
     await until(connected)
     const c = connectors.get(lent.id()!)!
-    expect(c.name).toBe('iMac (Maria)')
+    expect(c.name).toBe('iMac · computador de Maria')
     expect(nodeOf(c.url)).toEqual({ device: 'mac-1', owner: 'maria' })
   })
 
@@ -156,3 +158,84 @@ describe("the server's /node/link", () => {
     expect(nodeOf('https://mcp.linear.app/mcp')).toBeUndefined()
   })
 })
+
+describe('what only its person reaches', () => {
+  it("can't be a routine's trigger: a check that runs on its own would read it for whoever made the routine", async () => {
+    lent = await lend({ node, db, connectors })
+    await until(connected)
+    db.saveAgent({ id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1'] })
+    const routines = new Routines({ db, runner: { runRoutine: async () => undefined }, connectors, emit: () => {} })
+    const save = () => routines.save({ name: 'Olho', agentId: 'a1', conversationId: 'c1', prompt: 'x', schedule: { days: [], time: '' }, trigger: { kind: 'poll', connectorId: lent!.id()!, tool: 'node_list', args: { path: '~' }, everyMinutes: 5 }, enabled: true })
+    expect(save).toThrow(/não serve de gatilho|can't be a trigger/)
+    await expect(routines.preview({ kind: 'poll', connectorId: lent.id()!, tool: 'node_list', args: {}, everyMinutes: 5 })).rejects.toThrow(/gatilho|trigger/)
+  })
+
+  it("a channel routine, or a turn with no one to go by, is no one's: it reaches no one's computer", () => {
+    db.saveAgent({ id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    const ch = { kind: 'channel' as const }
+    const team = { id: 'rt', name: 'Do time', agentId: 'a1', conversationId: 'c1', prompt: 'x', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 0, scope: 'channel' as const }
+    const mine = { ...team, id: 'rm', scope: undefined, owner: 'maria' }
+    db.saveRoutine(team)
+    db.saveRoutine(mine)
+    const ask = (id: string) => [{ id: 'm', conversationId: 'c1', author: { kind: 'routine' as const, id }, text: 'x', at: 1 }]
+    expect(namedRequester(db, ch, ask('rt'))).toBeUndefined()
+    expect(namedRequester(db, ch, ask('rm'))).toBe('maria')
+    expect(namedRequester(db, ch, [])).toBeUndefined()
+    expect(namedRequester(db, { kind: 'dm', owner: 'maria' }, [])).toBe('maria')
+  })
+
+  it(`one person lends at most ${MAX_COMPUTERS} computers: a new one replaces their oldest off the line, or is refused`, () => {
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    const removed: string[] = []
+    let live = false
+    const links = new NodeLinks({ db, attach: async () => {}, connected: () => live, remove: async (id) => (removed.push(id), db.removeConnector(id)) })
+    const port = (): LinkPort & { closed: boolean } => ({ closed: false, postMessage() {}, on() { return this }, close() { this.closed = true } })
+    for (let i = 0; i < MAX_COMPUTERS; i++) expect(links.attach(port(), { person: 'maria', device: `d${i}`, name: 'Mac' })).toBeTruthy()
+    const first = db.connectors()[0]!.id
+    expect(links.attach(port(), { person: 'maria', device: 'd-new', name: 'Mac' })).toBeTruthy()
+    expect(removed).toEqual([first])
+    live = true // all of them on a line now
+    const p = port()
+    expect(links.attach(p, { person: 'maria', device: 'd-other', name: 'Mac' })).toBeUndefined()
+    expect(p.closed).toBe(true)
+    expect(db.connectors()).toHaveLength(MAX_COMPUTERS)
+  })
+
+  it("never follows a redirect: its key and this computer's answers stay with the server it was lent to", async () => {
+    let elsewhere = 0
+    const other = createServer((_req, res) => (elsewhere++, res.writeHead(200, { 'content-type': 'text/event-stream' }).end('event: hello\ndata: x\n\n')))
+    await new Promise<void>((r) => other.listen(0, '127.0.0.1', () => r()))
+    const to = `http://127.0.0.1:${(other.address() as AddressInfo).port}${NODE_LINK_PATH}`
+    const moved = createServer((_req, res) => res.writeHead(307, { location: to }).end())
+    await new Promise<void>((r) => moved.listen(0, '127.0.0.1', () => r()))
+    const statuses: UplinkStatus[] = []
+    const up = new NodeUplink({ serverId: 's', origin: `http://127.0.0.1:${(moved.address() as AddressInfo).port}`, token: 'k', device: 'd', name: 'n', server: () => node.mcp(), onStatus: (s) => statuses.push(s), backoffMs: [1000] })
+    up.start()
+    await until(() => last(statuses) === 'error')
+    up.stop()
+    expect(elsewhere).toBe(0)
+    for (const s of [other, moved]) (s.closeAllConnections(), await new Promise<void>((r) => s.close(() => r())))
+  })
+
+  it("an agent changes or cancels a routine only for its person: not Maria's for João in a shared channel", () => {
+    db.saveAgent({ id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    db.addPerson({ id: 'joao', name: 'João', role: 'member', about: '' })
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1'] })
+    const routines = new Routines({ db, runner: { runRoutine: async () => undefined }, connectors, emit: () => {} })
+    const lia = db.agent('a1')!
+    const ch = db.conversation('c1')!
+    const r = routines.schedule(lia, ch, { nome: 'Da Maria', pedido: 'olhe meu computador', horario: '09:00' }, 'maria').routine!
+    expect(r.owner).toBe('maria')
+    const byJoao = routines.schedule(lia, ch, { nome: 'Da Maria', pedido: 'apague tudo', horario: '09:00', substitui: r.id }, 'joao')
+    expect(byJoao.error).toBe(true)
+    expect(db.routine(r.id)?.prompt).toBe('olhe meu computador')
+    expect(routines.cancel(lia, r.id, () => true, 'joao').error).toBe(true)
+    expect(db.routine(r.id)).toBeTruthy()
+    expect(routines.schedule(lia, ch, { nome: 'Da Maria', pedido: 'olhe a pasta X', horario: '10:00', substitui: r.id }, 'maria').error).toBeFalsy()
+    expect(routines.cancel(lia, r.id, () => true, 'maria').error).toBeFalsy()
+  })
+})
+

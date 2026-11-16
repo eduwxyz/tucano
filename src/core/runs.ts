@@ -34,7 +34,7 @@ import { JEV_MODEL, routeJev } from './jev'
 import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
-import { agentOwner, deciders, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
+import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can } from './policy-people'
 import { agentsFor } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
@@ -1303,9 +1303,11 @@ export class Runner {
       verdict({ cls: t.cls, kinds: kindsOf(t), p: policy, highRisk: t.highRisk, alwaysAllowed: t.cls !== 'read' && !t.highRisk && !!agent.autoApprove?.includes(`${connectorId}:${t.name}`), outside })
     // A computer lent to this server is its person's: an agent reaches it only working for them (a routine of
     // theirs, their DM, what they asked in a channel), never for someone else on the same server.
+    // Only someone named counts here: a channel routine (the team's) or a turn with no one to go by reaches no one's.
+    const computerFor = opts.for?.id ?? namedRequester(db, conv, windowAll, msg.threadId)
     const notYours = (c: Connector): boolean => {
       const n = nodeOf(c.url)
-      return !!n && (n.owner ?? db.ownerId()) !== requester.id
+      return !!n && (n.owner ?? db.ownerId()) !== computerFor
     }
     for (const c of this.deps.connectors?.list() ?? []) {
       if (notYours(c)) continue
@@ -1819,7 +1821,7 @@ ${note}`,
 
         if (routines && ROUTINE_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id) ?? agent
-          const r = name === AGENDAR.name ? routines.schedule(current, conv, args, requester.id, visible) : routines.cancel(current, typeof args['id'] === 'string' ? args['id'] : '', visible)
+          const r = name === AGENDAR.name ? routines.schedule(current, conv, args, requester.id, visible) : routines.cancel(current, typeof args['id'] === 'string' ? args['id'] : '', visible, requester.id)
           if (!r.routine) return textResult(r.reply, r.error)
           if (name === AGENDAR.name && !routineIds.includes(r.routine.id)) routineIds.push(r.routine.id)
           msg.run = { ...msg.run!, routineIds: routineIds.length ? [...routineIds] : undefined }
@@ -2645,6 +2647,9 @@ ${note}`,
     const { db, emit } = this.deps
     const ap = db.approval(id)
     const decider = decision === 'expired' ? undefined : (by ?? db.ownerId())
+    // Someone's lent computer: only they allow or refuse what runs on it (not an admin, not Telegram's owner).
+    const computer = ap && decision !== 'expired' ? computerOwner(db, ap.connectorId) : undefined
+    if (computer && decider !== computer) return
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason, decider)) return
     // Everyone who sees the card learns it's decided (and by whom) now, not after the call it allowed.
     emit({ type: 'approval', approval: db.approval(id)! })

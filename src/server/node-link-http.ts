@@ -24,6 +24,8 @@ interface Live {
 }
 
 const BEAT_MS = 25_000
+// Lines one person may have open at once: a new one past this closes their oldest.
+export const MAX_LINKS = 5
 
 export class NodeLinkHttp {
   private links = new Map<string, Live>()
@@ -58,6 +60,8 @@ export class NodeLinkHttp {
     if (!device) return void res.writeHead(400, headers).end()
     const name = cleanMachine(url.searchParams.get('name'))
     const id = randomUUID()
+    const mine = [...this.links].filter(([, l]) => !!l.who.owner === !!who.owner && l.who.person === who.person)
+    for (const [old, l] of mine.slice(0, Math.max(0, mine.length - MAX_LINKS + 1))) (this.links.delete(old), l.port.close())
     const port = new LinkPortHttp((msg) => void (!res.writableEnded && res.write(`data: ${JSON.stringify(msg)}\n\n`)))
     this.links.set(id, { who, port })
     const end = (): void => {

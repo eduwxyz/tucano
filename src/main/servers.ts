@@ -161,8 +161,9 @@ export class Servers {
     // A new token for a server already here: its page starts again with it.
     if (known) this.drop(known.id)
     const id = known?.id ?? randomUUID()
-    // Paired again (a new key), it stays lent if it was.
-    this.save([...list.filter((s) => s.origin !== p.origin), { id, origin: p.origin, token: sealed, open: true, ...(known?.node ? { node: true } : {}) }])
+    // Paired again, with a new key: not lent any more. The key could be someone else's (a link someone sent),
+    // and the computer would be theirs on that server: the person turns it on again, knowing.
+    this.save([...list.filter((s) => s.origin !== p.origin), { id, origin: p.origin, token: sealed, open: true }])
     await this.show(id)
     return 'paired'
   }

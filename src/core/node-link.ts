@@ -60,8 +60,13 @@ export class PortTransport implements Transport {
 export interface NodeLinksDeps {
   db: Pick<Db, 'connectors' | 'saveConnector' | 'person' | 'ownerId'>
   attach(connectorId: string, transport: Transport): Promise<void> // the connector manager connects over it
+  connected?(connectorId: string): boolean // whether a computer's connector is on a line now
+  remove?(connectorId: string): Promise<void> // a computer's connector, gone (to make room for a new one)
   emitConnector?(id: string): void
 }
+
+// Computers one person may lend a server: a new one past this replaces their oldest that isn't on a line.
+export const MAX_COMPUTERS = 5
 
 export class NodeLinks {
   constructor(private deps: NodeLinksDeps) {}
@@ -79,13 +84,23 @@ export class NodeLinks {
       return undefined
     }
     const machine = cleanMachine(o.name) || L('Computador', 'Computer')
-    // The Tucano's owner's computer goes by its name; anyone else's says whose it is.
-    const name = owner === db.ownerId() ? machine : `${machine} (${who.name})`
+    // The Tucano's owner's computer goes by its name; anyone else's says it's a computer, and whose.
+    const name = owner === db.ownerId() ? machine : L(`${machine} · computador de ${who.name}`, `${machine} · ${who.name}'s computer`)
     const url = nodeUrl(device, owner === db.ownerId() ? undefined : owner)
-    const found = db.connectors().find((c) => {
+    const theirs = db.connectors().filter((c) => {
       const n = nodeOf(c.url)
-      return !!n && n.device === device && (n.owner ?? db.ownerId()) === owner
+      return !!n && (n.owner ?? db.ownerId()) === owner
     })
+    const found = theirs.find((c) => nodeOf(c.url)!.device === device)
+    // A new computer past the most one person lends: their oldest not on a line makes room; all on one, it's refused.
+    if (!found && theirs.length >= MAX_COMPUTERS) {
+      const idle = theirs.find((c) => !this.deps.connected?.(c.id))
+      if (!idle || !this.deps.remove) {
+        port.close()
+        return undefined
+      }
+      void this.deps.remove(idle.id)
+    }
     const id = found?.id ?? randomUUID()
     if (!found || found.name !== name) db.saveConnector({ id, name, kind: 'remote', url, auth: 'none' })
     if (found?.name !== name) this.deps.emitConnector?.(id)
@@ -187,7 +202,7 @@ export class NodeUplink {
     url.searchParams.set('name', this.o.name)
     let res: Response
     try {
-      res = await f(url, { headers: this.headers({ accept: 'text/event-stream' }), signal: abort.signal })
+      res = await f(url, { headers: this.headers({ accept: 'text/event-stream' }), signal: abort.signal, redirect: 'error' }) // never on to another address, key and all
     } catch (e) {
       if (this.stopped) return
       this.set('error', L(`Não alcancei o servidor (${(e as Error).message}). Tento de novo sozinho.`, `Couldn't reach the server (${(e as Error).message}). I'll try again by myself.`))
@@ -230,7 +245,7 @@ export class NodeUplink {
     const post = async (m: JSONRPCMessage): Promise<void> => {
       const url = new URL(NODE_LINK_PATH, this.o.origin)
       url.searchParams.set('id', link)
-      const r = await f(url, { method: 'POST', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify(m), signal: abort.signal })
+      const r = await f(url, { method: 'POST', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify(m), signal: abort.signal, redirect: 'error' })
       void r.body?.cancel()
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
     }
@@ -238,6 +253,7 @@ export class NodeUplink {
       for await (const ev of events(body)) {
         beat()
         if (ev.event === 'hello') {
+          if (transport) continue // one line, one link: a second hello changes nothing
           link = ev.data.trim()
           transport = new UplinkTransport(post)
           server = this.o.server()
@@ -287,6 +303,9 @@ class UplinkTransport implements Transport {
   }
 }
 
+// The longest event a server may send down a line (a tool call's arguments): past it, the line is dropped.
+const MAX_EVENT_CHARS = 16 * 1024 * 1024
+
 // Server-sent events from a byte stream: each event's name (message by default) and its data lines joined.
 export async function* events(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: string }> {
   const decoder = new TextDecoder()
@@ -299,6 +318,7 @@ export async function* events(body: ReadableStream<Uint8Array>): AsyncGenerator<
       const { value, done } = await reader.read()
       if (done) return
       buffer += decoder.decode(value, { stream: true })
+      if (buffer.length > MAX_EVENT_CHARS) throw new Error('an event too long')
       let nl: number
       while ((nl = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, nl).replace(/\r$/, '')

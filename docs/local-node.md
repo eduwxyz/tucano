@@ -21,7 +21,9 @@ The computer is available while the app is open. If you quit the app, the comput
 
 On a server with several people, your computer is yours. An agent reaches your computer only when it works for you: in a conversation of yours, a routine of yours, or when you asked in a channel. When someone else asks the same agent for something, it doesn't see your computer.
 
-On the server, someone else's computer shows with their name (e.g. "iMac (Maria)").
+What waits for approval on your computer (a push, a risky click) only you allow: not an admin, not the Tucano's owner, not their Telegram. A team routine (a channel's) reaches no one's computer, and a lent computer can't be a routine's trigger ("when something new shows up").
+
+On the server, someone else's computer shows with their name (e.g. "iMac · computador de Maria"). Each person lends up to 5 computers; a sixth replaces their oldest one that isn't connected.
 
 ## What the server gets
 
@@ -55,6 +57,7 @@ If your agents now live on the server, pause this computer (the screen offers it
 
 - The app calls `<server address>/node/link`, a live stream like the pages' `/events`, and answers with POSTs to the same address. Caddy needs nothing. With nginx, turn off response buffering on that path as for `/events` (`proxy_buffering off`), or honor the `X-Accel-Buffering` header Tucano already sends.
 - Each link signs in with a device's key (the one the app got when it connected the server). Removing the person in **People**, or that device's key, cuts their computer off at once.
+- The app never follows a redirect: the key and what the computer answers go only to the address the person connected. Connecting the same server again, with another link, turns lending off until the person turns it on again.
 - The server can't reach the computer on its own: only the app opens the line, and only to servers it's turned on for.
 
 ## Limits

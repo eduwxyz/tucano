@@ -21,7 +21,9 @@ O computador fica disponível enquanto o app estiver aberto. Se você fechar o a
 
 Num servidor com várias pessoas, o seu computador é seu. Um agente só alcança o seu computador quando trabalha para você: numa conversa sua, numa rotina sua, ou quando foi você quem pediu num canal. Se outra pessoa pede algo ao mesmo agente, ele não vê o seu computador.
 
-No servidor, o computador de outra pessoa aparece com o nome dela (ex.: "iMac (Maria)").
+O que pede aprovação no seu computador (um push, um clique arriscado) só você aprova: nem um admin, nem o dono do Tucano, nem o Telegram dele. Uma rotina do time (do canal) não alcança o computador de ninguém, e um computador emprestado não serve de gatilho de rotina ("quando aparece algo novo").
+
+No servidor, o computador de outra pessoa aparece com o nome dela (ex.: "iMac · computador de Maria"). Cada pessoa empresta até 5 computadores; um sexto substitui o mais antigo que não está ligado.
 
 ## O que o servidor recebe
 
@@ -55,6 +57,7 @@ Se os seus agentes passaram a morar no servidor, pause este computador (a tela o
 
 - O app liga para `<endereço do servidor>/node/link`, um fluxo contínuo como o `/events` das páginas, e responde por POST no mesmo endereço. Com Caddy não precisa de nada. Com nginx, desligue o buffer das respostas nesse caminho como no `/events` (`proxy_buffering off`), ou mande o cabeçalho `X-Accel-Buffering`, que o Tucano já manda.
 - Cada link entra com a chave de um aparelho (a que o app ganhou ao conectar o servidor). Tirar a pessoa em **Pessoas**, ou tirar a chave daquele aparelho, corta o computador dela na hora.
+- O app nunca segue um redirecionamento: a chave e o que o computador responde só vão pro endereço que a pessoa conectou. Conectar o mesmo servidor de novo, com outro link, desliga o empréstimo até a pessoa ligar outra vez.
 - O servidor não alcança o computador sozinho: só o app abre a ligação, e só para servidores em que ela está ligada.
 
 ## Limites

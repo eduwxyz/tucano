@@ -9,6 +9,7 @@ import type { CoreEvent } from '../shared/rpc'
 import { cleanTimes, dateAt, describeSchedule, isoDay, MAX_AGENT_ROUTINES, MAX_TIMES, nextRun, routineCap, validDate, validTime, type Schedule, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
 import { routineCut } from './access-policy'
+import { nodeOf } from '../shared/node-link'
 import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
@@ -110,6 +111,9 @@ export const whenText = (at: number): string =>
 type ToolOutcome = { routine?: Routine; reply: string; error?: boolean }
 
 const MAX_SEEN = 500 // item ids remembered per connector trigger
+// A lent computer (shared/node-link.ts) is reached only by an agent working for its person; a check that
+// runs on its own, for whoever made the routine, would read it for someone else.
+const NOT_A_TRIGGER = (): string => L('Um computador emprestado não serve de gatilho: escolha outro conector.', "A lent computer can't be a trigger: pick another connector.")
 const MAX_EVENT_CHARS = 6_000
 
 export interface RoutineDeps {
@@ -246,7 +250,9 @@ export class Routines {
   private cleanTrigger(t: Trigger, prev?: Trigger): Trigger {
     if (t.kind === 'webhook') return { kind: 'webhook', token: prev?.kind === 'webhook' ? prev.token : randomBytes(18).toString('base64url') }
     const tool = this.deps.db.tools(t.connectorId).find((x) => x.name === t.tool)
-    if (!this.deps.connectors?.list().some((c) => c.id === t.connectorId)) throw new Error(L('Escolha um conector.', 'Pick a connector.'))
+    const c = this.deps.connectors?.list().find((x) => x.id === t.connectorId)
+    if (!c) throw new Error(L('Escolha um conector.', 'Pick a connector.'))
+    if (nodeOf(c.url)) throw new Error(NOT_A_TRIGGER())
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L('Escolha uma ferramenta de leitura do conector.', "Pick one of the connector's read tools."))
     const everyMinutes = Math.max(1, Math.round(t.everyMinutes))
     const same = prev?.kind === 'poll' && prev.connectorId === t.connectorId && prev.tool === t.tool && JSON.stringify(prev.args) === JSON.stringify(t.args)
@@ -268,6 +274,7 @@ export class Routines {
   private async look(t: Extract<Trigger, { kind: 'poll' }>): Promise<{ items: EventItem[]; source: string }> {
     const connector = this.deps.connectors?.list().find((c) => c.id === t.connectorId)
     if (!this.deps.connectors || !connector) throw new Error(L('o conector não existe mais', 'the connector no longer exists'))
+    if (nodeOf(connector.url)) throw new Error(NOT_A_TRIGGER())
     const tool = this.deps.db.tools(t.connectorId).find((x) => x.name === t.tool)
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L(`a ferramenta ${t.tool} não está liberada como leitura`, `the tool ${t.tool} isn't enabled for reading`))
     const r = await this.deps.connectors.call(t.connectorId, t.tool, t.args)
@@ -333,6 +340,8 @@ export class Routines {
     const replaces = text('substitui')
     const prev = replaces ? this.deps.db.routine(replaces) : undefined
     if (replaces && (prev?.agentId !== agent.id || !visible(prev.conversationId))) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
+    // Changed only for whom it is (mayChange): asked by someone else in a shared channel, the change would run as its person.
+    if (prev && !this.mayChange(prev, owner)) return fail(notTheirs(prev))
     const max = routineCap(agent.maxRoutines)
     if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
@@ -373,11 +382,19 @@ export class Routines {
   }
 
   // `cancelar_rotina`
-  cancel(agent: Agent, id: string, visible: (conversationId: string) => boolean = () => true): ToolOutcome {
+  cancel(agent: Agent, id: string, visible: (conversationId: string) => boolean = () => true, owner?: string): ToolOutcome {
     const r = this.deps.db.routine(id)
     if (r?.agentId !== agent.id || !visible(r.conversationId)) return { reply: L(`Não achei uma rotina sua com id ${id}.`, `I couldn't find a routine of yours with id ${id}.`), error: true }
+    if (!this.mayChange(r, owner)) return { reply: notTheirs(r), error: true }
     this.remove(id)
     return { routine: r, reply: L(`Rotina "${r.name}" apagada.`, `Routine "${r.name}" deleted.`) }
+  }
+
+  // Whether the person an agent works for (`owner`, unset: the Tucano's owner) may change a routine through it:
+  // someone's own routine by them, the team's (a channel's) by an admin.
+  private mayChange(r: Routine, owner?: string): boolean {
+    const asker = this.deps.db.person(owner ?? this.deps.db.ownerId())
+    return r.scope === 'channel' ? asker?.role === 'owner' || asker?.role === 'admin' : (r.owner ?? this.deps.db.ownerId()) === asker?.id
   }
 
   remove(id: string): void {
@@ -539,6 +556,9 @@ export async function retrying(
   }
   return reply
 }
+
+const notTheirs = (r: Routine): string =>
+  L(`A rotina ${r.name} não é de quem pediu: só ${r.scope === 'channel' ? 'um admin' : 'a pessoa dela'} muda.`, `The routine ${r.name} isn't the asker's: only ${r.scope === 'channel' ? 'an admin' : 'its person'} changes it.`)
 
 const agentName = (db: Db, id: string): string => db.agent(id)?.name ?? L('Agente', 'Agent')
 

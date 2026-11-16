@@ -606,7 +606,17 @@ export class ConnectorManager {
 
   // A computer lent to this server called in (core/node-link.ts): its connector connects over that line, in
   // place of one it had, and goes back to disconnected when the computer hangs up (it calls again by itself).
-  async attachNode(id: string, transport: Transport): Promise<void> {
+  // One at a time per computer: two calls-in at once would each think the other's client was theirs.
+  private attaching = new Map<string, Promise<void>>()
+  attachNode(id: string, transport: Transport): Promise<void> {
+    const p = (this.attaching.get(id) ?? Promise.resolve()).then(() => this.attachNow(id, transport))
+    const kept = p.catch(() => {})
+    this.attaching.set(id, kept)
+    void kept.then(() => this.attaching.get(id) === kept && this.attaching.delete(id))
+    return p
+  }
+
+  private async attachNow(id: string, transport: Transport): Promise<void> {
     if (!nodeOf(this.deps.db.connector(id)?.url)) throw new Error('not a computer')
     await this.disconnect(id)
     this.setStatus(id, 'connecting')

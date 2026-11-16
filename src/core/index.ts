@@ -886,7 +886,7 @@ function setUplinks(name: string, links: { serverId: string; origin: string; tok
   emit({ type: 'node', info: nodeInfo() })
 }
 // A server's side: a computer that called in (src/server/node-link-http.ts) becomes its person's connector.
-const nodeLinks = new NodeLinks({ db, attach: (id, transport) => connectors.attachNode(id, transport) })
+const nodeLinks = new NodeLinks({ db, attach: (id, transport) => connectors.attachNode(id, transport), connected: (id) => connectors.get(id)?.status === 'connected', remove: (id) => connectors.remove(id) })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -2135,6 +2135,7 @@ const api: Handlers = {
     if (!a) return
     if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
     must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
+    if (!people.canDecide(ctx.person, a)) throw new UserError(L('Isso roda no computador de outra pessoa: só ela decide.', "That runs on someone else's computer: only they decide."))
     bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
   },
 

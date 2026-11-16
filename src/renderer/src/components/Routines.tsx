@@ -1,6 +1,7 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
 import { L, lang, locale } from '../../../shared/lang'
+import { nodeOf } from '../../../shared/node-link'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   agentById,
@@ -771,7 +772,8 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
   const perWeek = days.length * times.length
   const past = mode === 'date' && !!draft.schedule.date && validTime(draft.schedule.time) && dateAt(draft.schedule.date, draft.schedule.time) <= Date.now()
   const toggleDay = (d: number): void => set({ schedule: { ...draft.schedule, days: days.includes(d) ? days.filter((x) => x !== d) : [...days, d] } })
-  const connectors = useStore((s) => s.connectors.filter((c) => c.tools.some((t) => t.cls === 'read' && t.enabled)))
+  // A lent computer isn't offered: a check that runs on its own would read it for someone else (core/routines.ts).
+  const connectors = useStore((s) => s.connectors.filter((c) => !nodeOf(c.url) && c.tools.some((t) => t.cls === 'read' && t.enabled)))
   const t = draft.trigger
   const [argsText, setArgsText] = useState(t?.kind === 'poll' ? JSON.stringify(t.args, null, 1) : '{}')
   const [preview, setPreview] = useState<string | null>(null)
