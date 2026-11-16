@@ -2,6 +2,7 @@ import { L, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import { THEMES, themeById, themeTokens } from '../../../shared/themes'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -2029,6 +2030,42 @@ export function LanguagePicker({ className = '' }: { className?: string }): Reac
   )
 }
 
+function AppearanceCard(): ReactNode {
+  const mode = useStore((s) => s.settings.theme)
+  const themeId = useStore((s) => themeById(s.settings.themeId).id)
+  return (
+    <Card title={L('Aparência', 'Appearance')}>
+      <div className="field">
+        <span className="field__label">{L('Claro ou escuro', 'Light or dark')}</span>
+        <div className="segmented" role="radiogroup" aria-label={L('Claro ou escuro', 'Light or dark')}>
+          {(['system', 'light', 'dark'] as const).map((t) => (
+            <button key={t} type="button" role="radio" aria-checked={mode === t} className={mode === t ? 'is-active' : ''} onClick={() => updateSettings({ theme: t })}>
+              {t === 'system' ? L('Do sistema', 'System') : t === 'light' ? L('Claro', 'Light') : L('Escuro', 'Dark')}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span className="field__label">{L('Temas', 'Themes')}</span>
+        <div className="theme-grid" role="radiogroup" aria-label={L('Temas', 'Themes')}>
+          {THEMES.map((theme) => (
+            <button key={theme.id} type="button" role="radio" aria-checked={theme.id === themeId} className={`theme-card ${theme.id === themeId ? 'is-active' : ''}`} onClick={() => updateSettings({ themeId: theme.id })}>
+              <span className="theme-card__swatches">
+                {(['light', 'dark'] as const).map((scheme) => {
+                  const { bg, accent } = themeTokens(theme, scheme)
+                  return <span key={scheme} className="theme-card__swatch" title={scheme === 'light' ? L('Claro', 'Light') : L('Escuro', 'Dark')} style={{ background: `linear-gradient(135deg, ${bg} 50%, ${accent} 50%)` }} />
+                })}
+              </span>
+              <span className="theme-card__name">{theme.name}</span>
+            </button>
+          ))}
+        </div>
+        <span className="hint">{L('Cada tema tem uma versão clara e uma escura; o modo acima escolhe qual aparece.', 'Each theme has a light and a dark version; the mode above picks which one shows.')}</span>
+      </div>
+    </Card>
+  )
+}
+
 // Issue to PR (spec §22): the token the app pushes agent/* branches and opens PRs with.
 // The team as a file, and backups of everything.
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
@@ -2560,16 +2597,6 @@ export function SettingsPage(): ReactNode {
               <LanguagePicker />
               <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', 'The app’s language for you. The agents reply in the Tucano’s language.')}</span>
             </div>
-            <div className="field">
-              <span className="field__label">{L('Tema', 'Theme')}</span>
-              <div className="segmented" role="radiogroup" aria-label={L('Tema', 'Theme')}>
-                {(['system', 'light', 'dark'] as const).map((t) => (
-                  <button key={t} type="button" role="radio" aria-checked={settings.theme === t} className={settings.theme === t ? 'is-active' : ''} onClick={() => updateSettings({ theme: t })}>
-                    {t === 'system' ? L('Do sistema', 'System') : t === 'light' ? L('Claro', 'Light') : L('Escuro', 'Dark')}
-                  </button>
-                ))}
-              </div>
-            </div>
             <AdminOnly>{L('Só um admin muda os modelos, os agentes, o contexto e as outras configurações do Tucano.', 'Only an admin changes the models, the agents, the context and the Tucano’s other settings.')}</AdminOnly>
           </Card>
         )}
@@ -2612,6 +2639,8 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+
+        {pane('geral') && <AppearanceCard />}
 
         {pane('geral') && admin && <VoiceCard />}
 
