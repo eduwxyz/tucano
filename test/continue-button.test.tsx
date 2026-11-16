@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { ReactNode } from 'react'
 import type { Root } from 'react-dom/client'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, Conversation, Message, Person, Settings, Step } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
 import { setLang } from '../src/shared/lang'
@@ -12,11 +12,13 @@ import { setLang } from '../src/shared/lang'
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
 Object.assign(window, { tucano: {} })
+Object.assign(document, { oninput: null })
 Object.assign(globalThis, { ResizeObserver: class { observe(): void {} unobserve(): void {} disconnect(): void {} } })
 vi.mock('open-bot-avatar/dom', () => ({ mountAvatar: () => new Proxy({}, { get: () => () => {} }) }))
 
 let fake: State
 const continueRun = vi.fn(async () => {})
+const interveneRun = vi.fn(async (_id: string, _text: string) => {})
 const retryRun = vi.fn(async () => {})
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
@@ -25,6 +27,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     useStore: <T,>(select: (s: State) => T): T => select(fake),
     getState: () => fake,
     continueRun,
+    interveneRun,
     retryRun,
     setTab: vi.fn(),
     navigate: vi.fn(),
@@ -45,9 +48,14 @@ const cut = (steps: Step[]): Message => ({
 })
 
 let root: Root | undefined
+afterEach(async () => {
+  if (root) await act(async () => root!.unmount())
+  root = undefined
+})
 beforeEach(() => {
   setLang('en')
   continueRun.mockClear()
+  interveneRun.mockReset()
   retryRun.mockClear()
   const mount = document.getElementById('root')!
   mount.innerHTML = ''
@@ -76,17 +84,17 @@ const render = async (node: ReactNode): Promise<void> => {
 const buttons = (): string[] => [...document.querySelectorAll('button.retry')].map((b) => b.textContent?.trim() ?? '')
 
 describe('a reply the app cut', () => {
-  it('offers Continue before Try again once a tool call came back', async () => {
+  it('offers Continue, Intervene, then Try again once a tool call came back', async () => {
     fake = { ...fake, messages: { d1: [cut([step('Thought', 'done'), step('Read src/core/runs.ts', 'done', 'src/core/runs.ts')])] } }
     await render(<ConversationView id="d1" />)
-    expect(buttons()[0]).toBe('Continue')
-    expect(buttons()).toContain('Try again')
+    expect(buttons()).toEqual(['Continue', 'Intervene', 'Try again'])
   })
 
   it('offers only Try again when all it did was think', async () => {
     fake = { ...fake, messages: { d1: [cut([step('Thought', 'done')])] } }
     await render(<ConversationView id="d1" />)
     expect(buttons()).not.toContain('Continue')
+    expect(buttons()).not.toContain('Intervene')
     expect(buttons()).toContain('Try again')
   })
 
@@ -97,6 +105,57 @@ describe('a reply the app cut', () => {
     await act(async () => (button as unknown as { click: () => void }).click())
     expect(continueRun).toHaveBeenCalledWith('m1')
     // And it is not the same thing as trying again from the beginning.
+    expect(retryRun).not.toHaveBeenCalled()
+  })
+
+  it('opens a modal without resuming, and cancels without sending', async () => {
+    fake = { ...fake, messages: { d1: [cut([step('Read a.ts', 'done')])] } }
+    await render(<ConversationView id="d1" />)
+    const button = [...document.querySelectorAll('button.retry')].find((b) => b.textContent === 'Intervene')!
+    await act(async () => (button as HTMLElement).click())
+    expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Intervene in the run')
+    expect(document.querySelector('[role="dialog"]')?.closest('.messages')).toBeNull()
+    expect(document.querySelector('textarea[aria-label="New guidance"]')).toBeTruthy()
+    const send = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Send and continue'))!
+    expect(send.hasAttribute('disabled')).toBe(true)
+    const cancel = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Cancel')!
+    await act(async () => (cancel as HTMLElement).click())
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(interveneRun).not.toHaveBeenCalled()
+    expect(continueRun).not.toHaveBeenCalled()
+  })
+
+  it('also offers intervention for a reply paused at its budget', async () => {
+    const message = cut([])
+    message.run!.status = 'paused'
+    fake = { ...fake, messages: { d1: [message] } }
+    await render(<ConversationView id="d1" />)
+    expect(buttons()).toEqual(['Continue', 'Intervene'])
+  })
+
+  it('sends the new guidance, keeps the draft on error, and closes after success', async () => {
+    fake = { ...fake, messages: { d1: [cut([step('Read a.ts', 'done')])] } }
+    await render(<ConversationView id="d1" />)
+    const button = [...document.querySelectorAll('button.retry')].find((b) => b.textContent === 'Intervene')!
+    await act(async () => (button as HTMLElement).click())
+    const field = document.querySelector('textarea[aria-label="New guidance"]')!
+    let proto: object | null = Object.getPrototypeOf(field)
+    let set: ((v: string) => void) | undefined
+    while (proto && !set) (set = Object.getOwnPropertyDescriptor(proto, 'value')?.set), (proto = Object.getPrototypeOf(proto))
+    await act(async () => {
+      set!.call(field, '  Ajuste só o teste.  ')
+      field.dispatchEvent(new window.Event('input', { bubbles: true }))
+    })
+    interveneRun.mockRejectedValueOnce(new Error('Core unavailable'))
+    const form = document.querySelector('form.intervention')!
+    await act(async () => void form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })))
+    expect(interveneRun).toHaveBeenCalledWith('m1', 'Ajuste só o teste.')
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe('Core unavailable')
+    expect((field as HTMLTextAreaElement).value).toBe('  Ajuste só o teste.  ')
+    interveneRun.mockResolvedValueOnce(undefined)
+    await act(async () => void form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })))
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(continueRun).not.toHaveBeenCalled()
     expect(retryRun).not.toHaveBeenCalled()
   })
 })

@@ -1515,7 +1515,7 @@ const api: Handlers = {
 
   retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
 
-  continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
+  continueRun: ({ messageId, text }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.continue(messageId, text, ctx.person.id)),
 
   setAgentModels: ({ agentIds, modelId }, ctx) => {
     const value = modelId.trim()

@@ -1792,6 +1792,9 @@ h3 {
   border-color: var(--border-strong);
   box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft);
 }
+.intervention {
+  padding: 0 20px 20px;
+}
 .composer textarea {
   border: 0;
   box-shadow: none;

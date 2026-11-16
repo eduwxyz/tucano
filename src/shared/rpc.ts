@@ -44,7 +44,7 @@ export interface Api {
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
-  continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
+  continueRun(p: { messageId: string; text?: string }): void // goes on, optionally with a person's new guidance
   setAgentModels(p: { agentIds: string[]; modelId: string }): number
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
