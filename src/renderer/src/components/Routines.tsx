@@ -1,5 +1,7 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
+// Two ways to see them: the week (the default), with the ones that run several times a day in a
+// strip above the hours, and a light list that starts with what needs me.
 import { L, lang, locale } from '../../../shared/lang'
 import { nodeOf } from '../../../shared/node-link'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -23,6 +25,7 @@ import {
   runRoutine,
   saveRoutine,
   useStore,
+  type Agent,
   type Message,
   type Routine,
   type State,
@@ -41,6 +44,7 @@ import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
 import { Modal } from './Modal'
 import { Select } from './Select'
+import { chipOcc, FAILED, failedWords, finished, firstLine, listSections, markOf, nextWords, routineWords, splitWeek, stripDay, waitWords, WAITS, type Need, type Occ } from './routines-view'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -122,17 +126,28 @@ export function duplicateDraft(r: Routine): Draft {
 // On or off from a list or the card; when the server refuses (a date that has passed), it says why.
 const turn = (r: Routine, enabled: boolean): void => void saveRoutine({ ...r, enabled }).catch((e: unknown) => toast(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))
 
+type View = 'week' | 'list'
+// The way of seeing them picked last, kept while the app is open: the week, the first time.
+let lastView: View = 'week'
+
 export function RoutinesPage(): ReactNode {
   const routines = useStore((s) => s.routines)
   const agents = useStore((s) => s.agents.filter(isTeam))
   const runs = useStore(allRuns)
+  const [view, setView] = useState<View>(lastView)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [week, setWeek] = useState(() => startOfWeek(Date.now()))
   const [open, setOpen] = useState<{ occ: Occ; rect: DOMRect } | null>(null)
   const [only, setOnly] = useState<string | null>(null)
+  const [problems, setProblems] = useState(false)
   const [showOff, setShowOff] = useState(false)
   const now = useNow()
 
+  const show = (v: View): void => {
+    lastView = v
+    setView(v)
+    setOpen(null)
+  }
   const blank = (patch: Partial<Draft> = {}, example?: Example): Draft => ({
     name: example?.name ?? '',
     prompt: example?.prompt ?? '',
@@ -147,15 +162,21 @@ export function RoutinesPage(): ReactNode {
     setOpen(null)
     setDraft(blank(patch))
   }
+  const fromExample = (ex: Example): void => {
+    if (agents.length === 0) return
+    setOpen(null)
+    setDraft(blank({}, ex))
+  }
 
-  // ← → change the week, T comes back to this one, N creates, Esc closes.
+  // ← → change the week, T comes back to this one (in the week), N creates, Esc closes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = (e.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable]')
       if (draft || typing || e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'ArrowLeft') setWeek((w) => shiftWeek(w, -1))
-      else if (e.key === 'ArrowRight') setWeek((w) => shiftWeek(w, 1))
-      else if (e.key.toLowerCase() === 't') setWeek(startOfWeek(Date.now()))
+      const inWeek = view === 'week'
+      if (inWeek && e.key === 'ArrowLeft') setWeek((w) => shiftWeek(w, -1))
+      else if (inWeek && e.key === 'ArrowRight') setWeek((w) => shiftWeek(w, 1))
+      else if (inWeek && e.key.toLowerCase() === 't') setWeek(startOfWeek(Date.now()))
       else if (e.key.toLowerCase() === 'n') create()
       else if (e.key === 'Escape') setOpen(null)
       else return
@@ -165,128 +186,158 @@ export function RoutinesPage(): ReactNode {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  const mine = (agentId: string): boolean => !only || only === agentId
   const days = Array.from({ length: 7 }, (_, i) => dayAt(week, i))
   const end = dayAt(week, 7)
   const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.at >= week && o.at < end)
+  const { grid, strip } = splitWeek(occs)
+  const failedHere = occs.filter((o) => !o.upcoming && o.status && FAILED.has(o.status) && mine(o.agentId)).length
+  const onlyProblems = problems && failedHere > 0
+  // Dimmed: another agent's (with one picked), or one that went fine while looking at what failed.
+  const dim = (list: Occ[]): boolean => list.every((o) => !mine(o.agentId)) || (onlyProblems && !list.some((o) => markOf(o) === 'bad'))
   const watching = routines.filter((r) => r.enabled && r.trigger)
-  const finished = (r: Routine): boolean => !r.enabled && !!r.schedule.once && !!r.lastAt && !r.trigger
   const off = routines.filter((r) => !r.enabled && !finished(r))
   const people = agents.filter((a) => routines.some((r) => r.agentId === a.id))
 
   // Only the hours that have something, with some room, and at least a working day.
-  const hours = occs.map((o) => new Date(o.at).getHours())
+  const hours = grid.map((o) => new Date(o.at).getHours())
   if (now >= week && now < end) hours.push(new Date(now).getHours())
   let h0 = hours.length ? Math.max(0, Math.min(...hours) - 1) : 8
   let h1 = hours.length ? Math.min(24, Math.max(...hours) + 2) : 18
   if (h1 - h0 < 9) (h1 = Math.min(24, h0 + 9)), (h0 = Math.max(0, h1 - 9))
 
-  const range = weekRange(week)
-  const thisWeek = week === startOfWeek(now)
+  const pick = (occ: Occ, rect: DOMRect): void => setOpen({ occ, rect })
 
   return (
     <Sheet
       fill
       title={L('Rotinas', 'Routines')}
-      lede={
-        <>
-          {range}
-          {!thisWeek && (
-            <>
-              {' · '}
-              <button className="text-btn" onClick={() => setWeek(startOfWeek(Date.now()))}>
-                {L('voltar pra esta semana', 'back to this week')}
-              </button>
-            </>
-          )}
-        </>
-      }
       actions={
-        <>
-          {people.length > 1 && (
-            <div className="cal-people" role="group" aria-label={L('Mostrar só as de um agente', 'Show only one agent’s')}>
-              {people.map((a) => (
-                <button key={a.id} className={only === a.id ? 'is-on' : only ? 'is-dim' : ''} title={only === a.id ? L('Mostrar todas', 'Show all') : L(`Só as de ${a.name}`, `Only ${a.name}'s`)} onClick={() => setOnly(only === a.id ? null : a.id)}>
-                  <AgentAvatar agent={a} size={22} />
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="cal-nav">
-            <button title={L('Semana anterior (←)', 'Previous week (←)')} onClick={() => setWeek(shiftWeek(week, -1))}>
-              <Icon name="back" size={14} />
-            </button>
-            <button title={L('Esta semana (T)', 'This week (T)')} onClick={() => setWeek(startOfWeek(Date.now()))}>
-              {L('Hoje', 'Today')}
-            </button>
-            <button title={L('Próxima semana (→)', 'Next week (→)')} onClick={() => setWeek(shiftWeek(week, 1))}>
-              <Icon name="back" size={14} />
-            </button>
-          </div>
-          <button className="btn btn--primary btn--sm" disabled={agents.length === 0} title={L('Nova rotina (N)', 'New routine (N)')} onClick={() => create()}>
-            <Icon name="plus" size={14} /> {L('Nova rotina', 'New routine')}
-          </button>
-        </>
+        <button className="btn btn--primary btn--sm" disabled={agents.length === 0} title={L('Nova rotina (N)', 'New routine (N)')} onClick={() => create()}>
+          <Icon name="plus" size={14} /> {L('Nova rotina', 'New routine')}
+        </button>
       }
     >
-      {watching.length > 0 && (
-        <div className="cal-watch">
-          <span className="cal-watch__label">{L('De olho, sem horário', 'Watching, no set time')}</span>
-          {watching.map((r) => {
-            const a = agents.find((x) => x.id === r.agentId)
-            return (
-              <button
-                key={r.id}
-                className={`cal-watch__chip ${only && only !== r.agentId ? 'is-dim' : ''}`}
-                onClick={(e) => setOpen({ occ: { key: `watch-${r.id}`, routine: r, name: r.name, agentId: r.agentId, at: 0, conversationId: r.conversationId }, rect: e.currentTarget.getBoundingClientRect() })}
-              >
-                <i />
-                {a && <AgentAvatar agent={a} size={15} />}
-                {r.name}
+      <div className="rt-bar">
+        <div className="segmented rt-bar__views" role="radiogroup" aria-label={L('Como ver', 'How to see them')}>
+          {(
+            [
+              ['week', L('Semana', 'Week')],
+              ['list', L('Lista', 'List')]
+            ] as const
+          ).map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={view === k} className={view === k ? 'is-active' : ''} onClick={() => show(k)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === 'week' && (
+          <>
+            <span className="rt-bar__range">{weekRange(week)}</span>
+            <div className="cal-nav">
+              <button title={L('Semana anterior (←)', 'Previous week (←)')} onClick={() => setWeek(shiftWeek(week, -1))}>
+                <Icon name="back" size={14} />
               </button>
-            )
-          })}
-        </div>
-      )}
-
-      <Calendar
-        days={days}
-        occs={occs}
-        h0={h0}
-        h1={h1}
-        now={now}
-        only={only}
-        selected={open?.occ.key}
-        empty={routines.length === 0}
-        onPick={(occ, rect) => setOpen({ occ, rect })}
-        onSlot={(day, time) => create({ schedule: { days: [new Date(day).getDay()], time } })}
-        onExample={(ex) => agents.length > 0 && (setOpen(null), setDraft(blank({}, ex)))}
-      />
-
-      {off.length > 0 && (
-        <footer className="cal-foot">
-          <button className="text-btn" onClick={() => setShowOff(!showOff)}>
-            {off.length === 1 ? L('1 rotina desligada', '1 routine off') : L(`${off.length} rotinas desligadas`, `${off.length} routines off`)} {showOff ? '▾' : '▸'}
+              <button title={L('Esta semana (T)', 'This week (T)')} onClick={() => setWeek(startOfWeek(Date.now()))}>
+                {L('Hoje', 'Today')}
+              </button>
+              <button title={L('Próxima semana (→)', 'Next week (→)')} onClick={() => setWeek(shiftWeek(week, 1))}>
+                <Icon name="back" size={14} />
+              </button>
+            </div>
+          </>
+        )}
+        <span className="grow" />
+        {view === 'week' && failedHere > 0 && (
+          <button
+            className={`rt-failed ${onlyProblems ? 'is-on' : ''}`}
+            aria-pressed={onlyProblems}
+            title={onlyProblems ? L('Mostrar todas', 'Show all') : L('Destacar só as que falharam', 'Highlight only the ones that failed')}
+            onClick={() => setProblems(!onlyProblems)}
+          >
+            <i />
+            {failedHere === 1 ? L('1 falhou', '1 failed') : L(`${failedHere} falharam`, `${failedHere} failed`)}
+            {onlyProblems && <Icon name="x" size={11} />}
           </button>
-        </footer>
-      )}
-      {showOff && off.length > 0 && (
-        <div className="cal-off">
-          {off.map((r) => {
-            const a = agents.find((x) => x.id === r.agentId)
-            return (
-              <div key={r.id} className="cal-off__row">
-                {a && <AgentAvatar agent={a} size={18} />}
-                <strong className="truncate">{r.name}</strong>
-                <span className="muted small truncate">{describeRoutine(r)}</span>
-                <span className="grow" />
-                <button className="text-btn" onClick={() => setDraft({ ...r })}>
-                  {L('Editar', 'Edit')}
-                </button>
-                <Toggle on={r.enabled} onChange={(enabled) => turn(r, enabled)} />
-              </div>
-            )
-          })}
-        </div>
+        )}
+        {people.length > 1 && (
+          <div className="rt-agent">
+            <Select
+              aria-label={L('Mostrar só as de um agente', 'Show only one agent’s')}
+              value={only ?? ''}
+              onChange={(v) => setOnly(v || null)}
+              options={[{ value: '', label: L('Todos os agentes', 'All agents') }, ...people.map((a) => ({ value: a.id, label: a.name }))]}
+            />
+          </div>
+        )}
+      </div>
+
+      {view === 'week' ? (
+        <>
+          {watching.length > 0 && (
+            <div className="cal-watch">
+              <span className="cal-watch__label">{L('De olho, sem horário', 'Watching, no set time')}</span>
+              {watching.map((r) => {
+                const a = agents.find((x) => x.id === r.agentId)
+                return (
+                  <button
+                    key={r.id}
+                    className={`cal-watch__chip ${!mine(r.agentId) || onlyProblems ? 'is-dim' : ''}`}
+                    onClick={(e) => pick({ key: `watch-${r.id}`, routine: r, name: r.name, agentId: r.agentId, at: 0, conversationId: r.conversationId }, e.currentTarget.getBoundingClientRect())}
+                  >
+                    <i />
+                    {a && <AgentAvatar agent={a} size={15} />}
+                    {r.name}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          <Calendar
+            days={days}
+            grid={grid}
+            strip={strip}
+            h0={h0}
+            h1={h1}
+            now={now}
+            dim={dim}
+            selected={open?.occ.key}
+            empty={routines.length === 0}
+            onPick={pick}
+            onSlot={(day, time) => create({ schedule: { days: [new Date(day).getDay()], time } })}
+            onExample={fromExample}
+          />
+
+          {off.length > 0 && (
+            <footer className="cal-foot">
+              <button className="text-btn" onClick={() => setShowOff(!showOff)}>
+                {off.length === 1 ? L('1 rotina desligada', '1 routine off') : L(`${off.length} rotinas desligadas`, `${off.length} routines off`)} {showOff ? '▾' : '▸'}
+              </button>
+            </footer>
+          )}
+          {showOff && off.length > 0 && (
+            <div className="cal-off">
+              {off.map((r) => {
+                const a = agents.find((x) => x.id === r.agentId)
+                return (
+                  <div key={r.id} className="cal-off__row">
+                    {a && <AgentAvatar agent={a} size={18} />}
+                    <strong className="truncate">{r.name}</strong>
+                    <span className="muted small truncate">{describeRoutine(r)}</span>
+                    <span className="grow" />
+                    <button className="text-btn" onClick={() => setDraft({ ...r })}>
+                      {L('Editar', 'Edit')}
+                    </button>
+                    <Toggle on={r.enabled} onChange={(enabled) => turn(r, enabled)} />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+        <RoutineList routines={routines.filter((r) => mine(r.agentId))} runs={runs} now={now} empty={routines.length === 0} onPick={pick} onEdit={(r) => (setOpen(null), setDraft({ ...r }))} onExample={fromExample} />
       )}
 
       {open && <Popover occ={open.occ} rect={open.rect} now={now} onClose={() => setOpen(null)} onEdit={(r) => (setOpen(null), setDraft({ ...r }))} onDuplicate={(r) => (setOpen(null), setDraft(duplicateDraft(r)))} />}
@@ -303,10 +354,7 @@ export function RoutinesPage(): ReactNode {
 // ---------- the week ----------
 
 const HOUR = 56 // px per hour
-const BLOCK = 26 // px, one line
-
-// One routine at one time: a run that happened (with how it went), or one still to come.
-type Occ = { key: string; routine?: Routine; name: string; agentId: string; at: number; conversationId: string; status?: RunStatus; replyId?: string; upcoming?: boolean }
+const BLOCK = 34 // px, two lines: the name, then the agent and the time
 
 function useNow(): number {
   const [now, setNow] = useState(Date.now())
@@ -353,7 +401,7 @@ function runsOf(messages: Message[], routines: Routine[]): Occ[] {
     }
     const agentId = r?.agentId ?? (reply?.author.kind === 'agent' ? reply.author.id : undefined)
     if (!agentId) return
-    out.push({ key: ask.id, routine: r, name: r?.name ?? ask.routine?.name ?? L('Rotina', 'Routine'), agentId, at: ask.at, conversationId: ask.conversationId, status: reply?.run?.status, replyId: reply?.id })
+    out.push({ key: ask.id, routine: r, name: r?.name ?? ask.routine?.name ?? L('Rotina', 'Routine'), agentId, at: ask.at, conversationId: ask.conversationId, status: reply?.run?.status, replyId: reply?.id, reply })
   })
   return out
 }
@@ -373,13 +421,17 @@ function planned(routines: Routine[], week: number, now: number): Occ[] {
   return out
 }
 
+// A run's state in words, for a tick's or a block's tooltip.
+const statusWords = (o: Occ): string => (o.upcoming ? L('vai rodar', 'will run') : (o.status && LAST()[o.status]?.label) || '')
+
 function Calendar({
   days,
-  occs,
+  grid,
+  strip,
   h0,
   h1,
   now,
-  only,
+  dim,
   selected,
   empty,
   onPick,
@@ -387,11 +439,12 @@ function Calendar({
   onExample
 }: {
   days: number[]
-  occs: Occ[]
+  grid: Occ[]
+  strip: Occ[]
   h0: number
   h1: number
   now: number
-  only: string | null
+  dim: (list: Occ[]) => boolean
   selected?: string
   empty: boolean
   onPick: (occ: Occ, rect: DOMRect) => void
@@ -402,6 +455,7 @@ function Calendar({
   const scroller = useRef<HTMLDivElement>(null)
   const [ghost, setGhost] = useState<{ day: number; min: number } | null>(null)
   const today = new Date(now).toDateString()
+  const occs = grid
 
   // A crowded hour grows taller (same for all seven days, so rows stay aligned) instead of
   // pushing its routines into the next hours. Extra room accrues at the end of the hour.
@@ -462,6 +516,36 @@ function Calendar({
           )
         })}
       </div>
+      {strip.length > 0 && (
+        <div className="cal__strip">
+          <span className="cal__strip-label">{L('o dia todo', 'all day')}</span>
+          {days.map((d) => (
+            <div key={d} className={`cal__strip-day ${new Date(d).toDateString() === today ? 'is-today' : ''}`}>
+              {stripDay(strip, d).map((chip) => {
+                const a = agents.find((x) => x.id === chip.routine.agentId)
+                const occ = chipOcc(chip)
+                const live = chip.ticks.some((t) => t.status === 'working')
+                return (
+                  <button
+                    key={chip.routine.id}
+                    className={`cal__allday c-${a?.color ?? 'graphite'} ${dim(chip.ticks) ? 'is-dim' : ''} ${chip.ticks.some((t) => t.key === selected) ? 'is-selected' : ''} ${live ? 'is-live' : ''}`}
+                    style={a ? ownColor(a) : undefined}
+                    title={`${chip.routine.name} · ${routineWords(chip.routine)}`}
+                    onClick={(e) => onPick(occ, e.currentTarget.getBoundingClientRect())}
+                  >
+                    <span className="cal__allday-name">{chip.routine.name}</span>
+                    <span className="cal__ticks" aria-hidden>
+                      {chip.ticks.map((t) => (
+                        <i key={t.key} className={`is-${markOf(t)}`} title={`${hm(t.at)} · ${statusWords(t)}`} />
+                      ))}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="cal__scroll" ref={scroller}>
         <div className="cal__grid" style={{ height: total }}>
           <div className="cal__hours">
@@ -505,31 +589,28 @@ function Calendar({
                 )}
                 {placed.map(({ o, top }) => {
                   const a = agents.find((x) => x.id === o.agentId)
-                  const live = o.status === 'working'
-                  const ok = o.status && ['done', 'waiting_input', 'waiting_approval'].includes(o.status)
-                  const bad = o.status && ['failed', 'limit_reached'].includes(o.status)
+                  const mark = markOf(o)
+                  const live = mark === 'live'
                   return (
                     <button
                       key={o.key}
-                      className={`cal__ev ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${selected === o.key ? 'is-selected' : ''} ${only && only !== o.agentId ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
+                      className={`cal__ev cal__ev--two ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${selected === o.key ? 'is-selected' : ''} ${dim([o]) ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
                       style={{ ...(a ? ownColor(a) : {}), top }}
-                      title={`${hm(o.at)} · ${o.name}`}
+                      title={`${hm(o.at)} · ${o.name}${statusWords(o) ? ` · ${statusWords(o)}` : ''}`}
                       onMouseEnter={() => setGhost(null)}
                       onClick={(e) => onPick(o, e.currentTarget.getBoundingClientRect())}
                     >
-                      {a && <AgentAvatar agent={a} size={15} busy={live} />}
-                      <span className="cal__ev-time">{hm(o.at)}</span>
-                      <strong>{o.name}</strong>
-                      {ok && (
-                        <span className="cal__ev-ok">
-                          <Icon name="check" size={11} />
+                      <span className="cal__ev-top">
+                        <strong>{o.name}</strong>
+                        {(mark === 'ok' || mark === 'wait' || mark === 'bad') && <i className={`cal__mark is-${mark}`} />}
+                      </span>
+                      <span className="cal__ev-sub">
+                        {a && <AgentAvatar agent={a} size={12} busy={live} />}
+                        <span className="truncate">
+                          {a ? `${a.name} · ` : ''}
+                          {hm(o.at)}
                         </span>
-                      )}
-                      {bad && (
-                        <span className="cal__ev-bad">
-                          <Icon name="x" size={11} />
-                        </span>
-                      )}
+                      </span>
                     </button>
                   )
                 })}
@@ -542,19 +623,211 @@ function Calendar({
           <div className="cal__empty">
             <strong>{L('Clique num horário pra criar uma rotina.', 'Click a time slot to create a routine.')}</strong>
             <span>{L('Ou comece por um destes:', 'Or start from one of these:')}</span>
-            <div>
-              {EXAMPLES().map((ex) => (
-                <button key={ex.name} onClick={() => onExample(ex)}>
-                  {ex.name} <span>{describeSchedule(ex)}</span>
-                </button>
-              ))}
-            </div>
+            <Examples onExample={onExample} />
           </div>
         )}
       </div>
     </div>
   )
 }
+
+function Examples({ onExample }: { onExample: (ex: Example) => void }): ReactNode {
+  return (
+    <div>
+      {EXAMPLES().map((ex) => (
+        <button key={ex.name} onClick={() => onExample(ex)}>
+          {ex.name} <span>{describeSchedule(ex)}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------- the list ----------
+
+// Someone else's own routine, or the channel's for a member: seen, not changed here (the editor says why).
+const mayChangeIn = (admin: boolean, you: string | undefined) => (r: Routine): boolean => admin || (r.scope !== 'channel' && (!r.owner || r.owner === you))
+
+// What a row opens the card on: its last run, or the next one, or the routine itself.
+const occOf = (r: Routine, last: Occ | undefined, next: number | undefined): Occ =>
+  last ?? { key: next ? `${r.id}-${next}` : `routine-${r.id}`, routine: r, name: r.name, agentId: r.agentId, at: next ?? 0, conversationId: r.conversationId, upcoming: !!next }
+
+// The card opens beside the name, not beside the whole row.
+const nameRect = (e: React.MouseEvent<HTMLElement>): DOMRect => (e.currentTarget.querySelector('.rt-row__name') ?? e.currentTarget).getBoundingClientRect()
+
+function RoutineList({
+  routines,
+  runs,
+  now,
+  empty,
+  onPick,
+  onEdit,
+  onExample
+}: {
+  routines: Routine[]
+  runs: Occ[]
+  now: number
+  empty: boolean
+  onPick: (occ: Occ, rect: DOMRect) => void
+  onEdit: (r: Routine) => void
+  onExample: (ex: Example) => void
+}): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const connectors = useStore((s) => s.connectors)
+  const admin = useStore(amAdmin)
+  const you = useStore((s) => s.you)
+  const mayChange = mayChangeIn(admin, you)
+  const { needs, next, off } = useMemo(() => listSections(routines, runs, now), [routines, runs, now])
+  // One problem is open at a time: the first, until another is picked (or it's closed).
+  const [picked, setPicked] = useState<string | null | undefined>(undefined)
+  const expanded = picked === undefined ? needs[0]?.routine.id : picked
+  const [showOff, setShowOff] = useState(false)
+
+  const agentOf = (r: Routine): Agent | undefined => agents.find((a) => a.id === r.agentId)
+  const words = (r: Routine): string => routineWords(r, r.trigger?.kind === 'poll' ? connectors.find((c) => c.id === (r.trigger as { connectorId: string }).connectorId)?.name : undefined)
+  const who = (r: Routine): ReactNode => {
+    const a = agentOf(r)
+    return (
+      <>
+        {a ? <AgentAvatar agent={a} size={20} /> : <span className="rt-row__noavatar" />}
+        <span className="rt-row__name">{r.name}</span>
+        <span className="rt-row__sub">
+          {a ? `${a.name} · ` : ''}
+          {words(r)}
+        </span>
+      </>
+    )
+  }
+
+  if (empty)
+    return (
+      <div className="rt-list">
+        <div className="rt-empty">
+          <strong>{L('Nenhuma rotina ainda.', 'No routines yet.')}</strong>
+          <span>{L('Crie uma em “Nova rotina”, ou comece por um destes:', 'Create one with “New routine”, or start from one of these:')}</span>
+          <Examples onExample={onExample} />
+        </div>
+      </div>
+    )
+
+  return (
+    <div className="rt-list">
+      <div className="rt-list__inner">
+        {needs.length > 0 && (
+          <section className="rt-sec">
+            <h2 className="rt-sec__title">
+              {L('Precisa de você', 'Needs you')} · {needs.length}
+            </h2>
+            {needs.map((n) => (
+              <NeedRow key={n.routine.id} need={n} now={now} open={expanded === n.routine.id} mayChange={mayChange(n.routine)} who={who(n.routine)} onToggle={() => setPicked(expanded === n.routine.id ? null : n.routine.id)} onPick={onPick} />
+            ))}
+          </section>
+        )}
+
+        {(next.length > 0 || off.length > 0) && (
+          <section className="rt-sec">
+            {next.length > 0 && <h2 className="rt-sec__title">{L('Próximas', 'Coming up')}</h2>}
+            {next.map(({ routine: r, next: at, last }) => {
+              const live = last?.status === 'working'
+              return (
+                <div key={r.id} className="rt-row">
+                  <button className="rt-row__open rt-open" onClick={(e) => onPick(occOf(r, last, at), nameRect(e))}>
+                    {who(r)}
+                    <span className="rt-row__last">{live ? L('rodando agora…', 'running now…') : last ? (last.reply?.text ? firstLine(last.reply.text) : statusWords(last)) : L('ainda não rodou', 'hasn’t run yet')}</span>
+                  </button>
+                  <span className="rt-row__acts">
+                    {mayChange(r) && (
+                      <button className="text-btn" disabled={live} onClick={() => runRoutine(r.id)}>
+                        {L('Rodar agora', 'Run now')}
+                      </button>
+                    )}
+                    <Toggle on={r.enabled} label={L(`Ligar ou desligar ${r.name}`, `Turn ${r.name} on or off`)} onChange={(enabled) => turn(r, enabled)} />
+                  </span>
+                  <span className={`rt-row__next ${r.trigger ? 'is-watch' : ''}`}>
+                    {r.trigger ? (
+                      <>
+                        <i />
+                        {L('de olho', 'watching')}
+                      </>
+                    ) : at ? (
+                      nextWords(at, now)
+                    ) : (
+                      ''
+                    )}
+                  </span>
+                </div>
+              )
+            })}
+            {off.length > 0 && (
+              <button className="text-btn rt-offbtn" aria-expanded={showOff} onClick={() => setShowOff(!showOff)}>
+                {off.length === 1 ? L('1 desligada', '1 off') : L(`${off.length} desligadas`, `${off.length} off`)} <span className={showOff ? 'is-open' : ''}>›</span>
+              </button>
+            )}
+            {showOff &&
+              off.map((r) => (
+                <div key={r.id} className="rt-row is-off">
+                  <button className="rt-row__open rt-open" onClick={(e) => onPick(occOf(r, runs.filter((o) => o.routine?.id === r.id).at(-1), undefined), nameRect(e))}>
+                    {who(r)}
+                    <span className="rt-row__last" />
+                  </button>
+                  <span className="rt-row__acts is-shown">
+                    <button className="text-btn" onClick={() => onEdit(r)}>
+                      {L('Editar', 'Edit')}
+                    </button>
+                    {finished(r) ? <span className="rt-row__done">{L(`rodou ${when(r.lastAt!)}`, `ran ${when(r.lastAt!)}`)}</span> : <Toggle on={r.enabled} label={L(`Ligar ${r.name}`, `Turn ${r.name} on`)} onChange={(enabled) => turn(r, enabled)} />}
+                  </span>
+                </div>
+              ))}
+          </section>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// A routine that failed or waits on me: what happened at the right; opened, why, and what to do.
+function NeedRow({ need, now, open, mayChange, who, onToggle, onPick }: { need: Need; now: number; open: boolean; mayChange: boolean; who: ReactNode; onToggle: () => void; onPick: (occ: Occ, rect: DOMRect) => void }): ReactNode {
+  const { routine: r, occ, kind, okSince } = need
+  const failed = kind === 'failed'
+  const later = okSince === 0 ? '' : okSince === 1 ? L(' Depois, rodou 1 vez normalmente.', ' After that, it ran once as usual.') : L(` Depois, rodou ${okSince} vezes normalmente.`, ` After that, it ran ${okSince} times as usual.`)
+  const why = failed
+    ? `${occ.reply?.run?.error ?? (occ.status === 'limit_reached' ? L('Parou no limite de uso do agente.', 'It stopped at the agent’s usage limit.') : L('Não deu certo, e não ficou dito por quê.', 'It didn’t work, and it didn’t say why.'))}${later}`
+    : occ.status === 'waiting_input'
+      ? L('Ela fez uma pergunta na conversa e está esperando a resposta.', 'It asked a question in the conversation and is waiting for the answer.')
+      : L('Ela parou num passo que precisa da sua aprovação.', 'It stopped at a step that needs your approval.')
+  const go = (): void => navigate({ kind: 'conversation', id: occ.conversationId, message: occ.replyId })
+  return (
+    <div className={`rt-need ${open ? 'is-open' : ''}`}>
+      <button className="rt-row__open rt-need__head" aria-expanded={open} onClick={onToggle}>
+        {who}
+        <span className="grow" />
+        <span className={`rt-need__what ${failed ? 'is-bad' : 'is-wait'}`}>
+          <i />
+          {failed ? failedWords(occ.at, now) : waitWords(occ.status)}
+        </span>
+      </button>
+      {open && (
+        <div className="rt-need__body">
+          <p>{why}</p>
+          <div className="rt-need__acts">
+            {failed && mayChange && (
+              <button className="btn btn--sm btn--primary" onClick={() => runRoutine(r.id)}>
+                <Icon name="play" size={12} /> {L('Rodar agora', 'Run now')}
+              </button>
+            )}
+            <button className={`btn btn--sm ${failed ? '' : 'btn--primary'}`} onClick={go}>
+              {L('Abrir conversa', 'Open the conversation')}
+            </button>
+            <button className="icon-btn rt-more" title={L('Mais', 'More')} aria-label={L('Mais', 'More')} onClick={(e) => onPick(occ, e.currentTarget.getBoundingClientRect())}>
+              •••
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 function Hook({ token }: { token: string }): ReactNode {
   const [copied, setCopied] = useState(false)
@@ -597,7 +870,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
   }, [rect, occ.key])
   useEffect(() => {
     const away = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest('.cal__ev, .cal-watch__chip')) onClose()
+      if (!ref.current?.contains(e.target as Node) && !(e.target as HTMLElement).closest('.cal__ev, .cal-watch__chip, .cal__allday, .rt-open, .rt-more')) onClose()
     }
     window.addEventListener('mousedown', away)
     return () => window.removeEventListener('mousedown', away)
@@ -648,7 +921,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
           {history.slice(-14).map((h) => (
             <button
               key={h.key}
-              className={h.status === 'working' ? 'is-live' : h.status && OK.has(h.status) ? 'is-ok' : h.status ? 'is-bad' : ''}
+              className={h.status === 'working' ? 'is-live' : h.status && WAITS.has(h.status) ? 'is-wait' : h.status && OK.has(h.status) ? 'is-ok' : h.status ? 'is-bad' : ''}
               title={`${when(h.at)}${h.status && LAST()[h.status] ? ` · ${LAST()[h.status]!.label}` : ''}`}
               onClick={() => go(h)}
             />
