@@ -361,6 +361,9 @@ export class People {
         return { type: 'inbox', inbox: this.inbox(person) }
       case 'delegations':
         return { type: 'delegations', delegations: this.delegations(person) }
+      // One's own to-dos: theirs alone.
+      case 'tasks':
+        return event.for === person.id ? event : undefined
       case 'settings':
         return { type: 'settings', settings: this.settingsFor(person, event.settings) }
       // Gone from a DM (or someone's own memory): only its person hears of it (its id is no one else's to know).

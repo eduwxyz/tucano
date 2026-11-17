@@ -216,6 +216,23 @@ export interface DelegationRef {
   back?: 'result' // on the message that brought the answer back to where it was asked: shown folded there
 }
 
+// A to-do on the board (Quadro): written before it starts, by one person, for an agent. Starting it posts it
+// as that person's message to the agent (its DM, or a channel it's in), and from there it's that reply's card.
+export interface Task {
+  id: string
+  owner: string // the person whose list it is
+  title: string
+  notes?: string // what the agent should know: it goes in the message, under the title
+  agentId?: string // who does it; unset until picked
+  conversationId?: string // where it's posted; unset: the agent's DM
+  dueAt?: number
+  position: number // its place in the list, smallest first
+  createdAt: number
+}
+export type TaskInput = Pick<Task, 'title'> & Partial<Pick<Task, 'id' | 'notes' | 'agentId' | 'conversationId' | 'dueAt' | 'position'>>
+export const MAX_TASK_TITLE = 300
+export const MAX_TASK_NOTES = 8_000
+
 // A piece of work an agent handed to one below it (src/shared/org.ts), in that one's channel: a thread
 // there, opened by `rootId`. What it ends with goes back to where it was asked from, and whoever asked
 // gets the turn again. `asking`: the one doing it left a question, which goes up to whoever asked.
@@ -428,6 +445,7 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+  title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it

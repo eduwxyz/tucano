@@ -1368,6 +1368,10 @@ function Mention({ handle }: { handle: string }): ReactNode {
     </AgentCardButton>
   )
 }
+// A reply's text as the conversation shows it, elsewhere (the board's open card): Markdown, mentions, links.
+export function ReplyText({ text }: { text: string }): ReactNode {
+  return <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(text)}</MessageMarkdown>
+}
 const plainMarkdown = { pre: CodeBlock, a: (p: { href?: string; children?: ReactNode }) => <WikiLink href={p.href}>{p.children}</WikiLink>, span: MentionSpan }
 
 // Now, every second while `on`: the clock of a reply at work.

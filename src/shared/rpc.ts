@@ -3,7 +3,7 @@ import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -54,6 +54,10 @@ export interface Api {
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
+  tasks(): Task[] // my to-dos on the board (Quadro), in order
+  saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
+  removeTask(p: { id: string }): void
+  startTask(p: { id: string }): { conversationId: string } // posts it as my message to its agent (its DM, or the channel set) and takes it off the list
   ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)
@@ -238,6 +242,7 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 
 export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
+  | { type: 'tasks'; for: string } // someone's to-dos changed: they read them again
   | { type: 'node'; info: NodeInfo } // this computer's lines to the servers it's lent to, as they change
   | { type: 'message'; message: Message }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
@@ -264,7 +269,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true
