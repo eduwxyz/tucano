@@ -17,6 +17,7 @@ import { OrgPage } from './components/OrgChart'
 import { Onboarding } from './components/Onboarding'
 import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
 import { MissionsPage } from './components/Missions'
+import { Hub, hubTab } from './components/Hubs'
 import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
 import { AgentCardLayer } from './components/AgentCard'
@@ -33,6 +34,7 @@ export function App(): ReactNode {
   const guest = useStore(guestWelcome)
   const mac = useStore((s) => s.platform === 'mac')
   const navOpen = useStore((s) => s.navOpen)
+  const tab = hubTab(view)
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
@@ -106,13 +108,19 @@ export function App(): ReactNode {
         {view.kind === 'agent' && <AgentPage key={view.id} id={view.id} />}
         {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
         {view.kind === 'approvals' && <ApprovalsPage />}
-        {view.kind === 'usage' && <UsagePage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
-        {view.kind === 'memory' && <MemoryPage />}
-        {view.kind === 'wiki' && <WikiView />}
-        {view.kind === 'routines' && <RoutinesPage />}
-        {view.kind === 'skills' && <SkillsPage />}
-        {view.kind === 'report' && <ReportPage />}
+        {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
+        {tab && (
+          <Hub tab={tab}>
+            {tab === 'memory' && <MemoryPage />}
+            {tab === 'wiki' && <WikiView />}
+            {tab === 'skills' && <SkillsPage />}
+            {tab === 'routines' && <RoutinesPage />}
+            {tab === 'report' && <ReportPage />}
+            {tab === 'usage' && <UsagePage />}
+          </Hub>
+        )}
+        {view.kind === 'wiki' && !tab && <WikiView />}
         {view.kind === 'org' && <OrgPage />}
         {view.kind === 'board' && <BoardPage />}
         {view.kind === 'settings' && <SettingsPage />}

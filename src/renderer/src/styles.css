@@ -13129,3 +13129,326 @@ button.agent-card__now:hover {
 .approval-line .approval {
   margin-top: 4px;
 }
+||||||| 4b08cea
+
+/* ---------- debloat: sidebar and hubs ---------- */
+/* The workspace's name opens its menu (Workspaces.tsx): a caret, and a dot when a connector needs the person. */
+.ws-menu .workspace-picker__button[aria-expanded='true'] {
+  background: var(--active);
+}
+.ws-menu__caret {
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  color: var(--text-3);
+}
+.ws-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: pop var(--dur-enter) var(--ease-spring) backwards;
+}
+.ws-dot.is-fresh {
+  background: var(--accent);
+}
+.ws-menu__list {
+  width: 280px;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-lg);
+  transform-origin: top left;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
+}
+.ws-menu__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ws-menu__logo {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--border-strong);
+  color: var(--text);
+}
+.ws-menu__list [aria-checked='true'] .ws-menu__logo {
+  background: var(--text);
+  color: var(--panel);
+}
+.ws-menu__logo.is-server {
+  background: transparent;
+  color: var(--text-2);
+}
+.ws-menu__list .workspace-picker__check {
+  color: var(--accent);
+}
+.ws-menu__quiet {
+  color: var(--text-2);
+}
+/* A long hint gives way (with an ellipsis), never the item's name. */
+.ws-menu__hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.ws-menu__hint.is-warn {
+  color: var(--warn);
+}
+.ws-menu__list .menu__item:hover .ws-menu__hint,
+.ws-menu__list .menu__item:hover .workspace-picker__check {
+  color: inherit;
+}
+.ws-menu__list .menu__item:hover .ws-menu__logo {
+  background: var(--accent-text);
+  color: var(--accent);
+}
+/* Nothing else lives at the foot now: it shows only for the update note. */
+.sidebar__foot:empty {
+  display: none;
+}
+
+/* The AGENTES header: the org chart and the "+". */
+.section__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A sector of agents folds like a channel group; folded, it says how many and what waits in it. */
+.agent-sector__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.agent-sector.is-folded .agent-sector__head:has(.badge, .waiting-pill) {
+  color: var(--text);
+}
+.agent-sector__count {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.agent-sector__head .badge {
+  flex: none;
+}
+/* Folded, the whole AGENTES section keeps only the row you're in, not the sectors' heads. */
+.section.is-folded .agent-sector__head {
+  display: none;
+}
+.is-folded .agent-row:not(:has(> .nav-item.is-active)) {
+  display: none;
+}
+
+/* An agent's row: the name, and on the right only what changed. The role and the gear come on hover or focus. */
+.agent-row {
+  position: relative;
+}
+
+.agent-row .nav-item__label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.agent-row .nav-item__role {
+  flex: 1 1 0;
+  max-width: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.agent-row:hover .nav-item__role,
+.agent-row:focus-within .nav-item__role {
+  opacity: 1;
+}
+.agent-row:hover > .nav-item:not(.is-active) {
+  background: var(--hover);
+  color: var(--text);
+}
+.agent-row:hover > .nav-item,
+.agent-row:focus-within > .nav-item {
+  padding-right: 32px;
+}
+.agent-row__gear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  translate: 0 -50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.agent-row:hover > .agent-row__gear,
+.agent-row:focus-within > .agent-row__gear {
+  opacity: 1;
+  pointer-events: auto;
+}
+.agent-row .nav-item__mac {
+  color: var(--text-3);
+}
+.agent-row.is-archived > .nav-item {
+  opacity: 0.6;
+}
+.nav-item > .nav-item__mac,
+.nav-item > .dot,
+.nav-item > .waiting-pill,
+.nav-item > .working-dots {
+  flex: none;
+}
+
+/* Waiting on me: a shield and how many, in the accent. */
+.waiting-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  animation: rise var(--dur-enter) var(--ease-spring) backwards;
+}
+.waiting-pill .icon {
+  stroke-width: 2.4;
+}
+
+/* Working: three dots that breathe one after another; just finished, green for a moment, then gone. */
+.working-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+}
+.working-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.working-dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.working-dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+.working-dots.is-done i {
+  background: var(--ok);
+  animation: fade var(--dur-enter) var(--ease-in) 1.2s reverse forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting-pill {
+    animation: none;
+  }
+}
+
+/* A hub (Hubs.tsx): a big title, one line, the tabs, and the page below without its own title. */
+.hub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.hub__drag {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 28px;
+  -webkit-app-region: drag;
+}
+.hub__head {
+  flex: none;
+  padding: 40px 32px 0;
+  border-bottom: 1px solid var(--border);
+}
+.hub__title {
+  margin: 0;
+  font-family: var(--i-display);
+  font-weight: 800;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.hub__lede {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.hub__tabs {
+  display: flex;
+  gap: 24px;
+  margin-top: 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.hub__tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 10px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  color: var(--text-2);
+  transition: var(--transition-ui);
+}
+.hub__tab:hover {
+  color: var(--text);
+}
+.hub__tab.is-active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.hub__tab .badge,
+.hub__tab .nav-item__new {
+  margin-left: 0;
+}
+.hub__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.hub__body > * {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+/* The page inside sits under the tabs, from the same left edge as the title. */
+.hub .sheet__drag {
+  display: none;
+}
+.hub .sheet__inner {
+  max-width: 960px;
+  margin: 0;
+  padding: 24px 32px 120px;
+}
+.hub .sheet__inner.is-wide {
+  max-width: 1064px;
+}
+.hub .sheet--fill .sheet__head {
+  padding-top: 18px;
+}

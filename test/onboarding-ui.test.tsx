@@ -58,6 +58,7 @@ const store = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { Intro, GuestWelcome, foundTitle, continueLabel, leftOut } = await import('../src/renderer/src/components/Intro')
 const { Sidebar } = await import('../src/renderer/src/components/Sidebar')
+const { Hub } = await import('../src/renderer/src/components/Hubs')
 const { MissionsPage } = await import('../src/renderer/src/components/Missions')
 const { Dialogs } = await import('../src/renderer/src/components/Dialogs')
 const { askBody, askTitle } = await import('../src/renderer/src/components/Coach')
@@ -373,29 +374,60 @@ describe('the sidebar and the missions', () => {
   const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: 'Agenda', color: 'violet', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
   const labels = (): string[] => [...document.querySelectorAll('.nav-item__label')].map((x) => x.textContent ?? '')
 
-  it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions, the settings', async () => {
+  // The workspace's name at the top opens the menu that holds Conectores and Configurações now.
+  const openMenu = (): Promise<void> => click(document.querySelector('.workspace-picker__button')!)
+  const menuItems = (): string[] => [...document.querySelectorAll('[role="menu"] .menu__item')].map((x) => x.textContent ?? '')
+  const tabs = (): string[] => [...document.querySelectorAll('.hub__tab')].map((x) => x.textContent ?? '')
+
+  it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions; the settings in the menu', async () => {
     fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia', 'Configurações'])
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia'])
     expect(text()).toContain('Missões')
     expect(text()).toContain('Próxima: fale com Lia')
+    await openMenu()
+    expect(menuItems().join(' | ')).toContain('Configurações')
   })
 
   it('grows as missions bring parts, tagged new until opened', async () => {
     fake = state({ agents: [lia], conversations: [geral], connectors: [{ id: 'c1' } as State['connectors'][number]], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toContain('Conectores')
-    expect(document.querySelector('.nav-item.is-fresh')?.textContent).toContain('NOVO')
+    // Conectores lives in the workspace menu: a dot on the name says something new is in it.
+    expect(document.querySelector('.ws-dot.is-fresh')).not.toBeNull()
     expect(text()).toContain('Você liberou Conectores')
-    await click(document.querySelector('.nav-item.is-fresh')!)
+    await openMenu()
+    const connectors = [...document.querySelectorAll('[role="menu"] .menu__item')].find((x) => x.textContent?.includes('Conectores'))!
+    expect(connectors.textContent).toContain('NOVO')
+    await click(connectors)
     expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, seen: ['connectors'] } })
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'connectors' })
+  })
+
+  it('shows a hub only with an unlocked tab, and only its unlocked tabs', async () => {
+    // Something on autopilot: Rotinas is unlocked; Boletim and Uso (the first talk) aren't, nor anything of Conhecimento.
+    const routine = { id: 'r1' } as State['routines'][number]
+    fake = state({ agents: [lia], conversations: [geral], routines: [routine], settings: { onboarding: { done: true, fresh: true } } })
+    await render(<Sidebar />)
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'Operação', 'geral', 'Lia'])
+    expect(document.querySelector('[data-hub="operations"]')?.textContent).toContain('NOVO')
+    await render(<Hub tab="routines">{null}</Hub>)
+    expect(tabs()).toEqual(['RotinasNOVO'])
+    expect(document.querySelector('.hub__title')?.textContent).toBe('Operação')
+    // Opened, it stops being new.
+    expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, seen: ['routines'] } })
   })
 
   it('is whole for someone who already used Tucano, and after "Mostrar tudo de uma vez"', async () => {
     for (const onboarding of [undefined, { done: true }, { done: true, fresh: true, showAll: true }]) {
       fake = state({ agents: [lia], conversations: [geral], settings: { onboarding } })
       await render(<Sidebar />)
-      expect(labels()).toEqual(expect.arrayContaining(['Memória', 'Wiki', 'Rotinas', 'Skills', 'Boletim', 'Uso e limites', 'Conectores']))
+      expect(labels()).toEqual(expect.arrayContaining(['Conhecimento', 'Operação']))
+      await openMenu()
+      expect(menuItems().join(' | ')).toContain('Conectores')
+      await render(<Hub tab="memory">{null}</Hub>)
+      expect(tabs()).toEqual(['Memória', 'Wiki', 'Skills'])
+      await render(<Hub tab="usage">{null}</Hub>)
+      expect(tabs()).toEqual(['Rotinas', 'Boletim', 'Uso e limites'])
     }
   })
 
