@@ -13215,10 +13215,31 @@ button.agent-card__now:hover {
   background: var(--accent-text);
   color: var(--accent);
 }
-/* Nothing else lives at the foot now: it shows only for the update note. */
+/* The foot: the update note when there is one, then Conectores by name and the Settings gear. */
 .sidebar__foot:empty {
   display: none;
 }
+.sidebar__tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sidebar__tool {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+}
+.sidebar__tool:hover, .sidebar__tool.is-active { background: var(--hover); color: var(--text); }
+.sidebar__gear { color: var(--text-2); }
+.sidebar__gear.is-active { background: var(--hover); color: var(--text); }
 
 /* The AGENTES header: the org chart and the "+". */
 .section__actions {

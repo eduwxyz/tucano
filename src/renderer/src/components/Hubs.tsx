@@ -39,8 +39,9 @@ export interface Tab {
   fresh: boolean
 }
 
-// The tabs a hub shows: on a new install's short sidebar only those a mission unlocked (or that have
-// something waiting), the admin-only ones only for admins, and always the one on screen.
+// The tabs a hub shows. On a new install's short sidebar the hub appears once a mission unlocked one
+// of its tabs (or one has something in it or waiting), and then with all its tabs: a hub with one tab
+// looked like the others were gone. The admin-only ones only for admins.
 export function useHubTabs(hub: HubId): Tab[] {
   const parts = useSidebarParts()
   const admin = useStore(amAdmin)
@@ -56,8 +57,10 @@ export function useHubTabs(hub: HubId): Tab[] {
     usage: admin && parts.shows('usage')
   }
   const badges: Partial<Record<HubTab, number>> = { memory: suggestions, skills: proposals }
+  const open = TABS[hub].some((t) => shows[t] || t === current)
+  const allowed: Record<HubTab, boolean> = { memory: true, wiki: true, skills: true, routines: true, report: admin, usage: admin }
   return TABS[hub]
-    .filter((t) => shows[t] || t === current)
+    .filter((t) => open && (allowed[t] || t === current))
     .map((t) => ({ tab: t, label: tabLabel(t), badge: badges[t] ?? 0, fresh: parts.fresh(t as SidebarPart) }))
 }
 

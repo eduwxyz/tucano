@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { sortWorkspaces, workspaceLabel, type WorkspaceList } from '../../../shared/workspaces'
-import { amAdmin, navigate, openDialog, shortcut, updateSettings, useStore, type State } from '../store'
+import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, updateSettings, useStore, type State } from '../store'
 import { Icon } from './ui'
 import { useServers } from './Servers'
 import { useSidebarParts } from './Missions'
@@ -33,17 +33,15 @@ function connectorsHint(s: State): string {
 }
 
 // The workspace's name at the top of the sidebar opens this menu: the workspaces (switch, create,
-// manage), and what used to sit at the sidebar's foot and top corner: Conectores, Configurações,
-// pausing the agents and the theme. A dot by the name says a connector needs the person.
+// manage), pausing the agents, the theme, and the missions when they were hidden. Conectores and
+// Configurações sit at the sidebar's foot (SidebarFoot), where people look for them.
 export function WorkspaceMenu(): ReactNode {
   const name = useStore((s) => workspaceLabel(s.settings))
   const platform = useStore((s) => s.platform)
   const paused = useStore((s) => !!s.settings.paused)
   const theme = useStore((s) => s.settings.theme)
   const admin = useStore(amAdmin)
-  const hint = useStore(connectorsHint)
-  const parts = useSidebarParts()
-  const freshConnectors = parts.fresh('connectors')
+  const missionsHidden = useStore((s) => amOwner(s) && !!s.settings.onboarding?.done && !!s.settings.onboarding.checklistHidden)
   const { list, error: loadError } = useWorkspaceList()
   const selectedId = list?.selected
   const workspaces = sortWorkspaces(list?.workspaces)
@@ -74,13 +72,11 @@ export function WorkspaceMenu(): ReactNode {
     action()
   }
   const isDark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-  const dot = hint ? <span className="ws-dot" title={hint} aria-label={hint} /> : freshConnectors ? <span className="ws-dot is-fresh" title={L('Conectores: novo', 'Connectors: new')} aria-label={L('Conectores: novo', 'Connectors: new')} /> : null
   return (
     <div className="workspace-picker ws-menu" ref={root}>
       <button ref={button} className="workspace-picker__button" title={name} aria-label={L(`${name}: workspaces e ajustes`, `${name}: workspaces and settings`)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="workspace__logo">{name.slice(0, 1)}</span>
         <span className="workspace__name">{name}</span>
-        {dot}
         <span className="ws-menu__caret">
           <Icon name="caret" size={12} />
         </span>
@@ -124,16 +120,6 @@ export function WorkspaceMenu(): ReactNode {
           </button>
           <div className="menu__sep" role="separator" />
         </>}
-        <button className="menu__item" role="menuitem" onClick={pick(() => (freshConnectors && parts.seen('connectors'), navigate({ kind: 'connectors' })))}>
-          <Icon name="plug" size={15} />
-          <span className="grow">{L('Conectores', 'Connectors')}</span>
-          {hint ? <span className="ws-menu__hint is-warn">{hint}</span> : freshConnectors ? <span className="nav-item__new">{L('NOVO', 'NEW')}</span> : null}
-        </button>
-        <button className="menu__item" role="menuitem" onClick={pick(() => navigate({ kind: 'settings' }))}>
-          <Icon name="gear" size={15} />
-          <span className="grow">{L('Configurações', 'Settings')}</span>
-          <span className="ws-menu__hint">{shortcut(platform, ',')}</span>
-        </button>
         {admin && (
           <button
             className="menu__item"
@@ -149,8 +135,37 @@ export function WorkspaceMenu(): ReactNode {
           <Icon name={isDark ? 'sun' : 'moon'} size={15} />
           <span className="grow">{isDark ? L('Tema claro', 'Light theme') : L('Tema escuro', 'Dark theme')}</span>
         </button>
+        {missionsHidden && (
+          <button className="menu__item" role="menuitem" onClick={pick(() => updateSettings({ onboarding: { ...getState().settings.onboarding, done: true, checklistHidden: false } }))}>
+            <Icon name="spark" size={15} />
+            <span className="grow">{L('Mostrar as missões', 'Show the missions')}</span>
+          </button>
+        )}
         {(error || loadError) && <p className="field__error" role="alert">{error || loadError}</p>}
       </div>}
+    </div>
+  )
+}
+
+// The sidebar's foot: Conectores by name (it's what a new person needs to find) with what needs them
+// there, and Configurações as the gear everyone looks for in this corner.
+export function SidebarFoot(): ReactNode {
+  const platform = useStore((s) => s.platform)
+  const hint = useStore(connectorsHint)
+  const onConnectors = useStore((s) => s.view?.kind === 'connectors')
+  const onSettings = useStore((s) => s.view?.kind === 'settings')
+  const parts = useSidebarParts()
+  const fresh = parts.fresh('connectors')
+  return (
+    <div className="sidebar__tools">
+      <button className={`sidebar__tool ${onConnectors ? 'is-active' : ''}`} title={hint || undefined} onClick={() => (fresh && parts.seen('connectors'), navigate({ kind: 'connectors' }))}>
+        <Icon name="plug" size={15} />
+        <span className="grow">{L('Conectores', 'Connectors')}</span>
+        {hint ? <span className="ws-dot" aria-label={hint} /> : fresh ? <span className="nav-item__new">{L('NOVO', 'NEW')}</span> : null}
+      </button>
+      <button className={`icon-btn sidebar__gear ${onSettings ? 'is-active' : ''}`} title={L(`Configurações (${shortcut(platform, ',')})`, `Settings (${shortcut(platform, ',')})`)} aria-label={L('Configurações', 'Settings')} onClick={() => navigate({ kind: 'settings' })}>
+        <Icon name="gear" size={16} />
+      </button>
     </div>
   )
 }

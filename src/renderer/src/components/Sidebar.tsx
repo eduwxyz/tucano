@@ -42,7 +42,7 @@ import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dia
 import { FoldToggle, useFold } from './Fold'
 import { MissionsCard, useSidebarParts } from './Missions'
 import { UpdateNote } from './Update'
-import { WorkspaceMenu } from './Workspaces'
+import { SidebarFoot, WorkspaceMenu } from './Workspaces'
 import { Glyph, hubOf, hubTab, hubTitle, openHub, useHubTabs, type HubId } from './Hubs'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
 
@@ -500,6 +500,7 @@ export function Sidebar(): ReactNode {
       <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
         <UpdateNote />
+        <SidebarFoot />
       </div>
     </aside>
   )
