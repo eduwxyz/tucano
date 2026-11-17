@@ -1,6 +1,7 @@
 // The board's cards (src/renderer/src/board.ts): one per request, read off the messages as they are.
 import { describe, expect, it } from 'vitest'
-import { boardCards, familyOf, titleOf, type BoardInput } from '../src/renderer/src/board'
+import { boardCards, familyOf, storyOf, tasksOf, titleOf, type BoardInput } from '../src/renderer/src/board'
+import { cleanTitle, shortTitle, titledAlready } from '../src/shared/titles'
 import type { Agent, Delegation, Inbox, Message, Run } from '../src/shared/types'
 
 const NOW = new Date(2026, 10, 16, 15, 0).getTime()
@@ -90,6 +91,74 @@ describe('the board’s cards', () => {
 
   it('titles drop mentions and Markdown, and stay short', () => {
     expect(titleOf('\n\n@lia   [veja](http://x) o `log`')).toBe('Veja o log')
-    expect(titleOf('x'.repeat(300))).toHaveLength(158)
+    expect(titleOf('x'.repeat(300)).length).toBeLessThanOrEqual(60)
+    expect(titleOf('qualquer coisa longa', 'Notas da versão 0.2.37')).toBe('Notas da versão 0.2.37')
+  })
+
+  it('a title skips greetings, the name it is addressed to and nudges, and keeps the first sentence', () => {
+    expect(shortTitle('Otto, publique a v0.2.35 do Tucano (desktop), com o OK do Eduardo (dado às 08:44 de 16/11)')).toBe('Publique a v0.2.35 do Tucano (desktop), com o OK do…')
+    expect(shortTitle('Quero o seguinte. Hoje a gente facilita a importação de quem vem do Open Bot.')).toBe('Hoje a gente facilita a importação de quem vem do Open Bot')
+    expect(shortTitle('Bom dia! Revise o PR #531')).toBe('Revise o PR #531')
+    expect(shortTitle('E aí?\nComo ficou o deploy do site?')).toBe('Como ficou o deploy do site?')
+    expect(cleanTitle('Título: "Notas da versão."\n')).toBe('Notas da versão')
+    expect(titledAlready('Revise o PR #531')).toBe(true)
+    expect(titledAlready('Revise o PR #531\ne depois junte')).toBe(false)
+  })
+})
+
+describe('one task, one card', () => {
+  const split = (): { ask: Message; msgs: Message[]; d: (id: string, to: string, state: Delegation['state']) => Delegation; splitId: string } => {
+    const ask = me('eng', 'Lançar a 0.2.35', NOW - 60 * MIN)
+    const s = reply('eng', 'lia', NOW - 59 * MIN, { status: 'done', replyTo: ask.id, delegations: [{ id: 'd1', to: 'theo', conversationId: 'dados', rootId: 'root1' }, { id: 'd2', to: 'nina', conversationId: 'cont', rootId: 'root2' }] })
+    const d = (id: string, to: string, state: Delegation['state']): Delegation => ({ id, from: 'lia', to, conversationId: to === 'theo' ? 'dados' : 'cont', rootId: id === 'd1' ? 'root1' : 'root2', originConversationId: 'eng', originMessageId: s.id, requestedBy: 'ana', text: to === 'theo' ? 'Revisar o commit' : 'Escrever o post', state, createdAt: NOW - 58 * MIN }) as Delegation
+    return { ask, msgs: [ask, s], d, splitId: s.id }
+  }
+
+  it('a part that asks me puts the whole task in "Precisa de você", once, saying who asks', () => {
+    const { msgs, d } = split()
+    const theo = reply('dados', 'theo', NOW - 50 * MIN, { status: 'done', handed: 'd1' }, { threadId: 'root1', text: 'Revisado.' })
+    const nina = reply('cont', 'nina', NOW - 40 * MIN, { status: 'waiting_input', handed: 'd2', question: 'Posto sem imagem?' }, { threadId: 'root2' })
+    const cards = boardCards(input([...msgs, theo, nina], { delegations: [d('d1', 'theo', 'done'), d('d2', 'nina', 'open')], inbox: { approvals: [], questions: [{ id: nina.id } as Inbox['questions'][number]] } }), NOW)
+    const tasks = tasksOf(cards)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({ title: 'Lançar a 0.2.35', column: 'you' })
+    expect(tasks[0]!.asking!.agentId).toBe('nina')
+    expect(tasks[0]!.crew).toEqual([{ agentId: 'nina', state: 'you' }, { agentId: 'lia', state: 'waiting' }, { agentId: 'theo', state: 'done' }])
+  })
+
+  it('a task delivered still goes to "Precisa de você" while a part of it asks me', () => {
+    const { msgs, d } = split()
+    const nina = reply('cont', 'nina', NOW - 40 * MIN, { status: 'waiting_input', handed: 'd2', question: 'Posto sem imagem?' }, { threadId: 'root2' })
+    const together = reply('eng', 'lia', NOW - 5 * MIN, { status: 'done' }, { text: 'Lançado.' })
+    const tasks = tasksOf(boardCards(input([...msgs, nina, together], { delegations: [d('d1', 'theo', 'done'), d('d2', 'nina', 'open')], inbox: { approvals: [], questions: [{ id: nina.id } as Inbox['questions'][number]] } }), NOW))
+    expect(tasks.map((t) => t.column)).toEqual(['you'])
+  })
+
+  it('while the parts run, the task is in Fazendo and its crew is who is on it now', () => {
+    const { msgs, d } = split()
+    const theo = reply('dados', 'theo', NOW - 50 * MIN, { status: 'working', handed: 'd1' }, { threadId: 'root1' })
+    const tasks = tasksOf(boardCards(input([...msgs, theo], { delegations: [d('d1', 'theo', 'open'), d('d2', 'nina', 'open')] }), NOW))
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]!.column).toBe('doing')
+    expect(tasks[0]!.crew[0]).toEqual({ agentId: 'theo', state: 'working' })
+  })
+
+  it('its story: who asked, who split it, each part, in order', () => {
+    const { msgs, d } = split()
+    const theo = reply('dados', 'theo', NOW - 50 * MIN, { status: 'done', handed: 'd1' }, { threadId: 'root1', text: 'Revisado.' })
+    const [task] = tasksOf(boardCards(input([...msgs, theo], { delegations: [d('d1', 'theo', 'done'), d('d2', 'nina', 'open')] }), NOW))
+    expect(storyOf(task!).map((b) => [b.kind, b.agentId ?? b.by?.name, b.state])).toEqual([
+      ['asked', 'Você', 'waiting'],
+      ['split', 'lia', 'done'],
+      ['part', 'theo', 'done'],
+      ['part', 'nina', 'waiting']
+    ])
+  })
+})
+
+describe('titles that say nothing', () => {
+  it('a nudge alone keeps its words', () => {
+    expect(shortTitle('E aí?')).toBe('E aí?')
+    expect(shortTitle('Oi')).toBe('Oi')
   })
 })

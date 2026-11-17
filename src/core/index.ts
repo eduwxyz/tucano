@@ -73,6 +73,7 @@ import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellC
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
+import { Titles } from './titles'
 import { loginEnv, MacComputer } from './mac'
 import { NodeLog, NodeServer } from './node-server'
 import { NodeLinks, NodeUplink, type LinkPort } from './node-link'
@@ -459,9 +460,12 @@ function workspaceSummary(): void {
     lastSummary = wire
   }, 250)
 }
+// The requests' short titles (the board's cards), made once a reply starts on them.
+let titles: Titles | undefined
 function emit(event: CoreEvent): void {
   const more = event.type === 'message' && db.recordActivity(event.message, viewing)
   hub.emit(event)
+  if (event.type === 'message') titles?.forReply(event.message)
   // An approval asked or decided changes what waits on its deciders.
   if (event.type === 'approval') hub.emit({ type: 'inbox' })
   toPhone(event)
@@ -840,6 +844,7 @@ const oauthCallback = async (url: URL): Promise<string> => {
 gateway.route('/oauth/callback', oauthCallback)
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
+titles = new Titles({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
 

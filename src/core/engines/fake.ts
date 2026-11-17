@@ -2,6 +2,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L, locale } from '../../shared/lang'
 import { memorySystem } from '../memory'
+import { titleSystem } from '../titles'
+import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
 import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
@@ -45,6 +47,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeHandoff(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
+      } else if (turn.system === titleSystem()) {
+        // A request's title: its own words, short (the real one is a cheap model's).
+        reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {

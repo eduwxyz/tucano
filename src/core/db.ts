@@ -587,7 +587,9 @@ const COLUMNS: [string, string, string][] = [
   // What a connector's server says can't be loosened here (META_FLOOR, META_HIGH_RISK in shared/classify.ts):
   // the class a tool can't go below, and that it's high risk. A node says both for the person's computer.
   ['connector_tools', 'cls_floor', 'TEXT'],
-  ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0']
+  ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
+  // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
+  ['messages', 'title', 'TEXT']
 ]
 
 
@@ -1124,8 +1126,14 @@ export class Db {
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
-      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
+      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
+      ...(r['title'] ? { title: str(r['title']) } : {})
     }
+  }
+
+  // A request's short title (src/core/titles.ts).
+  setMessageTitle(id: string, title: string): void {
+    this.db.prepare('UPDATE messages SET title = ? WHERE id = ?').run(title, id)
   }
 
   messages(): Message[] {

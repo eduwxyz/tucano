@@ -6,6 +6,7 @@
 import { L } from '../../shared/lang'
 import { isTeam, type Agent, type Delegation, type Inbox, type Message, type Run } from '../../shared/types'
 import { canContinue } from '../../shared/run-progress'
+import { shortTitle } from '../../shared/titles'
 import { mineIn } from './components/waiting'
 
 export type Column = 'doing' | 'you' | 'done' | 'stuck'
@@ -60,12 +61,8 @@ const OPEN = new Set<Run['status']>(['working', 'waiting_input', 'waiting_approv
 const asked = (m: Message): boolean => !!(m.run?.question || m.run?.questions?.length)
 const place = (m: Pick<Message, 'conversationId' | 'threadId'>): string => `${m.conversationId}|${m.threadId ?? ''}`
 
-// A request's words as a card's title: its first line that says something, without mentions or Markdown.
-export function titleOf(text: string): string {
-  const line = text.split('\n').map((l) => l.replace(/@[\w.-]+/g, '').replace(/[*_`#>]+/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim()).find((l) => l.length > 0) ?? ''
-  const t = line.length > 160 ? `${line.slice(0, 157).trimEnd()}…` : line
-  return t.charAt(0).toUpperCase() + t.slice(1)
-}
+// A request as a card's title: the short one made for it (src/core/titles.ts), else a few of its own words.
+export const titleOf = (text: string, made?: string): string => made || shortTitle(text)
 
 // The start of the day `now` is in, where the board's "done" begins.
 export const dayStart = (now: number): number => {
@@ -129,7 +126,7 @@ export function boardCards(input: BoardInput, now = Date.now()): BoardCard[] {
         key = open(`d:${run.handed}`, {
           id: `d:${run.handed}`,
           agentId: m.author.id,
-          title: titleOf(d?.text ?? root?.text ?? m.text),
+          title: titleOf(d?.text ?? root?.text ?? m.text, root?.title),
           by: d ? agentAsker(d.from) : asker(root),
           conversationId: m.conversationId,
           ...(m.threadId ? { threadId: m.threadId } : {}),
@@ -147,7 +144,7 @@ export function boardCards(input: BoardInput, now = Date.now()): BoardCard[] {
           key = open(`m:${run.replyTo}`, {
             id: `m:${run.replyTo}`,
             agentId: m.author.id,
-            title: titleOf(p?.text ?? m.text) || L('Pedido', 'Request'),
+            title: titleOf(p?.text ?? m.text, p?.title) || L('Pedido', 'Request'),
             by: asker(p),
             conversationId: m.conversationId,
             ...(m.threadId ? { threadId: m.threadId } : {}),
@@ -177,7 +174,7 @@ export function boardCards(input: BoardInput, now = Date.now()): BoardCard[] {
   for (const d of delegations) {
     const key = `d:${d.id}`
     if (cards.has(key) || !team.has(d.to) || !cardOf.has(d.originMessageId)) continue
-    cards.set(key, { id: key, agentId: d.to, title: titleOf(d.text), by: agentAsker(d.from), conversationId: d.conversationId, threadId: d.threadId ?? d.rootId, requestId: d.rootId, replies: [], at: d.createdAt, delegation: d })
+    cards.set(key, { id: key, agentId: d.to, title: titleOf(d.text, byId.get(d.rootId)?.title), by: agentAsker(d.from), conversationId: d.conversationId, threadId: d.threadId ?? d.rootId, requestId: d.rootId, replies: [], at: d.createdAt, delegation: d })
   }
 
   // Who handed what: a part's parent is the card of the reply that asked for it.
@@ -275,4 +272,89 @@ export function familyOf(cards: BoardCard[], id: string): Set<string> {
   }
   walk(root)
   return out
+}
+
+// ---------- one task, one card ----------
+
+// Someone on a task: the agents of its parts (and its own), each with where their part stands.
+export type CrewState = 'working' | 'you' | 'waiting' | 'done' | 'stuck'
+export interface CrewMember {
+  agentId: string
+  state: CrewState
+}
+export interface BoardTask extends BoardCard {
+  crew: CrewMember[] // who has worked on it, the ones on it now first
+  asking?: BoardCard // the card in it that waits on me (it may be a part, deep down)
+  family: BoardCard[] // the request and every part, in the order they were asked
+}
+
+const URGENT: Record<CrewState, number> = { you: 0, working: 1, waiting: 2, stuck: 3, done: 4 }
+// A part handed on that nobody has taken yet waits in line: it isn't being worked on.
+const crewState = (c: BoardCard): CrewState =>
+  c.column === 'you' ? 'you' : c.column === 'done' ? 'done' : c.column === 'stuck' ? 'stuck' : c.state === 'working' && c.replies.length ? 'working' : 'waiting'
+
+// The board's cards as tasks: a request split among agents is ONE card, whatever view and however deep
+// the parts go. It stands where its most urgent part does: anything in it waiting on me puts it in
+// "Precisa de você"; otherwise it's where the request itself is. Counting tasks, every view agrees.
+export function tasksOf(cards: BoardCard[]): BoardTask[] {
+  const byId = new Map(cards.map((c) => [c.id, c]))
+  const out: BoardTask[] = []
+  for (const top of cards) {
+    if (top.parent && byId.has(top.parent)) continue
+    const family: BoardCard[] = []
+    const walk = (c: BoardCard | undefined, depth: number): void => {
+      if (!c || family.includes(c) || depth > 6) return
+      family.push(c)
+      for (const p of c.parts) walk(byId.get(p), depth + 1)
+    }
+    walk(top, 0)
+    const asking = family.filter((c) => c.column === 'you').sort((a, b) => a.at - b.at)[0]
+    const best = new Map<string, CrewState>()
+    for (const c of family) {
+      // The one who split it and only waits on the parts isn't "on it": the parts' agents are.
+      if (c === top && c.state === 'parts' && family.length > 1) {
+        if (!best.has(c.agentId)) best.set(c.agentId, 'waiting')
+        continue
+      }
+      const s = crewState(c)
+      const was = best.get(c.agentId)
+      if (was === undefined || URGENT[s] < URGENT[was]) best.set(c.agentId, s)
+    }
+    const crew = [...best].map(([agentId, state]) => ({ agentId, state })).sort((a, b) => URGENT[a.state] - URGENT[b.state])
+    // Even a task delivered goes back to "Precisa de você" while a part of it still asks me something.
+    const column = asking ? 'you' : top.column
+    out.push({ ...top, column, crew, family, ...(asking ? { asking } : {}) })
+  }
+  return out
+}
+
+// A task's story, in the order it happened: who asked whom, who split it, what each part did.
+export interface Beat {
+  cardId: string
+  agentId?: string // none: the person who asked
+  by?: Asker
+  depth: number
+  kind: 'asked' | 'split' | 'part' | 'delivered'
+  title: string
+  state: CrewState
+  at: number
+}
+export function storyOf(task: BoardTask): Beat[] {
+  const byId = new Map(task.family.map((c) => [c.id, c]))
+  const beats: Beat[] = [{ cardId: task.id, by: task.by, depth: 0, kind: 'asked', title: task.title, state: crewState(task), at: task.at }]
+  if (task.parts.length) {
+    const first = Math.min(...task.parts.map((p) => byId.get(p)?.at ?? task.at))
+    beats.push({ cardId: task.id, agentId: task.agentId, depth: 0, kind: 'split', title: String(task.parts.length), state: 'done', at: first })
+  }
+  const walk = (c: BoardCard, depth: number): void => {
+    for (const id of [...c.parts].sort((a, b) => (byId.get(a)?.at ?? 0) - (byId.get(b)?.at ?? 0))) {
+      const k = byId.get(id)
+      if (!k) continue
+      beats.push({ cardId: k.id, agentId: k.agentId, depth, kind: 'part', title: k.title, state: crewState(k), at: k.endedAt ?? k.at })
+      walk(k, depth + 1)
+    }
+  }
+  walk(task, 1)
+  if (task.parts.length && task.column === 'done') beats.push({ cardId: task.id, agentId: task.agentId, depth: 0, kind: 'delivered', title: task.title, state: 'done', at: task.endedAt ?? task.at })
+  return beats
 }
