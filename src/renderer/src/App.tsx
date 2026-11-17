@@ -12,6 +12,8 @@ import { WikiView } from './components/Wiki'
 import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
+import { BoardPage } from './components/Board'
+import { OrgPage } from './components/OrgChart'
 import { Onboarding } from './components/Onboarding'
 import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
 import { MissionsPage } from './components/Missions'
@@ -111,6 +113,8 @@ export function App(): ReactNode {
         {view.kind === 'routines' && <RoutinesPage />}
         {view.kind === 'skills' && <SkillsPage />}
         {view.kind === 'report' && <ReportPage />}
+        {view.kind === 'org' && <OrgPage />}
+        {view.kind === 'board' && <BoardPage />}
         {view.kind === 'settings' && <SettingsPage />}
         {view.kind === 'missions' && <MissionsPage />}
       </main>

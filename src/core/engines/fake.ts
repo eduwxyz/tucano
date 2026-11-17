@@ -1,7 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { L } from '../../shared/lang'
+import { L, locale } from '../../shared/lang'
 import { memorySystem } from '../memory'
+import { titleSystem } from '../titles'
+import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
 import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
@@ -15,6 +17,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
   const delay = opts.delayMs ?? 25
   return {
     id,
+    ...(id === 'codex' ? { planUsage: async () => ({ windows: [{ minutes: 300, utilization: 0.12, resetsAt: Date.now() + 3 * 3_600_000 }, { minutes: 10_080, utilization: 0.09, resetsAt: Date.now() + 5 * 86_400_000 }], plan: 'plus', at: Date.now() }) } : {}),
     ...(opts.sessions
       ? {
           sessions: true,
@@ -24,7 +27,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         }
       : {}),
     async *run(turn): AsyncIterable<EngineEvent> {
-      const last = lastMessage(turn.prompt)
+      let last = lastMessage(turn.prompt)
+      // Work handed down (src/core/delegations.ts): what was asked is the line after "um pedido:", and
+      // what came back to whoever asked is in the task at the end, not in a message.
+      const handed = /A mensagem acima é (?:um pedido d[eo]|de) |The message above is (?:a request )?from /.test(turn.prompt) ? [...turn.prompt.matchAll(/(?:um pedido|a request):\n\n([^\n]+)/g)].at(-1)?.[1] : undefined
+      if (handed) last = handed
+      const back = /(?:Voltou do que você pediu ao seu time|Back from what you asked of your team):[\s\S]*$/.exec(turn.prompt)?.[0]
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
       // harness, or another account of Claude, whose limit is still there).
       if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== memorySystem()) {
@@ -39,6 +47,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeHandoff(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
+      } else if (turn.system === titleSystem()) {
+        // A request's title: its own words, short (the real one is a cheap model's).
+        reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
@@ -71,11 +82,47 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           })
           reply = textOf(r).includes('card') ? L('Montei o Rafa. Dá pra criar, editar antes ou me pedir ajustes.', 'I put Rafa together. You can create it, edit it first or ask me for changes.') : textOf(r)
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
+      } else if (turn.mcpUrl && back) {
+        // What came back from its team: a question left there is answered ("responda a dúvida com `x`", in
+        // what the person wrote first) or taken to the person; an end is told in a line.
+        const waiting = /\[([0-9a-f]{8})\][^\n]*(?:deixou uma pergunta|left a question)/.exec(back)
+        const known = /respond[ae] (?:a d[úu]vida|the question) com `([^`]+)`/i.exec(turn.prompt)
+        if (waiting && known) {
+          await callTool(turn.mcpUrl, 'responder_pedido', { id: waiting[1]!, resposta: known[1]! })
+          reply = '' // answered it itself: nothing for the person to read
+        } else if (waiting) {
+          await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
+          reply = 'Ele precisa de uma decisão sua.'
+        } else reply = /passou do prazo|past its deadline/.test(back) ? 'Passou do prazo e ainda não terminou.' : /: não terminou|did not finish/.test(back) ? 'Não deu certo: o pedido não terminou.' : 'Pronto: o time terminou o que pedi.'
+      } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/i.test(last)) {
+        // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".
+        const out: string[] = []
+        for (const m of last.matchAll(/(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/gi)) out.push(textOf(await callTool(turn.mcpUrl, 'pedir', { para: m[1]!, pedido: m[3]!, ...(m[2] ? { canal: m[2] } : {}), ...(/prazo de (\d+) ?h/i.test(m[3]!) ? { prazo_horas: Number(/prazo de (\d+) ?h/i.exec(m[3]!)![1]) } : {}) })))
+        // Asked: it ends with no text, as told (the person sees whom it asked under their message). What
+        // didn't go out is said.
+        reply = out.filter((t) => !/^(?:Pedido|Request) \[/.test(t)).join('\n')
+      } else if (turn.mcpUrl && /^continue (?:com|with) @?([\w-]+): (.+)/i.test(last)) {
+        // "continue com clara: e mande também pro Beltrano": the request that came back from her, in its thread.
+        const [, who, what] = /^continue (?:com|with) @?([\w-]+): (.+)/i.exec(last)!
+        const code = new RegExp(`\\[([0-9a-f]{8})\\] ${who![0]!.toUpperCase()}${who!.slice(1)},`).exec(turn.prompt)?.[1] ?? ''
+        const out = textOf(await callTool(turn.mcpUrl, 'pedir', { para: who!, pedido: what!, continuar: code }))
+        reply = /^(?:Pedido|Request) \[/.test(out) ? '' : out
+      } else if (turn.mcpUrl && /^repasse: (.+)/i.test(last)) {
+        // The person's answer to a question that came up from the team, passed on to whoever waits for it.
+        const code = /\[([0-9a-f]{8})\][^\n]*(?:esperando uma resposta sua|waiting for an answer from you)/.exec(turn.prompt)?.[1] ?? ''
+        reply = textOf(await callTool(turn.mcpUrl, 'responder_pedido', { id: code, resposta: /^repasse: (.+)/i.exec(last)![1]! }))
+      } else if (turn.mcpUrl && /cancele o pedido/i.test(last)) {
+        const code = [...turn.prompt.matchAll(/\[([0-9a-f]{8})\]/g)].at(-1)?.[1] ?? ''
+        reply = textOf(await callTool(turn.mcpUrl, 'cancelar_pedido', { id: code, motivo: 'mudou o plano' }))
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
         reply = `@${/pe[çc]a pr[oa] (\w+)/i.exec(last)![1]!.toLowerCase()}, pode ajudar aqui?`
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
         // A thank-you that mentions someone: the hand-off screening lets no one answer it.
         reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
+      } else if (turn.mcpUrl && /^rode no computador: (.+)/i.test(last)) {
+        // A command on a computer lent to this server (core/node-link.ts), for trying the line end to end.
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'node_bash'), { command: /^rode no computador: (.+)/i.exec(last)![1]! })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'list_tasks'), {})
         reply = `Suas tarefas:\n\n${textOf(r)}`
@@ -121,6 +168,27 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/gaste (\d+) tokens/i.test(last)) {
         spend = Number(/gaste (\d+) tokens/i.exec(last)![1])
         reply = 'Instalei o Swift e li o módulo de sorteio. Falta rodar os testes do Core e conferir o filtro de questões recentes.'
+      } else if (/\b(?:was cut when the app closed|was cut by a failure|was cut before it finished|foi cortada quando|foi cortada por uma falha)/i.test(turn.prompt)) {
+        // A reply the app cut, continued: the steps it already took are in its task, so it says how
+        // many there were and goes on instead of redoing them (src/core/runs.ts, continue()).
+        const told = /(?:The steps you took|Os passos que você fez):\n([\s\S]*?)\n\n/.exec(turn.prompt)?.[1] ?? ''
+        const done = told
+          .split('\n')
+          .filter((l) => l.trim().startsWith('-'))
+          .map((l) => l.trim().slice(2).split(':')[0]!.trim())
+        reply = L(
+          `Continuei dali: ${done.join(', ')} já estavam prontos, e não refiz nenhum.`,
+          `I went on from there: ${done.join(', ')} were already done, and I redid none of them.`
+        )
+      } else if (turn.mcpUrl && /lembre e procure:/i.test(last)) {
+        // A memory written and then searched, then a hold: two real steps behind a reply, and a pause
+        // long enough for the app to be killed between them (scripts/e2e-kill-restart.mjs). Neither
+        // call needs a computer, so this runs on any host the app runs on.
+        const texto = /lembre e procure:\s*(.+)/is.exec(last)![1]!.trim()
+        await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
+        await callTool(turn.mcpUrl, 'buscar_memorias', { busca: texto })
+        await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
+        reply = L('Guardei e procurei de volta.', 'I saved it and searched it back.')
       } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
@@ -159,7 +227,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const inputTokens = Math.ceil((turn.system.length + turn.prompt.length) / 4)
       yield { type: 'progress', tokens: inputTokens + spend }
       // "demore 8 s": a reply that takes its time, to see one at work.
-      const slow = /demore (\d+) ?s/i.exec(last)
+      const slow = /^\s*(?:delegue|hand) /i.test(last) ? null : /demore (\d+) ?s/i.exec(last) // what it hands down is the other's to take its time on
       if (slow) await new Promise((r) => setTimeout(r, Number(slow[1]) * 1000))
       if (id === 'claude') yield { type: 'quota', quota: { fiveHour: { utilization: 0.34, resetsAt: Date.now() + 2 * 3_600_000 }, sevenDay: { utilization: 0.21, resetsAt: Date.now() + 4 * 86_400_000 }, at: Date.now() } }
       let text = ''
@@ -259,7 +327,7 @@ function fakeCuration(prompt: string): { guardar: boolean; motivo: string; titul
   const named = titles.find((t) => t.toLowerCase().split(/\s+/).filter((w) => w.length >= 5).some((w) => stretch.toLowerCase().includes(w)))
   const plain = stretch.replace(/\*\*[^*]+\*\* \([^)]*\): /g, '').replace(/\s+/g, ' ').trim()
   const line = plain.length > 160 ? `${plain.slice(0, 157)}…` : plain
-  const day = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  const day = new Date().toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })
   const mudancas: Record<string, string>[] = []
   if (named) mudancas.push({ op: 'append', pagina: named, secao: L('Histórico', 'History'), texto: `- **${day}:** ${line}` })
   if (/\d|decid|fech|guarda/i.test(plain) && !named) mudancas.push({ op: 'create', pagina: plain.split(/[.!?:]/)[0]!.split(' ').slice(0, 5).join(' '), tipo: L('Assunto', 'Topic'), texto: `${line}\n\n## ${L('Detalhes', 'Details')}\n- ${line}` })

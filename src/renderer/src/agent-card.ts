@@ -1,6 +1,7 @@
 // What an agent's profile card says about it right now, and where the card goes on the
 // screen. Kept apart from React so both can be tested without a browser.
 import type { Agent, Conversation, Message } from '../../shared/types'
+import { overMonthlyLimit } from '../../shared/limits'
 
 export type AgentNow =
   | { kind: 'working'; conversationId: string; doing?: string; since: number }
@@ -25,7 +26,8 @@ export function agentNow(agent: Pick<Agent, 'id' | 'archived' | 'used' | 'limit'
     const on = waiting.run!.status === 'waiting_input' ? 'input' : 'approval'
     return { kind: 'waiting', conversationId: waiting.conversationId, on, ...(on === 'input' && waiting.run!.askedTo ? { askedTo: waiting.run!.askedTo } : {}) }
   }
-  if (agent.limit > 0 && agent.used >= agent.limit) return { kind: 'limit' }
+  // 0 is no limit, so there is nothing to have hit (shared/limits.ts).
+  if (overMonthlyLimit(agent.used, agent.limit)) return { kind: 'limit' }
   return { kind: 'idle', lastAt: own.at(-1)?.at }
 }
 
@@ -60,6 +62,14 @@ export function placeCard(anchor: Box, card: { width: number; height: number }, 
   const x = Math.max(EDGE, Math.min(anchor.left, view.width - card.width - EDGE))
   const below = anchor.top + anchor.height + GAP
   return { left: x, top: clampTop(below + card.height <= view.height - EDGE ? below : anchor.top - GAP - card.height), width: card.width }
+}
+
+// A scroll moves the card's anchor only when the scrolled thing holds it (or is the whole page):
+// the chat list auto-scrolling under a card opened from the header leaves the card where it belongs.
+export function scrollMovesAnchor(scrolled: EventTarget | null, anchor: Node): boolean {
+  if (!anchor.isConnected) return true
+  const container = scrolled as Partial<Node> | null
+  return typeof container?.contains !== 'function' || container.contains(anchor)
 }
 
 // ---------- which card is open, and how ----------

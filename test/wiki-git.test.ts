@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { classify, GitFailure, isReadOnly, KEY_SECRET, makeKeyPair, parseRepoUrl, redact, WikiGit } from '../src/core/wiki-git'
 import { pageKey, Wiki } from '../src/core/wiki'
@@ -69,6 +69,7 @@ async function connected(url: string, o: { ssh?: string } = {}) {
       for (const s of wiki?.sources(1000) ?? []) if (s.origin.conversationId && dms.get(s.origin.conversationId) !== null) out.add(`${s.file}.md`)
       return out
     },
+    copied: (from, to) => wiki?.carryKey(pageKey(from.replace(/\.md$/i, '')), pageKey(to.replace(/\.md$/i, ''))),
     quiet: (on) => wiki?.quiet(on),
     refresh: () => wiki?.refresh() ?? Promise.resolve(),
     notice: (n) => wiki?.addNotice(n),
@@ -213,6 +214,20 @@ describe('the loop', () => {
     wiki.setFindings([])
     expect(wiki.findings().some((x) => x.kind === 'git')).toBe(true)
     expect(g.status().state).toBe('ok')
+  })
+
+  it('a conflict copy keeps the cut of the page it came from (a restricted member)', async () => {
+    const r = remote({ 'Salários.md': 'Folha.\n' })
+    const { g, wiki, dir } = await connected(r.url)
+    await g.sync()
+    macEdit(r.mac, 'Salários.md', 'Folha (do Mac).\n')
+    const src = wiki.addSource({ title: 'rh', text: 'Folha de novembro.', kind: 'conversation', origin: { conversationId: 'rh', messageIds: [] }, by: 'auto' })
+    wiki.applyChange(wiki.addChange({ ops: [{ op: 'append', page: 'Salários', text: 'Folha de novembro (do #rh).' }], sourceId: src.id, by: 'auto' }).id, 'Curador')
+    await g.sync()
+    expect(readFileSync(join(dir, 'Salários (versão do Tucano).md'), 'utf8')).toContain('do #rh')
+    const out = wiki.outOfReach((id) => id === 'eng')
+    expect(out.has(pageKey('Salários (versão do Tucano)'))).toBe(true)
+    expect(wiki.outOfReach((id) => id === 'eng' || id === 'rh').has(pageKey('Salários (versão do Tucano)'))).toBe(false)
   })
 
   it('held pages and DM sources are never committed', async () => {
@@ -360,7 +375,7 @@ describe('a refused key', () => {
   // file it was given: none of it may reach the status, the errors or the log.
   const fakeSsh = (): string => {
     const f = join(mkdtempSync(join(tmpdir(), 'tucano-ssh-')), 'ssh')
-    writeFileSync(f, '#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = "-i" ]; then cat "$2" >&2; echo "using $2" >&2; fi; shift; done\necho "git@github.com: Permission denied (publickey)." >&2\nexit 255\n')
+    writeFileSync(f, '#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = "-i" ]; then printf "%s" "$2" > "$0.used-key"; cat "$2" >&2; echo "using $2" >&2; fi; shift; done\necho "git@github.com: Permission denied (publickey)." >&2\nexit 255\n')
     chmodSync(f, 0o755)
     return f
   }
@@ -369,7 +384,8 @@ describe('a refused key', () => {
     const data = mkdtempSync(join(tmpdir(), 'tucano-data-'))
     const secrets = memSecrets()
     let meta: string | undefined
-    const g = new WikiGit({ dataDir: data, secrets, load: () => meta, store: (j) => void (meta = j), privatePaths: () => new Set(), quiet: () => {}, refresh: async () => {}, notice: () => {}, changed: () => {}, currentPages: () => 0, ssh: fakeSsh() })
+    const ssh = fakeSsh()
+    const g = new WikiGit({ dataDir: data, secrets, load: () => meta, store: (j) => void (meta = j), privatePaths: () => new Set(), quiet: () => {}, refresh: async () => {}, notice: () => {}, changed: () => {}, currentPages: () => 0, ssh })
     await g.setup('git@github.com:edu/vault.git')
     const e = await g.test().then(() => null, (x: unknown) => x)
     expect(e).toBeInstanceOf(GitFailure)
@@ -378,8 +394,11 @@ describe('a refused key', () => {
     expect((e as Error).message).not.toContain('PRIVATE KEY')
     for (const line of key.split('\n').filter((l) => l.length > 20)) expect((e as Error).message).not.toContain(line)
     expect(meta).not.toContain('PRIVATE KEY')
-    // and the key file is gone once git is done
-    expect(execFileSync('sh', ['-c', `ls -d ${tmpdir()}/tucano-key-* 2>/dev/null || true`], { encoding: 'utf8' }).trim()).toBe('')
+    // Check this call's key, even while another workspace has a git operation in flight.
+    const usedKey = readFileSync(`${ssh}.used-key`, 'utf8')
+    expect(usedKey).toContain('tucano-key-')
+    expect(existsSync(usedKey)).toBe(false)
+    expect(existsSync(dirname(usedKey))).toBe(false)
   })
 
   it('a key revoked after connecting: an auth status, a retry time, and a log with no key', async () => {

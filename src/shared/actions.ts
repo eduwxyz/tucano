@@ -137,7 +137,8 @@ export function gate(kinds: readonly ActionKind[], p: Policy): { mode?: ActionMo
 }
 
 // What happens to one call. `cls`: the tool's class (a command is a write); `alwaysAllowed`: approved
-// for good from a card; `outside`: the turn has read something from outside; `askByDefault`: what
+// for good from a card, which holds even after something from outside (only careful, an "ask" rule,
+// "never" or a high-risk tool still stop it); `outside`: the turn has read something from outside; `askByDefault`: what
 // no rule decides asks (a risky click), else it goes by the class.
 export type Verdict = { run: boolean; off?: boolean; why: 'read' | 'rule' | 'level' | 'class' | 'always' | 'risk' | 'guard' | 'never'; kinds: ActionKind[] }
 
@@ -149,7 +150,9 @@ export function verdict(o: { cls: 'read' | 'write' | 'sensitive'; kinds: readonl
   if (g.mode === 'ask') return { run: false, why: 'rule', kinds: g.kinds }
   const level = levelOf(o.p)
   // Let through by a rule or by the level: unless what goes out came after something from outside.
-  const loose = (why: Verdict['why'], kinds: readonly ActionKind[], outbound: boolean): Verdict => (outbound && o.p.guard !== false && o.outside ? { run: false, why: 'guard', kinds: [...kinds] } : { run: true, why, kinds: [...kinds] })
+  // A tool the person allowed for good ("sempre permitir") still runs then: that choice holds always.
+  const loose = (why: Verdict['why'], kinds: readonly ActionKind[], outbound: boolean): Verdict =>
+    outbound && o.p.guard !== false && o.outside ? (o.alwaysAllowed ? { run: true, why: 'always', kinds: [...kinds] } : { run: false, why: 'guard', kinds: [...kinds] }) : { run: true, why, kinds: [...kinds] }
   if (g.mode === 'auto') return loose('rule', g.kinds, g.kinds.some((k) => OUTBOUND.includes(k)))
   // No rule decides: the level, then the class.
   if (level === 'careful') return { run: false, why: 'level', kinds: g.kinds }

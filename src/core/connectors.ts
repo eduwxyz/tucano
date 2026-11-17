@@ -16,6 +16,8 @@ import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connect
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
+import { floorOf, saysHighRisk } from '../shared/classify'
+import { nodeOf } from '../shared/node-link'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
 
@@ -215,6 +217,7 @@ interface Live {
 // What happened to the renewals of one connection attempt.
 interface Renewal {
   failed?: boolean // the token endpoint didn't answer, or answered with a server error: the sign-in may still be good
+  offline?: boolean // the authorization server offers `offline_access`: a sign-in that renews itself has to ask for it
 }
 
 type Answer = { status: number; statusText: string; headers: [string, string][]; body: string }
@@ -462,6 +465,11 @@ export class ConnectorManager {
   private async doConnect(id: string, interactive: boolean): Promise<void> {
     const c = this.deps.db.connector(id)
     if (!c) return
+    // A computer lent to this server calls in by itself (attachNode): there's nowhere to call it at.
+    if (nodeOf(c.url)) {
+      if (!this.live.get(id)?.client) this.setStatus(id, 'disconnected')
+      return
+    }
     await this.disconnect(id)
     this.setStatus(id, 'connecting')
 
@@ -484,7 +492,7 @@ export class ConnectorManager {
           const token = await this.deps.secrets.get(key(id, 'token'))
           if (token) headers['Authorization'] = `Bearer ${await resolveOp(token, this.deps.readOp)}`
         }
-        const provider = c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own) : undefined
+        const provider = c.auth === 'oauth' ? this.oauthProvider(id, () => http, interactive, own, renewal) : undefined
         const fetchFn = c.auth === 'oauth' ? this.renewingFetch(renewal) : undefined
         const http: StreamableHTTPClientTransport = new StreamableHTTPClientTransport(new URL(c.url!), {
           requestInit: { headers },
@@ -596,6 +604,52 @@ export class ConnectorManager {
     }
   }
 
+  // A computer lent to this server called in (core/node-link.ts): its connector connects over that line, in
+  // place of one it had, and goes back to disconnected when the computer hangs up (it calls again by itself).
+  // One at a time per computer: two calls-in at once would each think the other's client was theirs.
+  private attaching = new Map<string, Promise<void>>()
+  attachNode(id: string, transport: Transport): Promise<void> {
+    const p = (this.attaching.get(id) ?? Promise.resolve()).then(() => this.attachNow(id, transport))
+    const kept = p.catch(() => {})
+    this.attaching.set(id, kept)
+    void kept.then(() => this.attaching.get(id) === kept && this.attaching.delete(id))
+    return p
+  }
+
+  private async attachNow(id: string, transport: Transport): Promise<void> {
+    if (!nodeOf(this.deps.db.connector(id)?.url)) throw new Error('not a computer')
+    await this.disconnect(id)
+    this.setStatus(id, 'connecting')
+    const client = new Client({ name: 'tucano', version: '0.1.0' }, { listChanged: { tools: { onChanged: () => void this.refreshTools(id).catch(() => {}) } } })
+    try {
+      await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS })
+    } catch (e) {
+      await client.close().catch(() => {})
+      this.setStatus(id, 'disconnected', e instanceof Error ? e.message : String(e))
+      return
+    }
+    const l = this.live.get(id)!
+    l.client = client
+    l.transport = transport
+    l.failures = 0
+    // After the SDK's own (which fails the calls under way at once, instead of at their timeout).
+    const sdk = transport.onclose
+    transport.onclose = () => {
+      sdk?.()
+      if (this.live.get(id)?.client === client) {
+        l.client = undefined
+        l.transport = undefined
+        this.setStatus(id, 'disconnected')
+      }
+    }
+    try {
+      await this.refreshTools(id)
+      this.setStatus(id, 'connected')
+    } catch (e) {
+      this.setStatus(id, 'error', e instanceof Error ? e.message : String(e))
+    }
+  }
+
   // Connects again after a wait that grows with each try, while the connector exists and nothing else has
   // brought it back. A failure that won't pass by itself (a refused token, a sign-in to finish) stops it.
   private reconnectLater(id: string): void {
@@ -623,7 +677,7 @@ export class ConnectorManager {
     do {
       const page = await client.listTools(cursor ? { cursor } : undefined)
       for (const t of page.tools) {
-        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t) })
+        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
       }
       cursor = page.nextCursor
     } while (cursor)
@@ -633,8 +687,9 @@ export class ConnectorManager {
 
   // Runs a tool on the real server, reconnecting on demand. Stdio servers that
   // keep failing are marked as having a problem. What it throws says why, in words.
-  async call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    const timeout = this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS
+  // A call that may take longer by design (a command on a node, up to 600 s) passes its own timeoutMs; never less than the usual.
+  async call(id: string, name: string, args: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<CallToolResult> {
+    const timeout = Math.max(this.deps.callTimeoutMs ?? CALL_TIMEOUT_MS, opts.timeoutMs ?? 0)
     let l = this.live.get(id)
     if (!l?.client) {
       await this.connect(id)
@@ -735,6 +790,25 @@ export class ConnectorManager {
   // server refused, and one that failed without saying the sign-in is bad (no answer, a server error).
   private renewingFetch(renewal: Renewal): typeof fetch {
     return async (input, init) => {
+      const address = input instanceof Request ? input.url : String(input)
+      // What the authorization server offers: read on its way to the SDK, which picks the scopes from the
+      // MCP server's own list and never looks here.
+      if (/\/\.well-known\/(oauth-authorization-server|openid-configuration)/.test(address)) {
+        const r = await fetch(input, init)
+        const meta = (await r.clone().json().catch(() => undefined)) as { scopes_supported?: unknown } | undefined
+        if (Array.isArray(meta?.scopes_supported) && meta.scopes_supported.includes('offline_access')) renewal.offline = true
+        return r
+      }
+      // Registering the app: the same scopes the sign-in will ask for.
+      if (renewal.offline && init?.method === 'POST' && typeof init.body === 'string') {
+        try {
+          const b = JSON.parse(init.body) as { redirect_uris?: unknown; scope?: unknown }
+          const scopes = typeof b.scope === 'string' ? b.scope.split(' ').filter(Boolean) : []
+          if (Array.isArray(b.redirect_uris) && !scopes.includes('offline_access')) init = { ...init, body: JSON.stringify({ ...b, scope: [...scopes, 'offline_access'].join(' ') }) }
+        } catch {
+          // not a registration: it goes as it is
+        }
+      }
       const form = init?.body instanceof URLSearchParams ? init.body : undefined
       const refreshToken = form?.get('grant_type') === 'refresh_token' ? form.get('refresh_token') : null
       if (!refreshToken) return fetch(input, init)
@@ -794,7 +868,7 @@ export class ConnectorManager {
   }
 
   // `own`: a server that signs in with the person's own app (Google's, Slack's) instead of registering one.
-  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app']): OAuthClientProvider {
+  private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app'], renewal?: Renewal): OAuthClientProvider {
     const { secrets } = this.deps
     const redirectUrl = own ? this.redirectFor(own.provider) : this.deps.oauthCallbackUrl()
     // Signing in again (someone clicked Authorize) goes on past a saved value the system's key won't open:
@@ -847,6 +921,14 @@ export class ConnectorManager {
       codeVerifier: async () => (await secrets.get(key(id, 'oauth_verifier'))) ?? '',
       redirectToAuthorization: (page) => {
         if (!interactive) return // never pop a browser on a background reconnect
+        // A server that lists only its own scopes (Vercel's: "openid") gets a sign-in with no refresh token,
+        // which lasts as long as the access token: a day. Where the authorization server offers to stay
+        // signed in, the request asks for it.
+        if (!own && renewal?.offline) {
+          const scopes = (page.searchParams.get('scope') ?? '').split(' ').filter(Boolean)
+          if (!scopes.includes('offline_access')) page.searchParams.set('scope', [...scopes, 'offline_access'].join(' '))
+          if (!page.searchParams.has('prompt')) page.searchParams.set('prompt', 'consent')
+        }
         const url = own ? ownAuthorization(page, own) : page
         this.oauthStates.set(state || url.searchParams.get('state') || '', { connectorId: id, transport: transport() })
         this.authUrls.set(id, url.toString())

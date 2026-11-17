@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The page of every guide and of the guide indexes (/guias/, /docs/), in one language. build.mjs
+     fills the {{…}} from guias/<guide>/pt.md and en.md: edit the look here, the text there. -->
+<title>{{title}} · Tucano</title>
+<meta name="description" content="{{desc}}">
+<meta property="og:title" content="{{title}}">
+<meta property="og:description" content="{{desc}}">
+<meta property="og:image" content="https://tucano.sh/assets/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="{{ogType}}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
+<meta name="twitter:site" content="@tucanosh">
+<meta name="theme-color" content="#F3EFE6">
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/brand/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/compare.css?v=2">
+</head>
+<body>
+<script>
+// A visitor who picked the other language on tucano.sh goes to this page in that language.
+;(() => {
+  let l
+  try { l = localStorage.getItem('tucano-lang') } catch {}
+  const other = (l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang && document.querySelector(`link[rel="alternate"][hreflang="${l}"]`)
+  if (other) location.replace(other.href)
+})()
+</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="mark-clip"><rect width="100" height="100" rx="28"/></clipPath>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g clip-path="url(#mark-clip)">
+        <rect width="100" height="100" fill="#F1ECE2"/>
+        <circle cx="27" cy="73" r="48" fill="#121212"/>
+        <circle cx="38" cy="47" r="14" fill="#fff"/>
+        <circle cx="43" cy="47" r="5.5" fill="#121212"/>
+        <path d="M53 24 Q84 25 93 44 L96 57 L53 57 Z" fill="#FF8C24"/>
+        <path d="M53 57 L95 57 Q86 70 53 71 Z" fill="#E5531F"/>
+        <path d="M83 57 A9 12 0 0 1 97 47 L97 57 Z" fill="#121212"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <a class="brand" href="{{home}}"><svg><use href="#mark"/></svg><span>tucano</span></a>
+  <div class="lang" role="group" aria-label="Idioma / Language"><a href="{{ptHref}}" hreflang="pt-BR">PT</a><a href="{{enHref}}" hreflang="en">EN</a></div>
+  <a class="btn btn--beak" href="{{home}}#instalar">{{getTucano}}</a>
+</header>
+
+<main class="guide">
+<nav class="crumbs" aria-label="{{crumbsLabel}}">{{crumbs}}</nav>
+<div class="hero">
+  <div class="eyebrow">{{eyebrow}}</div>
+  <h1>{{title}}</h1>
+</div>
+{{main}}
+</main>
+
+<footer>
+  <span>{{madeIn}}</span>
+  <nav>{{footerLinks}}</nav>
+</footer>
+</div>
+<script>
+// PT | EN remembers the choice, as on the home page.
+document.querySelectorAll('.lang a').forEach((a) => a.addEventListener('click', () => { try { localStorage.setItem('tucano-lang', a.hreflang) } catch {} }))
+</script>
+</body>
+</html>

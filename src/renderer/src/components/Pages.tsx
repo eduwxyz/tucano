@@ -1,4 +1,7 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
+import { instructionLengthNote } from '../../../shared/instructions'
+import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   agentById,
@@ -80,13 +83,16 @@ import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
+import { HermesImport } from './HermesImport'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
+import { directReports, possibleBosses } from '../../../shared/org'
+import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
-import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
+import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -94,7 +100,7 @@ import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, 
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import type { NotifyState } from '../rpc'
-import { hasServers, ServersCard } from './Servers'
+import { hasServers, NodeCard, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
@@ -418,6 +424,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 onChange={(e) => patch({ instructions: e.target.value })}
               />
               <p className="hint">{L('O contexto do workspace já entra em toda conversa. Aqui vai só o que é deste agente.', 'The workspace context already goes into every conversation. Here goes only what’s specific to this agent.')}</p>
+              {instructionLengthNote(draft.instructions.length) && <p className="hint hint--warn">{instructionLengthNote(draft.instructions.length)}</p>}
             </Card>
           )}
 
@@ -441,6 +448,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <p className="hint">{L(`Fora desses canais, chame com @${draft.handle || 'handle'} ou mande DM.`, `Outside these channels, call it with @${draft.handle || 'handle'} or send a DM.`)}</p>
             </Card>
           )}
+
+          {pane('canais') && draft.kind !== 'tuca' && <ReportsTo draft={draft} patch={patch} />}
 
           {!isNew && pane('canais') && <AgentSkills agentId={draft.id} name={draft.name} />}
 
@@ -517,16 +526,17 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 })}
               </div>
               <p className="hint">
-                <Icon name="shield" size={13} /> {L('Ferramentas sensíveis (publicar código, colocar no ar, apagar, enviar algo pra fora) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".', 'Sensitive tools (publishing code, putting things live, deleting, sending something out) become an approval request in the chat, except the ones you marked as "always allow".')}
+                <Icon name="shield" size={13} /> {L('Ferramentas sensíveis (publicar código, colocar no ar, apagar, enviar algo pra fora) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir": essas rodam sem pedir, mesmo depois de o agente ler algo de fora.', 'Sensitive tools (publishing code, putting things live, deleting, sending something out) become an approval request in the chat, except the ones you marked as "always allow": those run without asking, even after the agent reads something from outside.')}
               </p>
               {!isNew && (draft.autoApprove?.length ?? 0) > 0 && (
                 <div className="always">
                   <span className="small muted">{L('Sempre permitido, sem pedir:', 'Always allowed, without asking:')}</span>
                   {draft.autoApprove!.map((rule) => {
-                    const [cid, tool] = rule.split(':')
+                    const cid = rule.slice(0, rule.indexOf(':'))
+                    const { tool, account } = ruleTool(rule)
                     return (
                       <span key={rule} className="chip is-on always__rule">
-                        {connectors.find((c) => c.id === cid)?.name ?? L('conector', 'connector')} · {toolWords(tool ?? '')}
+                        {connectors.find((c) => c.id === cid)?.name ?? L('conector', 'connector')} · {accountLabel(toolWords(tool), account)}
                         {admin && (
                           <button
                             className="always__x"
@@ -754,7 +764,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                     min={0}
                     step={0.5}
                     value={draft.limit / 1_000_000}
-                    onChange={(n) => patch({ limit: Math.max(0, Math.round(n * 1_000_000)) })}
+                    onChange={(n) => patch({ limit: safeLimit(n * 1_000_000) })}
                     className="input--short"
                   />
                 </Field>
@@ -800,7 +810,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <div className="profile-card__budget">
                 <span className="muted small">{L('Uso em', 'Usage in')} {new Date().toLocaleDateString(locale(), { month: 'long' })}</span>
                 <span>
-                  <strong>{tokens(draft.used)}</strong> <span className="muted">{L(`de ${tokens(draft.limit)} tokens`, `of ${tokens(draft.limit)} tokens`)}</span>
+                  <strong>{tokens(draft.used)}</strong>{' '}
+                  <span className="muted">
+                    {/* No limit set: "of 0 tokens" would read as a cap spent, so say there isn't one. */}
+                    {hasMonthlyLimit(draft.limit) ? L(`de ${tokens(draft.limit)} tokens`, `of ${tokens(draft.limit)} tokens`) : L('sem limite no mês', 'no monthly limit')}
+                  </span>
                 </span>
                 <UsageBar used={draft.used} limit={draft.limit} />
               </div>
@@ -1393,6 +1407,7 @@ export function HistoryRow({ id }: { id: string }): ReactNode {
 
 // ---------- Connectors ----------
 
+const CLASS_ORDER: ToolClass[] = ['read', 'write', 'sensitive']
 const CLASS_LABEL = (): Record<ToolClass, string> => ({ read: L('leitura', 'read'), write: L('escrita', 'write'), sensitive: L('sensível', 'sensitive') })
 
 export const STATUS = (): Record<Connector['status'], { label: string; tone: string }> => ({
@@ -1585,14 +1600,17 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
                 <Select
                   value={t.cls ?? null}
                   onChange={(v) => { if (v) updateTool(c.id, t.name, { cls: v as ToolClass }) }}
-                  options={(Object.keys(CLASS_LABEL()) as ToolClass[]).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
+                  // The server's floor (a node's command or file write): the classes under it aren't offered.
+                  options={CLASS_ORDER.slice(t.floor ? CLASS_ORDER.indexOf(t.floor) : 0).map((k) => ({ value: k, label: CLASS_LABEL()[k] }))}
                   placeholder={L('Escolha a classe', 'Pick a class')}
                 />
               )}
               <input
                 type="checkbox"
-                disabled={t.cls !== 'sensitive' && !runner}
-                checked={t.highRisk && (t.cls === 'sensitive' || runner)}
+                // Marked by the computer's owner (a node): it stays on.
+                disabled={t.lockedHighRisk || (t.cls !== 'sensitive' && !runner)}
+                checked={t.lockedHighRisk || (t.highRisk && (t.cls === 'sensitive' || runner))}
+                title={t.lockedHighRisk ? L('O dono do computador marcou como alto risco: não dá pra desmarcar aqui.', "The computer's owner marked it high risk: it can't be unmarked here.") : undefined}
                 onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
               />
               <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
@@ -1728,11 +1746,35 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
 function AgentSkills({ agentId, name }: { agentId: string; name: string }): ReactNode {
   const skills = useStore((s) => s.skills.filter((k) => k.state === 'active'))
   const everyone = useStore((s) => s.agents.filter(isTeam).map((a) => a.id))
+  const [q, setQ] = useState('')
+  const [group, setGroup] = useState<string | null>(null)
+  const [onlyMine, setOnlyMine] = useState(false)
   const toggle = (k: Skill, on: boolean): void => {
     let agents = on ? (k.agents.length === 0 ? [] : [...k.agents, agentId]) : (k.agents.length === 0 ? everyone : k.agents).filter((x) => x !== agentId)
     if (on && agents.length >= everyone.length && everyone.every((id) => agents.includes(id))) agents = [] // everyone again
     void saveSkill({ id: k.id, name: k.name, description: k.description, body: k.body, agents, source: k.source })
   }
+  // One that only this agent uses can't be unticked here: the last owner is what keeps it in the
+  // library. Archiving it in Skills is the way out, and the tooltip says so.
+  const last = (k: Skill): boolean => skillApplies(k, agentId) && k.agents.length === 1
+  const groupOf = (k: Skill): string => skillGroup(k.source)
+  const counts = new Map<string, number>()
+  for (const k of skills) counts.set(groupOf(k), (counts.get(groupOf(k)) ?? 0) + 1)
+  const needles = q.trim().toLowerCase()
+  const shown = skills
+    .filter((k) => (group ? groupOf(k) === group : true))
+    .filter((k) => (onlyMine ? skillApplies(k, agentId) : true))
+    .filter((k) => (needles ? `${k.name} ${k.description} ${groupOf(k)}`.toLowerCase().includes(needles) : true))
+  // What this agent carries into every message: the descriptions of the ones that apply to it,
+  // counted as the prompt does (~4 characters per token).
+  const cost = Math.round(skills.filter((k) => skillApplies(k, agentId)).reduce((n, k) => n + k.name.length + 2 + k.description.length, 0) / 4)
+  const bulk = (on: boolean): void => {
+    for (const k of shown) {
+      if (on ? skillApplies(k, agentId) : !skillApplies(k, agentId) || last(k)) continue
+      toggle(k, on)
+    }
+  }
+  const groups = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
   return (
     <Card title="Skills" lead={L(`As receitas que ${name || 'o agente'} segue. Ele vê o nome e quando usar de cada uma, e lê a receita quando a tarefa bate.`, `The recipes ${name || 'the agent'} follows. It sees each one's name and when to use it, and reads the recipe when the task matches.`)}>
       {skills.length === 0 ? (
@@ -1743,23 +1785,69 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
           </button>
         </p>
       ) : (
-        <div className="checks checks--skills">
-          {skills.map((k) => {
-            const on = skillApplies(k, agentId)
-            const only = on && k.agents.length === 1
-            return (
-              <label key={k.id} className="check check--skill" title={only ? L(`Só ${name || 'este agente'} usa: pra ninguém usar, arquive em Skills`, `Only ${name || 'this agent'} uses it: to have no one use it, archive it in Skills`) : undefined}>
-                <input type="checkbox" checked={on} disabled={only} onChange={(e) => toggle(k, e.target.checked)} />
-                <span>
-                  <strong>{k.name}</strong>
-                  {k.source && <span className="tag">{L('do seu', 'from your')} {k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}</span>}
-                  <span className="muted small">{k.agents.length === 0 ? L('todos os agentes', 'all agents') : `${k.agents.length} ${k.agents.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}`}</span>
-                  <span className="small skill__desc">{k.description}</span>
-                </span>
-              </label>
-            )
-          })}
-        </div>
+        <>
+          <div className="skill-filter">
+            <div className="skill-filter__search">
+              <Icon name="search" size={14} />
+              <input
+                value={q}
+                placeholder={L('Buscar skill por nome ou descrição', 'Find a skill by name or description')}
+                aria-label={L('Buscar skill', 'Find a skill')}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+            <label className="check check--inline">
+              <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
+              <span className="small">{L('Só as deste agente', "Only this agent's")}</span>
+            </label>
+          </div>
+          <div className="skill-groups">
+            <button className={`chip ${group === null ? 'is-on' : ''}`} onClick={() => setGroup(null)}>
+              {L('Todas', 'All')} <span className="muted">{skills.length}</span>
+            </button>
+            {groups.map(([id, n]) => (
+              <button key={id} className={`chip ${group === id ? 'is-on' : ''}`} onClick={() => setGroup(group === id ? null : id)}>
+                {id} <span className="muted">{n}</span>
+              </button>
+            ))}
+          </div>
+          <div className="row row--between small muted skill-filter__meta">
+            <span>
+              {L(`${shown.length} de ${skills.length}`, `${shown.length} of ${skills.length}`)} ·{' '}
+              {L(`~${tokens(cost)} tokens por mensagem`, `~${tokens(cost)} tokens per message`)}
+            </span>
+            <span className="row">
+              <button className="link" onClick={() => bulk(true)}>
+                {L('Marcar as mostradas', 'Tick the shown ones')}
+              </button>
+              <button className="link" onClick={() => bulk(false)}>
+                {L('Desmarcar as mostradas', 'Untick the shown ones')}
+              </button>
+            </span>
+          </div>
+          {shown.length === 0 ? (
+            <p className="muted small">{L('Nenhuma skill bate com esse filtro.', 'No skill matches that filter.')}</p>
+          ) : (
+            <div className="checks checks--skills">
+              {shown.map((k) => {
+                const on = skillApplies(k, agentId)
+                const only = last(k)
+                const origin = skillOrigin(k.source)
+                return (
+                  <label key={k.id} className="check check--skill" title={only ? L(`Só ${name || 'este agente'} usa: pra ninguém usar, arquive em Skills`, `Only ${name || 'this agent'} uses it: to have no one use it, archive it in Skills`) : undefined}>
+                    <input type="checkbox" checked={on} disabled={only} onChange={(e) => toggle(k, e.target.checked)} />
+                    <span>
+                      <strong>{k.name}</strong>
+                      {origin && <span className="tag">{L('do seu', 'from your')} {origin === 'codex' ? 'Codex' : origin === 'claude' ? 'Claude Code' : 'Hermes'}</span>}
+                      <span className="muted small">{k.agents.length === 0 ? L('todos os agentes', 'all agents') : `${k.agents.length} ${k.agents.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}`}</span>
+                      <span className="small skill__desc">{k.description}</span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </Card>
   )
@@ -1806,6 +1894,49 @@ function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
         </button>
       ))}
     </div>
+  )
+}
+
+// Whom the agent answers to (src/shared/org.ts). With that set, the one above hands it work in its own
+// channel and gets the answer back; with no one answering to anyone, nothing changes.
+function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>) => void }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const bosses = possibleBosses(agents, draft.id)
+  const below = directReports(agents, draft.id)
+  const boss = bosses.find((a) => a.id === draft.reportsTo)
+  const none = L('Ninguém', 'No one')
+  return (
+    <Card
+      title={L('Time', 'Team')}
+      lead={L(
+        'Quem está acima passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta de volta. Sem ninguém marcado, tudo funciona como sempre.',
+        'Whoever is above hands work to those below, in each one’s channel, and gets the answer back. With no one set, everything works as it always did.'
+      )}
+    >
+      <label className="field">
+        <span className="field__label">{L('Responde a', 'Answers to')}</span>
+        <Select
+          value={boss?.id ?? null}
+          onChange={(v) => patch({ reportsTo: v || undefined })}
+          options={[{ value: '', label: none }, ...bosses.map((a) => ({ value: a.id, label: a.role ? `${a.name} · ${a.role}` : a.name }))]}
+          placeholder={none}
+        />
+        {boss && (
+          <span className="hint">
+            {L(
+              `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}. O pedido vira uma thread no primeiro canal marcado acima, e a resposta volta pra ${boss.name}.`,
+              `${boss.name} can ask ${draft.name || 'this agent'} for work. The request becomes a thread in the first channel checked above, and the answer goes back to ${boss.name}.`
+            )}
+          </span>
+        )}
+      </label>
+      {below.length > 0 && (
+        <p className="hint">
+          {L('Respondem a ', 'Answering to ')}
+          {draft.name || L('este agente', 'this agent')}: {below.map((a) => a.name).join(', ')}.
+        </p>
+      )}
+    </Card>
   )
 }
 
@@ -1882,8 +2013,9 @@ export function ModelSelect(p: { value: string; onChange: (v: string) => void; j
   return <ModelPicker {...p} />
 }
 
-export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
-  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
+// `label` names it for a screen reader when no text sits next to it (a card's action, say).
+export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
 }
 
 // ---------- Settings ----------
@@ -1907,6 +2039,8 @@ export function LanguagePicker({ className = '' }: { className?: string }): Reac
 const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base64 grows a third
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
+  const [hermes, setHermes] = useState(false)
+  const owner = useStore(amOwner) // Hermes reads the server's folder: the owner's
   const settings = useStore((s) => s.settings)
   // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
   const grokSkill = (): void => {
@@ -1963,7 +2097,7 @@ function TeamCard(): ReactNode {
       .then(setNote, failed)
   }
   return (
-    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot e do Grok Bot também entram, sem nenhum conector e com a busca na web desligada.', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot and Grok Bot come in too, with no connector and web search off.')}>
+    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot, do Grok Bot e do Hermes também entram, sem nenhum conector e com a busca na web desligada.', 'The team in a .md file (agents, skills, channels and routines, without credentials or conversations), to keep or take to another computer. Agents from OpenBot, Grok Bot and Hermes come in too, with no connector and web search off.')}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
@@ -1990,6 +2124,13 @@ function TeamCard(): ReactNode {
             }}
           />
         </label>
+        {owner && <button
+          className="btn btn--sm"
+          onClick={() => (setNote(''), setHermes(true))}
+          title={L('Lê a pasta do Hermes Agent (normalmente ~/.hermes) e mostra o que entra antes de importar.', 'Reads the Hermes Agent folder (usually ~/.hermes) and shows what comes in before importing.')}
+        >
+          {L('Importar do Hermes…', 'Import from Hermes…')}
+        </button>}
         <button
           className="btn btn--sm"
           onClick={grokSkill}
@@ -1999,6 +2140,7 @@ function TeamCard(): ReactNode {
         </button>
       </div>
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
+      {owner && hermes && <HermesImport onClose={() => setHermes(false)} onDone={setNote} />}
     </Card>
   )
 }
@@ -2023,7 +2165,7 @@ export function BackupCard(): ReactNode {
       `${n(s.agents, 'agente', 'agentes')}, ${n(s.channels, 'canal', 'canais')}, ${n(s.messages, 'mensagem', 'mensagens')}, ${n(s.memories, 'memória', 'memórias')}, ${n(s.wikiPages, 'página da wiki', 'páginas da wiki')} e ${n(s.files, 'arquivo', 'arquivos')}`,
       `${n(s.agents, 'agent', 'agents')}, ${n(s.channels, 'channel', 'channels')}, ${n(s.messages, 'message', 'messages')}, ${n(s.memories, 'memory', 'memories')}, ${n(s.wikiPages, 'wiki page', 'wiki pages')} and ${n(s.files, 'file', 'files')}`
     )
-  const day = (at: number): string => new Date(at).toLocaleDateString(L('pt-BR', 'en'))
+  const day = (at: number): string => new Date(at).toLocaleDateString(locale())
   const exportAll = (): void => {
     setBusy(true)
     setNote(L('Preparando o arquivo…', 'Preparing the file…'))
@@ -2101,8 +2243,8 @@ export function BackupCard(): ReactNode {
       {web && info && (
         <p className="small" style={{ whiteSpace: 'pre-line' }}>
           {L(
-            `Backup restaurado em ${new Date(info.at).toLocaleString('pt-BR')}. Falta:\n• conferir se a sua IA está conectada aqui (Configurações › Modelos)\n• reconectar os conectores (Conectores)${info.routines ? `\n• ligar as rotinas que quiser aqui (${info.routines} chegaram desligadas, pra não rodarem em dobro com o computador)` : ''}`,
-            `Backup restored on ${new Date(info.at).toLocaleString('en')}. Left to do:\n• check that your AI is signed in here (Settings › Models)\n• reconnect the connectors (Connectors)${info.routines ? `\n• turn on the routines you want here (${info.routines} came in off, so they don't run twice with your computer)` : ''}`
+            `Backup restaurado em ${new Date(info.at).toLocaleString(locale())}. Falta:\n• conferir se a sua IA está conectada aqui (Configurações › Modelos)\n• reconectar os conectores (Conectores)${info.routines ? `\n• ligar as rotinas que quiser aqui (${info.routines} chegaram desligadas, pra não rodarem em dobro com o computador)` : ''}`,
+            `Backup restored on ${new Date(info.at).toLocaleString(locale())}. Left to do:\n• check that your AI is signed in here (Settings › Models)\n• reconnect the connectors (Connectors)${info.routines ? `\n• turn on the routines you want here (${info.routines} came in off, so they don't run twice with your computer)` : ''}`
           )}
         </p>
       )}
@@ -2492,6 +2634,19 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {pane('geral') && (
+          <Card title={L('Conversas', 'Conversations')}>
+            <div className="key-row">
+              <Icon name="layers" />
+              <div className="grow">
+                <strong>{L('Mostrar os passos enquanto o agente trabalha', 'Show the steps while the agent works')}</strong>
+                <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Opens the list of what the agent is doing under its reply. Off, only the line with what it’s doing now stays; a click on it opens the steps. It changes only for you.')}</p>
+              </div>
+              <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
+            </div>
+          </Card>
+        )}
+
         {pane('geral') && admin && (
           <Card title={L('Atualizações', 'Updates')}>
             <UpdateSettings />
@@ -2504,8 +2659,8 @@ export function SettingsPage(): ReactNode {
           <Card
             title="Harnesses"
             lead={L(
-              'Os programas em que os agentes rodam, cada um como você configurou: no seu plano, no gateway da empresa ou nos seus provedores. O Tucano nunca vê nem guarda as suas credenciais.',
-              'The programs the agents run on, each one the way you set it up: on your plan, your company’s gateway or your providers. Tucano never sees or stores your credentials.'
+              'Onde os agentes rodam: um endpoint seu, sem instalar nada, ou um programa como você configurou (no seu plano, no gateway da empresa ou nos seus provedores). Dos programas, o Tucano nunca vê nem guarda as credenciais; a chave de um endpoint fica guardada aqui, cifrada.',
+              'Where the agents run: an endpoint of yours, with nothing to install, or a program the way you set it up (on your plan, your company’s gateway or your providers). Tucano never sees or stores the programs’ credentials; an endpoint’s key is kept here, encrypted.'
             )}
             action={
               <button className="btn btn--ghost btn--sm" onClick={refreshEngines}>
@@ -2633,6 +2788,7 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && admin && <TeamCard />}
         {pane('geral') && <BackupCard />}
         {pane('servidores') && <ServersCard />}
+        {pane('servidores') && <NodeCard />}
 
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>
@@ -2642,10 +2798,10 @@ export function SettingsPage(): ReactNode {
                   min={0}
                   step={0.5}
                   value={settings.defaultLimit / 1_000_000}
-                  onChange={(n) => updateSettings({ defaultLimit: Math.max(0, Math.round(n * 1_000_000)) })}
+                  onChange={(n) => updateSettings({ defaultLimit: safeLimit(n * 1_000_000) })}
                 />
               </Field>
-              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua.', 'When it hits it, the agent pauses and you decide whether it continues.')}>
+              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua. Num agente sem limite mensal, a conta é sobre 10 milhões de tokens.', 'When it hits it, the agent pauses and you decide whether it continues. For an agent with no monthly limit, it is taken over 10 million tokens.')}>
                 <NumberInput
                   min={1}
                   max={100}

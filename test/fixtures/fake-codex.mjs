@@ -42,6 +42,8 @@ if (process.argv[2] === 'exec') {
         return reply({ userAgent: 'fake', codexHome: home, platformFamily: 'unix', platformOs: 'macos' })
       case 'initialized':
         return
+      case 'account/rateLimits/read':
+        return reply({ rateLimits: { limitId: 'codex', primary: { usedPercent: 9, windowDurationMins: 10080, resetsAt: 1794567151 }, secondary: null, planType: 'plus' } })
       case 'thread/start': {
         const id = randomUUID()
         threads.set(id, { turns: 0, resumed: false })
