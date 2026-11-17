@@ -2670,10 +2670,18 @@ ${note}`,
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
     // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
     const kinds: ActionKind[] = ap.connectorId === COMPUTADOR || ap.tool === NODE_BASH ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
+    // On a lent computer its person decides, but she may not be one who sets this agent's rules (a team's
+    // agent, someone else's): then "always" stays on her computer. A kind of command turned to "does it
+    // alone" would be the agent's everywhere (its own computer, other people's), so that one is just this once;
+    // a tool of her computer allowed for good is that connector's alone, so it stands.
+    const decidedBy = decider ? db.person(decider) : undefined
+    const agentWide = !computer || (!!decidedBy && can(decidedBy, { kind: 'approval', agentOwner: agentOwner(db, ap.agentId) }))
     if (always && decision === 'approved' && owner && !ap.highRisk && kinds.length) {
-      db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
-      emit({ type: 'agent', agent: db.agent(owner.id)! })
-      db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
+      if (agentWide) {
+        db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
+        emit({ type: 'agent', agent: db.agent(owner.id)! })
+        db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
+      }
     } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })

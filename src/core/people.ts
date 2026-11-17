@@ -312,7 +312,8 @@ export class People {
   // An approval reaches who may decide it and who asked; one in a channel, everyone who reads the
   // channel too. One from a DM never goes past its deciders and requester.
   canSeeApproval(person: Person, a: Approval): boolean {
-    if (a.requestedBy === person.id || deciders(this.db, a.agentId).includes(person.id)) return true
+    // A lent computer's person always sees what would run on it (she alone decides it).
+    if (a.computerOwner === person.id || a.requestedBy === person.id || deciders(this.db, a.agentId).includes(person.id)) return true
     const c = this.conversationOf(a.conversationId)
     return !!c && c.kind !== 'dm' && this.canSeeConversation(person, c)
   }

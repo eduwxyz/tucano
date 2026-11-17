@@ -16,6 +16,7 @@ let ana: Client // the owner, whose agent it is
 let bia: Client // a member, whose computer it is
 let dani: Client // an admin
 let biaId: string
+let anaId: string
 let agentId: string
 let geral: string
 type Snap = { agents: Agent[]; conversations: Conversation[] }
@@ -29,15 +30,19 @@ const join1 = async (name: string, role: 'member' | 'admin'): Promise<Person> =>
 }
 
 // What an agent of Ana's, working for Bia in #geral, leaves when it asks to run a command on Bia's computer.
-function ask(id: string): void {
+// `on`: whose computer (Bia's unless said); `tool`/`args`: the call; `conv`/`by`: where and for whom.
+function ask(id: string, o: { on?: 'bia' | 'ana'; tool?: string; args?: Record<string, unknown>; conv?: string; by?: string } = {}): void {
   const db = new DatabaseSync(join(core.dataDir, 'tucano.db'))
   const now = Date.now()
   db.prepare('INSERT OR IGNORE INTO connectors (id, name, kind, url, created_at) VALUES (?, ?, ?, ?, ?)').run('node-bia', 'MacBook da Bia', 'remote', nodeUrl('mac-bia', biaId), now)
+  db.prepare('INSERT OR IGNORE INTO connectors (id, name, kind, url, created_at) VALUES (?, ?, ?, ?, ?)').run('node-ana', 'MacBook da Ana', 'remote', nodeUrl('mac-ana', anaId), now)
+  const [cid, cname] = o.on === 'ana' ? ['node-ana', 'MacBook da Ana'] : ['node-bia', 'MacBook da Bia']
   db.prepare(
     'INSERT INTO approvals (id, hash, agent_id, conversation_id, message_id, connector_id, connector_name, tool, args, why, created_at, expires_at, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, id, agentId, geral, 'm-' + id, 'node-bia', 'MacBook da Bia', 'node_bash', JSON.stringify({ command: 'git push' }), '', now, now + 3_600_000, biaId)
+  ).run(id, id, agentId, o.conv ?? geral, 'm-' + id, cid, cname, o.tool ?? 'node_bash', JSON.stringify(o.args ?? { command: 'git push' }), '', now, now + 3_600_000, o.by ?? (o.on === 'ana' ? anaId : biaId))
   db.close()
 }
+const theAgent = async (): Promise<Agent> => (await ana.call<Snap>('snapshot')).agents.find((a) => a.id === agentId)!
 const state = (id: string): string | undefined => {
   const db = new DatabaseSync(join(core.dataDir, 'tucano.db'))
   const r = db.prepare('SELECT state FROM approvals WHERE id = ?').get(id) as { state: string } | undefined
@@ -49,7 +54,8 @@ beforeAll(async () => {
   core = await bootCore({ server: true })
   ana = core.connect()
   await ana.call('setMyName', { name: 'Ana' })
-  const snap = await ana.call<Snap>('snapshot')
+  const snap = await ana.call<Snap & { you: string }>('snapshot')
+  anaId = snap.you
   geral = snap.conversations.find((c) => c.kind === 'channel')!.id
   agentId = snap.agents.find((a) => a.kind !== 'tuca')!.id // the owner's: not Bia's
   const bp = await join1('Bia', 'member')
@@ -83,9 +89,44 @@ describe("a command on a member's lent computer, asked by an agent that isn't he
     expect((await dani.call<Inbox>('inbox')).approvals.map((a) => a.id)).not.toContain('ap-3')
   })
 
+  it("sees it even where she couldn't otherwise (someone else's DM): it's her computer", async () => {
+    const dm = await ana.call<string>('openDm', { agentId }) // Ana's DM with her agent: Bia doesn't see it
+    ask('ap-7', { conv: dm, by: anaId })
+    expect((await bia.call<Inbox>('inbox')).approvals.map((a) => a.id)).toContain('ap-7')
+  })
+
   it('says whose computer it is, so her page shows her the buttons and theirs do not', async () => {
     const a = (await bia.call<Inbox>('inbox')).approvals.find((x) => x.id === 'ap-3')
     expect(a?.computerOwner).toBe(biaId)
+  })
+})
+
+describe('"always allow" by her, on an agent that isn\'t hers', () => {
+  it("doesn't turn a kind of command to \"does it alone\" for the whole agent (its own computer, other people's)", async () => {
+    ask('ap-4')
+    const before = (await theAgent()).actionRules?.push
+    expect(await err(bia.call('decideApproval', { id: 'ap-4', decision: 'approved', always: true }))).toBe('ok')
+    await vi.waitFor(async () => expect(state('ap-4')).toBe('approved'))
+    await new Promise((r) => setTimeout(r, 200)) // whatever decide saves, it saves right after the state
+    const after = await theAgent()
+    expect(after.actionRules?.push).toBe(before)
+    expect(after.actionRules?.push).not.toBe('auto')
+  })
+
+  it('a tool of her computer allowed for good stays on her computer: only that connector, nothing else', async () => {
+    ask('ap-5', { tool: 'node_write_file', args: { path: 'notes.md', content: 'x' } })
+    const before = (await theAgent()).autoApprove ?? []
+    expect(await err(bia.call('decideApproval', { id: 'ap-5', decision: 'approved', always: true }))).toBe('ok')
+    await vi.waitFor(async () => expect(state('ap-5')).toBe('approved'))
+    await vi.waitFor(async () => expect((await theAgent()).autoApprove ?? []).toContain('node-bia:node_write_file'))
+    const added = ((await theAgent()).autoApprove ?? []).filter((r) => !before.includes(r))
+    expect(added).toEqual(['node-bia:node_write_file'])
+  })
+
+  it('the agent\'s own person, on her own lent computer, still turns it to "does it alone" as before', async () => {
+    ask('ap-6', { on: 'ana' })
+    expect(await err(ana.call('decideApproval', { id: 'ap-6', decision: 'approved', always: true }))).toBe('ok')
+    await vi.waitFor(async () => expect((await theAgent()).actionRules?.push).toBe('auto'))
   })
 })
 
