@@ -31,6 +31,14 @@ describe("errors in people’s words", () => {
         { engine: "Codex" }
       ).text
     ).toMatch(/^O Codex saiu da sua conta/);
+    // GitHub Copilot CLI 1.0.105 with no login, and with a token it can't use (its own words)
+    for (const said of [
+      "Copilot exited without a reply (code 1).\nError: No authentication information found.",
+      "Copilot exited without a reply (code 1).\nAuthentication token validation failed: token expired",
+    ])
+      expect(friendly(said, { engine: "GitHub Copilot" }).text).toBe(
+        "O GitHub Copilot saiu da sua conta. Entre de novo em Configurações › Modelos."
+      );
     setLang("en");
     expect(
       friendly("OAuth token has expired", { engine: "Claude Code" }).text
