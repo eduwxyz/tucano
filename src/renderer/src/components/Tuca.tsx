@@ -35,7 +35,7 @@ import { AgentAvatar, Icon, monthlyLimitText } from './ui'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { describeRoutine } from './Routines'
 
-const EFFORT = (): Record<AgentDraft['effort'], string> => ({ low: L('esforço baixo', 'low effort'), medium: L('esforço médio', 'medium effort'), high: L('esforço alto', 'high effort'), xhigh: L('esforço máximo', 'max effort') })
+export const EFFORT = (): Record<AgentDraft['effort'], string> => ({ low: L('esforço baixo', 'low effort'), medium: L('esforço médio', 'medium effort'), high: L('esforço alto', 'high effort'), xhigh: L('esforço máximo', 'max effort') })
 
 // Set by the introduction: a card there fills the first agent instead of creating one.
 export const UseDraft = createContext<((draft: AgentDraft, messageId: string) => void) | null>(null)

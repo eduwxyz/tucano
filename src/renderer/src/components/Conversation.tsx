@@ -2103,7 +2103,8 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 }
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
-export function Composer({ conversationId, threadId, members, placeholder }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string }): ReactNode {
+// `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
+export function Composer({ conversationId, threadId, members, placeholder, tools }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2465,8 +2466,9 @@ export function Composer({ conversationId, threadId, members, placeholder }: { c
               e.target.value = ''
             }}
           />
+          {tools}
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
+            {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
