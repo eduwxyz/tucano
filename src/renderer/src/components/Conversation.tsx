@@ -5,7 +5,7 @@ import { withMessage } from '../../../shared/attach'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
@@ -653,7 +653,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
         {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
           <div className="msg__meta">
-            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} hooks={message.run.hooks} />}
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
@@ -1695,7 +1695,7 @@ function StepRow({ step }: { step: Step }): ReactNode {
   )
 }
 
-function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['run']>['receipt']> }): ReactNode {
+function ReceiptLine({ receipt, hooks }: { receipt: NonNullable<NonNullable<Message['run']>['receipt']>; hooks?: NonNullable<Message['run']>['hooks'] }): ReactNode {
   const model = useStore((s) => modelById(s, receipt.model))
   const [open, setOpen] = useState(false)
   const total = countedTokens(receipt)
@@ -1720,6 +1720,14 @@ function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['ru
               <dd>{usd(receipt.apiCostUsd)}</dd>
             </>
           )}
+          {(hooks ?? []).map((h) => (
+            <Fragment key={`${h.event}-${h.ms}`}>
+              <dt>{h.event}</dt>
+              <dd>
+                {h.exit === 0 ? `${h.ms} ms` : h.error || `exit ${h.exit}`}
+              </dd>
+            </Fragment>
+          ))}
         </dl>
       )}
     </div>

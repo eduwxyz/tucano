@@ -21,3 +21,7 @@ Especially interesting:
 - Connector secrets are encrypted with a key in the macOS Keychain (on Linux, the system keyring: GNOME Keyring or KWallet) before they reach the database. Without a keyring, Tucano refuses to store them.
 - An agent's computer is a Docker container with only its own folder and the folders you lend it, or, if you choose so, your own computer.
 - Everything stays on your computer: conversations, memory, logins. There is no Tucano server.
+
+## Native turn hooks
+
+Settings can opt into a command that runs at the start and end of each agent reply, with a JSON payload on stdin. This is off by default. The command must be an absolute path; it is spawned without a shell and without inheriting secret environment variables (only `PATH`/`HOME` and keys you declare). A broken, slow or missing command never fails the turn (short timeout, fail-open). The path, duration and exit code are recorded on that reply's receipt. Turning this on is as sensitive as running a local program on every reply: only enable a command you trust.

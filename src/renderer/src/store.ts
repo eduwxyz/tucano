@@ -825,6 +825,7 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 }
 
 export const refreshEngines = (): void => void fire(L('Não consegui conferir os modelos.', "I couldn't check the models."), 'refreshEngines')
+export const testTurnHook = (): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testTurnHook')
 export const voiceStatus = (): Promise<VoiceStatus> => call('voiceStatus')
 export const voiceDownload = (model: VoiceModelId): Promise<void> => call('voiceDownload', { model })
 export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownload')
@@ -1018,7 +1019,9 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
   const agent = agentById(state, agentId)
   if (!agent) return
   const channelIds = state.conversations.filter((c) => c.kind === 'channel' && c.members.includes(agentId)).map((c) => c.id)
-  void fire(L('Não consegui salvar o agente.', "I couldn't save the agent."), 'saveAgent', { agent: { ...agent, ...patch }, channelIds })
+  const next = { ...agent, ...patch }
+  if ('hooks' in patch && patch.hooks !== 'off') delete next.hooks
+  void fire(L('Não consegui salvar o agente.', "I couldn't save the agent."), 'saveAgent', { agent: next, channelIds })
 }
 
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })

@@ -27,6 +27,8 @@ import {
   removeConnector,
   updateTool,
   updateSettings,
+  testTurnHook,
+  toast,
   setJevKey,
   browserAction,
   setTelegramToken,
@@ -915,6 +917,34 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </Disclosure>
                 )}
               </AutonomyRows>
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
+              title={L('Ganchos do turno', 'Turn hooks')}
+              help={L(
+                'Se os ganchos nativos estiverem ligados em Configurações, este agente herda o comando. Desligar aqui silencia só ele.',
+                'If native hooks are on in Settings, this agent inherits the command. Turning it off here silences only this agent.'
+              )}
+            >
+              <Row label={L('Herdar o gancho das configurações', 'Inherit the hook from Settings')}>
+                <Toggle
+                  on={draft.hooks !== 'off'}
+                  onChange={(v) => {
+                    setDraft((d) => {
+                      const n = { ...d }
+                      if (v) delete n.hooks
+                      else n.hooks = 'off'
+                      latest.current.draft = n
+                      return n
+                    })
+                    if (isNew) return
+                    pending.current = { ...pending.current, hooks: v ? undefined : 'off' }
+                    schedule(true)
+                  }}
+                />
+              </Row>
             </Section>
           )}
 
@@ -2411,6 +2441,59 @@ export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChang
   return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
 }
 
+function TurnHooksCard(): ReactNode {
+  const hooks = useStore((s) => s.settings.hooks)
+  const [testing, setTesting] = useState(false)
+  const on = !!hooks?.enabled
+  const command = hooks?.command ?? ''
+  const captureOwner = !!hooks?.captureOwner
+  const patchHooks = (next: Partial<NonNullable<typeof hooks>>): void => {
+    updateSettings({ hooks: { enabled: on, command, ...hooks, ...next } })
+  }
+  return (
+    <Card
+      title={L('Ganchos do turno', 'Turn hooks')}
+      lead={L(
+        'Um comando seu no começo e no fim de cada resposta, com um JSON na entrada padrão. Desligado por padrão: os hooks dos harnesses continuam de fora. Um gancho quebrado nunca derruba o turno.',
+        'A command of yours at the start and end of each reply, with JSON on stdin. Off by default: harness hooks stay out. A broken hook never fails the turn.'
+      )}
+    >
+      <div className="key-row">
+        <div className="grow">
+          <strong>{L('Ligar ganchos nativos', 'Turn native hooks on')}</strong>
+        </div>
+        <Toggle on={on} onChange={(v) => patchHooks({ enabled: v })} />
+      </div>
+      <Field
+        label={L('Comando (caminho absoluto)', 'Command (absolute path)')}
+        hint={L('Sem shell. O app manda um JSON por linha na entrada padrão (turn-start e turn-end).', 'No shell. The app sends one JSON line on stdin (turn-start and turn-end).')}
+      >
+        <input className="input" value={command} spellCheck={false} placeholder="/usr/local/bin/my-hook" onChange={(e) => patchHooks({ command: e.target.value })} />
+      </Field>
+      <div className="key-row">
+        <div className="grow">
+          <strong>TUCANO_CAPTURE_OWNER</strong>
+          <p className="muted small">{L('Marca o Tucano como dono da captura, pra um produtor externo não gravar o turno duas vezes.', 'Marks Tucano as the capture owner, so an external producer doesn’t record the turn twice.')}</p>
+        </div>
+        <Toggle on={captureOwner} onChange={(v) => patchHooks({ captureOwner: v })} />
+      </div>
+      <button
+        className="btn btn--ghost btn--sm"
+        disabled={testing || !on || !command}
+        onClick={() => {
+          setTesting(true)
+          void testTurnHook()
+            .then((r) => toast(r.message))
+            .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)))
+            .finally(() => setTesting(false))
+        }}
+      >
+        {testing ? L('Testando…', 'Testing…') : L('Testar', 'Test')}
+      </button>
+    </Card>
+  )
+}
+
 // ---------- Settings ----------
 
 // Português or English: the app's, and the language agents answer in. Labeled in both, so anyone finds it.
@@ -3123,6 +3206,8 @@ export function SettingsPage(): ReactNode {
             <AutonomyControls own={{ autonomy: settings.autonomy, actionRules: settings.actionRules, outsideGuard: settings.outsideGuard }} onChange={(p) => updateSettings(p)} />
           </Card>
         )}
+
+        {pane('agentes') && admin && <TurnHooksCard />}
 
         {pane('agentes') && (
           <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
