@@ -45,7 +45,11 @@ import {
   type SkillVersion,
   type ThreadSummary,
   type ToolClass,
-  type Trigger
+  type Trigger,
+  type VaultItem,
+  type VaultKind,
+  type VaultUse,
+  VAULT_FIELDS
 } from '../shared/types'
 import { stricter } from '../shared/classify'
 
@@ -549,6 +553,47 @@ export const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS tasks_by_owner ON tasks (owner, position);
+  `,
+  // The vault (src/core/vault): items sealed with the vault key, which is kept wrapped twice here
+  // (by this computer's key, from the keychain, and by the recovery code). Names and who uses them
+  // are plain; values never are. vault_uses: who used what, when.
+  `
+  CREATE TABLE IF NOT EXISTS vault_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL,
+    wrapped_key TEXT NOT NULL,
+    recovery_kdf TEXT NOT NULL,
+    recovery_key TEXT NOT NULL,
+    recovery_saved INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS vault_items (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    sealed TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    access_all INTEGER NOT NULL DEFAULT 0,
+    agent_ids TEXT NOT NULL DEFAULT '[]',
+    hosts TEXT NOT NULL DEFAULT '[]',
+    scope TEXT NOT NULL DEFAULT 'http' CHECK (scope IN ('http', 'any')),
+    ask_each_use INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    last_used_by TEXT
+  );
+  CREATE TABLE IF NOT EXISTS vault_uses (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT,
+    tool TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS vault_uses_by_item ON vault_uses (item_id, at);
   `
 ]
 
@@ -594,6 +639,17 @@ const COLUMNS: [string, string, string][] = [
 
 
 type Row = Record<string, unknown>
+
+// The vault's own rows (src/core/vault): what the screen sees, plus the sealed values and their version.
+export interface VaultMeta {
+  version: number
+  wrappedKey: string // the vault key, wrapped by this computer's key
+  recoveryKdf: string // JSON (Kdf in src/core/vault/crypto.ts)
+  recoveryKey: string // the vault key, wrapped by the recovery code
+  recoverySaved: boolean
+  createdAt: number
+}
+export type VaultStored = VaultItem & { sealed: string; version: number }
 
 // A stored access back to its shape; anything unreadable is "everything".
 function parseAccess(v: unknown): PersonAccess | undefined {
@@ -1473,6 +1529,98 @@ export class Db {
   setSecret(key: string, value: string | undefined): void {
     if (value === undefined) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(key)
     else this.db.prepare('INSERT INTO secrets (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
+  }
+
+  // ---------- the vault (src/core/vault; values come and go sealed) ----------
+
+  vaultMeta(): VaultMeta | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_meta WHERE id = 1').get() as Row | undefined
+    return r ? { version: Number(r['version']), wrappedKey: str(r['wrapped_key']), recoveryKdf: str(r['recovery_kdf']), recoveryKey: str(r['recovery_key']), recoverySaved: r['recovery_saved'] === 1, createdAt: Number(r['created_at']) } : undefined
+  }
+
+  setVaultMeta(m: VaultMeta): void {
+    this.db
+      .prepare(
+        `INSERT INTO vault_meta (id, version, wrapped_key, recovery_kdf, recovery_key, recovery_saved, created_at) VALUES (1, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET version = excluded.version, wrapped_key = excluded.wrapped_key, recovery_kdf = excluded.recovery_kdf, recovery_key = excluded.recovery_key, recovery_saved = excluded.recovery_saved`
+      )
+      .run(m.version, m.wrappedKey, m.recoveryKdf, m.recoveryKey, m.recoverySaved ? 1 : 0, m.createdAt)
+  }
+
+  // The vault was lost (no key, no recovery code) and the person starts over: everything goes, or
+  // (keepItems) every item stays with its settings and no value, to be typed again.
+  clearVault(keepItems = false): void {
+    if (keepItems) this.db.exec("DELETE FROM vault_meta; UPDATE vault_items SET sealed = '', version = version + 1")
+    else this.db.exec('DELETE FROM vault_items; DELETE FROM vault_uses; DELETE FROM vault_meta')
+  }
+
+  private toVaultItem(r: Row): VaultStored {
+    const kind = str(r['kind']) as VaultKind
+    const ids = JSON.parse(str(r['agent_ids']) || '[]') as string[]
+    return {
+      id: str(r['id']),
+      name: str(r['name']),
+      kind,
+      description: str(r['description']),
+      fields: VAULT_FIELDS[kind] ?? ['value'],
+      access: r['access_all'] === 1 ? { all: true } : { all: false, agentIds: ids },
+      hosts: JSON.parse(str(r['hosts']) || '[]') as string[],
+      scope: r['scope'] === 'any' ? 'any' : 'http',
+      askEachUse: r['ask_each_use'] === 1,
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at']),
+      ...(r['last_used_at'] ? { lastUsedAt: Number(r['last_used_at']), lastUsedBy: str(r['last_used_by']) } : {}),
+      ...(str(r['sealed']) === '' ? { missing: true } : {}),
+      sealed: str(r['sealed']),
+      version: Number(r['version'])
+    }
+  }
+
+  vaultItems(): VaultStored[] {
+    return (this.db.prepare('SELECT * FROM vault_items ORDER BY name').all() as Row[]).map((r) => this.toVaultItem(r))
+  }
+
+  vaultItem(id: string): VaultStored | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_items WHERE id = ?').get(id) as Row | undefined
+    return r ? this.toVaultItem(r) : undefined
+  }
+
+  vaultItemNamed(name: string): VaultStored | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_items WHERE name = ?').get(name) as Row | undefined
+    return r ? this.toVaultItem(r) : undefined
+  }
+
+  saveVaultItem(i: VaultStored): void {
+    this.db
+      .prepare(
+        `INSERT INTO vault_items (id, name, kind, description, sealed, version, access_all, agent_ids, hosts, scope, ask_each_use, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, kind = excluded.kind, description = excluded.description, sealed = excluded.sealed, version = excluded.version,
+           access_all = excluded.access_all, agent_ids = excluded.agent_ids, hosts = excluded.hosts, scope = excluded.scope, ask_each_use = excluded.ask_each_use, updated_at = excluded.updated_at`
+      )
+      .run(i.id, i.name, i.kind, i.description, i.sealed, i.version, i.access.all ? 1 : 0, JSON.stringify(i.access.all ? [] : i.access.agentIds), JSON.stringify(i.hosts), i.scope, i.askEachUse ? 1 : 0, i.createdAt, i.updatedAt)
+  }
+
+  removeVaultItem(id: string): void {
+    this.db.prepare('DELETE FROM vault_items WHERE id = ?').run(id)
+    this.db.prepare('DELETE FROM vault_uses WHERE item_id = ?').run(id)
+  }
+
+  addVaultUse(u: VaultUse): void {
+    this.db.prepare('INSERT INTO vault_uses (id, item_id, agent_id, conversation_id, tool, outcome, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(u.id, u.itemId, u.agentId, u.conversationId ?? null, u.tool, u.outcome, u.at)
+    if (u.outcome === 'used') this.db.prepare('UPDATE vault_items SET last_used_at = ?, last_used_by = ? WHERE id = ?').run(u.at, u.agentId, u.itemId)
+  }
+
+  vaultUses(itemId: string, limit = 50): VaultUse[] {
+    return (this.db.prepare('SELECT * FROM vault_uses WHERE item_id = ? ORDER BY at DESC LIMIT ?').all(itemId, limit) as Row[]).map((r) => ({
+      id: str(r['id']),
+      itemId: str(r['item_id']),
+      agentId: str(r['agent_id']),
+      ...(r['conversation_id'] ? { conversationId: str(r['conversation_id']) } : {}),
+      tool: str(r['tool']),
+      outcome: r['outcome'] === 'refused' ? 'refused' : 'used',
+      at: Number(r['at'])
+    }))
   }
 
   // ---------- approvals ----------

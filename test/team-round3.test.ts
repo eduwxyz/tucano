@@ -157,7 +157,8 @@ describe('G. every event reaches only who may see what it is about', () => {
       people: { event: { type: 'people', people: db.people() }, is: 'shown' },
       inbox: { event: { type: 'inbox' }, is: 'own' },
       delegations: { event: { type: 'delegations' }, is: 'own' },
-      tasks: { event: { type: 'tasks', for: ana.id }, is: 'hidden' }
+      tasks: { event: { type: 'tasks', for: ana.id }, is: 'hidden' },
+      vault: { event: { type: 'vault' }, is: 'hidden' }
     }
     expect(Object.keys(cases).sort()).toEqual([...CORE_EVENT_TYPES].sort())
     for (const [type, c] of Object.entries(cases)) {

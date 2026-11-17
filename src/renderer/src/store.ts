@@ -60,7 +60,12 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo
+  type NodeInfo,
+  type VaultAccess,
+  type VaultItem,
+  type VaultItemInput,
+  type VaultStatus,
+  type VaultUse
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -118,6 +123,7 @@ export interface State {
   routines: Routine[]
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
+  vaultRev: number // goes up when the vault changes: its tab reads it again
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
@@ -166,6 +172,7 @@ let state: State = {
   ready: false,
   threadSeen: loadSeen(),
   wikiRev: 0,
+  vaultRev: 0,
   voiceRev: 0,
   navOpen: false,
   view: null,
@@ -616,6 +623,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
       case 'wiki':
         return { ...s, wikiRev: s.wikiRev + 1 }
+      case 'vault':
+        return { ...s, vaultRev: s.vaultRev + 1 }
       case 'voice':
         return { ...s, voiceRev: s.voiceRev + 1 }
       case 'people':
@@ -1070,6 +1079,18 @@ export const setEndpoint = (baseUrl: string, models: string[], key?: string | nu
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
+// The vault (Settings › Vault): names and who uses each; a value goes in and never comes back.
+export const vaultStatus = (): Promise<VaultStatus> => call('vaultStatus')
+export const vaultList = (): Promise<VaultItem[]> => call('vaultList')
+export const vaultCreate = (): Promise<{ recoveryCode: string }> => call('vaultCreate')
+export const vaultRecoverySaved = (): Promise<void> => call('vaultRecoverySaved')
+export const vaultNewRecoveryCode = (): Promise<{ recoveryCode: string }> => call('vaultNewRecoveryCode')
+export const vaultRecover = (code: string): Promise<void> => call('vaultRecover', { code })
+export const vaultReset = (keepItems: boolean): Promise<{ recoveryCode: string }> => call('vaultReset', { keepItems })
+export const vaultSave = (item: VaultItemInput): Promise<VaultItem> => call('vaultSave', { item })
+export const vaultSetAccess = (id: string, access: VaultAccess): Promise<VaultItem> => call('vaultSetAccess', { id, access })
+export const vaultRemove = (id: string): Promise<void> => call('vaultRemove', { id })
+export const vaultUses = (id: string): Promise<VaultUse[]> => call('vaultUses', { id })
 export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')
 export const linkSkill = (source: string, agents: string[] = []): Promise<Skill> => call('linkSkill', { source, agents })
 export const decideSkill = (id: string, approve: boolean): void =>

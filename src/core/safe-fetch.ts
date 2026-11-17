@@ -85,8 +85,18 @@ export function blockedAddress(ip: string): boolean {
 const insideError = (): Error =>
   new InsideNetworkError(L('Esse link aponta pra rede interna do servidor; não dá pra ler daqui.', "That link points into the server's internal network; it can't be read from here."))
 
+// What a request may say: GET by default. redirect 'manual': a redirect comes back as it is, never
+// followed (the vault's requests: their headers carry a secret meant for one host only).
+export interface SafeInit {
+  headers?: Record<string, string>
+  signal?: AbortSignal
+  method?: string
+  body?: string
+  redirect?: 'follow' | 'manual'
+}
+
 // A fetch (the parts the wiki uses) that refuses the inside. `resolve` and `blocked` are for tests.
-export function safeFetch(opts: { resolve?: Resolve; blocked?: (ip: string) => boolean } = {}): (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response> {
+export function safeFetch(opts: { resolve?: Resolve; blocked?: (ip: string) => boolean } = {}): (url: string, init?: SafeInit) => Promise<Response> {
   const resolve: Resolve = opts.resolve ?? ((host) => lookup(host, { all: true, verbatim: true }))
   const blocked = opts.blocked ?? blockedAddress
   return async (url, init = {}) => {
@@ -98,7 +108,7 @@ export function safeFetch(opts: { resolve?: Resolve; blocked?: (ip: string) => b
       if (!addrs.length || addrs.some((a) => blocked(a.address))) throw insideError()
       const res = await once(at, addrs[0]!, init)
       const location = res.statusCode && res.statusCode >= 300 && res.statusCode < 400 ? res.headers.location : undefined
-      if (!location) return toResponse(res, at.href, init.signal)
+      if (!location || init.redirect === 'manual') return toResponse(res, at.href, init.signal)
       res.resume()
       if (hop >= MAX_REDIRECTS) throw new Error(L('A página tem redirecionamentos demais.', 'The page redirects too many times.'))
       at = new URL(location, at)
@@ -107,7 +117,7 @@ export function safeFetch(opts: { resolve?: Resolve; blocked?: (ip: string) => b
 }
 
 // One request, to the address already checked (the name stays the Host and the TLS name).
-function once(at: URL, addr: { address: string; family: number }, init: { headers?: Record<string, string>; signal?: AbortSignal }): Promise<IncomingMessage> {
+function once(at: URL, addr: { address: string; family: number }, init: SafeInit): Promise<IncomingMessage> {
   const request = at.protocol === 'https:' ? httpsRequest : httpRequest
   const host = at.hostname.replace(/^\[|\]$/g, '')
   return new Promise((ok, fail) => {
@@ -116,7 +126,7 @@ function once(at: URL, addr: { address: string; family: number }, init: { header
       hostname: host,
       ...(at.port ? { port: Number(at.port) } : {}),
       path: `${at.pathname}${at.search}`,
-      method: 'GET',
+      method: init.method ?? 'GET',
       ...(init.headers ? { headers: init.headers } : {}),
       ...(init.signal ? { signal: init.signal } : {}),
       ...(isIP(host) ? {} : { servername: host }),
@@ -127,7 +137,7 @@ function once(at: URL, addr: { address: string; family: number }, init: { header
     }
     const req = request(options, ok)
     req.on('error', fail)
-    req.end()
+    req.end(init.body)
   })
 }
 

@@ -16,6 +16,26 @@ const MIN_CHARS = 160 // less than this said since the last read: nothing to kee
 const MAX_PAGE_CHARS = 3_000
 const DOC_PART = 30_000 // a long document is read in parts this size, one after the other
 
+// The vault (src/core/vault) stays out of the wiki: a reference to a secret, or what it came back as.
+const VAULT_REF = /\{\{\s*vault:[^}]*\}\}|\[vault:[a-z0-9_.-]+\]/gi
+export const mentionsVault = (text: string): boolean => new RegExp(VAULT_REF.source, 'i').test(text)
+export const withoutVault = (text: string): string => text.replace(VAULT_REF, L('[segredo]', '[secret]'))
+
+// What the curator reads on its own: every exchange that touched the vault left out whole, the
+// reply that used a secret (or went on from an approved call that did) and the message it answered.
+export function outsideVault(messages: Message[]): Message[] {
+  const out = new Set<string>()
+  messages.forEach((m, i) => {
+    if (!m.run?.vault && !mentionsVault(m.text)) return
+    out.add(m.id)
+    if (m.author.kind !== 'agent') return
+    // The person's message it answered: the one it replies to, or the last one before it.
+    const asked = m.run?.replyTo ? messages.find((x) => x.id === m.run!.replyTo) : messages.slice(0, i).reverse().find((x) => x.author.kind === 'person')
+    if (asked) out.add(asked.id)
+  })
+  return messages.filter((m) => !out.has(m.id))
+}
+
 export interface CuratorDeps {
   wiki: Wiki
   db: { conversation(id: string): { id: string; kind: string; name: string; wikiCapture?: boolean; owner?: string } | undefined; messagesAfter(conversationId: string, at: number): Message[]; messagesSaidAfter(conversationId: string, at: number): Message[]; message(id: string): Message | undefined; saveMessage(m: Message): void; agents(): Agent[]; ownerId?(): string; people?(opts: { removed?: boolean }): Person[]; teamMode?(): boolean }
@@ -41,6 +61,7 @@ Você recebe as regras da wiki (o esquema), o índice das páginas, algumas pág
 
 Conhecimento, não registro. Os agentes contam o que fizeram ("enviei o e-mail", "procurei na agenda", "rodei os testes", "criei o rascunho", "não achei o arquivo"). Isso é o registro da tarefa, não conhecimento: não guarde as ações, os passos, as tentativas, os erros nem as ferramentas usadas. Quando uma ação mudou algo que continua valendo, guarde o que mudou, não a ação: "marquei a reunião com o Marcos dia 12" vira "Reunião com [[Marcos Lima]] em 12/01" na página certa; "mandei o orçamento pro Marcos" vira "Orçamento enviado em 03/11" na situação do projeto.
 Não guarde também: conversa fiada, perguntas sem resposta, o que só importa nesta conversa, tarefas em andamento sem conclusão.
+Nunca guarde segredos nem nada sobre eles: senhas, chaves de API, tokens, URLs secretas, nem o cofre do app (que segredos existem, como se chamam, pra onde podem ir, quem usa, onde ficam guardados). Um [segredo] no trecho é um valor que não deve aparecer na wiki.
 
 Se valer, escreva as mudanças:
 - "create": uma página nova, inteira, no formato do esquema (uma frase de resumo no começo; seções com ##; [[links]] pras outras páginas). Só crie se não houver página sobre isso no índice.
@@ -61,6 +82,7 @@ You get the wiki's rules (the schema), the page index, a few pages that may be r
 
 Knowledge, not a record. Agents tell what they did ("I sent the email", "I checked the calendar", "I ran the tests", "I made the draft", "I couldn't find the file"). That's the record of the task, not knowledge: don't keep the actions, the steps, the attempts, the errors or the tools used. When an action changed something that keeps holding, keep what changed, not the action: "I booked the meeting with Mark on the 12th" becomes "Meeting with [[Mark Lee]] on Jan 12" on the right page; "I sent Mark the quote" becomes "Quote sent on Nov 3" in the project's status.
 Don't keep either: small talk, unanswered questions, what matters only in this conversation, tasks in progress with no outcome.
+Never keep secrets or anything about them: passwords, API keys, tokens, secret URLs, or the app's vault (which secrets exist, what they're called, where they may go, who uses them, where they're kept). A [secret] in the stretch is a value that must not show in the wiki.
 
 If it's worth it, write the changes:
 - "create": a new page, whole, in the schema's format (a summary sentence first; ## sections; [[links]] to other pages). Only create it if no page in the index is about it.
@@ -164,7 +186,7 @@ export class WikiCurator {
     return this.deps.db.agents().find((a) => a.id === agentId)?.name ?? L('Agente', 'Agent')
   }
   private excerpt(messages: Message[]): string {
-    return messages.map((m) => `**${this.name(m)}** (${new Date(saidAt(m)).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
+    return messages.map((m) => `**${this.name(m)}** (${new Date(saidAt(m)).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${withoutVault(m.text.trim())}`).join('\n\n')
   }
 
   private async doRead(conversationId: string): Promise<void> {
@@ -180,7 +202,7 @@ export class WikiCurator {
     // In the order things were said, and the mark goes by that too: a reply still at work when the
     // conversation was last read comes after what was read then, however early it started.
     const all = asSaid(db.messagesSaidAfter(conversationId, since)).filter((m) => (m.author.kind === 'person' || m.author.kind === 'agent') && m.text.trim() && m.run?.status !== 'working')
-    const fresh = all.filter((m) => !kept.has(m.id))
+    const fresh = outsideVault(all.filter((m) => !kept.has(m.id)))
     if (!fresh.length) return all.length ? wiki.setMark(conversationId, saidAt(all.at(-1)!)) : undefined
     const stretch = fresh.slice(-MAX_MESSAGES)
     const last = stretch.at(-1)!
@@ -262,7 +284,7 @@ export class WikiCurator {
     if (ro) throw new Error(ro)
     const shown = wiki.view(this.deps.hidden?.(p.conversationId) ?? new Set())
     const text = p.text ?? this.excerpt(p.messages)
-    const plain = p.plain ?? p.messages.map((m) => m.text).join(' ')
+    const plain = p.plain ?? p.messages.map((m) => withoutVault(m.text)).join(' ')
     // The pages it may touch: the ones the words of the stretch find.
     // The pages it may touch: first the ones the stretch names ("o Rogério mudou de telefone"),
     // then what a search finds in its end, the newest part; a long reply up front can't crowd them out.
@@ -291,7 +313,9 @@ export class WikiCurator {
       text,
       L('Responda só com o JSON.', 'Reply with the JSON only.')
     ].join('\n\n')
-    const out = parseCuration(await this.deps.llm(curatorSystem(), prompt))
+    const parsed = parseCuration(await this.deps.llm(curatorSystem(), prompt))
+    // A reference to a secret never reaches a page, whatever the model wrote.
+    const out = parsed && { ...parsed, ops: parsed.ops.map((o) => ({ ...o, ...(o.text !== undefined ? { text: withoutVault(o.text) } : {}), ...(o.new !== undefined ? { new: withoutVault(o.new) } : {}) })) }
     // While the model read, the source may have been taken back, or its conversation deleted (a
     // purge): nothing of it gets written, and what it left behind goes.
     if ((p.source && !wiki.source(p.source.id)) || (p.conversationId && !this.deps.db.conversation(p.conversationId))) {

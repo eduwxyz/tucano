@@ -176,6 +176,7 @@ export interface Run {
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   receipt?: Receipt
   approvalId?: string
+  vault?: boolean // it used a vault secret (src/core/vault), or goes on from an approved call that did: the wiki's curator leaves it out
   outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
@@ -1400,4 +1401,72 @@ export interface BackupSummary {
   wikiPages: number
   files: number
   filesLeftOut: number // the agents' files that didn't fit in one upload
+}
+
+// ---------- the vault (src/core/vault) ----------
+// Secrets the agents use by reference ({{vault:name}}) and never see. The screen gets names, never values.
+
+export type VaultKind = 'password' | 'api_key' | 'token' | 'url' | 'login' | 'note'
+export const VAULT_KINDS: VaultKind[] = ['api_key', 'token', 'password', 'login', 'url', 'note']
+// The fields each kind keeps; an agent names one as {{vault:name.field}} (the first one by default).
+export const VAULT_FIELDS: Record<VaultKind, string[]> = {
+  password: ['value'],
+  api_key: ['value'],
+  token: ['value'],
+  url: ['value'],
+  note: ['value'],
+  login: ['password', 'username']
+}
+// http: only in vault_http, to the item's hosts. any: also in commands, files, the browser and connectors.
+export type VaultScope = 'http' | 'any'
+// Who uses an item: every agent (those made later too), or the ones named. Never "empty means all".
+export type VaultAccess = { all: true } | { all: false; agentIds: string[] }
+
+export interface VaultItem {
+  id: string
+  name: string // a slug, unique: github_token
+  kind: VaultKind
+  description: string // what it's for, in the agents' prompt
+  fields: string[]
+  access: VaultAccess
+  hosts: string[] // where vault_http may send it: api.github.com, *.example.com
+  scope: VaultScope
+  askEachUse: boolean // every use waits for an approval
+  createdAt: number
+  updatedAt: number
+  lastUsedAt?: number
+  lastUsedBy?: string // agent id
+  missing?: boolean // kept with no value (the vault started over without its code): typed again, it works again
+}
+
+// What the form sends. values: the new values, by field; left out (or empty) keeps what's saved.
+export interface VaultItemInput {
+  id?: string
+  name: string
+  kind: VaultKind
+  description: string
+  values?: Record<string, string>
+  access: VaultAccess
+  hosts: string[]
+  scope: VaultScope
+  askEachUse: boolean
+}
+
+// empty: nothing saved yet. open: ready. needs_recovery: saved, but this computer's key doesn't open
+// it (a new computer, the keychain reset): the recovery code does. unavailable: no keychain to use.
+export interface VaultStatus {
+  state: 'empty' | 'open' | 'needs_recovery' | 'unavailable'
+  problem?: string
+  recoverySaved: boolean // the person said they kept the recovery code
+  count: number
+}
+
+export interface VaultUse {
+  id: string
+  itemId: string
+  agentId: string
+  conversationId?: string
+  tool: string
+  outcome: 'used' | 'refused'
+  at: number
 }

@@ -4,7 +4,7 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
 import { agentById, amAdmin, archiveAgent, canEditChannel, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
-import { AgentAvatar, Icon, type IconName } from './ui'
+import { AgentAvatar, Icon, useCountdown, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
 import { LoginHost } from './LoginTerminal'
@@ -26,7 +26,8 @@ export function Dialogs(): ReactNode {
 // resolves true when the person clicks the confirm button (named with the verb and the
 // thing: “Excluir #lancamento”), false on Cancelar, Esc or a click outside. danger is for
 // what can't be undone: red button, and Cancelar holds the focus so Enter doesn't destroy.
-type Ask = { title: string; body?: string; confirm: string; danger?: boolean; resolve: (ok: boolean) => void }
+// waitSeconds: the confirm button only works after that long (counting down on it); cancelling never waits.
+type Ask = { title: string; body?: string; confirm: string; danger?: boolean; waitSeconds?: number; resolve: (ok: boolean) => void }
 let asking: Ask | null = null
 const askListeners = new Set<() => void>()
 const setAsking = (a: Ask | null): void => {
@@ -34,7 +35,7 @@ const setAsking = (a: Ask | null): void => {
   askListeners.forEach((l) => l())
 }
 
-export function confirmDialog(o: { title: string; body?: string; confirm: string; danger?: boolean }): Promise<boolean> {
+export function confirmDialog(o: { title: string; body?: string; confirm: string; danger?: boolean; waitSeconds?: number }): Promise<boolean> {
   asking?.resolve(false)
   return new Promise((resolve) => setAsking({ ...o, resolve }))
 }
@@ -48,8 +49,19 @@ function ConfirmHost(): ReactNode {
     () => asking
   )
   if (!ask) return null
+  // Keyed by the question: a new one starts its own wait.
+  return <Confirm key={askKey(ask)} ask={ask} />
+}
+
+const keys = new WeakMap<Ask, number>()
+let nextKey = 0
+const askKey = (a: Ask): number => keys.get(a) ?? (keys.set(a, ++nextKey), nextKey)
+
+function Confirm({ ask }: { ask: Ask }): ReactNode {
+  const left = useCountdown(ask.waitSeconds ?? 0)
+  const waiting = left > 0
   const answer = (ok: boolean): void => {
-    if (asking !== ask) return
+    if (asking !== ask || (ok && waiting)) return
     setAsking(null)
     ask.resolve(ok)
   }
@@ -62,11 +74,11 @@ function ConfirmHost(): ReactNode {
       ))}
       <footer className="modal__foot">
         <span className="grow" />
-        <button className="btn btn--ghost btn--sm" autoFocus={ask.danger} onClick={() => answer(false)}>
+        <button className="btn btn--ghost btn--sm" autoFocus={ask.danger || !!ask.waitSeconds} onClick={() => answer(false)}>
           {L('Cancelar', 'Cancel')}
         </button>
-        <button className={`btn btn--sm ${ask.danger ? 'btn--danger' : 'btn--primary'}`} autoFocus={!ask.danger} onClick={() => answer(true)}>
-          {ask.confirm}
+        <button className={`btn btn--sm ${ask.danger ? 'btn--danger' : 'btn--primary'}`} autoFocus={!ask.danger && !ask.waitSeconds} disabled={waiting} onClick={() => answer(true)}>
+          {waiting ? `${ask.confirm} (${left})` : ask.confirm}
         </button>
       </footer>
     </Modal>

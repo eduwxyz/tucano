@@ -68,6 +68,8 @@ import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-impo
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
+import { Vault } from './vault'
+import { vaultInput } from './vault/input'
 import { Browser, browserTools, type BrowserHost } from './browser'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
@@ -806,6 +808,8 @@ function localReach(messageId: string): LocalReach | undefined {
 }
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
+// Secrets the agents use by reference and never see (src/core/vault). Opens on its own at start.
+const vault = new Vault({ db, secrets, changed: () => emit({ type: 'vault' }) })
 // The person's own apps, through agent-desktop (none on a server: no screen there).
 // Off a Mac it needs the installed apps to know each one's program.
 const desktopApps = new DesktopApps(undefined, {
@@ -1055,6 +1059,7 @@ const runner = new Runner({
   computers,
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
+  vault,
   routines,
   skills,
   wiki,
@@ -1128,6 +1133,8 @@ hooks.on('error', (e) => console.error(`[gatilhos] porta ${runtimePorts.webhook}
 
 void ready.then(async () => {
   toMain({ type: 'ready' })
+  // Before the routines: the ones that use a secret find the vault open.
+  await vault.start().catch((e: unknown) => console.error('[vault]', e instanceof Error ? e.message : e))
   workspaceSummary()
   await runner.expireApprovals()
   const settled = await runner.settleDecidedRuns()
@@ -1904,6 +1911,43 @@ const api: Handlers = {
   restoreSkill: ({ skillId, versionId }, ctx) => (record(ctx, 'skill.updated', skillId, { restored: versionId }), void skills.restore(skillId, versionId)),
   archiveSkill: ({ id, archived }, ctx) => (record(ctx, archived ? 'skill.archived' : 'skill.restored', id), void skills.archive(id, archived)),
   removeSkill: ({ id }, ctx) => (record(ctx, 'skill.removed', id), skills.remove(id)),
+
+  vaultStatus: () => vault.status(),
+  vaultList: () => vault.list(),
+  vaultCreate: async (_p, ctx) => {
+    const r = await vault.create()
+    record(ctx, 'vault.created')
+    return r
+  },
+  vaultRecoverySaved: () => vault.recoverySaved(),
+  vaultNewRecoveryCode: (_p, ctx) => (record(ctx, 'vault.recovery_code'), vault.newRecoveryCode()),
+  vaultRecover: async ({ code }, ctx) => {
+    await vault.recover(code)
+    record(ctx, 'vault.recovered')
+  },
+  vaultReset: async ({ keepItems }, ctx) => {
+    const r = await vault.reset(keepItems)
+    record(ctx, 'vault.reset', undefined, { keepItems })
+    return r
+  },
+  vaultSave: ({ item }, ctx) => {
+    const input = vaultInput(item)
+    const saved = vault.save(input)
+    // Only names: never a value, not even its length.
+    record(ctx, input.id ? 'vault.updated' : 'vault.created_item', saved.id, { name: saved.name, ...(input.values && Object.keys(input.values).length ? { value: 'changed' } : {}) })
+    return saved
+  },
+  vaultSetAccess: ({ id, access }, ctx) => {
+    const saved = vault.setAccess(id, vaultInput({ name: 'x', kind: 'note', description: '', access, hosts: [], scope: 'any', askEachUse: false }).access)
+    record(ctx, 'vault.access', id, { name: saved.name })
+    return saved
+  },
+  vaultRemove: ({ id }, ctx) => {
+    const name = vault.list().find((i) => i.id === id)?.name
+    vault.remove(id)
+    record(ctx, 'vault.removed', id, name ? { name } : undefined)
+  },
+  vaultUses: ({ id }) => vault.uses(id),
   skillVersions: ({ skillId }) => db.skillVersions(skillId),
 
   checkTrigger: ({ trigger }) => routines.preview(trigger),

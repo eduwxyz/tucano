@@ -114,6 +114,17 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   restoreSkill: { skillId: 's', versionId: 'n' },
   archiveSkill: { id: 's', archived: 'b' },
   removeSkill: { id: 's' },
+  vaultStatus: {},
+  vaultList: {},
+  vaultCreate: {},
+  vaultRecoverySaved: {},
+  vaultNewRecoveryCode: {},
+  vaultRecover: { code: 's' },
+  vaultReset: { keepItems: 'b' },
+  vaultSave: { item: 'o' },
+  vaultSetAccess: { id: 's', access: 'o' },
+  vaultRemove: { id: 's' },
+  vaultUses: { id: 's' },
   skillVersions: { skillId: 's' },
   checkTrigger: { trigger: 'o' },
   setTelegramToken: { token: 's|null' },
@@ -257,6 +268,7 @@ export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
   wikiRelease: { title: 200 },
   wikiGitSetup: { url: 1_000 },
   loginInput: { text: 4_000 }, // a code or an API key, typed into a sign-in
+  vaultRecover: { code: 200 },
   setPush: { handle: 2_000, tag: 200 }
 }
 

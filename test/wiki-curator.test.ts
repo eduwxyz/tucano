@@ -8,7 +8,7 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
 import { Runner } from '../src/core/runs'
 import { applyOp, Wiki } from '../src/core/wiki'
-import { curatorSystem, parseCuration, WikiCurator } from '../src/core/wiki-curator'
+import { curatorSystem, outsideVault, parseCuration, withoutVault, WikiCurator } from '../src/core/wiki-curator'
 
 const fresh = (): Wiki => {
   const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
@@ -121,6 +121,46 @@ describe('the curator', () => {
     await curator.read('c')
     expect(w.page('Marcos Lima')!.body).toContain('aceitou o orçamento')
     expect(w.changes('pending')).toHaveLength(0)
+  })
+
+  it('leaves out every exchange that touched the vault, and keeps the rest', async () => {
+    const { w, curator, say, calls, messages } = setup(() => decision)
+    say('m1', 'me', 'Quais pedidos a Acme recebeu hoje? Me passa a chave da API também.', 1)
+    say('m2', 'lia', 'A chave {{vault:acme_api_key}} só vai pra 127.0.0.1:7399; não posso mostrar. Hoje foram 3 pedidos, R$ 1.514,40.', 2)
+    messages[1]!.run = { status: 'done', steps: [], vault: true }
+    say('m3', 'me', 'O Marcos aceitou o orçamento de R$ 12.960 da reforma, fechado em 3 vezes. Começa em janeiro.', 3)
+    say('m4', 'lia', 'Ótimo! Anotei: reforma do apto 302 fechada em R$ 12.960, em 3 vezes, começo em janeiro.', 4)
+    await curator.read('c')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('R$ 12.960')
+    expect(calls[0]).not.toMatch(/Acme|acme_api_key|7399/)
+    expect(JSON.stringify(w.sources().map((x) => w.source(x.id)!.text))).not.toMatch(/Acme|vault/)
+    expect(w.mark('c')).toBe(4) // read past it: it isn't offered again
+  })
+
+  it('a stretch that is all vault asks the model nothing', async () => {
+    const { curator, say, calls, messages } = setup(() => decision)
+    say('m1', 'me', 'Cria um pedido novo na Acme pra Livraria Sul, total 320,00, por favor.', 1)
+    say('m2', 'lia', 'Pedido ORD-1044 criado na Acme pra Livraria Sul, R$ 320,00, tudo certo com a API de pedidos.', 2)
+    messages[1]!.run = { status: 'done', steps: [], vault: true }
+    await curator.read('c')
+    expect(calls).toEqual([])
+  })
+
+  it('what the model writes never carries a reference to a secret', async () => {
+    const leaky = JSON.stringify({ guardar: true, motivo: 'x', titulo_fonte: 'Integração', mudancas: [{ op: 'create', pagina: 'Integração', tipo: 'Assunto', texto: 'Usa {{vault:acme_api_key}} e volta [vault:acme_api_key].' }] })
+    const { w, curator, say } = setup(() => leaky)
+    say('m1', 'me', 'Guarda que a integração com o ERP roda toda noite às 2h, puxando os pedidos do dia anterior.', 1)
+    say('m2', 'lia', 'Anotado: integração com o ERP roda toda noite às 2h, com os pedidos do dia anterior.', 2)
+    await curator.read('c')
+    expect(w.page('Integração')!.body).not.toMatch(/vault/)
+  })
+
+  it('picks out the vault exchanges, and redacts references', () => {
+    const m = (id: string, kind: 'person' | 'agent', text: string, vault = false): Message => ({ id, conversationId: 'c', author: { kind, id: kind === 'agent' ? 'lia' : 'me' }, text, at: 1, ...(kind === 'agent' ? { run: { status: 'done', steps: [], ...(vault ? { vault: true } : {}) } } : {}) }) as Message
+    expect(outsideVault([m('a', 'person', 'oi'), m('b', 'agent', 'feito', true), m('c', 'person', 'e o Marcos?'), m('d', 'agent', 'aceitou')]).map((x) => x.id)).toEqual(['c', 'd'])
+    expect(outsideVault([m('a', 'person', 'usa {{vault:x}} aqui'), m('b', 'agent', 'ok')]).map((x) => x.id)).toEqual(['b'])
+    expect(withoutVault('Bearer {{vault:gh}} → [vault:gh.username]')).toMatch(/^Bearer \[(segredo|secret)\] → \[(segredo|secret)\]$/)
   })
 
   it('reads nothing twice, skips small talk without asking the model, and keeps nothing when it says so', async () => {

@@ -1,4 +1,5 @@
 import { L } from '../../../../shared/lang'
+import type { VaultAccess } from '../../../../shared/types'
 import { type ReactNode } from 'react'
 import { agentById, useStore, isTeam } from '../../store'
 import { AgentAvatar, Icon } from '../ui'
@@ -50,6 +51,43 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
               </button>
             )
           })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Who uses something where "everyone" must be said in so many words (a vault item): every agent,
+// those made later too, or the ones picked, even none. Never "an empty list means everyone".
+export function AccessPicker({ value, onChange }: { value: VaultAccess; onChange: (a: VaultAccess) => void }): ReactNode {
+  const agents = useStore((s) => s.agents.filter((a) => isTeam(a) && !a.archived))
+  const ids = value.all ? [] : value.agentIds
+  const toggle = (id: string): void => onChange({ all: false, agentIds: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] })
+  return (
+    <div className="agent-picker">
+      <div className="segmented">
+        <button type="button" className={value.all ? 'is-active' : ''} onClick={() => onChange({ all: true })}>
+          {L('Todos os agentes', 'All agents')}
+        </button>
+        <button type="button" className={value.all ? '' : 'is-active'} onClick={() => value.all && onChange({ all: false, agentIds: [] })}>
+          {L('Só alguns', 'Only some')}
+        </button>
+      </div>
+      {value.all ? (
+        <span className="hint">{L('Vale também pros agentes que você criar depois.', 'It also counts for the agents you create later.')}</span>
+      ) : (
+        <div className="agent-picker__list">
+          {agents.map((a) => {
+            const on = ids.includes(a.id)
+            return (
+              <button key={a.id} type="button" aria-pressed={on} className={`agent-pill ${on ? 'is-on' : ''}`} onClick={() => toggle(a.id)}>
+                <AgentAvatar agent={a} size={18} />
+                {a.name}
+                {on && <Icon name="check" size={12} />}
+              </button>
+            )
+          })}
+          {!ids.length && <span className="hint">{L('Nenhum agente usa ainda.', 'No agent uses it yet.')}</span>}
         </div>
       )}
     </div>
