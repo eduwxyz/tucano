@@ -15,7 +15,7 @@ import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -1374,6 +1374,19 @@ function reach(ctx: Ctx, conversationId: string | undefined): void {
   if (why) throw new Error(why)
 }
 // A message from a channel's heritage (People.visibleAt) is, to a member, as if it weren't there.
+// The person's DM with an agent: the one there is, or a new one.
+function dmFor(ctx: Ctx, agentId: string): string {
+  assertAgentVisible(db, ctx.person, agentId)
+  const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
+  if (existing) return existing.id
+  const id = randomUUID()
+  db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId], owner: ctx.person.id })
+  emitConversations([id])
+  return id
+}
+// A to-do's text as kept: no control characters but newlines, no longer than `max`.
+const cleanTaskText = (s: unknown, max: number): string => (typeof s === 'string' ? s.replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim().slice(0, max) : '')
+
 function reachMessage(ctx: Ctx, messageId: string): void {
   reach(ctx, db.messageConversation(messageId))
   const m = db.message(messageId)
@@ -1815,14 +1828,59 @@ const api: Handlers = {
     if (draft && m?.run?.agentDraft && !m.run.agentDraft.state) settleDraft(messageId)
   },
   // One DM per agent and person.
-  openDm: ({ agentId }, ctx) => {
-    assertAgentVisible(db, ctx.person, agentId)
-    const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
-    if (existing) return existing.id
-    const id = randomUUID()
-    db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId], owner: ctx.person.id })
-    emitConversations([id])
-    return id
+  openDm: ({ agentId }, ctx) => dmFor(ctx, agentId),
+
+  // ---------- the board's to-dos (Quadro) ----------
+  tasks: (_p, ctx) => db.tasks(ctx.person.id),
+  saveTask: ({ task }, ctx) => {
+    const prev = task.id ? db.task(task.id) : undefined
+    if (task.id && prev?.owner !== ctx.person.id) throw new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
+    const title = cleanTaskText(task.title, MAX_TASK_TITLE).replace(/\s+/g, ' ')
+    if (!title) throw new UserError(L('Escreva o que é pra fazer.', 'Write what is to be done.'))
+    const notes = task.notes === undefined ? prev?.notes : cleanTaskText(task.notes, MAX_TASK_NOTES) || undefined
+    const agentId = task.agentId === undefined ? prev?.agentId : task.agentId || undefined
+    if (agentId) {
+      assertAgentVisible(db, ctx.person, agentId)
+      const a = db.agent(agentId)
+      if (!a || !isTeam(a)) throw new UserError(L('Escolha um agente do time.', 'Pick one of the team’s agents.'))
+    }
+    const conversationId = task.conversationId === undefined ? prev?.conversationId : task.conversationId || undefined
+    if (conversationId) {
+      reach(ctx, conversationId)
+      const conv = db.conversation(conversationId)
+      if (conv?.kind !== 'channel') throw new UserError(L('Escolha um canal, ou deixe na DM do agente.', 'Pick a channel, or leave it in the agent’s DM.'))
+      if (agentId && !conv.members.includes(agentId)) throw new UserError(L('Esse agente não está nesse canal.', 'That agent isn’t in that channel.'))
+    }
+    const mine = db.tasks(ctx.person.id)
+    const position = Number.isFinite(task.position) ? Number(task.position) : (prev?.position ?? (mine.length ? Math.min(...mine.map((t) => t.position)) - 1 : 0))
+    const dueAt = task.dueAt === undefined ? prev?.dueAt : Number.isFinite(task.dueAt) && task.dueAt! > 0 ? Math.round(task.dueAt!) : undefined
+    const saved: Task = { id: prev?.id ?? randomUUID(), owner: ctx.person.id, title, position, createdAt: prev?.createdAt ?? Date.now(), ...(notes ? { notes } : {}), ...(agentId ? { agentId } : {}), ...(conversationId ? { conversationId } : {}), ...(dueAt ? { dueAt } : {}) }
+    db.saveTask(saved)
+    emit({ type: 'tasks', for: ctx.person.id })
+    return saved
+  },
+  removeTask: ({ id }, ctx) => {
+    if (db.task(id)?.owner !== ctx.person.id) return
+    db.removeTask(id)
+    emit({ type: 'tasks', for: ctx.person.id })
+  },
+  // Posted as the person's own message: in the agent's DM, or in the channel set, addressed to it.
+  startTask: ({ id }, ctx) => {
+    const t = db.task(id)
+    if (t?.owner !== ctx.person.id) throw new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
+    if (!t.agentId) throw new UserError(L('Escolha quem faz antes de começar.', 'Pick who does it before starting.'))
+    assertAgentVisible(db, ctx.person, t.agentId)
+    const agent = db.agent(t.agentId)
+    if (!agent || !isTeam(agent)) throw new UserError(L('Esse agente não está mais no time.', 'That agent is no longer on the team.'))
+    const channel = t.conversationId ? db.conversation(t.conversationId) : undefined
+    if (t.conversationId) reach(ctx, t.conversationId)
+    const conversationId = channel?.kind === 'channel' && channel.members.includes(agent.id) ? channel.id : dmFor(ctx, agent.id)
+    const body = `${t.title}${t.notes ? `\n\n${t.notes}` : ''}${t.dueAt ? `\n\n${L('Prazo', 'Due')}: ${new Date(t.dueAt).toLocaleDateString(locale(), { day: 'numeric', month: 'long' })}` : ''}`
+    const text = conversationId === channel?.id ? `@${agent.handle} ${body}` : body
+    db.removeTask(id)
+    emit({ type: 'tasks', for: ctx.person.id })
+    bg(runner.send(conversationId, text, [], undefined, ctx.person.id), 'startTask')
+    return { conversationId }
   },
 
   saveSkill: ({ skill }, ctx) => {
