@@ -26,6 +26,8 @@ let rotate: boolean
 let tokenDelayMs: number
 let tokenDown: number // the next refreshes answer 503
 let calls: number
+let offline: boolean // the authorization server offers offline_access, the MCP server lists only "openid" (Vercel's)
+let registered: { scope?: string }[]
 
 const body = async (req: import('node:http').IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -43,6 +45,8 @@ beforeEach(async () => {
   tokenDelayMs = 0
   tokenDown = 0
   calls = 0
+  offline = false
+  registered = []
   let current = '' // only the newest access token works, as if the older one had expired
   expireAccessToken = () => {
     current = ''
@@ -56,7 +60,7 @@ beforeEach(async () => {
         void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
       const url = new URL(req.url ?? '/', base)
       if (req.method === 'GET' && url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
-        return json(200, { resource: `${base}/mcp`, authorization_servers: [base] })
+        return json(200, { resource: `${base}/mcp`, authorization_servers: [base], ...(offline ? { scopes_supported: ['openid'] } : {}) })
       }
       if (req.method === 'GET' && url.pathname.startsWith('/.well-known/oauth-authorization-server')) {
         return json(200, {
@@ -67,12 +71,15 @@ beforeEach(async () => {
           response_types_supported: ['code'],
           grant_types_supported: ['authorization_code', 'refresh_token'],
           code_challenge_methods_supported: ['S256'],
-          token_endpoint_auth_methods_supported: ['none']
+          token_endpoint_auth_methods_supported: ['none'],
+          ...(offline ? { scopes_supported: ['openid', 'email', 'offline_access', 'profile'] } : {})
         })
       }
       if (req.method === 'POST' && url.pathname === '/register') {
         registrations += 1
-        return json(201, { ...JSON.parse(await body(req)), client_id: `client-${registrations}` })
+        const asked = JSON.parse(await body(req)) as { scope?: string }
+        registered.push(asked)
+        return json(201, { ...asked, client_id: `client-${registrations}` })
       }
       if (req.method === 'POST' && url.pathname === '/token') {
         const form = new URLSearchParams(await body(req))
@@ -205,6 +212,31 @@ const signedIn = async (): Promise<string> => {
 }
 
 describe('renewing the sign-in', () => {
+  it('asks to stay signed in when the authorization server offers it, though the server lists only its own scopes', async () => {
+    offline = true
+    const m = launch(51001)
+    const id = await m.add({ name: 'Vercel', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await m.connect(id)
+    const page = new URL((await m.authorize(id))!)
+    // Without it the sign-in has no refresh token and asks again when the access token expires, every day.
+    expect(page.searchParams.get('scope')?.split(' ').sort()).toEqual(['offline_access', 'openid'])
+    expect(page.searchParams.get('prompt')).toBe('consent')
+    expect(registered.at(-1)?.scope?.split(' ')).toContain('offline_access')
+    expect(await m.finishOAuth(page.searchParams.get('state')!, 'code-1')).toBe(true)
+    expect(m.get(id)!.status).toBe('connected')
+    await m.closeAll()
+  })
+
+  it('asks for nothing more of a server that does not offer it', async () => {
+    const m = launch(51001)
+    const id = await m.add({ name: 'Atlassian', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await m.connect(id)
+    const page = new URL((await m.authorize(id))!)
+    expect(page.searchParams.get('scope') ?? '').not.toContain('offline_access')
+    expect(registered.at(-1)?.scope ?? '').not.toContain('offline_access')
+    await m.closeAll()
+  })
+
   it('renews once when two calls find the access token expired together, and keeps the new refresh token', async () => {
     rotate = true
     tokenDelayMs = 50

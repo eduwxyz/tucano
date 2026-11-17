@@ -23,7 +23,9 @@ import {
   modelInfo,
   navigate,
   openExternal,
+  probeEndpoint,
   rememberModels,
+  setEndpoint,
   setTab,
   testEngine,
   updateSettings,
@@ -194,7 +196,8 @@ const ROUTE = (): Record<NonNullable<EngineStatus['route']>, { label: string; to
   plan: { label: L('plano', 'plan'), tone: 'tag--ok' },
   gateway: { label: 'gateway', tone: 'tag--ok' },
   apikey: { label: L('chave de API', 'API key'), tone: 'tag--warn' },
-  providers: { label: L('provedores', 'providers'), tone: 'tag--ok' }
+  providers: { label: L('provedores', 'providers'), tone: 'tag--ok' },
+  endpoint: { label: 'endpoint', tone: 'tag--ok' }
 })
 
 // Every harness, with what was found in its own setup, a box to use it or not, and a test.
@@ -209,9 +212,9 @@ export function HarnessList(): ReactNode {
   }
   return (
     <div className="harnesses">
-      {ENGINE_IDS.map((e) => (
-        <HarnessRow key={e} engine={e} st={engines[e]} picked={picked(e)} toggle={() => toggle(e)} />
-      ))}
+      {(['endpoint', ...ENGINE_IDS.filter((x) => x !== 'endpoint')] as EngineId[]).map((e) =>
+        e === 'endpoint' ? <EndpointRow key={e} st={engines[e]} picked={picked(e)} toggle={() => toggle(e)} /> : <HarnessRow key={e} engine={e} st={engines[e]} picked={picked(e)} toggle={() => toggle(e)} />
+      )}
     </div>
   )
 }
@@ -323,6 +326,158 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
             ) : (
               <EngineProblem engine={engine} message={result.message} onSignIn={() => void loginEngine(engine).then((r) => setManual(r.opened ? null : r.command))} onRetry={() => void test()} />
             ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Shortcuts for the address: a provider's, or a local server's on its usual port.
+const ENDPOINT_PRESETS: { label: string; url: string }[] = [
+  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  { label: 'Ollama', url: 'http://localhost:11434/v1' },
+  { label: 'LM Studio', url: 'http://localhost:1234/v1' }
+]
+
+// An address in OpenAI's format, with no harness to install: OpenRouter, OmniRoute, Ollama, LM Studio,
+// vLLM, a company's proxy. The address and the key, tried before saving (what it lists comes back), and
+// the models the agents may use, picked from that list. The key goes to the core and never comes back.
+function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean; toggle: () => void }): ReactNode {
+  const saved = useStore((s) => s.settings.endpoint)
+  const checkId = useId()
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState(saved?.baseUrl ?? '')
+  const [key, setKey] = useState('')
+  const [listed, setListed] = useState<string[] | null>(null)
+  const [chosen, setChosen] = useState<string[]>(saved?.models ?? [])
+  const [filter, setFilter] = useState('')
+  const [busy, setBusy] = useState<'probe' | 'save' | null>(null)
+  const [problem, setProblem] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [model, setModel] = useState('')
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  async function probe(): Promise<void> {
+    setBusy('probe')
+    setProblem('')
+    try {
+      const r = await probeEndpoint(url, key || undefined)
+      if (r.error) setProblem(r.error)
+      setListed(r.models)
+      // What was picked before stays picked, if it's still there.
+      setChosen((c) => c.filter((m) => r.models.includes(m)))
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  async function save(): Promise<void> {
+    setBusy('save')
+    setProblem('')
+    try {
+      await setEndpoint(url, chosen, key ? key : undefined)
+      setKey('')
+      setOpen(false)
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const shown = (listed ?? []).filter((m) => m.toLowerCase().includes(filter.trim().toLowerCase())).slice(0, 300)
+  const flip = (m: string): void => setChosen((c) => (c.includes(m) ? c.filter((x) => x !== m) : [...c, m]))
+
+  return (
+    <div className={`harness ${picked ? 'is-picked' : ''}`}>
+      <div className="harness__head">
+        <button id={checkId} className={`harness__check ${picked ? 'is-on' : ''}`} disabled={!st.installed} onClick={toggle} aria-label={L('Usar o endpoint', 'Use the endpoint')}>
+          {picked && <Icon name="check" size={12} />}
+        </button>
+        <label className="grow harness__name" htmlFor={checkId}>
+          <strong>{L('Endpoint próprio', 'Your own endpoint')}</strong>
+          <span className="harness__account">{st.installed ? st.account : L('OpenRouter, OmniRoute, Ollama… sem instalar nada', 'OpenRouter, OmniRoute, Ollama… nothing to install')}</span>
+        </label>
+        {st.installed && <span className="tag tag--ok">endpoint</span>}
+        {picked && st.loggedIn && !open && (
+          <button className="btn btn--sm" onClick={() => setTesting(!testing)}>
+            {L('Testar', 'Test')}
+          </button>
+        )}
+        <button className={`btn btn--sm ${st.installed ? '' : 'btn--primary'}`} onClick={() => setOpen(!open)} aria-expanded={open}>
+          {st.installed ? L('Editar', 'Edit') : L('Configurar', 'Set up')}
+        </button>
+      </div>
+      {open && (
+        <div className="harness__body endpoint">
+          <p className="hint">
+            {L(
+              'Um endereço no padrão da OpenAI (/chat/completions) e a chave dele. Os agentes rodam direto nele, sem Claude Code nem Codex, e cada um usa um dos modelos que você marcar.',
+              'An address in OpenAI’s format (/chat/completions) and its key. Agents run straight on it, with no Claude Code or Codex, each on one of the models you tick.'
+            )}
+          </p>
+          <div className="endpoint__presets">
+            {ENDPOINT_PRESETS.map((p) => (
+              <button key={p.label} className={`chip ${url === p.url ? 'is-on' : ''}`} onClick={() => setUrl(p.url)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <label className="field">
+            <span className="field__label">{L('Endereço', 'Address')}</span>
+            <input value={url} spellCheck={false} placeholder="https://openrouter.ai/api/v1" onChange={(e) => setUrl(e.target.value)} />
+          </label>
+          <label className="field">
+            <span className="field__label">{L('Chave', 'Key')}</span>
+            <input type="password" value={key} autoComplete="off" spellCheck={false} placeholder={saved?.hasKey ? L('Salva. Digite pra trocar.', 'Saved. Type to replace it.') : L('Opcional num servidor local', 'Optional for a local server')} onChange={(e) => setKey(e.target.value)} />
+          </label>
+          <div className="endpoint__actions">
+            <button className="btn btn--sm" disabled={!url.trim() || busy !== null} onClick={() => void probe()}>
+              {busy === 'probe' ? L('Buscando…', 'Fetching…') : L('Buscar os modelos', 'Fetch the models')}
+            </button>
+            {saved && (
+              <button className="btn btn--ghost btn--sm" disabled={busy !== null} onClick={() => void setEndpoint('', []).then(() => (setUrl(''), setListed(null), setChosen([]), setOpen(false)))}>
+                {L('Remover o endpoint', 'Remove the endpoint')}
+              </button>
+            )}
+          </div>
+          {problem && <p className="hint hint--warn">{problem}</p>}
+          {listed && listed.length > 0 && (
+            <>
+              <div className="endpoint__head">
+                <span className="field__label">{L(`Modelos que os agentes podem usar (${chosen.length} de ${listed.length})`, `Models the agents may use (${chosen.length} of ${listed.length})`)}</span>
+                {listed.length > 8 && <input className="endpoint__filter" value={filter} placeholder={L('Filtrar…', 'Filter…')} onChange={(e) => setFilter(e.target.value)} />}
+              </div>
+              <div className="endpoint__models" role="group" aria-label={L('Modelos', 'Models')}>
+                {shown.map((m) => (
+                  <label key={m} className="endpoint__model">
+                    <input type="checkbox" checked={chosen.includes(m)} onChange={() => flip(m)} />
+                    <span>{m}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must handle tool calls: that’s how an agent asks another, asks you and uses connectors.')}</p>
+            </>
+          )}
+          <div className="endpoint__actions">
+            <button className="btn btn--primary btn--sm" disabled={!url.trim() || busy !== null || (listed !== null && chosen.length === 0)} onClick={() => void save()}>
+              {busy === 'save' ? L('Salvando…', 'Saving…') : L('Salvar', 'Save')}
+            </button>
+            <button className="btn btn--ghost btn--sm" onClick={() => setOpen(false)}>
+              {L('Cancelar', 'Cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+      {testing && !open && (
+        <div className="harness__body">
+          <div className="harness__test">
+            <ModelPicker value={model} onChange={setModel} engines={['endpoint']} />
+            <button className="btn btn--primary btn--sm" disabled={!modelInfo(model)?.id} onClick={() => void testEngine(model).then(setResult, (e: unknown) => setResult({ ok: false, message: e instanceof Error ? e.message : String(e) }))}>
+              {L('Mandar teste', 'Send a test')}
+            </button>
+          </div>
+          {result && (result.ok ? <p className="note note--ok"><Icon name="check" size={14} /> {`${L('Funcionando.', 'Working.')} ${result.message}`}</p> : <p className="hint hint--warn">{result.message}</p>)}
         </div>
       )}
     </div>

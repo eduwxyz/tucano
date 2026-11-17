@@ -7,7 +7,7 @@ import { L } from '../shared/lang'
 import type { EngineId, EngineStatus } from '../shared/types'
 
 // The harnesses the app can run agents on; one added later is listed as coming until then.
-export const RUNNABLE: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline', 'hermes']
+export const RUNNABLE: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline', 'hermes', 'endpoint']
 
 // Off for a harness pointed at a gateway: its own telemetry and error reports
 // would go to Anthropic or OpenAI, around the gateway.
@@ -25,6 +25,21 @@ export function withChoice(engines: Record<EngineId, EngineStatus>, chosen: Engi
     else if (chosen && !chosen.includes(e)) out[e] = { ...st, loggedIn: false, off: true }
   }
   return out
+}
+
+// An endpoint's address as people paste it: with or without a trailing slash, or the whole
+// …/chat/completions they copied from the docs. What stays is the base the paths go after.
+export function cleanEndpoint(raw: string): string {
+  const s = raw.trim().replace(/\/+$/, '').replace(/\/(chat\/completions|completions|models)$/i, '')
+  let u: URL
+  try {
+    u = new URL(s)
+  } catch {
+    throw new Error(L('Esse endereço não parece uma URL. Algo como https://openrouter.ai/api/v1.', "That address doesn't look like a URL. Something like https://openrouter.ai/api/v1."))
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(L('O endereço precisa começar com http:// ou https://.', 'The address must start with http:// or https://.'))
+  if (u.username || u.password) throw new Error(L('Ponha a chave no campo dela, não no endereço.', 'Put the key in its own field, not in the address.'))
+  return s
 }
 
 // The models a gateway lists (GET …/models, the same on both APIs).

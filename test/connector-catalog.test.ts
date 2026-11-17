@@ -4,7 +4,7 @@ import { LOGOS } from '../src/renderer/src/connector-logos'
 
 describe('the connector catalog', () => {
   it('lists each service once, at an https address, in a category that exists', () => {
-    expect(CATALOG.length).toBe(49)
+    expect(CATALOG.length).toBe(50)
     expect(new Set(CATALOG.map((c) => c.id)).size).toBe(CATALOG.length)
     const remote = CATALOG.filter((c) => !c.local)
     expect(new Set(remote.map((c) => c.url)).size).toBe(remote.length)
@@ -37,6 +37,7 @@ describe('the connector catalog', () => {
     expect(searchCatalog('programacao').length).toBeGreaterThan(5) // the category's name
     expect(searchCatalog('cartoes banco').map((c) => c.id)).toEqual(['mofi'])
     expect(searchCatalog('paginas markdown').map((c) => c.id)).toEqual(['keenable'])
+    expect(searchCatalog('edge functions').map((c) => c.id)).toEqual(['supabase'])
     expect(searchCatalog('zzz')).toEqual([])
     expect(searchCatalog('  ')).toHaveLength(CATALOG.length)
   })
@@ -45,6 +46,7 @@ describe('the connector catalog', () => {
     const get = (id: string) => CATALOG.find((c) => c.id === id)!
     expect(catalogInput(get('linear'))).toEqual({ name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth' })
     expect(catalogInput(get('mofi'))).toEqual({ name: 'Mofi', kind: 'remote', url: 'https://omofi.com.br/api/mcp', auth: 'oauth' }) // the server, not its page at /mcp
+    expect(catalogInput(get('supabase'))).toEqual({ name: 'Supabase', kind: 'remote', url: 'https://mcp.supabase.com/mcp', auth: 'oauth' })
     expect(catalogInput(get('keenable'))).toEqual({ name: 'Keenable', kind: 'remote', url: 'https://api.keenable.ai/mcp-public?keenable_title=tucano', auth: 'none' }) // keyless, no sign-in
     expect(catalogInput(get('github'), { token: ' github_pat_1 ' })).toMatchObject({ url: 'https://api.githubcopilot.com/mcp/', auth: 'token', token: 'github_pat_1' })
     expect(catalogInput(get('dynatrace'), { environment: 'https://ABC12345.apps.dynatrace.com/ui', token: 't' }).url).toBe(

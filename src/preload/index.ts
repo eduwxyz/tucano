@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('tucano', {
     }
   },
   connect: (): void => ipcRenderer.send('core:connect'),
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
+  pickFolder: (o?: { start?: string; hidden?: boolean }): Promise<string | null> => ipcRenderer.invoke('pick-folder', o) as Promise<string | null>,
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
   // A click on a notification opens its conversation, and the thread it's about.
@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('tucano', {
     open: (id: string): void => ipcRenderer.send('servers:open', id),
     local: (): void => ipcRenderer.send('servers:local'),
     forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
+    setNode: (id: string, on: boolean): void => ipcRenderer.send('servers:node', id, on),
     // Returns how to stop listening: each screen showing the list listens while it's open.
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()

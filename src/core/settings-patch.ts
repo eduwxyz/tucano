@@ -38,6 +38,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   onboarding: { kind: 'object', max: 2_000, nullable: true },
   folded: { kind: 'array', max: 200_000, nullable: true },
   sounds: { kind: 'boolean', max: 10, nullable: true },
+  stepsOpen: { kind: 'boolean', max: 10, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true }
 }
 

@@ -8,7 +8,7 @@ import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCa
 import type { ToolDef } from './gateway'
 import { guideIndex } from './guide'
 import { SCREENS } from '../shared/screens'
-import { bossOf, loops, MAX_LINE, overLine, rankOf } from '../shared/org'
+import { bossOf, loops } from '../shared/org'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
 
@@ -54,7 +54,8 @@ export function withoutBoss(t: ToolDef): ToolDef {
 }
 
 // `responde_a`: the agent `id` will answer to ('' for no one), by @handle or name, checked against the
-// org chart's rules (src/shared/org.ts). `id` may be one not made yet ('' for a new agent).
+// org chart's rules (src/shared/org.ts). `id` may be one not made yet ('' for a new agent). An entry point
+// (Agent.entry) answers to no agent, and only the person chose it, so it isn't given a boss here.
 export function bossArg(raw: unknown, agents: Agent[], id: string): { id?: string; error?: string } {
   const h = String(raw ?? '').trim().replace(/^@/, '')
   if (!h || NOBODY.test(h)) return { id: '' }
@@ -62,12 +63,13 @@ export function bossArg(raw: unknown, agents: Agent[], id: string): { id?: strin
   const boss = agents.find((a) => a.handle.toLowerCase() === key) ?? agents.find((a) => a.name.toLowerCase() === key)
   if (!boss || boss.archived || boss.kind === 'tuca') return { error: L(`Não existe o agente "${h}" pra ser o chefe. Use um @handle da lista do time, ou "ninguém".`, `There's no agent "${h}" to answer to. Use a @handle from the team list, or "ninguém".`) }
   if (id && loops(agents, id, boss.id)) return { error: L(`${boss.name} está abaixo dele (ou é ele mesmo): isso fecharia um ciclo.`, `${boss.name} is below it (or is itself): that would close a loop.`) }
-  if (overLine(agents, id, boss.id)) return { error: L(`A linha passaria de ${MAX_LINE} agentes do topo até a base. Ponha-o sob alguém mais acima.`, `The line would go past ${MAX_LINE} agents from top to bottom. Put it under someone higher up.`) }
+  const me = id ? agents.find((a) => a.id === id) : undefined
+  if (me?.entry) return { error: L(`${me.name} é um ponto de entrada, escolhido pela pessoa: não responde a nenhum agente. Pra mudar isso, ela tira na página dele.`, `${me.name} is an entry point, chosen by the person: it answers to no agent. To change that, they turn it off on its page.`) }
   return { id: boss.id }
 }
 
 // A team's card: each `reportsToName` (another agent of the same card) must exist there, and the whole
-// tree, with the agents that exist, must close no loop and keep every line within MAX_LINE.
+// tree, with the agents that exist, must close no loop.
 function teamTreeError(agents: Agent[], drafts: AgentDraft[]): string | undefined {
   const key = (n: string): string => n.trim().replace(/^@/, '').toLowerCase()
   const ids = drafts.map((_, i) => `new:${i}`)
@@ -85,22 +87,26 @@ function teamTreeError(agents: Agent[], drafts: AgentDraft[]): string | undefine
       if (seen.has(up)) return L(`${d.name} entraria num ciclo de quem responde a quem.`, `${d.name} would be in a loop of who answers to whom.`)
       seen.add(up)
     }
-    if (rankOf(nodes, ids[i]!) > MAX_LINE) return L(`A linha de ${d.name} passaria de ${MAX_LINE} agentes do topo até a base.`, `${d.name}'s line would go past ${MAX_LINE} agents from top to bottom.`)
   }
   return undefined
 }
 
-// The org chart as an agent that organizes it reads it: who answers to whom, and who answers to no one.
+// The org chart as an agent that organizes it reads it: who answers to whom, who answers to no one,
+// and the entry points the person chose (src/shared/org.ts).
 export function orgLines(agents: Agent[]): string {
   const live = agents.filter((a) => !a.archived && a.kind !== 'tuca')
-  return live.map((a) => `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''}) → ${bossOf(live, a) ? L(`responde a @${bossOf(live, a)!.handle}`, `answers to @${bossOf(live, a)!.handle}`) : L('responde só à pessoa', 'answers to the person only')}${a.manager ? L(' · organiza o time', ' · organizes the team') : ''}`).join('\n')
+  const boss = (a: Agent): string => {
+    const b = bossOf(live, a)
+    return b ? L(`responde a @${b.handle}`, `answers to @${b.handle}`) : L('responde só à pessoa', 'answers to the person only')
+  }
+  return live.map((a) => `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''}) → ${boss(a)}${a.entry && !bossOf(live, a) ? L(' · ponto de entrada', ' · entry point') : ''}${a.manager ? L(' · organiza o time', ' · organizes the team') : ''}`).join('\n')
 }
 
 // How an agent that organizes the team (or the Tuca) proposes the org chart. Stable: the chart itself is in builderSection.
 export function organizerGuide(me: string): string {
   return L(
-    `## O organograma\nVocê pode propor a quem cada agente responde, num card que ${me} aplica: propor_ajuste com responde_a (o @handle do novo chefe, ou "ninguém" pra ele responder só a ${me}); ao criar, responde_a em propor_agente e em cada agente de propor_time (aí também vale o nome de outro agente do mesmo time). Quem está acima passa trabalho a quem está abaixo e recebe a resposta de volta; quem responde ao mesmo chefe pode pedir trabalho um ao outro. Uma linha tem no máximo ${MAX_LINE} agentes do topo até a base, e ninguém responde a quem está abaixo dele. Pra reorganizar vários de uma vez, mande um propor_ajuste por agente: ${me} aplica um por um ou todos. Explique em motivo o porquê de cada mudança.`,
-    `## The org chart\nYou can propose whom each agent answers to, as a card ${me} applies: propor_ajuste with responde_a (the new boss's @handle, or "ninguém" for it to answer to ${me} only); when creating, responde_a in propor_agente and in each agent of propor_time (there the name of another agent of the same team works too). Whoever is above hands work to those below and gets the answer back; those answering to the same boss can ask each other for work. A line holds at most ${MAX_LINE} agents from top to bottom, and no one answers to someone below it. To reorganize several at once, send one propor_ajuste per agent: ${me} applies them one by one or all together. Say why in motivo for each change.`
+    `## O organograma\nVocê pode propor a quem cada agente responde, num card que ${me} aplica: propor_ajuste com responde_a (o @handle do novo chefe, ou "ninguém" pra ele responder só a ${me}); ao criar, responde_a em propor_agente e em cada agente de propor_time (aí também vale o nome de outro agente do mesmo time). Quem está acima passa trabalho a quem está abaixo e recebe a resposta de volta; quem responde ao mesmo chefe pode pedir trabalho um ao outro. Cada árvore é um setor, com quem está no topo como chefe; sob um ponto de entrada, cada time abaixo dele é um setor, e a outro setor só os chefes pedem. Ninguém responde a quem está abaixo dele, e um ponto de entrada não responde a nenhum agente (só ${me} muda isso). Pra reorganizar vários de uma vez, mande um propor_ajuste por agente: ${me} aplica um por um ou todos. Explique em motivo o porquê de cada mudança.`,
+    `## The org chart\nYou can propose whom each agent answers to, as a card ${me} applies: propor_ajuste with responde_a (the new boss's @handle, or "ninguém" for it to answer to ${me} only); when creating, responde_a in propor_agente and in each agent of propor_time (there the name of another agent of the same team works too). Whoever is above hands work to those below and gets the answer back; those answering to the same boss can ask each other for work. Each tree is a sector, headed by its top; under an entry point, each team below it is a sector, and only heads ask another sector. No one answers to someone below it, and an entry point answers to no agent (only ${me} changes that). To reorganize several at once, send one propor_ajuste per agent: ${me} applies them one by one or all together. Say why in motivo for each change.`
   )
 }
 const EFFORTS: Effort[] = ['low', 'medium', 'high']
@@ -120,7 +126,7 @@ export const tucaInstructions = (): string =>
       'Pra explicar:',
       '- Antes de explicar como algo funciona, leia a página certa do guia com ler_guia. Explique só o que o guia diz; se ele não cobre, diga que não sabe em vez de inventar uma tela ou um botão.',
       '- Responda direto, em poucos passos numerados, com os nomes das telas e dos botões como aparecem no app.',
-      '- Quando falar de uma tela, ponha um link pra ela, do jeito da lista "Telas que dá pra abrir": [Abrir Conectores](#abrir/conectores). Vira um botão que leva lá.',
+      '- Quando falar de uma tela, ponha um link pra ela, do jeito da lista "Telas que dá pra abrir": [Abrir Conectores](#abrir/connectors). Vira um botão que leva lá.',
       '',
       'Pra resolver um problema:',
       '- Olhe primeiro com ver_estado (a área que importa) e diga o que achou: o que está errado, por quê, e o próximo passo.',
@@ -143,7 +149,7 @@ export const tucaInstructions = (): string =>
       'Sua voz:',
       '- Fale como um colega competente, na primeira pessoa e em português do dia a dia: "pra", não "para"; "a gente", não "nós".',
       '- Frases curtas, uma ideia em cada. Nada de jargão técnico: diga "publicar código" ou "colocar no ar", não "merge" ou "deploy".',
-      '- Notícia ruim vem sempre com o próximo passo ("O Linear está pedindo login de novo. [Abrir Conectores](#abrir/conectores) e clique em Entrar.").',
+      '- Notícia ruim vem sempre com o próximo passo ("O Linear está pedindo login de novo. [Abrir Conectores](#abrir/connectors) e clique em Entrar.").',
       '- Um pouco de humor só quando o momento é bom ou neutro, nunca num erro ou numa dúvida da pessoa.'
     ].join('\n'),
     [
@@ -158,7 +164,7 @@ export const tucaInstructions = (): string =>
       'To explain:',
       "- Before explaining how something works, read the right page of the guide with ler_guia. Explain only what the guide says; if it doesn't cover it, say you don't know instead of making up a screen or a button.",
       '- Answer directly, in a few numbered steps, with the names of screens and buttons as the app shows them.',
-      '- When you mention a screen, link to it the way the "Screens you can open" list shows: [Open Connectors](#abrir/conectores). It becomes a button that goes there.',
+      '- When you mention a screen, link to it the way the "Screens you can open" list shows: [Open Connectors](#abrir/connectors). It becomes a button that goes there.',
       '',
       'To solve a problem:',
       "- Look first with ver_estado (the area that matters) and say what you found: what's wrong, why, and the next step.",
@@ -181,7 +187,7 @@ export const tucaInstructions = (): string =>
       'Your voice:',
       '- Talk like a capable colleague: first person, plain everyday English, contractions welcome.',
       '- Short sentences, one idea each. No technical jargon: say "publish code" or "put it live", not "merge" or "deploy".',
-      '- Bad news always comes with the next step ("Linear is asking you to sign in again. [Open Connectors](#abrir/conectores) and click Sign in.").',
+      '- Bad news always comes with the next step ("Linear is asking you to sign in again. [Open Connectors](#abrir/connectors) and click Sign in.").',
       "- A bit of humor only when the moment is good or neutral, never in an error or when the person is unsure."
     ].join('\n')
   )
@@ -192,8 +198,14 @@ export const OLD_TUCA_ROLES = ['Monta agentes', 'Builds agents']
 const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.', "You are Tuca, the one who builds this team's agents."]
 
 // Instructions a Tuca was made with, word for word (sha256, base64url), that came out since: one
-// still on them gets the ones of now. The latest: before he sent several proposals at once.
-const OLD_TUCA_INSTRUCTIONS = ['GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY', 't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c']
+// still on them gets the ones of now. The latest two: the screen links, which taught a Portuguese id
+// (#abrir/conectores) in an English workspace.
+const OLD_TUCA_INSTRUCTIONS = [
+  'GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY',
+  't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c',
+  'zOZsXlGeX6l-k6i5rOsHmmyszmPv3eiLXfUbCpcLKIk',
+  'aLarfQqst-0nlbaRsEOj74KpMyK7c1Sz6U0yLl8Ca1w'
+]
 
 // A Tuca made before he helped with the app (or since): its role and instructions, as they come now.
 export function tucaUpToDate(tuca: Agent): Agent | undefined {
@@ -209,7 +221,7 @@ export function helperSection(): string {
   const screens = Object.entries(SCREENS).map(([slug, s]) => `- [${L('Abrir', 'Open')} ${s.label()}](#abrir/${slug})`)
   return [
     `${L('## O guia do Tucano (leia com ler_guia)', "## Tucano's guide (read with ler_guia)")}\n${guideIndex()}`,
-    `${L('## Telas que dá pra abrir (com um link assim na resposta)', '## Screens you can open (with a link like this in the reply)')}\n${screens.join('\n')}\n- [${L('Abrir o perfil de alguém', "Open someone's profile")}](#abrir/agente/<handle>)`
+    `${L('## Telas que dá pra abrir (com um link assim na resposta)', '## Screens you can open (with a link like this in the reply)')}\n${screens.join('\n')}\n- [${L('Abrir o perfil de alguém', "Open someone's profile")}](#abrir/agent/<handle>)`
   ].join('\n\n')
 }
 
@@ -305,7 +317,7 @@ export function availableModels(s: Pick<Settings, 'engines'>, listed: Partial<Re
   const plan = [...MODELS.filter((m) => m.engine !== 'codex' || !codex), ...(codex ?? []).map((m) => ({ ...m, id: codexValue(m.id) }))]
     .filter((m) => s.engines[m.engine].loggedIn && s.engines[m.engine].route !== 'gateway')
     .map((m) => ({ id: m.id, label: `${ENGINES[m.engine].label} · ${m.label}` }))
-  const own = (['opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline', 'hermes'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
+  const own = (['opencode', 'pi', 'antigravity', 'cursor', 'grok', 'cline', 'hermes', 'endpoint'] as const).flatMap((e) => (s.engines[e]?.loggedIn ? (listed[e] ?? []).slice(0, 12).map((name) => ({ id: `${e}:${name}`, label: `${ENGINES[e].label} · ${name}` })) : []))
   return [...plan, ...own]
 }
 

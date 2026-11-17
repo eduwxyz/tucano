@@ -18,4 +18,4 @@ O Tuca propõe o organograma sem precisar ligar nada, inclusive ao criar:
 - num time, um agente pode responder a outro do mesmo time.
 
 ## Regras
-As de sempre: um agente responde a um só, uma linha tem no máximo três agentes, ninguém responde a quem está abaixo dele, e o Tuca não entra no organograma. Se o time mudou desde a proposta e ela não cabe mais, o cartão avisa em vez de aplicar.
+As de sempre: um agente responde a um só, ninguém responde a quem está abaixo dele, e o Tuca não entra no organograma. Um ponto de entrada, que você escolhe, não responde a nenhum agente: ele não propõe chefe pra ele. Se o time mudou desde a proposta e ela não cabe mais, o cartão avisa em vez de aplicar.

@@ -39,11 +39,15 @@ describe('propor_ajuste with responde_a', () => {
     expect(proposalFrom('propor_ajuste', { agente: 'theo', responde_a: 'lia' }, { ...ctx, organizes: true }).error).toContain('Nada mudaria')
   })
 
-  it('refuses a loop, a line past three, and an agent that does not exist', () => {
+  it('refuses a loop, a boss for an entry point, and an agent that does not exist', () => {
     expect(bossArg('theo', team, 'a1').error).toContain('ciclo')
+    // Lines have no length limit any more (main's sectors): deep under deep is fine.
     const deep = [agent('t', 'top'), agent('m', 'mid', { reportsTo: 't' }), agent('b', 'bot', { reportsTo: 'm' }), agent('n', 'new')]
-    expect(bossArg('bot', deep, 'n').error).toContain('3 agentes')
-    expect(bossArg('mid', deep, 'n').id).toBe('m')
+    expect(bossArg('bot', deep, 'n').id).toBe('b')
+    // An entry point is the person's choice: it answers to no agent, so it isn't given a boss here.
+    const entry = [...team, agent('e', 'eva', { entry: true })]
+    expect(bossArg('lia', entry, 'e').error).toContain('ponto de entrada')
+    expect(bossArg('eva', entry, 'a3').id).toBe('e')
     expect(bossArg('zeca', team, 'a3').error).toContain('Não existe o agente "zeca"')
   })
 })
@@ -62,9 +66,9 @@ describe('proposing new agents in the chart', () => {
     expect(r.proposal).toMatchObject({ kind: 'team', agents: [{ name: 'Duda', reportsTo: 'a1' }, { name: 'Caio', reportsToName: 'Duda' }] })
     const loop = teamFrom({ agentes: [one('Duda', { responde_a: 'Caio' }), one('Caio', { responde_a: 'Duda' })] }, { ...base, agents: team, organizes: true, channels: [] })
     expect(loop.error).toContain('ciclo')
-    // Theo is already under Lia: Duda under Theo, and Caio under Duda, makes four in a line.
+    // Theo is already under Lia: Duda under Theo, and Caio under Duda, is four in a line, which is fine now.
     const long = teamFrom({ agentes: [one('Duda', { responde_a: 'theo' }), one('Caio', { responde_a: 'Duda' })] }, { ...base, agents: team, organizes: true, channels: [] })
-    expect(long.error).toContain('3 agentes')
+    expect(long.proposal).toMatchObject({ agents: [{ name: 'Duda', reportsTo: 'a2' }, { name: 'Caio', reportsToName: 'Duda' }] })
     expect(teamFrom({ agentes: [one('Duda', { responde_a: 'Zeca' }), one('Caio')] }, { ...base, agents: team, organizes: true, channels: [] }).error).toContain('não existe "Zeca"')
   })
 })

@@ -76,6 +76,24 @@ export const permits = (cls: ToolClass, grant: GrantLevel | undefined): boolean 
 
 const RANK: Record<ToolClass, number> = { read: 0, write: 1, sensitive: 2 }
 const strictest = (classes: ToolClass[]): ToolClass => classes.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), 'read')
+export const stricter = (a: ToolClass, b: ToolClass | undefined): ToolClass => (b && RANK[b] > RANK[a] ? b : a)
+
+// What a server may say about its own tools, in a tool's _meta, that only ever makes it stricter here:
+// the class it can't go below, and that it's high risk. A node (core/node-server.ts) says both, so the
+// class of a command on the person's computer, or the high-risk mark its owner set there, can't be
+// loosened on the server that calls it.
+export const META_FLOOR = 'tucano/floor'
+export const META_HIGH_RISK = 'tucano/highRisk'
+// A node's own tools, whatever the node says: a command is at least a write (and is judged as a command),
+// writing a file is a write, and a risky click goes through the approvals as a browser or app action.
+const NODE_FLOORS: Record<string, ToolClass> = { node_bash: 'write', node_write_file: 'write', node_edit_file: 'write', node_approved: 'sensitive' }
+export function floorOf(tool: { name: string; _meta?: Record<string, unknown> }): ToolClass | undefined {
+  const said = tool._meta?.[META_FLOOR]
+  const meta = said === 'read' || said === 'write' || said === 'sensitive' ? said : undefined
+  const own = NODE_FLOORS[tool.name]
+  return own ? stricter(own, meta) : meta
+}
+export const saysHighRisk = (tool: { _meta?: Record<string, unknown> }): boolean => tool._meta?.[META_HIGH_RISK] === true
 
 // Words that run code or a workflow: inside a Composio call they're sensitive, like the runners themselves.
 const RUNS_CODE = new Set(['execute', 'exec', 'run', 'bash', 'shell', 'eval', 'script'])
@@ -83,6 +101,11 @@ const RUNS_CODE = new Set(['execute', 'exec', 'run', 'bash', 'shell', 'eval', 's
 const CHANGE_WORDS = new Set(['post', 'create', 'update', 'set', 'add', 'edit', 'modify', 'write', 'put', 'patch', 'insert', 'upload', 'invite', 'kick', 'archive', 'move', 'rename', 'mark', 'star', 'pin', 'react', 'join', 'leave', 'close', 'open', 'reply', 'forward', 'share', 'approve', 'cancel', 'subscribe', 'unsubscribe', 'trash', 'restore', 'save', 'start', 'stop'])
 // Query keys whose value is the operation itself (?action=create).
 const OPERATION_KEYS = new Set(['action', 'method', '_method', 'op', 'operation', 'do', 'cmd', 'command', 'mode', 'verb'])
+
+// Remote code tools called directly: they run anything, so a call to them is never allowed for good.
+// A node's risky click or key (node_approved) is never allowed for good either: each one asks, as on this computer.
+const RUNS_CODE_DIRECTLY = new Set(['composio_remote_workbench', 'composio_remote_bash_tool', 'node_approved'])
+export const neverAllowedForGood = (toolName: string): boolean => RUNS_CODE_DIRECTLY.has(toolName.toLowerCase())
 
 // A Composio tool inside a call that can't be allowed for good: Composio's own (a runner inside a
 // runner) or one that runs code.
@@ -124,6 +147,16 @@ export function callClass(tool: { name: string; cls: ToolClass }, connectorUrl: 
   return cls === 'read' && 'body' in args && args['body'] !== undefined && args['body'] !== null ? 'write' : cls
 }
 
+// An item that names an account is allowed for good for that account only: "<connector>:GMAIL_SEND_EMAIL@work".
+// A slug never holds "@", so this key can't be one saved before accounts existed.
+const ACCOUNT_SEPARATOR = '@'
+const ruleKey = (connectorId: string, slug: string, account: string | undefined): string => `${connectorId}:${slug.toUpperCase()}${account ? ACCOUNT_SEPARATOR + account : ''}`
+export const ruleTool = (rule: string): { tool: string; account?: string } => {
+  const named = rule.slice(rule.indexOf(':') + 1)
+  const at = named.indexOf(ACCOUNT_SEPARATOR)
+  return at < 0 ? { tool: named } : { tool: named.slice(0, at), account: named.slice(at + 1) }
+}
+
 // "Always allow" on a runner's call: one rule per inner tool that asked for approval, keyed by the
 // connector and that tool's slug ("<connector>:GMAIL_REPLY_TO_THREAD"), never by the runner. Undefined
 // when any of them can't be allowed for good: a raw request, a call not understood, Composio's own
@@ -134,7 +167,7 @@ export function runnerRules(connectorId: string, toolName: string, args: Record<
   if (!actions) return undefined
   const asking = actions.filter((a) => classifyAction(a) === 'sensitive')
   if (!asking.length || asking.some((a) => a.kind !== 'tool' || neverForGood(a.slug))) return undefined
-  return [...new Set(asking.map((a) => `${connectorId}:${(a as { slug: string }).slug.toUpperCase()}`))]
+  return [...new Set(asking.map((a) => ruleKey(connectorId, (a as { slug: string }).slug, (a as { account?: string }).account)))]
 }
 
 // A runner's call runs without asking only when every inner tool that would ask is allowed for good.
