@@ -90,6 +90,7 @@ export interface Agent {
   actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
   autonomy?: Autonomy // how far it goes on its own (src/shared/actions.ts); unset: Settings' level
   outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
+  hooks?: 'off' // native turn hooks: off for this agent; unset: inherit Settings.hooks
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
@@ -192,6 +193,7 @@ export interface Run {
   askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
+  hooks?: HookRun[] // native turn hooks that ran for this reply (opt-in; never fails the turn)
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
@@ -493,6 +495,39 @@ export interface LocalInfo {
   download?: string // on a server, where the file isn't on this computer: to save it here
 }
 
+// A command the app runs at turn-start / turn-end, with JSON on stdin. Off until enabled.
+export interface HookSettings {
+  enabled: boolean
+  command: string // absolute path; no shell
+  args?: string[] // extra argv after the command
+  timeoutMs?: number // default 2000, capped
+  env?: Record<string, string> // only these extra keys go to the command (no secret inheritance)
+  captureOwner?: boolean // set TUCANO_CAPTURE_OWNER / AI_MEMORY_CAPTURE_OWNER on the command
+}
+
+export type HookEventName = 'turn-start' | 'turn-end'
+
+export interface HookEvent {
+  version: 1
+  event: HookEventName
+  session: string // Tucano's turn id (`run-<message-id>`), for an external store's session_id
+  agent: { id: string; handle: string; name: string; engine: EngineId; model: string }
+  conversation: { id: string; kind: Conversation['kind']; name: string; threadId: string | null }
+  message: { id: string; text: string; author: 'person' | 'agent' | 'routine' }
+  reply?: { text: string; ms: number; tokens?: { input: number; output: number } }
+  tools: { name: string; ok: boolean }[]
+  cwd: string
+  captureOwner?: string
+}
+
+export interface HookRun {
+  event: HookEventName
+  command: string
+  ms: number
+  exit: number | null
+  error?: string
+}
+
 export interface EndpointSettings {
   baseUrl: string // e.g. https://openrouter.ai/api/v1, http://localhost:11434/v1
   models: string[] // the ones the agents may run on
@@ -526,6 +561,8 @@ export interface Settings {
   actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
   autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)
   outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
+  // Opt-in command on each turn (src/core/hooks.ts). Default off: harness hooks stay out of isolated homes.
+  hooks?: HookSettings
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app

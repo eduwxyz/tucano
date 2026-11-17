@@ -107,6 +107,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   nodeLog: { limit: 'n?' },
   engineModels: { engine: 's' },
   testEngine: { model: 's' },
+  testTurnHook: {},
   saveSkill: { skill: 'o' },
   localSkills: {},
   linkSkill: { source: 's', agents: 'S' },

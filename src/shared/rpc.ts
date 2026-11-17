@@ -137,6 +137,7 @@ export interface Api {
   nodeLog(p: { limit?: number }): Promise<NodeLogEntry[]> // what the server ran here, newest first (up to 500)
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
+  testTurnHook(): Promise<{ ok: boolean; message: string; seconds?: number }> // sample payload on stdin of Settings.hooks.command
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
   localSkills(): LocalSkill[] // the skills of the user's Claude Code, its plugins and Codex
   linkSkill(p: { source: string; agents: string[] }): Skill

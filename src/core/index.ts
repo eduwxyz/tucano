@@ -59,6 +59,7 @@ import { Skills } from './skills'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
 import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
+import { cleanAgentHooks, cleanHooks, hooksPatchError, runTurnHook, sampleHookEvent, withCaptureOwner } from './hooks'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
@@ -1646,6 +1647,9 @@ const api: Handlers = {
     clean.actionRules = cleanRules(clean.actionRules)
     if (!isAutonomy(clean.autonomy)) delete clean.autonomy
     if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
+    const hooks = cleanAgentHooks(clean.hooks)
+    if (hooks) clean.hooks = hooks
+    else delete clean.hooks
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
@@ -2091,6 +2095,16 @@ const api: Handlers = {
   },
 
   // A real question through the chosen engine and model: what fails here would fail every reply.
+  testTurnHook: async () => {
+    const h = settings().hooks
+    const err = hooksPatchError(h)
+    if (err) return { ok: false, message: err }
+    if (!h?.enabled || !h.command) return { ok: false, message: L('Ligue o gancho e informe o comando antes de testar.', 'Turn the hook on and set the command before testing.') }
+    const run = await runTurnHook(h, withCaptureOwner(h, sampleHookEvent()))
+    if (run.exit === 0) return { ok: true, message: L(`Gancho ok (${run.ms} ms).`, `Hook ok (${run.ms} ms).`), seconds: run.ms / 1000 }
+    return { ok: false, message: run.error || L(`Saiu com código ${run.exit}.`, `Exited with code ${run.exit}.`) }
+  },
+
   testEngine: async ({ model }) => {
     await enginesReady
     const m = modelInfo(model)
@@ -2149,6 +2163,13 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    if (patch.hooks !== undefined) {
+      const whyHooks = hooksPatchError(patch.hooks)
+      if (whyHooks) throw new Error(whyHooks)
+      const hooks = cleanHooks(patch.hooks)
+      if (hooks) patch.hooks = hooks
+      else delete patch.hooks
+    }
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
