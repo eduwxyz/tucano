@@ -41,7 +41,8 @@ describe("an agent's page a member only looks at", () => {
   })
 
   it('has no "takes effect right away" and no "authorize in the browser"', () => {
-    for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).toContain('Muda na hora, sem precisar salvar.')
+    // Everything saves by itself now, so no one is told "no need to save" any more.
+    for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).not.toContain('Muda na hora')
     expect(page('ferramentas', 'ana')).toContain('Autorizar no navegador')
     for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'bia')).not.toContain('Muda na hora')
     const tools = page('ferramentas', 'bia')

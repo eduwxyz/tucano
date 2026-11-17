@@ -13261,3 +13261,391 @@ button.agent-card__now:hover {
     display: none;
   }
 }
+
+/* The "?" by a title: what the paragraph under it used to say. */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  font-weight: 400;
+}
+.help-tip > summary {
+  list-style: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.help-tip > summary::-webkit-details-marker {
+  display: none;
+}
+.help-tip > summary:hover,
+.help-tip[open] > summary {
+  color: var(--text);
+  border-color: var(--text-2);
+}
+.help-tip > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+.help-tip__pop {
+  position: absolute;
+  left: 24px;
+  top: -9px;
+  z-index: 25;
+  width: max-content;
+  max-width: min(340px, 70vw);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--toast-bg);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: normal;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
+}
+.help-tip__pop p {
+  margin: 0;
+}
+.help-tip__pop p + p {
+  margin-top: 6px;
+}
+/* By a row's name (long, near the right), it opens below and to the left. */
+.lrow .help-tip__pop {
+  left: auto;
+  right: -10px;
+  top: 24px;
+}
+
+/* ---------- an agent's page ---------- */
+.agent-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+.agent-head > .avatar {
+  flex: none;
+}
+.agent-head__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-head__sub {
+  flex: none;
+  font-family: var(--font);
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.agent-head__model,
+.agent-head__usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.agent-head__usage .budget {
+  width: 44px;
+  height: 4px;
+}
+.save-state {
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  animation: fade var(--dur-fast) var(--ease-out) backwards;
+}
+.save-state.is-saved {
+  color: var(--ok);
+}
+.save-state.is-warn {
+  color: var(--warn);
+}
+.save-state.is-error {
+  color: var(--danger);
+  white-space: normal;
+  max-width: 320px;
+}
+.agent-head__more {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--text-2);
+  letter-spacing: 0.08em;
+}
+.agent-head__more:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.agent-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  max-width: 760px;
+}
+/* A section: its title (and "?"), then its rows in one box. */
+.lgroup__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+.lgroup__head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.lgroup__aside {
+  margin-left: auto;
+}
+.lgroup__box {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.lgroup__box > * + * {
+  border-top: 1px solid var(--border);
+}
+.lgroup__pad {
+  padding: 14px;
+}
+.lgroup__bare > .checks,
+.lgroup__bare > .skill-filter {
+  margin-top: 4px;
+}
+.lrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 14px;
+  box-sizing: border-box;
+}
+.lrow__label {
+  flex: 1;
+  min-width: 0;
+}
+.lrow__name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.lrow__sub {
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+.lrow__warn {
+  color: var(--warn);
+}
+.lrow__warn .link {
+  color: inherit;
+}
+.lrow__ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 60%;
+}
+.lrow__ctl .select {
+  width: 220px;
+}
+.lrow__ctl .select__trigger {
+  height: 32px;
+  font-size: 13px;
+}
+.lrow__ctl .input--short {
+  width: 110px;
+}
+.lrow__channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lrow__channel .icon {
+  color: var(--text-3);
+}
+.lrow--wide .lrow__label {
+  flex: 0 0 auto;
+  width: 110px;
+}
+.lrow--wide .lrow__ctl {
+  flex: 1;
+  max-width: none;
+}
+.lrow--wide .model-picker {
+  justify-content: flex-end;
+}
+.lrow--wide .model-picker .select {
+  width: auto;
+  flex: 1 1 160px;
+}
+/* Name, @handle, role: the field fills the row, quiet until it's being typed in. */
+.lrow--field .lrow__key {
+  flex: none;
+  width: 110px;
+  color: var(--text-2);
+}
+.lrow--field > input,
+.lrow__input > input {
+  flex: 1;
+  min-width: 0;
+  margin-left: -9px;
+  padding: 6px 9px;
+  border-color: transparent;
+  background: transparent;
+}
+.lrow--field > input:hover,
+.lrow__input > input:hover {
+  background: var(--hover);
+}
+.lrow--field > input:focus,
+.lrow__input > input:focus {
+  background: var(--panel);
+  border-color: var(--accent);
+}
+.lrow__input {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lrow__input .field__error {
+  font-size: 12px;
+}
+.look-sum {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.look-pop {
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.look-pop .looks {
+  max-height: 220px;
+  overflow-y: auto;
+}
+/* A picker that brings its own label (the account): laid out as a row. */
+.lrow--picker:empty {
+  display: none;
+}
+.lrow--picker .field {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0;
+  gap: 4px 12px;
+}
+.lrow--picker .field__label {
+  flex: 1;
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--text);
+}
+.lrow--picker .select {
+  width: 220px;
+}
+.lrow--picker .hint {
+  flex-basis: 100%;
+}
+.lrow-note {
+  margin: 0;
+  padding: 10px 14px;
+}
+/* A row that opens what's under it. */
+.lrow-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  border-radius: 12px;
+}
+.lrow-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.lrow-fold > summary:hover {
+  background: var(--hover);
+}
+.lrow__value {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.lrow__value .icon {
+  color: var(--text-3);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.lrow-fold[open] > summary .lrow__value .icon {
+  transform: rotate(90deg);
+}
+.lrow-fold__body {
+  padding: 2px 14px 14px;
+  animation: rise var(--dur-fast) var(--ease-out) backwards;
+}
+.lrow-fold__body .always {
+  margin-top: 0;
+}
+.lrow-fold__body .grants {
+  margin: 0;
+}
+.lgroup__bare > textarea.instructions {
+  display: block;
+  min-height: 210px;
+  padding: 12px 14px;
+  border-color: var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.lgroup__bare > textarea.instructions:focus {
+  border-color: var(--accent);
+}
+.lgroup__bare > .hint {
+  margin-top: 6px;
+}
+.computer-body > .mac-confirm:first-child,
+.computer-body > .computer:first-child {
+  margin-top: 0;
+}
+
+/* The agent's save state at the tabs' right end, once its head scrolled away. */
+.tabs__aside {
+  margin-left: auto;
+  padding: 0 4px 2px;
+}
+@media (max-width: 760px) {
+  .lrow {
+    flex-wrap: wrap;
+  }
+  .lrow__ctl {
+    max-width: 100%;
+  }
+  .lrow--field .lrow__key {
+    width: 84px;
+  }
+}

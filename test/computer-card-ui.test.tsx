@@ -17,9 +17,9 @@ vi.mock('open-bot-avatar/dom', () => ({ mountAvatar: () => new Proxy({}, { get: 
 let fake: State
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
-  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake), computerAction: vi.fn(), patchAgent: vi.fn(), ensureTuca: vi.fn(() => new Promise(() => {})) }
+  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake), computerAction: vi.fn(), saveAgent: vi.fn(async () => {}), ensureTuca: vi.fn(() => new Promise(() => {})) }
 })
-const { getState, patchAgent } = await import('../src/renderer/src/store')
+const { getState, saveAgent } = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { AgentPage } = await import('../src/renderer/src/components/Pages')
 
@@ -32,7 +32,8 @@ const render = async (agent: Agent, computer?: ComputerInfo): Promise<void> => {
   fake = { ...getState(), ready: true, people: [ana], you: 'ana', agents: [agent], connectors: [], tabs: { agent: 'ferramentas' }, computers: computer ? [computer] : [], isolatedComputers: true }
   await act(async () => root.render(<AgentPage id="a1" />))
 }
-const card = (): Element => [...document.querySelectorAll('.card')].find((c) => c.textContent?.startsWith('Computador'))!
+// The section, since the page's sections became list groups (its title, a "?", then its rows).
+const card = (): Element => [...document.querySelectorAll('.lgroup')].find((c) => c.textContent?.startsWith('Computador'))!
 const text = (): string => card().textContent ?? ''
 const picked = (): string => [...card().querySelectorAll('[role="radio"]')].filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent).join()
 const click = async (name: string): Promise<void> => {
@@ -76,7 +77,8 @@ describe('picking "Este computador"', () => {
     expect(picked()).toBe('Este computador')
     expect(text()).toContain('Liberar o computador pra ele')
     for (const t of ['sem Docker', 'Emprestar pasta', 'Apagar computador']) expect(text()).not.toContain(t)
-    expect(patchAgent).not.toHaveBeenCalled()
+    await act(async () => new Promise((r) => setTimeout(r, 10)))
+    expect(saveAgent).not.toHaveBeenCalled()
     await click('Cancelar')
     expect(picked()).toBe('Linux isolado')
     expect(text()).toContain('Emprestar pasta')
@@ -95,7 +97,9 @@ describe('picking "Este computador"', () => {
     await render(lia({ computer: false }))
     await click('Este computador')
     await click('Liberar o computador pra ele')
-    expect(patchAgent).toHaveBeenCalledWith('a1', { computer: true, computerKind: 'mac' })
+    // It saves by itself, right away: the stored agent with the change, in its channels.
+    await act(async () => new Promise((r) => setTimeout(r, 10)))
+    expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', computer: true, computerKind: 'mac' }), [])
     expect(picked()).toBe('Este computador')
     expect(text()).toContain('Abrir pasta dele')
     expect(text()).not.toContain('Liberar o computador pra ele')
