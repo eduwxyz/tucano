@@ -2,7 +2,8 @@ import { L, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
+import { useContext, useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
+import { InHub } from './hub-context'
 import {
   agentById,
   navigate,
@@ -106,18 +107,49 @@ import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 
-export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
-  return (
-    <section className="page">
-      <header className="topbar">
-        <div className="topbar__title">
-          <h1>{title}</h1>
-        </div>
-        <div className="topbar__actions">{actions}</div>
+// Every page's head, the same on all of them: the title big, inside the content and at the same
+// place; the actions on its line, at the right; one line under it. Tabs, when a page has them,
+// are its first child, right below. Inside a hub (Conhecimento, Operação) the hub draws the title
+// and the tabs, so the page keeps only its actions (and its way back, when it has one).
+export function PageHead({ title, lede, actions, back }: { title: ReactNode; lede?: ReactNode; actions?: ReactNode; back?: { label: string; onClick: () => void } }): ReactNode {
+  const hub = useContext(InHub)
+  if (hub)
+    return back || actions ? (
+      <header className="phead phead--hub">
+        {back && (
+          <button className="phead__back" onClick={back.onClick}>
+            ‹ {back.label}
+          </button>
+        )}
+        {actions && <div className="phead__actions">{actions}</div>}
       </header>
+    ) : null
+  return (
+    <header className="phead">
+      {back && (
+        <button className="phead__back" onClick={back.onClick}>
+          ‹ {back.label}
+        </button>
+      )}
+      <div className="phead__row">
+        <h1 className="phead__title">{title}</h1>
+        {actions && <div className="phead__actions">{actions}</div>}
+      </div>
+      {lede && <p className="phead__lede">{lede}</p>}
+    </header>
+  )
+}
+
+// A page: no bar on top any more (a strip still drags the window), the head in the content.
+// Lists and forms keep to a readable width, left-aligned at the same place on every page.
+export function Page({ title, subtitle, actions, back, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: { label: string; onClick: () => void }; children: ReactNode }): ReactNode {
+  const hub = useContext(InHub)
+  return (
+    <section className={`page page--head ${hub ? 'is-in-hub' : ''}`}>
+      {!hub && <div className="page__drag" />}
       <div className="page__scroll">
-        <div className="page__inner">
-          {subtitle && <p className="page__subtitle">{subtitle}</p>}
+        <div className="page-body">
+          <PageHead title={title} lede={subtitle} actions={actions} back={back} />
           {children}
         </div>
       </div>
@@ -125,8 +157,9 @@ export function Page({ title, subtitle, actions, children }: { title: ReactNode;
   )
 }
 
-// The cleaner page: a big title and one line, no bar on top (a strip still drags the window).
-// `fill` gives the content the rest of the height instead of scrolling the page.
+// The same page with a lede instead of a subtitle (same place, same look). `wide` lets the content
+// take the room a board or a chart needs; `fill` gives it the rest of the height instead of
+// scrolling the page.
 export function Sheet({
   title,
   lede,
@@ -144,31 +177,19 @@ export function Sheet({
   wide?: boolean
   children: ReactNode
 }): ReactNode {
-  const head = (
-    <header className="sheet__head">
-      <div>
-        {back && (
-          <button className="text-btn sheet__back" onClick={back.onClick}>
-            ← {back.label}
-          </button>
-        )}
-        <h1>{title}</h1>
-        {lede && <p className="sheet__lede">{lede}</p>}
-      </div>
-      {actions && <div className="sheet__actions">{actions}</div>}
-    </header>
-  )
+  const hub = useContext(InHub)
+  const head = <PageHead title={title} lede={lede} actions={actions} back={back} />
   return (
-    <section className={`page sheet ${fill ? 'sheet--fill' : ''}`}>
-      <div className="sheet__drag" />
+    <section className={`page page--head sheet ${fill ? 'sheet--fill' : ''} ${hub ? 'is-in-hub' : ''}`}>
+      {!hub && <div className="page__drag" />}
       {fill ? (
         <>
-          {head}
+          <div className="page-body page-body--fill">{head}</div>
           {children}
         </>
       ) : (
         <div className="page__scroll">
-          <div className={`sheet__inner ${wide ? 'is-wide' : ''}`}>
+          <div className={`page-body ${wide ? 'is-wide' : ''}`}>
             {head}
             {children}
           </div>

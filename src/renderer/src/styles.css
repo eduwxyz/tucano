@@ -12871,3 +12871,111 @@ button.agent-card__now:hover {
 .bd .bd-add input:focus-visible,
 .bd .bd-field input:focus,
 .bd .bd-field input:focus-visible { outline: none; box-shadow: none; border: 0; }
+
+/* ---------- debloat: page header, approvals, agent page ---------- */
+/* Page and Sheet share one head: the title big (Nunito), inside the content and left-aligned at the
+   same place on every page, the actions on its line, a line under it, the tabs right after. No bar on
+   top: a strip still drags the window. Lists and forms keep to ~960px; `wide` takes the room it needs. */
+.page--head {
+  position: relative;
+}
+.page__drag {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 28px;
+  -webkit-app-region: drag;
+  z-index: 1;
+}
+.page-body {
+  box-sizing: border-box;
+  max-width: calc(960px + 64px);
+  padding: 40px 32px 72px;
+}
+.page-body.is-wide {
+  max-width: calc(1280px + 64px);
+}
+.page-body--fill {
+  max-width: none;
+  padding-bottom: 14px;
+  flex: none;
+}
+.is-in-hub .page-body {
+  padding-top: 12px;
+}
+.phead {
+  margin-bottom: 20px;
+}
+.phead__back {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  -webkit-app-region: no-drag;
+}
+.phead__back:hover {
+  color: var(--text);
+}
+.phead__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+}
+.phead__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--i-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.phead__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+  z-index: 2; /* above the window's drag strip */
+  -webkit-app-region: no-drag;
+}
+.phead__lede {
+  margin: 4px 0 0;
+  max-width: 720px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+/* In a hub: no title, only the actions, at the right, above the content. */
+.phead--hub {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.phead--hub .phead__back {
+  margin: 0 auto 0 0;
+}
+/* The tabs stay on top while the page scrolls: clickable under the window's drag strip. */
+.page-body > .tabs {
+  margin-top: -4px;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+@media (max-width: 760px) {
+  .page-body {
+    padding: calc(env(safe-area-inset-top) + 56px) 16px 56px;
+  }
+  .phead__row {
+    flex-wrap: wrap;
+  }
+  .phead__title {
+    font-size: 26px;
+    flex-basis: 100%;
+  }
+  .phead__actions {
+    flex-wrap: wrap;
+  }
+}
