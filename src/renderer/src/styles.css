@@ -12871,3 +12871,483 @@ button.agent-card__now:hover {
 .bd .bd-add input:focus-visible,
 .bd .bd-field input:focus,
 .bd .bd-field input:focus-visible { outline: none; box-shadow: none; border: 0; }
+
+/* ---------- debloat: routines page ---------- */
+/* One bar on top: Semana | Lista, the week and its arrows, then (at the right) what failed and the agent picked. */
+.rt-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 32px 14px;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+.rt-bar .grow {
+  flex: 1;
+}
+.rt-bar__range {
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.rt-bar .cal-nav button {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  font-size: 12.5px;
+}
+.rt-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.rt-failed > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--danger);
+}
+.rt-failed:hover {
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+}
+.rt-failed.is-on {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.rt-agent {
+  flex: none;
+  width: auto;
+}
+.rt-agent .select__trigger {
+  height: 28px;
+  padding: 0 9px 0 12px;
+  border-color: var(--border);
+  border-radius: 99px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.rt-agent .select__value {
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+/* The week: routines that run several times a day sit in "o dia todo", above the hours, one chip a
+   day with a tick per run. The grid keeps the ones at one time, with room for the name. */
+.cal__strip {
+  flex: none;
+  display: grid;
+  grid-template-columns: 52px repeat(7, minmax(0, 1fr));
+  max-height: 30vh;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+}
+.cal__strip-label {
+  padding: 9px 10px 0 0;
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-align: right;
+  color: var(--text-3);
+}
+.cal__strip-day {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 5px 3px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.cal__strip-day.is-today {
+  background-color: color-mix(in srgb, var(--accent) 3%, transparent);
+}
+.cal__allday {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 6px 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--agent) 14%, var(--panel));
+  box-shadow: inset 2.5px 0 0 var(--agent);
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  --rise: 3px;
+  animation: rise var(--dur-enter) var(--ease-out) both;
+}
+.cal__allday:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 2.5px 0 0 var(--agent), 0 6px 16px rgba(60, 40, 20, 0.12);
+}
+.cal__allday.is-selected {
+  box-shadow: inset 2.5px 0 0 var(--agent), 0 0 0 2px var(--text);
+}
+.cal__allday.is-dim {
+  opacity: 0.25;
+}
+.cal__allday-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text);
+}
+.cal__ticks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+/* A tick per run: green done, a red square failed, amber waits on me, orange running, dim still to come. */
+.cal__ticks > i,
+.cal__mark {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-3) 45%, transparent);
+}
+.cal__ticks > .is-ok,
+.cal__mark.is-ok {
+  background: var(--ok);
+}
+.cal__ticks > .is-bad,
+.cal__mark.is-bad {
+  background: var(--danger);
+  border-radius: 1px;
+}
+.cal__ticks > .is-wait,
+.cal__mark.is-wait {
+  background: var(--warn);
+}
+.cal-pop__runs button.is-wait {
+  background: var(--warn);
+}
+.cal__ticks > .is-live {
+  background: var(--accent);
+  animation: fade-pulse var(--dur-loop) var(--ease-in-out) infinite;
+}
+.cal__ticks > .is-off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-3);
+}
+.cal__mark {
+  width: 6px;
+  height: 6px;
+}
+.cal__ev.cal__ev--two {
+  height: 34px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 7px 0 9px;
+}
+.cal__ev-top,
+.cal__ev-sub {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.cal__ev-top {
+  gap: 5px;
+  line-height: 15px;
+}
+.cal__ev-sub {
+  gap: 4px;
+  font-size: 10.5px;
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--agent) 45%, var(--text-2));
+}
+.cal__ev.is-past .cal__ev-sub {
+  color: var(--text-3);
+}
+
+/* The list: what needs me on top, then what comes next, one quiet row each. */
+.rt-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 32px 40px;
+}
+.rt-list__inner {
+  max-width: 860px;
+}
+.rt-sec__title {
+  margin: 14px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.rt-sec + .rt-sec .rt-sec__title {
+  margin-top: 22px;
+}
+.rt-row,
+.rt-need {
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-radius: 9px;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.rt-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.rt-row:hover,
+.rt-row:focus-within,
+.rt-need:hover,
+.rt-need.is-open {
+  background: var(--hover);
+}
+.rt-row__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rt-row__noavatar {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.rt-row__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 34%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+.rt-row__sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.rt-row__last {
+  flex: 1 1 0;
+  min-width: 40px;
+  padding-left: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+/* Rodar agora and the switch wait for the pointer (or the keyboard) on the row. */
+.rt-row__acts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.rt-row:hover .rt-row__acts,
+.rt-row:focus-within .rt-row__acts,
+.rt-row__acts.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+.rt-row__acts .text-btn {
+  font-size: 12.5px;
+}
+.rt-row__acts .text-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+.rt-row__next {
+  flex: none;
+  width: 104px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rt-row__next.is-watch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  color: var(--text-3);
+}
+.rt-row__next.is-watch > i {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+/* Watching is calm: the slower ring of "De olho" in the week. */
+.rt-row__next.is-watch > i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  pointer-events: none;
+  --halo-scale: 2.4;
+  animation: halo 2.2s var(--ease-out) infinite;
+}
+.rt-row.is-off .rt-row__name {
+  color: var(--text-2);
+}
+.rt-row.is-off :is(.avatar, .rt-row__noavatar) {
+  opacity: 0.55;
+}
+.rt-row__done {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.rt-offbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.rt-offbtn > span {
+  display: inline-block;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.rt-offbtn > span.is-open {
+  transform: rotate(90deg);
+}
+.rt-need.is-open {
+  padding-bottom: 12px;
+}
+/* A button doesn't stretch on its own: the problem goes to the far right. */
+.rt-need__head {
+  width: 100%;
+}
+.rt-need__what {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.rt-need__what > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.rt-need__what.is-bad {
+  color: var(--danger);
+}
+.rt-need__what.is-bad > i {
+  border-radius: 1.5px;
+  background: var(--danger);
+}
+.rt-need__what.is-wait {
+  color: var(--warn);
+}
+.rt-need__what.is-wait > i {
+  background: var(--warn);
+}
+.rt-need__body {
+  padding-left: 32px;
+  --rise: 3px;
+  animation: rise var(--dur-base) var(--ease-out) backwards;
+}
+.rt-need__body p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.rt-need__acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.rt-more {
+  width: auto;
+  padding: 0 8px;
+  height: 28px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.rt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 28px 0;
+}
+.rt-empty > span {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.rt-empty > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.rt-empty button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 13px;
+  font-weight: 550;
+  transition: var(--transition-ui);
+}
+.rt-empty button:hover {
+  border-color: var(--border-strong);
+}
+.rt-empty button span {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal__allday,
+  .rt-need__body,
+  .cal__ticks > .is-live,
+  .rt-row__next.is-watch > i::after {
+    animation: none;
+  }
+}
