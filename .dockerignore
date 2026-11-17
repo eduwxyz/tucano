@@ -1,0 +1,13 @@
+# What the Dockerfile doesn't need from the clone: built output, dependencies (installed inside), the site, local state.
+.git
+node_modules
+out
+dist
+build/whisper
+site
+test
+*.log
+.DS_Store
+.tucano
+.tucano-local
+.wrangler

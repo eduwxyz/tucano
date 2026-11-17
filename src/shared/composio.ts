@@ -6,10 +6,11 @@
 export const MULTI_EXECUTE = 'COMPOSIO_MULTI_EXECUTE_TOOL'
 export const EXECUTE = 'COMPOSIO_EXECUTE_TOOL' // the older single one: tool_slug and arguments at the top
 export const PROXY_EXECUTE = 'COMPOSIO_PROXY_EXECUTE'
+export const MANAGE_CONNECTIONS = 'COMPOSIO_MANAGE_CONNECTIONS' // links an app's account: the sign-in link
 const RUNNERS = new Set([MULTI_EXECUTE, EXECUTE, PROXY_EXECUTE])
 
 // One action a call runs: an app's tool by its slug ("GMAIL_FETCH_EMAILS"), or a raw request to an app's API.
-export type InnerAction = { kind: 'tool'; slug: string } | { kind: 'http'; toolkit: string; method: string; endpoint: string; params: { name: string; value: string; type: string }[] }
+export type InnerAction = { kind: 'tool'; slug: string; account?: string } | { kind: 'http'; toolkit: string; method: string; endpoint: string; params: { name: string; value: string; type: string }[] }
 
 export const isComposio = (url: string | undefined): boolean => {
   try {
@@ -22,6 +23,11 @@ export const isComposio = (url: string | undefined): boolean => {
 
 // A runner whose every call is judged by what it runs: only on Composio's own servers, by its exact name.
 export const perCallTool = (url: string | undefined, name: string): boolean => isComposio(url) && RUNNERS.has(name)
+// Linking an app's account (Gmail, Calendar…) on Composio's own servers: what even reading needs the first
+// time, so a reader sees it too, and each call asks.
+export const linksAccounts = (url: string | undefined, name: string): boolean => isComposio(url) && name === MANAGE_CONNECTIONS
+// What a read grant sees besides read tools: the runners, for their read-only calls, and the linking.
+export const forReaders = (url: string | undefined, name: string): boolean => perCallTool(url, name) || linksAccounts(url, name)
 // The same by name only, for the approval card, which shows what a call runs.
 export const isRunner = (name: string): boolean => RUNNERS.has(name)
 
@@ -33,8 +39,13 @@ const NOTES: Record<string, 'string' | 'boolean'> = { thought: 'string', current
 const plainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype
 // Only these keys, and the notes with their types.
 const only = (o: Record<string, unknown>, keys: string[]): boolean => Object.entries(o).every(([k, v]) => keys.includes(k) || (k in NOTES && typeof v === NOTES[k]))
-const toolOf = (o: unknown): InnerAction | undefined =>
-  plainObject(o) && only(o, ['tool_slug', 'arguments']) && typeof o['tool_slug'] === 'string' && SLUG.test(o['tool_slug']) && plainObject(o['arguments']) ? { kind: 'tool', slug: o['tool_slug'] } : undefined
+const nonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+// "account" names whose identity the item runs as (an alias or a connected account's id); a toolkit with two or more accounts needs it.
+const toolOf = (o: unknown): InnerAction | undefined => {
+  if (!plainObject(o) || !only(o, ['tool_slug', 'arguments', 'account']) || typeof o['tool_slug'] !== 'string' || !SLUG.test(o['tool_slug']) || !plainObject(o['arguments'])) return undefined
+  if ('account' in o && !nonEmptyString(o['account'])) return undefined
+  return { kind: 'tool', slug: o['tool_slug'], ...(nonEmptyString(o['account']) ? { account: o['account'] } : {}) }
+}
 
 // What a runner's call runs; undefined when its arguments aren't one of the documented shapes.
 export function innerActions(name: string, args: unknown): InnerAction[] | undefined {

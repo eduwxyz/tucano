@@ -12,7 +12,7 @@ A wiki é um conjunto de páginas em Markdown, ligadas entre si (pessoas, projet
 ## O curador
 Um modelo que cuida da wiki. Em **Ajustes da wiki** (Wiki settings):
 - **Guardar das conversas**: depois que uma conversa assenta, ele guarda as decisões, os fatos e os resultados nas páginas. Pra desligar num canal ou DM, no menu dele na barra lateral, **Não guardar na wiki**.
-- **Mudar uma página que já existe**: **Pede aprovação** ou **Automático**. Páginas novas sempre entram direto. Tudo fica no histórico, com **Desfazer**.
+- **Mudar uma página que já existe**: **Pede aprovação** ou **Automático** (ao trocar, o que já estava esperando entra junto). Em **Esperando você**, **Aprovar todas** aprova a lista de uma vez. Páginas novas sempre entram direto. Tudo fica no histórico, com **Desfazer**.
 - **Revisar sozinha toda semana**: procura o que não bate, o que ficou velho e o que está repetido. O que achar espera você em **Cuidados**. Dá pra **Revisar agora** a qualquer hora.
 
 **Decisões do curador** mostra o que ele quer mudar em páginas que já existem: **Aprovar**, **Recusar** ou **Desfazer**. Se a página mudou depois da sugestão, **Refazer sobre a versão nova**.

@@ -173,3 +173,22 @@ describe('reading the folder behind the window', () => {
     expect(w.log()[0]).toContain('B')
   })
 })
+
+describe('approving all that waits', () => {
+  it('puts in every waiting change oldest first, makes again the ones that ran into the one before, and leaves what no longer fits', () => {
+    const w = fresh()
+    w.save({ title: 'Obra', body: 'Começa em janeiro.', ...by })
+    const a = w.addChange({ ops: [{ op: 'append', page: 'Obra', text: 'Piso: porcelanato.' }], by: 'auto' })
+    const b = w.addChange({ ops: [{ op: 'append', page: 'Obra', text: 'Pintura: branco gelo.' }], by: 'auto' })
+    const gone = w.addChange({ ops: [{ op: 'replace', page: 'Obra', old: 'Começa em janeiro.', new: 'Começa em março.' }], by: 'auto' })
+    const review = w.addChange({ ops: [{ op: 'append', page: 'Obra', text: 'Revisar.' }], by: 'review' })
+    w.save({ title: 'Obra', body: 'Começa em fevereiro.', ...by, expectedHash: w.page('Obra')!.hash })
+    expect(w.applyWaiting('Ana')).toEqual({ applied: 2, left: 1 })
+    expect(w.page('Obra')!.body).toContain('Piso: porcelanato.')
+    expect(w.page('Obra')!.body).toContain('Pintura: branco gelo.')
+    expect(w.page('Obra')!.body).not.toContain('março')
+    expect(w.change(gone.id)!.state).toBe('conflict')
+    expect(w.change(review.id)!.state).toBe('pending')
+    expect([a, b].map((c) => w.change(c.id)!.state)).toEqual(['refused', 'refused']) // made again, and those went in
+  })
+})

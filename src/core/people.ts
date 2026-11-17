@@ -1,14 +1,17 @@
 // The people of a Tucano: who a connection is, what each one may see, and how someone new
 // comes in (an invite, then a key). A desktop has one person, its owner; a server has
 // whoever was invited. A DM is its person's alone: not even the owner reads it.
+import { nodeOf } from '../shared/node-link'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
-import { CODE_SPANS, delegating, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
+import { CODE_SPANS, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type PersonAccess, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
+import { agentsFor, assertAgentVisible, peopleFor, viewedConversations, withinAccess } from './access-policy'
+import { cleanAccess, covers, EVERYTHING, restricted, seesAgent } from '../shared/access'
 
 export { isAdmin }
 
@@ -38,7 +41,7 @@ export const agentOwner = (db: Db, agentId: string): Person | undefined => {
 // whoever covers for that person now.
 export function deciders(db: Db, agentId: string, now = Date.now()): string[] {
   const owner = agentOwner(db, agentId)
-  return db.people().filter((p) => isAdmin(p) || p.id === owner?.id || delegating(owner, p.id, now)).map((p) => p.id)
+  return db.people().filter((p) => isAdmin(p) || p.id === owner?.id || covers(owner, p, now)).map((p) => p.id)
 }
 
 // A routine's person: whose own it is (a channel routine is the team's: none).
@@ -46,14 +49,40 @@ export const routinePerson = (db: Db, r: Pick<Routine, 'scope' | 'owner'> | unde
   r && r.scope !== 'channel' && r.owner ? db.person(r.owner) : undefined
 
 // Whom a reply is for: a DM's person; in a channel, whoever wrote last in what it reads (a
-// routine's person for a routine run; a channel routine, the Tucano's owner); otherwise the owner.
-export function requesterOf(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[]): Person {
+// routine's person for a routine run; a channel routine, the Tucano's owner); in the thread of work
+// an agent handed down (`pedir`) where no person wrote, the person that work was asked for, so a
+// restricted person's ask stays within what they see all the way down; otherwise the owner.
+export function requesterOf(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], threadId?: string): Person {
   const owner = db.owner()
   const dm = dmOwner(conv, owner.id)
   if (dm) return db.person(dm) ?? owner
   const last = [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine')
   if (last?.author.kind === 'routine') return routinePerson(db, db.routine(last.author.id)) ?? owner
-  return (last?.author.kind === 'person' && db.person(last.author.id)) || owner
+  if (last?.author.kind === 'person') return db.person(last.author.id) ?? owner
+  const handed = threadId ? db.delegationAt(threadId) : undefined
+  return (handed && db.person(handed.requestedBy)) || owner
+}
+
+// Whom a reply is for, only when someone is named: a DM's person, the person who wrote last, a personal
+// routine's person (one with no owner set is the Tucano owner's), or whom handed-down work was for. A channel
+// routine, or nothing to go by, is no one: what's a person's own (their lent computer) isn't reached then.
+export function namedRequester(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], threadId?: string): string | undefined {
+  const dm = dmOwner(conv, db.ownerId())
+  if (dm) return dm
+  const last = [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine')
+  if (last?.author.kind === 'routine') {
+    const r = db.routine(last.author.id)
+    return r && r.scope !== 'channel' ? (r.owner ?? db.ownerId()) : undefined
+  }
+  if (last?.author.kind === 'person') return last.author.id
+  const handed = threadId ? db.delegationAt(threadId) : undefined
+  return handed?.requestedBy
+}
+
+// A lent computer's person, when a connector is one (shared/node-link.ts): unset owner is the Tucano owner.
+export const computerOwner = (db: Db, connectorId: string | undefined): string | undefined => {
+  const n = nodeOf(connectorId ? db.connector(connectorId)?.url : undefined)
+  return n ? (n.owner ?? db.ownerId()) : undefined
 }
 
 // The people whose memories ("about me") a reply gets: a DM's person; in a channel, the people who
@@ -222,7 +251,7 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
+    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
     return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 
@@ -235,10 +264,10 @@ export class People {
     return Object.fromEntries(Object.entries(patch).filter(([k]) => !isPersonalSetting(k))) as Partial<T>
   }
 
-  canSeeConversation(person: Person, c: Pick<Conversation, 'kind' | 'owner'> | undefined): boolean {
+  canSeeConversation(person: Person, c: (Pick<Conversation, 'kind' | 'owner'> & Partial<Pick<Conversation, 'id' | 'name'>>) | undefined): boolean {
     if (!c) return false
     const dm = dmOwner(c, this.db.ownerId())
-    return dm === undefined || dm === person.id
+    return (dm === undefined || dm === person.id) && withinAccess(this.db, person, c)
   }
 
   // Whether a message is this person's to read, by when it was said: what a channel held before
@@ -276,7 +305,7 @@ export class People {
     return this.canSeeConversation(person, c) ? undefined : L('Essa conversa é de outra pessoa.', 'That conversation belongs to someone else.')
   }
 
-  private conversationOf(id: string): Pick<Conversation, 'kind' | 'owner'> | undefined {
+  private conversationOf(id: string): Pick<Conversation, 'id' | 'kind' | 'name' | 'owner'> | undefined {
     return this.db.conversationOwner(id)
   }
 
@@ -293,7 +322,7 @@ export class People {
   canSeeMemory(person: Person, m: Pick<Memory, 'scope' | 'privateTo'>): boolean {
     if (m.privateTo) return m.privateTo === person.id
     const of = scopePerson(m.scope)
-    return of === undefined || of === person.id
+    return of === undefined ? !this.agentHidden(person, m.scope) : of === person.id // an agent's notes: not of one they can't see
   }
 
   // The event as this person gets it: undefined when it isn't theirs to see. A conversation
@@ -310,7 +339,8 @@ export class People {
       case 'conversation': {
         if (!this.canSeeConversation(person, event.conversation)) return undefined
         const mine = this.db.conversation(event.conversation.id, person.id)
-        return { type: 'conversation', conversation: { ...event.conversation, unread: mine?.unread ?? 0 } }
+        const [conversation] = viewedConversations(this.db, person, [event.conversation])
+        return { type: 'conversation', conversation: { ...conversation!, unread: mine?.unread ?? 0 } }
       }
       case 'artifact':
         return conversation(event.artifact.conversationId) && this.artifactVisible(person, event.artifact) ? event : undefined
@@ -323,14 +353,19 @@ export class People {
       case 'memory':
         return this.canSeeMemory(person, event.memory) ? event : undefined
       case 'browser':
-        return { type: 'browser', view: this.browserFor(person, event.view) }
-      // The screen of a browser working for a conversation this person doesn't see: not theirs.
+        return this.agentHidden(person, event.view.agentId) ? undefined : { type: 'browser', view: this.browserFor(person, event.view) }
+      // The screen of a browser working for an agent or a conversation this person doesn't see: not theirs.
       case 'browser_frame':
-        return !event.conversationId || this.canSeeConversation(person, this.conversationOf(event.conversationId)) ? event : undefined
+        return !this.agentHidden(person, event.agentId) && (!event.conversationId || this.canSeeConversation(person, this.conversationOf(event.conversationId))) ? event : undefined
       case 'computer':
-        return { type: 'computer', computer: this.computerFor(person, event.computer) }
+        return this.agentHidden(person, event.computer.agentId) ? undefined : { type: 'computer', computer: this.computerFor(person, event.computer) }
       case 'inbox':
         return { type: 'inbox', inbox: this.inbox(person) }
+      case 'delegations':
+        return { type: 'delegations', delegations: this.delegations(person) }
+      // One's own to-dos: theirs alone.
+      case 'tasks':
+        return event.for === person.id ? event : undefined
       case 'settings':
         return { type: 'settings', settings: this.settingsFor(person, event.settings) }
       // Gone from a DM (or someone's own memory): only its person hears of it (its id is no one else's to know).
@@ -344,13 +379,18 @@ export class People {
       // The team's own things, and signals that carry nothing: everyone (each reads the details over the API, checked there).
       case 'connector':
         return { type: 'connector', connector: this.connectorFor(person, event.connector) }
-      case 'voice':
       case 'agent':
+        return this.agentHidden(person, event.agent.id) ? undefined : event
+      case 'people':
+        return { type: 'people', people: peopleFor(person, event.people), ...(event.former ? { former: event.former } : {}) }
+      // This computer's lines to the servers it's lent to: its owner's only.
+      case 'node':
+        return person.role === 'owner' ? event : undefined
+      case 'voice':
       case 'connector_removed':
       case 'skill':
       case 'skill_removed':
       case 'wiki':
-      case 'people':
         return event
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.
@@ -359,6 +399,11 @@ export class People {
         return undefined
       }
     }
+  }
+
+  // An agent this person's access leaves out: nothing about it reaches them.
+  agentHidden(person: Person, agentId: string): boolean {
+    return restricted(person) && !seesAgent(person, this.db.agents(), agentId)
   }
 
   // An agent's browser working for a conversation this person doesn't see: that it exists, no more
@@ -392,11 +437,12 @@ export class People {
 
   // Saving a routine: where it goes and, for one that exists, where it is now must both be this
   // person's to reach (no one moves a routine out of someone else's DM), with the rules of both.
-  routineSave(person: Person, routine: Pick<RoutineInput, 'id' | 'conversationId' | 'scope' | 'trigger'>): Routine | undefined {
+  routineSave(person: Person, routine: Pick<RoutineInput, 'id' | 'conversationId' | 'scope' | 'trigger'> & Partial<Pick<RoutineInput, 'agentId'>>): Routine | undefined {
     const reach = (id: string | undefined): void => {
       const why = this.conversationError(person, id)
       if (why) throw new Error(why)
     }
+    if (routine.agentId) assertAgentVisible(this.db, person, routine.agentId)
     if (routine.conversationId) reach(routine.conversationId)
     const prev = routine.id ? this.db.routine(routine.id) : undefined
     if (prev) {
@@ -429,7 +475,10 @@ export class People {
 
   // ---------- what waits on someone ----------
 
-  canDecide(person: Person, a: Pick<Approval, 'agentId'>): boolean {
+  canDecide(person: Person, a: Pick<Approval, 'agentId'> & { connectorId?: string }): boolean {
+    // A command or a click on someone's lent computer is theirs alone to allow.
+    const computer = computerOwner(this.db, a.connectorId)
+    if (computer) return computer === person.id
     return can(person, { kind: 'approval', agentOwner: agentOwner(this.db, a.agentId) })
   }
 
@@ -440,6 +489,11 @@ export class People {
   // Approvals this person can decide, and the questions waiting on them: asked to them (or to
   // someone they cover for), a DM's question waiting on their yes, or one past its deadline that
   // they had asked for. A question from a DM that isn't theirs comes without where it was asked.
+  // Work handed down the tree that is open, or ended in the last day, in channels this person sees.
+  delegations(person: Person, now = Date.now()): Delegation[] {
+    return this.db.liveDelegations(now - 86_400_000).filter((d) => this.canSeeConversation(person, this.conversationOf(d.conversationId)))
+  }
+
   inbox(person: Person, now = Date.now()): Inbox {
     const approvals = this.db.approvals().filter((a) => a.state === 'pending' && this.canDecide(person, a) && this.canSeeApproval(person, a))
     // A question from a DM that isn't theirs comes without where it was asked.
@@ -452,7 +506,7 @@ export class People {
       const waiting =
         q.confirm === 'pending'
           ? q.requestedBy === person.id
-          : q.askedTo === person.id || delegating(this.db.person(q.askedTo), person.id, now) || (now >= q.deadlineAt && q.requestedBy === person.id)
+          : q.askedTo === person.id || covers(this.db.person(q.askedTo), person, now) || (now >= q.deadlineAt && q.requestedBy === person.id)
       if (!waiting) return []
       // Its decisions, to answer them on the card from here too (the question only, as its text is).
       const run = this.db.message(q.id)?.run
@@ -484,8 +538,8 @@ export class People {
   }
 
   // The snapshot as this person gets it: no one else's DMs, their messages or their memories.
-  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox'>, opts: { server?: boolean } = {}): Snapshot {
-    const conversations = this.db.conversations(person.id).filter((c) => this.canSeeConversation(person, c))
+  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations'>, opts: { server?: boolean } = {}): Snapshot {
+    const conversations = viewedConversations(this.db, person, this.db.conversations(person.id).filter((c) => this.canSeeConversation(person, c)))
     const seen = new Set(conversations.map((c) => c.id))
     const theirs = base.messages.filter((m) => seen.has(m.conversationId))
     const messages = theirs.filter((m) => this.visibleAt(person, m))
@@ -506,12 +560,14 @@ export class People {
       ...(base.jobWatches ? { jobWatches: base.jobWatches.filter((w) => seen.has(w.conversationId)) } : {}),
       approvals: base.approvals.filter((a) => this.canSeeApproval(person, a)),
       memories: base.memories.filter((m) => this.canSeeMemory(person, m)),
-      browsers: base.browsers.map((v) => this.browserFor(person, v)),
-      computers: base.computers.map((c) => this.computerFor(person, c)),
-      people: this.db.people(),
+      agents: agentsFor(person, base.agents),
+      browsers: base.browsers.filter((v) => !this.agentHidden(person, v.agentId)).map((v) => this.browserFor(person, v)),
+      computers: base.computers.filter((c) => !this.agentHidden(person, c.agentId)).map((c) => this.computerFor(person, c)),
+      people: peopleFor(person, this.db.people()),
       ...(this.db.formerPeople().length ? { former: this.db.formerPeople() } : {}),
       you: person.id,
       inbox: this.inbox(person),
+      delegations: this.delegations(person),
       ...(opts.server && person.role === 'owner' && !this.db.ownerNamed() ? { needsName: true } : {})
     }
   }
@@ -529,7 +585,7 @@ export class People {
     return typeof key === 'string' && /^p_[\w-]{43}$/.test(key) && this.db.removedKey(hashSecret(key))
   }
 
-  createInvite(by: Person, p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string }, now = Date.now()): { code: string; expiresAt: number } {
+  createInvite(by: Person, p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string; access?: PersonAccess }, now = Date.now()): { code: string; expiresAt: number } {
     must(by, { kind: 'admin' })
     if (p.role !== 'admin' && p.role !== 'member') throw new Error(L('Escolha admin ou membro.', 'Pick admin or member.'))
     // Only the owner makes an admin.
@@ -540,7 +596,8 @@ export class People {
     if (back) must(by, { kind: 'person', target: back, role: p.role })
     const code = newInviteCode()
     const expiresAt = now + INVITE_DAYS * 86_400_000
-    this.db.saveInvite({ id: hashSecret(code), role: p.role, about: (p.about ?? '').trim().slice(0, 500), ...(p.restore ? { restore: p.restore } : {}), createdBy: by.id, createdAt: now, expiresAt })
+    const access = p.role === 'member' && p.access?.mode === 'picked' ? this.cleanAccess(p.access) : undefined
+    this.db.saveInvite({ id: hashSecret(code), role: p.role, about: (p.about ?? '').trim().slice(0, 500), ...(p.restore ? { restore: p.restore } : {}), ...(access ? { access } : {}), createdBy: by.id, createdAt: now, expiresAt })
     this.db.addActivity({ personId: by.id, kind: 'invite.created', target: hashSecret(code), detail: { role: p.role, ...(p.restore ? { restore: p.restore } : {}) }, at: now })
     return { code, expiresAt }
   }
@@ -571,7 +628,8 @@ export class People {
       const id = back?.id ?? randomUUID()
       if (!this.db.useInvite(invite.id, id, now)) return { error: L('Esse convite não vale mais. Peça um novo a quem te convidou.', 'That invite is no longer valid. Ask whoever invited you for a new one.') }
       const routines = back ? this.db.restorePerson(id, { name: clean, role: invite.role, about: invite.about }) : undefined
-      if (!back) this.db.addPerson({ id, name: clean, role: invite.role, about: invite.about })
+      if (!back) this.db.addPerson({ id, name: clean, role: invite.role, about: invite.about, ...(invite.access ? { access: invite.access } : {}) })
+      else this.db.setPersonAccess(id, invite.access ?? EVERYTHING) // back: what this invite says, not what they had
       // Someone new gets their own short welcome first (who invited them, the team, the deal).
       if (!back) this.db.setPrefs(id, { onboarding: { done: true, guest: { by: this.db.person(invite.createdBy)?.name } } })
       const key = newKey()
@@ -666,6 +724,23 @@ export class People {
     return this.db.person(id)!
   }
 
+  // What a member sees (the owner and admins always see everything). Admins change members', the owner anyone's.
+  setPersonAccess(by: Person, id: string, access: PersonAccess): Person {
+    const p = this.db.person(id)
+    if (!p) throw new Error(L('Essa pessoa não está mais aqui.', 'That person is no longer here.'))
+    must(by, { kind: 'person', target: p })
+    if (p.role !== 'member') throw new Error(L('Admins e o dono sempre veem tudo.', 'Admins and the owner always see everything.'))
+    this.db.setPersonAccess(id, this.cleanAccess(access))
+    const now = this.db.person(id)!
+    if (restricted(now)) this.db.dropCoversBy(id) // someone restricted covers for no one (see covers)
+    this.db.addActivity({ personId: by.id, kind: 'person.access', target: id, detail: { mode: now.access?.mode ?? 'all', agents: now.access?.agents.length ?? 0, sectors: now.access?.sectors.length ?? 0, channels: now.access?.channels.length ?? 0 } })
+    return now
+  }
+
+  private cleanAccess(a: PersonAccess): PersonAccess {
+    return cleanAccess(a, this.db.agents().map((x) => x.id), this.db.conversations().filter((c) => c.kind !== 'dm').map((c) => c.id))
+  }
+
   // Someone answering and approving for me until then (`to` null: no one).
   setDelegation(by: Person, to: string | null, until: number | undefined, now = Date.now()): void {
     if (to === null) {
@@ -673,7 +748,9 @@ export class People {
       this.db.addActivity({ personId: by.id, kind: 'person.delegation', target: by.id, detail: { to: null }, at: now })
       return
     }
-    if (to === by.id || !this.db.person(to)) throw new Error(L('Escolha outra pessoa do Tucano.', 'Pick someone else in this Tucano.'))
+    const who = this.db.person(to)
+    if (to === by.id || !who) throw new Error(L('Escolha outra pessoa do Tucano.', 'Pick someone else in this Tucano.'))
+    if (restricted(who)) throw new Error(L(`${who.name} não vê todo o time, então não pode cobrir ninguém.`, `${who.name} doesn't see the whole team, so they can't cover for anyone.`))
     if (typeof until !== 'number' || !Number.isFinite(until) || until <= now) throw new Error(L('Escolha até quando.', 'Pick until when.'))
     this.db.setDelegation(by.id, to, until)
     this.db.addActivity({ personId: by.id, kind: 'person.delegation', target: by.id, detail: { to, until }, at: now })

@@ -134,13 +134,22 @@ export const antigravityInput = (prompt: string): string => `${JSON.stringify({ 
 // reads are denied). Longer instructions go at the top of the prompt instead.
 export const RULES_MAX = 24_000
 
-export function antigravityPrompt(turn: Pick<Turn, 'system' | 'prompt' | 'images'>): string {
+export function antigravityPrompt(turn: Pick<Turn, 'system' | 'prompt' | 'images' | 'mcpUrl'>): string {
   const inRules = Buffer.byteLength(turn.system, 'utf8') <= RULES_MAX
   const head = inRules || !turn.system ? '' : `<instructions>\n${turn.system}\n</instructions>\n\n`
-  const images = (turn.images ?? []).some((i) => existsSync(i.path)) ? imagesLeftOut() : ''
+  const images = (turn.images ?? []).some((i) => existsSync(i.path)) ? (turn.mcpUrl ? imagesByTool() : imagesLeftOut()) : ''
   return head + turn.prompt + images
 }
 
+// The CLI takes no image in the prompt, but it does pass on an image a tool returns: the gateway's ver_imagem
+// (core/runs.ts) shows the attached one, and the model sees it (checked with gemini-4-argon on agy 1.5.9).
+const imagesByTool = (): string =>
+  L(
+    '\n\n(Aviso do Tucano: as imagens anexadas chegam a você só pelo nome, como [imagem anexada: nome], porque o Antigravity CLI não recebe imagens junto da mensagem. Pra ver uma, chame a ferramenta ver_imagem com esse nome antes de responder sobre ela.)',
+    "\n\n(Note from Tucano: attached images reach you by name only, as [attached image: name], because Antigravity CLI doesn't take images with the message. To see one, call the ver_imagem tool with that name before answering about it.)"
+  )
+
+// Without the gateway (no tools), there's no way to show it.
 const imagesLeftOut = (): string =>
   L(
     '\n\n(Aviso do Tucano: as imagens anexadas nesta conversa não puderam ser mostradas a você, porque o Antigravity CLI não aceita imagens. Se a pessoa perguntar sobre uma imagem, diga que não conseguiu vê-la.)',

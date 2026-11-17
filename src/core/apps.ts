@@ -6,16 +6,16 @@
 // to read and change; a click that sends, pays, publishes or deletes becomes an
 // approval request, like the browser's.
 import { execFile } from 'node:child_process'
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync, readlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L } from '../shared/lang'
 import type { Agent, AgentApp } from '../shared/types'
 import { textResult, type ToolDef } from './gateway'
 import { norm, risky } from './browser'
 import { findOnPath, spawnable } from './platform'
-import { appOfWindow, startApp, windowsOpen, type SystemApp } from './apps-os'
+import { appOfWindow, launcherDirs, startApp, windowsOpen, type SystemApp } from './apps-os'
 
 export const APPS = 'apps' // the "connector" of app click approvals
 export const APP_TOOL_NAMES = new Set(['apps_listar', 'app_abrir', 'app_ver', 'app_menu', 'app_clicar', 'app_escrever', 'app_tecla'])
@@ -254,17 +254,25 @@ const clean = (s: unknown): string =>
 
 // The tree as numbered lines: everything the agent can act on, and the text around it
 // (a note's lines, a field's value), so it can read the app too.
-export function itemize(tree: Node | undefined, max = MAX_LINES): { items: Item[]; lines: string[]; more: number } {
+// `from` skips that many lines (a later page of a big window, numbers unchanged); `start` numbers
+// after an earlier list, so an area read keeps the window's numbers good.
+export function itemize(tree: Node | undefined, max = MAX_LINES, from = 0, start = 0): { items: Item[]; lines: string[]; more: number } {
   const items: Item[] = []
   const lines: string[] = []
   let more = 0
+  let seen = 0
+  const show = (line: string, item: boolean): void => {
+    if (seen >= from && lines.length < max) lines.push(line)
+    else if (item && seen >= from) more++
+    seen++
+  }
   const visit = (n: Node, depth: number): void => {
     const role = String(n.role ?? '')
     const name = clean(n.name) || (['row', 'option', 'listitem', 'cell'].includes(role) ? inner(n) : '')
     const value = typeof n.value === 'string' || typeof n.value === 'number' ? clean(n.value) : ''
     if (n.ref_id) {
       const item: Item = {
-        n: items.length + 1,
+        n: start + items.length + 1,
         ref: n.ref_id,
         role,
         name,
@@ -272,9 +280,8 @@ export function itemize(tree: Node | undefined, max = MAX_LINES): { items: Item[
         ...(n.available_actions?.length ? { actions: n.available_actions } : {})
       }
       items.push(item)
-      if (lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}#${item.n} ${ROLE()[role] ?? role}${name ? ` "${name}"` : ''}${item.value ? ` = "${item.value.slice(0, 200)}"` : ''}`)
-      else more++
-    } else if (role === 'statictext' && (name || value) && lines.length < max) lines.push(`${'  '.repeat(Math.min(depth, 4))}${L('texto', 'text')} "${(name || value).slice(0, 200)}"`)
+      show(`${'  '.repeat(Math.min(depth, 4))}#${item.n} ${ROLE()[role] ?? role}${name ? ` "${name}"` : ''}${item.value ? ` = "${item.value.slice(0, 200)}"` : ''}`, true)
+    } else if (role === 'statictext' && (name || value)) show(`${'  '.repeat(Math.min(depth, 4))}${L('texto', 'text')} "${(name || value).slice(0, 200)}"`, false)
     for (const c of n.children ?? []) visit(c, depth + 1)
   }
   if (tree) visit(tree, 0)
@@ -395,6 +402,10 @@ export function appTools(agent: Pick<Agent, 'apps'>): ToolDef[] {
           area: {
             type: 'string',
             description: L('Opcional: o número de um grupo da última lista.', "Optional: a group's number from the last list.")
+          },
+          pagina: {
+            type: 'number',
+            description: L(`Opcional: numa janela grande, a página da lista (${MAX_LINES} linhas cada, a 1 é o começo). Os números não mudam de uma página pra outra.`, `Optional: in a big window, the page of the list (${MAX_LINES} lines each, 1 is the start). Numbers stay the same across pages.`)
           }
         },
         required: ['app']
@@ -491,21 +502,74 @@ export interface AppOutcome {
 }
 
 // The apps of every agent: the last numbered list each one read, and the actions.
+// The agents' own Chrome (chrome.ts) runs headless but still sits on Linux's accessibility bus
+// as "chrome", next to the person's: agent-desktop picks it by name unless told the window.
+// shortcut: recognized by its --remote-debugging-pipe, which a person's Chrome never has; pass the pid list from chrome.ts if that changes.
+export const isAgentBrowser = (cmdline: string): boolean => cmdline.split('\0').includes('--remote-debugging-pipe')
+const agentBrowserPid = (pid: number): boolean => {
+  try {
+    return isAgentBrowser(readFileSync(`/proc/${pid}/cmdline`, 'utf8'))
+  } catch {
+    return false
+  }
+}
+const exeOf = (pid: number): string | undefined => {
+  try {
+    return readlinkSync(`/proc/${pid}/exe`)
+  } catch {
+    return undefined
+  }
+}
+type Win = { id?: string; pid?: number; is_focused?: boolean; bounds?: { width?: number; height?: number }; size?: { width?: number; height?: number } }
+const area = (x: Win): number => (x.bounds?.width ?? x.size?.width ?? 0) * (x.bounds?.height ?? x.size?.height ?? 0)
+// The node a ref was given to, in a tree already read.
+const nodeOf = (n: Node, ref: string): Node | undefined => (n.ref_id === ref ? n : (n.children ?? []).reduce<Node | undefined>((hit, c) => hit ?? nodeOf(c, ref), undefined))
+const biggest = (list: Win[]): Win | undefined => [...list].sort((a, b) => area(b) - area(a))[0]
+
 export class DesktopApps {
-  private lists = new Map<string, { app: string; items: Item[]; surface: string }>() // the last numbered list per agent, and where it came from
+  private lists = new Map<string, { app: string; items: Item[]; surface: string; tree?: Node; title?: string }>() // the last numbered list per agent, where it came from, and the whole tree it was cut from
   private permits = new Map<string, { key: string; until: number }[]>() // approved actions, each good once
   private written = new Map<string, { app: string; text: string; creates?: boolean }>() // the last thing each agent wrote, and where
 
   private targets = new Map<string, { name: string; at: number }>() // an app's name for agent-desktop, a minute at a time
   private platform: NodeJS.Platform
   private installed: () => Promise<SystemApp[]>
+  private agentBrowser: (pid: number) => boolean
+  private exe: (pid: number) => string | undefined
+  private wayland: boolean
+  // Linux reads a web page (Chrome, Electron) until three reads agree; a big one takes more than
+  // agent-desktop's 3 s, and a window not read whole leaves every element unproven (AMBIGUOUS_TARGET).
+  private slow: string[]
+  private dirs: (program: string) => string[]
 
   constructor(
     private cli: Cli = agentDesktop(),
-    opts: { platform?: NodeJS.Platform; installed?: () => Promise<SystemApp[]> } = {}
+    opts: { platform?: NodeJS.Platform; installed?: () => Promise<SystemApp[]>; agentBrowser?: (pid: number) => boolean; exe?: (pid: number) => string | undefined; dirs?: (program: string) => string[]; wayland?: boolean } = {}
   ) {
     this.platform = opts.platform ?? process.platform
     this.installed = opts.installed ?? (async () => [])
+    this.agentBrowser = opts.agentBrowser ?? ((pid) => this.platform === 'linux' && agentBrowserPid(pid))
+    this.exe = opts.exe ?? exeOf
+    this.dirs = opts.dirs ?? launcherDirs
+    // The session's own variables only for the real platform (tests pick theirs).
+    this.wayland = opts.wayland ?? (!opts.platform && this.platform === 'linux' && (process.env['XDG_SESSION_TYPE'] === 'wayland' || !!process.env['WAYLAND_DISPLAY']))
+    this.slow = this.platform === 'linux' ? ['--timeout-ms', '15000'] : []
+  }
+
+  // The app's windows, without the agents' own Chrome; `hidden` when it had one there.
+  private async windowsOf(who: string): Promise<{ list: Win[]; hidden: boolean }> {
+    const w = await this.cli(['list-windows', '--app', who], 15_000)
+    const all = (Array.isArray(w.data) ? w.data : ((w.data?.['windows'] as unknown[]) ?? [])) as Win[]
+    const list = all.filter((x) => !(x.pid && this.agentBrowser(x.pid)))
+    return { list, hidden: list.length < all.length }
+  }
+
+  // Off a Mac, when the agents' Chrome shares the app's name: the person's window, so keys and focus go there.
+  private async only(who: string): Promise<string[]> {
+    if (this.platform !== 'linux') return []
+    const { list, hidden } = await this.windowsOf(who)
+    const main = biggest(list)
+    return hidden && main?.id ? ['--window-id', main.id] : []
   }
 
   private async installedApp(app: string): Promise<SystemApp | undefined> {
@@ -517,7 +581,8 @@ export class DesktopApps {
   private async openOther(app: string, ia: SystemApp): Promise<boolean> {
     const open = (await this.foreground().catch(() => [])).some((a) => norm(a.name) === norm(app))
     if (open) {
-      await run(this.cli, ['focus-window', '--app', await this.target(app, true)])
+      const who = await this.target(app, true)
+      await run(this.cli, ['focus-window', '--app', who, ...(await this.only(who))])
       return true
     }
     return startApp(ia, this.platform)
@@ -538,10 +603,19 @@ export class DesktopApps {
       name = w?.name ?? (ia?.exe && !ia.id?.includes('!') ? (ia.exe.split('\\').pop() ?? '').replace(/\.exe$/i, '') : undefined)
     } else {
       const r = await this.cli(['list-apps'], 20_000)
-      const apps = ((r.data?.['apps'] ?? []) as { name?: string; bundle_id?: string }[]).filter((a) => a.name)
+      const apps = ((r.data?.['apps'] ?? []) as { name?: string; bundle_id?: string; pid?: number; presentation?: string }[]).filter((a) => a.name && !(a.pid && this.agentBrowser(a.pid)))
       const prog = ia?.exec?.[0]?.split('/').pop()
       const byId = ia?.id ? apps.find((a) => a.bundle_id === `${ia.id}.desktop` || a.bundle_id === ia.id) : undefined
       name = (byId ?? apps.find((a) => (prog && a.name === prog) || norm(a.name!) === norm(app)))?.name
+      // A launcher script under another name (google-chrome-stable starts "chrome"): by where the running program lives.
+      const launcher = ia?.exec?.[0] && (ia.exec[0].includes('/') ? ia.exec[0] : findOnPath(ia.exec[0]))
+      if (!name && launcher) {
+        const dirs = this.dirs(launcher)
+        name = apps.find((a) => {
+          const exe = a.pid && a.presentation === 'foreground' ? this.exe(a.pid) : undefined
+          return !!exe && dirs.includes(dirname(exe))
+        })?.name
+      }
       if (!name && ia) name = prog && !/^(flatpak|env|snap|sh|bash)$/.test(prog) ? prog : ia.id
     }
     const out = name || app
@@ -599,11 +673,14 @@ export class DesktopApps {
         }))
     }
     const r = await run(this.cli, ['list-apps'])
-    const apps = (r.data?.['apps'] ?? []) as { name?: string; bundle_id?: string; presentation?: string }[]
+    const apps = ((r.data?.['apps'] ?? []) as { name?: string; bundle_id?: string; presentation?: string; pid?: number }[]).filter((a) => !(a.pid && this.agentBrowser(a.pid)))
     // Linux: a program by its menu entry's name ("Editor de texto", not gnome-text-editor).
-    const shown = (a: { name?: string; bundle_id?: string }): { name: string; bundleId?: string } => {
+    // A Chromium app started by a script under another name (google-chrome-stable runs "chrome"): by where it lives.
+    const byDir = new Map(this.platform === 'linux' ? all.filter((x) => x.chromium && x.exec?.[0]).flatMap((x) => this.dirs(x.exec![0]!.includes('/') ? x.exec![0]! : (findOnPath(x.exec![0]!) ?? x.exec![0]!)).map((d) => [d, x] as const)) : [])
+    const shown = (a: { name?: string; bundle_id?: string; pid?: number }): { name: string; bundleId?: string } => {
       const id = a.bundle_id?.replace(/\.desktop$/, '')
-      const entry = all.find((x) => (id && x.id === id) || x.exec?.[0]?.split('/').pop() === a.name)
+      const exe = byDir.size && a.pid ? this.exe(a.pid) : undefined
+      const entry = all.find((x) => (id && x.id === id) || x.exec?.[0]?.split('/').pop() === a.name) ?? (exe ? byDir.get(dirname(exe)) : undefined)
       return entry ? { name: entry.name, ...(entry.id ? { bundleId: entry.id } : {}) } : { name: clean(a.name), ...(a.bundle_id ? { bundleId: a.bundle_id } : {}) }
     }
     return once(apps.filter((a) => a.presentation === 'foreground' && clean(a.name)).map(shown))
@@ -613,29 +690,46 @@ export class DesktopApps {
   // the biggest, unless a surface (a menu, a popover) was asked for.
   private async snapshot(app: string, extra: string[]): Promise<Envelope> {
     let who = await this.target(app)
-    let r = await run(this.cli, ['snapshot', '--app', who, '-i', '--compact', ...extra])
+    if (this.platform === 'linux' && !extra.includes('--surface')) {
+      const { list, hidden } = await this.windowsOf(who)
+      const main = biggest(list)
+      if (hidden)
+        return main?.id
+          ? run(this.cli, ['snapshot', '--app', who, '-i', '--compact', '--window-id', main.id, ...extra, ...this.slow])
+          : { ok: false, error: { code: 'WINDOW_NOT_FOUND', message: L(`a janela do ${app} não está aberta, ou ele foi aberto sem acessibilidade (feche e abra com app_abrir).`, `${app}'s window isn't open, or it was started without accessibility (close it and open it with app_abrir).`) } }
+    }
+    let r = await run(this.cli, ['snapshot', '--app', who, '-i', '--compact', ...extra, ...this.slow])
     // Opened or closed since: look for it again.
     if (!r.ok && this.platform !== 'darwin' && /APP_NOT_FOUND|WINDOW_NOT_FOUND/.test(r.error?.code ?? '')) {
       who = await this.target(app, true)
-      r = await run(this.cli, ['snapshot', '--app', who, '-i', '--compact', ...extra])
+      r = await run(this.cli, ['snapshot', '--app', who, '-i', '--compact', ...extra, ...this.slow])
     }
     if (r.ok || r.error?.code !== 'AMBIGUOUS_TARGET' || extra.includes('--surface')) return r
-    const w = await this.cli(['list-windows', '--app', who], 15_000)
-    type Win = { id?: string; bounds?: { width?: number; height?: number }; size?: { width?: number; height?: number } }
-    const list = (Array.isArray(w.data) ? w.data : ((w.data?.['windows'] as unknown[]) ?? [])) as Win[]
-    const area = (x: Win): number => (x.bounds?.width ?? x.size?.width ?? 0) * (x.bounds?.height ?? x.size?.height ?? 0)
-    const main = [...list].sort((a, b) => area(b) - area(a))[0]
-    return main?.id ? run(this.cli, ['snapshot', '--app', who, '-i', '--compact', '--window-id', main.id, ...extra]) : r
+    const main = biggest((await this.windowsOf(who)).list)
+    return main?.id ? run(this.cli, ['snapshot', '--app', who, '-i', '--compact', '--window-id', main.id, ...extra, ...this.slow]) : r
   }
 
-  private async read(agentId: string, app: string, extra: string[] = []): Promise<CallToolResult> {
+  private async read(agentId: string, app: string, extra: string[] = [], page = 1): Promise<CallToolResult> {
+    const before = this.lists.get(agentId)
     const r = await this.snapshot(app, extra)
-    if (!r.ok) return textResult(L(`Não consegui ler o ${app}: ${failure(r)}`, `Couldn't read ${app}: ${failure(r)}`), true)
-    const { items, lines, more } = itemize(r.data?.['tree'] as Node | undefined)
-    this.lists.set(agentId, { app, items, surface: extra.includes('menu') ? 'menu' : extra.includes('menubar') ? 'menubar' : 'window' })
-    const win = clean((r.data?.['window'] as { title?: string } | undefined)?.title)
-    const head = `${app}${win && win !== app ? ` · ${win}` : ''}`
-    const tail = more ? `\n${L(`+${more} elementos não listados: leia um grupo com app_ver area=#n.`, `+${more} elements not listed: read a group with app_ver area=#n.`)}` : ''
+    const root = extra[extra.indexOf('--root') + 1]
+    // Off a Mac an area that repeats in the window (a row of a table) has no ref of its own:
+    // the area as it was in the last whole read, which already has it.
+    const kept = !r.ok && r.error?.code === 'AMBIGUOUS_TARGET' && extra.includes('--root') && root && before?.tree && norm(before.app) === norm(app) ? nodeOf(before.tree, root) : undefined
+    if (!r.ok && !kept) return textResult(L(`Não consegui ler o ${app}: ${failure(r)}`, `Couldn't read ${app}: ${failure(r)}`), true)
+    const tree = kept ?? (r.data?.['tree'] as Node | undefined)
+    // An area is numbered after the list it came from, and that list stays good: #127 still works after reading #130.
+    const area = extra.includes('--root') && before && norm(before.app) === norm(app)
+    const prior = area ? before.items : []
+    const { items: found, lines, more } = itemize(tree, MAX_LINES, (Math.max(1, Math.floor(page)) - 1) * MAX_LINES, prior.reduce((m, i) => Math.max(m, i.n), 0))
+    const items = [...prior, ...found]
+    const win = kept ? before?.title : clean((r.data?.['window'] as { title?: string } | undefined)?.title)
+    // An area keeps the whole tree it came from, so a group inside it can be read the same way.
+    const whole = extra.includes('--root') ? before?.tree : tree
+    this.lists.set(agentId, { app, items, surface: extra.includes('menu') ? 'menu' : extra.includes('menubar') ? 'menubar' : 'window', ...(whole ? { tree: whole } : {}), ...(win ? { title: win } : {}) })
+    const head = `${app}${win && win !== app ? ` · ${win}` : ''}${kept ? L(' (da última leitura: esse grupo se repete na janela)', ' (from the last read: this group repeats in the window)') : ''}`
+    const next = `${area ? `area=#${prior.find((i) => i.ref === root)?.n ?? ''} ` : ''}pagina=${Math.max(1, Math.floor(page)) + 1}`
+    const tail = more ? `\n${L(`+${more} elementos não listados: veja os próximos com app_ver ${next}, ou leia um grupo com app_ver area=#n.`, `+${more} elements not listed: see the next ones with app_ver ${next}, or read a group with app_ver area=#n.`)}` : ''
     return textResult(`${head}\n${lines.join('\n') || L('(nada pra clicar nessa janela)', '(nothing to click in this window)')}${tail}`)
   }
 
@@ -693,9 +787,8 @@ export class DesktopApps {
           }
         // A slow app: the window may come after the launch gave up waiting.
         for (let i = 0; i < 10; i++) {
-          const w = await this.cli(['list-windows', '--app', await this.target(app, i > 0 || this.platform !== 'darwin')], 15_000)
-          const list = Array.isArray(w.data) ? w.data : ((w.data?.['windows'] as unknown[] | undefined) ?? [])
-          if (w.ok && list.length > 0) {
+          const { list } = await this.windowsOf(await this.target(app, i > 0 || this.platform !== 'darwin'))
+          if (list.length > 0) {
             // Chromium's screen on Windows fills in over a few seconds after it opens.
             if (this.platform === 'win32' && ia?.chromium && i > 0) await wait(4_000)
             return { result: await this.read(id, app) }
@@ -708,10 +801,11 @@ export class DesktopApps {
       }
       case 'app_ver': {
         const area = String(args['area'] ?? '').trim()
-        if (!area) return { result: await this.read(id, app) }
+        const page = Number(args['pagina'] ?? 1) || 1
+        if (!area) return { result: await this.read(id, app, [], page) }
         const it = this.item(id, app, area)
         if ('error' in it) return { result: textResult(it.error, true) }
-        return { result: await this.read(id, app, ['--root', it.ref]) }
+        return { result: await this.read(id, app, ['--root', it.ref], page) }
       }
       case 'app_menu':
         // Windows and Linux keep the menu bar inside the window: it's in the window's list.
@@ -805,11 +899,23 @@ export class DesktopApps {
           }
         }
         const who = await this.target(app)
-        let r = await run(this.cli, ['press', combo, '--app', who])
+        const only = await this.only(who)
+        // Wayland lets no program bring a window forward or confirm which one has the keyboard:
+        // a key goes only when the person has the app in front, and then to the window in front.
+        if (this.wayland) {
+          if (!(await this.windowsOf(who)).list.some((w) => w.is_focused))
+            return {
+              result: textResult(L(`A tecla não foi: no Wayland eu não consigo trazer o ${app} pra frente. Peça pra pessoa clicar na janela dele e tente de novo, ou faça pelos cliques.`, `The key didn't go: on Wayland I can't bring ${app} to the front. Ask the person to click its window and try again, or do it with clicks.`), true)
+            }
+          const r = await run(this.cli, ['press', combo])
+          if (!r.ok) return { result: textResult(L(`A tecla não foi: ${failure(r)}`, `The key didn't go through: ${failure(r)}`), true) }
+          return { result: await this.read(id, app), detail: `${combo} · ${app}` }
+        }
+        let r = await run(this.cli, ['press', combo, '--app', who, ...only])
         // Off a Mac a key goes to the window in front: bring the app's forward, once.
         if (!r.ok && this.platform !== 'darwin') {
-          await run(this.cli, ['focus-window', '--app', who])
-          r = await run(this.cli, ['press', combo, '--app', who])
+          await run(this.cli, ['focus-window', '--app', who, ...only])
+          r = await run(this.cli, ['press', combo, '--app', who, ...only])
         }
         if (!r.ok)
           return {

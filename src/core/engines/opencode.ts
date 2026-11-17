@@ -63,10 +63,14 @@ export function stripJsonComments(text: string): string {
   return out.replace(/,(\s*[}\]])/g, '$1')
 }
 
-// The whole setup goes in OPENCODE_CONFIG_CONTENT: no built-in tools (shell,
-// files, tasks), the app's gateway as the only MCP server and its tools
-// allowed, web fetch and search only when the agent has the web, the system
-// prompt as the agent's own, and nothing shared.
+// The whole setup goes in OPENCODE_CONFIG_CONTENT: of the built-in tools only `read`,
+// kept to the agent's own folder (the turn's cwd); the app's gateway as the only MCP
+// server and its tools allowed, web fetch and search only when the agent has the web,
+// the system prompt as the agent's own, and nothing shared.
+// `read` is there for OpenCode's free models (opencode/…-free): their server refuses a call
+// that doesn't offer it ("Free usage limit reached. Free models work in OpenCode"), and a
+// tool that's denied is left out of the call. Outside the folder it's denied
+// (external_directory), so the person's files stay out of reach as before.
 export function opencodeConfig(turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, providers: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     $schema: 'https://opencode.ai/config.json',
@@ -75,13 +79,40 @@ export function opencodeConfig(turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, pr
     autoupdate: false,
     snapshot: false,
     mcp: turn.mcpUrl ? { [GATEWAY_NAME]: { type: 'remote', url: turn.mcpUrl, enabled: true } } : {},
-    tools: { '*': false, [`${GATEWAY_NAME}_*`]: true, webfetch: !!turn.web, websearch: !!turn.web },
+    tools: { '*': false, read: true, [`${GATEWAY_NAME}_*`]: true, webfetch: !!turn.web, websearch: !!turn.web },
+    permission: { read: 'allow', external_directory: 'deny' },
     agent: { tucano: { mode: 'primary', prompt: turn.system } }
   }
 }
 
+// Its errors logged to stderr: a model call that fails is only logged, and `run` waits on without
+// exiting (see opencodeParser's stderr).
+export const OPENCODE_LOGS = ['--print-logs', '--log-level', 'ERROR']
+
 export function opencodeArgs(turn: Pick<Turn, 'model' | 'images'>): string[] {
-  return ['run', '--pure', '--format', 'json', '--agent', 'tucano', '-m', turn.model, ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['-f', i.path])]
+  return ['run', ...OPENCODE_LOGS, '--pure', '--format', 'json', '--agent', 'tucano', '-m', turn.model, ...(turn.images ?? []).filter((i) => existsSync(i.path)).flatMap((i) => ['-f', i.path])]
+}
+
+// The free models (opencode/…-free) answer only a call that looks like OpenCode's own app's (see
+// opencodeConfig), and only up to their free usage limit: past it, or if OpenCode asks more of the call,
+// "Free usage limit reached. Free models work in OpenCode".
+const FREE_ONLY = /free models work in opencode|free usage limit/i
+// How long a failed model call may still go on (OpenCode retrying) before the turn stops.
+export const OPENCODE_ERROR_WAIT_MS = 30_000
+
+// A model call that failed, from its log line: `level=ERROR … message="stream error" … error.error="…"`.
+export function opencodeStreamError(line: string): { message: string; waitMs: number } | undefined {
+  if (!/level=ERROR/.test(line) || !/message="stream error"/.test(line)) return undefined
+  const said = /error\.error="((?:[^"\\]|\\.)*)"/.exec(line)?.[1]?.replace(/\\"/g, '"').replace(/^AI_APICallError:\s*/, '').trim()
+  if (said && FREE_ONLY.test(said))
+    return {
+      message: L(
+        `O OpenCode recusou o modelo grátis: o uso grátis pode ter chegado ao limite. Se continuar, troque o modelo deste agente por um pago (OpenCode Go ou Zen) ou de um provedor com a sua chave.\nO OpenCode disse: ${said}`,
+        `OpenCode refused the free model: free usage may have hit its limit. If it keeps happening, switch this agent to a paid model (OpenCode Go or Zen) or one from a provider with your key.\nOpenCode said: ${said}`
+      ),
+      waitMs: 0
+    }
+  return { message: L(`O modelo falhou no OpenCode: ${said || 'erro sem detalhe'}`, `The model failed in OpenCode: ${said || 'error with no detail'}`), waitMs: OPENCODE_ERROR_WAIT_MS }
 }
 
 // One JSON event per line: step_start, text (a whole part), tool_use, step_finish (with tokens), error.
@@ -94,6 +125,7 @@ export function opencodeParser(): Parser {
   let failed = false
 
   return {
+    stderr: opencodeStreamError,
     line(line) {
       const ev = parseJson(line)
       if (!ev) return []
@@ -148,7 +180,9 @@ export function opencodeEngine(bin: () => string | undefined, appDir: string, sh
         yield* runOpencodeV2(path, turn, appDir, await shellEnv())
         return
       }
-      const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir), OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, userOpencodeProviders())), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
+      // PWD too: OpenCode takes its folder (where `read` may go) from it, not from the process's cwd,
+      // and the app's own PWD is wherever it was opened from (`/` from the Finder).
+      const env = { ...process.env, ...(await shellEnv()), ...opencodeHome(appDir), PWD: turn.cwd, OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(turn, userOpencodeProviders())), OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_AUTOUPDATE: '1' }
       yield* runCli({ bin: path, args: opencodeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: opencodeParser(), env })
     }
   }

@@ -357,10 +357,16 @@ describe('Antigravity config', () => {
     expect(antigravityPrompt({ system: 'curto', prompt: 'oi' })).toBe('oi')
   })
 
-  it('tells the agent when images could not go along', () => {
+  it('sends the agent to ver_imagem for an attached image (the CLI passes a tool\'s image on), or says it can\'t see it with no tools', () => {
     const img = join(mkdtempSync(join(tmpdir(), 'ag-img-')), 'a.png')
     writeFileSync(img, 'png')
-    expect(antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }] })).toMatch(/^oi\n\n\(.*(imagens|images)/s)
+    const withTools = antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }], mcpUrl: 'http://127.0.0.1:1/mcp' })
+    expect(withTools).toMatch(/^oi\n\n\(/)
+    expect(withTools).toContain('ver_imagem')
+    expect(withTools).not.toMatch(/não conseguiu vê-la|couldn't see it/)
+    const without = antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }] })
+    expect(without).toMatch(/não conseguiu vê-la|couldn't see it/)
+    expect(antigravityPrompt({ system: 's', prompt: 'oi', mcpUrl: 'http://127.0.0.1:1/mcp' })).toBe('oi')
   })
 
   it('moves the home on Linux and Windows but keeps their app-data folders', () => {

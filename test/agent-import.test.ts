@@ -268,6 +268,33 @@ describe('importing agents from Grok Bot, through our skill', () => {
     'agents/ledger/skills/reconcile/template.txt': 'x'
   })
 
+  it('imports instructions over the recommendation exactly from Tucano exports', () => {
+    const instructions = ` ${'x'.repeat(32_000)} END\n`
+    const source = files()
+    source['tucano-import.json'] = manifest({ agents: [{ key: 'ledger', name: 'Ledger', instructions }] })
+    expect(readForeignZip(zipFromBuffer(zip(source))).agents[0]?.instructions).toBe(instructions)
+  })
+
+  it('imports OpenBot instructions over the recommendation whole', () => {
+    const instructions = ` ${'x'.repeat(40_000)} END\n`
+    const source = files()
+    source['agents/lia/workspace/AGENTS.md'] = instructions
+    source['openbot-transfer.json'] = transfer([{ ...lia, description: 'Fallback description', files: 'agents/lia/workspace' }])
+    const team = readForeignZip(zipFromBuffer(zip(source, { deflate: true })))
+    expect(team.agents[0]?.instructions).toHaveLength(instructions.length)
+    expect(team.agents[0]?.instructions).toMatch(/^ x{10,} END\n$/)
+    expect(team.agents[0]?.notes).not.toContain('o AGENTS.md (não deu pra ler)')
+  })
+
+  it('reports when imported instructions exceed the recommendation, without shortening them', () => {
+    const instructions = `${'x'.repeat(32_000)} END`
+    const source = files()
+    source['tucano-import.json'] = manifest({ agents: [{ key: 'ledger', name: 'Ledger', instructions }] })
+    const result = applyForeignTeam(fresh(), readForeignZip(zipFromBuffer(zip(source))), opts)
+    expect(result.summary).toContain('Prompt longo')
+    expect(result.summary).toContain('32.004')
+  })
+
   it('imports long skills whole and reports how far they exceed the recommendation', () => {
     const source = files()
     const body = 'x'.repeat(32_345)

@@ -5,9 +5,10 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, amAdmin, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { agentById, amAdmin, amOwner, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
+import { PanelResize } from './SidebarResize'
 
 const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
   image: L('Imagem', 'Image'),
@@ -379,6 +380,7 @@ export function SidePanel(): ReactNode {
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
   return (
     <aside className={`side-panel side-panel--${panel.kind}`}>
+      <PanelResize />
       <header className="side-panel__head">
         <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
@@ -453,8 +455,37 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
     case 'text':
       return <pre className="side-panel__text">{text}</pre>
     default:
-      return <p className="empty">{L('Sem visualização pra esse tipo de arquivo', 'No preview for this kind of file')} ({artifact.name}, {bytes(artifact.size)}).</p>
+      return (
+        <div className="side-panel__empty">
+          <div className="empty">
+            <Icon name="clip" size={22} />
+            <p>{L('Sem visualização pra esse tipo de arquivo', 'No preview for this kind of file')}</p>
+            <p className="muted">
+              {artifact.name} · {bytes(artifact.size)}
+            </p>
+            <RevealArtifact artifactId={artifact.id} />
+          </div>
+        </div>
+      )
   }
+}
+
+// Only the owner at the computer's own window: a member or a web page would open a Finder on a screen it can't see.
+function RevealArtifact({ artifactId }: { artifactId: string }): ReactNode {
+  const platform = useStore((s) => s.platform)
+  const local = useStore((s) => amOwner(s) && !windowless())
+  if (!local) return null
+  const label =
+    platform === 'mac'
+      ? L('Mostrar no Finder', 'Show in Finder')
+      : platform === 'windows'
+        ? L('Mostrar no Explorador', 'Show in Explorer')
+        : L('Mostrar na pasta', 'Show in folder')
+  return (
+    <button className="btn btn--sm side-panel__reveal" onClick={() => revealArtifact(artifactId)}>
+      <Icon name="folder" size={14} /> {label}
+    </button>
+  )
 }
 
 // Enough CSV for a preview: quoted fields, escaped quotes, first 500 rows.
