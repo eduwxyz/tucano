@@ -48,6 +48,7 @@ import {
   type Trigger
 } from '../shared/types'
 import { stricter } from '../shared/classify'
+import { nodeOf } from '../shared/node-link'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
@@ -1498,8 +1499,15 @@ export class Db {
       decidedAt: r['decided_at'] ? Number(r['decided_at']) : undefined,
       ...(r['requested_by'] ? { requestedBy: str(r['requested_by']) } : {}),
       ...(r['decided_by'] ? { decidedBy: str(r['decided_by']) } : {}),
-      ...(r['behalf'] ? { behalf: str(r['behalf']) } : {})
+      ...(r['behalf'] ? { behalf: str(r['behalf']) } : {}),
+      ...this.computerOf(str(r['connector_id']))
     }
+  }
+
+  // A lent computer's person (unset owner: the Tucano's owner), for an approval on it: only they decide it.
+  private computerOf(connectorId: string): { computerOwner?: string } {
+    const n = nodeOf(this.connector(connectorId)?.url)
+    return n ? { computerOwner: n.owner ?? this.ownerId() } : {}
   }
 
   // The latest replies that ended badly, newest first: what went wrong, never what was said.

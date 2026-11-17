@@ -2,7 +2,7 @@
 // it was paired with, and becomes a connector there; nothing listens on the computer. Over real HTTP, in one process.
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -150,6 +150,23 @@ describe("the server's /node/link", () => {
     lent.links.closeAll('maria')
     expect(lent.links.size).toBe(0)
     await until(() => connectors.get(lent!.id()!)?.status === 'disconnected')
+  })
+
+  it("one of her keys signed out (Settings › Devices): that computer's line ends, and it can't call again with that key", async () => {
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    const keys: Record<string, { person?: string }> = { 'mac-key': { person: 'maria' } }
+    lent = await lend({ node, db, connectors, keys, token: 'mac-key' })
+    await until(connected)
+    // removeDevice in the core: the key goes, and the server hears "person-changed" for her (test/node-approval-member.test.ts).
+    delete keys['mac-key']
+    const server = readFileSync(join(import.meta.dirname, '..', 'src', 'server', 'index.ts'), 'utf8')
+    expect(server).toMatch(/msg\.type === 'person-changed'\) && msg\.id\) nodeLinks\.closeAll\(msg\.id\)/)
+    lent.links.closeAll('maria')
+    await until(() => last(lent!.statuses) === 'refused')
+    await until(() => connectors.get(lent!.id()!)?.status === 'disconnected')
+    await new Promise((r) => setTimeout(r, 150)) // past its backoff: it doesn't come back
+    expect(lent.links.size).toBe(0)
+    expect(last(lent.statuses)).toBe('refused')
   })
 
   it('a node address keeps the device and whose it is', () => {
