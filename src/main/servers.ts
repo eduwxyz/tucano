@@ -19,6 +19,7 @@ interface Saved {
   origin: string
   token: string // sealed with the system's keychain
   open?: boolean // it was on screen when the app last quit: it comes back there
+  node?: boolean // this computer is lent to it: its agents use this computer's terminal, files, browser and apps (core/node-link.ts)
 }
 
 // The app's bar above a server's page (the renderer's ServerBar): where to go back.
@@ -30,6 +31,7 @@ export interface ServerInfo {
   name: string
   origin: string
   open: boolean // on screen now, in the app's window
+  node: boolean // this computer is lent to it
 }
 
 // paired; cancelled (the person said no); invalid (not a pairing link); unsafe (nowhere safe to keep it);
@@ -41,6 +43,7 @@ export interface ServersDeps {
   seal: (text: string) => string | null // null: this computer can't keep it safely
   unseal: (sealed: string) => string | null
   changed: () => void // the menus and the app's page list the servers, and which is on screen
+  lent?: (links: { serverId: string; origin: string; token: string }[]) => void // the servers this computer is lent to, with their keys, for the core
   window: () => BrowserWindow | null // the app's window, where a server is shown
   showLocal: () => void // the app's window, on screen
 }
@@ -85,10 +88,27 @@ export class Servers {
   private save(list: Saved[]): void {
     writeFileSync(this.file(), JSON.stringify(list, null, 2), { mode: 0o600 })
     this.deps.changed()
+    this.deps.lent?.(this.lentLinks())
+  }
+
+  // The servers this computer is lent to, each with its key opened from the keychain (one it can't open is left out).
+  lentLinks(): { serverId: string; origin: string; token: string }[] {
+    return this.list().flatMap((s) => {
+      if (!s.node) return []
+      const token = this.deps.unseal(s.token)
+      return token ? [{ serverId: s.id, origin: s.origin, token }] : []
+    })
+  }
+
+  // Lends this computer to a server, or stops: the core calls it, or hangs up, right away.
+  setNode(id: string, on: boolean): void {
+    const list = this.list()
+    if (!list.some((s) => s.id === id)) return
+    this.save(list.map((s) => (s.id === id ? { ...s, node: on || undefined } : s)))
   }
 
   summary(): ServerInfo[] {
-    return this.list().map((s) => ({ id: s.id, name: serverName(s.origin), origin: s.origin, open: this.active === s.id }))
+    return this.list().map((s) => ({ id: s.id, name: serverName(s.origin), origin: s.origin, open: this.active === s.id, node: !!s.node }))
   }
 
   // A pairing link from outside the app (the system, the menu's clipboard): it says so when it isn't one.
@@ -141,6 +161,8 @@ export class Servers {
     // A new token for a server already here: its page starts again with it.
     if (known) this.drop(known.id)
     const id = known?.id ?? randomUUID()
+    // Paired again, with a new key: not lent any more. The key could be someone else's (a link someone sent),
+    // and the computer would be theirs on that server: the person turns it on again, knowing.
     this.save([...list.filter((s) => s.origin !== p.origin), { id, origin: p.origin, token: sealed, open: true }])
     await this.show(id)
     return 'paired'
@@ -269,6 +291,11 @@ export class Servers {
       return s && frameUrl && onServer(frameUrl, s.origin) ? id : undefined
     }
     return undefined
+  }
+
+  // Something for every server's page (the app's update state).
+  tell(channel: string, payload: unknown): void {
+    for (const v of this.views.values()) if (!v.webContents.isDestroyed()) v.webContents.send(channel, payload)
   }
 
   // A click on a server's notification: that server on screen, at what it's about.

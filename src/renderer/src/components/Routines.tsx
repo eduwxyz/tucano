@@ -1,15 +1,21 @@
 // Routines (spec §14, §17): requests for an agent that run on their own, at a
 // time or when something happens (a new item in a connector, a call on the Mac).
 import { L, lang, locale } from '../../../shared/lang'
+import { nodeOf } from '../../../shared/node-link'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   agentById,
   checkTrigger,
+  cleanTimes,
   dateAt,
   describeSchedule,
   isoDay,
+  MAX_TIMES,
   nextRun,
   POLL_MINUTES,
+  timesOf,
+  toast,
+  validTime,
   WEBHOOK_PORT,
   dmWith,
   navigate,
@@ -112,6 +118,9 @@ export function duplicateDraft(r: Routine): Draft {
     trigger: r.trigger?.kind === 'webhook' ? { kind: 'webhook', token: '' } : r.trigger ? { ...r.trigger } : undefined
   }
 }
+
+// On or off from a list or the card; when the server refuses (a date that has passed), it says why.
+const turn = (r: Routine, enabled: boolean): void => void saveRoutine({ ...r, enabled }).catch((e: unknown) => toast(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))
 
 export function RoutinesPage(): ReactNode {
   const routines = useStore((s) => s.routines)
@@ -273,7 +282,7 @@ export function RoutinesPage(): ReactNode {
                 <button className="text-btn" onClick={() => setDraft({ ...r })}>
                   {L('Editar', 'Edit')}
                 </button>
-                <Toggle on={r.enabled} onChange={(enabled) => void saveRoutine({ ...r, enabled })} />
+                <Toggle on={r.enabled} onChange={(enabled) => turn(r, enabled)} />
               </div>
             )
           })}
@@ -293,7 +302,6 @@ export function RoutinesPage(): ReactNode {
 
 // ---------- the week ----------
 
-const DAY = 86_400_000
 const HOUR = 56 // px per hour
 const BLOCK = 26 // px, one line
 
@@ -314,6 +322,8 @@ const dayAt = (week: number, i: number): number => {
   d.setDate(d.getDate() + i)
   return d.getTime()
 }
+// The next midnight: a day is 23 or 25 hours long when the clock changes.
+const dayEnd = (d: number): number => dayAt(d, 1)
 const hm = (t: number): string => new Date(t).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
 
 // What actually ran: each request a routine posted, with the agent's reply after it. Worked out per
@@ -400,7 +410,7 @@ function Calendar({
     const heights = Array.from({ length: n }, () => HOUR)
     for (const d of days) {
       const last = Array.from({ length: n }, () => -Infinity)
-      for (const o of occs.filter((x) => x.at >= d && x.at < d + DAY).sort((a, b) => a.at - b.at)) {
+      for (const o of occs.filter((x) => x.at >= d && x.at < dayEnd(d)).sort((a, b) => a.at - b.at)) {
         const t = new Date(o.at)
         const i = t.getHours() - h0
         if (i < 0 || i >= n) continue
@@ -445,7 +455,7 @@ function Calendar({
           const date = new Date(d)
           const isToday = date.toDateString() === today
           return (
-            <div key={d} className={`cal__day ${isToday ? 'is-today' : d + DAY <= now ? 'is-past' : ''}`}>
+            <div key={d} className={`cal__day ${isToday ? 'is-today' : dayEnd(d) <= now ? 'is-past' : ''}`}>
               <span>{date.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')}</span>
               <b>{date.getDate()}</b>
             </div>
@@ -463,7 +473,7 @@ function Calendar({
           </div>
           {days.map((d) => {
             const isToday = new Date(d).toDateString() === today
-            const list = occs.filter((o) => o.at >= d && o.at < d + DAY).sort((a, b) => a.at - b.at)
+            const list = occs.filter((o) => o.at >= d && o.at < dayEnd(d)).sort((a, b) => a.at - b.at)
             // Blocks closer than their height stack down under each other, but only inside their own hour (its row is tall enough).
             let bottom = -Infinity
             let rowHour = -1
@@ -607,7 +617,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
           {agent?.name ?? L('Agente', 'Agent')} · {where}
         </span>
         <span className="grow" />
-        {r && !(r.schedule.once && !r.enabled && r.lastAt) && <Toggle on={r.enabled} onChange={(enabled) => void saveRoutine({ ...r, enabled })} />}
+        {r && !(r.schedule.once && !r.enabled && r.lastAt) && <Toggle on={r.enabled} onChange={(enabled) => turn(r, enabled)} />}
         <button className="icon-btn" title={L('Fechar (Esc)', 'Close (Esc)')} onClick={onClose}>
           <Icon name="x" size={14} />
         </button>
@@ -717,21 +727,53 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
   const days = draft.schedule.days
   // How a routine at a time repeats: the days of each week, once, on a date, or a day of every month.
   const mode: Repeat = draft.schedule.date !== undefined ? 'date' : draft.schedule.monthDay !== undefined ? 'month' : draft.schedule.once ? 'once' : 'week'
+  // Several times a day go with a week's days and a day of the month; once and a date run at one.
+  const several = mode === 'week' || mode === 'month'
+  const times = several ? timesOf(draft.schedule) : [draft.schedule.time]
   const repeat = (m: Repeat): void => {
     const time = draft.schedule.time
+    const many = (m === 'week' || m === 'month') && draft.schedule.times ? { times: draft.schedule.times } : {}
     const schedule: Schedule =
       m === 'date'
         ? { days: [], time, once: true, date: isoDay(Date.now() + 86_400_000) }
         : m === 'month'
-          ? { days: EVERY_DAY, time, monthDay: new Date().getDate() }
+          ? { days: EVERY_DAY, time, ...many, monthDay: new Date().getDate() }
           : m === 'once'
             ? { days: EVERY_DAY, time, once: true }
-            : { days: mode === 'week' ? days : WEEKDAYS, time }
+            : { days: mode === 'week' ? days : WEEKDAYS, time, ...many }
     set({ schedule })
   }
-  const past = mode === 'date' && !!draft.schedule.date && dateAt(draft.schedule.date, draft.schedule.time || '00:00') <= Date.now()
+  // The list as it's typed (put in order once a field is left); the first is also `time`.
+  const setTimes = (list: string[]): void => set({ schedule: { ...draft.schedule, time: list[0] ?? '', times: list.length > 1 ? list : undefined } })
+  // Once every one is a time: one left empty stays, and says so, rather than going quietly.
+  const tidyTimes = (): void => {
+    if (!times.every(validTime)) return
+    const clean = cleanTimes(times)
+    if (clean.length && clean.join() !== times.join()) setTimes(clean)
+  }
+  // A new time an hour after the last one, or the next free hour.
+  const addTime = (): void => {
+    const last = Number((times.at(-1) ?? '08:00').slice(0, 2))
+    const min = (times.at(-1) ?? '08:00').slice(3, 5)
+    for (let h = 1; h < 24; h++) {
+      const next = `${String((last + h) % 24).padStart(2, '0')}:${min}`
+      if (!times.includes(next)) return setTimes(cleanTimes([...times, next]))
+    }
+  }
+  const repeated = times.filter((x, i) => times.indexOf(x) !== i)
+  const timeError = !times.every(validTime)
+    ? times.length > 1
+      ? L('Preencha cada horário, ou tire o que sobrou.', 'Fill in each time, or remove the extra one.')
+      : L('Escolha um horário.', 'Pick a time.')
+    : repeated.length
+      ? L('Esse horário já está na lista.', 'That time is already on the list.')
+      : null
+  const noDays = (mode === 'week' || mode === 'once') && days.length === 0
+  const perWeek = days.length * times.length
+  const past = mode === 'date' && !!draft.schedule.date && validTime(draft.schedule.time) && dateAt(draft.schedule.date, draft.schedule.time) <= Date.now()
   const toggleDay = (d: number): void => set({ schedule: { ...draft.schedule, days: days.includes(d) ? days.filter((x) => x !== d) : [...days, d] } })
-  const connectors = useStore((s) => s.connectors.filter((c) => c.tools.some((t) => t.cls === 'read' && t.enabled)))
+  // A lent computer isn't offered: a check that runs on its own would read it for someone else (core/routines.ts).
+  const connectors = useStore((s) => s.connectors.filter((c) => !nodeOf(c.url) && c.tools.some((t) => t.cls === 'read' && t.enabled)))
   const t = draft.trigger
   const [argsText, setArgsText] = useState(t?.kind === 'poll' ? JSON.stringify(t.args, null, 1) : '{}')
   const [preview, setPreview] = useState<string | null>(null)
@@ -767,7 +809,9 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
     setError(null)
     try {
       const conversationId = target || dm?.id || (await dmWith(draft.agentId))
-      const r = await saveRoutine({ ...draft, trigger: withArgs(draft.trigger), conversationId })
+      // Every time it has, even one: without them, the server would keep the ones it had.
+      const schedule = draft.trigger ? draft.schedule : { ...draft.schedule, times: cleanTimes(timesOf(draft.schedule)) }
+      const r = await saveRoutine({ ...draft, schedule, trigger: withArgs(draft.trigger), conversationId })
       if (team && r.scope === 'channel' && watch !== !!r.watchers?.includes(you)) watchRoutine(r.id, watch)
       onClose()
     } catch (e) {
@@ -869,15 +913,16 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
           </p>
         )}
         {!t && (
-          <div className="grid2">
-            <Field group label={mode === 'date' ? L('Data', 'Date') : mode === 'month' ? L('Dia do mês', 'Day of the month') : L('Dias', 'Days')}>
-              <div className="segmented routine-once" role="radiogroup" aria-label={L('Repetição', 'Repeat')}>
+          <div className="routine-when">
+            <div className="routine-when__row">
+              <span className="routine-when__k">{L('Repete', 'Repeats')}</span>
+              <div className="segmented" role="radiogroup" aria-label={L('Repetição', 'Repeat')}>
                 {(
                   [
-                    ['week', L('Repete', 'Repeats')],
+                    ['week', L('Toda semana', 'Every week')],
+                    ['month', L('Todo mês', 'Monthly')],
                     ['once', L('Uma vez', 'Once')],
-                    ['date', L('Numa data', 'On a date')],
-                    ['month', L('Todo mês', 'Monthly')]
+                    ['date', L('Numa data', 'On a date')]
                   ] as const
                 ).map(([k, label]) => (
                   <button key={k} type="button" role="radio" aria-checked={mode === k} className={mode === k ? 'is-active' : ''} onClick={() => repeat(k)}>
@@ -885,18 +930,19 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="routine-when__row">
+              <span className="routine-when__k">{mode === 'date' ? L('Data', 'Date') : mode === 'month' ? L('Dia', 'Day') : L('Dias', 'Days')}</span>
               {mode === 'date' ? (
-                <div className="row row--center routine-days">
-                  <input
-                    type="date"
-                    aria-label={L('Data', 'Date')}
-                    min={isoDay(Date.now())}
-                    value={draft.schedule.date ?? ''}
-                    onChange={(e) => e.target.value && set({ schedule: { ...draft.schedule, date: e.target.value, days: [new Date(dateAt(e.target.value, '12:00')).getDay()] } })}
-                  />
-                </div>
+                <input
+                  type="date"
+                  aria-label={L('Data', 'Date')}
+                  min={isoDay(Date.now())}
+                  value={draft.schedule.date ?? ''}
+                  onChange={(e) => e.target.value && set({ schedule: { ...draft.schedule, date: e.target.value, days: [new Date(dateAt(e.target.value, '12:00')).getDay()] } })}
+                />
               ) : mode === 'month' ? (
-                <div className="row row--center routine-days">
+                <div className="routine-when__pick">
                   <Select
                     value={String(draft.schedule.monthDay ?? 1)}
                     onChange={(v) => { if (v) set({ schedule: { ...draft.schedule, monthDay: Number(v) } }) }}
@@ -905,26 +951,73 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                   />
                 </div>
               ) : (
-              <div className="row row--center routine-days">
-                <div className="days" role="group" aria-label={L('Dias da semana', 'Days of the week')}>
-                  {DAYS().map((label, d) => (
-                    <button key={d} type="button" title={DAY_NAMES()[d]} aria-pressed={days.includes(d)} className={days.includes(d) ? 'is-on' : ''} onClick={() => toggleDay(d)}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <button type="button" className="link small" onClick={() => set({ schedule: { ...draft.schedule, days: WEEKDAYS } })}>
-                  {L('seg a sex', 'Mon–Fri')}
-                </button>
-                <button type="button" className="link small" onClick={() => set({ schedule: { ...draft.schedule, days: EVERY_DAY } })}>
-                  {L('todo dia', 'every day')}
-                </button>
-              </div>
+                <>
+                  <div className="days" role="group" aria-label={L('Dias da semana', 'Days of the week')}>
+                    {DAYS().map((label, d) => (
+                      <button key={d} type="button" title={DAY_NAMES()[d]} aria-pressed={days.includes(d)} className={days.includes(d) ? 'is-on' : ''} onClick={() => toggleDay(d)}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" className="link small" onClick={() => set({ schedule: { ...draft.schedule, days: WEEKDAYS } })}>
+                    {L('seg a sex', 'Mon–Fri')}
+                  </button>
+                  <button type="button" className="link small" onClick={() => set({ schedule: { ...draft.schedule, days: EVERY_DAY } })}>
+                    {L('todo dia', 'every day')}
+                  </button>
+                </>
               )}
-            </Field>
-            <Field label={L('Horário', 'Time')} hint={mode === 'once' ? L('No próximo dia marcado em que esse horário ainda não passou.', 'On the next checked day this time hasn’t passed yet.') : mode === 'month' ? L('Hora do seu computador. Num mês sem esse dia, roda no último.', 'Your computer’s time. In a month without that day, it runs on the last one.') : L('Hora do seu computador.', 'Your computer’s time.')}>
-              <input type="time" value={draft.schedule.time} onChange={(e) => set({ schedule: { ...draft.schedule, time: e.target.value } })} />
-            </Field>
+            </div>
+            <div className="routine-when__row">
+              <span className="routine-when__k">{L('Às', 'At')}</span>
+              <div className="time-pills" role="group" aria-label={times.length > 1 ? L('Horários', 'Times') : L('Horário', 'Time')}>
+                {times.map((time, i) => (
+                  <span key={i} className={`time-pill ${!validTime(time) || repeated.includes(time) ? 'is-bad' : ''}`}>
+                    <input
+                      type="time"
+                      required
+                      aria-label={times.length > 1 ? L(`Horário ${i + 1}`, `Time ${i + 1}`) : L('Horário', 'Time')}
+                      value={time}
+                      onChange={(e) => setTimes(times.map((x, j) => (j === i ? e.target.value : x)))}
+                      onBlur={tidyTimes}
+                    />
+                    {times.length > 1 && (
+                      <button type="button" className="time-pill__x" title={L('Tirar este horário', 'Remove this time')} aria-label={L(`Tirar ${time}`, `Remove ${time}`)} onClick={() => setTimes(times.filter((_, j) => j !== i))}>
+                        <Icon name="x" size={12} />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {several && times.length < MAX_TIMES && (
+                  <button type="button" className="time-pills__add" onClick={addTime}>
+                    {L('+ horário', '+ time')}
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className={`routine-when__sum ${timeError || past || noDays ? 'is-bad' : ''}`} role={timeError || past ? 'alert' : undefined}>
+              {timeError ? (
+                timeError
+              ) : past ? (
+                L('Essa data já passou: escolha um dia e horário que ainda vão chegar.', 'That date has already passed: pick a day and time still to come.')
+              ) : noDays ? (
+                L('Escolha pelo menos um dia.', 'Pick at least one day.')
+              ) : (
+                <>
+                  <b>{describeSchedule(draft.schedule)}</b>
+                  {' · '}
+                  {mode === 'week' && perWeek > 1
+                    ? L(`${perWeek} vezes por semana, na hora do seu computador.`, `${perWeek} times a week, on your computer’s clock.`)
+                    : mode === 'once'
+                      ? L('No próximo dia marcado em que o horário ainda não passou. Depois, desliga sozinha.', 'On the next checked day the time hasn’t passed yet. Then it turns itself off.')
+                      : mode === 'date'
+                        ? L('Roda uma vez e desliga sozinha.', 'Runs once, then turns itself off.')
+                        : mode === 'month'
+                          ? L('Num mês sem esse dia, roda no último.', 'In a month without that day, it runs on the last one.')
+                          : L('Na hora do seu computador.', 'On your computer’s clock.')}
+                </>
+              )}
+            </p>
           </div>
         )}
         {team && (
@@ -968,16 +1061,14 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
               ? L('O que já existe agora não dispara: ela roda uma vez pra cada item novo, um de cada vez. O agente recebe o item, marcado como vindo de fora.', 'What exists now doesn’t trigger it: it runs once per new item, one at a time. The agent gets the item, marked as coming from outside.')
               : t?.kind === 'webhook'
                 ? L('Roda uma vez por chamada; se ainda estiver rodando, a chamada é recusada.', 'Runs once per call; if it’s still running, the call is refused.')
-                : past
-                  ? L('Essa data já passou: escolha um dia e horário que ainda vão chegar.', 'That date has already passed: pick a day and time still to come.')
-                  : `${mode !== 'week' && mode !== 'once' ? `${describeSchedule(draft.schedule)}.` : days.length > 0 ? `${describeSchedule(draft.schedule)}.` : L('Escolha pelo menos um dia.', 'Pick at least one day.')}${draft.schedule.once ? L(' Depois de rodar, desliga sozinha.', ' After it runs, it turns itself off.') : ''}${L(' Se o app estiver fechado no horário, roda quando abrir (até 12 h depois).', ' If the app is closed at that time, it runs when it opens (up to 12 h later).')}`}
+                : L('Se o app estiver fechado no horário, roda quando abrir (até 12 h depois).', 'If the app is closed at that time, it runs when it opens (up to 12 h later).')}
           </span>
           <div className="row">
             {error && <span className="field__error">{error}</span>}
             <button className="btn btn--sm btn--ghost" onClick={onClose}>
               {L('Cancelar', 'Cancel')}
             </button>
-            <button className="btn btn--sm btn--primary" disabled={locked || saving || !draft.name.trim() || !draft.prompt.trim() || (!t && (mode === 'week' || mode === 'once') && days.length === 0) || (!t && past && draft.enabled) || (t?.kind === 'poll' && (!!argsError || !t.tool))} onClick={() => void save()}>
+            <button className="btn btn--sm btn--primary" disabled={locked || saving || !draft.name.trim() || !draft.prompt.trim() || (!t && (noDays || !!timeError)) || (!t && past && draft.enabled) || (t?.kind === 'poll' && (!!argsError || !t.tool))} onClick={() => void save()}>
               {draft.id ? L('Salvar', 'Save') : L('Criar rotina', 'Create routine')}
             </button>
           </div>

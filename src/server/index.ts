@@ -20,6 +20,7 @@ import { Forwarder, isPrivate } from './forward'
 import { ARTIFACT_CSP, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
+import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { applyRestore } from '../core/restore'
@@ -33,6 +34,15 @@ const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
 const port = Number(process.env['TUCANO_PORT'] || 7337)
 const page = join(import.meta.dirname, '..', 'renderer')
+// This build's version: what a browser's Settings shows, and what the core takes as its own
+// (the desktop says its over the environment; a server reads the package.json next to the build).
+const version = (() => {
+  try {
+    return String((JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version?: string }).version ?? '')
+  } catch {
+    return ''
+  }
+})()
 mkdirSync(dataDir, { recursive: true, mode: 0o700 })
 
 // A file only this user reads, made once: the server's key or token.
@@ -104,6 +114,8 @@ function ask<T>(msg: Record<string, unknown>, timeoutMs = 10_000): Promise<T | u
     toCore({ ...msg, id })
   })
 }
+// Computers lent to this server (shared/node-link.ts): each link's port goes to the core, as a page's does.
+const nodeLinks = new NodeLinkHttp((data, port) => toCore(data, [port as unknown as Port]))
 const signins = new Signins((key) => ask<Person | { removed: true } | undefined>({ type: 'auth', key }))
 const grants = new Grants((person, what) => ask<boolean>({ type: 'access', person, ...what }))
 
@@ -126,6 +138,9 @@ function fromCore(msg: CoreRequest): void {
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
+  // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
+  // computer calls again in a moment, with its key checked anew: a removed one is turned away.
+  if ((msg.type === 'person-removed' || msg.type === 'person-changed') && msg.id) nodeLinks.closeAll(msg.id)
   if (personNotice(msg, { signins, grants, viewers, streams })) return
   // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
@@ -419,6 +434,9 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     return
   }
 
+  // A computer lent to this server, calling in with its own key (shared/node-link.ts).
+  if (nodeLinks.handles(url)) return nodeLinks.handle(req, res, url, who, BASE_HEADERS)
+
   if (url.pathname === '/events') {
     // Once the line is closed (the person removed, a device disconnected), a late answer goes nowhere.
     const port = new Port((msg) => void (!res.writableEnded && res.write(`data: ${JSON.stringify(msg)}\n\n`)))
@@ -659,7 +677,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     return 'shown'
   }
   // The server's folders, in the app's own dialog look: a browser can't show the server's disk.
-  const pickFolder = () =>
+  const pickFolder = (o) =>
     new Promise((done) => {
       const pt = document.documentElement.lang !== 'en'
       const t = (a, b) => (pt ? a : b)
@@ -716,14 +734,16 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
             if (!r.folders.length) list.append(el('p', 'small muted', t('Nenhuma pasta aqui dentro.', 'No folders in here.')))
           })
           .catch(() => (where.textContent = t('Não consegui abrir essa pasta.', "Couldn't open that folder.")))
-      go('')
+      // o.start (from the home folder, like ".hermes"), or the home folder when it is not there
+      if (o && typeof o.start === 'string') fetch('./folders?path=' + encodeURIComponent(o.start)).then((r) => go(r.ok ? o.start : ''), () => go(''))
+      else go('')
       choose.focus()
     })
   if (!desktop && notifyState() === 'ask')
     document.addEventListener('pointerdown', () => void Notification.requestPermission().catch(() => {}), { once: true })
   window.tucano = {
     connect,
-    pickFolder: () => pickFolder(),
+    pickFolder: (o) => pickFolder(o),
     // A file from this computer up to the server; where it landed there.
     upload: (file, purpose) =>
       fetch('./upload?name=' + encodeURIComponent(file.name) + (purpose === 'message' ? '&for=message' : ''), { method: 'POST', body: file }).then((r) =>
@@ -737,10 +757,12 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     },
     notifyState,
     testNotify,
-    updateState: async () => ({ version: '', status: 'off' }),
-    onUpdate: () => {},
-    checkUpdates: () => {},
-    installUpdate: () => {}
+    // In the desktop app, the app's own updates (its page is what's on screen, so it is the one to
+    // say a version is ready); in a browser, the server's version, which updates on the server.
+    updateState: async () => (desktop && desktop.updateState && (await desktop.updateState())) || { version: ${JSON.stringify(version)}, status: 'off' },
+    onUpdate: (cb) => { if (desktop && desktop.onUpdate) desktop.onUpdate(cb) },
+    checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
+    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() }
   }
 })()
 `
@@ -752,6 +774,7 @@ process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_LOCAL_KEY'] = localKey
 process.env['TUCANO_PACKAGED'] = '1'
 process.env['TUCANO_SERVER'] = '1'
+process.env['TUCANO_VERSION'] ??= version
 ;(process as unknown as { parentPort: Port }).parentPort = parent
 await import(pathToFileURL(join(import.meta.dirname, 'core.js')).href)
 toCore(null, [watcher])

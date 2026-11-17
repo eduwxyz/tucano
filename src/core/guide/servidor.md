@@ -1,7 +1,7 @@
 # Tucano num servidor
 > Rodar o Tucano num servidor seu (VPS ou máquina em casa) e usar pelo navegador: instalar, acessar, manter rodando e o que muda.
 
-No servidor, as rotinas continuam rodando quando o seu computador dorme, e você usa o Tucano pelo navegador, em qualquer computador ou celular. Nada passa por um serviço do Tucano: o servidor é seu. Está em fase nova e experimental.
+No servidor, as rotinas continuam rodando quando o seu computador dorme, e você usa o Tucano pelo navegador, em qualquer computador ou celular. Nada passa por um serviço do Tucano: o servidor é seu. É o mesmo que roda nos servidores do Tucano Pro.
 
 ## O que precisa
 - Linux (x64 ou ARM64), com 2 GB de RAM ou mais, e Node.js 24 ou mais novo.
@@ -9,7 +9,9 @@ No servidor, as rotinas continuam rodando quando o seu computador dorme, e você
 - Opcional: Docker Engine (computadores Linux dos agentes) e Chromium ou Chrome (navegador dos agentes).
 
 ## Instalar
-Como o usuário que vai rodar o Tucano (não root): clonar o repositório, `npm ci`, `npm run build` e `npm run server`. Ele mostra o endereço com um token (`http://127.0.0.1:7337/?token=…`). Abra esse link uma vez: o token entra no navegador e um cookie mantém. Pra deslogar todos os navegadores, apague o arquivo `server-token` na pasta de dados e reinicie.
+Com Docker: a imagem `ghcr.io/eduwxyz/tucano` já vem com os harnesses e o Chromium. `docker run -d --name tucano -p 127.0.0.1:7337:7337 -v tucano:/home/tucano ghcr.io/eduwxyz/tucano:latest`, e o link pra entrar sai de `docker exec tucano node out/main/server.js link`. Tudo fica no volume `tucano`. O passo a passo está em `docs/server.md`.
+
+Sem Docker, como o usuário que vai rodar o Tucano (não root): clonar o repositório, `npm ci`, `npm run build` e `npm run server`. Ele mostra o endereço com um token (`http://127.0.0.1:7337/?token=…`). Abra esse link uma vez: o token entra no navegador e um cookie mantém. Pra deslogar todos os navegadores, apague o arquivo `server-token` na pasta de dados e reinicie.
 
 ## Acessar
 Por padrão ele só escuta no próprio servidor, porque quem tem o token controla os agentes. Jeitos de chegar:
@@ -29,6 +31,6 @@ Variáveis: `TUCANO_DATA` (a pasta de dados, `~/.tucano-server` por padrão), `T
 - Conector com OAuth: a autorização abre no seu navegador; ao terminar, você cola o endereço em que a página parou.
 - Escolher uma pasta pede o caminho dela no servidor.
 - A wiki pode usar o seu cofre do Obsidian guardado num repositório git: **Ajustes da wiki** › **Sincronizar com git**. Veja **wiki-git**.
-- Apps do computador não existem no servidor (não há tela).
+- Apps do computador não existem no servidor (não há tela). Pra os agentes de lá usarem o seu computador (terminal, pastas, navegador e apps), no app do computador ligue **Configurações › Servidores** › **Deixar este servidor usar este computador**. Só quando trabalham pra você, com as aprovações do servidor.
 - Um Tucano por pasta de dados: não rode o app e o servidor na mesma pasta ao mesmo tempo.
 - Um servidor é um workspace só (o da pasta de dados).

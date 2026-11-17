@@ -340,6 +340,7 @@ export function Sidebar(): ReactNode {
       <nav className="sidebar__scroll">
         <TucaItem />
         <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
+        {agents.some(isTeam) && parts.shows('board') && <NavItem view={{ kind: 'board' }} icon="board" label={L('Quadro', 'Board')} fresh={fresh('board')} />}
         {(parts.shows('memory') || suggestions > 0) && <NavItem view={{ kind: 'memory' }} icon="book" label={L('Memória', 'Memory')} badge={suggestions} fresh={fresh('memory')} />}
         {parts.shows('wiki') && <NavItem view={{ kind: 'wiki' }} icon="layers" label="Wiki" fresh={fresh('wiki')} />}
         {parts.shows('routines') && <NavItem view={{ kind: 'routines' }} icon="clock" label={L('Rotinas', 'Routines')} fresh={fresh('routines')} />}

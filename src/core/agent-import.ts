@@ -13,7 +13,7 @@
 // format "tucano-agent-import", version 1), read by `readTucanoImport`.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { channelName, codexValue, customModel, dateAt, MAX_AGENT_ROUTINES, validDate, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
+import { channelName, cleanTimes, codexValue, customModel, dateAt, MAX_AGENT_ROUTINES, MAX_TIMES, personScope, validDate, type Agent, type Effort, type EngineId, type Memory, type Routine, type Schedule } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
 import { frontmatter } from './local-skills'
@@ -41,6 +41,7 @@ export interface ForeignAgent {
   skills: ForeignSkill[]
   routines: { name: string; prompt: string; schedule: Schedule }[]
   memories: string[]
+  userMemories?: string[] // what it knew about the person (Hermes's USER.md): their memories, waiting for a yes
   notes: string[] // what of this agent stayed out, and why
 }
 
@@ -384,10 +385,13 @@ export function tucanoSchedule(r: Record<string, unknown>): Schedule | undefined
   const t = time(r['time'])
   if (t && typeof r['date'] === 'string' && validDate(r['date'])) return { days: [new Date(dateAt(r['date'], t)).getDay()], time: t, once: true, date: r['date'] }
   const md = r['monthDay']
-  if (t && typeof md === 'number' && Number.isInteger(md) && md >= 1 && md <= 31) return { days: [0, 1, 2, 3, 4, 5, 6], time: t, monthDay: md }
+  // Several times a day, as a team file from a version with them carries them.
+  const all = t && r['once'] !== true ? cleanTimes([t, ...arr(r['times']).map((x) => time(x)).filter((x): x is string => !!x)]).slice(0, MAX_TIMES) : []
+  const many = all.length > 1 ? { time: all[0]!, times: all } : {}
+  if (t && typeof md === 'number' && Number.isInteger(md) && md >= 1 && md <= 31) return { days: [0, 1, 2, 3, 4, 5, 6], time: t, ...many, monthDay: md }
   const days = arr(r['days']).map((d) => (typeof d === 'string' ? DAYS.indexOf(d.toLowerCase().slice(0, 3)) : -1))
   if (!t || !days.length || days.some((d) => d < 0)) return undefined
-  return { days: [...new Set(days)].sort(), time: t, ...(r['once'] === true ? { once: true } : {}) }
+  return { days: [...new Set(days)].sort(), time: t, ...many, ...(r['once'] === true ? { once: true } : {}) }
 }
 
 // ---------- adding it here ----------
@@ -413,7 +417,8 @@ export interface ImportResult {
 }
 
 // `works`: whether a model runs here now (its harness chosen and signed in); `defaultModel` is one that does.
-export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit: number; defaultModel: string; works?: (modelId: string) => boolean }): ImportResult {
+// `personId`: who is importing; what an agent knew about them comes as their memories (none without it).
+export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit: number; defaultModel: string; works?: (modelId: string) => boolean; personId?: string }): ImportResult {
   const added = { agents: [] as string[], skills: 0, routines: 0, memories: [] as Memory[], same: [] as string[] }
   const left: string[] = [...team.notes]
   const skillsBefore = new Set(db.skills().filter((k) => k.state === 'active').map((k) => k.name))
@@ -505,6 +510,25 @@ export function applyForeignTeam(db: Db, team: ForeignTeam, opts: { defaultLimit
       const m: Memory = { id: randomUUID(), scope: agent.id, text, state: 'pending', origin: 'agent', agentId: agent.id, messageIds: [], createdAt: at, confirmedAt: at }
       db.saveMemory(m)
       added.memories.push(m)
+    }
+  }
+
+  // What the agents knew about the person: theirs, waiting for a yes, once each (a text already
+  // there, even one they forgot, isn't proposed again). Said by an agent, so origin 'agent'.
+  if (opts.personId) {
+    const scope = personScope(opts.personId)
+    const norm = (t: string): string => t.toLowerCase().replace(/\s+/g, ' ').trim()
+    const seen = new Set(db.memories({ scope }).map((m) => norm(m.text)))
+    for (const f of team.agents) {
+      const by = byKey.get(f.key)
+      for (const text of f.userMemories ?? []) {
+        if (seen.has(norm(text))) continue
+        seen.add(norm(text))
+        const at = Date.now()
+        const m: Memory = { id: randomUUID(), scope, text, state: 'pending', origin: 'agent', ...(by ? { agentId: by } : {}), messageIds: [], createdAt: at, confirmedAt: at }
+        db.saveMemory(m)
+        added.memories.push(m)
+      }
     }
   }
 
