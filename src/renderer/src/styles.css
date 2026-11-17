@@ -13129,7 +13129,6 @@ button.agent-card__now:hover {
 .approval-line .approval {
   margin-top: 4px;
 }
-||||||| 4b08cea
 
 /* ---------- debloat: sidebar and hubs ---------- */
 /* The workspace's name opens its menu (Workspaces.tsx): a caret, and a dot when a connector needs the person. */
@@ -13452,7 +13451,6 @@ button.agent-card__now:hover {
 .hub .sheet--fill .sheet__head {
   padding-top: 18px;
 }
-||||||| 4b08cea
 
 /* ---------- debloat: routines page ---------- */
 /* One bar on top: Semana | Lista, the week and its arrows, then (at the right) what failed and the agent picked. */
@@ -13933,7 +13931,6 @@ button.agent-card__now:hover {
     animation: none;
   }
 }
-||||||| 4b08cea
 
 /* ---------- debloat: Tuca ----------
    The Tuca's builder screen (Onboarding.tsx, MeetTuca): named steps on top, a compact header, the chat
@@ -14313,7 +14310,6 @@ button.agent-card__now:hover {
     display: none;
   }
 }
-||||||| 4b08cea
 
 /* ---------- debloat: page header, approvals, agent page ---------- */
 /* Page and Sheet share one head: the title big (Nunito), inside the content and left-aligned at the
