@@ -12871,3 +12871,261 @@ button.agent-card__now:hover {
 .bd .bd-add input:focus-visible,
 .bd .bd-field input:focus,
 .bd .bd-field input:focus-visible { outline: none; box-shadow: none; border: 0; }
+
+/* ---------- debloat: routines in the conversation ---------- */
+/* Who runs on this computer, said once in the conversation's header instead of on every message. */
+.topbar__mac {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  flex: none;
+}
+/* A routine's reply: the routine rides by the name as a chip, and opens what it asked. */
+.msg__head:has(.routine-tag) {
+  align-items: center;
+}
+.routine-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 1px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.routine-tag:hover,
+.routine-tag.is-open {
+  background: var(--active);
+  color: var(--text);
+}
+.routine-tag__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routine-tag__chev {
+  display: inline-flex;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.routine-tag.is-open .routine-tag__chev {
+  transform: rotate(90deg);
+}
+.routine-ask {
+  max-width: 600px;
+  margin: 6px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-size: 12.5px;
+  --rise: 4px;
+  animation: rise var(--dur-base) var(--ease-out) both;
+}
+.routine-ask__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.routine-ask__meta .link {
+  font-size: 11.5px;
+}
+.routine-ask__event {
+  margin-bottom: 4px;
+}
+.routine-ask__prompt.md {
+  color: var(--text-2);
+}
+.routine-ask__prompt.md p {
+  margin: 0 0 6px;
+}
+.routine-ask__prompt.md > :last-child {
+  margin-bottom: 0;
+}
+
+/* Runs in a row of one routine that found nothing new: one line in the text column, a row per run when open. */
+.no-news {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 3px 28px 3px 74px;
+}
+.no-news__box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.no-news.is-open .no-news__box {
+  border-color: var(--border-strong);
+}
+.no-news__head,
+.no-news__run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.no-news__head {
+  padding: 7px 12px;
+}
+.no-news__head:hover,
+.no-news.is-open .no-news__head {
+  background: var(--hover);
+}
+.no-news__name {
+  flex: none;
+  color: var(--text);
+  font-weight: 500;
+}
+.no-news__what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.no-news__dots {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.no-news__more {
+  margin-right: 2px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.no-news__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.no-news__dot.is-failed {
+  border-radius: 1.5px;
+  background: var(--danger);
+}
+.no-news__chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.no-news.is-open .no-news__head .no-news__chev,
+.no-news__run.is-open .no-news__chev {
+  transform: rotate(90deg);
+}
+.no-news__runs {
+  animation: fade var(--dur-base) var(--ease-out) both;
+}
+.no-news__run {
+  padding: 6px 12px 6px 36px;
+  border-top: 1px solid var(--border);
+}
+.no-news__run:hover,
+.no-news__run.is-open {
+  background: var(--hover);
+}
+.no-news__at {
+  flex: none;
+  width: 40px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.no-news__said {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.no-news__steps {
+  flex: none;
+  color: var(--text-3);
+}
+/* A run opened inside the line: its whole reply, as in the conversation. */
+.no-news__reply {
+  border-top: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--text);
+}
+.no-news__reply .msg {
+  max-width: none;
+  padding: 10px 12px 8px;
+}
+
+/* An approval already decided: one line; the whole card opens on a click. */
+.approval-line {
+  margin: 6px 0 2px;
+  font-size: 12.5px;
+}
+.approval-line__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-left: -7px;
+  padding: 3px 9px 3px 7px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.approval-line__head:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.approval-line__state {
+  flex: none;
+  font-weight: 500;
+}
+.approval-line--approved .approval-line__head > .icon,
+.approval-line--approved .approval-line__state {
+  color: var(--ok);
+}
+.approval-line--refused .approval-line__head > .icon,
+.approval-line--refused .approval-line__state {
+  color: var(--danger);
+}
+.approval-line__what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-line__chev {
+  flex: none;
+  display: inline-flex;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.approval-line.is-open .approval-line__chev {
+  transform: rotate(90deg);
+}
+.approval-line .approval {
+  margin-top: 4px;
+}

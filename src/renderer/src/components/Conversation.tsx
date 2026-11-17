@@ -77,6 +77,7 @@ import { canEditChannel,
   MAX_FILE_BYTES,
   MAX_FILES_PER_MESSAGE,
   isTeam,
+  isMac,
   cancelTranscribe,
   transcribe,
   voiceStatus,
@@ -95,7 +96,8 @@ import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
 import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
-import { when } from './Routines'
+import { describeRoutine, when } from './Routines'
+import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
@@ -173,6 +175,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
+  // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
+  const dmAgentId = conv?.kind === 'dm' ? conv.members[0] : undefined
+  const routinesHere = useStore((s) => (dmAgentId ? s.routines.filter((r) => r.conversationId === id && r.agentId === dmAgentId && r.enabled).length : 0))
 
   if (!conv)
     return (
@@ -190,6 +195,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       </div>
     )
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
+  // Who here runs its commands right on this computer: said once, up top, not on every message.
+  const onMac = members.filter(isMac)
 
   return (
     <div className="split">
@@ -213,6 +220,23 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                 {dmAgent.role}
               </span>
             )}
+            {onMac.length > 0 && (
+              <span
+                className="tag tag--warn topbar__mac"
+                title={
+                  dmAgent
+                    ? L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')
+                    : L(`Os comandos de ${onMac.map((a) => a.name).join(', ')} rodam direto no seu computador`, `${onMac.map((a) => a.name).join(', ')}’s commands run right on your computer`)
+                }
+              >
+                <Icon name="laptop" size={12} />
+                {dmAgent
+                  ? L('roda no seu computador', 'runs on your computer')
+                  : onMac.length === 1
+                    ? L(`${onMac[0]!.name} roda no seu computador`, `${onMac[0]!.name} runs on your computer`)
+                    : L(`${onMac.length} rodam no seu computador`, `${onMac.length} run on your computer`)}
+              </span>
+            )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
           </div>
           <div className="topbar__actions">
@@ -230,6 +254,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                   </button>
                 )}
               </div>
+            )}
+            {dmAgent && routinesHere > 0 && (
+              <button className="btn btn--ghost" title={L(`As rotinas de ${dmAgent.name} que postam aqui`, `${dmAgent.name}’s routines that post here`)} onClick={() => navigate({ kind: 'routines' })}>
+                <Icon name="clock" size={14} /> {L(`${routinesHere} rotina${routinesHere === 1 ? '' : 's'}`, `${routinesHere} routine${routinesHere === 1 ? '' : 's'}`)}
+              </button>
             )}
             <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title={L('O que esta conversa já cobriu', 'What this conversation has covered')} onClick={() => setShowSummary(!showSummary)}>
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
@@ -263,6 +292,9 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
+  // A routine's message rides on its reply, and its runs with nothing new fold into one line (routine-runs.ts).
+  const routines = useStore((s) => s.routines)
+  const shown = useMemo(() => shownMessages(messages, routines, replies ? (mid) => !!replies.get(mid)?.length : undefined), [messages, routines, replies])
   const editsChannel = useStore((s) => {
     const c = s.conversations.find((x) => x.id === conversationId)
     return !!c && canEditChannel(s, c)
@@ -279,10 +311,11 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   })
 
   // Opened on a message (a routine's run, say): scroll to it and flash it once. It may come a moment
-  // later, from further back.
-  const focusAt = focus ? messages.findIndex((m) => m.id === focus) : -1
+  // later, from further back. Folded into a routine's line, the line opens on it and is what flashes.
+  const holder = focus ? shown.find((x) => idsOf(x).includes(focus)) : undefined
+  const focusAt = holder ? (holder.kind === 'message' ? holder.message.id : holder.key) : undefined
   useEffect(() => {
-    const el = focus && focusAt >= 0 ? ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(focus)}"]`) : null
+    const el = focusAt ? ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(focusAt)}"]`) : null
     if (!el) return
     stick.current = false
     el.scrollIntoView({ block: 'center' })
@@ -290,7 +323,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, conversationId, focusAt >= 0])
+  }, [focus, conversationId, focusAt])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -399,8 +432,11 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
       {lead}
-      {messages.map((m, i) => {
-        const prev = messages[i - 1]
+      {shown.map((item, i) => {
+        if (item.kind === 'no-news') return <NoNewsLine key={item.key} line={item} focus={holder === item ? focus : undefined} replies={replies} />
+        const m = item.message
+        const above = shown[i - 1]
+        const prev = above?.kind === 'message' ? above.message : undefined
         const grouped =
           !!prev &&
           prev.author.kind === m.author.kind &&
@@ -410,7 +446,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
           !m.run &&
           m.author.kind !== 'system' &&
           m.author.kind !== 'routine'
-        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} />
+        return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} ask={item.ask} askReplies={item.ask && replies?.get(item.ask.id)} />
       })}
       {farFromBottom && (
         <div className="messages__jump">
@@ -432,8 +468,9 @@ const STREAM_MS = 140 // a streaming reply's Markdown, about 7 times a second
 const NO_ATTACHED: Artifact[] = []
 
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
+// `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies }: { message: Message; grouped: boolean; replies?: Message[] }): ReactNode {
+const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
@@ -459,6 +496,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
   // A reply that only handed work on says what's going on in the line under it, not in words: whatever it
   // wrote anyway waits behind a link, and the agent speaks when the work comes back.
   const [showSaid, setShowSaid] = useState(false)
+  const [showAsk, setShowAsk] = useState(false)
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
 
   // The same object between renders, or every link would start over.
@@ -507,14 +545,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
             ) : (
               <span className="msg__author">{name}</span>
             )}
-            {agent?.computer && agent.computerKind === 'mac' && (
-              <span className="tag tag--warn" title={L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')}>
-                {L('no seu computador', 'on your computer')}
-              </span>
-            )}
+            {ask && <RoutineTag ask={ask} open={showAsk} onToggle={() => setShowAsk(!showAsk)} />}
             <span className="msg__time">{time(saidAt(message))}</span>
           </div>
         )}
+        {ask && showAsk && <RoutineAsk ask={ask} />}
         {/* A run is taller than the screen, so the way into the thread can't sit at its start: it rides the
             top of the run here, in the same block, and leaves with the run's last line. Without threads, or
             without a run, it stays where it was, at the corner of the message (ThreadLink). */}
@@ -558,7 +593,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
           ) : (
             <AnswersSummary message={message} />
           ))}
-        {approval && <ApprovalCard approval={approval} />}
+        {approval && (approval.state === 'pending' ? <ApprovalCard approval={approval} /> : <DecidedApproval approval={approval} />)}
         {(message.run?.agentDraft || proposalsOf(message.run).length > 0) && <Proposals message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
@@ -624,6 +659,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies }: { mes
         )}
         {message.author.kind === 'person' && !message.threadId && <AskedFromHere message={message} />}
         {replies && <ThreadLink message={message} replies={replies} noReply={!!message.run} />}
+        {/* The routine's message had a thread of its own: still there, under the reply that carries it. */}
+        {ask && !!askReplies?.length && <ThreadLink message={ask} replies={askReplies} noReply />}
       </div>
     </article>
   )
@@ -678,6 +715,175 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
+  )
+}
+
+// On a routine's reply, by the agent's name: which routine it ran for. It opens what the routine asked.
+function RoutineTag({ ask, open, onToggle }: { ask: Message; open: boolean; onToggle: () => void }): ReactNode {
+  const info = ask.routine
+  return (
+    <>
+      <button className={`routine-tag ${open ? 'is-open' : ''}`} aria-expanded={open} title={open ? L('Esconder o que a rotina pediu', 'Hide what the routine asked') : L('Ver o que a rotina pediu', 'See what the routine asked')} onClick={onToggle}>
+        <Icon name="clock" size={11} />
+        <span className="routine-tag__name">{info?.name ?? L('Rotina', 'Routine')}</span>
+        <span className="routine-tag__chev">
+          <Icon name="chevron" size={10} />
+        </span>
+      </button>
+      {info?.late && (
+        <span className="tag tag--warn" title={L(`Era pra rodar às ${time(info.scheduledAt)}`, `It was due at ${time(info.scheduledAt)}`)}>
+          {L('atrasada', 'late')}
+        </span>
+      )}
+    </>
+  )
+}
+
+// What the routine asked on that run, opened from its chip: its schedule in words, when it ran, what set
+// it off (a trigger's event), the prompt as it was then, and the way to change it.
+function RoutineAsk({ ask }: { ask: Message }): ReactNode {
+  const routineId = ask.author.kind === 'routine' ? ask.author.id : ''
+  const r = useStore((s) => s.routines.find((x) => x.id === routineId))
+  const connectorName = useStore((s) => (r?.trigger?.kind === 'poll' ? s.connectors.find((c) => r.trigger?.kind === 'poll' && c.id === r.trigger.connectorId)?.name : undefined))
+  const info = ask.routine
+  const today = new Date(ask.at).toDateString() === new Date().toDateString()
+  return (
+    <div className="routine-ask">
+      <div className="routine-ask__meta">
+        <span>
+          {r && `${describeRoutine(r, connectorName)} · `}
+          {today ? L(`rodou às ${time(ask.at)}`, `ran at ${time(ask.at)}`) : L(`rodou em ${time(ask.at)}`, `ran on ${time(ask.at)}`)}
+        </span>
+        {info?.late && (
+          <span className="tag tag--warn">
+            {L('atrasada · era', 'late · was due')} {time(info.scheduledAt)}
+          </span>
+        )}
+        <span className="grow" />
+        {r ? (
+          <button className="link" onClick={() => navigate({ kind: 'routines' })}>
+            {L('Editar rotina', 'Edit routine')}
+          </button>
+        ) : (
+          <span>{L('Esta rotina foi apagada.', 'This routine was deleted.')}</span>
+        )}
+      </div>
+      {info?.event && (
+        <div className="routine-ask__event">
+          <Icon name="zap" size={12} /> {info.event.source}: <strong>{info.event.title}</strong>
+        </div>
+      )}
+      <div className="md routine-ask__prompt">
+        <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>
+          {wikiLinks(ask.text)}
+        </MessageMarkdown>
+      </div>
+    </div>
+  )
+}
+
+const MAX_DOTS = 24
+const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+
+// Runs in a row of one routine that found nothing new, as one line: how many, from when to when, a dot
+// per run (a red square for one that failed and was got past). It opens to a row per run, and each
+// row to that run's whole reply.
+const NoNewsLine = memo(function NoNewsLine({ line, focus, replies }: { line: Extract<Shown, { kind: 'no-news' }>; focus?: string; replies?: Map<string, Message[]> }): ReactNode {
+  // Opened on one of its runs (from the Rotinas page, say): the line opens on it.
+  const target = focus ? line.runs.find((p) => p.reply.id === focus || p.ask.id === focus)?.reply.id : undefined
+  const [open, setOpen] = useState(!!target)
+  const [shownRun, setShownRun] = useState<string | undefined>(target)
+  useEffect(() => {
+    if (!target) return
+    setOpen(true)
+    setShownRun(target)
+  }, [target])
+  const quiet = line.runs.filter((p) => p.reply.run?.noNews).length
+  const failed = line.runs.length - quiet
+  const what = L(`${quiet} ${quiet === 1 ? 'execução' : 'execuções'} sem novidade`, `${quiet} ${quiet === 1 ? 'run' : 'runs'} with nothing new`) + (failed ? L(`, ${failed} com falha`, `, ${failed} failed`) : '')
+  const dots = line.runs.slice(-MAX_DOTS)
+  return (
+    <div className={`no-news ${open ? 'is-open' : ''}`} data-id={line.key}>
+      <div className="no-news__box">
+        <button className="no-news__head" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon name="clock" size={14} />
+          <span className="no-news__name">{line.name}</span>
+          <span className="no-news__what">
+            {what} · {spanOf(line.runs.map((p) => p.ask.at))}
+          </span>
+          <span className="grow" />
+          <span className="no-news__dots" aria-hidden>
+            {line.runs.length > MAX_DOTS && <span className="no-news__more">+{line.runs.length - MAX_DOTS}</span>}
+            {dots.map((p) => (
+              <span key={p.reply.id} className={`no-news__dot ${p.reply.run?.noNews ? '' : 'is-failed'}`} />
+            ))}
+          </span>
+          <span className="no-news__chev">
+            <Icon name="chevron" size={13} />
+          </span>
+        </button>
+        {open && (
+          <div className="no-news__runs">
+            {line.runs.map((p) => (
+              <NoNewsRun key={p.reply.id} pair={p} open={shownRun === p.reply.id} onToggle={() => setShownRun(shownRun === p.reply.id ? undefined : p.reply.id)} replies={replies} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})
+
+// One run in a routine's line: when, what it said (or why it failed), how many steps; its whole reply on a click.
+function NoNewsRun({ pair, open, onToggle, replies }: { pair: RoutineRunPair; open: boolean; onToggle: () => void; replies?: Map<string, Message[]> }): ReactNode {
+  const { reply, ask } = pair
+  const ok = !!reply.run?.noNews
+  const steps = reply.run?.steps.length ?? 0
+  return (
+    <>
+      <button className={`no-news__run ${open ? 'is-open' : ''}`} aria-expanded={open} onClick={onToggle}>
+        <span className={`no-news__dot ${ok ? '' : 'is-failed'}`} />
+        <span className="no-news__at">{hm(ask.at)}</span>
+        <span className="no-news__said">{ok ? reply.text.trim().replace(/\*\*/g, '') : (reply.run?.error ?? L('Falhou.', 'Failed.'))}</span>
+        {steps > 0 && <span className="no-news__steps">{L(`${steps} passo${steps === 1 ? '' : 's'}`, `${steps} step${steps === 1 ? '' : 's'}`)}</span>}
+        <span className="no-news__chev">
+          <Icon name="chevron" size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="no-news__reply">
+          <MessageRow message={reply} grouped={false} replies={replies && (replies.get(reply.id) ?? NO_REPLIES)} ask={ask} askReplies={replies?.get(ask.id)} />
+        </div>
+      )}
+    </>
+  )
+}
+
+// An approval already decided, in the conversation: one line saying how it went. The whole card (what
+// was asked, the exact call, who decided and why) opens on a click.
+function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const by = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : undefined))
+  const team = useStore(teamMode)
+  const state = approval.state === 'approved' ? L('Aprovada', 'Approved') : approval.state === 'refused' ? L('Recusada', 'Refused') : L('Expirou', 'Expired')
+  const what = approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
+  return (
+    <div className={`approval-line approval-line--${approval.state} ${open ? 'is-open' : ''}`}>
+      <button className="approval-line__head" aria-expanded={open} title={`${approval.connectorName} · ${approval.tool}`} onClick={() => setOpen(!open)}>
+        <Icon name={approval.state === 'approved' ? 'check' : approval.state === 'refused' ? 'x' : 'clock'} size={12} />
+        <span className="approval-line__state">{state}</span>
+        <span className="approval-line__what">
+          · {what}
+          {team && by ? ` · ${by}` : ''}
+          {approval.decidedAt ? ` · ${time(approval.decidedAt)}` : ''}
+          {approval.reason ? ` · “${approval.reason}”` : ''}
+        </span>
+        <span className="approval-line__chev">
+          <Icon name="chevron" size={11} />
+        </span>
+      </button>
+      {open && <ApprovalCard approval={approval} />}
+    </div>
   )
 }
 
