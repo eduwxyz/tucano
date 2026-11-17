@@ -8,7 +8,8 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type HookEvent, type HookRun, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { clipHookText, hookActive, runTurnHook, withCaptureOwner } from './hooks'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -1162,6 +1163,7 @@ export class Runner {
     // say) are what was already said: they go before it. Replies to it or to later ones, none.
     const anchor = opts.trigger ? db.message(opts.trigger) : undefined
     const history = anchor ? routedHistory(db, windowed, anchor, msg.id) : windowed
+    const hookTools: { name: string; ok: boolean }[] = []
     const ownerName = settings.workspaceName // who schedules routines, for now
     if (requester.id !== db.ownerId()) settings = { ...settings, workspaceName: requester.name }
     const people = promptPeople(db, { workspaceName: ownerName })
@@ -2339,6 +2341,7 @@ ${note}`,
         sign()
         try {
           const r = await runTool(name, args)
+          hookTools.push({ name, ok: !r.isError })
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2365,6 +2368,25 @@ ${note}`,
           sign()
         }
       }
+    }
+
+    const hookRuns: HookRun[] = []
+    const source = anchor ?? [...history].reverse().find((m) => m.id !== msg.id)
+    const hookAuthor = source?.author.kind === 'routine' ? 'routine' : source?.author.kind === 'agent' ? 'agent' : 'person'
+    const hookPayload = (event: HookEvent['event'], extra?: Partial<HookEvent>): HookEvent => ({
+      version: 1,
+      event,
+      session: `run-${msg.id}`,
+      agent: { id: agent.id, handle: agent.handle, name: agent.name, engine: engineId, model: modelId },
+      conversation: { id: conv.id, kind: conv.kind, name: conv.name, threadId: msg.threadId ?? null },
+      message: { id: source?.id ?? msg.id, text: clipHookText(source?.text ?? ''), author: hookAuthor },
+      tools: hookTools,
+      cwd,
+      ...extra
+    })
+    const fireHook = async (event: HookEvent['event'], extra?: Partial<HookEvent>): Promise<void> => {
+      if (!hookActive(settings, agent) || !settings.hooks) return
+      hookRuns.push(await runTurnHook(settings.hooks, withCaptureOwner(settings.hooks, hookPayload(event, extra))))
     }
 
     let progress = { tokens: 0, cacheRead: 0 }
@@ -2449,6 +2471,7 @@ ${note}`,
       return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
     }
     let input = plan?.resume ? since(plan) : whole
+    await fireHook('turn-start')
     try {
       for (;;) {
         try {
@@ -2539,6 +2562,10 @@ ${note}`,
         ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
+    await fireHook('turn-end', {
+      reply: { text: clipHookText(msg.text), ms, ...(receipt ? { tokens: { input: receipt.inputTokens, output: receipt.outputTokens } } : {}) },
+      tools: hookTools
+    })
     const usedNow = db.usedThisMonth(agent.id)
     // Only an agent with a ceiling has a share of it to warn about.
     if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
@@ -2562,7 +2589,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(hookRuns.length ? { hooks: hookRuns } : {}), ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
