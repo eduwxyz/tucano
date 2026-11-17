@@ -14313,3 +14313,782 @@ button.agent-card__now:hover {
     display: none;
   }
 }
+||||||| 4b08cea
+
+/* ---------- debloat: page header, approvals, agent page ---------- */
+/* Page and Sheet share one head: the title big (Nunito), inside the content and left-aligned at the
+   same place on every page, the actions on its line, a line under it, the tabs right after. No bar on
+   top: a strip still drags the window. Lists and forms keep to ~960px; `wide` takes the room it needs. */
+.page--head {
+  position: relative;
+}
+.page__drag {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 28px;
+  -webkit-app-region: drag;
+  z-index: 1;
+}
+.page-body {
+  box-sizing: border-box;
+  max-width: calc(960px + 64px);
+  padding: 40px 32px 72px;
+}
+.page-body.is-wide {
+  max-width: calc(1280px + 64px);
+}
+.page-body--fill {
+  max-width: none;
+  padding-bottom: 14px;
+  flex: none;
+}
+.is-in-hub .page-body {
+  padding-top: 12px;
+}
+.phead {
+  margin-bottom: 20px;
+}
+.phead__back {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  -webkit-app-region: no-drag;
+}
+.phead__back:hover {
+  color: var(--text);
+}
+.phead__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+}
+.phead__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--i-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.phead__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+  z-index: 2; /* above the window's drag strip */
+  -webkit-app-region: no-drag;
+}
+.phead__lede {
+  margin: 4px 0 0;
+  max-width: 720px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+/* In a hub: no title, only the actions, at the right, above the content. */
+.phead--hub {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.phead--hub .phead__back {
+  margin: 0 auto 0 0;
+}
+/* The tabs stay on top while the page scrolls: clickable under the window's drag strip. */
+.page-body > .tabs {
+  margin-top: -4px;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+@media (max-width: 760px) {
+  .page-body {
+    padding: calc(env(safe-area-inset-top) + 56px) 16px 56px;
+  }
+  .phead__row {
+    flex-wrap: wrap;
+  }
+  .phead__title {
+    font-size: 26px;
+    flex-basis: 100%;
+  }
+  .phead__actions {
+    flex-wrap: wrap;
+  }
+}
+
+/* A small panel under its button (the look of an agent, the "always allow" rules). */
+.popover {
+  position: relative;
+  display: inline-flex;
+}
+.popover__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  text-align: left;
+  transform-origin: top left;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
+}
+.popover__panel--end {
+  left: auto;
+  right: 0;
+  transform-origin: top right;
+}
+
+/* ---------- approvals ---------- */
+.caps-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 26px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.phead + .caps-title,
+.phead + .rest-line {
+  margin-top: 4px;
+}
+.caps-title .segmented {
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* A segmented pick without the frame: the history's filter, the levels of a connector. */
+.segmented--quiet {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.segmented--quiet button {
+  font-size: 12px;
+  padding: 3px 9px;
+}
+.segmented--quiet button.is-active {
+  background: color-mix(in srgb, var(--text) 11%, transparent);
+  box-shadow: none;
+}
+/* A request waiting: the conversation's card, with where it came from on its top line. */
+.approval-slot {
+  position: relative;
+  max-width: 760px;
+}
+.stack-list .approval-slot .approval {
+  max-width: none;
+  margin: 0;
+}
+.approval-slot__meta {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.approval-slot__meta .link {
+  color: var(--text-2);
+}
+.approval-slot__meta .link:hover {
+  color: var(--text);
+}
+/* Nothing waiting: one line, the toucan asleep and small. */
+.rest-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 760px;
+  margin-top: 4px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+.rest-line .sleeping-toucan {
+  flex: none;
+  margin: -6px -2px -6px -6px;
+}
+.rest-line p {
+  margin: 0;
+}
+.rest-line__title {
+  font-weight: 500;
+}
+.rest-line__why {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+/* The history: by day, the same action folded. */
+.approvals-history {
+  max-width: 760px;
+}
+.approvals-history .caps-title {
+  margin-top: 30px;
+}
+.approvals-history__none {
+  margin: 10px 0 0;
+}
+.history-day {
+  margin-top: 14px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+.history-day__head {
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.history-day__head strong {
+  font-weight: 500;
+  color: var(--text);
+}
+.history-row {
+  margin: 0 -10px;
+  border-radius: 8px;
+}
+.history-row--refused,
+.history-row--failed {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.history-row > .history-row__line,
+.history-row > .history-row__more {
+  white-space: normal;
+}
+.history-row__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: left;
+}
+.history-row__line:hover {
+  background: var(--hover);
+}
+.history-row__noone {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.history-row__line > .avatar {
+  flex: none;
+}
+.history-row__what {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 10px;
+}
+.history-row__times {
+  padding: 0 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.history-row__who {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.history-row__at {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.history-row__state {
+  flex: none;
+  width: 84px;
+  text-align: right;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.history-row--approved .history-row__state {
+  color: var(--ok);
+}
+.history-row--refused .history-row__state,
+.history-row--failed .history-row__state {
+  color: var(--danger);
+}
+.history-row__more {
+  list-style: none;
+  margin: 0;
+  padding: 2px 10px 8px 40px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  animation: rise var(--dur-fast) var(--ease-out) backwards;
+}
+.history-row__more li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+}
+.history-row__more-at {
+  flex: none;
+  min-width: 46px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* The "always allow" rules: who has any, and the way to them. */
+.rules-pop {
+  width: 300px;
+  padding: 8px;
+}
+.rules-pop__lead,
+.rules-pop__none {
+  margin: 2px 6px 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.rules-pop__none {
+  color: var(--text-3);
+}
+.rules-pop__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.rules-pop__item:hover {
+  background: var(--hover);
+}
+
+.link--quiet {
+  color: var(--text-2);
+}
+.link--quiet:hover {
+  color: var(--text);
+}
+/* The small toucan asleep: its body takes the text's color, so it shows on the dark theme too. */
+.rest-line .sleeping-toucan [fill='#1d1a16'] {
+  fill: var(--text);
+}
+.rest-line .sleeping-toucan [stroke='#fff'] {
+  stroke: var(--panel);
+}
+@media (max-width: 760px) {
+  .approval-slot__meta {
+    position: static;
+    margin-top: 6px;
+    padding-left: 2px;
+  }
+  .history-row__at {
+    display: none;
+  }
+}
+
+/* The "?" by a title: what the paragraph under it used to say. */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  font-weight: 400;
+}
+.help-tip > summary {
+  list-style: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.help-tip > summary::-webkit-details-marker {
+  display: none;
+}
+.help-tip > summary:hover,
+.help-tip[open] > summary {
+  color: var(--text);
+  border-color: var(--text-2);
+}
+.help-tip > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+.help-tip__pop {
+  position: absolute;
+  left: 24px;
+  top: -9px;
+  z-index: 25;
+  width: max-content;
+  max-width: min(340px, 70vw);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--toast-bg);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: normal;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
+}
+.help-tip__pop p {
+  margin: 0;
+}
+.help-tip__pop p + p {
+  margin-top: 6px;
+}
+/* By a row's name (long, near the right), it opens below and to the left. */
+.lrow .help-tip__pop {
+  left: auto;
+  right: -10px;
+  top: 24px;
+}
+
+/* ---------- an agent's page ---------- */
+.agent-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+.agent-head > .avatar {
+  flex: none;
+}
+.agent-head__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-head__sub {
+  flex: none;
+  font-family: var(--font);
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.agent-head__model,
+.agent-head__usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.agent-head__usage .budget {
+  width: 44px;
+  height: 4px;
+}
+.save-state {
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  animation: fade var(--dur-fast) var(--ease-out) backwards;
+}
+.save-state.is-saved {
+  color: var(--ok);
+}
+.save-state.is-warn {
+  color: var(--warn);
+}
+.save-state.is-error {
+  color: var(--danger);
+  white-space: normal;
+  max-width: 320px;
+}
+.agent-head__more {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--text-2);
+  letter-spacing: 0.08em;
+}
+.agent-head__more:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.agent-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  max-width: 760px;
+}
+/* A section: its title (and "?"), then its rows in one box. */
+.lgroup__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+.lgroup__head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.lgroup__aside {
+  margin-left: auto;
+}
+.lgroup__box {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.lgroup__box > * + * {
+  border-top: 1px solid var(--border);
+}
+.lgroup__pad {
+  padding: 14px;
+}
+.lgroup__bare > .checks,
+.lgroup__bare > .skill-filter {
+  margin-top: 4px;
+}
+.lrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 14px;
+  box-sizing: border-box;
+}
+.lrow__label {
+  flex: 1;
+  min-width: 0;
+}
+.lrow__name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.lrow__sub {
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+.lrow__warn {
+  color: var(--warn);
+}
+.lrow__warn .link {
+  color: inherit;
+}
+.lrow__ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 60%;
+}
+.lrow__ctl .select {
+  width: 220px;
+}
+.lrow__ctl .select__trigger {
+  height: 32px;
+  font-size: 13px;
+}
+.lrow__ctl .input--short {
+  width: 110px;
+}
+.lrow__channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lrow__channel .icon {
+  color: var(--text-3);
+}
+.lrow--wide .lrow__label {
+  flex: 0 0 auto;
+  width: 110px;
+}
+.lrow--wide .lrow__ctl {
+  flex: 1;
+  max-width: none;
+}
+.lrow--wide .model-picker {
+  justify-content: flex-end;
+}
+.lrow--wide .model-picker .select {
+  width: auto;
+  flex: 1 1 160px;
+}
+/* Name, @handle, role: the field fills the row, quiet until it's being typed in. */
+.lrow--field .lrow__key {
+  flex: none;
+  width: 110px;
+  color: var(--text-2);
+}
+.lrow--field > input,
+.lrow__input > input {
+  flex: 1;
+  min-width: 0;
+  margin-left: -9px;
+  padding: 6px 9px;
+  border-color: transparent;
+  background: transparent;
+}
+.lrow--field > input:hover,
+.lrow__input > input:hover {
+  background: var(--hover);
+}
+.lrow--field > input:focus,
+.lrow__input > input:focus {
+  background: var(--panel);
+  border-color: var(--accent);
+}
+.lrow__input {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lrow__input .field__error {
+  font-size: 12px;
+}
+.look-sum {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.look-pop {
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.look-pop .looks {
+  max-height: 220px;
+  overflow-y: auto;
+}
+/* A picker that brings its own label (the account): laid out as a row. */
+.lrow--picker:empty {
+  display: none;
+}
+.lrow--picker .field {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0;
+  gap: 4px 12px;
+}
+.lrow--picker .field__label {
+  flex: 1;
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--text);
+}
+.lrow--picker .select {
+  width: 220px;
+}
+.lrow--picker .hint {
+  flex-basis: 100%;
+}
+.lrow-note {
+  margin: 0;
+  padding: 10px 14px;
+}
+/* A row that opens what's under it. */
+.lrow-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  border-radius: 12px;
+}
+.lrow-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.lrow-fold > summary:hover {
+  background: var(--hover);
+}
+.lrow__value {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.lrow__value .icon {
+  color: var(--text-3);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.lrow-fold[open] > summary .lrow__value .icon {
+  transform: rotate(90deg);
+}
+.lrow-fold__body {
+  padding: 2px 14px 14px;
+  animation: rise var(--dur-fast) var(--ease-out) backwards;
+}
+.lrow-fold__body .always {
+  margin-top: 0;
+}
+.lrow-fold__body .grants {
+  margin: 0;
+}
+.lgroup__bare > textarea.instructions {
+  display: block;
+  min-height: 210px;
+  padding: 12px 14px;
+  border-color: var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.lgroup__bare > textarea.instructions:focus {
+  border-color: var(--accent);
+}
+.lgroup__bare > .hint {
+  margin-top: 6px;
+}
+.computer-body > .mac-confirm:first-child,
+.computer-body > .computer:first-child {
+  margin-top: 0;
+}
+
+/* The agent's save state at the tabs' right end, once its head scrolled away. */
+.tabs__aside {
+  margin-left: auto;
+  padding: 0 4px 2px;
+}
+@media (max-width: 760px) {
+  .lrow {
+    flex-wrap: wrap;
+  }
+  .lrow__ctl {
+    max-width: 100%;
+  }
+  .lrow--field .lrow__key {
+    width: 84px;
+  }
+}
