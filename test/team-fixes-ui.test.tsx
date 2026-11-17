@@ -123,10 +123,11 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
     const css = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'styles.css'), 'utf8')
     expect(css).toMatch(/\.history-row__what \{[^}]*min-width: 0;[^}]*overflow-wrap: anywhere;/)
     expect(css).toMatch(/\.history-row > :not\(\.history-row__what\):not\(\.history-row__outcome\) \{[^}]*flex-shrink: 0;/)
-    const { HistoryRow } = await import('../src/renderer/src/components/Pages')
+    const { HistoryRow, approvalWhat } = await import('../src/renderer/src/components/Pages')
+    const { groupHistory } = await import('../src/renderer/src/approval-history')
     fake = { ...fake, approvals: [{ id: 'ap', hash: 'h', agentId: 'a1', conversationId: 'ch', messageId: 'm', connectorName: 'GitLab', tool: 'mcp__gitlab__create_merge_request_with_a_really_long_name', args: {}, why: '', highRisk: false, state: 'approved', createdAt: 1, expiresAt: 2, decidedAt: 3 } as never] }
-    const html = renderToStaticMarkup(<HistoryRow id="ap" />)
-    expect(html).toContain('class="table__row history-row"')
+    const html = renderToStaticMarkup(<HistoryRow group={groupHistory(fake.approvals, approvalWhat)[0]!.rows[0]!} />)
+    expect(html).toContain('class="history-row history-row--approved')
     expect(html).toContain('class="history-row__what"')
   })
 

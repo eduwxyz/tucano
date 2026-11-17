@@ -12979,3 +12979,285 @@ button.agent-card__now:hover {
     flex-wrap: wrap;
   }
 }
+
+/* A small panel under its button (the look of an agent, the "always allow" rules). */
+.popover {
+  position: relative;
+  display: inline-flex;
+}
+.popover__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  text-align: left;
+  transform-origin: top left;
+  animation: pop var(--dur-fast) var(--ease-out) backwards;
+}
+.popover__panel--end {
+  left: auto;
+  right: 0;
+  transform-origin: top right;
+}
+
+/* ---------- approvals ---------- */
+.caps-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 26px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.phead + .caps-title,
+.phead + .rest-line {
+  margin-top: 4px;
+}
+.caps-title .segmented {
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* A segmented pick without the frame: the history's filter, the levels of a connector. */
+.segmented--quiet {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.segmented--quiet button {
+  font-size: 12px;
+  padding: 3px 9px;
+}
+.segmented--quiet button.is-active {
+  background: color-mix(in srgb, var(--text) 11%, transparent);
+  box-shadow: none;
+}
+/* A request waiting: the conversation's card, with where it came from on its top line. */
+.approval-slot {
+  position: relative;
+  max-width: 760px;
+}
+.stack-list .approval-slot .approval {
+  max-width: none;
+  margin: 0;
+}
+.approval-slot__meta {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.approval-slot__meta .link {
+  color: var(--text-2);
+}
+.approval-slot__meta .link:hover {
+  color: var(--text);
+}
+/* Nothing waiting: one line, the toucan asleep and small. */
+.rest-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 760px;
+  margin-top: 4px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+.rest-line .sleeping-toucan {
+  flex: none;
+  margin: -6px -2px -6px -6px;
+}
+.rest-line p {
+  margin: 0;
+}
+.rest-line__title {
+  font-weight: 500;
+}
+.rest-line__why {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+/* The history: by day, the same action folded. */
+.approvals-history {
+  max-width: 760px;
+}
+.approvals-history .caps-title {
+  margin-top: 30px;
+}
+.approvals-history__none {
+  margin: 10px 0 0;
+}
+.history-day {
+  margin-top: 14px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+.history-day__head {
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.history-day__head strong {
+  font-weight: 500;
+  color: var(--text);
+}
+.history-row {
+  margin: 0 -10px;
+  border-radius: 8px;
+}
+.history-row--refused,
+.history-row--failed {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.history-row > .history-row__line,
+.history-row > .history-row__more {
+  white-space: normal;
+}
+.history-row__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: left;
+}
+.history-row__line:hover {
+  background: var(--hover);
+}
+.history-row__noone {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.history-row__line > .avatar {
+  flex: none;
+}
+.history-row__what {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 10px;
+}
+.history-row__times {
+  padding: 0 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.history-row__who {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.history-row__at {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.history-row__state {
+  flex: none;
+  width: 84px;
+  text-align: right;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.history-row--approved .history-row__state {
+  color: var(--ok);
+}
+.history-row--refused .history-row__state,
+.history-row--failed .history-row__state {
+  color: var(--danger);
+}
+.history-row__more {
+  list-style: none;
+  margin: 0;
+  padding: 2px 10px 8px 40px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  animation: rise var(--dur-fast) var(--ease-out) backwards;
+}
+.history-row__more li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+}
+.history-row__more-at {
+  flex: none;
+  min-width: 46px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* The "always allow" rules: who has any, and the way to them. */
+.rules-pop {
+  width: 300px;
+  padding: 8px;
+}
+.rules-pop__lead,
+.rules-pop__none {
+  margin: 2px 6px 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.rules-pop__none {
+  color: var(--text-3);
+}
+.rules-pop__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.rules-pop__item:hover {
+  background: var(--hover);
+}
+
+.link--quiet {
+  color: var(--text-2);
+}
+.link--quiet:hover {
+  color: var(--text);
+}
+/* The small toucan asleep: its body takes the text's color, so it shows on the dark theme too. */
+.rest-line .sleeping-toucan [fill='#1d1a16'] {
+  fill: var(--text);
+}
+.rest-line .sleeping-toucan [stroke='#fff'] {
+  stroke: var(--panel);
+}
+@media (max-width: 760px) {
+  .approval-slot__meta {
+    position: static;
+    margin-top: 6px;
+    padding-left: 2px;
+  }
+  .history-row__at {
+    display: none;
+  }
+}

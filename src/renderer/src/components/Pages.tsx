@@ -2,7 +2,7 @@ import { L, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
-import { useContext, useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
+import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { InHub } from './hub-context'
 import {
   agentById,
@@ -106,6 +106,8 @@ import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
+import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
+import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
 
 // Every page's head, the same on all of them: the title big, inside the content and at the same
 // place; the actions on its line, at the right; one line under it. Tabs, when a page has them,
@@ -1245,53 +1247,245 @@ export function ApprovalsPage(): ReactNode {
   return <MyApprovals />
 }
 
+// A small panel under its button: open on click, gone on a click outside or Escape.
+function Popover({ label, title, className = '', panelClass = '', disabled, children }: { label: ReactNode; title?: string; className?: string; panelClass?: string; disabled?: boolean; children: (close: () => void) => ReactNode }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  const id = useId()
+  useEffect(() => {
+    if (!open) return
+    const out = (e: MouseEvent): void => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', out)
+    window.addEventListener('keydown', esc)
+    return () => {
+      window.removeEventListener('mousedown', out)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [open])
+  return (
+    <span ref={box} className="popover">
+      <button type="button" className={className} title={title} disabled={disabled} aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+        {label}
+      </button>
+      {open && (
+        <div id={id} role="dialog" aria-label={title} className={`popover__panel ${panelClass}`}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </span>
+  )
+}
+
+// The agent page's Ferramentas tab, with its "always allowed" rules open: where they're seen and taken back.
+let rulesFor: string | null = null
+export function openAgentRules(agentId: string): void {
+  rulesFor = agentId
+  setTab('agent', 'ferramentas')
+  navigate({ kind: 'agent', id: agentId })
+}
+
+// How many "do it without asking" an agent has: tools allowed for good, and kinds of action set to "sozinho".
+const ruleCount = (a: Pick<Agent, 'autoApprove' | 'actionRules'>): number => (a.autoApprove?.length ?? 0) + Object.values(a.actionRules ?? {}).filter((m) => m === 'auto').length
+
+// "Sempre permitir" lives on each agent (its tools, and its rules action by action): this lists who has any.
+function AlwaysRulesLink(): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const withRules = agents.filter((a) => !a.archived && ruleCount(a) > 0)
+  return (
+    <Popover label={L('Regras de “sempre permitir”', '“Always allow” rules')} title={L('Regras de “sempre permitir”', '“Always allow” rules')} className="text-btn" panelClass="popover__panel--end rules-pop">
+      {(close) => (
+        <>
+          <p className="rules-pop__lead">{L('Cada agente tem as suas, na página dele, em Ferramentas. Lá dá pra ver e tirar.', 'Each agent has its own, on its page, under Tools. That’s where you see and remove them.')}</p>
+          {withRules.length === 0 ? (
+            <p className="rules-pop__none">{L('Nenhuma ainda. “Aprovar e sempre permitir”, num pedido, cria uma.', 'None yet. “Approve and always allow”, on a request, makes one.')}</p>
+          ) : (
+            withRules.map((a) => (
+              <button key={a.id} className="rules-pop__item" onClick={() => (close(), openAgentRules(a.id))}>
+                <AgentAvatar agent={a} size={20} still />
+                <span className="grow">{a.name}</span>
+                <span className="muted">
+                  {L(`${ruleCount(a)} ${ruleCount(a) === 1 ? 'regra' : 'regras'}`, `${ruleCount(a)} ${ruleCount(a) === 1 ? 'rule' : 'rules'}`)} ›
+                </span>
+              </button>
+            ))
+          )}
+        </>
+      )}
+    </Popover>
+  )
+}
+
+// A request waiting: the same card as in the conversation, with where it came from and the way
+// to it on the card's own top line.
+function PendingApproval({ approval, where }: { approval: Approval; where: string }): ReactNode {
+  const there = useStore((s) => s.conversations.some((c) => c.id === approval.conversationId))
+  return (
+    <div className="approval-slot">
+      <ApprovalCard approval={approval} />
+      <div className="approval-slot__meta">
+        <span>
+          {where} · {time(approval.createdAt)}
+        </span>
+        {there && (
+          <button className="link" onClick={() => navigate({ kind: 'conversation', id: approval.conversationId })}>
+            {L('Ver na conversa', 'See in the conversation')}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Nothing waiting: the toucan asleep, small, on one line.
+function NothingWaiting({ why }: { why: string }): ReactNode {
+  return (
+    <div className="rest-line">
+      <SleepingToucan size={44} />
+      <div>
+        <p className="rest-line__title">{L('Nada esperando você.', 'Nothing waiting for you.')}</p>
+        <p className="rest-line__why">{why}</p>
+      </div>
+    </div>
+  )
+}
+
+// What an approval was for, in a few words: "Rodar um comando", "Abrir pull request", "Send email".
+export function approvalWhat(a: Approval): string {
+  const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+  if (a.tool === ACCESS_REQUEST) return L('Pedir acesso', 'Ask for access')
+  if (a.connectorId === COMPUTADOR) return shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || L('Rodar um comando', 'Run a command')
+  if (a.tool === 'abrir_pr') return L('Abrir pull request', 'Open a pull request')
+  if (a.connectorId === 'navegador') return L('Clicar no navegador', 'Click in the browser')
+  if (a.connectorId === 'apps') return L(`Clicar no ${String(a.args['app'] ?? 'app')}`, `Click in ${String(a.args['app'] ?? 'an app')}`)
+  return cap(toolWords(a.tool))
+}
+
+const STATUS_WORD = (): Record<HistoryStatus, string> => ({
+  approved: L('✓ aprovada', '✓ approved'),
+  refused: L('✕ recusada', '✕ refused'),
+  failed: L('✕ falhou', '✕ failed'),
+  expired: L('expirada', 'expired')
+})
+
+// The times of a folded row: all of them up to four; past that, the first three and the last.
+const timesOf = (items: Approval[]): string => {
+  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))
+  return hm.length > 4 ? `${hm.slice(0, 3).join(', ')} … ${hm.at(-1)}` : hm.join(', ')
+}
+
+// One row of the history (one action, or the same one folded ×N). Opened, each time with what came
+// of it, the reason, who decided and the way to the conversation.
+export function HistoryRow({ group }: { group: HistoryGroup }): ReactNode {
+  const agent = useStore((s) => agentById(s, group.agentId))
+  const conversations = useStore((s) => s.conversations)
+  const people = useStore((s) => s.people)
+  const [open, setOpen] = useState(false)
+  const n = group.items.length
+  return (
+    <div className={`history-row history-row--${group.status} ${open ? 'is-open' : ''}`}>
+      <button className="history-row__line" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {agent ? <AgentAvatar agent={agent} size={20} still /> : <span className="history-row__noone" />}
+        <span className="history-row__what">
+          {group.what}
+          {n > 1 && <span className="history-row__times">×{n}</span>}
+          <span className="history-row__who">
+            {agent?.name ?? L('Agente', 'Agent')} · {group.connectorName}
+          </span>
+        </span>
+        <span className="history-row__at">{timesOf(group.items)}</span>
+        <span className="history-row__state">{STATUS_WORD()[group.status]}</span>
+      </button>
+      {open && (
+        <ul className="history-row__more">
+          {group.items.map((a) => {
+            const by = a.decidedBy ? people.find((p) => p.id === a.decidedBy)?.name : undefined
+            return (
+              <li key={a.id}>
+                <span className="history-row__more-at">{time(a.decidedAt ?? a.createdAt)}</span>
+                <span className="grow">
+                  {a.outcome ?? (a.state === 'expired' ? L('Expirou sem decisão.', 'Expired without a decision.') : '')}
+                  {a.reason ? ` “${a.reason}”` : ''}
+                  {by && a.state !== 'expired' && <span className="muted"> · {a.state === 'approved' ? L(`aprovada por ${by}`, `approved by ${by}`) : L(`recusada por ${by}`, `refused by ${by}`)}</span>}
+                </span>
+                {conversations.some((c) => c.id === a.conversationId) && (
+                  <button className="link link--quiet" onClick={() => navigate({ kind: 'conversation', id: a.conversationId })}>
+                    {L('Ver na conversa', 'See in the conversation')}
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// What was decided, by day, with the same action folded; "Só exceções" keeps what didn't go through.
+function ApprovalHistory({ approvals }: { approvals: Approval[] }): ReactNode {
+  const [only, setOnly] = useState(false)
+  if (!approvals.some((a) => a.state !== 'pending')) return null
+  const exceptions = exceptionCount(approvals)
+  const days = groupHistory(approvals, approvalWhat, only)
+  return (
+    <section className="approvals-history">
+      <div className="caps-title">
+        <span className="grow">{L('Histórico', 'History')}</span>
+        <div className="segmented segmented--quiet" role="radiogroup" aria-label={L('Mostrar', 'Show')}>
+          <button role="radio" aria-checked={!only} className={!only ? 'is-active' : ''} onClick={() => setOnly(false)}>
+            {L('Tudo', 'All')}
+          </button>
+          <button role="radio" aria-checked={only} className={only ? 'is-active' : ''} onClick={() => setOnly(true)}>
+            {L(`Só exceções · ${exceptions}`, `Exceptions only · ${exceptions}`)}
+          </button>
+        </div>
+      </div>
+      {days.length === 0 && <p className="muted small approvals-history__none">{L('Nenhuma recusada, expirada ou com falha.', 'None refused, expired or failed.')}</p>}
+      {days.map((d) => (
+        <div key={d.day} className="history-day">
+          <div className="history-day__head">
+            <strong>{dayLabel(d.day)}</strong> · {daySummary(d.counts)}
+          </div>
+          {d.rows.map((g) => (
+            <HistoryRow key={g.key} group={g} />
+          ))}
+        </div>
+      ))}
+    </section>
+  )
+}
+
 function MyApprovals(): ReactNode {
   const approvals = useStore((s) => s.approvals)
   const pending = approvals.filter((a) => a.state === 'pending')
-  const past = approvals.filter((a) => a.state !== 'pending').sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
   const conversations = useStore((s) => s.conversations)
   const agents = useStore((s) => s.agents)
+  const where = (a: Approval): string => {
+    const conv = conversations.find((c) => c.id === a.conversationId)
+    const who = agents.find((x) => x.id === a.agentId)?.name
+    return conv?.kind === 'channel' ? L(`em #${conv.name}`, `in #${conv.name}`) : who ? L(`na DM com ${who}`, `in the DM with ${who}`) : L('na DM', 'in the DM')
+  }
 
   return (
-    <Page title={L('Aprovações', 'Approvals')} subtitle={L('Nada sensível acontece sem você. Cada aprovação cobre uma ação exata.', 'Nothing sensitive happens without you. Each approval covers one exact action.')}>
+    <Page title={L('Aprovações', 'Approvals')} subtitle={L('Nada sensível acontece sem você. Cada aprovação cobre uma ação exata.', 'Nothing sensitive happens without you. Each approval covers one exact action.')} actions={<AlwaysRulesLink />}>
       {pending.length === 0 ? (
-        <div className="empty empty--rest">
-          <SleepingToucan />
-          <p>{L('Nada esperando por você.', 'Nothing waiting for you.')}</p>
-          <p className="muted">{L('Quando um agente quiser publicar código, colocar algo no ar, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.', 'When an agent wants to publish code, put something live, delete or send something out, the request shows up here and in the conversation.')}</p>
-        </div>
+        <NothingWaiting why={L('Quando um agente quiser publicar, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.', 'When an agent wants to publish, delete or send something out, the request shows up here and in the conversation.')} />
       ) : (
-        <div className="stack-list">
-          {pending.map((a) => {
-            const conv = conversations.find((c) => c.id === a.conversationId)
-            const who = agents.find((x) => x.id === a.agentId)?.name
-            return (
-              <div key={a.id}>
-                <div className="row row--between small muted list-meta">
-                  <span>
-                    {conv?.kind === 'channel' ? L(`em #${conv.name}`, `in #${conv.name}`) : who ? L(`na DM com ${who}`, `in the DM with ${who}`) : L('na DM', 'in the DM')} · {time(a.createdAt)}
-                  </span>
-                  <button className="link" onClick={() => navigate({ kind: 'conversation', id: a.conversationId })}>
-                    {L('Ver na conversa', 'See in the conversation')}
-                  </button>
-                </div>
-                <ApprovalCard approval={a} />
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {past.length > 0 && (
         <>
-          <h3 className="section-title">{L('Histórico', 'History')}</h3>
-          <div className="table">
-            {past.map((a) => (
-              <HistoryRow key={a.id} id={a.id} />
+          <div className="caps-title">{L(`Esperando você · ${pending.length}`, `Waiting for you · ${pending.length}`)}</div>
+          <div className="stack-list">
+            {pending.map((a) => (
+              <PendingApproval key={a.id} approval={a} where={where(a)} />
             ))}
           </div>
         </>
       )}
+      <ApprovalHistory approvals={approvals} />
     </Page>
   )
 }
@@ -1307,7 +1501,6 @@ export function InboxPage(): ReactNode {
   const approvals = useStore((s) => s.approvals)
   const mine = new Set(inbox.approvals.map((a) => a.id))
   const asked = approvals.filter((a) => a.state === 'pending' && !mine.has(a.id) && a.requestedBy === you)
-  const past = approvals.filter((a) => a.state !== 'pending').sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
   const proposals = inbox.proposals ?? []
   // One answered by someone else while I was typing stays, with what I typed and who answered.
   const gone = (inbox.answered ?? []).filter((q) => questionDrafts.get(q.id)?.trim() && !inbox.questions.some((x) => x.id === q.id))
@@ -1331,30 +1524,21 @@ export function InboxPage(): ReactNode {
     </div>
   )
   return (
-    <Page title={L('Pra você', 'For you')} subtitle={L('O que espera por você: aprovações que você decide e perguntas dos agentes a você.', 'What waits on you: approvals you decide and the agents’ questions to you.')}>
-      {nothing && (
-        <div className="empty empty--rest">
-          <SleepingToucan />
-          <p>{L('Nada esperando por você.', 'Nothing waiting for you.')}</p>
-          <p className="muted">{L('Quando um agente precisar da sua aprovação ou te fizer uma pergunta, aparece aqui e na conversa.', 'When an agent needs your approval or asks you something, it shows up here and in the conversation.')}</p>
-        </div>
-      )}
+    <Page title={L('Pra você', 'For you')} subtitle={L('O que espera por você: aprovações que você decide e perguntas dos agentes a você.', 'What waits on you: approvals you decide and the agents’ questions to you.')} actions={<AlwaysRulesLink />}>
+      {nothing && <NothingWaiting why={L('Quando um agente precisar da sua aprovação ou te fizer uma pergunta, aparece aqui e na conversa.', 'When an agent needs your approval or asks you something, it shows up here and in the conversation.')} />}
       {inbox.approvals.length > 0 && (
         <>
-          <h3 className="section-title">{L('Aprovações', 'Approvals')}</h3>
+          <div className="caps-title">{L(`Aprovações · ${inbox.approvals.length}`, `Approvals · ${inbox.approvals.length}`)}</div>
           <div className="stack-list">
             {inbox.approvals.map((a) => (
-              <div key={a.id}>
-                {meta(a.conversationId, a.agentId, a.createdAt)}
-                <ApprovalCard approval={approvals.find((x) => x.id === a.id) ?? a} />
-              </div>
+              <PendingApproval key={a.id} approval={approvals.find((x) => x.id === a.id) ?? a} where={where(a.conversationId, a.agentId)} />
             ))}
           </div>
         </>
       )}
       {questions.length > 0 && (
         <>
-          <h3 className="section-title">{L('Perguntas', 'Questions')}</h3>
+          <div className="caps-title">{L(`Perguntas · ${questions.length}`, `Questions · ${questions.length}`)}</div>
           <div className="stack-list">
             {questions.map(({ q, done }) => (
               <div key={q.id}>
@@ -1367,7 +1551,7 @@ export function InboxPage(): ReactNode {
       )}
       {proposals.length > 0 && (
         <>
-          <h3 className="section-title">{L('Pedidos pra um admin aplicar', 'Requests for an admin to apply')}</h3>
+          <div className="caps-title">{L(`Pedidos pra um admin aplicar · ${proposals.length}`, `Requests for an admin to apply · ${proposals.length}`)}</div>
           <div className="stack-list">
             {proposals.map((p) => (
               <div key={`${p.id}:${p.index ?? 0}`}>
@@ -1384,45 +1568,16 @@ export function InboxPage(): ReactNode {
       )}
       {asked.length > 0 && (
         <>
-          <h3 className="section-title">{L('Você pediu, esperando outra pessoa', 'You asked, waiting on someone else')}</h3>
+          <div className="caps-title">{L('Você pediu, esperando outra pessoa', 'You asked, waiting on someone else')}</div>
           <div className="stack-list">
             {asked.map((a) => (
-              <div key={a.id}>
-                {meta(a.conversationId, a.agentId, a.createdAt)}
-                <ApprovalCard approval={a} />
-              </div>
+              <PendingApproval key={a.id} approval={a} where={where(a.conversationId, a.agentId)} />
             ))}
           </div>
         </>
       )}
-      {past.length > 0 && (
-        <>
-          <h3 className="section-title">{L('Histórico', 'History')}</h3>
-          <div className="table">
-            {past.map((a) => (
-              <HistoryRow key={a.id} id={a.id} />
-            ))}
-          </div>
-        </>
-      )}
+      <ApprovalHistory approvals={approvals} />
     </Page>
-  )
-}
-
-// A long tool name wraps inside its own column; the rest of the row keeps its size.
-export function HistoryRow({ id }: { id: string }): ReactNode {
-  const a = useStore((s) => s.approvals.find((x) => x.id === id)!)
-  const agent = useStore((s) => agentById(s, a.agentId))
-  return (
-    <div className="table__row history-row">
-      {agent && <AgentAvatar agent={agent} size={22} />}
-      <span className="history-row__what">
-        {a.connectorId === COMPUTADOR ? shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || toolWords(a.tool) : toolWords(a.tool)} <span className="muted">· {a.connectorName}</span>
-      </span>
-      {a.outcome && <span className="muted small history-row__outcome" title={a.outcome}>{a.outcome}</span>}
-      <span className={`tag ${a.state === 'approved' ? 'tag--ok' : a.state === 'refused' ? 'tag--danger' : ''}`}>{a.state === 'approved' ? L('aprovado', 'approved') : a.state === 'refused' ? L('recusado', 'refused') : L('expirado', 'expired')}</span>
-      <span className="muted small">{a.decidedAt ? time(a.decidedAt) : ''}</span>
-    </div>
   )
 }
 
