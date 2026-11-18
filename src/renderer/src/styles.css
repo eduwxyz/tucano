@@ -2520,6 +2520,15 @@ h3 {
   margin-top: 2px;
   flex-shrink: 0;
 }
+/* A form row lines up under the rows above it: the fields start where their text does, and the
+   right-hand column stays free for the button those rows carry there. */
+.key-row--form {
+  align-items: flex-start;
+}
+.key-row__glyph {
+  width: 28px;
+  flex: none;
+}
 
 /* A three-state switch (Global · On · Off) beside a sentence needs more room than a toggle: in a
    narrow card it drops to its own line, right-aligned, instead of squeezing the sentence into a
