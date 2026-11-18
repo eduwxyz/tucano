@@ -836,6 +836,8 @@ const connectors = new ConnectorManager({
   // On a server behind https (TUCANO_URL), the provider sends the person back to the server's own
   // address, which src/server hands over here; on a desktop, to the gateway on this computer.
   oauthCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : gateway.url('/oauth/callback')),
+  // A provider that takes only a loopback address back (Canva's): on that server, the address the person pastes.
+  localCallbackUrl: () => gateway.url('/oauth/callback'),
   // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
   fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
 })

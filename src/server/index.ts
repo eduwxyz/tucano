@@ -694,13 +694,15 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       const head = el('header', 'modal__head')
       head.append(el('strong', '', t('Escolher pasta no servidor', 'Choose a folder on the server')))
       const where = el('p', 'small muted mono modal__lead')
+      // The person's own folders aren't here: they're lent from the app on their computer.
+      const mine = el('p', 'small muted', t('Estas são as pastas do servidor. Pra uma pasta do seu computador, ligue no app do Tucano nele Configurações › Servidores › Deixar este servidor usar este computador e empreste a pasta por lá.', "These are the server's folders. For a folder on your computer, turn on Settings › Servers › Let this server use this computer in the Tucano app there, and lend the folder from it."))
       const list = el('div', 'folder-pick')
       list.style.cssText = 'max-height:320px;overflow:auto;display:grid;gap:2px;margin:8px 0'
       const foot = el('footer', 'modal__foot')
       const cancel = el('button', 'btn btn--ghost btn--sm', t('Cancelar', 'Cancel'))
       const choose = el('button', 'btn btn--primary btn--sm', t('Escolher esta pasta', 'Choose this folder'))
       foot.append(el('span', 'grow'), cancel, choose)
-      card.append(head, where, list, foot)
+      card.append(head, where, list, mine, foot)
       shade.append(card)
       document.body.append(shade)
       let current = ''
