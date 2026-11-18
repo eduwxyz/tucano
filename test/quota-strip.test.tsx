@@ -6,6 +6,10 @@
 // own bots are set to run on get one: a login on the computer that no member spends has no bar, and a
 // fallback model's provider does, after its bot's main one. The widths the bars take are measured in
 // a browser in test/quota-strip-layout.test.ts; linkedom has no layout.
+//
+// The box over a bar has its own block below: the pointer names one provider and gets that
+// provider's windows alone, leaving the strip closes it, the keyboard opens it where there is no
+// pointer to name a bar, and a wallet is a line of money rather than a bar.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -72,6 +76,21 @@ const render = async (agents: Agent[]): Promise<void> => {
 const pills = (): HTMLElement[] => [...document.querySelectorAll('.quota-strip__pill')] as HTMLElement[]
 // The bar each pill draws, as the provider it stands for and the window it measures.
 const drew = (): [string | undefined, string | undefined][] => pills().map((p) => [p.dataset.provider, p.dataset.span])
+// The pointer and the keyboard, as the header hears them: a pointer moving onto an element arrives as
+// `mouseover`, moving off it as `mouseout`, and the keyboard's focus as `focusin`, its leaving as
+// `focusout`. linkedom has no MouseEvent, and React reads the target and its ancestors from these.
+const hover = async (el: Element): Promise<void> => {
+  await act(async () => el.dispatchEvent(new window.Event('mouseover', { bubbles: true })))
+}
+const leave = async (el: Element): Promise<void> => {
+  await act(async () => el.dispatchEvent(new window.Event('mouseout', { bubbles: true })))
+}
+const focusOn = async (el: Element): Promise<void> => {
+  await act(async () => el.dispatchEvent(new window.Event('focusin', { bubbles: true })))
+}
+const blurOff = async (el: Element): Promise<void> => {
+  await act(async () => el.dispatchEvent(new window.Event('focusout', { bubbles: true })))
+}
 const plane = (over: Partial<ProviderQuota>): ProviderQuota => ({ id: 'openai-codex', label: 'Codex', via: 'Codex', at: Date.now(), ...over })
 // A window with a cap, as a provider reports it: what is left, out of what it allows.
 const pct = (leftOver: number, resetsAt?: number) => ({ used: 1 - leftOver, remaining: leftOver, limit: 1, unit: '%' as const, ...(resetsAt ? { resetsAt } : {}) })
@@ -192,14 +211,17 @@ describe('the strip in the header', () => {
     expect(pills().find((p) => p.dataset.provider === 'openai-codex')!.querySelector('i')!.getAttribute('style')).toContain('8%')
   })
 
-  it('says whose number it is and when it resets, without opening anything', async () => {
+  it('says whose number it is and when it resets, without leaving the header', async () => {
     reply = [plane({ id: 'opencode-go', label: 'OpenCode Go', via: 'Pi', month: { ...pct(0.5, Date.now() + 5 * 86_400_000) } })]
     await render([bot('lia', { modelId: 'pi:opencode-go/deepseek-v4.1-flash' })])
-    const title = pills()[0]!.getAttribute('title')!
-    expect(title).toContain('OpenCode Go')
-    expect(title).toContain('50%')
-    expect(title).toContain('this month')
-    expect(title).toContain('resets')
+    await hover(pills()[0]!)
+    const said = document.querySelector('.quota-card')!.textContent!
+    expect(said).toContain('OpenCode Go')
+    expect(said).toContain('Month')
+    expect(said).toContain('50%')
+    expect(said).toContain('resets')
+    // Reading it is not opening Usage and limits: the click is still the click.
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it('opens Usage and limits on a click', async () => {
@@ -225,5 +247,68 @@ describe('the strip in the header', () => {
     await act(async () => root.render(<QuotaStrip agents={[bot('lia', { modelId: 'codex:gpt-6.1-sol' })]} />))
     await flush()
     expect(document.querySelector('.quota-strip')).toBeNull()
+  })
+})
+
+describe('the box over a bar', () => {
+  // Two providers whose windows differ, so the box says which bar the pointer named: the header
+  // carries one number each, and the box is the one place those numbers are spelled out.
+  const both = async (): Promise<void> => {
+    reply = [
+      plane({ session: pct(0.9), week: pct(0.7), month: pct(0.5, Date.now() + 5 * 86_400_000) }),
+      plane({ id: 'zai', label: 'Z.ai', via: 'Pi', week: pct(0.4) })
+    ]
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' }), bot('theo', { modelId: 'pi:zai/glm-5.3' })])
+  }
+  const card = (): HTMLElement | null => document.querySelector('.quota-card')
+  const written = (sel: string): string[] => [...document.querySelectorAll(sel)].map((n) => n.textContent ?? '')
+
+  it("opens the pointed-at provider's own windows, and only those", async () => {
+    await both()
+    // Nothing is open until the pointer says which bar it is asking about.
+    expect(card()).toBeNull()
+    await hover(pills()[0]!)
+    expect(card()!.getAttribute('role')).toBe('tooltip')
+    expect(written('.quota-card__name')).toEqual(['Codex'])
+    // Every window that provider reports a cap for, longest first, each with what is left and when it
+    // resets — the three rows the Usage page draws, in the header's own box.
+    expect(written('.quota-card__span')).toEqual(['Month', 'Week', '5h'])
+    expect(written('.quota-card__left')).toEqual(['50% left', '70% left', '90% left'])
+    expect(written('.quota-card__track')).toHaveLength(3)
+    expect(written('.quota-card__reset')[0]).toContain('resets')
+    expect(card()!.textContent).not.toContain('Z.ai')
+    // The other bar names the other provider, in the one window that one reports.
+    await hover(pills()[1]!)
+    expect(written('.quota-card__name')).toEqual(['Z.ai'])
+    expect(written('.quota-card__span')).toEqual(['Week'])
+    expect(card()!.textContent).not.toContain('Codex')
+  })
+
+  it('closes when the pointer leaves the strip', async () => {
+    await both()
+    await hover(pills()[1]!)
+    expect(card()).not.toBeNull()
+    await leave(document.querySelector('.quota-strip-wrap')!)
+    expect(card()).toBeNull()
+  })
+
+  it('opens on the keyboard, where there is no pointer to name one bar, and closes when it goes', async () => {
+    await both()
+    const strip = document.querySelector('.quota-strip')!
+    await focusOn(strip)
+    expect(card()!.getAttribute('role')).toBe('tooltip')
+    // No pointer named a bar, so the box holds each bar it could be reading.
+    expect(written('.quota-card__name')).toEqual(['Codex', 'Z.ai'])
+    await blurOff(strip)
+    expect(card()).toBeNull()
+  })
+
+  it('says what is in a wallet, which draws no bar of its own', async () => {
+    reply = [plane({ month: pct(0.3), week: { remaining: 3.42, unit: 'usd' } })]
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' })])
+    await hover(pills()[0]!)
+    // A balance has no cap, so it is a line of money rather than a bar.
+    expect(written('.quota-card__span')).toEqual(['Month'])
+    expect(card()!.textContent).toContain('$3.42 in the wallet')
   })
 })
