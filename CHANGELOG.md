@@ -4,6 +4,14 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Settings grouped by section.** Every settings pane now names the sections it holds in a rail above the controls, so a long pane such as General reads as Appearance, Workspace, Notifications and Backups instead of one list. The rail stays visible while scrolling, marks the section being read, and moves to a section without losing keyboard focus; reduced motion jumps instead of animating. Section order and the settings each one owns are declared once in `src/renderer/src/settings-structure.ts`, and `npm run check:settings` fails when a control is rendered outside its declared section.
+
+### Fixed
+
+- **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences.
+
 ## [0.2.37] - 2026-11-17
 
 > **Em português:**

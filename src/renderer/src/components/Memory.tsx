@@ -150,7 +150,7 @@ export function MemoryPage(): ReactNode {
       {tab === 'review' ? (
         <>
           {pending.length > 0 && (
-            <ReadGroup title={L('Novas', 'New')} lead={L('Só entram na memória se você guardar.', 'They only go into memory if you keep them.')}>
+            <ReadGroup title={L('Novas', 'New')} lead={L('Só entram na memória se você guardar.', "Save a suggestion to add it to memory.")}>
               {pending.map((m) => (
                 <Line key={m.id} memory={m} shown>
                   <button className="text-btn text-btn--strong" onClick={() => decideMemory(m.id, true)}>
@@ -183,11 +183,11 @@ export function MemoryPage(): ReactNode {
           </button>
         </>
       ) : tab === 'forgotten' ? (
-        <ReadGroup title={L('Esquecidas', 'Forgotten')} lead={L('Saíram do prompt. O registro impede que sejam aprendidas de novo; apagar de vez remove até ele.', 'Out of the prompt. The record keeps them from being learned again; deleting for good removes even that.')}>
+        <ReadGroup title={L('Esquecidas', 'Forgotten')} lead={L('Saíram do prompt. O registro impede que sejam aprendidas de novo; apagar de vez remove até ele.', "Excluded from prompts and blocked from relearning. Permanent deletion also removes that block.")}>
           {forgotten.filter(hit).map((m) => (
             <Line key={m.id} memory={m}>
               <button className="text-btn" onClick={() => purgeMemory(m.id)}>
-                {L('Apagar de vez', 'Delete for good')}
+                {L('Apagar de vez', "Delete permanently")}
               </button>
             </Line>
           ))}
@@ -254,7 +254,7 @@ function Meta({ memory, searchable }: { memory: Memory; searchable?: boolean }):
       )}
       {' · '}
       <span title={new Date(memory.createdAt).toLocaleString(locale())}>{ago(memory.createdAt)}</span>
-      {searchable && <span title={L('Fora do prompt: os agentes acham com buscar_memorias.', 'Out of the prompt: agents find it with buscar_memorias.')}>{L(' · por busca', ' · by search')}</span>}
+      {searchable && <span title={L('Fora do prompt: os agentes acham com buscar_memorias.', "Not included in prompts; agents can find it through memory search.")}>{L(' · por busca', " · searchable")}</span>}
     </span>
   )
 }
@@ -270,7 +270,7 @@ function Line({ memory, searchable, shown, children }: { memory: Memory; searcha
         <Meta memory={memory} searchable={searchable} />
         {previous && (
           <button className="text-btn" onClick={() => setShowPrev(!showPrev)}>
-            {showPrev ? L('Esconder a anterior', 'Hide the previous one') : L('Ver a anterior', 'See the previous one')}
+            {showPrev ? L('Esconder a anterior', "Hide previous version") : L('Ver a anterior', "View previous version")}
           </button>
         )}
         <span className="grow" />
@@ -342,7 +342,7 @@ function Add({ me }: { me: string }): ReactNode {
     >
       <Icon name="plus" size={15} />
       <input value={text} placeholder={L(`Ensinar algo sobre você. Ex.: ${me} prefere PRs pequenos.`, `Teach it something about you. E.g. ${me} prefers small PRs.`)} onChange={(e) => setText(e.target.value)} />
-      {text.trim() && <span className="read-add__hint">{L('Enter guarda', 'Enter keeps it')}</span>}
+      {text.trim() && <span className="read-add__hint">{L('Enter guarda', "Enter to save")}</span>}
     </form>
   )
 }
