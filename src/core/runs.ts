@@ -80,7 +80,7 @@ const GIVE_UP_MS = 10 * 60_000
 // not started out of the blue now; it ends as failed and whoever asked hears it, to ask again if it still matters.
 const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
-const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached', 'paused']
+const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
 // a failure, and neither is the same as the person stopping it.
 const cutOf = (status: RunStatus): string =>
