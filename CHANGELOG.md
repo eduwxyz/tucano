@@ -4,6 +4,35 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.37] - 2026-11-17
+
+> **Em português:**
+> - **Novo:** um **Tucano mais leve, com a mesma cara**. Agentes numa lista só, agrupada por setor; **Conhecimento** (Memória · Wiki · Skills) e **Operação** (Rotinas · Boletim · Uso) com abas; **Enviar feedback**, **Conectores** e a engrenagem no pé da barra. A página de rotinas abre na semana, as aprovações se agrupam por dia, a página do agente salva sozinha e o Tuca começa direto na conversa, com a proposta preenchendo ao lado.
+> - **Novo:** **tire da barra** o que você não usa (Tuca, Aprovações, Quadro, Conhecimento, Operação): clique com o botão direito ou no **•••** e escolha **Tirar da barra**. O que saiu fica numa linha **N escondidos** logo abaixo, de onde volta num clique, e o aviso tem **Desfazer**. Aprovações e Conhecimento voltam sozinhos enquanto algo espera por você.
+> - **Novo:** o **Quadro**, com o trabalho de todos os agentes em cartões, um por tarefa: A fazer, Fazendo, Precisa de você e Feito.
+> - **Novo:** **Enviar feedback** de dentro do app, com um print da janela se você quiser, e pesquisas rápidas numa linha discreta no pé da barra (dá pra desligar em Configurações).
+> - **Novo:** **outra conta do Antigravity**, no Mac, como já dava com o Claude Code e o Codex: em **Configurações › Modelos › Contas**, e cada agente escolhe a sua.
+> - **Mudou:** na conversa, uma rotina não repete mais o pedido inteiro a cada vez: ele vira um chip com o nome dela, e as execuções seguidas sem novidade se dobram numa linha só.
+> - **Corrigido:** o **Time** com muitos setores não vira mais uma faixa ilegível: **Organizar** quebra os setores em linhas, e arrastar e dar zoom ficou leve.
+> - **Corrigido:** quando o Tuca propunha dois agentes novos na mesma resposta, o segundo tomava o lugar do primeiro, e as rotinas do primeiro não aplicavam. Agora ele propõe os dois num time, e uma resposta antiga assim destrava quando o agente já existe.
+
+### Added
+
+- **A lighter desktop app, same identity.** Fewer things side by side, nothing said twice, what needs you in sight, and what you set up now and then one click away; no feature goes away. "Direct messages" and "Agents" are one list, grouped by sector when there are sectors, each sector folding and still showing what waits in it. **Knowledge** (Memory · Wiki · Skills) and **Operations** (Routines · Report · Usage) are hubs with tabs, each opening on its last tab. The foot of the sidebar is **Send feedback**, then **Connectors** and the settings gear; pausing the team and the theme moved to the menu on the workspace's name. The routines page opens on the week, with routines that run several times a day in an "all day" strip; Approvals puts pending ones first and groups the history by day, folding repeated actions; the agent page saves by itself, with its facts in a header; Tuca starts in the conversation with four suggestions and fills the proposal beside it. Every page has its title in the same place, with its actions on the same line. (#525)
+- **Take items out of the top of the sidebar.** Tuca, Approvals, Board, Knowledge and Operations each leave it from a right click or their "•••" ("Take out of the sidebar"), with Undo on the toast. What was taken out shows as one quiet line under them, "2 hidden", which opens to those items, dimmed, each going back to its place on a click; the workspace's menu also lists them under "In the sidebar". Approvals and Knowledge come back by themselves while something waits on you in them (an approval; a suggested memory or a proposed skill). It's each person's own setting. (#525)
+- **The Board.** Every agent's work as cards in To do, Doing, Needs you and Done (today's). A request split among agents is one card in every view, saying who has it now; anything in it waiting on you brings the whole card to Needs you. Long requests get a short title from the memory's model. The card's panel puts the decision first, then the task's story by agent. (#524)
+- **Send feedback from the app, and small surveys.** "Send feedback" (at the foot of the sidebar and in Settings › General) sends a kind, your text and, if you keep it ticked, a picture of the Tucano window, with a line saying what goes along. Now and then the owner sees a survey as one quiet line above the foot; it can be turned off in Settings, and "Não quero responder" hides it for good. (#534)
+- **Another Antigravity account, on a Mac.** Antigravity kept its Google login in one keychain entry, so a second account replaced the first. Settings › Models › Accounts now takes Antigravity too: its login lives in a file in the account's own folder, and an agent on that account runs with that login and no keychain. On Linux and Windows its login lives in the system store, so it isn't offered there yet. (#538)
+
+### Changed
+
+- **A routine's run in the conversation is lighter.** Its prompt no longer sits above every reply: the reply gets a chip with the routine's name, which opens what it asked. Consecutive runs with nothing new fold into one line ("Vigia do GitHub · 3 execuções sem novidade"), and an approval already decided is one line. "On your computer" shows once, in the conversation's header. (#525)
+
+### Fixed
+
+- **The Team board with many sectors.** Tidy up put every sector in one row, so a team of 17 in 5 sectors was a strip over 4,000 px wide that only fit at the 30% zoom floor. Sectors now wrap into rows to about a screen's shape, with each line to a lower row going down a gap between sectors; panning and zooming no longer redraw every card on each step. (#535)
+- **Tuca proposing two new agents in one reply.** The second new agent's card replaced the first one's, and the first one's routines couldn't be applied ("Create Sustinho first: it's in a card of this same reply", with no such card). Tuca now proposes several new agents as one team, and a card whose agent is in no card of its reply applies to an agent of that name already on the team. (#537)
+
 ## [0.2.36] - 2026-11-16
 
 > **Em português:**
