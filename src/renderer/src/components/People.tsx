@@ -577,6 +577,10 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return named ? L(`excluiu o canal #${named}`, `deleted the #${named} channel`) : L('excluiu um canal', 'deleted a channel')
     case 'dm.deleted':
       return L('apagou uma conversa privada', 'deleted a private conversation')
+    case 'channel.cleared':
+      return named ? L(`limpou o histórico do canal #${named}`, `cleared the history of #${named}`) : L('limpou o histórico de um canal', 'cleared the history of a channel')
+    case 'dm.cleared':
+      return L('limpou o histórico de uma conversa privada', 'cleared the history of a private conversation')
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
   }
