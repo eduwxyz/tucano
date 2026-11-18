@@ -88,7 +88,7 @@ const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
 // How much thinking is worth one wake-up of the window: it is read, not parsed.
 const THOUGHT_FLUSH = 240
-const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached', 'paused']
+const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const RETRY_MINUTES = [5, 10, 20, 30, 30, 30] // a failure that passes: tried again after each wait, about two hours in all
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
 // a failure, and neither is the same as the person stopping it.
