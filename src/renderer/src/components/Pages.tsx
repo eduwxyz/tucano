@@ -2880,9 +2880,15 @@ function VoiceCard(): ReactNode {
     setError(why ?? '')
     if (!why) updateSettings({ voice: next })
   }
+  const micLabel = (
+    <label className="row row--center small">
+      <input type="checkbox" checked={!voice?.hidden} onChange={(e) => save({ hidden: !e.target.checked })} />
+      {L('Mostrar o microfone no campo de mensagem', 'Show microphone in composer')}
+    </label>
+  )
   return (
     <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros, e clique de novo para terminar. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Click the mic or press ⌥ Space (Mac) / Ctrl+Space to start; click again to stop. Transcription stays offline for review before sending.')}>
-      {status && !status.ready && <VoiceSetup status={status} />}
+      {status && !status.ready && <VoiceSetup status={status} after={micLabel} />}
       <div className="voice-prefs">
         {status?.ready && (
           <div className="voice-on">
@@ -2901,10 +2907,7 @@ function VoiceCard(): ReactNode {
             {status.error && <p className="field__error">{status.error}</p>}
           </div>
         )}
-        <label className="row row--center small">
-          <input type="checkbox" checked={!voice?.hidden} onChange={(e) => save({ hidden: !e.target.checked })} />
-          {L('Mostrar o microfone no campo de mensagem', 'Show microphone in composer')}
-        </label>
+        {status?.ready && micLabel}
         <details className="voice-advanced">
           <summary className="small muted">{L('Avançado', 'Advanced')}</summary>
           <label className="row row--center small">

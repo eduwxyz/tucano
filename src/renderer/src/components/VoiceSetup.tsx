@@ -38,7 +38,7 @@ export function VoiceChoices({ current, label, onPick }: { current: VoiceModelId
   )
 }
 
-export function VoiceSetup({ status }: { status: VoiceStatus }): ReactNode {
+export function VoiceSetup({ status, after }: { status: VoiceStatus; after?: ReactNode }): ReactNode {
   const [pick, setPick] = useState<VoiceModelId>('recommended')
   const d = status.downloading
   if (d)
@@ -61,9 +61,12 @@ export function VoiceSetup({ status }: { status: VoiceStatus }): ReactNode {
     <div className="voice-setup">
       <VoiceChoices current={pick} onPick={setPick} />
       {status.error && <p className="field__error">{status.error}</p>}
-      <button className="btn btn--primary btn--sm" onClick={() => void voiceDownload(pick)}>
-        <Icon name="mic" size={13} /> {status.error ? L('Tentar de novo', 'Try again') : L('Ativar ditado', 'Turn dictation on')}
-      </button>
+      <div className="voice-setup__actions">
+        <button className="btn btn--primary btn--sm" onClick={() => void voiceDownload(pick)}>
+          <Icon name="mic" size={13} /> {status.error ? L('Tentar de novo', 'Try again') : L('Ativar ditado', 'Turn dictation on')}
+        </button>
+        {after}
+      </div>
     </div>
   )
 }
