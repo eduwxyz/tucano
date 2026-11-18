@@ -4,7 +4,7 @@ import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
-import { NOTICE_MAX_SECONDS, NOTICE_MIN_SECONDS, noticeOf, type NoticeRules } from '../../../shared/notice'
+import { NOTICE_MAX_SECONDS, NOTICE_MIN_SECONDS, noticeModeOf, noticeOf, type NoticeMode, type NoticeSettings } from '../../../shared/notice'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
@@ -4150,26 +4150,66 @@ export function notifyHint(state: NotifyState | 'shown', mac: boolean): string |
   return null
 }
 
-// How an agent asks to do something sensitive, shown over the window, and how it looks.
-function NoticeSettingsCard({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }): ReactNode {
-  const notice = noticeOf(settings)
-  const set = (patch: Partial<NoticeRules>): void => update({ notice: { ...notice, ...patch } })
+// Settings › General › Notifications: the chirp, which notifications (the system's own, or the cards),
+// and the way to see one arrive in that mode.
+export function NotificationCard({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }): ReactNode {
   return (
     <>
       <div className="key-row">
-        <Icon name="expand" />
+        <Icon name="volume" />
         <div className="grow">
-          <strong>{L('Avisos por cima das janelas', 'Notifications over every window')}</strong>
+          <strong>{L('Sons', 'Sounds')}</strong>
+          <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'The chirp when an agent needs you and when it’s done. Off, notifications still show up, silently.')}</p>
+        </div>
+        <Toggle on={settings.sounds !== false} onChange={(v) => update({ sounds: v })} />
+      </div>
+      <NoticeSettingsCard settings={settings} update={update} />
+      <NotifyTest mode={noticeModeOf(settings.notice)} />
+    </>
+  )
+}
+
+// How notifications arrive (0.2.37's own, or the cards over every window) and, for the cards, how
+// they look. Native leaves the system's notifications exactly as they were and hides everything
+// below the selector, so the two never stack their controls or say the same thing twice.
+export function NoticeSettingsCard({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }): ReactNode {
+  const notice = noticeOf(settings)
+  const enhanced = notice.mode === 'enhanced'
+  const set = (patch: Partial<NoticeSettings>): void => update({ notice: { ...settings.notice, ...patch } })
+  // Picking a mode drops the old on/off, so a choice made under it can't argue with this one.
+  const choose = (mode: NoticeMode): void => {
+    const { on: _older, ...rest } = settings.notice ?? {}
+    update({ notice: { ...rest, mode } })
+  }
+  return (
+    <>
+      <div className="key-row">
+        <Icon name="zap" />
+        <div className="grow">
+          <strong>{L('Como as notificações aparecem', 'How notifications arrive')}</strong>
           <p className="muted small">
-            {L(
-              'Os avisos chegam numa pilha no canto da tela, por cima das outras janelas, e somem sozinhos. Desligado, voltam os avisos do sistema.',
-              'Notifications arrive in a stack in the corner of the screen, over the other windows, and go away on their own. Off, the system’s own come back.'
-            )}
+            {enhanced
+              ? L(
+                  'Os avisos chegam numa pilha no canto da tela, por cima das outras janelas, e somem sozinhos.',
+                  'Notifications arrive in a stack in the corner of the screen, over the other windows, and go away on their own.'
+                )
+              : L('As notificações do sistema, como sempre foram.', 'The system’s own notifications, as they always were.')}
           </p>
         </div>
-        <Toggle on={notice.on} onChange={(v) => set({ on: v })} />
+        <div className="segmented" role="radiogroup" aria-label={L('Como as notificações aparecem', 'How notifications arrive')}>
+          {(
+            [
+              ['native', L('Nativo', 'Native')],
+              ['enhanced', L('Aprimorado', 'Enhanced')]
+            ] as const
+          ).map(([mode, label]) => (
+            <button key={mode} role="radio" aria-checked={notice.mode === mode} className={notice.mode === mode ? 'is-active' : ''} onClick={() => choose(mode)}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      {notice.on && (
+      {enhanced && (
         <>
           <div className="key-row">
             <Icon name="expand" />
@@ -4274,10 +4314,11 @@ function NoticeSettingsCard({ settings, update }: { settings: Settings; update: 
   )
 }
 
-function NotifyTest(): ReactNode {
-  // The system's own notifications are the app's, shown when it sends one: what is left here is the
-  // cards, drawn by the page that draws them, so the person sees how they look with the settings
-  // they chose.
+function NotifyTest({ mode }: { mode: NoticeMode }): ReactNode {
+  // Native: the system's own notifications are the ones to try, as 0.2.37 had it.
+  if (mode === 'native') return <SystemNotifyTest />
+  // Enhanced: what is left here is the cards, drawn by the page that draws them, so the person sees
+  // how they look with the settings they chose.
   if (!window.tucano.notice) return null
   return (
     <div className="key-row">
@@ -4289,6 +4330,28 @@ function NotifyTest(): ReactNode {
       <button className="btn btn--sm" title={L('Uma notificação de cada tipo, como elas ficam.', 'One notification of each kind, as they look.')} onClick={() => window.tucano.notice.demo()}>
         {L('Testar notificações', 'Test notifications')}
       </button>
+    </div>
+  )
+}
+
+// Settings › General › Notifications, Native: one from the system now, so the person sees whether
+// they come (and a Mac lists the app under Notifications only after its first one).
+function SystemNotifyTest(): ReactNode {
+  const [state, setState] = useState<NotifyState | 'shown' | null>(() => window.tucano.notifyState?.() ?? null)
+  if (!window.tucano.testNotify) return null
+  const hint = state ? notifyHint(state, /Mac/i.test(navigator.userAgent)) : null
+  const off = state === 'insecure' || state === 'unsupported'
+  return (
+    <div className="key-row">
+      <Icon name="send" />
+      <div className="grow">
+        <p className="muted small">{hint ?? L('Manda uma notificação agora, pra ver se chega.', 'Sends a notification now, to see that it comes.')}</p>
+      </div>
+      {!off && (
+        <button className="btn btn--sm" onClick={() => void window.tucano.testNotify?.().then(setState, () => setState('unsupported'))}>
+          {L('Mandar uma', 'Send one')}
+        </button>
+      )}
     </div>
   )
 }

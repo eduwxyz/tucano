@@ -22,9 +22,14 @@ export const NOTICE_MAX = 18 // kept at all, the oldest leaving first
 // How the cards are painted: the app's own warm palette, or the system's surfaces and accent, which
 // is what Windows 11, the Mac and the Linux desktops each draw their own panels with.
 export type NoticeSkin = 'light' | 'dark' | 'system'
+// Settings › General › Notifications › Which notifications: the system's own (0.2.37's, unchanged),
+// or the cards this fork draws over every window. Native leaves the system's own alone and hides
+// their settings; Enhanced turns the cards on, and their settings with them.
+export type NoticeMode = 'native' | 'enhanced'
 
 export interface NoticeSettings {
-  on?: boolean // a card over everything, instead of the system's own notification (default on)
+  mode?: NoticeMode // the system's own, or the cards over every window (default enhanced)
+  on?: boolean // the older on/off of the cards; false reads as native, kept so a choice already made is not lost
   act?: boolean // approve and answer from the card itself (default on)
   seconds?: number // how long a card stays (default NOTICE_SECONDS)
   hover?: boolean // the pointer on the stack holds the cards there (default on)
@@ -34,7 +39,8 @@ export interface NoticeSettings {
 }
 
 export interface NoticeRules {
-  on: boolean
+  mode: NoticeMode
+  on: boolean // the cards: true exactly when the mode is enhanced
   act: boolean
   seconds: number
   hover: boolean
@@ -43,15 +49,24 @@ export interface NoticeRules {
   stack: boolean // one card at a time, the rest behind it
 }
 
-export const noticeOf = (s: Pick<Settings, 'notice'>): NoticeRules => ({
-  on: s.notice?.on !== false,
-  act: s.notice?.act !== false,
-  seconds: Math.min(NOTICE_MAX_SECONDS, Math.max(NOTICE_MIN_SECONDS, Math.round(s.notice?.seconds ?? NOTICE_SECONDS))),
-  hover: s.notice?.hover !== false,
-  skin: s.notice?.skin === 'light' || s.notice?.skin === 'dark' ? s.notice.skin : 'system',
-  stack: s.notice?.stack === true,
-  ...(s.notice?.area ? { area: clampArea(s.notice.area) } : {})
-})
+// Enhanced unless the person chose native, or turned the cards off under the old on/off switch: a
+// notification already on keeps coming, as the cards. A chosen mode always wins over that switch.
+export const noticeModeOf = (s: NoticeSettings | undefined): NoticeMode =>
+  s?.mode === 'native' ? 'native' : s?.mode === 'enhanced' ? 'enhanced' : s?.on === false ? 'native' : 'enhanced'
+
+export const noticeOf = (s: Pick<Settings, 'notice'>): NoticeRules => {
+  const mode = noticeModeOf(s.notice)
+  return {
+    mode,
+    on: mode === 'enhanced',
+    act: s.notice?.act !== false,
+    seconds: Math.min(NOTICE_MAX_SECONDS, Math.max(NOTICE_MIN_SECONDS, Math.round(s.notice?.seconds ?? NOTICE_SECONDS))),
+    hover: s.notice?.hover !== false,
+    skin: s.notice?.skin === 'light' || s.notice?.skin === 'dark' ? s.notice.skin : 'system',
+    stack: s.notice?.stack === true,
+    ...(s.notice?.area ? { area: clampArea(s.notice.area) } : {})
+  }
+}
 
 export type NoticeKind = 'approval' | 'ask' | 'done' | 'note'
 

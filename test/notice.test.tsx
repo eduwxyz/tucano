@@ -46,12 +46,13 @@ afterEach(() => setLang('pt'))
 
 describe('how the cards are set', () => {
   it('is on by default, decides from the card, keeps each one six seconds, and holds it under the pointer', () => {
-    expect(noticeOf({})).toEqual({ on: true, act: true, seconds: NOTICE_SECONDS, hover: true, skin: 'system', stack: false })
+    expect(noticeOf({})).toEqual({ mode: 'enhanced', on: true, act: true, seconds: NOTICE_SECONDS, hover: true, skin: 'system', stack: false })
     // One choice at a time: what isn't chosen keeps its default.
-    expect(noticeOf({ notice: { hover: false } })).toEqual({ on: true, act: true, seconds: NOTICE_SECONDS, hover: false, skin: 'system', stack: false })
+    expect(noticeOf({ notice: { hover: false } })).toEqual({ mode: 'enhanced', on: true, act: true, seconds: NOTICE_SECONDS, hover: false, skin: 'system', stack: false })
     // A skin is only light, dark or the system's; the stack is on only when asked for.
     expect(noticeOf({ notice: { skin: 'dark', stack: true } })).toMatchObject({ skin: 'dark', stack: true })
     expect(noticeOf({ notice: { on: false } }).on).toBe(false)
+    expect(noticeOf({ notice: { on: false } }).mode).toBe('native')
     // The seconds stay inside what the card can show.
     expect(noticeOf({ notice: { seconds: 1 } }).seconds).toBe(3)
     expect(noticeOf({ notice: { seconds: 400 } }).seconds).toBe(30)
