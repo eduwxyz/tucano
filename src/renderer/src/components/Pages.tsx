@@ -1,7 +1,7 @@
 import { L, locale, type Lang } from '../../../shared/lang'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
-import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import { skillGroup, skillHarnessName } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
@@ -18,6 +18,7 @@ import {
   computerOf,
   folderAction,
   lendFolder,
+  skillFolders,
   openExternal,
   stopService,
   addConnector,
@@ -37,6 +38,7 @@ import {
   backupNow,
   openBackups,
   type TelegramInfo,
+  type LocalSkillFolder,
   useStore,
   EFFORTS,
   ENGINES,
@@ -2230,13 +2232,13 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
               {shown.map((k) => {
                 const on = skillApplies(k, agentId)
                 const only = last(k)
-                const origin = skillOrigin(k.source)
+                const origin = skillHarnessName(k.source)
                 return (
                   <label key={k.id} className="check check--skill" title={only ? L(`Só ${name || 'este agente'} usa: pra ninguém usar, arquive em Skills`, `Only ${name || 'this agent'} uses it: to have no one use it, archive it in Skills`) : undefined}>
                     <input type="checkbox" checked={on} disabled={only} onChange={(e) => toggle(k, e.target.checked)} />
                     <span>
                       <strong>{k.name}</strong>
-                      {origin && <span className="tag">{L('do seu', 'from your')} {origin === 'codex' ? 'Codex' : origin === 'claude' ? 'Claude Code' : 'Hermes'}</span>}
+                      {origin && <span className="tag">{L('do seu', 'from your')} {origin}</span>}
                       <span className="muted small">{k.agents.length === 0 ? L('todos os agentes', 'all agents') : `${k.agents.length} ${k.agents.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}`}</span>
                       <span className="small skill__desc">{k.description}</span>
                     </span>
@@ -2932,6 +2934,96 @@ function VoiceCard(): ReactNode {
   )
 }
 
+// Where skills are read from: the folder each harness on this computer keeps for itself, and the ones
+// added by hand. Every folder that's on mixes into one list, which is what a bot picks from
+// (src/core/local-skills.ts).
+function SkillFoldersCard(): ReactNode {
+  const settings = useStore((s) => s.settings)
+  const [folders, setFolders] = useState<LocalSkillFolder[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const extra = settings.skillFolders ?? []
+  const off = settings.skillFoldersOff ?? []
+  const key = JSON.stringify([extra, off])
+  useEffect(() => {
+    let live = true
+    void skillFolders()
+      .then((f) => live && setFolders(f))
+      .catch(() => live && setFolders([]))
+    return () => {
+      live = false
+    }
+  }, [key])
+  const turn = (f: LocalSkillFolder, on: boolean): void =>
+    updateSettings({ skillFoldersOff: on ? off.filter((p) => p !== f.path) : [...off.filter((p) => p !== f.path), f.path] })
+  // A folder found on this computer is turned off, not deleted: uninstalling nothing, it comes back
+  // the moment the harness puts it there again. Only a folder added by hand leaves the list.
+  const remove = (f: LocalSkillFolder): void =>
+    f.detected
+      ? turn(f, false)
+      : updateSettings({ skillFolders: extra.filter((p) => p !== f.path), skillFoldersOff: off.filter((p) => p !== f.path) })
+  const add = (): void => {
+    const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
+    if (!pick) return
+    void pick().then((path) => {
+      if (!path) return
+      if ((folders ?? []).some((f) => f.path === path)) {
+        setError(L('Essa pasta já está na lista.', 'That folder is already in the list.'))
+        return
+      }
+      setError(null)
+      updateSettings({ skillFolders: [...extra.filter((p) => p !== path), path], skillFoldersOff: off.filter((p) => p !== path) })
+    })
+  }
+  const shown = folders ?? []
+  const on = shown.filter((f) => f.on).length
+  return (
+    <Card
+      title={L('De onde vêm as skills', 'Skill folders')}
+      lead={L(
+        'As pastas que o Tucano lê. As que os harnesses já mantêm neste computador entram sozinhas; uma pasta a mais pode ser adicionada aqui. Tudo o que está ligado aparece junto na lista de skills de cada bot.',
+        'Runtime skill folders are detected automatically. Add other folders here. Enabled skills appear on agent profiles.'
+      )}
+    >
+      {shown.length === 0 && <p className="muted small">{folders ? L('Nenhuma pasta de skills encontrada.', 'No skills folder found.') : L('Procurando…', 'Looking…')}</p>}
+      {shown.map((f) => (
+        <div className="key-row" key={f.path}>
+          <Icon name="folder" />
+          <div className="grow">
+            <strong>{f.source === 'Added' ? L('Pasta adicionada', 'Added folder') : f.source}</strong>
+            <p className="muted small">
+              {f.path}
+              {' · '}
+              {f.on ? (f.count === 1 ? L('1 skill', '1 skill') : L(`${f.count} skills`, `${f.count} skills`)) : L('desligada', 'off')}
+              {!f.detected && !f.on && L(' · some da lista no x', ' · the x takes it off the list')}
+            </p>
+          </div>
+          <Toggle on={f.on} onChange={(v) => turn(f, v)} />
+          <button className="btn btn--ghost btn--sm" aria-label={L('Remover pasta', 'Remove folder')} title={L('Remover pasta', 'Remove folder')} onClick={() => remove(f)}>
+            <Icon name="x" />
+          </button>
+        </div>
+      ))}
+      <div className="row">
+        <button className="btn btn--sm" onClick={add}>
+          <Icon name="plus" /> {L('Adicionar pasta…', 'Add folder…')}
+        </button>
+        {shown.length > 0 && (
+          <span className="muted small">
+            {L(`${on} de ${shown.length} ligadas`, `${on} of ${shown.length} on`)}
+          </span>
+        )}
+      </div>
+      {error && <small className="field__error">{error}</small>}
+      <p className="hint">
+        {L(
+          'Um harness novo aparece aqui quando a pasta dele existe: não há nada para configurar. A pasta do Claude Code e a do Codex são lidas como sempre foram.',
+          'A new harness shows up here when its folder exists: there is nothing to set up. Claude Code’s folder and Codex’s are read as they always were.'
+        )}
+      </p>
+    </Card>
+  )
+}
+
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
@@ -3207,7 +3299,6 @@ export function SettingsPage(): ReactNode {
         {pane('geral') && <BackupCard />}
         {pane('servidores') && <ServersCard />}
         {pane('servidores') && <NodeCard />}
-
         {pane('agentes') && (
           <Card title={L('Limites', 'Limits')}>
             <div className="grid2">
@@ -3257,6 +3348,8 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+
+        {pane('agentes') && <SkillFoldersCard />}
         {pane('geral') && owner && <WorkspaceDangerArea />}
       </div>
     </Page>

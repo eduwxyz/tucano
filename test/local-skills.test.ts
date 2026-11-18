@@ -16,7 +16,12 @@ const put = (path: string, text: string): void => {
 }
 
 let home: string
+// The harnesses' own folders are found by where they are, so these tests read a home of their own:
+// a HERMES_HOME or a CODEX_HOME set on the machine would put the real ones in the list.
+const HARNESS_ENV = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'AGENTS_HOME', 'PI_HOME', 'HERMES_HOME', 'OPENCODE_CONFIG_DIR']
+for (const k of HARNESS_ENV) delete process.env[k]
 beforeEach(() => {
+  for (const k of HARNESS_ENV) delete process.env[k]
   home = mkdtempSync(join(tmpdir(), 'ad-home-'))
   put(join(home, '.claude/skills/video/SKILL.md'), '---\nname: video\ndescription: |\n  Cria os vídeos do canal.\n  Use pra "novo vídeo".\n---\n# Vídeos\nLeia estilo.md antes.')
   put(join(home, '.claude/skills/video/estilo.md'), 'Quadro de marcador.')
@@ -45,7 +50,8 @@ describe('local skills', () => {
 
   it("finds the user's Claude Code skills, the turned-on plugins' and Codex's, with their files and scripts", () => {
     const found = findLocalSkills(home)
-    expect(found.map((k) => [k.name, k.origin])).toEqual([['video', 'Claude Code'], ['verify', 'Plugin sdd'], ['humanize', 'Plugin root'], ['imediato', 'Codex']])
+    // The harnesses' folders in the order they're read, then the plugins turned on in Claude Code.
+    expect(found.map((k) => [k.name, k.origin])).toEqual([['video', 'Claude Code'], ['imediato', 'Codex'], ['verify', 'Plugin sdd'], ['humanize', 'Plugin root']])
     const video = found[0]!
     expect(video.description).toBe('Cria os vídeos do canal. Use pra "novo vídeo".')
     expect(video.files).toEqual(['estilo.md', 'fuga.md'])

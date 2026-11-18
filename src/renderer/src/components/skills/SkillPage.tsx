@@ -1,5 +1,5 @@
 import { L } from '../../../../shared/lang'
-import { skillOrigin } from '../../../../shared/skill-groups'
+import { skillHarnessName } from '../../../../shared/skill-groups'
 import { useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../../links'
@@ -23,9 +23,8 @@ export function result(r?: SkillReport): string {
 }
 
 export const from = (k: Skill): string => {
-  const origin = skillOrigin(k.source)
-  if (!origin) return L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`)
-  const who = origin === 'codex' ? 'Codex' : origin === 'claude' ? 'Claude Code' : 'Hermes'
+  const who = skillHarnessName(k.source)
+  if (!who) return L(`mudou ${ago(k.updatedAt)}`, `changed ${ago(k.updatedAt)}`)
   return L(`do seu ${who}`, `from your ${who}`)
 }
 
