@@ -554,6 +554,7 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sidebarHidden?: string[] // what I took out of the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: none
+  lastImageFolder?: string // the folder the last picture was saved to, so the next one goes there in one click
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once

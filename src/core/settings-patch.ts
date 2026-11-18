@@ -41,7 +41,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   sounds: { kind: 'boolean', max: 10, nullable: true },
   stepsOpen: { kind: 'boolean', max: 10, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true },
-  surveys: { kind: 'boolean', max: 10, nullable: true }
+  surveys: { kind: 'boolean', max: 10, nullable: true },
+  lastImageFolder: { kind: 'string', max: 4_096, nullable: true }
 }
 
 const fits = (kind: Kind, v: unknown): boolean =>
