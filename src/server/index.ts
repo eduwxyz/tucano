@@ -702,6 +702,12 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       const cancel = el('button', 'btn btn--ghost btn--sm', t('Cancelar', 'Cancel'))
       const choose = el('button', 'btn btn--primary btn--sm', t('Escolher esta pasta', 'Choose this folder'))
       foot.append(el('span', 'grow'), cancel, choose)
+      // In the desktop app, one click there: this computer's Tucano, on Settings › Servers.
+      if (desktop && desktop.openLending) {
+        const lend = el('button', 'btn btn--ghost btn--sm', t('Abrir no Tucano deste computador', "Open in this computer's Tucano"))
+        lend.onclick = () => (close(null), desktop.openLending())
+        foot.prepend(lend)
+      }
       card.append(head, where, list, mine, foot)
       shade.append(card)
       document.body.append(shade)
@@ -764,7 +770,9 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     updateState: async () => (desktop && desktop.updateState && (await desktop.updateState())) || { version: ${JSON.stringify(version)}, status: 'off' },
     onUpdate: (cb) => { if (desktop && desktop.onUpdate) desktop.onUpdate(cb) },
     checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
-    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() }
+    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() },
+    // In the desktop app: this computer's Tucano, on Settings › Servers, to lend it here.
+    openLending: desktop && desktop.openLending ? () => desktop.openLending() : undefined
   }
 })()
 `

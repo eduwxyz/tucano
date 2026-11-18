@@ -15368,6 +15368,15 @@ button.agent-card__now:hover {
 .computer-body > .computer:first-child {
   margin-top: 0;
 }
+/* On a server: the person's lent computer, a block of its own under the choice (its own row divider). */
+.your-computer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.your-computer .computer {
+  margin-top: 0;
+}
 
 /* The agent's save state at the tabs' right end, once its head scrolled away. */
 .tabs__aside {

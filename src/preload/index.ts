@@ -30,8 +30,8 @@ contextBridge.exposeInMainWorld('tucano', {
     ipcRenderer.on('navigate', (_e, id: unknown, thread: unknown) => typeof id === 'string' && cb(id, typeof thread === 'string' ? thread : undefined))
   },
   // …or a screen (a skill proposal opens Skills).
-  onNavigatePage: (cb: (page: 'skills') => void): void => {
-    ipcRenderer.on('navigate-page', (_e, page: unknown) => page === 'skills' && cb(page))
+  onNavigatePage: (cb: (page: 'skills' | 'servers') => void): void => {
+    ipcRenderer.on('navigate-page', (_e, page: unknown) => (page === 'skills' || page === 'servers') && cb(page))
   },
   // The core's process ended: the page says so and offers to reload, which starts a new one.
   onCoreDown: (cb: () => void): void => {

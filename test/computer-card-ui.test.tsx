@@ -105,3 +105,67 @@ describe('picking "Este computador"', () => {
     expect(text()).not.toContain('Liberar o computador pra ele')
   })
 })
+
+// On a server (Tucano Pro's, with no Docker): "this computer" is the server, an isolated Linux can't run,
+// and the person's own computer comes lent from the desktop app, as a connector the agent needs access to.
+describe('the Computador card on a server', () => {
+  const node = { id: 'mac1', name: 'MacBook Air de Ana', kind: 'remote', url: 'tucano-node://dev1', auth: 'none', status: 'connected', tools: [] } as unknown as State['connectors'][number]
+  const onServer = async (agent: Agent, o: { connectors?: State['connectors']; lending?: () => void } = {}): Promise<void> => {
+    Object.assign(window, { __TUCANO_WEB__: true, tucano: { ...(o.lending ? { openLending: o.lending } : {}) } })
+    fake = { ...getState(), ready: true, people: [ana], you: 'ana', agents: [agent], connectors: o.connectors ?? [], tabs: { agent: 'ferramentas' }, computers: [], isolatedComputers: false }
+    await act(async () => root.render(<AgentPage id="a1" />))
+  }
+  afterEach(() => void Object.assign(window, { __TUCANO_WEB__: undefined, tucano: undefined }))
+
+  it('Linux without Docker: says it can’t run here, with no "check again", and switches to None in one click', async () => {
+    await onServer(lia({ computer: true, computerKind: 'linux' }))
+    expect(text()).toContain('Este servidor não tem Docker, então o Linux isolado não roda aqui')
+    for (const t of ['Verificar de novo', 'Depois, clique', 'Emprestar pasta', 'Apagar computador']) expect(text()).not.toContain(t)
+    await click('Trocar pra Nenhum')
+    await act(async () => new Promise((r) => setTimeout(r, 10)))
+    expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', computer: false }), [])
+  })
+
+  it('names the server choice for what it is, and its confirmation says it isn’t your computer', async () => {
+    await onServer(lia({ computer: false }))
+    expect(card().textContent).toContain('O servidor')
+    expect(text()).not.toContain('Este computador')
+    await click('O servidor')
+    expect(text()).toContain('vão rodar direto no servidor, não no seu computador')
+    expect(text()).toContain('Liberar o servidor pra ele')
+  })
+
+  it('no computer lent: how to lend it, and in the desktop app the button that goes there', async () => {
+    const lending = vi.fn()
+    await onServer(lia({ computer: false }), { lending })
+    expect(text()).toContain('Deixar este servidor usar este computador')
+    await click('Abrir no Tucano deste computador')
+    expect(lending).toHaveBeenCalled()
+  })
+
+  it('in a browser there is no app to open: the words only', async () => {
+    await onServer(lia({ computer: false }))
+    expect(text()).toContain('Deixar este servidor usar este computador')
+    expect(text()).not.toContain('Abrir no Tucano deste computador')
+  })
+
+  it('your computer lent but not given to this agent: gives access in one click', async () => {
+    await onServer(lia({ computer: false }), { connectors: [node] })
+    expect(text()).toContain('MacBook Air de Ana está emprestado a este servidor, mas este agente ainda não tem acesso a ele')
+    await click('Dar acesso')
+    await act(async () => new Promise((r) => setTimeout(r, 10)))
+    expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', grants: { mac1: 'read_write' } }), [])
+  })
+
+  it('given: says what it uses and where the level is', async () => {
+    await onServer(lia({ computer: false, grants: { mac1: 'read_write' } }), { connectors: [node] })
+    expect(text()).toContain('Ele usa o MacBook Air de Ana (terminal, pastas emprestadas e navegador)')
+    expect(text()).not.toContain('Dar acesso')
+  })
+
+  it("someone else's computer isn't yours to give", async () => {
+    await onServer(lia({ computer: false }), { connectors: [{ ...node, url: 'tucano-node://dev2?owner=bia' }] })
+    expect(text()).not.toContain('MacBook Air de Ana')
+    expect(text()).toContain('Deixar este servidor usar este computador')
+  })
+})

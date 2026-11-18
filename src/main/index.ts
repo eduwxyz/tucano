@@ -624,7 +624,7 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
+function showWindow(conversationId?: string, page?: 'skills' | 'servers', threadId?: string): void {
   if (launch.qa) return
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
@@ -866,6 +866,12 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
   const n = new Notification({ title: note.title, body: note.body, silent: true, ...noteIcon() })
   n.on('click', () => void servers.openNote(id, note).catch(console.error))
   n.show()
+})
+// A server's page asks to lend this computer (its folder picker, an agent's Computer): this computer's Tucano
+// comes on screen on Settings › Servers. Only a server's own page asks, and it changes nothing by itself.
+ipcMain.on('server:lend', (e) => {
+  const frame = e.senderFrame
+  if (frame && frame === e.sender.mainFrame && servers.serverOf(e.sender, frame.url)) showWindow(undefined, 'servers')
 })
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.
