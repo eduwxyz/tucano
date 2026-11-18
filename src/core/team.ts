@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
 import { overlongSkillNote } from '../shared/skills'
-import { bossOf, possibleBosses } from '../shared/org'
+import { bossesOf, bossOf, possibleBosses } from '../shared/org'
 import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
@@ -34,6 +34,7 @@ interface TeamFile {
     computer: boolean
     grants: Record<string, GrantLevel> // by connector name
     reportsTo?: string // the handle of the agent it answers to (src/shared/org.ts)
+    alsoAnswersTo?: string[] // the handles of the other agents it also answers to (src/shared/org.ts bossesOf)
     sectorName?: string // a sector head's name for its sector
     sectorDoes?: string // and what the sector solves
     entry?: boolean // an entry point, over the sectors
@@ -73,6 +74,7 @@ export function exportTeam(db: Db, by = db.ownerId()): string {
       computer: a.computer,
       grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : []))),
       ...(bossOf(agents, a) ? { reportsTo: bossOf(agents, a)!.handle } : {}),
+      ...(bossesOf(agents, a).length > 1 ? { alsoAnswersTo: bossesOf(agents, a).slice(1).flatMap((b) => b.handle) } : {}),
       ...(a.sectorName ? { sectorName: a.sectorName } : {}),
       ...(a.sectorDoes ? { sectorDoes: a.sectorDoes } : {}),
       ...(a.entry ? { entry: true } : {})
@@ -175,10 +177,14 @@ export function importTeam(db: Db, text: string, defaultLimit: number, by = db.o
   }
   const byHandle = (h: string): string | undefined => db.agents().find((x) => x.handle === h)?.id
   // Who answers to whom, once everyone is in: only for the agents that came in now, and never into a loop.
+  // The other bosses it also answers to come after its primary one, each checked the same way.
   for (const a of data.agents ?? []) {
     const id = cameIn.includes(a.handle) ? byHandle(a.handle) : undefined
+    if (!id) continue
     const boss = a.reportsTo ? byHandle(a.reportsTo) : undefined
-    if (id && boss && possibleBosses(db.agents(), id).some((x) => x.id === boss)) db.saveAgent({ ...db.agent(id)!, reportsTo: boss })
+    if (boss && possibleBosses(db.agents(), id).some((x) => x.id === boss)) db.saveAgent({ ...db.agent(id)!, reportsTo: boss })
+    const also = (a.alsoAnswersTo ?? []).flatMap((h) => byHandle(h) ?? []).filter((x) => x !== id && x !== boss && possibleBosses(db.agents(), id).some((b) => b.id === x))
+    if (also.length) db.saveAgent({ ...db.agent(id)!, alsoTo: also.slice(0, 12) })
   }
 
   for (const k of data.skills ?? []) {

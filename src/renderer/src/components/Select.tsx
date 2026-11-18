@@ -46,6 +46,9 @@ type SelectProps = {
   onChange?: (value: string | null) => void
   onValuesChange?: (values: string[]) => void
   multiple?: boolean
+  // Multi select: every value chosen as its own chip in the field, and the field grows to hold them,
+  // instead of folding them into a count once there are more than a few.
+  showAllValues?: boolean
   // Show the filter (type-ahead) input when the menu opens.
   searchable?: boolean
   // Show a small secondary hint line under each option's label.
@@ -149,7 +152,7 @@ export function Select(props: SelectProps): ReactNode {
   const {
     id, name, label, hint, options, groups,
     placeholder = '', value, values, onChange, onValuesChange,
-    multiple = false, searchable = false, showHint = false, disabled = false, required = false,
+    multiple = false, showAllValues = false, searchable = false, showHint = false, disabled = false, required = false,
     'aria-label': ariaLabelProp, open: openProp, onOpenChange,
     className = '', emptyText = L('Nenhuma correspondência', 'No matches')
   } = props
@@ -366,7 +369,7 @@ export function Select(props: SelectProps): ReactNode {
   const display = (): ReactNode => {
     if (multiple) {
       if (selectedValues.length === 0) return <span className="select__placeholder">{placeholder}</span>
-      if (selectedValues.length <= 3) return selectedValues.map((v) => <span key={v} className="select__chip">{labels.get(v) ?? v}</span>)
+      if (showAllValues || selectedValues.length <= 3) return selectedValues.map((v) => <span key={v} className="select__chip">{labels.get(v) ?? v}</span>)
       return <span className="select__chip">{L(`${selectedValues.length} selecionados`, `${selectedValues.length} selected`)}</span>
     }
     // An option whose value is '' ("the usual one") shows as itself, like any other.
@@ -400,12 +403,12 @@ export function Select(props: SelectProps): ReactNode {
         aria-label={accessibleName}
         aria-required={required}
         aria-disabled={disabled || undefined}
-        className={`select__trigger ${open ? 'is-open' : ''} ${disabled ? 'is-disabled' : ''}`}
+        className={`select__trigger ${open ? 'is-open' : ''} ${disabled ? 'is-disabled' : ''} ${multiple && showAllValues ? 'is-wrapped' : ''}`}
         disabled={disabled}
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
-        <span className="select__trigger__value">{display()}</span>
+        <span className={`select__trigger__value${multiple && showAllValues ? ' is-wrap' : ''}`}>{display()}</span>
         <span className="select__caret" aria-hidden><Icon name="caret" size={14} /></span>
       </button>
       {hint && <span className="hint">{hint}</span>}

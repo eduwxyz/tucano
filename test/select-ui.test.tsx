@@ -38,4 +38,26 @@ describe('the Select', () => {
     expect(new Set(lists).size).toBe(2)
   })
 
+  // A panel field for "who else": every one chosen is named in the field, never folded into a count, and the
+  // field grows to hold them.
+  it('shows every value chosen when it is asked to, however many there are', async () => {
+    const options = [{ value: 'a', label: 'Ana' }, { value: 'b', label: 'Bia' }, { value: 'c', label: 'Caio' }, { value: 'd', label: 'Dora' }, { value: 'e', label: 'Eva' }]
+    await act(async () => root.render(<Select multiple values={['a', 'b', 'c', 'd']} options={options} onValuesChange={() => {}} />))
+    // Four would be folded into "4 selecionados" by default.
+    expect(document.querySelector('.select__trigger__value')?.textContent).toBe('4 selecionados')
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root')!)
+    await act(async () => root.render(<Select multiple showAllValues values={['a', 'b', 'c', 'd']} options={options} onValuesChange={() => {}} />))
+    const chips = [...document.querySelectorAll('.select__trigger__value .select__chip')].map((c) => c.textContent)
+    expect(chips).toEqual(['Ana', 'Bia', 'Caio', 'Dora'])
+    expect(document.querySelector('.select__trigger__value')?.textContent).not.toContain('selecionados')
+    expect(document.querySelector('.select__trigger')?.className).toContain('is-wrapped')
+    expect(document.querySelector('.select__trigger__value')?.className).toContain('is-wrap')
+    // And the list still offers every one of them, the ones taken ticked.
+    await act(async () => (document.querySelector('.select__trigger') as HTMLElement).click())
+    const rows = [...document.querySelectorAll('[role=option]')]
+    expect(rows.map((r) => r.textContent)).toEqual(['Ana', 'Bia', 'Caio', 'Dora', 'Eva'])
+    expect(rows.filter((r) => r.className.includes('is-selected'))).toHaveLength(4)
+  })
+
 })

@@ -95,6 +95,7 @@ export interface Agent {
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
   reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
+  alsoTo?: string[] // the other agents it also answers to, beyond reportsTo (src/shared/org.ts bossesOf): each may hand it work and gets the answer; the board draws it under its primary boss, with a line to each of these
   sectorName?: string // on a sector's head (src/shared/org.ts headsOf): the sector's name; unset: "Setor de <name>"
   sectorDoes?: string // on a sector's head: what the sector handles, in one line, read by the other heads
   entry?: boolean // the person chose it as an entry point (src/shared/org.ts entriesOf): it answers to no agent, is in no sector, and the teams below it are sectors
