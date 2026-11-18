@@ -4,6 +4,19 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.40] - 2026-11-18
+
+> **Em português:**
+> - **Mudou:** emprestar o seu computador a um **Tucano num servidor** (como o do Tucano Pro) ficou em dois cliques. Ao ligar **Deixar este servidor usar este computador**, o app já pede a primeira pasta, e logo abaixo da chave aparece **Escolher os agentes**, que abre o servidor em **Conectores**. Lá, **Seu computador** vem primeiro: cada agente com a sua chave, e **Dar acesso a todos**.
+> - **Mudou:** quem emprestou o computador escolhe os agentes que o usam mesmo sem ser admin do servidor, já que um agente só alcança esse computador quando trabalha pra essa pessoa.
+> - **Mudou:** no servidor, o cartão **Computador** de um agente chama de **O servidor** o que antes dizia "Este computador", mostra o seu computador emprestado com **Dar acesso** e **Tirar o acesso**, e um **Linux isolado** sem Docker oferece **Trocar pra Nenhum** em vez de "verificar de novo".
+
+### Changed
+
+- **Lending your computer to a server takes two clicks.** Turning on Settings › Servers › Let this server use this computer asks for the first folder when none is lent, and the row under the switch shows the folders lent and **Pick the agents**, which brings the server on screen at Connectors. There, **Your computer** comes first: each computer you lent, whether it's connected, every agent on its own switch and **Give all of them access**. The computer's window in Connectors has the same switches. In a browser with nothing lent, it says what to open on the computer. (#549)
+- **Whoever lent a computer picks its agents, admin or not.** An agent reaches a lent computer only when it works for that person, so they may give it to the agents they see, or take it away, without being an admin of the server. An admin still may too. Other connectors stay an admin's. (#549)
+- **An agent's Computer card, on a server, says what is the server's and what is yours.** "This computer" reads "The server", and its confirmation says the commands run on the server. **Your computer** shows the computer you lent, whether it's connected and whether this agent uses it, with **Give access** and **Take access away**. An isolated Linux on a server without Docker says it can't run there and offers **Switch to None**, instead of asking to check again. (#549)
+
 ## [0.2.39] - 2026-11-18
 
 > **Em português:**
