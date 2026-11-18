@@ -382,7 +382,7 @@ function JoinLink(): ReactNode {
       </label>
       <input id="intro-join" className="intro-input" autoFocus type="password" autoComplete="off" spellCheck={false} placeholder={L('Cole o link do convite ou do servidor', 'Paste the invite or server link')} value={link} onChange={(e) => (setLink(e.target.value), setNote(''))} />
       <button className="intro-btn intro-btn--sm" type="submit" disabled={!link.trim()}>
-        {L('Entrar', 'Join')}
+        {L('Entrar', 'Sign in')}
       </button>
       {note && (
         <p className="intro-note" role="status">

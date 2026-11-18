@@ -57,7 +57,7 @@ export function UpdateNote(): ReactNode {
           <span className="muted small">{workingNote(working)}</span>
         ) : (
           <a href={notes(u.next)} target="_blank" rel="noreferrer">
-            {L('O que mudou', 'What’s new')}
+            {L('O que mudou', 'Changed')}
           </a>
         )}
       </div>

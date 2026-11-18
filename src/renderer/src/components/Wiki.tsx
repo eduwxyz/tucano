@@ -653,7 +653,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
         <button title={L('Afastar', 'Zoom out')} onClick={() => zoom(1 / 1.3)}>
           −
         </button>
-        <button title={L('Ver tudo', 'Fit all')} onClick={() => fly(fit(), 500)}>
+        <button title={L('Ver tudo', 'Show all')} onClick={() => fly(fit(), 500)}>
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M1.5 4.5v-3h3M8.5 1.5h3v3M11.5 8.5v3h-3M4.5 11.5h-3v-3" />
           </svg>
