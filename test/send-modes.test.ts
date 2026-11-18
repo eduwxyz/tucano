@@ -354,7 +354,11 @@ describe('a steer reaches the agent between two tool calls', () => {
           await client.connect(new StreamableHTTPClientTransport(new URL(turn.mcpUrl)))
           const list = (await client.listTools()).tools.map((t) => t.name).find((n) => n.endsWith('__list_tasks'))!
           results.push(await client.callTool({ name: list, arguments: {} }))
-          await new Promise((res) => setTimeout(res, 400))
+          // A second of pause, not four hundred milliseconds: the steer below has to reach
+          // the runner inside this gap, and on a loaded shard the write alone can outlast a
+          // short one. Nothing here measures the pause; the assertions are about which call
+          // the steer is handed to.
+          await new Promise((res) => setTimeout(res, 1000))
           results.push(await client.callTool({ name: list, arguments: {} }))
           await client.close()
           reply = 'vi as tarefas'
@@ -367,7 +371,13 @@ describe('a steer reaches the agent between two tool calls', () => {
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const r = runnerWith(engine)
     await r.send('d1', 'quais tarefas?')
-    await new Promise((res) => setTimeout(res, 150)) // inside the pause between the two calls
+    // Wait for the first call to have come back, rather than for a fixed 150 ms: the steer
+    // must land inside the pause between the two calls, and on a starved shard the MCP
+    // round trip takes longer than that, so the steer reached the first call instead of the
+    // second and the assertion below read it in the wrong result. Polling for the event the
+    // test is actually about costs nothing when the call is quick.
+    for (let i = 0; i < 100 && results.length === 0; i++) await new Promise((res) => setTimeout(res, 20))
+    expect(results).toHaveLength(1)
     await r.send('d1', 'mude de plano: só as abertas', [], undefined, undefined, { mode: 'steer' })
     await r.idle()
     expect(results).toHaveLength(2)
