@@ -3158,9 +3158,15 @@ export function SettingsPage(): ReactNode {
 
         {pane('modelos') && (
           <Card title={L('Roteador', 'Router')} lead={L('Modelo pequeno que lê a conversa e decide quem responde nos canais. Não concede permissão nenhuma.', 'A small model that reads the conversation and decides who replies in channels. It grants no permissions at all.')}>
-            <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
-              <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
-            </Field>
+            <div className="key-row key-row--form">
+              <Icon name="spark" />
+              <div className="grow">
+                <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
+                  <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
+                </Field>
+              </div>
+              <span className="key-row__glyph" aria-hidden="true" />
+            </div>
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
             <SmartRoutingSwitch />
             {routingOn && work && (
