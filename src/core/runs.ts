@@ -245,14 +245,14 @@ export const askUserFor = (names: string[]): ToolDef =>
       }
 
 // What the agent proposes as the work that comes after this reply: a card with a box per step,
-// every box ticked (or the ones the classifier picked). It is ask_user's multiple choice turned around:
-// there, nothing is picked; here, the point is that nobody has to go hunting for the follow-up inside the text.
+// clear by default (a classifier may tick ones worth doing now). It is ask_user's multiple choice turned around:
+// there, nothing is picked; here, the person ticks what they want.
 export const NEXT_STEPS: ToolDef = {
   name: 'next_steps',
   get description() {
     return L(
-      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas marcadas, pra ninguém perder no meio do texto o que você sugeriu. Use raramente: só quando o trabalho chegou num ponto em que há de 1 a ${MAX_STEPS} continuações concretas que você faria e que dependem da pessoa querer. Um label curto por passo e, quando ajudar, uma description. Não use na maioria das respostas: nem quando a resposta já resolve o pedido, nem numa conversa ou pergunta simples, nem pra oferecer ajuda genérica ("quer que eu explique mais?"), nem pra algo que o pedido já cobre (isso você faz). Não use pra perguntar uma decisão: isso é ask_user. O card não prende ninguém: a pessoa marca o que quer e isso volta como uma mensagem, ou ignora e escreve outra coisa, e aí você segue o que ela escreveu. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
-      `Puts what you propose as the next step into a card of checkboxes, all ticked, so nothing you suggested gets lost in the middle of the text. Use it rarely: only when the work has reached a point with 1 to ${MAX_STEPS} concrete ways to go on that you would do and that depend on the person wanting them. A short label per step and, when it helps, a description. Don't use it on most replies: not when the reply already settles the request, not in a simple chat or question, not to offer general help ("want me to explain more?"), and not for something the request already covers (do that instead). Don't use it to ask a decision: that's ask_user. The card holds no one up: the person ticks what they want and it comes back as a message, or ignores it and writes something else, and then you follow what they wrote. After calling it, end your reply with one sentence at most, without repeating the steps.`
+      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas vazias, pra ninguém perder no meio do texto o que você sugeriu. Use raramente: só quando o trabalho chegou num ponto em que há de 1 a ${MAX_STEPS} continuações concretas que você faria e que dependem da pessoa querer. Um label curto por passo e, quando ajudar, uma description. O card não prende ninguém: a pessoa marca o que quer e isso volta como uma mensagem, ou ignora e escreve outra coisa, e aí você segue o que ela escreveu. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
+      `Puts what you propose as the next step into a card of checkboxes, all clear, so nothing you suggested gets lost in the middle of the text. Use it rarely: only when the work has reached a point with 1 to ${MAX_STEPS} concrete ways to go on that you would do and that depend on the person wanting them. A short label per step and, when it helps, a description. The card holds no one up: the person ticks what they want and it comes back as a message, or ignores it and writes something else, and then you follow what they wrote. After calling it, end your reply with one sentence at most, without repeating the steps.`
     )
   },
   get inputSchema() {
