@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **The clock is yours to pick: 24 hours, or 12 with am and pm.** Every time the app drew was 24-hour, except message times in English, which came out as `3:05 PM` because the shape was picked from the language, so the same conversation showed two clocks in two languages and the agent's own text disagreed with both. Settings › Yours gains **Clock**, and one helper (`src/shared/clock.ts`) now formats every time the app draws and every time it writes into an agent's context: message times, routine schedules, the panel, usage charts, and the dates a reply or a routine carries into its prompt. Untouched, it reads exactly as it did before. (#393)
+
 ## [0.2.37] - 2026-11-17
 
 > **Em português:**
@@ -27,7 +31,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **A routine's run in the conversation is lighter.** Its prompt no longer sits above every reply: the reply gets a chip with the routine's name, which opens what it asked. Consecutive runs with nothing new fold into one line ("Vigia do GitHub · 3 execuções sem novidade"), and an approval already decided is one line. "On your computer" shows once, in the conversation's header. (#525)
-
 ### Fixed
 
 - **The Team board with many sectors.** Tidy up put every sector in one row, so a team of 17 in 5 sectors was a strip over 4,000 px wide that only fit at the 30% zoom floor. Sectors now wrap into rows to about a screen's shape, with each line to a lower row going down a gap between sectors; panning and zooming no longer redraw every card on each step. (#535)

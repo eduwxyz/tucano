@@ -4,6 +4,7 @@
 // the conversation transcript. Everything the agent knows comes from here; a
 // kept session (sessions.ts) gets it once, then only the blocks of what's new,
 // and the live context again only when it changed.
+import { timeOpts } from '../shared/clock'
 import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import { ACCESS_REQUEST, CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Person, type Routine, type Settings, type Skill } from '../shared/types'
@@ -401,13 +402,13 @@ const utcOffset = (d: Date): string => {
 }
 const zone = (at: number): string => `${utcOffset(new Date(at))}, unix ${Math.floor(at / 1000)}`
 
-const now = (): string => `${new Date().toLocaleString(locale(), { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} (${zone(Date.now())})`
+const now = (): string => `${new Date().toLocaleString(locale(), timeOpts({ weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }))} (${zone(Date.now())})`
 
 // "sáb 18/10 14:02": with the weekday, so "toda segunda" and "amanhã" can be worked out.
 export const clock = (at: number): string => {
   const d = new Date(at)
   const day = d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')
-  return `${day} ${d.toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '')}`
+  return `${day} ${d.toLocaleString(locale(), timeOpts({ day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })).replace(',', '')}`
 }
 
 // A message's time in the transcript: the clock with the year, the offset and the Unix seconds, so

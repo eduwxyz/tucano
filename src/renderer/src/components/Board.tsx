@@ -5,6 +5,7 @@
 // The cards are read off the conversations (../board.ts); only the to-dos are kept for the board.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { L, locale } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { MAX_TASK_NOTES, MAX_TASK_TITLE, type Approval, type Inbox, type Task } from '../../../shared/types'
 import { headsOf, sectorName, sectorOf } from '../../../shared/org'
 import { canContinue } from '../../../shared/run-progress'
@@ -489,7 +490,7 @@ export function BoardPage(): ReactNode {
           const a = agents.get(r.agentId)
           return (
             <div key={`r:${r.id}`} data-card={`r:${r.id}`} className="bd-card routine" aria-label={r.name}>
-              <div className="bd-c-top"><Face agent={a} /><span className="nm">{a?.name}</span><span className="time"><Clock /> {new Date(r.nextAt!).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span></div>
+              <div className="bd-c-top"><Face agent={a} /><span className="nm">{a?.name}</span><span className="time"><Clock /> {new Date(r.nextAt!).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))}</span></div>
               <div className="bd-c-title">{r.name}</div>
               <div className="bd-c-foot">{L('Rotina', 'Routine')}<Where conv={convs.get(r.conversationId)} /></div>
             </div>
@@ -800,7 +801,7 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTas
     const result = c.state === 'stopped' ? L('Parado antes de terminar', 'Stopped before finishing') : firstLine(c.last?.text ?? '') || (c.parts.length ? L('O time entregou', 'The team delivered') : L('Pronto', 'Done'))
     body = (
       <>
-        <div className="bd-done-row"><Face agent={a} /><div className="bd-c-title">{c.title}</div><span className="time">{c.endedAt ? new Date(c.endedAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
+        <div className="bd-done-row"><Face agent={a} /><div className="bd-c-title">{c.title}</div><span className="time">{c.endedAt ? new Date(c.endedAt).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' })) : ''}</span></div>
         <div className={`bd-res ${c.state === 'stopped' ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
       </>
     )
@@ -870,7 +871,7 @@ const BEAT_MARK: Record<CrewMember['state'], () => string> = { working: () => L(
 // A task's story, one line per step of the team: who asked, who split it, each part (nested when a
 // part was handed on again). A line opens that agent's part, with its steps.
 function Story({ task, ctx, onNav }: { task: BoardTask; ctx: Ctx; onNav: (id: string) => void }): ReactNode {
-  const time = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const time = (at: number): string => new Date(at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
   return (
     <ol className="bd-story">
       {storyOf(task).map((b, i) => {

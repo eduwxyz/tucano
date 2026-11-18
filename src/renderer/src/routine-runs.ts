@@ -4,6 +4,7 @@
 // nothing new (Run.noNews, marked by the core) become one line. Read off the messages as they are:
 // nothing is kept for it.
 import { L, locale } from '../../shared/lang'
+import { timeOpts } from '../../shared/clock'
 import { saidAt, type Message, type Routine } from '../../shared/types'
 
 export interface RoutineRunPair {
@@ -91,7 +92,7 @@ export const idsOf = (s: Shown): string[] => (s.kind === 'message' ? (s.ask ? [s
 // "09:00–11:00", or with the day when it isn't today ("12 de nov. · 09:00–17:00"); one run, its time.
 export function spanOf(ats: number[], now = Date.now()): string {
   if (!ats.length) return ''
-  const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
   const first = Math.min(...ats)
   const last = Math.max(...ats)
   const times = first === last || hm(first) === hm(last) ? hm(first) : `${hm(first)}–${hm(last)}`
