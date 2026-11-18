@@ -2,23 +2,26 @@
 // provider it draws, the window it draws is the longest the provider reports (month over week over
 // the short one), a wallet with no cap draws nothing, the tone follows what is left, a click opens
 // Usage and limits, and reading every provider costs one read even when several conversations are
-// opened. The widths the bars take are measured in a browser in test/quota-strip-layout.test.ts;
-// linkedom has no layout.
+// opened. What is checked about which bars are drawn is that only the providers the conversation's
+// own bots are set to run on get one: a login on the computer that no member spends has no bar, and a
+// fallback model's provider does, after its bot's main one. The widths the bars take are measured in
+// a browser in test/quota-strip-layout.test.ts; linkedom has no layout.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import type { ProviderQuota } from '../src/shared/types'
+import type { Account, Agent, ProviderQuota } from '../src/shared/types'
 
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
 
+const accounts = [{ id: 'acc-work', engine: 'claude', name: 'Work', loggedIn: true }] as Account[]
 let reply: ProviderQuota[] = []
 const loadQuotas = vi.fn(async () => ({ list: reply, at: Date.now() }))
 const navigate = vi.fn()
 vi.mock('../src/renderer/src/store', () => ({
-  useStore: (select: (s: unknown) => unknown) => select({ settings: {} }),
+  useStore: (select: (s: unknown) => unknown) => select({ settings: { accounts } }),
   amAdmin: () => true,
   loadQuotas: () => loadQuotas(),
   navigate: (view: unknown) => navigate(view),
@@ -62,14 +65,19 @@ beforeEach(() => {
 })
 afterEach(async () => await act(async () => root.unmount()))
 
-const render = async (): Promise<void> => {
-  await act(async () => root.render(<QuotaStrip />))
+const render = async (agents: Agent[]): Promise<void> => {
+  await act(async () => root.render(<QuotaStrip agents={agents} />))
   await flush()
 }
 const pills = (): HTMLElement[] => [...document.querySelectorAll('.quota-strip__pill')] as HTMLElement[]
+// The bar each pill draws, as the provider it stands for and the window it measures.
+const drew = (): [string | undefined, string | undefined][] => pills().map((p) => [p.dataset.provider, p.dataset.span])
 const plane = (over: Partial<ProviderQuota>): ProviderQuota => ({ id: 'openai-codex', label: 'Codex', via: 'Codex', at: Date.now(), ...over })
 // A window with a cap, as a provider reports it: what is left, out of what it allows.
 const pct = (leftOver: number, resetsAt?: number) => ({ used: 1 - leftOver, remaining: leftOver, limit: 1, unit: '%' as const, ...(resetsAt ? { resetsAt } : {}) })
+// A bot as a conversation lists it: the model it replies on, and where a reply goes when that one is out.
+const bot = (id: string, over: Partial<Agent> = {}): Agent =>
+  ({ id, name: id, handle: id, role: '', modelId: 'codex:gpt-6.1-sol', archived: false, ...over }) as Agent
 
 describe('the window it keeps', () => {
   it('keeps the month where there is a month, the week where there is a week', () => {
@@ -91,6 +99,58 @@ describe('the window it keeps', () => {
   })
 })
 
+describe('the providers it draws', () => {
+  it('draws no bar for a provider that is logged in but that no member runs on', async () => {
+    // Three logins answer; the conversation's one bot replies on Codex alone.
+    reply = [
+      plane({ month: pct(0.4) }),
+      plane({ id: 'deepseek', label: 'DeepSeek', via: 'Pi', month: pct(0.9) }),
+      plane({ id: 'zai', label: 'Z.ai', via: 'Pi', week: pct(0.6) })
+    ]
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' })])
+    expect(drew()).toEqual([['openai-codex', 'month']])
+  })
+
+  it('draws a fallback model provider, after the main model one', async () => {
+    // The main model is not the one that runs out when the plan is spent: the fallback's is.
+    reply = [plane({ month: pct(0.5) }), plane({ id: 'zai', label: 'Z.ai', via: 'Pi', week: pct(0.4) })]
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol', fallbackModelId: 'pi:zai/glm-5.3' })])
+    expect(drew()).toEqual([
+      ['openai-codex', 'month'],
+      ['zai', 'week']
+    ])
+  })
+
+  it("draws a DM's one member and a channel's in the order it lists them, two at most", async () => {
+    // A DM carries one member and a channel the ones it lists; the strip reads whichever it is given.
+    reply = [
+      plane({ month: pct(0.5) }),
+      plane({ id: 'zai', label: 'Z.ai', via: 'Pi', week: pct(0.4) }),
+      plane({ id: 'xai-oauth', label: 'Grok', via: 'Hermes', week: pct(0.3) })
+    ]
+    await render([bot('theo', { modelId: 'pi:zai/glm-5.3' })])
+    expect(drew()).toEqual([['zai', 'week']])
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root')!)
+    await render([
+      bot('lia', { modelId: 'codex:gpt-6.1-sol' }),
+      bot('theo', { modelId: 'pi:zai/glm-5.3' }),
+      bot('nina', { modelId: 'pi:xai-oauth/grok-4.6' })
+    ])
+    // Two at most: the third member's provider is on the Usage page, not in this header.
+    expect(drew()).toEqual([
+      ['openai-codex', 'month'],
+      ['zai', 'week']
+    ])
+  })
+
+  it('draws nothing when the bot names no provider at all', async () => {
+    reply = [plane({ month: pct(0.5) })]
+    await render([bot('lia', { modelId: 'hermes:deepseek-v4.1-flash' })])
+    expect(document.querySelector('.quota-strip')).toBeNull()
+  })
+})
+
 describe('the strip in the header', () => {
   it('draws one bar per provider, in its longest window', async () => {
     reply = [
@@ -98,8 +158,8 @@ describe('the strip in the header', () => {
       plane({ id: 'xai-oauth', label: 'Grok', via: 'Hermes', week: pct(0.38) }),
       plane({ id: 'deepseek', label: 'DeepSeek', via: 'Pi', month: { remaining: 3.42, unit: 'usd' } })
     ]
-    await render()
-    expect(pills().map((p) => [p.dataset.provider, p.dataset.span])).toEqual([
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' }), bot('theo', { modelId: 'pi:xai-oauth/grok-4.6' })])
+    expect(drew()).toEqual([
       ['openai-codex', 'month'],
       ['xai-oauth', 'week']
     ])
@@ -109,8 +169,8 @@ describe('the strip in the header', () => {
   })
 
   it('draws nothing at all when no provider has a cap', async () => {
-    reply = [plane({ id: 'deepseek', label: 'DeepSeek', via: 'Pi', month: { remaining: 3.42, unit: 'usd' } })]
-    await render()
+    reply = [plane({ month: { remaining: 3.42, unit: 'usd' } })]
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' })])
     expect(document.querySelector('.quota-strip')).toBeNull()
     expect(loadQuotas).toHaveBeenCalledTimes(1)
   })
@@ -119,21 +179,22 @@ describe('the strip in the header', () => {
     reply = [
       plane({ session: pct(0.08) }),
       plane({ id: 'zai', label: 'Z.ai', via: 'Pi', week: pct(0.25) }),
+      // Logged in, plenty left, and spent by nobody in this conversation: no bar of its own.
       plane({ id: 'opencode-go', label: 'OpenCode Go', via: 'Pi', month: pct(0.79) })
     ]
-    await render()
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' }), bot('theo', { modelId: 'pi:zai/glm-5.3' })])
     const tone = (id: string): string => pills().find((p) => p.dataset.provider === id)!.className
     expect(tone('openai-codex')).toContain('is-danger')
     expect(tone('zai')).toContain('is-warn')
-    expect(tone('opencode-go')).not.toContain('is-danger')
-    expect(tone('opencode-go')).not.toContain('is-warn')
+    expect(tone('zai')).not.toContain('is-danger')
+    expect(pills().map((p) => p.dataset.provider)).not.toContain('opencode-go')
     // The bar is as long as what is left.
-    expect(pills().find((p) => p.dataset.provider === 'opencode-go')!.querySelector('i')!.getAttribute('style')).toContain('79%')
+    expect(pills().find((p) => p.dataset.provider === 'openai-codex')!.querySelector('i')!.getAttribute('style')).toContain('8%')
   })
 
   it('says whose number it is and when it resets, without opening anything', async () => {
-    reply = [plane({ label: 'OpenCode Go', via: 'Pi', month: { ...pct(0.5, Date.now() + 5 * 86_400_000) } })]
-    await render()
+    reply = [plane({ id: 'opencode-go', label: 'OpenCode Go', via: 'Pi', month: { ...pct(0.5, Date.now() + 5 * 86_400_000) } })]
+    await render([bot('lia', { modelId: 'pi:opencode-go/deepseek-v4.1-flash' })])
     const title = pills()[0]!.getAttribute('title')!
     expect(title).toContain('OpenCode Go')
     expect(title).toContain('50%')
@@ -143,24 +204,25 @@ describe('the strip in the header', () => {
 
   it('opens Usage and limits on a click', async () => {
     reply = [plane({ month: pct(0.5) })]
-    await render()
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' })])
     await act(async () => (document.querySelector('.quota-strip') as HTMLElement).click())
     expect(navigate).toHaveBeenCalledWith({ kind: 'usage' })
   })
 
   it('reads every provider once, however many conversations are opened', async () => {
     reply = [plane({ month: pct(0.5) })]
-    await render()
+    await render([bot('lia', { modelId: 'codex:gpt-6.1-sol' })])
     await act(async () => root.unmount())
     root = createRoot(document.getElementById('root')!)
-    await render()
+    // Another member, the same provider: the cache still answers, and the bar is still drawn.
+    await render([bot('theo', { modelId: 'pi:openai-codex/gpt-6.1-sol' })])
     expect(loadQuotas).toHaveBeenCalledTimes(1)
     expect(pills()).toHaveLength(1)
   })
 
   it('draws nothing when the read fails, and says nothing about it here', async () => {
     loadQuotas.mockRejectedValueOnce(new Error('no logins on this computer'))
-    await act(async () => root.render(<QuotaStrip />))
+    await act(async () => root.render(<QuotaStrip agents={[bot('lia', { modelId: 'codex:gpt-6.1-sol' })]} />))
     await flush()
     expect(document.querySelector('.quota-strip')).toBeNull()
   })

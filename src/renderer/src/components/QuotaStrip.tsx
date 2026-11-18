@@ -8,11 +8,16 @@
 // longest name the strip draws: a short bar beside a long one reads as two unrelated numbers rather
 // than one strip, and two unnamed bars read as one.
 //
+// Only the providers the bots in this conversation are set to run on, main model then its fallback,
+// and two at most: every login on the computer would be a wall of bars, and a bar whose provider no
+// reply here can spend says nothing about this conversation.
+//
 // A wallet (a balance with no cap) draws no bar: it has no denominator and no reset, and inventing
 // one would read as "nearly full" when it says nothing. Its money is on the Usage page.
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import type { ProviderQuota, QuotaWindow } from '../../../shared/types'
+import { agentProviders } from '../../../shared/quota-provider'
+import type { Agent, ProviderQuota, QuotaWindow } from '../../../shared/types'
 import { amAdmin, loadQuotas, navigate, useStore } from '../store'
 import { left, share, until } from './Usage'
 
@@ -65,12 +70,20 @@ function useQuotas(admin: boolean): ProviderQuota[] {
   return list
 }
 
-export function QuotaStrip(): ReactNode {
+/** The bots whose providers this header draws: a DM's own, a channel's members. */
+export function QuotaStrip({ agents }: { agents: Agent[] }): ReactNode {
   // Whose logins are read is an admin's, as everywhere else: a member's app never asks.
   const admin = useStore(amAdmin)
+  const accounts = useStore((s) => s.settings.accounts ?? [])
   const list = useQuotas(admin)
   if (!admin) return null
-  const bars = list.map((p) => ({ p, pick: longest(p) })).filter((b): b is { p: ProviderQuota; pick: { span: Span; w: QuotaWindow } } => b.pick !== undefined)
+  // The providers these bots spend, in the order the conversation lists them. A provider with a
+  // login but no bot on it is left out: nothing a reply here sends can use it up.
+  const bars = agentProviders(agents, accounts)
+    .map((id) => list.find((p) => p.id === id))
+    .filter((p): p is ProviderQuota => !!p)
+    .map((p) => ({ p, pick: longest(p) }))
+    .filter((b): b is { p: ProviderQuota; pick: { span: Span; w: QuotaWindow } } => b.pick !== undefined)
   if (bars.length === 0) return null
   return (
     <button
