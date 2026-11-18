@@ -1,11 +1,12 @@
 // Jev suggesting one option on an agent's question: the pick lands on the reply as a pill, one
-// cheap typed question per decision, and only when the person turned it on in the settings.
+// cheap typed question per decision, and only when the recommend job is assigned in Classifier Uses.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Decision } from '../src/shared/questions'
 import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { JEV_CLASSIFIER } from '../src/shared/classifiers'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -140,8 +141,11 @@ describe('the pill on the card', () => {
       jev: { key: async () => key, fetch: api.f }
     })
 
+  // The recommend job assigned to Jev, as Settings › Classifier Uses writes it.
+  const recommending = (): Settings => ({ ...settings, classifiers: [JEV_CLASSIFIER], classifierJobs: { recommend: 'jev' } })
+
   it('lands on the reply afterwards, so asking never waits on TypeSafe', async () => {
-    settings = { ...settings, jevRecommend: true }
+    settings = recommending()
     const api = typesafe({ pick: 'o1' })
     const r = runner(api, 'ts-key')
     await r.send('d1', '@lia me ajuda a decidir')
@@ -169,7 +173,7 @@ describe('the pill on the card', () => {
   })
 
   it('with no key, the card is what it always was', async () => {
-    settings = { ...settings, jevRecommend: true }
+    settings = recommending()
     const api = typesafe({ pick: 'o1' })
     const r = runner(api, undefined)
     await r.send('d1', '@lia me ajuda a decidir')
@@ -181,7 +185,7 @@ describe('the pill on the card', () => {
   })
 
   it('is not written onto a question that was answered while TypeSafe thought', async () => {
-    settings = { ...settings, jevRecommend: true }
+    settings = recommending()
     let release: () => void = () => {}
     const slow = (async (url: string, init: RequestInit) => {
       await new Promise<void>((res) => (release = res))

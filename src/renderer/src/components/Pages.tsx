@@ -1,6 +1,5 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
-import { L, locale, type Lang } from '../../../shared/lang'import { nodeOf } from '../../../shared/node-link'
-import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
+import { L, locale, type Lang } from '../../../shared/lang'import { nodeOf } from '../../../shared/node-link'import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
@@ -3440,8 +3439,7 @@ export function ClassifiersCard(): ReactNode {
 }
 
 // Which job each classifier serves: who replies in a channel, and what an agent clicks in a page. It sits in its own card, apart from the list, because
-// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.export function ClassifierUsesCard(): ReactNode {  const settings = useStore((s) => s.settings)
-  const work = onGateway(settings)
+// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.export function ClassifierUsesCard(): ReactNode {  const settings = useStore((s) => s.settings)  const work = onGateway(settings)
   const list = settings.classifiers ?? []
   const jobs = settings.classifierJobs ?? {}
   const assign = (job: ClassifierJob, id: string | null): void => {    const next = { ...jobs }
@@ -3475,8 +3473,7 @@ export function ClassifiersCard(): ReactNode {
               </div>            )
           })}
         </>
-      )}    </>  )
-}
+      )}    </>  )}
 
 // Settings › Agents: who finds the element an agent asks to click. A card of its own, beside the
 // other things agents do, because the choice is about the browser and not about a classifier row —
@@ -3696,8 +3693,7 @@ export function SettingsPage(): ReactNode {
                 )}
                 {owner && (
                   <Field label={L('Como os agentes te chamam', 'What the agents call you')}>
-                    <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />                  </Field>
-                )}
+                    <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />                  </Field>                )}
               </div>
               <div className="field">
                 <span className="field__label">Idioma · Language</span>

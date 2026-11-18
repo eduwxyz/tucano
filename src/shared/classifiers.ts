@@ -12,8 +12,6 @@ import type { Settings } from './types'
 export type ClassifierProvider = 'typesafe' | 'openrouter' | 'openai' | 'gemini'
 
 // Where a classifier is used. A job has at most one classifier, and unassigned means off.
-// `recommend` is the one job with no selector of its own: it is TypeSafe's Jev or nothing, switched
-// on in Settings › Classifiers › Classifier Uses, so it is not in CLASSIFIER_JOBS below.
 export type ClassifierJob = 'routing' | 'recommend' | 'browser'
 
 export interface ClassifierConfig {
@@ -89,13 +87,13 @@ export const providerSpec = (p: ClassifierProvider): ProviderSpec => PROVIDERS.f
 // The classifier an install from before this section had: one TypeSafe Jev.
 export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provider: 'typesafe', model: 'jev-latest' }
 
-// The jobs the Classifier Uses card offers as a selector. `recommend` is the switch below them.
-export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser']
+// The jobs the Classifier Uses card offers, one selector each.
+export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser', 'recommend']
 
 export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
   ({
     routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
-    recommend: { pt: 'A opção sugerida na pergunta', en: 'Suggested answers' },
+    recommend: { pt: 'Marcar a opção recomendada', en: 'Mark the recommended option' },
     browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
   })[job]
 
@@ -106,8 +104,8 @@ export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
       en: 'Reads the conversation and picks who replies, in place of the router’s small model. Every message without an @mention goes to the chosen provider.'
     },
     recommend: {
-      pt: 'Marca a opção que o Jev escolheria no card de uma pergunta do agente. É uma sugestão: quem escolhe continua sendo você.',
-      en: 'Marks the option Jev would pick on an agent’s question card. It is a suggestion: you still choose.'
+      pt: 'Sugere uma opção na pergunta do agente; você escolhe.',
+      en: 'Suggests an option on an agent question; you still choose.'
     },
     browser: {
       pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
@@ -134,6 +132,7 @@ export function classifierJobsOf(s: ClassifierSettings): Partial<Record<Classifi
   const jobs: Partial<Record<ClassifierJob, string>> = {}
   if (known && s.routerModel === 'jev') jobs.routing = JEV_CLASSIFIER.id
   if (known && s.browserJev) jobs.browser = JEV_CLASSIFIER.id
+  // A legacy install that switched the recommended option on keeps marking options on the same Jev.
   if (known && s.jevRecommend) jobs.recommend = JEV_CLASSIFIER.id
   return jobs
 }
