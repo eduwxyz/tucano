@@ -18,6 +18,7 @@ import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Compute
 import { extractFile } from './wiki-extract'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
+import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { LER_GUIA, readGuide } from './guide'
@@ -359,7 +360,8 @@ export interface RoutineEvent {
 // `trigger`: the message this reply answers (a routed one): what people wrote after it, while it
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
-type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string; vault?: boolean } // for: whom it's for, when it isn't read from the conversation (an answer back)
+// `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string; vault?: boolean } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -764,7 +766,7 @@ export class Runner {
     db.saveMessage(ask)
     emit({ type: 'message', message: ask })
 
-    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true })
+    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true, routineAsk: ask.id })
   }
 
   // A routine's reply that failed, run again in place with the same request.
@@ -800,6 +802,11 @@ export class Runner {
       L(
         `${me} pode não estar olhando agora: faça o que a última mensagem pede, do começo ao fim, e responda com o resultado. Só pergunte se for impossível continuar sem ${me}.`,
         `${me} may not be looking right now: do what the last message asks, start to finish, and reply with the result. Only ask if it's impossible to go on without ${me}.`
+      ),
+      // The app folds these runs into one line by this exact phrase (src/shared/routine-news.ts).
+      L(
+        `Se não houver nada novo pra contar (nada mudou, nada pra fazer), responda só "${noNewsPhrase()}", sem mais nada.`,
+        `If there's nothing new to report (nothing changed, nothing to do), reply only "${noNewsPhrase()}", with nothing else.`
       ),
       event &&
         L(
@@ -1073,7 +1080,10 @@ export class Runner {
     const replyTo = opts.trigger ?? opts.replyTo ?? opts.existing?.run?.replyTo
     // Going on from an approved call that used the vault (or retrying a reply that did): marked from the start.
     const vaultBefore = opts.vault || !!opts.existing?.run?.vault
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(vaultBefore ? { vault: true } : {}) }
+    // A routine's run, tried again by the routine or by hand, still answers the routine's message.
+    const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
+    const replyMeta = { ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...replyMeta, ...(vaultBefore ? { vault: true } : {}) }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -1696,6 +1706,10 @@ ${note}`,
           if (same < 0 && list.length >= MAX_PROPOSALS) return textResult(L(`Já são ${MAX_PROPOSALS} propostas nesta resposta: termine aqui e mande o resto na próxima.`, `That's ${MAX_PROPOSALS} proposals in this reply already: finish here and send the rest in the next one.`), true)
           msg.run = { ...msg.run!, proposals: same < 0 ? [...list, r.proposal] : list.map((x, i) => (i === same ? r.proposal! : x)) }
           delete msg.run.proposal
+          // A team with the new agent this reply already proposed takes its place: that agent is made
+          // with the team, and the cards that need it find it there.
+          const draft = msg.run.agentDraft
+          if (r.proposal.kind === 'team' && draft && !draft.state && r.proposal.agents.some((a) => a.name.toLowerCase() === draft.name.toLowerCase())) delete msg.run.agentDraft
           const p = r.proposal
           const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
           const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
@@ -1716,6 +1730,17 @@ ${note}`,
             connectors: this.deps.connectors?.list() ?? []
           })
           if (!r.draft) return textResult(r.error!, true)
+          // One new-agent card per reply. Another agent would take its place and leave the cards that
+          // need the first one with nothing to make it from: say how to propose both instead.
+          const before = msg.run?.agentDraft
+          if (before && !before.state && before.name.toLowerCase() !== r.draft.name.toLowerCase())
+            return textResult(
+              L(
+                `Esta resposta já propôs um agente novo, ${before.name}, e cada resposta tem um card de agente só: este não foi criado. Pra propor ${r.draft.name} junto, use propor_time com ${before.name} e ${r.draft.name} (o canal é opcional): o time entra no lugar do card de ${before.name}, e as rotinas e canais que dependem de um ou de outro continuam valendo. Ou proponha ${r.draft.name} na próxima resposta.`,
+                `This reply already proposed a new agent, ${before.name}, and each reply has one agent card: this one was not made. To propose ${r.draft.name} too, use propor_time with ${before.name} and ${r.draft.name} (the channel is optional): the team takes the place of ${before.name}'s card, and the routines and channels that need either still work. Or propose ${r.draft.name} in the next reply.`
+              ),
+              true
+            )
           msg.run = { ...msg.run!, agentDraft: r.draft }
           addSteps({ id: randomUUID(), label: L('Propôs um agente', 'Proposed an agent'), detail: `${r.draft.name}${r.draft.role ? ` · ${r.draft.role}` : ''}`, status: 'done' })
           return textResult(
@@ -2686,7 +2711,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(msg.run?.vault ? { vault: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...replyMeta, ...(msg.run?.vault ? { vault: true } : {}), ...(handedId ? { handed: handedId } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -2730,10 +2755,10 @@ ${note}`,
       const up = question && handedNow && askedTo.id === requester.id ? handedNow : undefined
       if (question && !up) this.asked(agent, msg, question, askedTo, requester, confirming, settings)
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
-      save({
-        text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
-        run: { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
-      })
+      const text = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
+      const run: Run = { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+      // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
+      save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
       // The inbox shows a question's decisions from its message, which has them only now.
       if (question) emit({ type: 'inbox' })
       if (question && up) this.askedUp(up, agent, msg, question)

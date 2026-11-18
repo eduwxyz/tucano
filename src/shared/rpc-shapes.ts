@@ -208,6 +208,9 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   answerDecision: { messageId: 's', index: 'n', answer: 'o|null' },
   submitDecisions: { messageId: 's' },
   watchRoutine: { id: 's', on: 'b' },
+  sendFeedback: { kind: '[bug,idea,other]', message: 's', image: 's?', lang: '[pt,en]?' },
+  survey: { lang: '[pt,en]?' },
+  answerSurvey: { survey: 's', choice: 's?', comment: 's?', dismiss: 'b?', lang: '[pt,en]?' }
 }
 
 const fits = (v: unknown, t: string): boolean => {
@@ -269,7 +272,10 @@ export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
   wikiGitSetup: { url: 1_000 },
   loginInput: { text: 4_000 }, // a code or an API key, typed into a sign-in
   vaultRecover: { code: 200 },
-  setPush: { handle: 2_000, tag: 200 }
+  setPush: { handle: 2_000, tag: 200 },
+  // The text, and a picture of up to 3 MB as base64 (core/feedback.ts checks the bytes).
+  sendFeedback: { message: 5_000, image: 4_200_000 },
+  answerSurvey: { survey: 100, choice: 100, comment: 2_000 }
 }
 
 export function limitError(method: Method, params: unknown): string | undefined {

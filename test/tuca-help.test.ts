@@ -315,15 +315,19 @@ describe("the Tuca's prompt, for several changes", () => {
   })
 
   it('brings a Tuca still on the instructions from before up to date, and leaves hand-written ones alone', () => {
+    // The rule on several new agents in one reply came last: every version before lacks it.
+    const lastRule = (): string => tucaInstructions().replace(/\n- (?:Mais de um agente novo|More than one new agent)[^\n]*/, '')
     const before = (lang: 'pt' | 'en'): string => {
       setLang(lang)
       // The lines that changed, as they were: the links he is taught, which carried a Portuguese
       // id (#abrir/conectores) before the screen ids lost the language.
-      return tucaInstructions().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
+      return lastRule().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
     }
     for (const lang of ['pt', 'en'] as const) {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }
       setLang(lang)
+      expect(lastRule()).not.toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: lastRule() })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate(old)?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: `${old.instructions}\nMinha regra.` })).toBeUndefined()
       expect(tucaUpToDate({ ...old, instructions: tucaInstructions() })).toBeUndefined()

@@ -14,7 +14,7 @@ export const ownerError = (): string => L('Só o dono do Tucano pode fazer isso.
 
 // What a person may change of the settings without being an admin: how the app looks to them.
 // Each person's own (kept on them, see People.settingsFor); the owner's are the settings themselves.
-export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']
+export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']
 export const isPersonalSetting = (k: string): boolean => (PERSONAL_SETTINGS as readonly string[]).includes(k)
 
 export type Action =
@@ -132,6 +132,9 @@ export const NEEDS: Record<Method, Need> = {
   removeRoutine: 'target',
   runRoutine: 'target',
   watchRoutine: 'anyone',
+  sendFeedback: 'anyone', // to the people who make Tucano: what anyone here saw go wrong
+  survey: 'owner', // one answer per install: the owner's
+  answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',

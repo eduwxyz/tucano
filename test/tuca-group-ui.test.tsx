@@ -29,6 +29,10 @@ vi.mock('../src/renderer/src/store', async (original) => {
     applyProposals: vi.fn(async () => ({ applied: [{ index: 0, id: 'lia' }, { index: 2, id: 'r1' }], failed: [{ index: 1, error: 'Já existe o canal #financeiro.' }], forwarded: [], draft: { agentId: 'leo' } })),
     dismissProposal: vi.fn(),
     dismissProposals: vi.fn(),
+    createFromDraft: vi.fn(async () => ({ agentId: 'rafa', conversationId: 'd1' })),
+    sendMessage: vi.fn(),
+    settleDraft: vi.fn(),
+    openDm: vi.fn(async () => {}),
     saveAgent: vi.fn(async () => {}),
     engineModels: vi.fn(async () => ({ models: [] })),
     navigate: vi.fn(),
@@ -117,6 +121,21 @@ describe('several proposals in one reply, on screen', () => {
     expect(text()).toContain('Depende de Léo')
   })
 
+  it('a card that needs an agent no card of the reply makes says to create it first', async () => {
+    // An older reply where a second new agent took the first one's card: Sustinho is in no card any more.
+    const susto: Proposal = { kind: 'routine', routine: { name: 'Preparo do susto', agentId: '', conversationId: '', prompt: 'Prepare o susto.', schedule: { days: [1], time: '08:00' }, enabled: true }, needs: ['Sustinho'] }
+    const m = reply([susto], { agentDraft: { ...draft, name: 'Faro' } })
+    fake = state({ messages: { t1: [m] } })
+    await render(<Proposals message={m} />)
+    await click(/^→$/)
+    expect(text()).toContain('Depende de Sustinho, que não está em nenhum card desta resposta: crie antes (peça ao Tuca) e aplique esta depois.')
+    // Once there's a Sustinho (made some other way), it's an ordinary card again.
+    fake = state({ messages: { t1: [m] }, agents: [tuca, lia, nina, agent('s1', 'Sustinho')] })
+    await render(<Proposals message={{ ...m }} />)
+    expect(text()).not.toContain('que não está em nenhum card')
+    expect(text()).toContain('É de Sustinho, que já está no time.')
+  })
+
   it('"Aplicar todos" says what it will do, in order, then what was applied and what failed', async () => {
     const m = reply(migration())
     fake = state({ messages: { t1: [m] } })
@@ -199,5 +218,63 @@ describe("the Tuca's builder screen", () => {
     await render(<Onboarding build />)
     await click(/Nova conversa/)
     expect(store.ensureTuca).toHaveBeenLastCalledWith(undefined, true)
+  })
+})
+
+describe('the builder screen, after the debloat: steps, ideas and the proposal beside the chat', () => {
+  const hello = { id: 'h1', conversationId: 't1', author: { kind: 'agent', id: 'tuca' }, text: 'Oi, eu sou o Tuca.', at: 1 } as Message
+  const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'tickets de suporte', at: 5 } as Message
+  const proposed = (extra: Partial<NonNullable<Message['run']>['agentDraft']> = {}, proposals: Proposal[] = []): Message =>
+    ({ id: 'm1', conversationId: 't1', author: { kind: 'agent', id: 'tuca' }, text: 'Montei o Léo.', at: 10, run: { status: 'done', steps: [], proposals, agentDraft: { ...draft, task: 'Resuma os gastos de hoje.', ...extra } } }) as Message
+  const steps = (): string[] => [...document.querySelectorAll('.onb-steps li')].map((li) => `${li.className}:${li.textContent}`)
+  const rows = (): string[] => [...document.querySelectorAll('.onb-tc__rows > div')].map((r) => `${r.querySelector('dt')?.textContent}=${r.querySelector('dd')?.textContent}`)
+
+  it('starts in the chat: his greeting, four ideas that send, and an empty proposal that cannot be created', async () => {
+    fake = state({ messages: { t1: [hello] } })
+    await render(<Onboarding build />)
+    expect(steps()[0]).toBe('is-now:1Conversa')
+    expect(text()).toContain('Explica o Tucano, investiga o que não funciona e cria agentes.')
+    expect(text()).toContain('Oi, eu sou o Tuca.')
+    expect(document.querySelectorAll('.onb-tc__idea')).toHaveLength(4)
+    expect(rows().slice(0, 4)).toEqual(['Nome=—', 'O que faz=—', 'Quando=—', 'Acesso=—'])
+    expect(button(/Prefiro montar eu mesmo/)).toBeTruthy()
+    expect([...document.querySelectorAll('button')].find((b) => b.textContent === 'Criar agente')?.disabled).toBe(true)
+    // "Nada é criado sem você" once, under the field (not in it too).
+    expect(text().split('Nada é criado sem você').length - 1).toBe(1)
+    await click(/Triar os tickets de suporte toda manhã/)
+    expect(store.sendMessage).toHaveBeenCalledWith('t1', 'Quero alguém pra triar os tickets de suporte toda manhã.')
+  })
+
+  it('a proposal fills the card ("Quando" from its routine) and "Criar agente" makes it and tries its first task', async () => {
+    const routine: Proposal = { kind: 'routine', routine: { name: 'Fechamento', agentId: '', conversationId: '', prompt: 'Resuma.', schedule: { days: [1, 2, 3, 4, 5], time: '18:00' }, enabled: true }, needs: ['Léo'] }
+    fake = state({ messages: { t1: [hello, said, proposed({}, [routine])] } })
+    await render(<Onboarding build />)
+    expect(steps().map((s) => s.split(':')[0])).toEqual(['is-done', 'is-now', ''])
+    expect(rows()).toContain('Nome=Léo · Financeiro')
+    expect(rows()).toContain('Quando=Seg a sex às 18h')
+    expect(rows()).toContain('Acesso=Sem web · sem conectores')
+    expect(document.querySelectorAll('.onb-tc__idea')).toHaveLength(0)
+    await click(/^Criar agente$/)
+    expect(store.createFromDraft).toHaveBeenCalledWith('m1')
+    expect(store.sendMessage).toHaveBeenCalledWith('d1', 'Resuma os gastos de hoje.')
+    await click(/^Descartar$/)
+    expect(store.settleDraft).toHaveBeenCalledWith('m1')
+  })
+
+  it('"Editar antes" goes on to its access, with the steps still on Proposta', async () => {
+    fake = state({ messages: { t1: [hello, said, proposed()] } })
+    await render(<Onboarding build />)
+    await click(/^Editar antes$/)
+    expect(steps()[1]).toBe('is-now:2Proposta · acesso')
+  })
+
+  it('once made, the steps say Pronto and the card opens its conversation', async () => {
+    const leo = agent('leo', 'Léo')
+    fake = state({ agents: [tuca, lia, nina, leo], messages: { t1: [hello, said, proposed({ state: 'created', agentId: 'leo' })] } })
+    await render(<Onboarding build />)
+    expect(steps().map((s) => s.split(':')[0])).toEqual(['is-done', 'is-done', 'is-now'])
+    expect(text()).toContain('Entrou no time')
+    await click(/Abrir conversa com Léo/)
+    expect(store.openDm).toHaveBeenCalledWith('leo')
   })
 })

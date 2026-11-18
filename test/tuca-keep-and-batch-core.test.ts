@@ -148,6 +148,27 @@ describe('B. several proposals in one reply', () => {
   })
 })
 
+describe('B2. two new agents in one reply', () => {
+  it('a second new agent is refused and told to use a team; the team takes the first card\'s place, and all of it applies', async () => {
+    const m = await reply(ana, first.conversationId, 'importa os bots do GrokBot')
+    const told = m.text.split('\n---\n')
+    expect(told[2]).toContain('já propôs um agente novo, Sustinho')
+    expect(told[2]).toContain('propor_time')
+    // The team with both replaced the lone card: nothing is left that needs an agent no card makes.
+    expect(m.run?.agentDraft).toBeUndefined()
+    const ps = proposalsOf(m.run)
+    expect(ps.map((p) => p.kind)).toEqual(['routine', 'team', 'routine'])
+    expect(ps.map((p) => p.needs)).toEqual([['Sustinho'], undefined, ['Faro']])
+    const r = await ana.call<ProposalsResult>('applyProposals', { messageId: m.id, draft: false })
+    expect(r.failed).toEqual([])
+    const snap = await ana.call<Snap>('snapshot')
+    const sustinho = snap.agents.find((a) => a.name === 'Sustinho')!
+    const faro = snap.agents.find((a) => a.name === 'Faro')!
+    expect(snap.routines.find((x) => x.name === 'Preparo do susto')?.agentId).toBe(sustinho.id)
+    expect(snap.routines.find((x) => x.name === 'Faro da manhã')?.agentId).toBe(faro.id)
+  })
+})
+
 describe('C. with a team: each person has their own Tuca, and the admins apply agents', () => {
   let mine: Tuca
   it("Bia's Tuca is her own conversation, and Ana's stays where it was", async () => {

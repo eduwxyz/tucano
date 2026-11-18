@@ -11,7 +11,7 @@ import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-path
 import { basename, join, resolve, sep } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
-import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
+import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
@@ -42,6 +42,7 @@ import { asdfEnv, codexEnv } from './engines/codex'
 import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
 import { LoginTerminal, type LoginKey } from './login-terminal'
 import { Push, pushUrl } from './push'
+import { Feedback, feedbackUrl } from './feedback'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { appTools, DesktopApps, macApps, SELF } from './apps'
@@ -507,6 +508,11 @@ const push = new Push({
   targets: (to) => db.pushTargets(to),
   gone: (hash) => db.dropKeyPush(hash)
 })
+
+// "Enviar feedback" and the sidebar's surveys, through tucano.sh (core/feedback.ts). install.json lives in
+// the desktop's data folder, for every workspace (TUCANO_INSTALL_DIR, set by src/main); a server keeps its own.
+const installDir = process.env['TUCANO_INSTALL_DIR'] || dataDir
+const feedback = new Feedback({ url: feedbackUrl(), dir: installDir, version: appVersion, fresh: db.created && installDir === dataDir, os: osOf() })
 
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
@@ -1298,7 +1304,17 @@ function neededAgents(messageId: string, p: Proposal): string[] {
       const id = at >= 0 ? t.agentIds?.[at] : undefined
       if (id && db.agent(id)) return id
     }
-    throw new Error(L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`))
+    // Still to make from a card of this reply: that card first.
+    const here = (d && !d.state && same(d.name)) || proposalsOf(run).some((t) => t.kind === 'team' && !t.state && t.agents.some((a) => same(a.name)))
+    // In no card of this reply (another took its place, or it was never proposed), but there is one by
+    // that name, made from another card or by hand: that one.
+    const named = here ? [] : db.agents().filter((a) => !a.archived && a.kind !== 'tuca' && same(a.name))
+    if (named.length === 1) return named[0]!.id
+    throw new Error(
+      here
+        ? L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`)
+        : L(`Antes, crie ${name}: não está em nenhum card desta resposta. Peça ao Tuca pra propor ${name}, crie, e aplique esta de novo.`, `Create ${name} first: it isn't in any card of this reply. Ask Tuca to propose ${name}, create it, and apply this one again.`)
+    )
   })
 }
 
@@ -2334,6 +2350,10 @@ const api: Handlers = {
     routines.remove(id)
   },
   // "Me avise": told of a channel routine's runs (one's own routine always tells its person).
+  sendFeedback: ({ kind, message, image, lang: l }) => feedback.send({ kind, message, ...(image ? { image } : {}), lang: l ?? lang() }),
+  // Off in the settings: no survey, and nothing asked of tucano.sh.
+  survey: ({ lang: l }) => (settings().surveys === false ? Promise.resolve(null) : feedback.survey({ lang: l ?? lang() })),
+  answerSurvey: ({ survey, choice, comment, dismiss, lang: l }) => feedback.answer({ survey, ...(choice ? { choice } : {}), ...(comment ? { comment } : {}), ...(dismiss ? { dismiss } : {}), lang: l ?? lang() }),
   watchRoutine: ({ id, on }, ctx) => {
     people.watch(ctx.person, id)
     db.watchRoutine(id, ctx.person.id, on)

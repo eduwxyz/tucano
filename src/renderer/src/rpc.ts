@@ -32,6 +32,7 @@ declare global {
       // (a browser: blocked by the person, or a page without HTTPS, where browsers show none).
       testNotify?: () => Promise<NotifyState | 'shown'>
       notifyState?: () => NotifyState // a browser only: where its notifications stand now
+      capture?: () => Promise<{ type: 'image/png' | 'image/jpeg'; data: string } | null> // desktop only: this window's picture, base64
       updateState: () => Promise<UpdateState>
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void

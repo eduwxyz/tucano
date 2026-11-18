@@ -436,7 +436,7 @@ function ItemForm({ initial, item, onClose }: { initial: VaultItemInput; item?: 
     // Like a password field: the eye inside shows what's being typed (never the saved value, which doesn't come back).
     const eye = (
       <button type="button" className="vault-secret__eye" aria-pressed={show} title={show ? L('Esconder', 'Hide') : L('Mostrar o que estou digitando', "Show what I'm typing")} aria-label={show ? L('Esconder', 'Hide') : L('Mostrar o que estou digitando', "Show what I'm typing")} onClick={() => setShow((v) => !v)}>
-        <Icon name={show ? 'eye-off' : 'eye'} size={16} />
+        <Icon name={show ? 'hide' : 'eye'} size={16} />
       </button>
     )
     return (
