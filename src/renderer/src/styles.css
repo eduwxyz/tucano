@@ -1923,6 +1923,23 @@ h3 {
   border-color: var(--border-strong);
   box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft);
 }
+.intervention {
+  min-height: 0;
+  overflow-y: auto;
+  /* Leave room for the composer's focus halo inside the scroll container. */
+  padding: 8px;
+  margin: -8px;
+}
+.modal__card.intervention-modal {
+  width: min(760px, calc(100vw - 32px));
+}
+.intervention .composer__bar {
+  flex-wrap: wrap;
+}
+.intervention .composer__bar .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .composer textarea {
   border: 0;
   box-shadow: none;
@@ -2958,6 +2975,16 @@ h3 {
 }
 .retry {
   margin-top: 6px;
+}
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.run-actions > .retry {
+  margin-top: 0;
 }
 
 .connector__actions {

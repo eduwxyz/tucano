@@ -93,6 +93,48 @@ describe('what a cut reply has to go on with', () => {
 })
 
 describe('continuing a reply the app cut', () => {
+  it('resumes in the same thread with the actual writer’s new guidance and the previous work', async () => {
+    db.addPerson({ id: 'ana', name: 'Ana', role: 'admin', about: '' })
+    const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'conserte o teste')
+    const cut = put('d1', { kind: 'agent', id: 'a1' }, 'Já li o arquivo.', {
+      status: 'stopped', task: 'conserte o teste', work: 'issue-42',
+      steps: [step('Read a.ts', 'done', 'a.ts'), step('Ran npm test', 'error', 'exit 1')]
+    }, prompt.id)
+    const r = runner()
+    await Promise.all([
+      r.continue(cut.id, '  Não altere a API pública; ajuste só o teste.  ', 'ana'),
+      r.continue(cut.id, 'Não altere a API pública; ajuste só o teste.', 'ana')
+    ])
+    await r.idle()
+    const guidance = db.messages().filter((m) => m.author.kind === 'person' && m.author.id === 'ana')
+    expect(guidance).toHaveLength(1)
+    expect(guidance[0]).toMatchObject({
+      text: 'Não altere a API pública; ajuste só o teste.', threadId: prompt.id,
+      author: { kind: 'person', id: 'ana' }
+    })
+    const next = replies().filter((m) => m.id !== cut.id)
+    expect(next).toHaveLength(1)
+    expect(next[0]).toMatchObject({ threadId: prompt.id, run: { replyTo: guidance[0]!.id, work: 'issue-42' } })
+    expect(turns[0]!.prompt).toContain('Já li o arquivo.')
+    expect(turns[0]!.prompt).toContain('conserte o teste')
+    expect(turns[0]!.prompt).toContain('Read a.ts: a.ts')
+    expect(turns[0]!.prompt).toContain('Ran npm test: exit 1 (failed)')
+    expect(turns[0]!.prompt).toContain('Não altere a API pública; ajuste só o teste.')
+    expect(turns[0]!.prompt).toContain('Ana intervened with new guidance')
+  })
+
+  it('ignores empty intervention without consuming the stopped reply', async () => {
+    const cut = put('d1', { kind: 'agent', id: 'a1' }, 'Comecei.', {
+      status: 'stopped', steps: [step('Read a.ts', 'done')]
+    })
+    const r = runner()
+    await r.continue(cut.id, '   ')
+    await r.idle()
+    expect(db.message(cut.id)?.run?.status).toBe('stopped')
+    expect(turns).toHaveLength(0)
+    expect(db.messages()).toHaveLength(1)
+  })
+
   it('goes on in a new reply, which carries the steps it already took', async () => {
     const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'conserte o teste que falha')
     const cut = put(

@@ -179,7 +179,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/gaste (\d+) tokens/i.test(last)) {
         spend = Number(/gaste (\d+) tokens/i.exec(last)![1])
         reply = 'Instalei o Swift e li o módulo de sorteio. Falta rodar os testes do Core e conferir o filtro de questões recentes.'
-      } else if (/\b(?:was cut when the app closed|was cut by a failure|was cut before it finished|foi cortada quando|foi cortada por uma falha)/i.test(turn.prompt)) {
+      } else if (/\b(?:was cut when the app closed|was cut when it was stopped|was cut by a failure|was cut before it finished|foi cortada quando|foi cortada por uma falha)/i.test(turn.prompt)) {
         // A reply the app cut, continued: the steps it already took are in its task, so it says how
         // many there were and goes on instead of redoing them (src/core/runs.ts, continue()).
         const told = /(?:The steps you took|Os passos que você fez):\n([\s\S]*?)\n\n/.exec(turn.prompt)?.[1] ?? ''
@@ -191,6 +191,8 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           `Continuei dali: ${done.join(', ')} já estavam prontos, e não refiz nenhum.`,
           `I went on from there: ${done.join(', ')} were already done, and I redid none of them.`
         )
+        if (/intervened with new guidance|interveio com uma nova orientação/.test(turn.prompt))
+          reply += L(` Nova orientação recebida: ${last}`, ` New guidance received: ${last}`)
       } else if (turn.mcpUrl && /lembre e procure:/i.test(last)) {
         // A memory written and then searched, then a hold: two real steps behind a reply, and a pause
         // long enough for the app to be killed between them (scripts/e2e-kill-restart.mjs). Neither

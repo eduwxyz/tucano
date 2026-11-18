@@ -6,12 +6,13 @@ import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
-import { CUT, canContinue } from '../../../shared/run-progress'
+import { canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -52,6 +53,7 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  interveneRun,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -103,6 +105,7 @@ import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
+import { Modal } from './Modal'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -467,6 +470,74 @@ const MessageMarkdown = memo(Markdown)
 const STREAM_MS = 140 // a streaming reply's Markdown, about 7 times a second
 const NO_ATTACHED: Artifact[] = []
 
+// Both ways resume the same work; intervening adds guidance without routing a separate request.
+function ResumeActions({ messageId }: { messageId: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const submitting = useRef(false)
+  const submit = async (): Promise<void> => {
+    if (!text.trim() || submitting.current) return
+    submitting.current = true
+    setBusy(true)
+    setError('')
+    try {
+      await interveneRun(messageId, text.trim())
+      setOpen(false)
+      setText('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : L('Não consegui intervir. Tente de novo.', "I couldn't intervene. Try again."))
+    } finally {
+      submitting.current = false
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <button className="btn btn--xs retry" onClick={() => continueRun(messageId)}>
+        {L('Continuar', 'Continue')}
+      </button>
+      <button className="btn btn--xs retry" onClick={() => setOpen(true)}>
+        {L('Intervir', 'Intervene')}
+      </button>
+      {open && createPortal(
+        <Modal className="intervention-modal" title={L('Intervir na execução', 'Intervene in the run')} onClose={() => !submitting.current && setOpen(false)}>
+          <p className="small modal__lead">{L('O agente retomará de onde parou, considerando sua nova orientação.', 'The agent will pick up where it left off, taking your new guidance into account.')}</p>
+          <form className="intervention" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+            <div className="composer">
+              <textarea
+                autoFocus
+                rows={6}
+                aria-label={L('Nova orientação', 'New guidance')}
+                placeholder={L('O que o agente precisa considerar ao continuar?', 'What should the agent consider as it continues?')}
+                value={text}
+                disabled={busy}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    void submit()
+                  }
+                }}
+              />
+              <div className="composer__bar">
+                <span className="composer__hint">{L('Enter envia · Shift+Enter quebra linha', 'Enter sends · Shift+Enter adds a line')}</span>
+                <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setOpen(false)}>{L('Cancelar', 'Cancel')}</button>
+                <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !text.trim()}>
+                  <Icon name="send" size={14} /> {busy ? L('Enviando…', 'Sending…') : L('Enviar e continuar', 'Send and continue')}
+                </button>
+              </div>
+            </div>
+            {error && <p className="note note--error" role="alert">{error}</p>}
+          </form>
+        </Modal>,
+        document.body
+      )}
+    </>
+  )
+}
+
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
@@ -626,29 +697,26 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
               {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
               <span className="muted">{L('O teto por resposta muda em Configurações › Agentes › Limites; não é o limite mensal do agente.', 'The ceiling per reply is set in Settings › Agents › Limits; it isn’t the agent’s monthly limit.')}</span>
             </div>
-            <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
-              {L('Continuar', 'Continue')}
-            </button>
           </>
         )}
-        {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
-            is in the task the new reply reads, so nothing it already did is done twice (#390). */}
-        {message.run && CUT.includes(message.run.status) && canContinue(message.run) && (
-          <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
-            {L('Continuar', 'Continue')}
-          </button>
-        )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
-            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
-            {L('Tentar de novo', 'Try again')}
-          </button>
-        )}
-        {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
-          <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
-            {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
-          </button>
+        {message.run && (canContinue(message.run) || ['failed', 'stopped', 'interrupted', 'limit_reached'].includes(message.run.status)) && (
+          <div className="run-actions">
+            {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
+                is in the task the new reply reads, so nothing it already did is done twice (#390). */}
+            {canContinue(message.run) && <ResumeActions messageId={message.id} />}
+            {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
+                With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
+            {(['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
+              <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
+                {L('Tentar de novo', 'Try again')}
+              </button>
+            )}
+            {message.run.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
+              <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+                {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
+              </button>
+            )}
+          </div>
         )}
         {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
         {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (

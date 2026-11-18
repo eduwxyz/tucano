@@ -703,7 +703,7 @@ export class Runner {
   // transcript, and its steps go in the task. Cutting it two ways is one path: at its budget it
   // always has somewhere to go on from; stopped, interrupted or failed, only when a step came back.
   // A reply that never got a tool call back is not continued: the person tries again instead.
-  async continue(messageId: string): Promise<void> {
+  async continue(messageId: string, text?: string, by?: string): Promise<void> {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (!msg?.run || msg.author.kind !== 'agent' || !canContinue(msg.run)) return
@@ -711,11 +711,25 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
+    const guidance = text?.trim()
+    if (text !== undefined && !guidance) return
     const me = (await this.deps.settings()).workspaceName
+    // Another click may have resumed it while the settings were being read.
+    const current = db.message(messageId)
+    if (!current?.run || !canContinue(current.run)) return
+    const writer = guidance ? ((by ? db.person(by) : undefined) ?? db.owner()) : undefined
     // Read before the status changes: how it was cut is what the next reply is told.
     const cut = msg.run.status
     // Said before the new reply starts, so the cut one reads as answered rather than as an offer.
     this.update(msg, { run: { ...msg.run, status: 'done' } })
+    const intervention: Message | undefined = guidance && writer ? {
+      id: randomUUID(), conversationId: conv.id, author: { kind: 'person', id: writer.id },
+      text: guidance, at: Date.now(), ...(msg.threadId ? { threadId: msg.threadId } : {})
+    } : undefined
+    if (intervention) {
+      db.saveMessage(intervention)
+      this.deps.emit({ type: 'message', message: intervention })
+    }
     const steps = (msg.run.steps ?? [])
       .filter((s) => s.status !== 'running' && !WORKLESS_LABELS.includes(s.label))
       .slice(-40)
@@ -732,11 +746,15 @@ export class Runner {
             `Your last reply was cut ${cutOf(cut)}, and ${me} asked you to go on. What you wrote is in your last message above.`
           ),
       steps.length ? `${L('Os passos que você fez', 'The steps you took')}:\n${steps.join('\n')}` : '',
-      L('Continue de onde parou, sem refazer o que já está feito, e termine com o resultado.', "Pick up where you left off, without redoing what's already done, and finish with the result.")
+      L('Continue de onde parou, sem refazer o que já está feito, e termine com o resultado.', "Pick up where you left off, without redoing what's already done, and finish with the result."),
+      intervention ? L(
+        `${writer!.name} interveio com uma nova orientação na última mensagem acima. Considere essa orientação ao retomar: ajuste o plano e o que for necessário, sem reiniciar o trabalho nem repetir ações já concluídas desnecessariamente.`,
+        `${writer!.name} intervened with new guidance in the latest message above. Apply that guidance as you resume: adjust the plan and whatever is needed, without restarting the work or unnecessarily repeating completed actions.`
+      ) : ''
     ]
       .filter(Boolean)
       .join('\n\n')
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}) }, { urgent: true })
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(intervention ? { replyTo: intervention.id, for: writer } : {}), ...(msg.run?.handed ? { handed: msg.run.handed } : {}) }, { urgent: true })
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
