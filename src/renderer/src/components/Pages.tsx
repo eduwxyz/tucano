@@ -1425,9 +1425,10 @@ function ActionRulesList({ rules, fallback, readOnly, onChange }: { rules: Actio
   )
 }
 
-export function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
+// `section`: the id a settings rail links to, when this card is one of its sections.
+export function Card({ title, lead, action, section, children }: { title: string; lead?: string; action?: ReactNode; section?: string; children: ReactNode }): ReactNode {
   return (
-    <div className="card">
+    <div className="card" id={section ? `settings-${section}` : undefined} data-settings-section={section}>
       <div className="card__head">
         <div className="row row--between">
           <h2>{title}</h2>
@@ -2877,7 +2878,6 @@ export function JevKey({ saved, hint }: { saved: boolean; hint?: string }): Reac
 // One key per row, so two accounts of one provider never share one.
 export function ClassifiersCard(): ReactNode {
   const settings = useStore((s) => s.settings)
-  const work = onGateway(settings)
   const list = settings.classifiers ?? []
   const jobs = settings.classifierJobs ?? {}
   const keys = settings.classifierKeys ?? {}
@@ -3009,24 +3009,30 @@ export function ClassifiersCard(): ReactNode {
       })}
 
       {adding ? (
-        <div className="grid2">
-          <Field label={L('Provedor', 'Provider')}>
-            <Select value={provider} onChange={(v) => pickProvider(v as ClassifierProvider)} options={PROVIDERS.map((p) => ({ value: p.provider, label: p.label, hint: p.model }))} />
-          </Field>
-          <Field label={L('Nome', 'Name')} hint={L('Como ele aparece nas escolhas abaixo.', 'How it reads in the choices below.')}>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
-          <Field label={L('Modelo', 'Model')} hint={L('O par de modelos que responde. Fixar a versão mantém as probabilidades que você já calibrou.', 'The model pair that answers. Pinning a version keeps the probabilities you already tuned.')}>
-            <input value={model} onChange={(e) => setModel(e.target.value)} />
-          </Field>
-          <div className="row">
-            <button className="btn" onClick={add} disabled={!model.trim()}>
-              {L('Adicionar', 'Add')}
-            </button>
-            <button className="btn btn--ghost" onClick={() => setAdding(false)}>
-              {L('Cancelar', 'Cancel')}
-            </button>
+        <div className="key-row key-row--form">
+          <Icon name="spark" />
+          <div className="grow">
+            <div className="grid2">
+              <Field label={L('Provedor', 'Provider')}>
+                <Select value={provider} onChange={(v) => pickProvider(v as ClassifierProvider)} options={PROVIDERS.map((p) => ({ value: p.provider, label: p.label, hint: p.model }))} />
+              </Field>
+              <Field label={L('Nome', 'Name')} hint={L('Como ele aparece nas escolhas abaixo.', 'How it reads in the choices below.')}>
+                <input value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label={L('Modelo', 'Model')} hint={L('O par de modelos que responde. Fixar a versão mantém as probabilidades que você já calibrou.', 'The model pair that answers. Pinning a version keeps the probabilities you already tuned.')}>
+                <input value={model} onChange={(e) => setModel(e.target.value)} />
+              </Field>
+              <div className="row">
+                <button className="btn" onClick={add} disabled={!model.trim()}>
+                  {L('Adicionar', 'Add')}
+                </button>
+                <button className="btn btn--ghost" onClick={() => setAdding(false)}>
+                  {L('Cancelar', 'Cancel')}
+                </button>
+              </div>
+            </div>
           </div>
+          <span className="key-row__glyph" aria-hidden="true" />
         </div>
       ) : (
         <div className="row">
@@ -3037,38 +3043,53 @@ export function ClassifiersCard(): ReactNode {
         </div>
       )}
 
-      {list.length > 0 && (
-        <>
-          <h3 className="h3">{L('Onde cada um é usado', 'Where each one is used')}</h3>
-          {CLASSIFIER_JOBS.map((job) => (
-            <Field key={job} label={jobLabel(job)[lang()]} hint={jobAbout(job)[lang()]}>
-              <Select
-                value={jobs[job] ?? ''}
-                onChange={(v) => assign(job, v ?? '')}
-                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
-              />
-            </Field>
-          ))}
-          {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
-            const c = list.find((x) => x.id === jobs[job])
-            if (!c || !work) return null
-            return (
-              <OutsideGateway
-                key={job}
-                what={
-                  job === 'routing'
-                    ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
-                    : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
-                }
-              />
-            )
-          })}
-        </>
-      )}
       {error && <p className="note note--error">{error}</p>}
       <p className="hint">
         <Icon name="shield" size={13} /> {L('Um classificador não escreve texto: devolve uma escolha, um sim/não ou uma nota, com a probabilidade de cada opção. A chave fica no cofre do sistema e nunca volta pra tela.', 'A classifier writes no text: it returns a choice, a yes/no or a score, with each option’s probability. The key stays in the system’s vault and never comes back to the screen.')}
       </p>
+    </>
+  )
+}
+
+// Which job each classifier serves: who replies in a channel, what an agent clicks in a page. It
+// sits in its own card, apart from the list, because an assignment is a decision of its own — and
+// the settings rail needs a section of its own to link to it.
+export function ClassifierUsesCard(): ReactNode {
+  const settings = useStore((s) => s.settings)
+  const work = onGateway(settings)
+  const list = settings.classifiers ?? []
+  const jobs = settings.classifierJobs ?? {}
+  const assign = (job: ClassifierJob, id: string): void => {
+    const next = { ...jobs }
+    if (id) next[job] = id
+    else delete next[job]
+    updateSettings({ classifierJobs: next })
+  }
+  return (
+    <>
+      {CLASSIFIER_JOBS.map((job) => (
+        <Field key={job} label={jobLabel(job)[lang()]} hint={jobAbout(job)[lang()]}>
+          <Select
+            value={jobs[job] ?? ''}
+            onChange={(v) => assign(job, v ?? '')}
+            options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
+          />
+        </Field>
+      ))}
+      {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
+        const c = list.find((x) => x.id === jobs[job])
+        if (!c || !work) return null
+        return (
+          <OutsideGateway
+            key={job}
+            what={
+              job === 'routing'
+                ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
+                : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
+            }
+          />
+        )
+      })}
     </>
   )
 }
@@ -3309,6 +3330,28 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('modelos') && (
+          <Card
+            title="Classifiers"
+            lead={L(
+              'Modelos que respondem perguntas fechadas — uma opção entre várias, um sim/não, uma nota — em menos de um segundo e com a probabilidade de cada resposta. O Jev, do TypeSafe, foi o primeiro; a Luna, da OpenAI, e a Decision 1, do Google, fazem o mesmo trabalho, e o Jev também é vendido pelo OpenRouter. Cada um serve um trabalho: quem responde num canal, o que o agente clica numa página.',
+              'Models that answer closed questions — one option out of several, a yes/no, a score — in under a second and with each answer’s probability. TypeSafe’s Jev was the first; OpenAI’s Luna and Google’s Decision 1 do the same job, and Jev is also sold through OpenRouter. Each one serves a job: who replies in a channel, what an agent clicks in a page.'
+            )}
+          >
+            <ClassifiersCard />
+          </Card>
+        )}
+
+        {pane('modelos') && (settings.classifiers ?? []).length > 0 && (
+          <Card
+            title={L('Usos dos classificadores', 'Classifier Uses')}
+            section="models-classifier-uses"
+            lead={L('Que trabalho cada classificador faz. Um trabalho sem classificador fica desligado, e o do roteador volta pro modelo pequeno.', 'Which job each classifier does. A job with no classifier stays off, and the router’s one falls back to the small model.')}
+          >
+            <ClassifierUsesCard />
+          </Card>
+        )}
+
+        {pane('modelos') && (
           <Card title={L('Roteador', 'Router')} lead={L('O que lê a conversa e decide quem responde nos canais: um modelo pequeno, ou um classificador. Não concede permissão nenhuma.', 'What reads the conversation and decides who replies in channels: a small model, or a classifier. It grants no permissions at all.')}>
             {routingClassifier ? (
               <div className="key-row">
@@ -3321,22 +3364,16 @@ export function SettingsPage(): ReactNode {
                 </div>
               </div>
             ) : (
-              <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
-                <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} />
-              </Field>
+              <div className="key-row key-row--form">
+                <Icon name="spark" />
+                <div className="grow">
+                  <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
+                    <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} />
+                  </Field>
+                </div>
+                <span className="key-row__glyph" aria-hidden="true" />
+              </div>
             )}
-          </Card>
-        )}
-
-        {pane('modelos') && (
-          <Card
-            title="Classifiers"
-            lead={L(
-              'Modelos que respondem perguntas fechadas — uma opção entre várias, um sim/não, uma nota — em menos de um segundo e com a probabilidade de cada resposta. O Jev, do TypeSafe, foi o primeiro; a Luna, da OpenAI, e a Decision 1, do Google, fazem o mesmo trabalho, e o Jev também é vendido pelo OpenRouter. Cada um serve um trabalho: quem responde num canal, o que o agente clica numa página.',
-              'Models that answer closed questions — one option out of several, a yes/no, a score — in under a second and with each answer’s probability. TypeSafe’s Jev was the first; OpenAI’s Luna and Google’s Decision 1 do the same job, and Jev is also sold through OpenRouter. Each one serves a job: who replies in a channel, what an agent clicks in a page.'
-            )}
-          >
-            <ClassifiersCard />
           </Card>
         )}
 
