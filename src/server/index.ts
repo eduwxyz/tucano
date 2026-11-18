@@ -650,7 +650,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
   let toConversation = () => {}
   let toPage = () => {}
   const desktop = window.tucanoDesktop
-  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : n.page === 'skills' && toPage('skills')))
+  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : (n.page === 'skills' || n.page === 'connectors') && toPage(n.page)))
   const notifyState = () =>
     desktop ? 'on' : !('Notification' in window) ? 'unsupported' : !window.isSecureContext ? 'insecure' : Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'blocked' : 'ask'
   const notify = (n) => {

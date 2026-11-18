@@ -230,6 +230,7 @@ export const NEEDS: Record<Method, Need> = {
   harnessMcps: 'admin',
   importHarnessMcp: 'admin',
   updateTool: 'admin',
+  shareComputer: 'target', // a lent computer's person, or an admin (checked in the core)
   checkTrigger: 'admin',
   refreshEngines: 'admin',
   loginEngine: 'admin',

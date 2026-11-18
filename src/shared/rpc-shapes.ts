@@ -78,6 +78,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   harnessMcps: {},
   importHarnessMcp: { key: 's' },
   updateTool: { connectorId: 's', name: 's', patch: 'o' },
+  shareComputer: { connectorId: 's', agentIds: 'S' },
   decideApproval: { id: 's', decision: '[approved,refused]', reason: 's?', always: 'b?' },
   addMemory: { scope: 's', text: 's' },
   editMemory: { id: 's', text: 's' },

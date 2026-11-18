@@ -9,9 +9,10 @@ Thanks to [@pedrojaques99](https://github.com/pedrojaques99), who designed and b
 ## Turning it on
 
 1. In the desktop app, connect the server in **Settings › Servers** (with the link it gives you), if you haven't yet.
-2. Under the server, turn on **Let this server use this computer**.
-3. In **What this computer lends**, lend your projects' folders.
-4. In the server's Tucano, under **Connectors**, your computer shows up (e.g. "MacBook Pro de Eduardo"). Under **Tools**, give access to the agents that will use it.
+2. Under the server, turn on **Let this server use this computer**. With no folder lent yet, the app asks for one right away: pick your projects' folder. More folders, and the apps it lends, are in **What this computer lends**.
+3. Click **Pick the agents**, right under the switch: the server comes on screen at **Connectors**, with your computer (e.g. "MacBook Pro de Eduardo") first. Turn on each agent that will use it, or **Give all of them access**.
+
+You can also give it to one agent from its page (**Tools › Computer › Your computer**). You pick the agents for your own computer even if you aren't an admin of the server: an agent reaches it only when it works for you.
 
 That's it. No port to open, no network to set up, no key to copy: the app calls the server, with the same access it already uses to open the server in its window. It works from any network (home, office, mobile) and through any router.
 

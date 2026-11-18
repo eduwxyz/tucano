@@ -947,6 +947,9 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
   void fire(L('Não consegui salvar a ferramenta.', "I couldn't save the tool."), 'updateTool', { connectorId, name, patch })
 
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
+// A computer lent to this server: exactly these agents use it (its person decides, even without being an admin).
+export const shareComputer = (connectorId: string, agentIds: string[]): void =>
+  void fire(L('Não consegui mudar quem usa o computador.', "I couldn't change who uses the computer."), 'shareComputer', { connectorId, agentIds })
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })

@@ -85,6 +85,30 @@ export const computerOwner = (db: Db, connectorId: string | undefined): string |
   return n ? (n.owner ?? db.ownerId()) : undefined
 }
 
+// A computer lent to this server (docs/local-node.md), for exactly the agents its person picks, to read and write.
+// Its person decides even without being an admin: an agent reaches it only working for them (runs.ts), and the
+// node's floors stay (a command never below "write"). An admin may too, as with any connector. Returns the
+// agents that changed, saved; throws why not.
+export function shareComputer(db: Db, person: Person, connectorId: string, agentIds: string[]): Agent[] {
+  const owner = computerOwner(db, connectorId)
+  if (!owner) throw new Error(L('Isso não é um computador emprestado.', "That isn't a lent computer."))
+  if (owner !== person.id && !isAdmin(person)) throw new Error(L('Só quem emprestou o computador escolhe os agentes que o usam.', 'Only whoever lent the computer picks the agents that use it.'))
+  const want = new Set(agentIds)
+  const changed: Agent[] = []
+  // Only the agents this person sees: someone who reaches part of the team touches only that part.
+  for (const a of agentsFor(person, db.agents())) {
+    if (a.archived || a.kind === 'tuca') continue
+    const has = (a.grants[connectorId] ?? 'none') !== 'none'
+    if (want.has(a.id) === has) continue
+    const grants = { ...a.grants }
+    if (want.has(a.id)) grants[connectorId] = 'read_write'
+    else delete grants[connectorId]
+    db.saveAgent({ ...a, grants })
+    changed.push(db.agent(a.id)!)
+  }
+  return changed
+}
+
 // The people whose memories ("about me") a reply gets: a DM's person; in a channel, the people who
 // wrote in what it reads (a routine's person for its run), newest first; the requester otherwise.
 export function presentPeople(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], requester: Person): string[] {

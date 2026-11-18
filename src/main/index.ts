@@ -848,6 +848,8 @@ ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'stri
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
 ipcMain.on('servers:node', (e, id: unknown, on: unknown) => fromApp(e) && typeof id === 'string' && typeof on === 'boolean' && servers.setNode(id, on))
+// Its server on screen at Connectors, where the person picks the agents that use this computer.
+ipcMain.on('servers:agents', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.openNote(id, { title: '', body: '', page: 'connectors' }).catch(console.error))
 // A server's page in this window hands its notifications here (src/preload/server.ts): the app
 // shows them as its own, and a click puts that server, and what it's about, on screen. The page
 // already left out the conversation being read there; a server can't send more than a few a minute.

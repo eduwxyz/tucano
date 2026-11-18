@@ -16,7 +16,7 @@ import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
-import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
@@ -881,6 +881,12 @@ function nodeDevice(): string {
 function nodeInfo(): NodeInfo {
   const n = settings().node ?? {}
   return { apps: n.apps ?? [], folders: n.folders ?? [], links: [...uplinks.values()].map((u) => u.link.state) }
+}
+// After a change to what it lends: every screen showing it hears (Settings › Servers and the card under it).
+function lentNow(): NodeInfo {
+  const info = nodeInfo()
+  emit({ type: 'node', info })
+  return info
 }
 // The servers to lend this computer to now: a new one calls, one no longer there (or with another key) hangs up.
 function setUplinks(name: string, links: { serverId: string; origin: string; token: string }[]): void {
@@ -2026,12 +2032,12 @@ const api: Handlers = {
     const prev = settings().node ?? {}
     const folders = prev.folders ?? []
     if (!folders.includes(real)) db.setSettings({ node: { ...prev, folders: [...folders, real] } })
-    return nodeInfo()
+    return lentNow()
   },
   removeNodeFolder: async ({ path }) => {
     const prev = settings().node ?? {}
     db.setSettings({ node: { ...prev, folders: (prev.folders ?? []).filter((f) => f !== path) } })
-    return nodeInfo()
+    return lentNow()
   },
   nodeLog: async ({ limit }) => nodeLog.read(limit ?? 100),
   setJevKey: async ({ key }) => {
@@ -2210,6 +2216,11 @@ const api: Handlers = {
     return id
   },
   updateTool: ({ connectorId, name, patch }, ctx) => (record(ctx, 'connector.updated', connectorId, { tool: name, ...patch }), connectors.updateTool(connectorId, name, patch)),
+  // A lent computer, for exactly the agents its person (or an admin) picks: people.ts says who may.
+  shareComputer: ({ connectorId, agentIds }, ctx) => {
+    for (const agent of shareComputerFor(db, ctx.person, connectorId, agentIds)) emit({ type: 'agent', agent })
+    record(ctx, 'computer.shared', connectorId, { agents: agentIds.length })
+  },
   // The agent's person, admins, and whoever covers for that person now.
   decideApproval: ({ id, decision, reason, always }, ctx) => {
     const a = db.approval(id)
