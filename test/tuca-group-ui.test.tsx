@@ -121,6 +121,21 @@ describe('several proposals in one reply, on screen', () => {
     expect(text()).toContain('Depende de Léo')
   })
 
+  it('a card that needs an agent no card of the reply makes says to create it first', async () => {
+    // An older reply where a second new agent took the first one's card: Sustinho is in no card any more.
+    const susto: Proposal = { kind: 'routine', routine: { name: 'Preparo do susto', agentId: '', conversationId: '', prompt: 'Prepare o susto.', schedule: { days: [1], time: '08:00' }, enabled: true }, needs: ['Sustinho'] }
+    const m = reply([susto], { agentDraft: { ...draft, name: 'Faro' } })
+    fake = state({ messages: { t1: [m] } })
+    await render(<Proposals message={m} />)
+    await click(/^→$/)
+    expect(text()).toContain('Depende de Sustinho, que não está em nenhum card desta resposta: crie antes (peça ao Tuca) e aplique esta depois.')
+    // Once there's a Sustinho (made some other way), it's an ordinary card again.
+    fake = state({ messages: { t1: [m] }, agents: [tuca, lia, nina, agent('s1', 'Sustinho')] })
+    await render(<Proposals message={{ ...m }} />)
+    expect(text()).not.toContain('que não está em nenhum card')
+    expect(text()).toContain('É de Sustinho, que já está no time.')
+  })
+
   it('"Aplicar todos" says what it will do, in order, then what was applied and what failed', async () => {
     const m = reply(migration())
     fake = state({ messages: { t1: [m] } })

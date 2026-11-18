@@ -1693,6 +1693,10 @@ ${note}`,
           if (same < 0 && list.length >= MAX_PROPOSALS) return textResult(L(`Já são ${MAX_PROPOSALS} propostas nesta resposta: termine aqui e mande o resto na próxima.`, `That's ${MAX_PROPOSALS} proposals in this reply already: finish here and send the rest in the next one.`), true)
           msg.run = { ...msg.run!, proposals: same < 0 ? [...list, r.proposal] : list.map((x, i) => (i === same ? r.proposal! : x)) }
           delete msg.run.proposal
+          // A team with the new agent this reply already proposed takes its place: that agent is made
+          // with the team, and the cards that need it find it there.
+          const draft = msg.run.agentDraft
+          if (r.proposal.kind === 'team' && draft && !draft.state && r.proposal.agents.some((a) => a.name.toLowerCase() === draft.name.toLowerCase())) delete msg.run.agentDraft
           const p = r.proposal
           const what = p.kind === 'agent' ? L(`Propôs mudar ${db.agent(p.agentId)?.name ?? ''}`, `Proposed changing ${db.agent(p.agentId)?.name ?? ''}`) : p.kind === 'routine' ? L('Propôs uma rotina', 'Proposed a routine') : p.kind === 'team' ? L('Propôs um time', 'Proposed a team') : L('Propôs um canal', 'Proposed a channel')
           const detail = p.kind === 'routine' ? p.routine.name : p.kind === 'channel' ? `#${p.name}` : p.kind === 'team' ? p.agents.map((a) => a.name).join(', ') : Object.keys(p.changes).join(', ')
@@ -1713,6 +1717,17 @@ ${note}`,
             connectors: this.deps.connectors?.list() ?? []
           })
           if (!r.draft) return textResult(r.error!, true)
+          // One new-agent card per reply. Another agent would take its place and leave the cards that
+          // need the first one with nothing to make it from: say how to propose both instead.
+          const before = msg.run?.agentDraft
+          if (before && !before.state && before.name.toLowerCase() !== r.draft.name.toLowerCase())
+            return textResult(
+              L(
+                `Esta resposta já propôs um agente novo, ${before.name}, e cada resposta tem um card de agente só: este não foi criado. Pra propor ${r.draft.name} junto, use propor_time com ${before.name} e ${r.draft.name} (o canal é opcional): o time entra no lugar do card de ${before.name}, e as rotinas e canais que dependem de um ou de outro continuam valendo. Ou proponha ${r.draft.name} na próxima resposta.`,
+                `This reply already proposed a new agent, ${before.name}, and each reply has one agent card: this one was not made. To propose ${r.draft.name} too, use propor_time with ${before.name} and ${r.draft.name} (the channel is optional): the team takes the place of ${before.name}'s card, and the routines and channels that need either still work. Or propose ${r.draft.name} in the next reply.`
+              ),
+              true
+            )
           msg.run = { ...msg.run!, agentDraft: r.draft }
           addSteps({ id: randomUUID(), label: L('Propôs um agente', 'Proposed an agent'), detail: `${r.draft.name}${r.draft.role ? ` · ${r.draft.role}` : ''}`, status: 'done' })
           return textResult(

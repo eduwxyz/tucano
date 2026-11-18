@@ -22,6 +22,7 @@ export const tucaInstructions = (): string =>
       '- Se a pessoa quer algo que você consegue fazer (um agente novo, um time, mudar um agente, uma rotina num horário, um canal), faça: proponha com a ferramenta certa. Nada de passo a passo pra ela fazer na mão.',
       '- Vale também pra "como eu faço X?": se X é algo que você faz, não explique, faça. Se faltar o essencial (qual agente, o que ele faz, quando), pergunte só isso, numa pergunta curta. O resto você decide (um nome curto, um horário razoável) e a pessoa ajusta no card ou pedindo.',
       '- Se o que ela quer depende de algo que não existe (uma rotina pra um agente que ainda não existe), proponha os dois na mesma resposta: primeiro o agente (propor_agente ou propor_time), depois a rotina ou o canal com o nome dele. O app cria o agente antes.',
+      '- Mais de um agente novo na mesma resposta? Um propor_time com todos eles (o canal é opcional), nunca dois propor_agente: cada resposta tem um card de agente só.',
       '- Passo a passo só pro que você não faz: entrar num motor, conectar um serviço, gatilhos de rotina (webhook, conector), configurações do app.',
       '',
       'Pra explicar:',
@@ -60,6 +61,7 @@ export const tucaInstructions = (): string =>
       "- If the person wants something you can do (a new agent, a team, changing an agent, a scheduled routine, a channel), do it: propose it with the right tool. No step-by-step for them to do by hand.",
       '- That goes for "how do I do X?" too: if X is something you do, don\'t explain it, do it. If the essentials are missing (which agent, what it does, when), ask only that, in one short question. Decide the rest yourself (a short name, a sensible time) and the person adjusts it on the card or by asking.',
       "- If what they want needs something that doesn't exist yet (a routine for an agent there isn't), propose both in the same reply: first the agent (propor_agente or propor_time), then the routine or channel with its name. The app makes the agent first.",
+      "- More than one new agent in the same reply? One propor_time with all of them (the channel is optional), never two propor_agente: each reply has one agent card.",
       "- Step-by-step only for what you don't do: signing in to a harness, connecting a service, routine triggers (webhook, connector), the app's settings.",
       '',
       'To explain:',
@@ -99,13 +101,16 @@ export const OLD_TUCA_ROLES = ['Monta agentes', 'Builds agents']
 const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.', "You are Tuca, the one who builds this team's agents."]
 
 // Instructions a Tuca was made with, word for word (sha256, base64url), that came out since: one
-// still on them gets the ones of now. The latest two: the screen links, which taught a Portuguese id
-// (#abrir/conectores) in an English workspace.
+// still on them gets the ones of now. Before the last two: the screen links, which taught a
+// Portuguese id (#abrir/conectores) in an English workspace. The last two: before the rule on several
+// new agents in one reply (one propor_time, never two propor_agente).
 const OLD_TUCA_INSTRUCTIONS = [
   'GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY',
   't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c',
   'zOZsXlGeX6l-k6i5rOsHmmyszmPv3eiLXfUbCpcLKIk',
-  'aLarfQqst-0nlbaRsEOj74KpMyK7c1Sz6U0yLl8Ca1w'
+  'aLarfQqst-0nlbaRsEOj74KpMyK7c1Sz6U0yLl8Ca1w',
+  'BX29T9SVUHvdO_enbL9UwgWyIb0nAng8cy4-fkcU34I',
+  'UiTBaE-bHpjZmJNa-klIjxUdSyEJi63YLU07EMeuA5s'
 ]
 
 // A Tuca made before he helped with the app (or since): its role and instructions, as they come now.

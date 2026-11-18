@@ -1297,7 +1297,17 @@ function neededAgents(messageId: string, p: Proposal): string[] {
       const id = at >= 0 ? t.agentIds?.[at] : undefined
       if (id && db.agent(id)) return id
     }
-    throw new Error(L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`))
+    // Still to make from a card of this reply: that card first.
+    const here = (d && !d.state && same(d.name)) || proposalsOf(run).some((t) => t.kind === 'team' && !t.state && t.agents.some((a) => same(a.name)))
+    // In no card of this reply (another took its place, or it was never proposed), but there is one by
+    // that name, made from another card or by hand: that one.
+    const named = here ? [] : db.agents().filter((a) => !a.archived && a.kind !== 'tuca' && same(a.name))
+    if (named.length === 1) return named[0]!.id
+    throw new Error(
+      here
+        ? L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`)
+        : L(`Antes, crie ${name}: não está em nenhum card desta resposta. Peça ao Tuca pra propor ${name}, crie, e aplique esta de novo.`, `Create ${name} first: it isn't in any card of this reply. Ask Tuca to propose ${name}, create it, and apply this one again.`)
+    )
   })
 }
 
