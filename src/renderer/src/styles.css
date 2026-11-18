@@ -8750,8 +8750,10 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 /* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
 .voice-prefs { display: grid; gap: 14px; }
 /* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
-.voice-advanced[open] { display: grid; gap: 10px; }
-.voice-advanced summary { cursor: pointer; }
+.voice-prefs__row { display: flex; align-items: center; gap: 14px; }
+.voice-advanced__toggle { margin-left: auto; border: 0; background: none; padding: 0; cursor: pointer; }
+.voice-advanced__toggle::before { content: "› "; }
+.voice-advanced__body { display: grid; gap: 10px; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }

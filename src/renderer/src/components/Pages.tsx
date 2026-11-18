@@ -2874,13 +2874,19 @@ function VoiceCard(): ReactNode {
   const voice = useStore((s) => s.settings.voice)
   const status = useVoice()
   const [error, setError] = useState('')
+  const [advanced, setAdvanced] = useState(false)
   const save = (patch: VoiceSettings): void => {
     const next = { ...voice, ...patch }
     const why = voiceRefusal(next)
     setError(why ?? '')
     if (!why) updateSettings({ voice: next })
   }
-  const micLabel = (
+    const advancedToggle = (
+    <button type="button" className="voice-advanced__toggle small muted" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>
+      {L('Avançado', 'Advanced')}
+    </button>
+  )
+const micLabel = (
     <label className="row row--center small">
       <input type="checkbox" checked={!voice?.hidden} onChange={(e) => save({ hidden: !e.target.checked })} />
       {L('Mostrar o microfone no campo de mensagem', 'Show microphone in composer')}
@@ -2888,7 +2894,7 @@ function VoiceCard(): ReactNode {
   )
   return (
     <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros, e clique de novo para terminar. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Click the mic or press ⌥ Space (Mac) / Ctrl+Space to start; click again to stop. Transcription stays offline for review before sending.')}>
-      {status && !status.ready && <VoiceSetup status={status} after={micLabel} />}
+      {status && !status.ready && <VoiceSetup status={status} after={<>{micLabel}{advancedToggle}</>} />}
       <div className="voice-prefs">
         {status?.ready && (
           <div className="voice-on">
@@ -2907,20 +2913,20 @@ function VoiceCard(): ReactNode {
             {status.error && <p className="field__error">{status.error}</p>}
           </div>
         )}
-        {status?.ready && micLabel}
-        <details className="voice-advanced">
-          <summary className="small muted">{L('Avançado', 'Advanced')}</summary>
-          <label className="row row--center small">
-            <input type="checkbox" checked={!!voice?.detect} onChange={(e) => save({ detect: e.target.checked })} />
-            {L('Detectar o idioma, em vez de usar o do app', 'Detect spoken language')}
-          </label>
-          <Field label={L('Caminho do whisper-cli', 'whisper-cli path')} hint={status?.bin && !voice?.bin ? L(`Em uso: ${status.bin}`, `In use: ${status.bin}`) : L('Opcional: sem isso, o app usa o que veio com ele.', 'Optional. Defaults to the bundled executable.')}>
-            <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
-          </Field>
-          <Field label={L('Caminho do modelo', 'Model path')} hint={status?.model && !voice?.model ? L(`Em uso: ${status.model}`, `In use: ${status.model}`) : L('Opcional: um modelo ggml (.bin) que você já tenha.', 'Optional path to an existing ggml model (.bin).')} error={error}>
-            <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
-          </Field>
-        </details>
+        {status?.ready && (<div className="voice-prefs__row">{micLabel}{advancedToggle}</div>)}
+        {advanced && (
+          <div className="voice-advanced__body">
+            <label className="row row--center small">
+              <input type="checkbox" checked={!!voice?.detect} onChange={(e) => save({ detect: e.target.checked })} />
+              {L('Detectar o idioma, em vez de usar o do app', 'Detect spoken language')}
+            </label>
+            <Field label={L('Caminho do whisper-cli', 'whisper-cli path')} hint={status?.bin && !voice?.bin ? L(`Em uso: ${status.bin}`, `In use: ${status.bin}`) : L('Opcional: sem isso, o app usa o que veio com ele.', 'Optional. Defaults to the bundled executable.')}>
+              <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
+            </Field>
+            <Field label={L('Caminho do modelo', 'Model path')} hint={status?.model && !voice?.model ? L(`Em uso: ${status.model}`, `In use: ${status.model}`) : L('Opcional: um modelo ggml (.bin) que você já tenha.', 'Optional path to an existing ggml model (.bin).')} error={error}>
+              <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
+            </Field>          </div>
+        )}
       </div>
     </Card>
   )
