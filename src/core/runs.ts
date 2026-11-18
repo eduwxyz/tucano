@@ -44,7 +44,7 @@ import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/
 import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
 import { can, isAdmin } from './policy-people'
 import { agentsFor } from './access-policy'
-import { covers, restricted, sharedAccess } from '../shared/access'
+import { covers, restricted, seesChannel, sharedAccess } from '../shared/access'
 import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
@@ -4620,6 +4620,15 @@ ${note}`,
       })
       team = db.conversation(id)!
       emit({ type: 'conversation', conversation: team })
+      // The room's audience is the source's audience: a member who sees only part of the team and could
+      // see where the work came from sees where it went (the same rule as a channel they make, access-policy.ts).
+      // Everyone else already sees every channel; a private room is its person's by `privateTo` alone.
+      const from = dmOwner(conv, db.ownerId())
+      for (const p of db.people()) {
+        if (!restricted(p) || !p.access) continue
+        if (conv.kind === 'dm' ? from !== p.id : !seesChannel(p, conv.id)) continue
+        if (!p.access.channels.includes(id)) db.setPersonAccess(p.id, { ...p.access, channels: [...p.access.channels, id] })
+      }
     }
     // What was already said here, named as the person would read it: the guest's context, not a log.
     const people = new Map(db.people({ removed: true }).map((p) => [p.id, p.name]))
