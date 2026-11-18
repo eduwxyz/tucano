@@ -2508,6 +2508,15 @@ h3 {
   margin-top: 2px;
   flex-shrink: 0;
 }
+/* A form row lines up under the rows above it: the fields start where their text does, and the
+   right-hand column stays free for the button those rows carry there. */
+.key-row--form {
+  align-items: flex-start;
+}
+.key-row__glyph {
+  width: 28px;
+  flex: none;
+}
 
 /* An error arrives calm: it rises in on a red tint that fades, no shake. */
 .note--error {
