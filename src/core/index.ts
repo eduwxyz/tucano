@@ -529,7 +529,8 @@ const notifyAll = (title: string, shortText: string, conversationId?: string, fu
   void push.send({ title, body: shortText, ...(conversationId ? { conversationId } : {}), ...(more.threadId ? { threadId: more.threadId } : {}), ...(more.kind ? { kind: more.kind } : {}) }, to)
   if (!to || to.includes(db.ownerId())) void telegram?.notice(title, fullText ?? shortText)
 }
-// Whether the cards go over every window instead of the system's own notification (Settings).
+// Whether the cards go over every window instead of the system's own notification (Settings): the
+// mode is the choice, and `on` its reading, so Native leaves the system's own as 0.2.37 had them.
 const noticePrefs = (): { on: boolean; area?: NoticeArea } => {
   const rules = noticeOf(settings())
   return { on: rules.on, ...(rules.area ? { area: rules.area } : {}) }

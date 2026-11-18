@@ -40,7 +40,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   sidebarHidden: { kind: 'array', max: 500, nullable: true },
   sounds: { kind: 'boolean', max: 10, nullable: true },
   stepsOpen: { kind: 'boolean', max: 10, nullable: true },
-  notice: { kind: 'object', max: 200, nullable: true },
+  notice: { kind: 'object', max: 500, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true },
   surveys: { kind: 'boolean', max: 10, nullable: true }
 }

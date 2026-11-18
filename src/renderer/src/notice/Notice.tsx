@@ -37,7 +37,7 @@ import { AskCard } from '../components/Decisions'
 import { toolWords } from '../components/Conversation'
 import { link, startFeed } from './feed'
 
-const RULES: NoticeRules = { on: true, act: true, seconds: NOTICE_SECONDS, hover: true, skin: 'system', stack: false }
+const RULES: NoticeRules = { mode: 'enhanced', on: true, act: true, seconds: NOTICE_SECONDS, hover: true, skin: 'system', stack: false }
 
 const KIND_LABEL: Record<NoticeCard['kind'], () => string> = {
   approval: () => L('Aprovação', 'Approval'),
