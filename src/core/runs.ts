@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type ReplyTarget, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -103,6 +103,8 @@ const cutOf = (status: RunStatus): string =>
 // or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
 // can't here (no file tools), so it calls again and again and answers without the data.
 export const MAX_RESULT_BYTES = 40_000
+// The longest excerpt of a message a reply may quote (the composer's selection, in characters).
+export const MAX_QUOTE_CHARS = 32_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
@@ -624,7 +626,8 @@ export class Runner {
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
   // `id`: the message's, chosen by the caller (src/core/mcp.ts waits on its replies); `via`: a harness sent it over MCP.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string; mode?: 'steer'; steerTo?: string } = {}): Promise<void> {
+  // `reply`: the message (or its excerpt) this one answers, which chooses its agent.
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string; mode?: 'steer'; steerTo?: string; reply?: ReplyTarget } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     // "/objetivo …" from before: every message now runs until it's done, so it reads as the message itself.
@@ -632,6 +635,13 @@ export class Runner {
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
+    // A reply quotes a message of this conversation, or the excerpt its author selected in it.
+    const { reply } = opts
+    const original = reply ? db.message(reply.messageId) : undefined
+    if (reply && (!original || original.conversationId !== conv.id || !['person', 'agent'].includes(original.author.kind) || original.run?.status === 'working'))
+      throw new Error(L('Escolha uma mensagem desta conversa para responder.', 'Choose a message in this conversation to reply to.'))
+    if (reply?.quote !== undefined && (!reply.quote.trim() || reply.quote.length > MAX_QUOTE_CHARS))
+      throw new Error(L('Selecione um trecho de até 32.000 caracteres para citar.', 'Select an excerpt of up to 32,000 characters to quote.'))
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
@@ -670,6 +680,17 @@ export class Runner {
       return
 
     const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
+    // What it answers as it read there, so the quote stands on its own; the excerpt when I selected one.
+    if (original) {
+      mine.reply = {
+        messageId: original.id,
+        text: reply?.quote ?? original.text,
+        at: original.at,
+        ...(reply?.quote !== undefined ? { excerpt: true } : {}),
+        author: await this.authorOf(original),
+        ...(original.author.kind === 'agent' ? { agentId: original.author.id } : {})
+      }
+    }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -682,7 +703,11 @@ export class Runner {
 
     const members = this.members(conv)
     const may = agentsFor(writer, members) // a restricted member never calls an agent they can't see, by name or through the router
+    // What I wrote calls whoever it names; a reply to an agent's message is for that agent (a
+    // restricted member still never calls one they can't see).
     let responders = mentioned(typed, may).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
+    const replyAgent = mine.reply?.agentId
+    if (!responders.length && replyAgent) responders = may.filter((a) => a.id === replyAgent)
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -899,6 +924,13 @@ export class Runner {
   private steerLeftovers(control: Control, reply: Message): void {
     for (const note of control.steer?.splice(0) ?? [])
       this.markSteer(reply, note.id, 'error', L('A resposta terminou antes de ler isto', "The reply ended before the agent read this instruction."))
+  }
+
+  // How a message's author reads in a quote: the agent's name, the person's, or the workspace's.
+  private async authorOf(message: Message): Promise<string> {
+    if (message.author.kind === 'agent') return this.deps.db.agent(message.author.id)?.name ?? L('Agente removido', 'Removed agent')
+    if (message.author.kind === 'person') return this.deps.db.person(message.author.id)?.name ?? (await this.deps.settings()).workspaceName
+    return (await this.deps.settings()).workspaceName
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).

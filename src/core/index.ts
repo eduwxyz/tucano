@@ -1994,10 +1994,10 @@ const api: Handlers = {
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  sendMessage: ({ conversationId, text, images, files, threadId, mode, steerTo }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId, mode, steerTo, reply }, ctx) => {
     reach(ctx, conversationId)
     // `mode` 'steer': written in a running reply's own pill, for that reply (`steerTo`), not a prompt.
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(mode === 'steer' ? { mode } : {}), ...(steerTo ? { steerTo } : {}) }), 'sendMessage')
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(mode === 'steer' ? { mode } : {}), ...(steerTo ? { steerTo } : {}), ...(reply ? { reply } : {}) }), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
