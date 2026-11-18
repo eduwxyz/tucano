@@ -152,7 +152,7 @@ The first time Tucano saves a connector password, macOS asks whether it may use 
 | **⌘,** | Settings |
 | **Right-click** | On a channel: agents, rename, delete. On an agent: message, edit, archive |
 
-On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps Tucano running in the tray, by the clock (routines and triggers go on); quit it from the tray icon.
+On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps Tucano running in the tray, by the clock (routines and triggers go on); quit it from the tray icon. On a Mac, the toucan in the menu bar shows and hides the window; right-click it for your servers and **Show in Dock**, which takes Tucano out of the Dock (also in **Settings › General › Menu bar only**).
 
 - **Connect a tool:** **Connectors → Add**, paste the MCP server's address. OAuth servers open the browser; the others ask for a token. Then, on each agent's page, set its access to each connector.
 - **Archived agents** leave the sidebar and stop answering, but keep their history and receipts. Find them under **Archived** to bring them back.

@@ -543,6 +543,7 @@ type ToMain =
   | { type: 'person-removed'; id: string }
   | { type: 'person-changed'; id: string } // a role changed: the server forgets what it remembered of them
   | { type: 'login_item'; open: boolean }
+  | { type: 'dock'; hide: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
 const toMain = (msg: ToMain): void =>
@@ -550,13 +551,14 @@ const toMain = (msg: ToMain): void =>
 // The menu is the main process's: it follows the language picked here.
 toMain({ type: 'lang', lang: db.getSettings(DEFAULTS).language })
 if (!serverMode && defaultWorkspace) toMain({ type: 'theme', theme: db.getSettings(DEFAULTS).theme, initial: true })
+if (!serverMode && defaultWorkspace) toMain({ type: 'dock', hide: !!db.getSettings(DEFAULTS).menuBarOnly })
 
 // Screenshots use Electron's Chromium, which lives in the main process.
 const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error) => void }>()
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown; on?: unknown } | undefined
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
@@ -565,6 +567,11 @@ process.parentPort.on('message', (e) => {
     } catch (error) {
       process.parentPort.postMessage({ type: 'workspace-paused', error: error instanceof Error ? error.message : String(error) })
     }
+    return
+  }
+  // The tray's Show in Dock (a Mac): the same setting as Settings › General › Menu bar only.
+  if (r?.type === 'menu-bar-only' && typeof r.on === 'boolean') {
+    api.updateSettings({ patch: { menuBarOnly: r.on } }, ownerCtx())
     return
   }
   if (r?.type === 'workspace-theme' && isTheme(r.theme)) {
@@ -2160,6 +2167,7 @@ const api: Handlers = {
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
+    if (!serverMode && defaultWorkspace && patch.menuBarOnly !== undefined) toMain({ type: 'dock', hide: !!patch.menuBarOnly })
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })
