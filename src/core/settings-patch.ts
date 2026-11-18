@@ -2,6 +2,7 @@
 // Anything else is refused at once: what's saved goes in every snapshot, to everyone.
 import { L } from '../shared/lang'
 import type { Settings } from '../shared/types'
+import { THEME_IDS } from '../shared/themes'
 
 type Kind = 'string' | 'boolean' | 'number' | 'object' | 'array' | readonly string[]
 // key → its kind, the most it takes (characters of its JSON), and whether null clears it.
@@ -24,6 +25,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   approvalTtlHours: { kind: 'number', max: 30 },
   questionDeadlineHours: { kind: 'number', max: 30, nullable: true },
   theme: { kind: ['system', 'light', 'dark'], max: 20 },
+  themeId: { kind: THEME_IDS, max: 40, nullable: true },
   language: { kind: ['pt', 'en'], max: 10 },
   openAtLogin: { kind: 'boolean', max: 10, nullable: true },
   runBudgetPct: { kind: 'number', max: 30, nullable: true },

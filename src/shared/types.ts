@@ -525,6 +525,7 @@ export interface Settings {
   autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)
   outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
+  themeId?: string // one of THEMES (src/shared/themes.ts); unset: Tucano
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT

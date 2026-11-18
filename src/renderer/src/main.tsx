@@ -4,10 +4,13 @@ import type { ReactNode } from 'react'
 import { App } from './App'
 import { ServerBar } from './components/Servers'
 import { start, useStore } from './store'
+import { paintTheme } from './theme'
 import '@fontsource-variable/inter/opsz.css'
 import '@fontsource-variable/nunito/wght.css' // the first run's headings
 import './styles.css'
 
+// Main has already set the system scheme to the saved light or dark mode.
+paintTheme(window.tucano?.themeId ?? undefined, 'system')
 void start()
 
 // Switching the language draws everything again, in the new one.
