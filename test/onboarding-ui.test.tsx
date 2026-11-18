@@ -474,7 +474,11 @@ describe('taking items out of the top of the sidebar', () => {
     expect([...document.querySelectorAll('.menu [role="menuitem"]')].map((x) => x.textContent)).toEqual(['Abrir', 'Tirar da barra'])
     await click(/^Tirar da barra$/)
     expect(store.updateSettings).toHaveBeenCalledWith({ sidebarHidden: ['board'] })
-    expect(store.toast).toHaveBeenCalledWith('Quadro saiu da barra. Pra trazer de volta: menu do nome do workspace › Na barra.')
+    // The toast takes it back at once.
+    expect(store.toast).toHaveBeenCalledWith('Quadro saiu da barra.', expect.objectContaining({ label: 'Desfazer' }))
+    fake = { ...fake, settings: { ...fake.settings, sidebarHidden: ['board'] } }
+    ;(vi.mocked(store.toast).mock.calls[0]![1] as { run: () => void }).run()
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ sidebarHidden: [] })
     // The "•••" opens the same menu.
     await click(row('Operação').querySelector('.top-row__more')!)
     expect(document.querySelector('.menu')?.textContent).toContain('Tirar da barra')
@@ -505,6 +509,30 @@ describe('taking items out of the top of the sidebar', () => {
     expect(row('Aprovações').className).toContain('is-back')
     expect(row('Aprovações').textContent).toContain('Você tinha tirado da barra. Some de novo quando nada esperar por você.')
     expect(row('Aprovações').querySelector('.top-row__more')).toBeNull()
+  })
+
+  it('says under the top items what was taken out, and puts each back where it was on a click', async () => {
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled, sidebarHidden: ['board', 'operations'] } })
+    await render(<Sidebar />)
+    const toggle = document.querySelector('.tucked__toggle')!
+    expect(toggle.textContent).toBe('2 escondidos')
+    expect(document.querySelectorAll('.tucked__item')).toHaveLength(0)
+    await click(toggle)
+    expect([...document.querySelectorAll('.tucked__item .nav-item__label')].map((x) => x.textContent)).toEqual(['Quadro', 'Operação'])
+    await click(document.querySelectorAll('.tucked__item')[1]!)
+    expect(store.updateSettings).toHaveBeenCalledWith({ sidebarHidden: ['board'] })
+    // Nothing taken out, no line.
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled } })
+    await render(<Sidebar />)
+    expect(document.querySelector('.tucked')).toBeNull()
+  })
+
+  it('brings Conhecimento back by itself while a memory suggestion waits in it', async () => {
+    const suggested = { id: 'm1', state: 'pending', text: 'Ana prefere reuniões curtas' } as State['memories'][number]
+    fake = state({ agents: [lia], conversations: [geral], memories: [suggested], settings: { onboarding: settled, sidebarHidden: ['knowledge'] } })
+    await render(<Sidebar />)
+    expect(row('Conhecimento').className).toContain('is-back')
+    expect(document.querySelector('.tucked')).toBeNull() // it's in the sidebar, not among those taken out
   })
 
   it('keeps only what this sidebar has in the menu: no Quadro before there are agents', async () => {

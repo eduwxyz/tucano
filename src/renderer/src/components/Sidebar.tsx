@@ -46,7 +46,7 @@ import { UpdateNote } from './Update'
 import { SidebarFoot, WorkspaceMenu } from './Workspaces'
 import { Glyph, hubOf, hubTab, hubTitle, openHub, useHubTabs, type HubId } from './Hubs'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
-import { setHidden, topLabel, useAvailable, useHidden, type TopItem } from './sidebar-top'
+import { setHidden, topLabel, useAvailable, useHidden, useWaitingIn, type TopItem } from './sidebar-top'
 
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
@@ -224,6 +224,31 @@ function TopRow({ item, back, onMenu, children }: { item: TopItem; back?: boolea
   )
 }
 
+// Under the top items, what the person took out of them: one quiet line ("2 escondidos") that opens
+// to those items, dimmed, each going back to its place on a click. Where they were, not in a menu.
+function Tucked({ items }: { items: TopItem[] }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const team = useStore(teamMode)
+  const glyph = (i: TopItem): ReactNode =>
+    i === 'tuca' ? <TucaMark size={18} /> : i === 'approvals' ? <Icon name="shield" /> : i === 'board' ? <Icon name="board" /> : <Glyph name={i} />
+  return (
+    <div className={`tucked ${open ? 'is-open' : ''}`}>
+      <button type="button" className="tucked__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="chevron" size={11} />
+        {items.length === 1 ? L('1 escondido', '1 hidden') : L(`${items.length} escondidos`, `${items.length} hidden`)}
+      </button>
+      {open &&
+        items.map((i) => (
+          <button key={i} type="button" className="nav-item tucked__item" title={L('Voltar pra barra', 'Put it back in the sidebar')} onClick={() => setHidden(i, false)}>
+            {glyph(i)}
+            <span className="nav-item__label">{topLabel(i, team)}</span>
+            <span className="tucked__back">{L('voltar', 'put back')}</span>
+          </button>
+        ))}
+    </div>
+  )
+}
+
 // The agents grouped by sector (src/shared/org.ts), each head first; those in no sector last. No sectors: no groups.
 interface AgentGroup {
   id: string
@@ -274,7 +299,11 @@ export function Sidebar(): ReactNode {
   // The top of the sidebar: what this one has, less what the person took out (Aprovações back while something waits).
   const hidden = useHidden()
   const available = useAvailable()
+  const waitingIn = useWaitingIn()
   const shows = (i: TopItem): boolean => available.includes(i) && !hidden.includes(i)
+  // Taken out, but something waits on the person in it: back, marked, until nothing does.
+  const back = (i: TopItem): boolean => available.includes(i) && hidden.includes(i) && (waitingIn[i] ?? 0) > 0
+  const tucked = available.filter((i) => hidden.includes(i) && !back(i))
   const open = (e: React.MouseEvent, items: MenuItem[]): void => {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, items })
@@ -445,8 +474,8 @@ export function Sidebar(): ReactNode {
             <TucaItem />
           </TopRow>
         )}
-        {(shows('approvals') || pending > 0) && (
-          <TopRow item="approvals" back={!shows('approvals')} onMenu={menuAt}>
+        {(shows('approvals') || back('approvals')) && (
+          <TopRow item="approvals" back={back('approvals')} onMenu={menuAt}>
             <NavItem view={{ kind: 'approvals' }} icon="shield" label={topLabel('approvals', team)} badge={pending} />
           </TopRow>
         )}
@@ -455,8 +484,8 @@ export function Sidebar(): ReactNode {
             <NavItem view={{ kind: 'board' }} icon="board" label={topLabel('board', team)} fresh={fresh('board')} />
           </TopRow>
         )}
-        {shows('knowledge') && (
-          <TopRow item="knowledge" onMenu={menuAt}>
+        {(shows('knowledge') || back('knowledge')) && (
+          <TopRow item="knowledge" back={back('knowledge')} onMenu={menuAt}>
             <HubNavItem hub="knowledge" icon="knowledge" />
           </TopRow>
         )}
@@ -465,6 +494,7 @@ export function Sidebar(): ReactNode {
             <HubNavItem hub="operations" icon="operations" />
           </TopRow>
         )}
+        {tucked.length > 0 && <Tucked items={tucked} />}
 
         <Section
           id="channels"

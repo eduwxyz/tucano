@@ -133,6 +133,7 @@ export interface State {
 export interface Toast {
   id: number
   text: string
+  action?: { label: string; run: () => void } // one thing to do about it, right there ("Desfazer")
   leaving?: boolean // fading out
 }
 
@@ -769,9 +770,9 @@ let toastSeq = 0
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let toastsHeld = false
 const toastLater = (id: number): void => void toastTimers.set(id, setTimeout(() => dismissToast(id), TOAST_MS))
-export function toast(text: string): void {
+export function toast(text: string, action?: Toast['action']): void {
   const id = ++toastSeq
-  set((s) => ({ ...s, toasts: [...s.toasts.slice(-2), { id, text }] })) // three at most
+  set((s) => ({ ...s, toasts: [...s.toasts.slice(-2), { id, text, ...(action ? { action } : {}) }] })) // three at most
   if (!toastsHeld) toastLater(id)
 }
 
