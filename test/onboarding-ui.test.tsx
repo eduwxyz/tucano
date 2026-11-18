@@ -386,20 +386,21 @@ describe('the sidebar and the missions', () => {
     expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia'])
     expect(text()).toContain('Missões')
     expect(text()).toContain('Próxima: fale com Lia')
-    expect(document.querySelector('.sidebar__tool')?.textContent).toBe('Conectores')
+    expect(document.querySelector('.sidebar__tools .sidebar__tool')?.textContent).toBe('Conectores')
     await click(document.querySelector('.sidebar__gear')!)
     expect(store.navigate).toHaveBeenCalledWith({ kind: 'settings' })
     await openMenu()
     expect(menuItems().join(' | ')).not.toMatch(/Conectores|Configurações/)
-    // Enviar feedback is in the menu from the start, for everyone, not a row of its own at the foot.
-    expect(menuItems()).toContain('Enviar feedback')
+    // Enviar feedback is at the foot from the start, for everyone, always in sight; not in the menu.
+    expect([...document.querySelectorAll('.sidebar__foot .sidebar__tool')].map((x) => x.textContent)).toEqual(['Enviar feedback', 'Conectores'])
+    expect(menuItems()).not.toContain('Enviar feedback')
   })
 
   it('grows as missions bring parts, tagged new until opened', async () => {
     fake = state({ agents: [lia], conversations: [geral], connectors: [{ id: 'c1' } as State['connectors'][number]], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
     expect(text()).toContain('Você liberou Conectores')
-    const connectors = document.querySelector('.sidebar__tool')!
+    const connectors = document.querySelector('.sidebar__tools .sidebar__tool')!
     expect(connectors.textContent).toContain('NOVO')
     await click(connectors)
     expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, seen: ['connectors'] } })
@@ -425,7 +426,7 @@ describe('the sidebar and the missions', () => {
       fake = state({ agents: [lia], conversations: [geral], settings: { onboarding } })
       await render(<Sidebar />)
       expect(labels()).toEqual(expect.arrayContaining(['Conhecimento', 'Operação']))
-      expect(document.querySelector('.sidebar__tool')?.textContent).toBe('Conectores')
+      expect(document.querySelector('.sidebar__tools .sidebar__tool')?.textContent).toBe('Conectores')
       await render(<Hub tab="memory">{null}</Hub>)
       expect(tabs()).toEqual(['Memória', 'Wiki', 'Skills'])
       await render(<Hub tab="usage">{null}</Hub>)

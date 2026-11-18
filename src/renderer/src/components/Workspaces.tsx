@@ -161,11 +161,6 @@ export function WorkspaceMenu(): ReactNode {
             </button>
           )
         })}
-        <div className="menu__sep" role="separator" />
-        <button className="menu__item" role="menuitem" onClick={pick(() => void openFeedback())}>
-          <Icon name="ask" size={15} />
-          <span className="grow">{L('Enviar feedback', 'Send feedback')}</span>
-        </button>
         {(error || loadError) && <p className="field__error" role="alert">{error || loadError}</p>}
       </div>}
     </div>
@@ -181,7 +176,14 @@ export function SidebarFoot(): ReactNode {
   const onSettings = useStore((s) => s.view?.kind === 'settings')
   const parts = useSidebarParts()
   const fresh = parts.fresh('connectors')
+  const onFeedback = useStore((s) => s.dialog?.kind === 'feedback')
   return (
+    <div className="sidebar__foot-rows">
+      {/* Always in sight, for everyone: the way to tell us something. */}
+      <button className={`sidebar__tool ${onFeedback ? 'is-active' : ''}`} onClick={() => void openFeedback()}>
+        <Icon name="ask" size={15} />
+        <span className="grow">{L('Enviar feedback', 'Send feedback')}</span>
+      </button>
     <div className="sidebar__tools">
       <button className={`sidebar__tool ${onConnectors ? 'is-active' : ''}`} title={hint || undefined} onClick={() => (fresh && parts.seen('connectors'), navigate({ kind: 'connectors' }))}>
         <Icon name="plug" size={15} />
@@ -191,6 +193,7 @@ export function SidebarFoot(): ReactNode {
       <button className={`icon-btn sidebar__gear ${onSettings ? 'is-active' : ''}`} title={L(`Configurações (${shortcut(platform, ',')})`, `Settings (${shortcut(platform, ',')})`)} aria-label={L('Configurações', 'Settings')} onClick={() => navigate({ kind: 'settings' })}>
         <Icon name="gear" size={16} />
       </button>
+    </div>
     </div>
   )
 }

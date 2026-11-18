@@ -3056,7 +3056,7 @@ export function SettingsPage(): ReactNode {
               <Icon name="send" />
               <div className="grow">
                 <strong>{L('Enviar feedback', 'Send feedback')}</strong>
-                <p className="muted small">{L('Um erro, uma ideia, qualquer coisa. Também no menu do nome do workspace, no topo da barra.', 'A bug, an idea, anything. Also in the menu on the workspace’s name, at the top of the sidebar.')}</p>
+                <p className="muted small">{L('Um erro, uma ideia, qualquer coisa. Também em "Enviar feedback", no pé da barra.', 'A bug, an idea, anything. Also in "Send feedback", at the foot of the sidebar.')}</p>
               </div>
               <button className="btn btn--sm" onClick={() => void openFeedback()}>
                 {L('Escrever', 'Write')}

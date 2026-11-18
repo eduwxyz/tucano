@@ -1,4 +1,4 @@
-// "Enviar feedback" (the dialog, opened from the workspace's menu and from Settings) and the small survey
+// "Enviar feedback" (the dialog, opened from the sidebar's foot and from Settings) and the small survey
 // line above the foot. Both go through the core to tucano.sh (src/core/feedback.ts): the page never
 // talks to it. The window's picture is taken by the desktop before the dialog opens over it.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -22,8 +22,8 @@ const KINDS: { kind: Kind; label: () => string; ask: () => string }[] = [
 const SYSTEMS = { mac: 'macOS', windows: 'Windows', linux: 'Linux' } as const
 
 // The picture first (the window as the person sees it), then the dialog over it. In a browser there's
-// no picture to take: the dialog opens without the option. From a menu, the picture waits two frames,
-// so the menu that was just closed is off the screen and out of it.
+// no picture to take: the dialog opens without the option. The picture waits two frames, so a menu or
+// a popover the click just closed is off the screen and out of it.
 export async function openFeedback(): Promise<void> {
   if (typeof requestAnimationFrame === 'function') await new Promise<void>((y) => requestAnimationFrame(() => requestAnimationFrame(() => y())))
   const shot = windowless() || !window.tucano?.capture ? null : await window.tucano.capture().catch(() => null)

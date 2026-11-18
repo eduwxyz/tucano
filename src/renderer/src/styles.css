@@ -13490,6 +13490,11 @@ button.agent-card__now:hover {
 .sidebar__foot:empty {
   display: none;
 }
+.sidebar__foot-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
 .sidebar__tools {
   display: flex;
   align-items: center;
