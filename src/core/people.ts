@@ -384,6 +384,9 @@ export class People {
       // This computer's lines to the servers it's lent to: its owner's only.
       case 'node':
         return person.role === 'owner' ? event : undefined
+      // The vault is the admins': a member never hears of it.
+      case 'vault':
+        return person.role === 'member' ? undefined : event
       case 'voice':
       case 'connector_removed':
       case 'skill':

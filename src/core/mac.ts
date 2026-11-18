@@ -374,7 +374,7 @@ export class MacComputer {
     return { result: { content: [{ type: 'image', data: png.toString('base64'), mimeType: 'image/png' }, { type: 'text', text: L(`Print de ${url}, mostrado no chat e salvo em ${saved}.`, `Screenshot of ${url}, shown in the chat and saved at ${saved}.`) }] }, artifact: kept }
   }
 
-  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal }): Promise<ToolOutcome> {
+  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal; env?: Record<string, string> }): Promise<ToolOutcome> {
     const cwd = this.cwd(agent)
     const path = (): string => macPath(String(args['path'] ?? ''), cwd)
     switch (name) {
@@ -382,7 +382,7 @@ export class MacComputer {
         const command = String(args['command'] ?? '').trim()
         if (!command) return { result: textResult(L('Faltou o comando.', 'Missing the command.'), true) }
         const t = Math.min(600, Math.max(1, Number(args['timeout_seconds']) || 120))
-        const r = await run(command, { cwd, env: await this.env(), timeoutSeconds: t, signal: ctx.signal })
+        const r = await run(command, { cwd, env: { ...(await this.env()), ...ctx.env }, timeoutSeconds: t, signal: ctx.signal })
         return { result: textResult(formatExec(r, t), r.code !== 0) }
       }
       case 'read_file':

@@ -84,6 +84,7 @@ import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
 import { HermesImport } from './HermesImport'
+import { VaultPane } from './Vault'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
@@ -96,7 +97,7 @@ import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } f
 import { ProposalCard } from './Tuca'
 import { confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { Modal } from './Modal'
-import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, Icon, NumberInput, WarnBox, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import { openFeedback } from './Feedback'
@@ -1926,9 +1927,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
         </p>
         {entry?.warning && <ThirdPartyWarning text={entry.warning()} />}
         {c.kind === 'stdio' && (
-          <p className="warn-box">
-            <Icon name="terminal" size={14} /> {L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}
-          </p>
+          <WarnBox icon="terminal">{L('Conector local: roda um processo no seu computador com o seu usuário.', 'Local connector: runs a process on your computer as your user.')}</WarnBox>
         )}
         {c.error && (
           <div className="note note--error">
@@ -2098,9 +2097,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
         </>
       ) : (
         <>
-          <p className="warn-box">
-            <Icon name="terminal" size={14} /> {L('Vai rodar um processo no seu computador, com o seu usuário. Só adicione comandos em que você confia.', 'It will run a process on your computer, as your user. Only add commands you trust.')}
-          </p>
+          <WarnBox icon="terminal">{L('Vai rodar um processo no seu computador, com o seu usuário. Só adicione comandos em que você confia.', 'It will run a process on your computer, as your user. Only add commands you trust.')}</WarnBox>
           <div className="grid2">
             <Field label={L('Comando', 'Command')}>
               <input value={command} placeholder="npx" onChange={(e) => setCommand(e.target.value)} />
@@ -2266,6 +2263,7 @@ export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList
       ] as [string, string][])
     : []),
   ...(team ? [['pessoas', L('Pessoas', 'People')] as [string, string]] : []),
+  ...(admin ? [['vault', L('Cofre', 'Vault')] as [string, string]] : []),
   ...(team && admin ? [['atividade', L('Atividade', 'Activity')] as [string, string]] : []),
   ...(admin && hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
 ]
@@ -2949,6 +2947,7 @@ export function SettingsPage(): ReactNode {
       <Tabs page="settings" tabs={tabs} />
       <div className="agent-form">
         {pane('pessoas') && <PeoplePane />}
+        {pane('vault') && admin && <VaultPane />}
         {pane('atividade') && admin && <ActivityPane />}
         {/* A member's own: the language, the theme and the sounds (their name is in Pessoas). */}
         {pane('geral') && !admin && (

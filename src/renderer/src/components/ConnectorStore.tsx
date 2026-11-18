@@ -8,7 +8,7 @@ import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type App
 import { LOGOS } from '../connector-logos'
 import { addConnector, authorizeConnector, openExternal, ownApp, setOwnApp, useStore, type Connector } from '../store'
 import { Modal } from './Modal'
-import { Icon } from './ui'
+import { Icon, WarnBox } from './ui'
 
 // A light brand color takes a dark mark, so every tile reads in both themes.
 const light = (hex: string): boolean => {
@@ -196,13 +196,10 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
 // before connecting and on its page.
 export function ThirdPartyWarning({ text }: { text: string }): ReactNode {
   return (
-    <div className="warn-box warn-box--third-party" role="note">
-      <Icon name="globe" size={16} />
-      <span>
-        <strong>{L('Seus dados passam por terceiros', 'Your data goes through a third party')}</strong>
-        {text}
-      </span>
-    </div>
+    <WarnBox icon="globe" className="warn-box--third-party">
+      <strong>{L('Seus dados passam por terceiros', 'Your data goes through a third party')}</strong>
+      {text}
+    </WarnBox>
   )
 }
 
@@ -243,9 +240,9 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
         </div>
         {entry.warning && <ThirdPartyWarning text={entry.warning()} />}
         {runs && (
-          <p className="warn-box small">
-            <Icon name="terminal" size={14} /> {L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
-          </p>
+          <WarnBox icon="terminal" className="small">
+            {L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
+          </WarnBox>
         )}
         {(entry.fields ?? []).map((f) => (
           <label key={f.id} className="field">

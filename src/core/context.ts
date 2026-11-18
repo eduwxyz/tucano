@@ -6,8 +6,9 @@
 // and the live context again only when it changed.
 import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
-import { ACCESS_REQUEST, CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Person, type Routine, type Settings, type Skill } from '../shared/types'
+import { ACCESS_REQUEST, CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Person, type Routine, type Settings, type Skill, type VaultItem } from '../shared/types'
 import type { ToolDef } from './gateway'
+import { vaultSection } from './vault/tool'
 import { describeQuestions, questionsOf } from '../shared/questions'
 import { osOf, shellCommand, systemName } from './platform'
 import { kindLabel, levelOf, policyOf, type ActionKind, type Autonomy } from '../shared/actions'
@@ -37,6 +38,7 @@ export type PromptOpts = {
   connectors?: boolean // it has connector tools (Slack, Databricks…)
   people?: Person[] // the Tucano's people; with more than one, the agent is told who they are
   github?: GitHubAccess // a GitHub connector it has access to: how it publishes, and what waits for the person
+  vault?: { items: VaultItem[]; where: { shell: boolean; browser: boolean; connectors: boolean } } // the vault items it may use, by name (src/core/vault)
 }
 
 // What an agent may do on GitHub through a connector, as this turn exposes it: the grant, the tools
@@ -166,8 +168,8 @@ export function systemPrompt(opts: PromptOpts): string {
 // What changes on its own between replies: it goes at the top of the transcript, and a kept session
 // gets it again (whole, after what it already has) only when it changed, so a new memory or a page
 // in the wiki doesn't end every agent's session. '' when there's nothing.
-export function liveContext(opts: Pick<PromptOpts, 'settings' | 'memories' | 'offline' | 'routines' | 'skills' | 'builder' | 'team' | 'wiki' | 'people'>): string {
-  const { settings, memories, offline, routines, skills, builder, team, wiki, people } = opts
+export function liveContext(opts: Pick<PromptOpts, 'settings' | 'memories' | 'offline' | 'routines' | 'skills' | 'builder' | 'team' | 'wiki' | 'people' | 'vault'>): string {
+  const { settings, memories, offline, routines, skills, builder, team, wiki, people, vault } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const parts = [
     builder,
@@ -190,6 +192,7 @@ export function liveContext(opts: Pick<PromptOpts, 'settings' | 'memories' | 'of
         '## Suas rotinas\nPedidos agendados que você roda sozinho. Pra mudar ou apagar, use agendar_rotina com substitui, ou cancelar_rotina.',
         '## Your routines\nScheduled requests you run on your own. To change or delete one, use agendar_rotina with substitui, or cancelar_rotina.'
       )}\n${routines.map((r) => `- [${r.id}] ${r.name}: ${describeSchedule(r.schedule).toLowerCase()} · ${r.prompt.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`,
+    vault?.items.length && vaultSection(me, vault.items, vault.where),
     offline?.length &&
       L(
         `## Conectores desconectados\nVocê tem acesso a ${offline.join(', ')}, mas ${offline.length > 1 ? 'eles estão desconectados' : 'ele está desconectado'} agora, então as ferramentas não aparecem pra você. Se precisar, peça a ${me} pra reconectar em Conectores (não é falta de permissão).`,
@@ -209,8 +212,8 @@ const LIVE_HEAD = (): string =>
 // A kept session saw a live context that is now empty: what tells it the old one is gone.
 export const NO_LIVE = (): string =>
   L(
-    '# Contexto de agora\nO contexto de antes não vale mais: agora não há memórias, wiki, skills, rotinas nem conectores desconectados.',
-    '# Context right now\nThe earlier context no longer holds: there are no memories, wiki, skills, routines or disconnected connectors now.'
+    '# Contexto de agora\nO contexto de antes não vale mais: agora não há memórias, wiki, skills, rotinas, segredos do cofre nem conectores desconectados.',
+    '# Context right now\nThe earlier context no longer holds: there are no memories, wiki, skills, routines, vault secrets or disconnected connectors now.'
   )
 
 // With more than one person, who they are: names in the transcript are theirs, and `me` (what the

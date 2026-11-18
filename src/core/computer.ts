@@ -341,9 +341,10 @@ const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
 type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
 
-function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Exec> {
+// env: variables for this docker client only (a vault value passed with `-e NAME`, so it's never in argv).
+function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal; env?: Record<string, string> } = {}): Promise<Exec> {
   return new Promise((resolve) => {
-    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'], ...(opts.env && Object.keys(opts.env).length ? { env: { ...process.env, ...opts.env } } : {}) })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
@@ -627,14 +628,16 @@ export class Computers {
     this.set(agentId, { state: agent?.computer ? 'stopped' : 'off', services: [] })
   }
 
-  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer } = {}): Promise<Exec> {
+  // env: the vault's values for this command (src/core/vault/refs.ts): named in argv, valued only in the docker client's environment.
+  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer; env?: Record<string, string> } = {}): Promise<Exec> {
     const t = Math.min(600, Math.max(1, Math.round(opts.timeoutSeconds ?? 120)))
-    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', this.name(agentId)]
+    const passed = Object.keys(opts.env ?? {}).flatMap((k) => ['-e', k])
+    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', ...passed, this.name(agentId)]
     // `timeout` runs inside, so the command stops even if the docker client is killed.
     const run = ['timeout', '-k', '5', String(t), 'bash', '-lc', command]
     const owner = await this.hostOwner(agentId)
     const args = owner ? [...head, 'bash', '-c', ownedBack(run.map(q).join(' '), this.shared(agentId), owner.uid, owner.gid)] : [...head, ...run]
-    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin })
+    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin, env: opts.env })
   }
 
   // The folders this computer writes into that are also the person's: /work and what's lent.
@@ -871,7 +874,8 @@ export class Computers {
 
   // ---------- the tools ----------
 
-  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal }): Promise<ToolOutcome> {
+  // ctx.env: the vault's values the command's references became (src/core/vault/refs.ts).
+  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal; env?: Record<string, string> }): Promise<ToolOutcome> {
     if (agent.computerKind === 'mac') return this.mac.call(agent, name, args, ctx)
     try {
       await this.ensure(agent.id)
@@ -885,7 +889,7 @@ export class Computers {
         const command = String(args['command'] ?? '').trim()
         if (!command) return { result: textResult(L('Faltou o comando.', 'Missing the command.'), true) }
         const t = Math.min(600, Math.max(1, Number(args['timeout_seconds']) || 120))
-        const r = await this.exec(agent.id, command, { timeoutSeconds: t, signal: ctx.signal })
+        const r = await this.exec(agent.id, command, { timeoutSeconds: t, signal: ctx.signal, env: ctx.env })
         return { result: textResult(formatExec(r, t), r.code !== 0) }
       }
       case 'read_file':

@@ -243,7 +243,8 @@ export interface BrowserDeps {
   onHandback?: (agentId: string) => void // the user handed the browser back; the runner resumes a pending ask_user
 }
 
-type Ctx = { conversationId: string; messageId: string }
+// typed: what navegador_digitar types, its vault references already put in (src/core/vault/refs.ts); args keep them.
+type Ctx = { conversationId: string; messageId: string; typed?: string }
 type Spot = { ref: number; el: BrowserElement; via: string } | { x: number; y: number; via: string }
 
 const LOG = 14
@@ -435,7 +436,7 @@ export class Browser {
           this.update(id, { doing: { label: L('Escrevendo em', 'Typing in'), detail: spot.el.label || target } })
           // Enter where it sends: the text goes in now, and the Enter waits for an approval.
           const sends = args['enter'] === true && enterSends(spot.el)
-          const r = await this.deps.host(id, 'type', { ref: spot.ref, text: String(args['texto'] ?? ''), enter: args['enter'] === true && !sends })
+          const r = await this.deps.host(id, 'type', { ref: spot.ref, text: ctx.typed ?? String(args['texto'] ?? ''), enter: args['enter'] === true && !sends })
           if (sends) {
             this.seen(id, r, { ...step, detail: spot.el.label || target })
             const field = spot.el.label || L('o campo', 'the field')

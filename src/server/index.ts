@@ -5,7 +5,7 @@
 // core (events down an event stream, requests up by POST). Every request needs
 // the server's token (the owner) or a person's key (someone invited, src/server/people.ts).
 //
-//   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN, TUCANO_URL, TUCANO_TRUST_PROXY)
+//   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN, TUCANO_URL, TUCANO_TRUST_PROXY, TUCANO_SERVER_KEY or TUCANO_SERVER_KEY_FILE)
 //   node out/main/server.js link   prints the link that signs a browser in
 //   node out/main/server.js pair [minutes]   a one-time link for the owner's phone (or a browser)
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
@@ -76,9 +76,23 @@ if (process.argv[2] === 'pair') {
   console.log(`${publicUrl}/?code=${code}`)
   process.exit(0)
 }
-// The secrets (Telegram, GitHub, connector keys) are sealed with this key; on a
-// desktop it's the system's keychain, which a server doesn't have.
-const key = Buffer.from(kept('server.key', () => randomBytes(32).toString('base64')), 'base64')
+// The secrets (Telegram, GitHub, connector keys, the vault's key) are sealed with this key; on a
+// desktop it's the system's keychain, which a server doesn't have. Kept outside the data volume
+// when given (TUCANO_SERVER_KEY, or a file such as a Docker secret in TUCANO_SERVER_KEY_FILE): then
+// a copy of the volume opens nothing. Otherwise a file in it, that only this user reads.
+const key = serverKey()
+
+function serverKey(): Buffer {
+  const file = process.env['TUCANO_SERVER_KEY_FILE']
+  const given = process.env['TUCANO_SERVER_KEY'] || (file ? readFileSync(file, 'utf8').trim() : '')
+  const k = Buffer.from(given || kept('server.key', () => randomBytes(32).toString('base64')), 'base64')
+  if (k.length !== 32) {
+    console.error('[server] the server key must be 32 bytes in base64 (openssl rand -base64 32)')
+    process.exit(1)
+  }
+  delete process.env['TUCANO_SERVER_KEY'] // the core and what it starts never see it
+  return k
+}
 
 const { seal, open } = vault(key)
 // The core signs the files it has checked a message may show (local-paths.ts); /local/ serves only those.

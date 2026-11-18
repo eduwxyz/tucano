@@ -47,6 +47,10 @@ import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO
 import { askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
+import type { Vault } from './vault'
+import { hasRefs, VaultTurn } from './vault/refs'
+import { expandUrl, VAULT_CONNECTOR, VAULT_HTTP, vaultHttp, vaultHttpTool } from './vault/tool'
+import { shellCommand } from './platform'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) })
 // The thread a request is worked in: its own, or the one it was asked inside.
@@ -274,6 +278,7 @@ export interface RunnerDeps {
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
+  vault?: Vault // secrets agents use by reference (src/core/vault); without it, none
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
@@ -356,7 +361,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string; vault?: boolean } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -1073,9 +1078,12 @@ export class Runner {
     const handedId = opts.handed ?? opts.existing?.run?.handed
     const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}) }
     const replyTo = opts.trigger ?? opts.replyTo ?? opts.existing?.run?.replyTo
+    // Going on from an approved call that used the vault (or retrying a reply that did): marked from the start.
+    const vaultBefore = opts.vault || !!opts.existing?.run?.vault
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    const replyMeta = { ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...replyMeta, ...(vaultBefore ? { vault: true } : {}) }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -1302,7 +1310,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES, VAULT_HTTP])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1398,6 +1406,10 @@ ${note}`,
     const canReadFiles = !!this.deps.gateway && filed.length > 0
     // On an endpoint there's no harness to search the web: the app's own search and page read, for an agent with Web on.
     const ownWeb = !!this.deps.gateway && !!agent.web && engineId === 'endpoint'
+    // The vault: what this agent may use by reference, never see (src/core/vault). Only with the gateway:
+    // the app's own tools are where a value goes in, and what comes back is masked there.
+    const vaultTurn = this.deps.vault && this.deps.gateway ? new VaultTurn(this.deps.vault, agent, conv.id) : undefined
+    const vaultItems = vaultTurn?.items() ?? []
     // The app's own tools stay in the prompt; the connectors' wait behind tool search (ALWAYS_LOAD).
     const others = db.people()
     const ownTools: ToolDef[] = [
@@ -1417,7 +1429,8 @@ ${note}`,
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...(wiki ? WIKI_TOOLS : []),
-      ...(ownWeb ? WEB_TOOLS : [])
+      ...(ownWeb ? WEB_TOOLS : []),
+      ...(vaultItems.length ? [vaultHttpTool()] : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
     const byStep = new Map([...exposed].map(([name, { connector, tool }]) => [`${connector.name} · ${tool.name}`, name]))
@@ -1853,16 +1866,102 @@ ${note}`,
           return textResult(r.reply)
         }
 
+        // A request with vault secrets (src/core/vault/tool.ts): runs now, or waits for an approval when an
+        // item asks on each use, or after something from outside was read and it writes or can go anywhere.
+        if (name === VAULT_HTTP && vaultTurn) {
+          const { [REASON_PARAM]: why, ...callArgs } = args
+          const rawUrl = typeof callArgs['url'] === 'string' ? callArgs['url'] : ''
+          const method = String(callArgs['method'] ?? 'GET').toUpperCase()
+          const c = vaultTurn.check(callArgs, 'http', VAULT_HTTP)
+          if (c.error) return textResult(c.error, true)
+          // A host the secrets don't name is refused now, not after someone approves a call that can't run.
+          const hostError = vaultTurn.hostCheck(c.items, hasRefs(rawUrl) ? expandUrl(vaultTurn, rawUrl) : rawUrl, VAULT_HTTP)
+          if (hostError) return textResult(hostError, true)
+          const writes = method !== 'GET' && method !== 'HEAD'
+          const guarded = (await policyNow()).guard !== false && outside && (writes || c.items.some((i) => !i.hosts.length))
+          const detail = `${method} ${snip(rawUrl, 120)}`
+          if (c.ask || guarded) {
+            if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+            approval = {
+              id: randomUUID(),
+              hash: approvalHash(VAULT_CONNECTOR, VAULT_HTTP, callArgs),
+              agentId: agent.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              connectorId: VAULT_CONNECTOR,
+              connectorName: L('Cofre', 'Vault'),
+              tool: VAULT_HTTP,
+              args: callArgs,
+              why: typeof why === 'string' ? why.trim() : '',
+              highRisk: false,
+              state: 'pending',
+              createdAt: Date.now(),
+              expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000,
+              requestedBy: requester.id,
+              ...(behalf ? { behalf } : {})
+            }
+            db.createApproval(approval)
+            emit({ type: 'approval', approval })
+            msg.run = { ...msg.run!, approvalId: approval.id }
+            addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${L('Cofre', 'Vault')} · ${detail}`, ...(guarded && !c.ask ? { note: guardNote() } : {}), status: 'done' })
+            notifyApproval(L(`${agent.name} quer usar um segredo do cofre`, `${agent.name} wants to use a vault secret`), `${c.items.map((i) => i.name).join(', ')} · ${detail}${approval.why ? `: ${approval.why}` : ''}`)
+            return textResult(
+              L(
+                `Pedido de aprovação criado. A requisição ainda NÃO foi feita. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                `Approval request created. The request has NOT been made yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+              ) + (guarded && !c.ask ? askedBecause({ run: false, why: 'guard', kinds: [] }) : '')
+            )
+          }
+          const t0 = Date.now()
+          const step: Step = { id: randomUUID(), label: L('Usou o cofre', 'Used the vault'), detail: `${c.items.map((i) => i.name).join(', ')} · ${detail}`, status: 'running' }
+          flush()
+          msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
+          save()
+          const r = await vaultHttp(vaultTurn, callArgs, { signal: control.ctl.signal })
+          sawOutside() // a server's answer is someone else's text
+          const end: Pick<Step, 'output' | 'error'> = r.isError ? { error: snip(errorReason(r), STEP_ERROR_MAX) } : { output: resultSummary(resultText(r)) }
+          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: r.isError ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()] }
+          stepStarted = Date.now()
+          save()
+          return clip(r)
+        }
+
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // Vault references, checked before anything runs: a command gets them as environment variables, a
+          // file as its text. An item that asks on each use, or any of them after reading something from
+          // outside (the guard), makes the command wait for an approval, with the references as written.
+          let vaultAsk: Verdict['why'] | undefined
+          if (vaultTurn && hasRefs(args)) {
+            const use = name === 'bash' ? 'shell' : name === 'write_file' || name === 'edit_file' ? 'file' : undefined
+            if (!use)
+              return textResult(
+                L(
+                  'Referências do cofre funcionam em bash, write_file e edit_file. Pra um serviço, escreva o segredo num arquivo (um .env) com write_file e faça o serviço ler de lá.',
+                  'Vault references work in bash, write_file and edit_file. For a service, write the secret to a file (a .env) with write_file and have the service read it from there.'
+                ),
+                true
+              )
+            const c = vaultTurn.check(args, use, name)
+            if (c.error) return textResult(c.error, true)
+            vaultAsk = c.ask ? 'rule' : (await policyNow()).guard !== false && outside ? 'guard' : undefined
+            if (vaultAsk && use === 'file')
+              return textResult(
+                vaultAsk === 'rule'
+                  ? L('Esse segredo pede aprovação a cada uso: use num comando bash, que vira um pedido de aprovação.', 'That secret asks for approval on each use: use it in a bash command, which becomes an approval request.')
+                  : L('Nesta resposta você já leu algo de fora: um segredo agora só num comando bash, que vira um pedido de aprovação.', 'In this reply you already read something from outside: a secret now only in a bash command, which becomes an approval request.'),
+                true
+              )
+          }
           // A command that commits, pushes, deletes…: by the rules, it runs, waits for me, or never runs.
           if (name === 'bash' || name === 'start_service') {
             const command = typeof args['command'] === 'string' ? args['command'] : ''
             const kinds = shellActions(command)
             // Only a command that does something that matters is judged; any other runs, as always.
-            const rules: Verdict = kinds.length ? verdict({ cls: 'write', kinds, p: await policyNow(), outside }) : { run: true, why: 'class', kinds: [] }
-            const words = (rules.kinds.length ? rules.kinds : kinds).map((k) => kindLabel(k).toLowerCase()).join(', ')
+            const judged0: Verdict = kinds.length ? verdict({ cls: 'write', kinds, p: await policyNow(), outside }) : { run: true, why: 'class', kinds: [] }
+            const rules: Verdict = vaultAsk && judged0.run ? { ...judged0, run: false, why: vaultAsk } : judged0
+            const words = (rules.kinds.length ? rules.kinds : kinds).map((k) => kindLabel(k).toLowerCase()).join(', ') || L('usar um segredo do cofre', 'use a vault secret')
             if (rules.off) {
               addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`${words}: desligado pra este agente`, `${words}: turned off for this agent`), status: 'error' })
               return textResult(
@@ -1898,7 +1997,7 @@ ${note}`,
               emit({ type: 'approval', approval })
               msg.run = { ...msg.run!, approvalId: approval.id }
               addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${words} · ${command.length > 120 ? `${command.slice(0, 120)}…` : command}`, ...(rules.why === 'guard' ? { note: guardNote() } : {}), status: 'done' })
-              this.deps.notify?.(L(`${agent.name} quer ${rules.kinds.map(actionVerb).join(' e ')}`, `${agent.name} wants to ${rules.kinds.map(actionVerb).join(' and ')}`), approval.why || command.slice(0, 120), conv.id, 'approval')
+              this.deps.notify?.(rules.kinds.length ? L(`${agent.name} quer ${rules.kinds.map(actionVerb).join(' e ')}`, `${agent.name} wants to ${rules.kinds.map(actionVerb).join(' and ')}`) : L(`${agent.name} quer usar um segredo do cofre`, `${agent.name} wants to use a vault secret`), approval.why || command.slice(0, 120), conv.id, 'approval')
               return textResult(
                 L(
                   `Pedido de aprovação criado, com o comando exato. O comando ainda NÃO rodou. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe a saída numa nova mensagem.`,
@@ -1932,7 +2031,18 @@ ${note}`,
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
-          const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          // The values go in only now, and what comes back is masked before anything shows it.
+          let runArgs = args
+          let env: Record<string, string> | undefined
+          if (vaultTurn && hasRefs(args)) {
+            if (name === 'bash') {
+              const sh = vaultTurn.shell(String(args['command'] ?? ''), name, current.computerKind === 'mac' ? shellCommand('').kind : 'bash')
+              runArgs = { ...args, command: sh.command }
+              env = sh.env
+            } else runArgs = vaultTurn.expandDeep(args, name)
+          }
+          const ran = await computers.call(current, name, runArgs, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal, ...(env ? { env } : {}) })
+          const out = vaultTurn ? { ...ran, result: vaultTurn.scrubResult(ran.result) } : ran
           const failed = !!out.result.isError
           const end: Pick<Step, 'output' | 'error'> = command
             ? execSummary(resultText(out.result), failed)
@@ -1963,13 +2073,34 @@ ${note}`,
         if (browser && BROWSER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.browser) return textResult(L('Seu navegador foi desligado.', 'Your browser was turned off.'), true)
+          // Vault references: in the text typed, or the address opened (a secret link). The step, the
+          // view and any approval keep the reference; only the page gets the value.
+          let browserArgs = args
+          let typed: string | undefined
+          if (vaultTurn && hasRefs(args)) {
+            const field = name === 'navegador_digitar' ? 'texto' : name === 'navegador_abrir' ? 'url' : undefined
+            if (!field || hasRefs({ ...args, [field]: '' }))
+              return textResult(L('No navegador, referências do cofre só funcionam no texto de navegador_digitar e no endereço de navegador_abrir.', 'In the browser, vault references only work in navegador_digitar\'s text and navegador_abrir\'s address.'), true)
+            const c = vaultTurn.check({ [field]: args[field] }, 'browser', name)
+            if (c.error) return textResult(c.error, true)
+            if (c.ask || ((await policyNow()).guard !== false && outside))
+              return textResult(
+                c.ask
+                  ? L('Esse segredo pede aprovação a cada uso, e o navegador não espera aprovação: use-o num comando ou em vault_http.', "That secret asks for approval on each use, and the browser doesn't wait for one: use it in a command or in vault_http.")
+                  : L('Nesta resposta você já leu algo de fora: um segredo não vai pro navegador agora. Comece uma nova resposta antes de ler qualquer página, ou use vault_http.', 'In this reply you already read something from outside: a secret doesn\'t go into the browser now. Start a new reply before reading any page, or use vault_http.'),
+                true
+              )
+            if (field === 'texto') typed = vaultTurn.expand(String(args['texto'] ?? ''), name)
+            else browserArgs = { ...args, url: vaultTurn.expand(String(args['url'] ?? ''), name) }
+          }
           const t0 = Date.now()
           const { label, detail } = browserStep(name, args)
           const step: Step = { id: randomUUID(), label, detail, status: 'running' }
           flush()
           msg.run = { ...msg.run!, browser: true, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
-          const out = await browser.call(current, name, args, { conversationId: conv.id, messageId: msg.id })
+          const seen = await browser.call(current, name, browserArgs, { conversationId: conv.id, messageId: msg.id, ...(typed !== undefined ? { typed } : {}) })
+          const out = vaultTurn ? { ...seen, result: vaultTurn.scrubResult(seen.result) } : seen
           sawOutside() // a page is someone else's text
           if (out.artifact) artifactIds.push(out.artifact.id)
           const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
@@ -2177,6 +2308,17 @@ ${note}`,
             true
           )
 
+        // Vault references (items allowed "anywhere"): checked now; one that asks on each use, or any after
+        // reading something from outside, makes the call wait for an approval with the references as written.
+        let vaultAsk: Verdict['why'] | undefined
+        if (vaultTurn && hasRefs(callArgs)) {
+          const c = vaultTurn.check(callArgs, 'connector', detail)
+          if (c.error) return textResult(c.error, true)
+          vaultAsk = c.ask ? 'rule' : (await policyNow()).guard !== false && outside ? 'guard' : undefined
+        }
+        const toConnector = (a: Record<string, unknown>): Record<string, unknown> => (vaultTurn && hasRefs(a) ? vaultTurn.expandDeep(a, detail) : a)
+        const masked = (r: CallToolResult): CallToolResult => (vaultTurn ? vaultTurn.scrubResult(r) : r)
+
         // "Sempre permitir": a tool approved for good runs without a card, in any call and after reading
         // something from outside too (never a high-risk one).
         // A runner's call, only when every inner tool that would ask is allowed for good on its own.
@@ -2192,9 +2334,10 @@ ${note}`,
         const kinds: ActionKind[] = risky ? [risky] : inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : isNode && current.name === NODE_BASH ? shellActions(String(callArgs['command'] ?? '')) : kindsOf({ cls, name: current.name })
         const unplaced = perCall && cls === 'sensitive' && !runnerRules(hit.connector.id, current.name, callArgs)
         // How far it goes on its own, read now: the rules may have changed since the turn started.
-        const judgedNow = risky
+        const judged0 = risky
           ? verdict({ cls: 'write', kinds, p: await policyNow(), highRisk: current.highRisk || readerLink, outside, askByDefault: true })
           : verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
+        const judgedNow: Verdict = vaultAsk && judged0.run ? { ...judged0, run: false, why: vaultAsk } : judged0
         if (judgedNow.off) return textResult(L(`Não rodei: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
         if (!judgedNow.run) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
@@ -2240,7 +2383,7 @@ ${note}`,
         save()
         // A failure keeps its reason on the step: a bare ✗ leaves nobody knowing why.
         const finish = (status: 'done' | 'error', why?: string, output?: string): void => {
-          const error = why && maskSecrets(why)
+          const error = why && maskSecrets(vaultTurn ? vaultTurn.scrub(why) : why)
           if (error) console.warn(`[connector] ${detail} failed: ${error}`)
           const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
           msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
@@ -2249,7 +2392,7 @@ ${note}`,
         }
         try {
           // A command on a node runs up to the time it asked for (as on this computer, at most 600 s): the call waits that, and a little more.
-          const first = await this.deps.connectors!.call(hit.connector.id, current.name, callArgs, isNode && current.name === NODE_BASH ? { timeoutMs: nodeCommandMs(callArgs) } : {})
+          const first = masked(await this.deps.connectors!.call(hit.connector.id, current.name, toConnector(callArgs), isNode && current.name === NODE_BASH ? { timeoutMs: nodeCommandMs(callArgs) } : {}))
           sawOutside() // what a connector answers is someone else's text: an email, an issue, a page
           // A query still running: the app waits for it here, with the connector's own status tool, instead
           // of the agent sleeping and asking again. Not a status tool the agent called itself (asking whether a
@@ -2261,7 +2404,7 @@ ${note}`,
             done(first)
             return clip(first)
           }
-          const w = await awaitDone(first, async (p) => this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args), {
+          const w = await awaitDone(first, async (p) => masked(await this.deps.connectors!.call(hit.connector.id, poller.tool.name, pollTool([poller.tool], p, () => true)?.args ?? poller.args)), {
             maxMs: PENDING_WAIT_MINUTES * 60_000,
             wait: this.deps.timers?.wait,
             now: this.deps.timers?.now,
@@ -2338,7 +2481,11 @@ ${note}`,
         acted = true
         sign()
         try {
-          const r = await runTool(name, args)
+          // Whatever comes back, every vault value this agent may use masked (src/core/vault/refs.ts).
+          const raw = await runTool(name, args)
+          const r = vaultTurn ? vaultTurn.scrubResult(raw) : raw
+          // A reply that reached for a secret (used or refused) stays out of the wiki (src/core/wiki-curator.ts).
+          if ((name === VAULT_HTTP || hasRefs(args)) && !msg.run?.vault) msg.run = { ...msg.run!, vault: true }
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2393,6 +2540,7 @@ ${note}`,
       connectors: exposed.size > 0,
       github,
       people,
+      vault: vaultItems.length ? { items: vaultItems, where: { shell: !!computers, browser: !!browser, connectors: exposed.size > 0 } } : undefined,
       team: team.length ? teamSection({ agent, agents: agentsFor(requester, db.agents(), agent.id), conversations: db.conversations().filter((c) => sees.canSeeConversation(requester, c)), connectors: this.deps.connectors?.list() ?? [], open: db.openDelegations(), ended: db.delegationsFrom(agent.id, conv.id, this.originThread(msg)), me: settings.workspaceName }) : undefined,
       builder: proposes
         ? builderSection(settings, { models: this.deps.models?.() ?? availableModels(settings), connectors: this.deps.connectors?.list() ?? [], team: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), own: agent.modelId })
@@ -2525,6 +2673,7 @@ ${note}`,
       clearInterval(stall)
       flush()
       session?.close()
+      vaultTurn?.close()
       unhold?.()
       if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown, live })
       if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, live, reply: msg.id, context: result?.context })
@@ -2562,7 +2711,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...replyMeta, ...(msg.run?.vault ? { vault: true } : {}), ...(handedId ? { handed: handedId } : {}) }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -2696,7 +2845,7 @@ ${note}`,
       db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
-    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR) {
+    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR && ap.connectorId !== VAULT_CONNECTOR) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: fresh.map((r) => r.slice(r.indexOf(':') + 1)).join(', ') } })
@@ -2727,7 +2876,17 @@ ${note}`,
       const command = String(ap.args['command'] ?? '')
       const what = L(`rodar \`${command}\``, `running \`${command}\``)
       if (decision === 'approved' && agent?.computer && this.deps.computers) {
-        const out = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId })
+        // Its vault references, checked again and put in only now; the output masked.
+        const vt = this.deps.vault && hasRefs(ap.args) ? new VaultTurn(this.deps.vault, agent, ap.conversationId) : undefined
+        const refused = vt?.check(ap.args, 'shell', 'bash').error
+        let out: { result: CallToolResult }
+        if (refused) out = { result: textResult(refused, true) }
+        else if (vt) {
+          const sh = vt.shell(command, 'bash', agent.computerKind === 'mac' ? shellCommand('').kind : 'bash')
+          const ran = await this.deps.computers.call(agent, 'bash', { ...ap.args, command: sh.command }, { conversationId: ap.conversationId, messageId: ap.messageId, env: sh.env })
+          out = { result: vt.scrubResult(ran.result) }
+          vt.close()
+        } else out = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId })
         ok = !out.result.isError
         outcome = ok ? ran : L('Rodou, com erro.', 'Ran, with an error.')
         task = L(
@@ -2742,6 +2901,29 @@ ${note}`,
         task = L(
           `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi rodado. Responda considerando isso; se fizer sentido, proponha outro caminho.`,
           `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was run. Reply with that in mind; if it makes sense, suggest another way.`
+        )
+      }
+    } else if (ap.connectorId === VAULT_CONNECTOR) {
+      // A request with vault secrets: made now, exactly as asked, with the secrets checked again.
+      const what = L(`a requisição ${String(ap.args['method'] ?? 'GET')} ${snip(String(ap.args['url'] ?? ''), 120)}`, `the request ${String(ap.args['method'] ?? 'GET')} ${snip(String(ap.args['url'] ?? ''), 120)}`)
+      if (decision === 'approved' && agent && this.deps.vault) {
+        const vt = new VaultTurn(this.deps.vault, agent, ap.conversationId)
+        const r = await vaultHttp(vt, ap.args)
+        vt.close()
+        ok = !r.isError
+        outcome = ok ? ran : L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`)
+        task = L(
+          `${me} aprovou ${what}. O app fez exatamente essa requisição${ok ? '' : ' e ela deu erro'}. Resposta:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`,
+          `${me} approved ${what}. The app made exactly that request${ok ? '' : ' and it failed'}. Response:\n${resultText(r)}\n\nGo on from here and tell ${me} the result.`
+        )
+      } else if (decision === 'approved') {
+        outcome = L('Não executou: o agente ou o cofre não está mais disponível.', "Didn't run: the agent or the vault is no longer available.")
+        task = L(`${me} aprovou ${what}, mas o cofre não está disponível agora. Avise ${me} em uma frase.`, `${me} approved ${what}, but the vault isn't available right now. Tell ${me} in one sentence.`)
+      } else {
+        outcome = decision === 'refused' ? L('Nada foi enviado.', 'Nothing was sent.') : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi enviado. Responda considerando isso.`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was sent. Reply with that in mind.`
         )
       }
     } else if (ap.connectorId === APPS) {
@@ -2825,7 +3007,19 @@ ${note}`,
       } else {
         try {
           const onNode = ap.tool === NODE_BASH && db.tools(ap.connectorId).some((t) => t.name === NODE_BASH)
-          const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args, onNode ? { timeoutMs: nodeCommandMs(ap.args) } : {})
+          // Its vault references, checked again and put in only now; the result masked.
+          const vt = this.deps.vault && hasRefs(ap.args) ? new VaultTurn(this.deps.vault, agent, ap.conversationId) : undefined
+          const refused = vt?.check(ap.args, 'connector', `${connector.name} · ${ap.tool}`).error
+          if (refused) throw new Error(refused)
+          const sent = vt ? vt.expandDeep(ap.args, `${connector.name} · ${ap.tool}`) : ap.args
+          const r = await this.deps.connectors!
+            .call(ap.connectorId, ap.tool, sent, onNode ? { timeoutMs: nodeCommandMs(ap.args) } : {})
+            .then((raw) => (vt ? vt.scrubResult(raw) : raw))
+            .catch((e: unknown) => {
+              const why = e instanceof Error ? e.message : String(e)
+              throw new Error(vt ? vt.scrub(why) : why)
+            })
+            .finally(() => vt?.close())
           ok = !r.isError
           outcome = r.isError ? L(`Executou, com erro: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`, `Ran, with an error: ${errorReason(r).slice(0, STEP_ERROR_MAX)}`) : ran
           task = L(
@@ -2868,7 +3062,8 @@ ${note}`,
       })
     }
     // Decided while the agent is still replying: this one starts when that reply ends.
-    if (agent && conv && !agent.archived) void this.startReply(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId }, { urgent: true })
+    const usedVault = ap.connectorId === VAULT_CONNECTOR || hasRefs(ap.args)
+    if (agent && conv && !agent.archived) void this.startReply(agent, conv, { depth: 1, task, work: msg?.run?.work, threadId: msg?.threadId, ...(usedVault ? { vault: true } : {}) }, { urgent: true })
   }
 
   // ---------- questions to people ----------

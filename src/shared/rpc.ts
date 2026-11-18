@@ -1,5 +1,6 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
+import type { VaultAccess, VaultItem, VaultItemInput, VaultStatus, VaultUse } from './types'
 import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
@@ -144,6 +145,18 @@ export interface Api {
   restoreSkill(p: { skillId: string; versionId: number }): void
   archiveSkill(p: { id: string; archived: boolean }): void
   removeSkill(p: { id: string }): void
+  // The vault (src/core/vault): names, kinds and who uses each item; values go in and never come out.
+  vaultStatus(): VaultStatus
+  vaultList(): VaultItem[]
+  vaultCreate(): Promise<{ recoveryCode: string }> // the first time; the code is shown once
+  vaultRecoverySaved(): void // the person kept the code
+  vaultNewRecoveryCode(): { recoveryCode: string } // the old one stops working
+  vaultRecover(p: { code: string }): Promise<void> // opens it on a computer whose key doesn't (throws a message)
+  vaultReset(p: { keepItems: boolean }): Promise<{ recoveryCode: string }> // no key and no code: a new vault; keepItems keeps the items with no value, to type again
+  vaultSave(p: { item: VaultItemInput }): VaultItem // throws a message for the form
+  vaultSetAccess(p: { id: string; access: VaultAccess }): VaultItem
+  vaultRemove(p: { id: string }): void
+  vaultUses(p: { id: string }): VaultUse[] // who used it lately
   skillVersions(p: { skillId: string }): SkillVersion[]
   checkTrigger(p: { trigger: Trigger }): Promise<string> // what a connector check finds now, for the form
   setTelegramToken(p: { token: string | null }): Promise<void> // checks it with Telegram; throws why it's refused
@@ -283,9 +296,10 @@ export type CoreEvent =
   | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
+  | { type: 'vault' } // the vault's state or items changed: admins read them again (vaultStatus, vaultList)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations', 'vault'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

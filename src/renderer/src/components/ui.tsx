@@ -163,6 +163,29 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }): Re
 
 // The Tuca wears the app's own toucan: he belongs to the app, not to the team.
 // busy: his lower beak goes while he works; happy: one squint when he's done.
+// Seconds left before something may be done (a confirm, closing what's shown once), counting down to 0.
+export function useCountdown(seconds: number): number {
+  const [left, setLeft] = useState(seconds)
+  useEffect(() => {
+    if (left <= 0) return
+    const t = setTimeout(() => setLeft((n) => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [left])
+  return left
+}
+
+// A warning in the warm box (.warn-box): an icon, what to know, and an action at the end if there is one.
+// `className`: a variant (warn-box--third-party); `role`: 'status' for something that changes, 'note' otherwise.
+export function WarnBox({ icon, children, action, className, role = 'note' }: { icon: IconName; children: ReactNode; action?: ReactNode; className?: string; role?: 'note' | 'status' }): ReactNode {
+  return (
+    <div className={`warn-box ${className ?? ''}`} role={role}>
+      <Icon name={icon} size={14} />
+      <span className="warn-box__text">{children}</span>
+      {action}
+    </div>
+  )
+}
+
 export function TucaMark({ size = 32, busy, happy }: { size?: number; busy?: boolean; happy?: boolean }): ReactNode {
   return (
     <svg className={`avatar avatar--tuca ${busy ? 'is-busy' : ''} ${happy ? 'is-happy' : ''}`} width={size} height={size} viewBox="0 0 100 100" aria-label="Tuca">

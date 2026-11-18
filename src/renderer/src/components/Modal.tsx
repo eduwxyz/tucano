@@ -8,17 +8,19 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
 
 // `className`: a card of another size (the news after an update). `variant: 'form'`: a form
 // that draws its own heading (a routine, a skill). `actions`: buttons beside the close one.
-export function Modal({ title, onClose, children, className, variant = 'dialog', actions }: {
+// `locked`: it can't be closed for now (no ✕, Esc or click outside): something shown once must be read first.
+export function Modal({ title, onClose, children, className, variant = 'dialog', actions, locked = false }: {
   title: string
   onClose: () => void
   children: ReactNode
   className?: string
   variant?: 'dialog' | 'form'
   actions?: ReactNode
+  locked?: boolean
 }): ReactNode {
   const card = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
-  close.current = onClose
+  close.current = locked ? () => {} : onClose
   useEffect(() => {
     const me = {}
     openModals.push(me)
@@ -50,14 +52,14 @@ export function Modal({ title, onClose, children, className, variant = 'dialog',
     }
   }, [])
   return (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
       <div className={`${variant === 'form' ? 'form-modal' : 'modal__card'} ${className ?? ''}`} role="dialog" aria-modal="true" aria-label={title} ref={card}>
         {variant === 'dialog' && (
           <header className="modal__head">
             <strong>{title}</strong>
             <div className="modal__actions">
               {actions}
-              <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} onClick={onClose}>
+              <button className="icon-btn icon-btn--sm" title={L('Fechar', 'Close')} disabled={locked} onClick={onClose}>
                 <Icon name="x" size={14} />
               </button>
             </div>
