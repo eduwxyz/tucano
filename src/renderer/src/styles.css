@@ -13351,6 +13351,86 @@ button.agent-card__now:hover {
   background: var(--accent-text);
   color: var(--accent);
 }
+/* "Na barra": what the top of the sidebar has, ticked while it's in it (sidebar-top.ts). */
+.ws-menu__part {
+  align-items: flex-start;
+}
+.ws-menu__box {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+  display: grid;
+  place-items: center;
+  color: var(--accent-text);
+}
+.ws-menu__box.is-on {
+  background: var(--accent);
+  box-shadow: none;
+}
+.ws-menu__list .ws-menu__box .icon {
+  color: var(--accent-text);
+  stroke-width: 3px;
+}
+.ws-menu__part-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ws-menu__sub {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.ws-menu__list .menu__item:hover .ws-menu__sub {
+  color: inherit;
+  opacity: 0.8;
+}
+.ws-menu__list .menu__item:hover .ws-menu__box {
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.ws-menu__list .menu__item:hover .ws-menu__box.is-on {
+  background: var(--accent-text);
+}
+.ws-menu__list .menu__item:hover .ws-menu__box .icon {
+  color: var(--accent);
+}
+/* An item at the top of the sidebar: its "•••" shows on hover, like an agent's gear. */
+.top-row {
+  position: relative;
+}
+.top-row__more {
+  position: absolute;
+  right: 6px;
+  top: 15.5px;
+  translate: 0 -50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.top-row:hover > .top-row__more,
+.top-row:focus-within > .top-row__more {
+  opacity: 1;
+  pointer-events: auto;
+}
+.top-row:hover > .nav-item,
+.top-row:focus-within > .nav-item {
+  padding-right: 32px;
+}
+/* Aprovações taken out, back while something waits: marked, with a line on why it's there. */
+.top-row.is-back > .nav-item {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text);
+}
+.top-row__back {
+  margin: 2px 0 4px;
+  padding: 0 9px 0 34px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
 /* The foot: the update note when there is one, then Conectores by name and the Settings gear. */
 .sidebar__foot:empty {
   display: none;

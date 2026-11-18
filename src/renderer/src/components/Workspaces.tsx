@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { sortWorkspaces, workspaceLabel, type WorkspaceList } from '../../../shared/workspaces'
-import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, updateSettings, useStore, type State } from '../store'
+import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, teamMode, updateSettings, useStore, type State } from '../store'
 import { Icon } from './ui'
 import { useServers } from './Servers'
 import { useSidebarParts } from './Missions'
 import { openFeedback } from './Feedback'
+import { topLabel, setHidden, useAvailable, useHidden } from './sidebar-top'
 
 export function useWorkspaceList(): { list: WorkspaceList | null; error: string } {
   const [list, setList] = useState<WorkspaceList | null>(null)
@@ -43,6 +44,10 @@ export function WorkspaceMenu(): ReactNode {
   const theme = useStore((s) => s.settings.theme)
   const admin = useStore(amAdmin)
   const missionsHidden = useStore((s) => amOwner(s) && !!s.settings.onboarding?.done && !!s.settings.onboarding.checklistHidden)
+  // What the top of the sidebar has, each with whether it's in it: unticking takes it out, ticking brings it back.
+  const available = useAvailable()
+  const hidden = useHidden()
+  const team = useStore(teamMode)
   const { list, error: loadError } = useWorkspaceList()
   const selectedId = list?.selected
   const workspaces = sortWorkspaces(list?.workspaces)
@@ -142,6 +147,20 @@ export function WorkspaceMenu(): ReactNode {
             <span className="grow">{L('Mostrar as missões', 'Show the missions')}</span>
           </button>
         )}
+        <div className="menu__sep" role="separator" />
+        <div className="workspace-picker__head"><span className="ws-menu__label">{L('Na barra', 'In the sidebar')}</span></div>
+        {available.map((item) => {
+          const on = !hidden.includes(item)
+          return (
+            <button key={item} className="menu__item ws-menu__part" role="menuitemcheckbox" aria-checked={on} onClick={() => setHidden(item, on, true)}>
+              <span className={`ws-menu__box ${on ? 'is-on' : ''}`} aria-hidden="true">{on && <Icon name="check" size={11} />}</span>
+              <span className="grow ws-menu__part-text">
+                <span>{topLabel(item, team)}</span>
+                {item === 'approvals' && <span className="ws-menu__sub">{L('Volta quando algo espera por você', 'Comes back when something waits on you')}</span>}
+              </span>
+            </button>
+          )
+        })}
         <div className="menu__sep" role="separator" />
         <button className="menu__item" role="menuitem" onClick={pick(() => void openFeedback())}>
           <Icon name="ask" size={15} />

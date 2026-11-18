@@ -46,6 +46,7 @@ import { UpdateNote } from './Update'
 import { SidebarFoot, WorkspaceMenu } from './Workspaces'
 import { Glyph, hubOf, hubTab, hubTitle, openHub, useHubTabs, type HubId } from './Hubs'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
+import { setHidden, topLabel, useAvailable, useHidden, type TopItem } from './sidebar-top'
 
 // The wiki stays lit on any of its pages.
 const same = (a: View | null, b: View): boolean => (b.kind === 'wiki' ? a?.kind === 'wiki' : JSON.stringify(a) === JSON.stringify(b))
@@ -184,6 +185,45 @@ function HubNavItem({ hub, icon }: { hub: HubId; icon: 'knowledge' | 'operations
   )
 }
 
+// One item at the top of the sidebar, with what it can do besides opening: a right click or its "•••"
+// opens a menu that takes it out of the sidebar (sidebar-top.ts). `back`: Aprovações, taken out, back
+// while something waits on the person, with a line that says so.
+function TopRow({ item, back, onMenu, children }: { item: TopItem; back?: boolean; onMenu: (at: { x: number; y: number }, items: MenuItem[]) => void; children: ReactNode }): ReactNode {
+  const row = useRef<HTMLDivElement>(null)
+  const team = useStore(teamMode)
+  const items = (): MenuItem[] => [
+    { label: L('Abrir', 'Open'), icon: 'expand', onClick: () => row.current?.querySelector<HTMLButtonElement>('.nav-item')?.click() },
+    { label: L('Tirar da barra', 'Take out of the sidebar'), icon: 'hide', onClick: () => setHidden(item, true) }
+  ]
+  return (
+    <div
+      ref={row}
+      className={`top-row ${back ? 'is-back' : ''}`}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onMenu({ x: e.clientX, y: e.clientY }, items())
+      }}
+    >
+      {children}
+      {!back && (
+        <button
+          type="button"
+          className="icon-btn icon-btn--sm top-row__more"
+          title={L(`Mais opções: ${topLabel(item, team)}`, `More options: ${topLabel(item, team)}`)}
+          aria-label={L(`Mais opções: ${topLabel(item, team)}`, `More options: ${topLabel(item, team)}`)}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            onMenu({ x: r.left, y: r.bottom + 4 }, items())
+          }}
+        >
+          <Icon name="more" size={14} />
+        </button>
+      )}
+      {back && <p className="top-row__back">{L('Você tinha tirado da barra. Some de novo quando nada esperar por você.', 'You took it out of the sidebar. It goes again once nothing waits on you.')}</p>}
+    </div>
+  )
+}
+
 // The agents grouped by sector (src/shared/org.ts), each head first; those in no sector last. No sectors: no groups.
 interface AgentGroup {
   id: string
@@ -230,6 +270,11 @@ export function Sidebar(): ReactNode {
   const groups = useMemo(() => groupAgents(agents), [agents])
   const [menu, setMenu] = useState<MenuState>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
+  const menuAt = useCallback((at: { x: number; y: number }, items: MenuItem[]) => setMenu({ ...at, items }), [])
+  // The top of the sidebar: what this one has, less what the person took out (Aprovações back while something waits).
+  const hidden = useHidden()
+  const available = useAvailable()
+  const shows = (i: TopItem): boolean => available.includes(i) && !hidden.includes(i)
   const open = (e: React.MouseEvent, items: MenuItem[]): void => {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, items })
@@ -395,11 +440,31 @@ export function Sidebar(): ReactNode {
         </button>
       )}
       <nav className="sidebar__scroll">
-        <TucaItem />
-        <NavItem view={{ kind: 'approvals' }} icon="shield" label={team ? L('Pra você', 'For you') : L('Aprovações', 'Approvals')} badge={pending} />
-        {teamAgents.length > 0 && parts.shows('board') && <NavItem view={{ kind: 'board' }} icon="board" label={L('Quadro', 'Board')} fresh={fresh('board')} />}
-        <HubNavItem hub="knowledge" icon="knowledge" />
-        <HubNavItem hub="operations" icon="operations" />
+        {shows('tuca') && (
+          <TopRow item="tuca" onMenu={menuAt}>
+            <TucaItem />
+          </TopRow>
+        )}
+        {(shows('approvals') || pending > 0) && (
+          <TopRow item="approvals" back={!shows('approvals')} onMenu={menuAt}>
+            <NavItem view={{ kind: 'approvals' }} icon="shield" label={topLabel('approvals', team)} badge={pending} />
+          </TopRow>
+        )}
+        {shows('board') && (
+          <TopRow item="board" onMenu={menuAt}>
+            <NavItem view={{ kind: 'board' }} icon="board" label={topLabel('board', team)} fresh={fresh('board')} />
+          </TopRow>
+        )}
+        {shows('knowledge') && (
+          <TopRow item="knowledge" onMenu={menuAt}>
+            <HubNavItem hub="knowledge" icon="knowledge" />
+          </TopRow>
+        )}
+        {shows('operations') && (
+          <TopRow item="operations" onMenu={menuAt}>
+            <HubNavItem hub="operations" icon="operations" />
+          </TopRow>
+        )}
 
         <Section
           id="channels"
