@@ -15,5 +15,7 @@ contextBridge.exposeInMainWorld('tucanoDesktop', {
     ipcRenderer.on('server:update', (_e, state: unknown) => cb(state))
   },
   checkUpdates: (): void => ipcRenderer.send('server:update-check'),
+  // Back to this computer's Tucano, on Settings › Servers: where it's lent to the server.
+  openLending: (): void => ipcRenderer.send('server:lend'),
   installUpdate: (): void => ipcRenderer.send('server:update-install')
 })

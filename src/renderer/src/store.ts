@@ -641,7 +641,10 @@ export async function start(): Promise<void> {
     navigate({ kind: 'conversation', id })
     if (thread) openThread(thread)
   })
-  window.tucano.onNavigatePage?.((page) => navigate({ kind: page }))
+  window.tucano.onNavigatePage?.((page) => {
+    if (page === 'servers') setTab('settings', 'servidores')
+    navigate({ kind: page === 'servers' ? 'settings' : page })
+  })
   window.tucano.onCoreDown?.(() => {
     disconnect()
     set((s) => ({ ...s, coreDown: true }))
@@ -944,6 +947,9 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
   void fire(L('Não consegui salvar a ferramenta.', "I couldn't save the tool."), 'updateTool', { connectorId, name, patch })
 
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
+// A computer lent to this server: exactly these agents use it (its person decides, even without being an admin).
+export const shareComputer = (connectorId: string, agentIds: string[]): void =>
+  void fire(L('Não consegui mudar quem usa o computador.', "I couldn't change who uses the computer."), 'shareComputer', { connectorId, agentIds })
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
@@ -1047,7 +1053,7 @@ export const stopService = (agentId: string, name: string): void => void fire(L(
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
-export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
 // A page an agent serves on the server's loopback, from here. Behind https it has an address of its

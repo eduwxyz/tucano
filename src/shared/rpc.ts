@@ -108,6 +108,7 @@ export interface Api {
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode
   importHarnessMcp(p: { key: string }): Promise<string> // adds one as a connector; its secrets never pass through the screen
   updateTool(p: { connectorId: string; name: string; patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>> }): void
+  shareComputer(p: { connectorId: string; agentIds: string[] }): void // a computer lent to this server: exactly these agents may use it (its person or an admin)
   decideApproval(p: { id: string; decision: 'approved' | 'refused'; reason?: string; always?: boolean }): void // always: the agent may use that tool without asking again
   addMemory(p: { scope: MemoryScope; text: string }): void
   editMemory(p: { id: string; text: string }): void

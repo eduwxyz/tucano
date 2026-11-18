@@ -19,7 +19,8 @@ export const hasServers = (): boolean => !!window.tucano?.servers
 
 export function ServersCard(): ReactNode {
   const api = window.tucano.servers!
-  const links = useNodeInfo()?.links ?? []
+  const node = useNodeInfo()
+  const links = node?.links ?? []
   const main = useStore((s) => s.defaultWorkspace)
   const [list, setList] = useState<Server[]>([])
   const [link, setLink] = useState('')
@@ -89,7 +90,7 @@ export function ServersCard(): ReactNode {
                 </button>
               </div>
             </div>
-            <Lend server={s} status={links.find((l) => l.serverId === s.id)} main={main} />
+            <Lend server={s} status={links.find((l) => l.serverId === s.id)} main={main} folders={node?.folders ?? []} />
           </div>
         ))}
       </Card>
@@ -183,9 +184,17 @@ const LINK: Record<UplinkStatus['state'], { pt: string; en: string; tone: string
 }
 
 // Under a server: lend it this computer (its terminal, the folders lent below, its browser and apps), or stop.
-// Asked once, with what it means; off, the line hangs up at once.
-function Lend({ server, status, main }: { server: Server; status?: UplinkStatus; main: boolean }): ReactNode {
+// Asked once, with what it means; off, the line hangs up at once. On, what's left is right under it: a folder
+// (asked for at once when there's none) and the agents, picked on the server, one click away.
+function Lend({ server, status, main, folders }: { server: Server; status?: UplinkStatus; main: boolean; folders: string[] }): ReactNode {
   const api = window.tucano.servers!
+  const [error, setError] = useState('')
+  const pick = (window.tucano as { pickFolder?: () => Promise<string | null> } | undefined)?.pickFolder // desktop only
+  const lendFolder = async (): Promise<void> => {
+    setError('')
+    const path = await pick?.()
+    if (path) await call('addNodeFolder', { path }).catch((e: unknown) => setError(why(e)))
+  }
   const turn = async (on: boolean): Promise<void> => {
     if (on) {
       const ok = await confirmDialog({
@@ -199,8 +208,11 @@ function Lend({ server, status, main }: { server: Server; status?: UplinkStatus;
       if (!ok) return
     }
     api.setNode(server.id, on)
+    // The file tools reach only lent folders: with none, the first is asked for right away (the person may cancel).
+    if (on && main && !folders.length) await lendFolder()
   }
   const shown = status && server.node ? LINK[status.state] : undefined
+  const connected = server.node && status?.state === 'connected'
   return (
     <div className="server-lend">
       <Toggle on={server.node} label={L(`Deixar ${server.name} usar este computador`, `Let ${server.name} use this computer`)} onChange={(on) => void turn(on)} />
@@ -211,6 +223,33 @@ function Lend({ server, status, main }: { server: Server; status?: UplinkStatus;
           <p className={`small server-lend__state ${shown.tone}`} role={shown.tone === 'is-bad' ? 'alert' : undefined}>
             {status!.error ?? L(shown.pt, shown.en)}
           </p>
+        )}
+        {server.node && main && (
+          <div className="server-lend__next">
+            <div className="server-lend__step">
+              <Icon name={folders.length ? 'check' : 'folder'} size={14} />
+              <span className="small grow">
+                {folders.length
+                  ? L(`Pastas: ${folders.map(shortPath).join(', ')}`, `Folders: ${folders.map(shortPath).join(', ')}`)
+                  : L('Nenhuma pasta ainda: empreste a dos seus projetos.', 'No folders yet: lend your projects’ folder.')}
+              </span>
+              {pick && (
+                <button className={`btn btn--sm ${folders.length ? 'btn--ghost' : 'btn--primary'}`} onClick={() => void lendFolder()}>
+                  {folders.length ? L('Outra pasta', 'Another folder') : L('Emprestar uma pasta', 'Lend a folder')}
+                </button>
+              )}
+            </div>
+            <div className="server-lend__step">
+              <Icon name="users" size={14} />
+              <span className="small grow">{L('Escolha, no servidor, os agentes que usam este computador.', 'Pick, on the server, the agents that use this computer.')}</span>
+              {api.openAgents && (
+                <button className="btn btn--sm btn--primary" disabled={!connected} title={connected ? undefined : L('Assim que conectar', 'Once it connects')} onClick={() => api.openAgents!(server.id)}>
+                  {L('Escolher os agentes', 'Pick the agents')}
+                </button>
+              )}
+            </div>
+            {error && <p className="note note--error">{error}</p>}
+          </div>
         )}
       </div>
     </div>

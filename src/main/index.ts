@@ -624,7 +624,7 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
+function showWindow(conversationId?: string, page?: 'skills' | 'servers', threadId?: string): void {
   if (launch.qa) return
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
@@ -848,6 +848,8 @@ ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'stri
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
 ipcMain.on('servers:node', (e, id: unknown, on: unknown) => fromApp(e) && typeof id === 'string' && typeof on === 'boolean' && servers.setNode(id, on))
+// Its server on screen at Connectors, where the person picks the agents that use this computer.
+ipcMain.on('servers:agents', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.openNote(id, { title: '', body: '', page: 'connectors' }).catch(console.error))
 // A server's page in this window hands its notifications here (src/preload/server.ts): the app
 // shows them as its own, and a click puts that server, and what it's about, on screen. The page
 // already left out the conversation being read there; a server can't send more than a few a minute.
@@ -866,6 +868,12 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
   const n = new Notification({ title: note.title, body: note.body, silent: true, ...noteIcon() })
   n.on('click', () => void servers.openNote(id, note).catch(console.error))
   n.show()
+})
+// A server's page asks to lend this computer (its folder picker, an agent's Computer): this computer's Tucano
+// comes on screen on Settings › Servers. Only a server's own page asks, and it changes nothing by itself.
+ipcMain.on('server:lend', (e) => {
+  const frame = e.senderFrame
+  if (frame && frame === e.sender.mainFrame && servers.serverOf(e.sender, frame.url)) showWindow(undefined, 'servers')
 })
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.

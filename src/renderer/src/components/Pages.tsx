@@ -1,4 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
@@ -7,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
 import {
   agentById,
+  getState,
   navigate,
   newAgentDraft,
   openDm,
@@ -26,6 +28,7 @@ import {
   setConnectorToken,
   removeConnector,
   updateTool,
+  shareComputer,
   updateSettings,
   setJevKey,
   browserAction,
@@ -978,6 +981,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               agentId={draft.id}
               kind={draft.computer ? (draft.computerKind ?? 'linux') : 'none'}
               onChange={(k) => patch({ computer: k !== 'none', computerKind: k === 'none' ? (draft.computerKind ?? 'linux') : k }, true)}
+              grants={draft.grants}
+              onGrant={(id, on) => {
+                const next = { ...draft.grants }
+                if (on) next[id] = 'read_write'
+                else delete next[id]
+                // An admin's page saves the agent itself (its draft keeps the change); anyone else's computer goes through the core.
+                if (admin) patch({ grants: next }, true)
+                else shareComputer(id, agentsWith(id, draft.id, on))
+              }}
             />
           )}
 
@@ -1024,13 +1036,14 @@ const COMPUTER_STATE = (): Record<string, { label: string; tone: string }> => ({
 })
 
 type ComputerChoice = 'none' | 'linux' | 'mac'
-const COMPUTER_CHOICES = (): { value: ComputerChoice; label: string }[] => [
+// On a server, "this computer" is the server: the person's own is lent to it (YourComputer).
+const COMPUTER_CHOICES = (server = windowless()): { value: ComputerChoice; label: string }[] => [
   { value: 'none', label: L('Nenhum', 'None') },
   { value: 'linux', label: L('Linux isolado', 'Isolated Linux') },
-  { value: 'mac', label: L('Este computador', 'This computer') }
+  { value: 'mac', label: server ? L('O servidor', 'The server') : L('Este computador', 'This computer') }
 ]
 
-function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void }): ReactNode {
+function ComputerCard({ agentId, kind, onChange, grants, onGrant }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void; grants: Agent['grants']; onGrant: (connectorId: string, on: boolean) => void }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
   // Looking is anyone's; starting, stopping, erasing and opening its folder, the admins'.
   const admin = useStore(amAdmin)
@@ -1042,10 +1055,13 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
   // under the confirmation, with Linux still picked, and that mix read as this computer's full card.
   const confirming = confirmMac && kind !== 'mac'
   const shown: ComputerChoice = confirming ? 'mac' : kind
-  const on = kind === 'linux' && !confirming
+  const isolated = useStore((s) => s.isolatedComputers)
+  const server = windowless()
+  // On a server without Docker (Tucano Pro's) an isolated Linux can't run: checking again changes nothing.
+  const dockerless = kind === 'linux' && !isolated && !confirming
+  const on = kind === 'linux' && !confirming && !dockerless
   const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
   const st = COMPUTER_STATE()[state]!
-  const isolated = useStore((s) => s.isolatedComputers)
 
   return (
     <Section
@@ -1077,14 +1093,42 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
           ))}
       </div>
       </Row>
+      {dockerless && (
+        <div className="lgroup__pad computer-body">
+          <div className="computer">
+            <span className="tag tag--warn">{L('sem Docker', 'no Docker')}</span>
+            <span className="muted small grow">
+              {L(
+                'Este servidor não tem Docker, então o Linux isolado não roda aqui. Pra rodar comandos, use o seu computador (abaixo), ou escolha Nenhum.',
+                'This server has no Docker, so the isolated Linux doesn’t run here. To run commands, use your computer (below), or pick None.'
+              )}
+            </span>
+            <button className="btn btn--sm" onClick={() => onChange('none')}>
+              {L('Trocar pra Nenhum', 'Switch to None')}
+            </button>
+          </div>
+        </div>
+      )}
       {(confirming || kind === 'mac' || on) && <div className="lgroup__pad computer-body">
       {confirming && (
         <div className="mac-confirm">
           <p>
-            <strong>{L('Os comandos dele vão rodar direto no seu computador, como você.', 'Its commands will run right on your computer, as you.')}</strong>{' '}
-            {L(
-              'Ele passa a alcançar seus arquivos, seus outros projetos, as credenciais que estiverem no disco (tokens, ~/.ssh) e as contas em que o terminal está logado. Uma página da web ou um arquivo com instruções escondidas pode tentar usar isso.',
-              'It can reach your files, your other projects, credentials on disk (tokens, ~/.ssh) and the accounts the terminal is signed in to. A web page or a file with hidden instructions may try to use that.'
+            {server ? (
+              <>
+                <strong>{L('Os comandos dele vão rodar direto no servidor, não no seu computador.', 'Its commands will run right on the server, not on your computer.')}</strong>{' '}
+                {L(
+                  'Ele passa a alcançar o que o Tucano alcança aqui: os arquivos e as credenciais que estiverem no disco do servidor. Pra ele usar o seu computador, empreste o computador (abaixo).',
+                  'It can reach what Tucano reaches here: the files and credentials on the server’s disk. For it to use your computer, lend your computer (below).'
+                )}
+              </>
+            ) : (
+              <>
+                <strong>{L('Os comandos dele vão rodar direto no seu computador, como você.', 'Its commands will run right on your computer, as you.')}</strong>{' '}
+                {L(
+                  'Ele passa a alcançar seus arquivos, seus outros projetos, as credenciais que estiverem no disco (tokens, ~/.ssh) e as contas em que o terminal está logado. Uma página da web ou um arquivo com instruções escondidas pode tentar usar isso.',
+                  'It can reach your files, your other projects, credentials on disk (tokens, ~/.ssh) and the accounts the terminal is signed in to. A web page or a file with hidden instructions may try to use that.'
+                )}
+              </>
             )}
           </p>
           <p className="muted small">
@@ -1095,7 +1139,7 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
           </p>
           <div className="row">
             <button className="btn btn--sm btn--danger" onClick={() => (setConfirmMac(false), onChange('mac'))}>
-              {L('Liberar o computador pra ele', 'Let it use this computer')}
+              {server ? L('Liberar o servidor pra ele', 'Let it use the server') : L('Liberar o computador pra ele', 'Let it use this computer')}
             </button>
             <button className="btn btn--sm btn--ghost" onClick={() => setConfirmMac(false)}>
               {L('Cancelar', 'Cancel')}
@@ -1106,12 +1150,14 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
       {kind === 'mac' && (
         <>
           <div className="computer">
-            <span className="tag tag--warn">{L('no seu computador', 'on your computer')}</span>
+            <span className="tag tag--warn">{server ? L('no servidor', 'on the server') : L('no seu computador', 'on your computer')}</span>
             <span className="muted small grow">
-              {L(
-                'Liberado: os comandos rodam direto no seu computador, como você, e começam na pasta dele. Ele alcança as suas pastas sem emprestar e não precisa do Docker.',
-                'Allowed: its commands run right on your computer, as you, and start in its folder. It reaches your folders without lending them and needs no Docker.'
-              )}
+              {server
+                ? L('Liberado: os comandos rodam direto no servidor, como o Tucano, e começam na pasta dele. Não é o seu computador.', 'Allowed: its commands run right on the server, as Tucano, and start in its folder. It isn’t your computer.')
+                : L(
+                    'Liberado: os comandos rodam direto no seu computador, como você, e começam na pasta dele. Ele alcança as suas pastas sem emprestar e não precisa do Docker.',
+                    'Allowed: its commands run right on your computer, as you, and start in its folder. It reaches your folders without lending them and needs no Docker.'
+                  )}
             </span>
           </div>
           <Services agentId={agentId} />
@@ -1176,7 +1222,158 @@ function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: Comp
         </>
       )}
       </div>}
+      {server && (
+        <div className="lgroup__pad computer-body">
+          <YourComputer grants={grants} onGrant={onGrant} />
+        </div>
+      )}
     </Section>
+  )
+}
+
+// On a server, the computers the viewer lent it from the desktop app (docs/local-node.md): each is a connector
+// of their own. Someone else's never shows here.
+const myComputers = (s: { connectors: Connector[]; people: { id: string; role: string }[]; you: string }): Connector[] => {
+  const owner = s.people.find((p) => p.role === 'owner')?.id
+  return s.connectors.filter((c) => {
+    const node = nodeOf(c.url)
+    return !!node && (node.owner ?? owner) === s.you
+  })
+}
+// The agents that would use a computer once one is turned on or off: the ones that have it now, give or take one.
+const agentsWith = (connectorId: string, agentId: string, on: boolean): string[] => {
+  const ids = getState()
+    .agents.filter((a) => !a.archived && a.kind !== 'tuca' && (a.grants[connectorId] ?? 'none') !== 'none')
+    .map((a) => a.id)
+    .filter((id) => id !== agentId)
+  return on ? [...ids, agentId] : ids
+}
+
+// How to lend a computer, where the person is: in the desktop app, one click to its Settings › Servers;
+// in a browser, what to open on the computer.
+function LendHint(): ReactNode {
+  const open = typeof window === 'undefined' ? undefined : window.tucano?.openLending
+  return (
+    <div className="computer">
+      <span className="muted small grow">
+        {open
+          ? L(
+              'Pra os agentes usarem o seu computador (terminal, pastas e navegador), ligue nele Deixar este servidor usar este computador. Depois, volte aqui e escolha os agentes.',
+              'For the agents to use your computer (terminal, folders and browser), turn on Let this server use this computer there. Then come back here and pick the agents.'
+            )
+          : L(
+              'Pra os agentes usarem o seu computador (terminal, pastas e navegador), abra o app do Tucano nele, conecte este servidor em Configurações › Servidores e ligue Deixar este servidor usar este computador. Ele aparece aqui logo em seguida.',
+              'For the agents to use your computer (terminal, folders and browser), open the Tucano app on it, connect this server in Settings › Servers and turn on Let this server use this computer. It shows up here right after.'
+            )}
+      </span>
+      {open && (
+        <button className="btn btn--sm btn--primary" onClick={() => open()}>
+          {L('Emprestar este computador', 'Lend this computer')}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// A lent computer's agents: each one on or off, or all at once. Its person decides (shareComputer), even without
+// being an admin, since an agent reaches it only when working for them.
+export function ComputerAgents({ connectorId }: { connectorId: string }): ReactNode {
+  const agents = useStore((s) => s.agents.filter((a) => !a.archived && a.kind !== 'tuca'))
+  const on = agents.filter((a) => (a.grants[connectorId] ?? 'none') !== 'none').map((a) => a.id)
+  if (!agents.length) return <p className="muted small">{L('Ainda não há agentes aqui: o computador fica pronto pra quando houver.', 'No agents here yet: the computer is ready for when there are.')}</p>
+  const set = (ids: string[]): void => shareComputer(connectorId, ids)
+  return (
+    <div className="computer-agents">
+      <div className="row row--between">
+        <span className="small muted">
+          {on.length === 0
+            ? L('Nenhum agente usa ainda.', 'No agent uses it yet.')
+            : on.length === agents.length
+              ? L('Todos os agentes usam.', 'Every agent uses it.')
+              : L(`${on.length} de ${agents.length} agentes usam.`, `${on.length} of ${agents.length} agents use it.`)}
+        </span>
+        {on.length < agents.length ? (
+          <button className="btn btn--sm btn--primary" onClick={() => set(agents.map((a) => a.id))}>
+            {L('Dar acesso a todos', 'Give all of them access')}
+          </button>
+        ) : (
+          <button className="btn btn--sm btn--ghost" onClick={() => set([])}>
+            {L('Tirar de todos', 'Take it from all')}
+          </button>
+        )}
+      </div>
+      <div className="computer-agents__list">
+        {agents.map((a) => {
+          const has = on.includes(a.id)
+          return (
+            <div key={a.id} className="computer-agents__row">
+              <AgentAvatar agent={a} size={22} still />
+              <span className="grow">{a.name}</span>
+              <Toggle on={has} label={L(`${a.name} usa o computador`, `${a.name} uses the computer`)} onChange={(v) => set(v ? [...on, a.id] : on.filter((id) => id !== a.id))} />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Connectors, on a server: the viewer's lent computers first, with the agents that use each, or how to lend one.
+function MyComputers(): ReactNode {
+  const mine = useStore(myComputers)
+  if (!windowless()) return null
+  return (
+    <section className="my-computers">
+      <div className="row row--between">
+        <strong>{L('Seu computador', 'Your computer')}</strong>
+      </div>
+      {mine.length === 0 ? (
+        <LendHint />
+      ) : (
+        mine.map((c) => (
+          <div key={c.id} className="my-computers__one">
+            <div className="row">
+              <Icon name="laptop" size={15} />
+              <strong className="grow">{c.name}</strong>
+              <span className={`tag ${c.status === 'connected' ? 'tag--ok' : ''}`}>{c.status === 'connected' ? L('ligado', 'connected') : L('desligado: o app do Tucano está fechado lá', 'off: the Tucano app is closed there')}</span>
+            </div>
+            <ComputerAgents connectorId={c.id} />
+          </div>
+        ))
+      )}
+    </section>
+  )
+}
+
+// On a server, in an agent's Computer card: whether the viewer's own computer is lent, whether this agent has
+// it, and the one click that's missing (giving access, or lending it).
+function YourComputer({ grants, onGrant }: { grants: Agent['grants']; onGrant: (connectorId: string, on: boolean) => void }): ReactNode {
+  const mine = useStore(myComputers)
+  return (
+    <div className="your-computer">
+      <strong className="small">{L('Seu computador', 'Your computer')}</strong>
+      {mine.length === 0 ? (
+        <LendHint />
+      ) : (
+        mine.map((c) => {
+          const has = (grants[c.id] ?? 'none') !== 'none'
+          const live = c.status === 'connected'
+          return (
+            <div key={c.id} className="computer">
+              <span className={`tag ${live ? 'tag--ok' : ''}`}>{live ? L('ligado', 'connected') : L('desligado', 'off')}</span>
+              <span className="muted small grow">
+                {has
+                  ? L(`Ele usa o ${c.name} (terminal, pastas emprestadas e navegador) enquanto o app do Tucano estiver aberto lá.`, `It uses ${c.name} (terminal, lent folders and browser) while the Tucano app is open there.`)
+                  : L(`O ${c.name} está emprestado a este servidor, mas este agente ainda não usa.`, `${c.name} is lent to this server, but this agent doesn't use it yet.`)}
+              </span>
+              <button className={`btn btn--sm ${has ? 'btn--ghost' : 'btn--primary'}`} onClick={() => onGrant(c.id, !has)}>
+                {has ? L('Tirar o acesso', 'Take access away') : L('Dar acesso', 'Give access')}
+              </button>
+            </div>
+          )
+        })
+      )}
+    </div>
   )
 }
 
@@ -1223,7 +1420,7 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
   return (
     <div className="folders">
       <div className="row row--between">
-        <strong className="small">{L('Pastas do seu computador', 'Folders from your computer')}</strong>
+        <strong className="small">{windowless() ? L('Pastas do servidor', 'Folders on the server') : L('Pastas do seu computador', 'Folders from your computer')}</strong>
         <button className="btn btn--sm" onClick={() => void lendFolder(agentId).then(setError)}>
           {L('Emprestar pasta…', 'Lend a folder…')}
         </button>
@@ -1853,6 +2050,7 @@ export function ConnectorsPage(): ReactNode {
   if (!admin)
     return (
       <Page title={L('Conectores', 'Connectors')} subtitle={L('Os serviços com que os agentes do time trabalham. Cada chamada passa pelas permissões e aprovações.', 'The services the team’s agents work with. Every call goes through permissions and approvals.')}>
+        <MyComputers />
         {connectors.length === 0 ? (
           <p className="muted">{L('Nenhum conector ainda.', 'No connectors yet.')}</p>
         ) : (
@@ -1895,6 +2093,7 @@ export function ConnectorsPage(): ReactNode {
           }}
         />
       )}
+      <MyComputers />
       <ConnectorGrid status={STATUS()} onManage={setOpenId} />
       <HarnessMcps onAdded={setOpenId} />
       {open && <ConnectorDetails c={open} onClose={() => setOpenId(null)} />}
@@ -1915,15 +2114,19 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
           <span className="muted small mono truncate grow">{address(c)}</span>
         </div>
-        <p className="muted small">
-          {users.length ? (
-            <>
-              {L('Quem usa:', 'Used by:')} {users.map((a) => a.name).join(', ')}
-            </>
-          ) : (
-            L('Nenhum agente usa ainda. Dê acesso na página de cada agente, em Ferramentas.', "No agent uses it yet. Give access on each agent's page, under Tools.")
-          )}
-        </p>
+        {nodeOf(c.url) ? (
+          <ComputerAgents connectorId={c.id} />
+        ) : (
+          <p className="muted small">
+            {users.length ? (
+              <>
+                {L('Quem usa:', 'Used by:')} {users.map((a) => a.name).join(', ')}
+              </>
+            ) : (
+              L('Nenhum agente usa ainda. Dê acesso na página de cada agente, em Ferramentas.', "No agent uses it yet. Give access on each agent's page, under Tools.")
+            )}
+          </p>
+        )}
         {entry?.warning && <ThirdPartyWarning text={entry.warning()} />}
         {c.kind === 'stdio' && (
           <p className="warn-box">
