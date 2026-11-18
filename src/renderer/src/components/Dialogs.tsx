@@ -249,7 +249,7 @@ export function MembersDialog({ id, name, members, mentionOnly = [], onClose }: 
                       )}
                       aria-label={L('O que é o modo menção', 'What mention mode does')}
                     >
-                      (?)
+                      ?
                     </span>
                   </label>
                 </div>
