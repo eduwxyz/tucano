@@ -267,7 +267,8 @@ body {
   --kind: var(--accent);
 }
 .nc--done {
-  --kind: var(--ok);
+  /* The bottom time bar keeps the app's signature orange, not the success green. */
+  --kind: var(--toast-ink);
 }
 .nc--note {
   --kind: var(--accent);
