@@ -37,6 +37,7 @@ export type AskMode = 'answer' | 'view' | 'done'
 
 // `answer`: this person may answer it now. `view`: someone else's to answer (or not yet asked).
 // `done`: answered. `badge`: the state, as the head says it; `byline`: who asked whom (a team).
+// `recommended`: Jev's pick per decision, when it's turned on and has answered.
 // `children`: what goes under it (a hint, buttons).
 export function AskCard({
   id,
@@ -47,8 +48,7 @@ export function AskCard({
   byline,
   answeredInText,
   cancelled,
-  closedAs,
-  children
+  closedAs,  children
 }: {
   id: string
   questions: Decision[]
@@ -67,8 +67,7 @@ export function AskCard({
   return (
     <section className={`ask ask--${mode}${steps ? ' ask--steps' : ''}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} steps={steps} />
-      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} closedAs={closedAs} /> : <Asked questions={questions} />}
-      {children}
+      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} closedAs={closedAs} /> : <Asked questions={questions} />}      {children}
     </section>
   )
 }
@@ -87,8 +86,14 @@ function Head({ badge, byline, done, cancelled, nav, steps }: { badge: string; b
   )
 }
 
+// Jev's pick, as a pill: the card still waits for the person, so it never takes the tick or the
+// keyboard. It's a hint on an option, not a state.
+function Recommended(): ReactNode {
+  return <span className="ask-option__pill">{L('Recomendado', 'Recommended')}</span>
+}
+
 // Someone else's question, waiting: each decision with its options, to read.
-function Asked({ questions }: { questions: Decision[] }): ReactNode {
+function Asked({ questions, recommended }: { questions: Decision[]; recommended?: (number | null)[] | undefined }): ReactNode {
   return (
     <ol className="ask-list">
       {questions.map((q, i) => (
@@ -99,8 +104,7 @@ function Asked({ questions }: { questions: Decision[] }): ReactNode {
               {q.options.map((o, j) => (
                 <span key={j} className="ask-chip">
                   {o.label}
-                  {o.recommended && <Recommended />}
-                </span>
+                  {o.recommended && <Recommended />}                </span>
               ))}
             </span>
           )}
@@ -131,8 +135,7 @@ function Summary({ questions, answers, answeredInText, cancelled, closedAs }: { 
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {
-  // Answers given here show at once, before the core echoes them back.
+function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {  // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
   const allAnswered = (list: (Answer | null)[]): boolean => firstUnanswered(questions, list) === -1
@@ -239,15 +242,13 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
           <button className="btn btn--sm" disabled={sending} onClick={goRecommended}>
             <Icon name="check" size={12} /> {L('Pode seguir com a recomendação', 'Go with the recommendation')}
           </button>
-        </div>
-      )}
+        </div>      )}
       {extra}
     </section>
   )
 }
 
-function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
-  const options = question.options ?? []
+function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {  const options = question.options ?? []
   const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
   const edit = (patch: Partial<AnswerDraft>): void => {
@@ -330,8 +331,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
                 <span className="ask-option__text">
                   <span className="ask-option__label">
                     {o.label}
-                    {o.recommended && <Recommended />}
-                  </span>
+                    {o.recommended && <Recommended />}                  </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
                 <span className={`ask-option__mark ${multiple ? 'is-box' : ''}`} aria-hidden>
@@ -438,8 +438,7 @@ export function NextStepsCard({ message, agentName }: { message: Message; agentN
 
 // Next steps a newer card took the place of: closed, and neither answered nor dismissed by anyone.
 export function ReplacedStepsCard({ message }: { message: Message }): ReactNode {
-  return <AskCard id={message.id} questions={questionsOf(message.run)} mode="done" badge={L('Substituído', 'Replaced')} cancelled closedAs={L('(substituído por um card mais novo)', '(replaced by a newer card)')} />
-}
+  return <AskCard id={message.id} questions={questionsOf(message.run)} mode="done" badge={L('Substituído', 'Replaced')} cancelled closedAs={L('(substituído por um card mais novo)', '(replaced by a newer card)')} />}
 
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it
 // shows only what was written beyond them, or not at all. It stays as it is everywhere else (the

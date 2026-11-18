@@ -699,8 +699,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           ) : message.run?.stepsReplaced ? (
             <ReplacedStepsCard message={message} />
           ) : team && message.run?.askedTo ? (
-            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} cancelled={message.run.cancelled} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
-          ) : (
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} cancelled={message.run.cancelled} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />          ) : (
             <AnswersSummary message={message} />
           ))}
         {approval && (approval.state === 'pending' ? <ApprovalCard approval={approval} /> : <DecidedApproval approval={approval} />)}
@@ -1601,8 +1600,7 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
-  return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {  return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
 }
 
 function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; question: string; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
@@ -1697,8 +1695,7 @@ function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, 
 // A question with decisions, with a team: whom it's for and who asked; answered on the card by
 // whoever may (the person, whoever covers for them or, past the deadline, the requester: those
 // who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
-function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, cancelled, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
-  const team = useStore(teamMode)
+function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, cancelled, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {  const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
   const waiting = useStore((s) => s.inbox.questions.find((q) => q.id === id))
@@ -1707,8 +1704,7 @@ function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, c
   const [answering, setAnswering] = useState(false)
   const who = agentName ?? L('O agente', 'The agent')
   const card = { id, questions: decisions, saved: answers }
-  if (cancelled) return <AskCard {...card} mode="done" badge={L('Cancelada', 'Cancelled')} cancelled />
-  if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
+  if (cancelled) return <AskCard {...card} mode="done" badge={L('Cancelada', 'Cancelled')} cancelled />  if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
   const toMe = target.id === you
   const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
   if (answered)

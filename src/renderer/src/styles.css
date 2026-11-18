@@ -3212,8 +3212,7 @@ h3 {
   justify-content: flex-end;
   margin-top: 8px;
 }
-/* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */
-.ask-option__pill {
+/* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */.ask-option__pill {
   flex: none;
   padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);

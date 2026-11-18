@@ -2160,7 +2160,7 @@ export function InboxPage(): ReactNode {
             {questions.map(({ q, done }) => (
               <div key={q.id}>
                 {meta(q.conversationId, q.agentId, q.createdAt)}
-                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
+                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}), ...(q.recommended ? { recommended: q.recommended } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
               </div>
             ))}
           </div>
@@ -3440,8 +3440,7 @@ export function ClassifiersCard(): ReactNode {
 }
 
 // Which job each classifier serves: who replies in a channel, and what an agent clicks in a page. It sits in its own card, apart from the list, because
-// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.export function ClassifierUsesCard(): ReactNode {
-  const settings = useStore((s) => s.settings)
+// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.export function ClassifierUsesCard(): ReactNode {  const settings = useStore((s) => s.settings)
   const work = onGateway(settings)
   const list = settings.classifiers ?? []
   const jobs = settings.classifierJobs ?? {}
@@ -3459,8 +3458,7 @@ export function ClassifiersCard(): ReactNode {
             <Field key={job} label={jobLabel(job)} hint={jobAbout(job)}>
               <Select
                 value={jobs[job] ?? ''}
-                onChange={(v) => assign(job, v)}                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
-              />
+                onChange={(v) => assign(job, v)}                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}              />
             </Field>
           ))}
           {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
@@ -3477,8 +3475,7 @@ export function ClassifiersCard(): ReactNode {
               </div>            )
           })}
         </>
-      )}    </>
-  )
+      )}    </>  )
 }
 
 // Settings › Agents: who finds the element an agent asks to click. A card of its own, beside the
@@ -3699,8 +3696,7 @@ export function SettingsPage(): ReactNode {
                 )}
                 {owner && (
                   <Field label={L('Como os agentes te chamam', 'What the agents call you')}>
-                    <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
-                  </Field>
+                    <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />                  </Field>
                 )}
               </div>
               <div className="field">

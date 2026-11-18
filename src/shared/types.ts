@@ -212,6 +212,7 @@ export interface Run {
   stepsOpen?: true // its next-steps card can still be answered; the reply itself is done and waits on no one
   stepsReplaced?: true // the same agent proposed a newer card in the same place: this one closed unanswered, and nobody dismissed it
   cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
+  recommended?: (number | null)[] // Jev's pick per decision, by index into its options (null: none is clearly better); unset when it's off or still thinking
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
   answerTyped?: string // what that message had beyond them, written in the message box
@@ -439,11 +440,14 @@ export interface Question {
 
 // What's waiting on a person: approvals they can decide and questions to them.
 // A question from someone else's DM comes without where it was asked (they see the question only).
+// A question in the inbox: with the decisions asked (ask_user's options), what was answered on the
+// card so far, and, when Jev is on, the option it suggests for each decision.
+export type InboxQuestion = Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[]; recommended?: (number | null)[] }
+
 export interface Inbox {
   approvals: Approval[]
-  // With the decisions asked (ask_user's options) and what was answered on the card so far.
-  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
-  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  questions: InboxQuestion[]
+  answered?: InboxQuestion[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
   harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
 }
@@ -573,7 +577,7 @@ export interface Settings {
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
-
+  jevRecommend?: boolean // Jev marks the best option on an agent's question (each such question goes to TypeSafe); off when unset
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
