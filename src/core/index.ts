@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, wikiAccess, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -57,6 +57,7 @@ import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
+import { canHandOff, handOffText } from './wiki-handoff'
 import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
@@ -2455,6 +2456,23 @@ const api: Handlers = {
     emit({ type: 'wiki' })
   },
   wikiDismissFinding: ({ id }) => wiki.dismissFinding(id),
+  // The review's card hands the job to an agent: one message in its DM with what the finding
+  // needs (the titles, the lines around them), and the card goes. The next review brings it
+  // back if it still holds.
+  wikiAsk: ({ id, agentId }, ctx) => {
+    const f = reviewer.status().findings.find((x) => x.id === id)
+    if (!f || !canHandOff(f.kind) || f.change || f.pages.some((t) => heldFrom(ctx, t))) throw new Error(L('Esse aviso não existe mais.', 'That finding is gone.'))
+    const agent = db.agent(agentId)
+    if (!agent || agent.archived || agent.kind === 'tuca') throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    if (wikiAccess(agent) !== 'read_write')
+      throw new Error(
+        L(`@${agent.handle} ainda não escreve na wiki: escolha "Lê e escreve" em Ferramentas nas configurações dele.`, `@${agent.handle} doesn't write on the wiki yet: choose "Read and write" under Tools in its settings.`)
+      )
+    const conversationId = api.openDm({ agentId: agent.id }, ctx)
+    bg(runner.send(conversationId, handOffText(f, (t) => wiki.page(t)), [], undefined, ctx.person.id), 'wikiAsk')
+    wiki.dismissFinding(id)
+    return conversationId
+  },
   wikiImport: ({ dir }, ctx) => wiki.importVault(dir, nameOf(ctx)),
   // On a server: a vault zipped on the person's computer and sent up. Only from the uploads folder
   // the server writes to; unpacked apart, copied in as any vault, then both go.

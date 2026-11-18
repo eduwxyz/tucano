@@ -16,6 +16,8 @@ import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { screenOf } from '../../../shared/screens'
+import { isTeam, wikiAccess } from '../../../shared/types'
+import { Select } from './Select'
 
 const DEFAULT_KINDS = (): string[] => [L('Pessoa', 'Person'), L('Projeto', 'Project'), L('Assunto', 'Topic'), L('Decisão', 'Decision')]
 const CODE = /```[\s\S]*?```|`[^`\n]*`/g
@@ -1617,6 +1619,63 @@ const FINDING_LABEL: Record<WikiFinding['kind'], () => string> = {
 const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm', log: 'warn', git: 'warn' }
 const FINDING_ORDER: WikiFinding['kind'][] = ['git', 'contradiction', 'stale', 'duplicate', 'log', 'link', 'broken', 'missing', 'orphan']
 
+// The last agent a finding was handed to, so the next one comes with it picked already.
+let lastAsked: string | undefined
+
+// A page nobody has written yet: the wiki links to it and doesn't have it. It goes to an agent,
+// picked here, which gets one message with what it needs; the writing is the agent's own tool, so
+// only the ones with wiki write access are offered.
+export function HandOff({ finding: f }: { finding: WikiFinding }): ReactNode {
+  const agents = useStore((s) => s.agents)
+  const [pick, setPick] = useState<string | null>(lastAsked ?? null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const writers = agents.filter((a) => isTeam(a) && wikiAccess(a) === 'read_write')
+  const chosen = writers.find((a) => a.id === pick) ?? writers[0]
+  if (!writers.length)
+    return (
+      <span className="muted small">
+        {L('Nenhum agente escreve na wiki ainda: escolha "Lê e escreve" em Ferramentas nas configurações de um.', 'No agent writes on the wiki yet: choose "Read and write" under Tools in one of their settings.')}
+      </span>
+    )
+  const ask = (): void => {
+    if (!chosen) return
+    setBusy(true)
+    setError('')
+    lastAsked = chosen.id
+    void call('wikiAsk', { id: f.id, agentId: chosen.id }).then(
+      (id) => {
+        setBusy(false)
+        navigate({ kind: 'conversation', id })
+      },
+      (e: unknown) => {
+        setBusy(false)
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    )
+  }
+  return (
+    <>
+      <Select
+        className="wk-handoff__agent"
+        aria-label={L('Agente', 'Agent')}
+        value={chosen?.id ?? null}
+        options={writers.map((a) => ({ value: a.id, label: `@${a.handle}`, hint: a.name }))}
+        showHint
+        onChange={(v) => {
+          if (!v) return
+          lastAsked = v
+          setPick(v)
+        }}
+      />
+      <button className={`btn btn--primary btn--sm ${busy ? 'is-busy' : ''}`} disabled={busy || !chosen} onClick={ask}>
+        {busy ? <span className="wk-spin" /> : <Icon name="edit" size={13} />} {L('Escrever a página', 'Write the page')}
+      </button>
+      {error && <span className="field__error">{error}</span>}
+    </>
+  )
+}
+
 function WikiReviewPane(): ReactNode {
   const rev = useStore((s) => s.wikiRev)
   const [r, setR] = useState<WikiReview | null>(null)
@@ -1681,9 +1740,10 @@ function WikiReviewPane(): ReactNode {
             <ChangeCard change={f.change} bare />
           ) : (
             <div className="wk-finding__actions">
+              {(f.kind === 'broken' || f.kind === 'missing') && <HandOff finding={f} />}
               {f.name && (f.kind === 'broken' || f.kind === 'missing') && (
-                <button className="btn btn--sm" onClick={() => navigate({ kind: 'wiki', title: f.name!, edit: true })}>
-                  <Icon name="edit" size={13} /> {L('Escrever a página', 'Write the page')}
+                <button className="btn btn--ghost btn--sm" onClick={() => navigate({ kind: 'wiki', title: f.name!, edit: true })}>
+                  <Icon name="edit" size={13} /> {L('Escrever eu mesmo', 'Write it myself')}
                 </button>
               )}
               <button className="btn btn--ghost btn--sm" onClick={() => void call('wikiDismissFinding', { id: f.id })}>
