@@ -3,7 +3,7 @@ import { L, locale, type Lang } from '../../../shared/lang'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
-import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import { skillGroup, skillHarnessName } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
@@ -24,6 +24,7 @@ import {
   computerOf,
   folderAction,
   lendFolder,
+  skillFolders,
   openExternal,
   stopService,
   addConnector,
@@ -44,6 +45,7 @@ import {
   backupNow,
   openBackups,
   type TelegramInfo,
+  type LocalSkillFolder,
   useStore,
   EFFORTS,
   ENGINES,
@@ -2589,13 +2591,13 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
               {shown.map((k) => {
                 const on = skillApplies(k, agentId)
                 const only = last(k)
-                const origin = skillOrigin(k.source)
+                const origin = skillHarnessName(k.source)
                 return (
                   <label key={k.id} className="check check--skill" title={only ? L(`Só ${name || 'este agente'} usa: pra ninguém usar, arquive em Skills`, `Only ${name || 'this agent'} uses it: to have no one use it, archive it in Skills`) : undefined}>
                     <input type="checkbox" checked={on} disabled={only} onChange={(e) => toggle(k, e.target.checked)} />
                     <span>
                       <strong>{k.name}</strong>
-                      {origin && <span className="tag">{L('do seu', 'from your')} {origin === 'codex' ? 'Codex' : origin === 'claude' ? 'Claude Code' : 'Hermes'}</span>}
+                      {origin && <span className="tag">{L('do seu', 'from your')} {origin}</span>}
                       <span className="muted small">{k.agents.length === 0 ? L('todos os agentes', 'all agents') : `${k.agents.length} ${k.agents.length === 1 ? L('agente', 'agent') : L('agentes', 'agents')}`}</span>
                       <span className="small skill__desc">{k.description}</span>
                     </span>
