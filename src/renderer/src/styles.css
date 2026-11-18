@@ -11503,6 +11503,11 @@ button.agent-card__now:hover {
   top: 0;
   transform-origin: 0 0;
 }
+/* While the board moves or zooms it is one layer the screen slides and scales without painting it again;
+   when the move ends it goes back to being painted, so the text is sharp at the new size. */
+.orgb.is-panning .orgb__stage {
+  will-change: transform;
+}
 .orgb__lines {
   position: absolute;
   left: 0;
