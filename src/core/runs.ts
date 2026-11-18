@@ -688,7 +688,10 @@ export class Runner {
     if (responders.length === 0) {
       if (conv.kind === 'dm' || may.length === 1) responders = may
       else if (may.length > 1) {
-        void this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id, mode === 'parallel'), mode === 'queue', queued ? mine : undefined)
+        // A queued prompt waits for everything running there to end; any other goes as it always
+        // has, straight to the router, without taking one of the queue's places while it decides.
+        if (mode === 'queue') void this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id), true, mine)
+        else void this.routeAndRun(conv, may, replyIn, mine.id, mode === 'parallel')
         return
       }
     }
@@ -696,15 +699,20 @@ export class Runner {
     // nothing to go into) goes as a reply always does, one at a time per agent and thread there, the
     // person's newer messages taking over; a queued one waits for everything running there to end.
     for (const agent of responders) {
-      const start = (): Promise<unknown> =>
-        this.startReply(
+      const start = (): Promise<unknown> => {
+        // startReply takes its own place in the queue once the agent is free, so the job that only
+        // launches it gives its place back at once instead of holding one until the reply ends.
+        void this.startReply(
           agent,
           conv,
           { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) },
           // A queued prompt answers the message it was written for, never taking over an earlier one.
           { urgent: true, merge: mode !== 'queue', parallel: mode === 'parallel' }
         )
-      this.runIn(conv.id, start, mode === 'queue', queued ? mine : undefined)
+        return Promise.resolve()
+      }
+      if (mode === 'queue') this.runIn(conv.id, start, true, queued ? mine : undefined)
+      else void start()
     }
   }
 
