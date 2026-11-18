@@ -1,4 +1,5 @@
 import { L, lang, locale, type Lang } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
@@ -1596,7 +1597,7 @@ const STATUS_WORD = (): Record<HistoryStatus, string> => ({
 
 // The times of a folded row: all of them up to four; past that, the first three and the last.
 const timesOf = (items: Approval[]): string => {
-  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))
+  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' })))
   return hm.length > 4 ? `${hm.slice(0, 3).join(', ')} … ${hm.at(-1)}` : hm.join(', ')
 }
 

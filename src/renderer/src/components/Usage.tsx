@@ -261,7 +261,7 @@ function Quota(): ReactNode {
 function CodexQuota(): ReactNode {
   const q = useStore((s) => s.settings.codexQuota)
   if (!q?.windows.length) return null
-  const at = new Date(q.at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  const at = new Date(q.at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
   const plan = q.plan ? ` ${cap(q.plan)}` : ''
   return (
     <section className="read-group">

@@ -784,7 +784,7 @@ function RoutineAsk({ ask }: { ask: Message }): ReactNode {
 }
 
 const MAX_DOTS = 24
-const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
 
 // Runs in a row of one routine that found nothing new, as one line: how many, from when to when, a dot
 // per run (a red square for one that failed and was got past). It opens to a row per run, and each
