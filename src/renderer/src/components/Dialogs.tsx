@@ -221,10 +221,24 @@ export function MembersDialog({ id, name, members, mentionOnly = [], onClose }: 
                 <span className="member__check">{on && <Icon name="check" size={13} />}</span>
               </button>
               {on && (
-                <label className="member-row__mention muted small" title={L('Lê a conversa, mas só responde quando é mencionado', 'Reads the conversation, but answers only when mentioned')}>
-                  <input type="checkbox" checked={quiet.includes(a.id)} onChange={() => mention(a.id)} aria-label={L(`Modo menção para ${a.name}`, `Mention mode for ${a.name}`)} />
-                  {L('Modo menção', 'Mention mode')}
-                </label>
+                <div className="member-row__modes">
+                  <label className="member-row__mention muted small">
+                    <input type="checkbox" checked={quiet.includes(a.id)} onChange={() => mention(a.id)} aria-label={L(`Modo menção para ${a.name}`, `Mention mode for ${a.name}`)} />
+                    <span>{L('Modo menção', 'Mention mode')}</span>
+                    <span
+                      className="mode-help"
+                      role="img"
+                      tabIndex={0}
+                      title={L(
+                        'Lê todas as mensagens do canal, mas só responde quando você ou outro agente chama o nome dele com @.',
+                        'Reads every message in the channel, but answers only when you or another agent calls its name with @.'
+                      )}
+                      aria-label={L('O que é o modo menção', 'What mention mode does')}
+                    >
+                      (?)
+                    </span>
+                  </label>
+                </div>
               )}
             </div>
           )

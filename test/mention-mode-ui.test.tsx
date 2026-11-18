@@ -1,5 +1,5 @@
-// Mention mode on the screens: the checkbox in the channel's agent list, only for agents in the
-// channel, and the line under the field when everyone in the room waits to be called.
+// Mention mode on the screens: the switch on the line under an agent in the channel's list, the
+// count, and the line under the field when everyone in the room waits to be called.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, Conversation } from '../src/shared/types'
@@ -58,6 +58,23 @@ describe("a channel's agent list", () => {
     expect(html).toContain('@nina') // in the list…
     expect(html).toContain('Modo menção para Lia')
     expect(html).not.toContain('Modo menção para Nina') // …but not in the channel, so nothing to set
+  })
+
+  it('puts the mode on a line under the agent, with a hover explanation', () => {
+    const html = dialog([])
+    const rows = html.split('<div class="member-row">').slice(1)
+    expect(rows).toHaveLength(3)
+    // An agent in the channel: its mode comes after the agent itself, on the line under it.
+    for (const row of rows.slice(0, 2)) {
+      expect(row.indexOf('class="member ')).toBeGreaterThanOrEqual(0)
+      expect(row.indexOf('member-row__modes')).toBeGreaterThan(row.indexOf('class="member '))
+      expect(row.indexOf('member-row__modes')).toBeLessThan(row.indexOf('</div>'))
+      expect(row).toContain('Lê todas as mensagens do canal')
+    }
+    // An agent out of the channel has no line to set anything on.
+    expect(rows[2]).not.toContain('member-row__modes')
+    expect(html.match(/class="mode-help"/g)).toHaveLength(2)
+    expect(html.match(/title="[^"]+" aria-label="O que é o modo menção"/g)).toHaveLength(2)
   })
 
   it('counts who is in mention mode', () => {
