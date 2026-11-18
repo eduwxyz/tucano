@@ -66,7 +66,10 @@ const click = async (name: RegExp): Promise<void> => {
 describe('a refused save', () => {
   it("on an agent's page, says why, and nothing goes uncaught", async () => {
     await act(async () => root.render(<AgentPage id="a1" />))
-    await click(/^Salvar$/)
+    // No Save button: a change saves by itself (a switch, at once).
+    const reserve = document.querySelector('[role="switch"][aria-label="Modelo reserva"]')!
+    await act(async () => void reserve.dispatchEvent(new window.Event('click', { bubbles: true })))
+    await act(async () => new Promise((r) => setTimeout(r, 20)))
     expect(saveAgent).toHaveBeenCalled()
     expect(text()).toContain(REFUSED)
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(REFUSED)

@@ -22,8 +22,10 @@ const KINDS: { kind: Kind; label: () => string; ask: () => string }[] = [
 const SYSTEMS = { mac: 'macOS', windows: 'Windows', linux: 'Linux' } as const
 
 // The picture first (the window as the person sees it), then the dialog over it. In a browser there's
-// no picture to take: the dialog opens without the option.
+// no picture to take: the dialog opens without the option. The picture waits two frames, so a menu or
+// a popover the click just closed is off the screen and out of it.
 export async function openFeedback(): Promise<void> {
+  if (typeof requestAnimationFrame === 'function') await new Promise<void>((y) => requestAnimationFrame(() => requestAnimationFrame(() => y())))
   const shot = windowless() || !window.tucano?.capture ? null : await window.tucano.capture().catch(() => null)
   openDialog({ kind: 'feedback', ...(shot ? { image: shot } : {}) })
 }
@@ -93,17 +95,6 @@ export function FeedbackDialog({ image, onClose }: { image?: Shot; onClose: () =
         </button>
       </footer>
     </Modal>
-  )
-}
-
-// The foot's row: always there, for everyone.
-export function FeedbackItem(): ReactNode {
-  const open = useStore((s) => s.dialog?.kind === 'feedback')
-  return (
-    <button className={`nav-item ${open ? 'is-active' : ''}`} onClick={() => void openFeedback()}>
-      <Icon name="ask" />
-      <span className="nav-item__label">{L('Enviar feedback', 'Send feedback')}</span>
-    </button>
   )
 }
 

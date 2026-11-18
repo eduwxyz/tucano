@@ -1,4 +1,4 @@
-// "Enviar feedback" and the survey line on screen: the row at the sidebar's foot, the dialog (the kind,
+// "Enviar feedback" and the survey line on screen: opening it (from the workspace's menu), the dialog (the kind,
 // the text, the window's picture, what goes along), and the survey's steps. The core is a stand-in:
 // what's sent to it is what's checked.
 import { parseHTML } from 'linkedom'
@@ -36,7 +36,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 const store = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
-const { FeedbackDialog, FeedbackItem, SurveyLine } = await import('../src/renderer/src/components/Feedback')
+const { FeedbackDialog, openFeedback, SurveyLine } = await import('../src/renderer/src/components/Feedback')
 
 const base = (await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')).getState()
 const owner: Person = { id: 'ana', name: 'Ana', role: 'owner', about: '' }
@@ -87,9 +87,8 @@ const render = async (node: React.ReactNode): Promise<void> => {
 const sent = (method: string): unknown[] => calls.filter((c) => c.method === method).map((c) => c.params)
 
 describe('Enviar feedback', () => {
-  it('the foot row takes the window’s picture first, then opens the dialog with it', async () => {
-    await render(<FeedbackItem />)
-    await click(/Enviar feedback/)
+  it('takes the window’s picture first, then opens the dialog with it', async () => {
+    await act(async () => openFeedback())
     expect(capture).toHaveBeenCalled()
     expect(store.openDialog).toHaveBeenCalledWith({ kind: 'feedback', image: SHOT })
   })
