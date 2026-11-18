@@ -2942,7 +2942,6 @@ h3 {
 .lrow--switch .lrow__ctl {
   margin-left: auto;
 }
-
 /* An error arrives calm: it rises in on a red tint that fades, no shake. */
 .note--error {
   color: var(--danger);

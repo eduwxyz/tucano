@@ -1790,8 +1790,7 @@ export function Card({ title, lead, action, section, children }: { title: string
     )
   }
   return (
-    <div className="card" id={section ? `settings-${section}` : undefined} data-settings-section={section} tabIndex={section ? -1 : undefined}>
-      <div className="card__head">
+    <div className="card" id={section ? `settings-${section}` : undefined} data-settings-section={section} tabIndex={section ? -1 : undefined}>      <div className="card__head">
         <div className="row row--between">
           <h2>{title}</h2>
           {action}
@@ -3423,8 +3422,7 @@ export function ClassifiersCard(): ReactNode {
               </div>
             </div>
           </div>
-          <span className="key-row__glyph" aria-hidden="true" />        </div>
-      ) : (
+          <span className="key-row__glyph" aria-hidden="true" />        </div>      ) : (
         <div className="row">
           <button className="btn btn--sm" onClick={startAdd}>
             {L('+ Adicionar classificador', '+ Add classifier')}
@@ -3442,14 +3440,12 @@ export function ClassifiersCard(): ReactNode {
 }
 
 // Which job each classifier serves: who replies in a channel, and what an agent clicks in a page. It sits in its own card, apart from the list, because
-// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.
-export function ClassifierUsesCard(): ReactNode {
+// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.export function ClassifierUsesCard(): ReactNode {
   const settings = useStore((s) => s.settings)
   const work = onGateway(settings)
   const list = settings.classifiers ?? []
   const jobs = settings.classifierJobs ?? {}
-  const assign = (job: ClassifierJob, id: string | null): void => {
-    const next = { ...jobs }
+  const assign = (job: ClassifierJob, id: string | null): void => {    const next = { ...jobs }
     if (id) next[job] = id
     else delete next[job]
     updateSettings({ classifierJobs: next })
@@ -3481,8 +3477,7 @@ export function ClassifierUsesCard(): ReactNode {
               </div>            )
           })}
         </>
-      )}
-    </>
+      )}    </>
   )
 }
 
@@ -3541,8 +3536,7 @@ export function BrowserClickCard(): ReactNode {
       {chosen && <ClassifierKey key={chosen.id} classifier={chosen} saved={!!settings.classifierKeys?.[chosen.id]} />}
     </Card>
   )
-}
-function VoiceCard(): ReactNode {
+}function VoiceCard(): ReactNode {
   const voice = useStore((s) => s.settings.voice)
   const status = useVoice()
   const [error, setError] = useState('')
@@ -3793,8 +3787,7 @@ export function SettingsPage(): ReactNode {
                   <strong>{L('Mostrar os passos enquanto o agente trabalha', 'Show the steps while the agent works')}</strong>
                   <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Shows steps under replies. When off, select the current step to see the list. This affects only you.')}</p>
                 </div>
-                <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />              </div>
-              <div className="key-row">
+                <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />              </div>              <div className="key-row">
                 <Icon name="spark" />
                 <div className="grow">
                   <strong>{L('O que o modelo pensa', "Show reasoning")}</strong>
@@ -3854,8 +3847,7 @@ export function SettingsPage(): ReactNode {
                 label={L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation")}
                 hint={L(
                   'Cada prompt ganha uma resposta própria, ao lado das que já estão em curso. Passando deste número, o prompt espera na fila até uma terminar. Um agente pode ir uma por vez na página dele.',
-                  "New prompts start separate replies up to this limit, then queue until one finishes. An agent can override this with “One reply at a time”."
-                )}
+                  "New prompts start separate replies up to this limit, then queue until one finishes. An agent can override this with “One reply at a time”."                )}
               >
                 <Select
                   aria-label={L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation")}
