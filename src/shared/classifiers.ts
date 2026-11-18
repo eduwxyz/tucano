@@ -12,7 +12,9 @@ import type { Settings } from './types'
 export type ClassifierProvider = 'typesafe' | 'openrouter' | 'openai' | 'gemini'
 
 // Where a classifier is used. A job has at most one classifier, and unassigned means off.
-export type ClassifierJob = 'routing' | 'browser'
+// `recommend` is the one job with no selector of its own: it is TypeSafe's Jev or nothing, switched
+// on in Settings › Classifiers › Classifier Uses, so it is not in CLASSIFIER_JOBS below.
+export type ClassifierJob = 'routing' | 'recommend' | 'browser'
 
 export interface ClassifierConfig {
   id: string
@@ -87,11 +89,13 @@ export const providerSpec = (p: ClassifierProvider): ProviderSpec => PROVIDERS.f
 // The classifier an install from before this section had: one TypeSafe Jev.
 export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provider: 'typesafe', model: 'jev-latest' }
 
+// The jobs the Classifier Uses card offers as a selector. `recommend` is the switch below them.
 export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser']
 
 export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
   ({
     routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
+    recommend: { pt: 'A opção sugerida na pergunta', en: 'Suggested answers' },
     browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
   })[job]
 
@@ -101,13 +105,17 @@ export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
       pt: 'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador. Cada mensagem sem @menção vai pro provedor escolhido.',
       en: 'Reads the conversation and picks who replies, in place of the router’s small model. Every message without an @mention goes to the chosen provider.'
     },
+    recommend: {
+      pt: 'Marca a opção que o Jev escolheria no card de uma pergunta do agente. É uma sugestão: quem escolhe continua sendo você.',
+      en: 'Marks the option Jev would pick on an agent’s question card. It is a suggestion: you still choose.'
+    },
     browser: {
       pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
       en: 'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
     }
   })[job]
 
-type ClassifierSettings = Pick<Settings, 'classifiers' | 'classifierJobs' | 'jevKey' | 'routerModel' | 'browserJev'>
+type ClassifierSettings = Pick<Settings, 'classifiers' | 'classifierJobs' | 'jevKey' | 'routerModel' | 'browserJev' | 'jevRecommend'>
 
 // What is configured. An install from before the section has no list: it had one Jev, if it was
 // ever switched on anywhere, and that is what it keeps.
@@ -126,6 +134,7 @@ export function classifierJobsOf(s: ClassifierSettings): Partial<Record<Classifi
   const jobs: Partial<Record<ClassifierJob, string>> = {}
   if (known && s.routerModel === 'jev') jobs.routing = JEV_CLASSIFIER.id
   if (known && s.browserJev) jobs.browser = JEV_CLASSIFIER.id
+  if (known && s.jevRecommend) jobs.recommend = JEV_CLASSIFIER.id
   return jobs
 }
 
