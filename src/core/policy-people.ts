@@ -132,6 +132,9 @@ export const NEEDS: Record<Method, Need> = {
   removeRoutine: 'target',
   runRoutine: 'target',
   watchRoutine: 'anyone',
+  sendFeedback: 'anyone', // to the people who make Tucano: what anyone here saw go wrong
+  survey: 'owner', // one answer per install: the owner's
+  answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',

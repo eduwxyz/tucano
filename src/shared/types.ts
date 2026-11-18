@@ -557,6 +557,7 @@ export interface Settings {
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work

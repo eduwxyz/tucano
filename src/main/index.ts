@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
+import { readInstall } from '../core/feedback'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
@@ -92,7 +93,7 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
@@ -642,6 +643,26 @@ const updates = new Updates((state) => {
   // With a server on screen, its page is what the person sees: it says a version is ready too.
   servers.tell('server:update', state)
 })
+// "Enviar feedback": the app's window as it is, taken before the dialog opens over it. At most 1600
+// pixels wide, a PNG, or a JPEG when the PNG would pass what the feedback bucket takes (core/feedback.ts).
+ipcMain.handle('window:capture', async (e) => {
+  if (!fromApp(e)) return null
+  try {
+    let image = await e.sender.capturePage()
+    const { width } = image.getSize()
+    if (width > 1600) image = image.resize({ width: 1600, quality: 'good' })
+    const png = image.toPNG()
+    if (png.length <= 2_500_000) return { type: 'image/png', data: png.toString('base64') }
+    for (const quality of [80, 60, 40]) {
+      const jpg = image.toJPEG(quality)
+      if (jpg.length <= 2_500_000) return { type: 'image/jpeg', data: jpg.toString('base64') }
+    }
+    return null
+  } catch (err) {
+    console.error('[main] capture:', err instanceof Error ? err.message : err)
+    return null
+  }
+})
 ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
 ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
 ipcMain.on('update:install', (e) => {
@@ -925,6 +946,9 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   })
   setMenu()
   protocol.handle('tucano', serveArtifact)
+  // This computer's install (core/feedback.ts), for every workspace: made once. Nothing here yet is a new
+  // install; a folder with a Tucano in it is one from before the file existed.
+  readInstall(dataDir(), app.getVersion(), !existsSync(join(dataDir(), 'tucano.db')))
   registry = new Workspaces(dataDir(), launch.ports)
   nativeTheme.themeSource = registry.theme() ?? 'system'
   systemProxyRead = readSystemProxy()

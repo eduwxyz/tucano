@@ -27,7 +27,7 @@ function watch(): void {
   window.tucano.onUpdate(set)
 }
 
-function useUpdate(): UpdateState | null {
+export function useUpdate(): UpdateState | null {
   watch()
   return useSyncExternalStore(
     (l) => {

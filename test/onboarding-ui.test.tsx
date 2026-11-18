@@ -390,6 +390,8 @@ describe('the sidebar and the missions', () => {
     expect(store.navigate).toHaveBeenCalledWith({ kind: 'settings' })
     await openMenu()
     expect(menuItems().join(' | ')).not.toMatch(/Conectores|Configurações/)
+    // Enviar feedback is in the menu from the start, for everyone, not a row of its own at the foot.
+    expect(menuItems()).toContain('Enviar feedback')
   })
 
   it('grows as missions bring parts, tagged new until opened', async () => {

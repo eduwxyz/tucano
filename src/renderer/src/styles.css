@@ -538,6 +538,137 @@ h3 {
   padding: 8px;
   border-top: 1px solid var(--border);
 }
+/* A survey (components/Feedback.tsx): a quiet line above the foot, and the card it opens upward. */
+.survey {
+  padding: 0 8px 6px;
+}
+.survey__line {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px 6px 11px;
+  border-radius: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: left;
+  transition: var(--transition-ui);
+}
+.survey__line:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.survey__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.survey__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.survey__time {
+  font-size: 11px;
+}
+.survey__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: pop var(--dur-base) var(--ease-out) backwards;
+}
+.survey__question {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.survey__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.survey__skip {
+  align-self: flex-start;
+  font-size: 12px;
+}
+.survey__why {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.survey__why textarea {
+  font-size: 12.5px;
+  resize: none;
+}
+.survey--thanks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 17px 12px;
+  color: var(--ok);
+  font-size: 12.5px;
+}
+/* "Enviar feedback": the kind, the text, the screen's picture and what goes along. */
+.modal__card.feedback {
+  width: min(520px, calc(100vw - 32px));
+}
+.feedback__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.feedback__kinds .chip {
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.feedback .field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.feedback__shot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 12px;
+}
+.feedback__attach {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.feedback__attach input {
+  accent-color: var(--accent);
+}
+.feedback__preview {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  object-position: left top;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.feedback__what {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  color: var(--text-2);
+  line-height: 1.5;
+}
 .section {
   margin-top: 14px;
 }
@@ -11371,6 +11502,11 @@ button.agent-card__now:hover {
   left: 0;
   top: 0;
   transform-origin: 0 0;
+}
+/* While the board moves or zooms it is one layer the screen slides and scales without painting it again;
+   when the move ends it goes back to being painted, so the text is sharp at the new size. */
+.orgb.is-panning .orgb__stage {
+  will-change: transform;
 }
 .orgb__lines {
   position: absolute;

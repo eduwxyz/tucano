@@ -99,6 +99,7 @@ import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
+import { openFeedback } from './Feedback'
 import type { NotifyState } from '../rpc'
 import { hasServers, NodeCard, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
@@ -3035,6 +3036,31 @@ export function SettingsPage(): ReactNode {
                 <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Opens the list of what the agent is doing under its reply. Off, only the line with what it’s doing now stays; a click on it opens the steps. It changes only for you.')}</p>
               </div>
               <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
+          <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>
+            {owner && (
+              <div className="key-row">
+                <Icon name="ask" />
+                <div className="grow">
+                  <strong>{L('Pesquisas', 'Surveys')}</strong>
+                  <p className="muted small">{L('De vez em quando, uma linha discreta no pé da barra com uma pergunta rápida. Pra isso o Tucano consulta tucano.sh algumas vezes por dia. Não manda nada seu.', 'Now and then, a quiet line at the foot of the sidebar with a quick question. For that, Tucano checks tucano.sh a few times a day. It sends nothing of yours.')}</p>
+                </div>
+                <Toggle on={settings.surveys !== false} onChange={(v) => updateSettings({ surveys: v })} label={L('Pesquisas', 'Surveys')} />
+              </div>
+            )}
+            <div className="key-row">
+              <Icon name="send" />
+              <div className="grow">
+                <strong>{L('Enviar feedback', 'Send feedback')}</strong>
+                <p className="muted small">{L('Um erro, uma ideia, qualquer coisa. Também no menu do nome do workspace, no topo da barra.', 'A bug, an idea, anything. Also in the menu on the workspace’s name, at the top of the sidebar.')}</p>
+              </div>
+              <button className="btn btn--sm" onClick={() => void openFeedback()}>
+                {L('Escrever', 'Write')}
+              </button>
             </div>
           </Card>
         )}

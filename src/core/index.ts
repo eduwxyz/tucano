@@ -11,7 +11,7 @@ import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-path
 import { basename, join, resolve, sep } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
-import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
+import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
@@ -42,6 +42,7 @@ import { asdfEnv, codexEnv } from './engines/codex'
 import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
 import { LoginTerminal, type LoginKey } from './login-terminal'
 import { Push, pushUrl } from './push'
+import { Feedback, feedbackUrl } from './feedback'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
 import { appTools, DesktopApps, macApps, SELF } from './apps'
@@ -505,6 +506,11 @@ const push = new Push({
   targets: (to) => db.pushTargets(to),
   gone: (hash) => db.dropKeyPush(hash)
 })
+
+// "Enviar feedback" and the sidebar's surveys, through tucano.sh (core/feedback.ts). install.json lives in
+// the desktop's data folder, for every workspace (TUCANO_INSTALL_DIR, set by src/main); a server keeps its own.
+const installDir = process.env['TUCANO_INSTALL_DIR'] || dataDir
+const feedback = new Feedback({ url: feedbackUrl(), dir: installDir, version: appVersion, fresh: db.created && installDir === dataDir, os: osOf() })
 
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
@@ -2290,6 +2296,10 @@ const api: Handlers = {
     routines.remove(id)
   },
   // "Me avise": told of a channel routine's runs (one's own routine always tells its person).
+  sendFeedback: ({ kind, message, image, lang: l }) => feedback.send({ kind, message, ...(image ? { image } : {}), lang: l ?? lang() }),
+  // Off in the settings: no survey, and nothing asked of tucano.sh.
+  survey: ({ lang: l }) => (settings().surveys === false ? Promise.resolve(null) : feedback.survey({ lang: l ?? lang() })),
+  answerSurvey: ({ survey, choice, comment, dismiss, lang: l }) => feedback.answer({ survey, ...(choice ? { choice } : {}), ...(comment ? { comment } : {}), ...(dismiss ? { dismiss } : {}), lang: l ?? lang() }),
   watchRoutine: ({ id, on }, ctx) => {
     people.watch(ctx.person, id)
     db.watchRoutine(id, ctx.person.id, on)

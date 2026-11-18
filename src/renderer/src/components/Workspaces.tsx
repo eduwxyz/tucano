@@ -5,6 +5,7 @@ import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, updateSetti
 import { Icon } from './ui'
 import { useServers } from './Servers'
 import { useSidebarParts } from './Missions'
+import { openFeedback } from './Feedback'
 
 export function useWorkspaceList(): { list: WorkspaceList | null; error: string } {
   const [list, setList] = useState<WorkspaceList | null>(null)
@@ -141,6 +142,11 @@ export function WorkspaceMenu(): ReactNode {
             <span className="grow">{L('Mostrar as missões', 'Show the missions')}</span>
           </button>
         )}
+        <div className="menu__sep" role="separator" />
+        <button className="menu__item" role="menuitem" onClick={pick(() => void openFeedback())}>
+          <Icon name="ask" size={15} />
+          <span className="grow">{L('Enviar feedback', 'Send feedback')}</span>
+        </button>
         {(error || loadError) && <p className="field__error" role="alert">{error || loadError}</p>}
       </div>}
     </div>
