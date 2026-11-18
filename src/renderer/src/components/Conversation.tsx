@@ -243,7 +243,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           <div className="topbar__actions">
             {/* What the providers have left, in the window that lasts longest: the one line that says
                 whether the plan runs out before it renews, without opening Usage and limits. */}
-            <QuotaStrip />
+            <QuotaStrip agents={members} />
             {conv.kind === 'channel' && (
               <div className="stack" title={L('Agentes no canal', 'Agents in the channel')}>
                 {members.map((a) => (
