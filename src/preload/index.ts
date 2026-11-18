@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('tucano', {
   testNotify: (): Promise<unknown> => ipcRenderer.invoke('notify:test'),
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
   viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
+  // "Enviar feedback": a picture of this window, before the dialog opens over it (null: it didn't work).
+  capture: (): Promise<unknown> => ipcRenderer.invoke('window:capture'),
   // The app's own updates.
   updateState: (): Promise<unknown> => ipcRenderer.invoke('update:state'),
   onUpdate: (cb: (state: unknown) => void): void => {

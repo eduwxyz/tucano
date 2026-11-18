@@ -136,7 +136,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string } } // image: the window, taken before it opened
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }

@@ -36,6 +36,7 @@ import {
 import type { SidebarPart } from '../../../shared/onboarding'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
+import { FeedbackItem, SurveyLine } from './Feedback'
 import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { MissionsCard, useSidebarParts } from './Missions'
@@ -449,11 +450,13 @@ export function Sidebar(): ReactNode {
       {/* The missions set the Tucano up and walk through it: the owner's. */}
       {owner && settings.onboarding?.done && !settings.onboarding.checklistHidden && <MissionsCard />}
       <ContextMenu menu={menu} onClose={closeMenu} />
+      <SurveyLine />
       <div className="sidebar__foot">
         <UpdateNote />
         {admin && parts.shows('usage') && <NavItem view={{ kind: 'usage' }} icon="chart" label={L('Uso e limites', 'Usage and limits')} fresh={fresh('usage')} />}
         {parts.shows('connectors') && <NavItem view={{ kind: 'connectors' }} icon="plug" label={L('Conectores', 'Connectors')} fresh={fresh('connectors')} />}
         <NavItem view={{ kind: 'settings' }} icon="gear" label={L('Configurações', 'Settings')} />
+        <FeedbackItem />
       </div>
     </aside>
   )
