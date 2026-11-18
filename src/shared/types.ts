@@ -875,6 +875,7 @@ export interface Approval {
   requestedBy?: string // the person whose request the agent was working on
   decidedBy?: string // the person who decided it
   behalf?: string // what it's for, when not a person's message: "rotina da Ana", "rotina do #vendas"
+  computerOwner?: string // on a lent computer (src/shared/node-link.ts): its person, the only one who decides it
 }
 
 // A person's memories are `person:<id>` (personScope); otherwise the scope is the id of the one agent they belong to.

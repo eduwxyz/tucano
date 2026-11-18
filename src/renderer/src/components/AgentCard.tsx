@@ -81,7 +81,11 @@ function AgentCard({ open }: { open: Open }): ReactNode {
   // an approval only the admins or the agent's person decide.
   const waitsOn = useStore((s): string | undefined => {
     if (now?.kind !== 'waiting') return undefined
-    if (now.on === 'approval') return canDecide(s, { agentId: open.agentId }) ? undefined : ''
+    if (now.on === 'approval') {
+      // The approval it waits on: on a lent computer, only that computer's person decides.
+      const a = s.approvals.findLast((x) => x.agentId === open.agentId && x.conversationId === now.conversationId && x.state === 'pending')
+      return canDecide(s, { agentId: open.agentId, computerOwner: a?.computerOwner }) ? undefined : ''
+    }
     return now.askedTo && s.you && now.askedTo !== s.you ? personName(s, now.askedTo) : undefined
   })
   const channels = useMemo(() => agentChannels(open.agentId, conversations), [open.agentId, conversations])

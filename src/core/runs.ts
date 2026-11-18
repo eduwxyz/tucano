@@ -1183,7 +1183,8 @@ export class Runner {
       return !p || p.id === db.ownerId() ? ownerName : p.name
     }
     const forWhom = (body: string): string => (behalf ? `${body} (${behalf})` : body)
-    const notifyApproval = (title: string, body: string): void => this.deps.notify?.(title, forWhom(body), conv.id, 'approval', msg.threadId, approvers())
+    // `only`: who alone decides it (a lent computer's person): the notice goes to them, not to the agent's deciders.
+    const notifyApproval = (title: string, body: string, only?: string): void => this.deps.notify?.(title, forWhom(body), conv.id, 'approval', msg.threadId, only ? [only] : approvers())
     // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
     const asked = [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine')
     const work = opts.work ?? opts.existing?.run?.work ?? (asked ? workIn(asked.text) : undefined)
@@ -2218,10 +2219,11 @@ ${note}`,
             ...(behalf ? { behalf } : {})
           }
           db.createApproval(approval)
-          emit({ type: 'approval', approval })
+          const stored = db.approval(approval.id) ?? approval // with whose computer it runs on, when it's a lent one
+          emit({ type: 'approval', approval: stored })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail, ...(judgedNow.why === 'guard' ? { note: guardNote() } : {}), status: 'done' })
-          notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`)
+          notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${toolLabel(current.name)} · ${hit.connector.name}${approval.why ? `: ${approval.why}` : ''}`, stored.computerOwner)
           return textResult(
             L(
               `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
@@ -2692,10 +2694,18 @@ ${note}`,
     const fresh = rules.filter((r) => !owner?.autoApprove?.includes(r))
     // For a command or a PR, "sempre permitir" turns that kind of action to "does it alone" on the agent's page.
     const kinds: ActionKind[] = ap.connectorId === COMPUTADOR || ap.tool === NODE_BASH ? shellActions(String(ap.args['command'] ?? '')) : ap.tool === ABRIR_PR ? ['pr'] : []
+    // On a lent computer its person decides, but she may not be one who sets this agent's rules (a team's
+    // agent, someone else's): then "always" stays on her computer. A kind of command turned to "does it
+    // alone" would be the agent's everywhere (its own computer, other people's), so that one is just this once;
+    // a tool of her computer allowed for good is that connector's alone, so it stands.
+    const decidedBy = decider ? db.person(decider) : undefined
+    const agentWide = !computer || (!!decidedBy && can(decidedBy, { kind: 'approval', agentOwner: agentOwner(db, ap.agentId) }))
     if (always && decision === 'approved' && owner && !ap.highRisk && kinds.length) {
-      db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
-      emit({ type: 'agent', agent: db.agent(owner.id)! })
-      db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
+      if (agentWide) {
+        db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
+        emit({ type: 'agent', agent: db.agent(owner.id)! })
+        db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
+      }
     } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })

@@ -2208,12 +2208,13 @@ const api: Handlers = {
     return id
   },
   updateTool: ({ connectorId, name, patch }, ctx) => (record(ctx, 'connector.updated', connectorId, { tool: name, ...patch }), connectors.updateTool(connectorId, name, patch)),
-  // The agent's person, admins, and whoever covers for that person now.
+  // The agent's person, admins, and whoever covers for that person now. On a lent computer, only its
+  // person: whoever the agent belongs to (a member using a team's agent decides on their own computer).
   decideApproval: ({ id, decision, reason, always }, ctx) => {
     const a = db.approval(id)
     if (!a) return
     if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
-    must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
+    if (!a.computerOwner) must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
     if (!people.canDecide(ctx.person, a)) throw new UserError(L('Isso roda no computador de outra pessoa: só ela decide.', "That runs on someone else's computer: only they decide."))
     bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
   },

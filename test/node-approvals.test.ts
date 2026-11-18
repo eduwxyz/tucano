@@ -61,6 +61,7 @@ let results: unknown[]
 let ran: string[] // the commands the node ran on "the person's computer"
 let clicked: Record<string, unknown>[] // the risky clicks the node's browser did
 let appActs: Record<string, unknown>[]
+let notified: (string[] | undefined)[] // whom each approval's notice went to
 let slowMs: number // how long a command or a local connector takes on "the person's computer"
 
 const agent = (o: { actionRules?: ActionRules; autonomy?: Autonomy; grant?: 'read' | 'read_write' } = {}): Agent => ({
@@ -75,6 +76,7 @@ const runner = (plan: (turn: Turn) => Plan): Runner =>
     engines: { claude: scripted(plan, results), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
     settings: async () => settings,
     emit: () => {},
+    notify: (_t, _b, _c, kind, _th, to) => void (kind === 'approval' && notified.push(to)),
     workDir: join(dir, 'work'),
     gateway,
     connectors,
@@ -92,6 +94,7 @@ beforeEach(async () => {
   ran = []
   clicked = []
   appActs = []
+  notified = []
   slowMs = 0
   // The person's computer: a command and a click are only recorded.
   const mac = {
@@ -343,5 +346,22 @@ describe("someone's computer on a team server is theirs", () => {
     await r.decide(ap.id, 'approved', undefined, false, 'maria')
     await r.idle()
     expect(ran).toEqual(['git push origin main'])
+  })
+
+  it("the notice of what waits on her computer goes to her alone, even with an agent that isn't hers, and says whose it is", async () => {
+    await lent.stop()
+    db.addPerson({ id: 'maria', name: 'Maria', role: 'member', about: '' })
+    db.addPerson({ id: 'dani', name: 'Dani', role: 'admin', about: '' })
+    db.createConversation({ id: 'd-maria', kind: 'dm', name: 'a1', members: ['a1'], owner: 'maria' })
+    lent = await lend({ node, db, connectors, keys: { 'maria-key': { person: 'maria' } }, device: 'mac-maria', name: 'iMac' })
+    await until(() => connectors.get(lent.id() ?? '')?.status === 'connected')
+    nodeId = lent.id()!
+    db.saveAgent(agent({ autonomy: 'careful' })) // the owner's agent: its deciders are the owner and the admins
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'git push origin main' } }, null))
+    await r.send('d-maria', 'publique')
+    await r.idle()
+    const ap = db.approvals().find((a) => a.state === 'pending')!
+    expect(ap.computerOwner).toBe('maria')
+    expect(notified).toEqual([['maria']])
   })
 })

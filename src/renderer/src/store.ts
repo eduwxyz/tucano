@@ -748,7 +748,9 @@ export const canEditChannel = (s: Pick<State, 'people' | 'you'>, c: Pick<Convers
 export const teamMode = (s: Pick<State, 'people'>): boolean => s.people.length > 1 || windowless()
 export const roleLabel = (r: Person['role']): string => (r === 'owner' ? L('Dono', 'Owner') : r === 'admin' ? 'Admin' : L('Membro', 'Member'))
 // Who decides an agent's approvals: admins, the agent's person, and whoever covers for them now.
-export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<Approval, 'agentId'>): boolean => {
+// On a lent computer, only its person (not the admins, nor whoever covers): the core refuses anyone else.
+export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<Approval, 'agentId' | 'computerOwner'>): boolean => {
+  if (a.computerOwner) return a.computerOwner === s.you
   if (amAdmin(s)) return true
   const owner = personById(s, s.agents.find((x) => x.id === a.agentId)?.owner)
   return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))

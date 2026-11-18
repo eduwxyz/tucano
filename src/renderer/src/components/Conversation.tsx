@@ -1733,7 +1733,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const mayDecide = useStore((s) => canDecide(s, approval))
-  const decider = useStore((s) => personById(s, agent?.owner))
+  // On a lent computer its person decides, not the agent's.
+  const decider = useStore((s) => personById(s, approval.computerOwner ?? agent?.owner))
   const requester = useStore((s) => personById(s, approval.requestedBy))
   const decidedBy = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : me.name))
   const [refusing, setRefusing] = useState(false)
@@ -1876,7 +1877,9 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         </div>
       ) : !mayDecide ? (
         <div className="approval__decided">
-          {approval.requestedBy === you
+          {approval.computerOwner
+            ? L(`Roda no computador de ${decider?.name ?? 'outra pessoa'}: só essa pessoa decide.`, `Runs on ${decider?.name ?? "someone else"}'s computer: only they decide.`)
+            : approval.requestedBy === you
             ? L(`Você pediu. Esperando ${decider?.name ?? 'um admin'} decidir.`, `You asked. Waiting for ${decider?.name ?? 'an admin'} to decide.`)
             : L(`Esperando ${decider?.name ?? 'um admin'} decidir. Só ${decider ? `${decider.name} e os admins aprovam` : 'os admins aprovam'}.`, `Waiting for ${decider?.name ?? 'an admin'} to decide. Only ${decider ? `${decider.name} and the admins approve` : 'the admins approve'}.`)}
         </div>
@@ -1974,7 +1977,11 @@ function peopleHandles(people: Person[]): { person: Person; handle: string }[] {
 function ApprovalRoute({ approval, agent, requester, decider, you }: { approval: Approval; agent?: Agent; requester?: Person; decider?: Person; you: string }): ReactNode {
   const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
   const asked = approval.behalf ? cap(approval.behalf) : requester ? (requester.id === you ? L('Pedido seu', 'Your request') : L(`Pedido de ${requester.name}`, `Asked by ${requester.name}`)) : undefined
-  const goes = decider ? (decider.id === you ? L(`Vai pra você, dono de ${agent?.name ?? 'o agente'}`, `Goes to you, ${agent?.name ?? 'the agent'}'s owner`) : L(`Vai pra ${decider.name}, dono de ${agent?.name ?? 'o agente'}`, `Goes to ${decider.name}, ${agent?.name ?? 'the agent'}'s owner`)) : L('Vai pros admins', 'Goes to the admins')
+  const goes = approval.computerOwner
+    ? decider?.id === you
+      ? L('Vai pra você: roda no seu computador', 'Goes to you: it runs on your computer')
+      : L(`Vai pra ${decider?.name ?? 'outra pessoa'}: roda no computador dela`, `Goes to ${decider?.name ?? 'someone else'}: it runs on their computer`)
+    : decider ? (decider.id === you ? L(`Vai pra você, dono de ${agent?.name ?? 'o agente'}`, `Goes to you, ${agent?.name ?? 'the agent'}'s owner`) : L(`Vai pra ${decider.name}, dono de ${agent?.name ?? 'o agente'}`, `Goes to ${decider.name}, ${agent?.name ?? 'the agent'}'s owner`)) : L('Vai pros admins', 'Goes to the admins')
   return (
     <div className="approval__route">
       {asked && <span className="tag">{asked}</span>}
