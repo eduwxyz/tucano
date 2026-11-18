@@ -1,11 +1,11 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { antigravityArgs, antigravityHomeEnv, antigravityInput, antigravityModel, antigravityParser, antigravityPrompt, antigravitySettings, antigravityTurnDirs, parseAntigravityModels, RULES_MAX } from '../src/core/engines/antigravity'
+import { ANTIGRAVITY_TOKEN, antigravityArgs, antigravityHomeEnv, antigravityInput, antigravityModel, antigravityParser, antigravityPrompt, antigravitySettings, antigravityTurnDirs, parseAntigravityModels, RULES_MAX } from '../src/core/engines/antigravity'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { grokArgs, grokCleanup, grokConfig, grokEngine, grokLogin, grokParser, grokPrompt, grokTurnDirs, grokTurnEnv, parseGrokModels, userGrokHome } from '../src/core/engines/grok'
 import { CLINE_OFF, clineArgs, clineEngine, clineLead, clineLogins, clineMcp, clineModel, clineParser, clinePrompt, clineSettings, clineTurnDirs, clineTurnEnv, clineCleanup, clineLoginEnv, clineProvidersFile } from '../src/core/engines/cline'
@@ -347,6 +347,21 @@ describe('Antigravity config', () => {
     expect(existsSync(join(linux.home, 'Library'))).toBe(false)
     expect(JSON.parse(readFileSync(join(linux.home, '.gemini', 'config', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: {} })
     expect(linux.root).not.toBe(dirs.root)
+  })
+
+  it("runs another account's turn on its login file, with no keychain (or agy would take the person's own login)", () => {
+    const real = mkdtempSync(join(tmpdir(), 'ag-real-'))
+    mkdirSync(join(real, 'Library', 'Keychains'), { recursive: true })
+    const account = mkdtempSync(join(tmpdir(), 'ag-account-'))
+    mkdirSync(join(account, '.gemini', 'antigravity-cli'), { recursive: true })
+    writeFileSync(join(account, ANTIGRAVITY_TOKEN), '{"token":"x"}')
+    const dirs = antigravityTurnDirs(mkdtempSync(join(tmpdir(), 'ag-app-')), { system: 'x', mcpUrl: undefined, web: false, account }, 'mac', real)
+    expect(existsSync(join(dirs.home, 'Library'))).toBe(false)
+    expect(readlinkSync(join(dirs.home, ANTIGRAVITY_TOKEN))).toBe(join(account, ANTIGRAVITY_TOKEN))
+    expect(readFileSync(join(dirs.home, ANTIGRAVITY_TOKEN), 'utf8')).toBe('{"token":"x"}')
+    // The turn's settings still go in its own home, beside the link, never in the account's.
+    expect(existsSync(join(dirs.home, '.gemini', 'antigravity-cli', 'settings.json'))).toBe(true)
+    expect(existsSync(join(account, '.gemini', 'antigravity-cli', 'settings.json'))).toBe(false)
   })
 
   it('puts instructions too long for a rules file at the top of the prompt instead', () => {
