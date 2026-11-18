@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Agent, EngineId, Settings } from '../src/shared/types'
+import { countedTokens, type Agent, type EngineId, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
@@ -183,6 +183,12 @@ describe('the budget per reply', () => {
     expect(seen.refused).toBeUndefined()
     expect(reply().run?.status).toBe('done')
     expect(db.usedThisMonth('a1')).toBe(68_000)
+  })
+
+  it('never goes below zero with a receipt whose cache reads came apart from its input (Antigravity)', () => {
+    db.addReceipt({ model: 'antigravity:gemini/x', inputTokens: 88_353, cacheReadTokens: 734_883, outputTokens: 2_602, ms: 1, messageId: 'split', agentId: 'a1', engine: 'antigravity', at: Date.now() })
+    expect(db.usedThisMonth('a1')).toBe(Math.round(88_353 + 734_883 * 0.1 + 2_602)) // the new input whole, the cache a tenth
+    expect(countedTokens({ inputTokens: 88_353, cacheReadTokens: 734_883, outputTokens: 2_602 })).toBe(db.usedThisMonth('a1'))
   })
 
   it('cuts a reply that keeps spending far past it', async () => {

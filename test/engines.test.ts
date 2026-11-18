@@ -269,6 +269,11 @@ describe('Antigravity stream', () => {
     expect(events.find((e) => e.type === 'done')).toMatchObject({ type: 'done', text: result.result.response, usage: { inputTokens: 38055, cacheReadTokens: 4036, outputTokens: 336 } })
   })
 
+  it('adds the cache reads to the input when they came apart from it', () => {
+    const done = JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'ok', usage: { input_tokens: 88353, output_tokens: 2602, thinking_tokens: 0, cache_read_tokens: 734883 } } })
+    expect(feed(antigravityParser(), [done]).find((e) => e.type === 'done')).toMatchObject({ usage: { inputTokens: 88353 + 734883, cacheReadTokens: 734883, outputTokens: 2602 } })
+  })
+
   it('gives a running total after each model call, for the limits', () => {
     const progress = feed(antigravityParser(), lines).filter((e) => e.type === 'progress')
     expect(progress.length).toBe(5)

@@ -604,8 +604,8 @@ function parseAccess(v: unknown): PersonAccess | undefined {
   } catch { return undefined }
 }
 
-// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
-const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
+// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT, and more of them than input came apart from it.
+const COUNTED = `(CASE WHEN cache_read_tokens > input_tokens THEN input_tokens + cache_read_tokens * ${CACHE_READ_WEIGHT} ELSE input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} END) + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
