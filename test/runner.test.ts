@@ -28,10 +28,10 @@ let events: CoreEvent[]
 let claude: ReturnType<typeof counted>
 let settings: Settings
 
-function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 })): Runner {
+function runner(engine: Engine = fakeEngine('claude', { delayMs: 1 }), dataDir?: string): Runner {
   claude = counted(engine)
   const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
-  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
+  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), ...(dataDir ? { dataDir } : {}) })
 }
 
 const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -47,6 +47,55 @@ beforeEach(() => {
 })
 
 describe('Runner', () => {
+  it('keeps only the selected excerpt in a reply and passes it to the responding agent', async () => {
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'An introduction.\n\n**Deploy** after review.\n\nA separate conclusion.', at: 100 })
+    const r = runner()
+    await r.send('c1', 'Explain this part.', [], undefined, undefined, { reply: { messageId: 'quoted', quote: 'Deploy after review.' } })
+    await r.idle()
+    const saved = db.messages().find((m) => m.reply)!
+    expect(saved.reply).toMatchObject({ messageId: 'quoted', author: 'lia', text: 'Deploy after review.', excerpt: true })
+    expect(saved.text).toBe('Explain this part.')
+    expect(claude.turns[0]?.prompt).toContain('> Deploy after review.')
+    expect(claude.turns).toHaveLength(1)
+  })
+
+  it('rejects empty or excessive excerpts and excerpts without an original message', async () => {
+    db.saveMessage({ id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Original text.', at: 100 })
+    const r = runner()
+    for (const quote of ['', '   ', 'a'.repeat(32_001)]) {
+      await expect(r.send('c1', 'A reply.', [], undefined, undefined, { reply: { messageId: 'quoted', quote } })).rejects.toThrow()
+    }
+    await expect(r.send('c1', 'A reply.', [], undefined, undefined, { reply: { messageId: '', quote: 'Text.' } })).rejects.toThrow()
+    expect(db.messages().filter((m) => m.author.kind === 'person')).toEqual([])
+  })
+
+  it('quotes an older message and directs the reply to its author in the same channel', async () => {
+    const source: Message = { id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'The deployment needs a review.', at: 100, run: { status: 'done', steps: [] } }
+    db.saveMessage(source)
+    for (let i = 0; i < 50; i++) db.saveMessage({ id: `filler-${i}`, conversationId: 'c1', author: { kind: 'person', id: db.ownerId() }, text: 'Later context.', at: 101 + i })
+    const r = runner()
+    await r.send('c1', 'Review it now.', [], undefined, undefined, { reply: { messageId: source.id } })
+    await r.idle()
+    const reply = db.messages().find((m) => m.reply)!
+    expect(reply.reply).toEqual({ messageId: source.id, author: 'lia', agentId: 'a1', text: source.text, at: 100 })
+    expect(claude.turns).toHaveLength(1)
+    expect(claude.turns[0]?.prompt).toContain('[Em resposta a lia:]')
+    expect(claude.turns[0]?.prompt).toContain(`> ${source.text}`)
+    expect(db.message(source.id)).toMatchObject(source)
+  })
+
+  it('rejects replies to missing messages, other conversations, system messages or active runs', async () => {
+    const r = runner()
+    const source: Message = { id: 'quoted', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: 'Still thinking.', at: 100, run: { status: 'working', steps: [] } }
+    db.saveMessage(source)
+    await expect(r.send('d1', 'A reply.', [], undefined, undefined, { reply: { messageId: source.id } })).rejects.toThrow()
+    await expect(r.send('c1', 'A reply.', [], undefined, undefined, { reply: { messageId: 'missing' } })).rejects.toThrow()
+    await expect(r.send('c1', 'A reply.', [], undefined, undefined, { reply: { messageId: source.id } })).rejects.toThrow()
+    db.saveMessage({ id: 'system', conversationId: 'c1', author: { kind: 'system' }, text: 'System notice.', at: 100 })
+    await expect(r.send('c1', 'A reply.', [], undefined, undefined, { reply: { messageId: 'system' } })).rejects.toThrow()
+    expect(db.messages().filter((m) => m.author.kind === 'person')).toEqual([])
+  })
+
   it('answers in a DM, streams deltas and records a receipt that matches the agent usage', async () => {
     const r = runner()
     await r.send('d1', 'oi')

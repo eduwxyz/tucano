@@ -453,6 +453,9 @@ export interface Invite {
 
 // A person's own memories ("about me") live in this scope.
 export const personScope = (personId: string): string => `person:${personId}`
+
+// What the composer answers: a message, or the excerpt of it the person selected.
+export type ReplyTarget = { messageId: string; quote?: string }
 export const scopePerson = (scope: string): string | undefined => (scope.startsWith('person:') ? scope.slice('person:'.length) : undefined)
 
 export interface Message {
@@ -466,6 +469,9 @@ export interface Message {
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
   title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
+  // The message this one answers, kept with the quote it showed: the agent still reads it when the
+  // original has left the history it sees.
+  reply?: { messageId: string; author: string; agentId?: string; text: string; at: number; excerpt?: boolean }
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it

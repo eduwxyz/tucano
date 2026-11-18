@@ -31,6 +31,7 @@ import {
   type Memory,
   type MemoryScope,
   type Message,
+  type ReplyTarget,
   type Model,
   type Person,
   type PersonAccess,
@@ -127,6 +128,7 @@ export interface State {
   panel: Panel | null // the side panel next to a conversation
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
+  replyTo: Record<string, ReplyTarget | undefined> // selected message per conversation, kept with its draft
   demoServer?: { command: string; args: string[] }
   toasts: Toast[] // short notes at the bottom: an action that didn't go through
   coreDown: boolean // the core's process ended; a banner offers to reopen
@@ -213,7 +215,9 @@ let state: State = {
   dialog: null,
   tabs: {},
   toasts: [],
-  coreDown: false
+  coreDown: false,
+  // What the composer answers, per conversation (src/shared/types.ts: ReplyTarget).
+  replyTo: {} as Record<string, ReplyTarget | undefined>
 }
 
 // ---------- store plumbing ----------
@@ -994,12 +998,16 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
 // `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], reply?: ReplyTarget): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(reply ? { reply } : {}) })
 }
+
+// What the composer answers in that conversation, or nothing: the quote above the field.
+export const setReplyTo = (conversationId: string, reply?: ReplyTarget): void => set((s) => ({ ...s, replyTo: { ...s.replyTo, [conversationId]: reply } }))
+
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })

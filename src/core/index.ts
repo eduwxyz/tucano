@@ -1900,10 +1900,9 @@ const api: Handlers = {
     reach(ctx, root.conversationId)
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
-
-  sendMessage: ({ conversationId, text, images, files, threadId }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId, reply }, ctx) => {
     reach(ctx, conversationId)
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, files?.length ? { files } : {}), 'sendMessage')
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(reply ? { reply } : {}) }), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
