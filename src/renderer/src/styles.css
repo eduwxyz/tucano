@@ -6335,10 +6335,16 @@ kbd {
 
 /* The session header's little bars: one per provider, only the window that lasts longest (a month
    outlasts a week, a week outlasts the five hours), so the line says whether the plan runs out
-   before it renews. A wallet has no cap, so it draws no bar. In a narrow window only the ones that
-   are actually running low stay, because those are the ones worth the space. */
+   before it renews. A wallet has no cap, so it draws no bar. Every bar takes the width of the
+   longest provider name the strip draws, and carries its own name above the track, so two bars read
+   as one strip rather than as two unrelated numbers. In a narrow window only the ones that are
+   actually running low stay, because those are the ones worth the space. */
 .quota-strip {
-  display: flex;
+  /* Equal columns, one per provider, sized to the longest name this header draws: the tracks line up
+     under one another instead. */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   align-items: center;
   gap: 4px;
   padding: 4px 5px;
@@ -6351,9 +6357,27 @@ kbd {
 .quota-strip:hover {
   background: var(--hover);
 }
+/* One column per provider: its name above the bar, dim and in small caps, so two bars are never
+   confused for one another. */
 .quota-strip__pill {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+.quota-strip__name {
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.quota-strip__track {
   display: block;
-  width: 18px;
+  /* The bar fills its column, so every bar in the strip is the width of the longest name among the
+     pills this header draws. */
   height: 4px;
   border-radius: 99px;
   background: var(--border);

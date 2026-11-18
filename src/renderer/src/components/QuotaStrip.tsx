@@ -4,6 +4,10 @@
 // only says how the next few hours go. So the header draws the month where there is one, the week
 // where there isn't, and the short window for a provider that reports nothing longer.
 //
+// Every bar carries its provider's name above the track, and every bar takes the width of the
+// longest name the strip draws: a short bar beside a long one reads as two unrelated numbers rather
+// than one strip, and two unnamed bars read as one.
+//
 // A wallet (a balance with no cap) draws no bar: it has no denominator and no reset, and inventing
 // one would read as "nearly full" when it says nothing. Its money is on the Usage page.
 import { useEffect, useState, type ReactNode } from 'react'
@@ -87,7 +91,10 @@ export function QuotaStrip(): ReactNode {
             data-span={pick.span}
             title={`${p.label} · ${left(pick.w)} ${L('livre', 'left')} ${NAMES[pick.span]()}${pick.w.resetsAt ? ` · ${L('zera', 'resets')} ${until(pick.w.resetsAt)}` : ''}`}
           >
-            <i style={{ width: `${Math.round((s ?? 0) * 100)}%` }} />
+            <span className="quota-strip__name">{p.label}</span>
+            <span className="quota-strip__track">
+              <i style={{ width: `${Math.round((s ?? 0) * 100)}%` }} />
+            </span>
           </span>
         )
       })}

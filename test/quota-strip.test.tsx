@@ -1,8 +1,9 @@
-// The little bars in a session's header. What is checked here: one bar per provider, the window it
-// draws is the longest the provider reports (month over week over the short one), a wallet with no
-// cap draws nothing, the tone follows what is left, a click opens Usage and limits, and reading every
-// provider costs one read even when several conversations are opened. What the bars look like and
-// where they sit is measured in the built app; linkedom has no layout.
+// The little bars in a session's header. What is checked here: one bar per provider, each naming the
+// provider it draws, the window it draws is the longest the provider reports (month over week over
+// the short one), a wallet with no cap draws nothing, the tone follows what is left, a click opens
+// Usage and limits, and reading every provider costs one read even when several conversations are
+// opened. The widths the bars take are measured in a browser in test/quota-strip-layout.test.ts;
+// linkedom has no layout.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -102,6 +103,9 @@ describe('the strip in the header', () => {
       ['openai-codex', 'month'],
       ['xai-oauth', 'week']
     ])
+    // Each bar names the provider it draws, above its track.
+    expect(pills().map((p) => p.querySelector('.quota-strip__name')?.textContent)).toEqual(['Codex', 'Grok'])
+    expect(pills().every((p) => !!p.querySelector('.quota-strip__track > i'))).toBe(true)
   })
 
   it('draws nothing at all when no provider has a cap', async () => {
