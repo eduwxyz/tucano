@@ -135,7 +135,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **The Quadro's "stopped on" row no longer draws the agent's name over the text.** The row borrowed the chat message's class, a grid with a 34px first column, so a name like "UI Architect" spilled over "parou em …".
 - **Dictation on a server says where the audio becomes text.** Settings and the microphone's balloon said "on this computer, offline" on Tucano Pro too, where it's the server, on shared processors: the Recommended model took 47 s for 8 s of speech there and the Light one 9 s, so a person waiting gave up. On a server they now say it runs on the server, and that the Light model is much faster there.
-
 ## [0.2.41] - 2026-11-19
 
 > **Em português:**
@@ -273,10 +272,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **A phone app can't start an empty install for the endpoint.** A phone app from before the endpoint listed it among the harnesses, with an **Install** button; on a server, that ran the installer with an empty command. Installing or signing in to the endpoint is now refused with what to do instead: it's an address and a key, in **Settings › Models**, on the computer or in the browser. (#492)
-
-### Fixed
-
-- **Temporary reasoning is forgotten when its display is disabled.** Previously cached text could return when the setting was enabled again, and removed conversations left it behind in memory. Disabling the display, removing a conversation or replacing the snapshot now clears the corresponding cache. Retention is limited to the 200 most recently streamed replies, with at most 20,000 characters per reply. (#235)
 
 ## [0.2.34] - 2026-11-15
 
