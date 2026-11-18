@@ -690,10 +690,11 @@ export const MAX_CHAIN_DEPTH = 10
 export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
 
 // What a reply counts against limits: a token read from the cache costs about a
-// tenth of a new one, so it counts a tenth.
+// tenth of a new one, so it counts a tenth. The input counts the cache reads in; more cache reads than
+// input means they came apart from it (an Antigravity receipt): the input is all new then.
 export const CACHE_READ_WEIGHT = 0.1
 export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number; outputTokens: number }): number =>
-  Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
+  Math.round((u.cacheReadTokens > u.inputTokens ? u.inputTokens + u.cacheReadTokens * CACHE_READ_WEIGHT : u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT)) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
 export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; min?: string; windows?: string; site: string }> = {
