@@ -4,6 +4,20 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.38] - 2026-11-18
+
+> **Em português:**
+> - **Corrigido:** no **Tucano num servidor** (como o do Tucano Pro), o **Canva** conecta. Ele só aceita voltar pra um endereço local, então o Tucano percebe e passa pro jeito de colar o endereço em que a página terminou.
+> - **Mudou:** no servidor, escolher uma pasta diz que essas são as pastas do servidor, e um **Linux isolado** sem Docker diz que o Docker precisa estar no servidor. Os dois apontam pra **Configurações › Servidores › Deixar este servidor usar este computador**, no app do computador, pra usar as pastas e o terminal dele.
+
+### Fixed
+
+- **Canva connects on a server.** Canva's MCP registers any return address, but its authorization page takes only a loopback one and answered a server's https address with "Invalid redirect URI.", so it never connected on a server such as Tucano Pro's. When a provider turns the server's own address away, the sign-in starts again with the loopback one and the step where you paste the address the page ended on; it then renews by itself after a restart. (#544)
+
+### Changed
+
+- **On a server, folders and the isolated Linux say where they live.** The folder picker says these are the server's folders, and a missing Docker says the isolated Linux needs Docker on the server, instead of asking to install it on "this computer". Both point to Settings › Servers › Let this server use this computer, in the app on your computer, to use its folders and terminal. (#544)
+
 ## [0.2.37] - 2026-11-17
 
 > **Em português:**
