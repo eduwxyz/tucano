@@ -6,6 +6,15 @@ import { call, connect } from '../rpc'
 import type { CoreEvent } from '../../../shared/rpc'
 import type { NoticeFeed } from '../../../shared/notice'
 
+// The language this page was made in: main appends it to the page's address (src/main/notice.ts), so
+// the very first paint is already in the right one, before the core has answered anything.
+export const startLang = (search: string): void => {
+  const asked = new URLSearchParams(search).get('lang')
+  if (asked !== 'en' && asked !== 'pt') return
+  setLang(asked)
+  document.documentElement.lang = asked === 'en' ? 'en' : 'pt-BR'
+}
+
 // What makes a card's words or buttons change: a decision waiting, a setting, an agent's name (or
 // its new face), a channel's name, and who's on the team.
 const MATTERS = new Set<CoreEvent['type']>(['inbox', 'settings', 'agent', 'people', 'conversation', 'conversation_removed'])

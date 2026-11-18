@@ -6,7 +6,7 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen, systemPreferences, type IpcMainEvent, type Rectangle } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { L } from '../shared/lang'
+import { L, lang } from '../shared/lang'
 import { NOTICE_PAD, areaRect, clampArea, defaultArea, type NoticeArea, type NoticePush } from '../shared/notice'
 
 // The page these windows show: the dev server's notice.html while developing, the built one otherwise.
@@ -14,6 +14,10 @@ const PAGE = process.env['ELECTRON_RENDERER_URL']
   ? `${process.env['ELECTRON_RENDERER_URL']}/notice.html`
   : pathToFileURL(join(import.meta.dirname, '../renderer/notice.html')).toString()
 const PICK = 'pick=1' // the same page, drawing the rectangle on screen instead of the cards
+
+// Both pages are made in the language the app is in, so the first thing drawn is already right; the
+// feed keeps it current afterwards (the window is open while Settings changes the language).
+const page = (...query: string[]): string => `${PAGE}?${[...query, `lang=${lang()}`].join('&')}`
 
 // The system's accent color as a page takes it: Windows 11's own, the Mac's highlight, and whatever
 // the Linux desktop says (its own default when it says nothing).
@@ -176,7 +180,7 @@ export class Notices {
       win.webContents.send('notice:pick', { x: a.x - workArea.x, y: a.y - workArea.y, w: a.w, h: a.h, up: a.up })
     })
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    void win.loadURL(`${PAGE}?${PICK}`)
+    void win.loadURL(page(PICK))
     win.once('ready-to-show', () => {
       win.show()
       win.focus()
@@ -262,7 +266,7 @@ export class Notices {
       for (const p of this.waiting.splice(0)) win.webContents.send(p.demo ? 'notice:demo' : 'notice:push', p)
     })
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    void win.loadURL(PAGE)
+    void win.loadURL(page())
     return win
   }
 

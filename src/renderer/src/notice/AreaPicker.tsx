@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { L } from '../../../shared/lang'
 import { NOTICE_MIN_H, NOTICE_MIN_W, type NoticeArea } from '../../../shared/notice'
 import { call } from '../rpc'
-import { link } from './feed'
+import { link, startFeed } from './feed'
 
 type Rect = { x: number; y: number; w: number; h: number }
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
@@ -39,13 +39,17 @@ function dragged(d: Drag, x: number, y: number): Rect {
 export function AreaPicker(): ReactNode {
   const [rect, setRect] = useState<Rect | null>(null)
   const [saving, setSaving] = useState(false)
+  // Bumped when the feed reads again: the rectangle's own words follow the language Settings says,
+  // including a change made while it is on screen.
+  const [, setRead] = useState(0)
   const drag = useRef<Drag | null>(null)
 
   useEffect(() => {
     window.tucano.notice.onPick((r) => setRect((was) => was ?? kept({ x: r.x, y: r.y, w: r.w, h: r.h })))
   }, [])
-  // The port to the core, so saving the rectangle is the same call every other setting makes.
-  useEffect(() => void link().catch(() => undefined), [])
+  // The port to the core, and its word on the language: the page is made in it (src/main/notice.ts),
+  // and this keeps it right if it changes while the rectangle is being drawn.
+  useEffect(() => startFeed(() => setRead((n) => n + 1)), [])
 
   useEffect(() => {
     const move = (e: PointerEvent): void => {
