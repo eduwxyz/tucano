@@ -19,6 +19,8 @@ export function SettingsLayout({ page, requested, sections, content, onNavigate 
   const destination = available.some(s => s.id === wanted) ? wanted : available[0]?.id ?? ''
   const root = useRef<HTMLDivElement>(null)
   const navigation = useRef<HTMLDivElement>(null)
+  // How far the pane's tab bar reaches down: the rail sticks under it instead of covering it.
+  const railTop = useRef(0)
   const frame = useRef<number | null>(null)
   const movingTo = useRef<string | null>(null)
   const handled = useRef<string | undefined>(undefined)
@@ -40,7 +42,7 @@ export function SettingsLayout({ page, requested, sections, content, onNavigate 
     const target = root.current?.querySelector<HTMLElement>(`[data-settings-section="${id}"]`)
     if (!scroller || !target) return
     setCurrent(id)
-    const inset = (navigation.current?.getBoundingClientRect().height ?? 0) + 16
+    const inset = railTop.current + (navigation.current?.getBoundingClientRect().height ?? 0) + 16
     const destinationTop = (): number => Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight,
       scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - inset))
     const top = destinationTop()
@@ -69,11 +71,18 @@ export function SettingsLayout({ page, requested, sections, content, onNavigate 
     const scroller = element?.closest<HTMLElement>('.page__scroll')
     if (!element || !scroller) return
     // Enough trailing room lets the final section reach the same top edge as every other one.
-    const size = (): void => element.style.setProperty('--settings-last-height', `${Math.max(0, scroller.clientHeight - (navigation.current?.getBoundingClientRect().height ?? 0) - 16)}px`)
+    const size = (): void => {
+      const tabs = scroller.querySelector<HTMLElement>('.page-body > .tabs')
+      railTop.current = tabs?.getBoundingClientRect().height ?? 0
+      element.style.setProperty('--settings-rail-top', `${railTop.current}px`)
+      element.style.setProperty('--settings-last-height', `${Math.max(0, scroller.clientHeight - railTop.current - (navigation.current?.getBoundingClientRect().height ?? 0) - 16)}px`)
+    }
     size()
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(size)
     observer?.observe(scroller)
     if (navigation.current) observer?.observe(navigation.current)
+    const tabs = scroller.querySelector<HTMLElement>('.page-body > .tabs')
+    if (tabs) observer?.observe(tabs)
     return () => observer?.disconnect()
   }, [page, ids])
 
@@ -105,7 +114,7 @@ export function SettingsLayout({ page, requested, sections, content, onNavigate 
         tracking = null
         if (movingTo.current) return
         const targets = [...(root.current?.querySelectorAll<HTMLElement>('[data-settings-section]') ?? [])]
-        const line = scroller.getBoundingClientRect().top + (navigation.current?.getBoundingClientRect().height ?? 0) + 24
+        const line = scroller.getBoundingClientRect().top + railTop.current + (navigation.current?.getBoundingClientRect().height ?? 0) + 24
         const atEnd = scroller.scrollHeight > scroller.clientHeight && scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2
         const selected = atEnd ? targets.at(-1) : targets.filter(el => el.getBoundingClientRect().top <= line).at(-1) ?? targets[0]
         if (selected?.dataset.settingsSection) setCurrent(selected.dataset.settingsSection)

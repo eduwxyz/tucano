@@ -66,7 +66,6 @@ import {
   reachable,
   voiceDownload,
   voiceRemoveModel,
-  type VoiceModelId,
   type VoiceSettings,
   amAdmin,
   amOwner,
@@ -82,7 +81,7 @@ import {
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
-import { useVoice, VOICE_CHOICES, VoiceSetup } from './VoiceSetup'
+import { useVoice, VoiceChoices, VoiceSetup } from './VoiceSetup'
 import { HermesImport } from './HermesImport'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
@@ -2881,32 +2880,22 @@ function VoiceCard(): ReactNode {
     setError(why ?? '')
     if (!why) updateSettings({ voice: next })
   }
-  const choice = (id: VoiceModelId) => VOICE_CHOICES().find((c) => c.id === id)!
-  const other = status?.ownModel === 'recommended' ? 'light' : 'recommended'
   return (
     <Card title={L('Ditado', 'Dictation')} lead={L('Fale em vez de digitar: clique no microfone do campo de mensagem, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros, e clique de novo para terminar. O áudio vira texto neste computador, sem internet, e o texto fica no campo para você revisar antes de enviar.', 'Click the mic or press ⌥ Space (Mac) / Ctrl+Space to start; click again to stop. Transcription stays offline for review before sending.')}>
       {status && !status.ready && <VoiceSetup status={status} />}
       <div className="voice-prefs">
         {status?.ready && (
           <div className="voice-on">
-            <p className="small">
-              <Icon name="check" size={13} />{' '}
-              {status.ownModel
-                ? L(`Ativado, com o modelo ${choice(status.ownModel).name} (${choice(status.ownModel).size}).`, `On, with the ${choice(status.ownModel).name} model (${choice(status.ownModel).size}).`)
-                : L(`Ativado, com o modelo que já estava instalado: ${status.model?.split(/[\\/]/).pop()}.`, `On, with the model already installed: ${status.model?.split(/[\\/]/).pop()}.`)}
-            </p>
             {status.downloading ? (
               <VoiceSetup status={status} />
             ) : (
               status.ownModel && (
-                <div className="row">
-                  <button className="btn btn--sm" onClick={() => void voiceDownload(other)}>
-                    {L(`Trocar pelo ${choice(other).name} (${choice(other).size})`, `Switch to ${choice(other).name} (${choice(other).size})`)}
-                  </button>
+                <>
+                  <VoiceChoices current={status.ownModel} label={L('Modelo de ditado', 'Dictation model')} onPick={(id) => void (id !== status.ownModel && voiceDownload(id))} />
                   <button className="btn btn--ghost btn--sm" onClick={() => void voiceRemoveModel(status.ownModel!)}>
                     {L('Remover o modelo', 'Remove model')}
                   </button>
-                </div>
+                </>
               )
             )}
             {status.error && <p className="field__error">{status.error}</p>}
@@ -2973,15 +2962,19 @@ export function SettingsPage(): ReactNode {
     'geral-workspace': (
             <Card title="Workspace">
               <p className="muted small">{L('Agentes, conversas, conectores e memórias ficam neste workspace. Os logins do Claude Code e OpenCode continuam compartilhados no computador. Um workspace não é uma sandbox do sistema.', 'Workspace data is separate; Claude Code and OpenCode logins are shared. Workspaces are not sandboxes.')}</p>
-              {window.tucano.workspaces && (
-                <Field label={L('Nome do workspace', 'Workspace name')}>
-                  <input value={settings.workspaceLabel ?? ''} placeholder={settings.workspaceName} maxLength={120} onChange={(e) => updateSettings({ workspaceLabel: e.target.value })} />
-                </Field>
-              )}
-              {owner && (
-                <Field label={L('Como os agentes te chamam', 'Your name')}>
-                  <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
-                </Field>
+              {(window.tucano.workspaces || owner) && (
+                <div className="settings-pair">
+                  {window.tucano.workspaces && (
+                    <Field label={L('Nome do workspace', 'Workspace name')}>
+                      <input value={settings.workspaceLabel ?? ''} placeholder={settings.workspaceName} maxLength={120} onChange={(e) => updateSettings({ workspaceLabel: e.target.value })} />
+                    </Field>
+                  )}
+                  {owner && (
+                    <Field label={L('Como os agentes te chamam', 'Your name')}>
+                      <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
+                    </Field>
+                  )}
+                </div>
               )}
               <Field label={L('Contexto', 'Context')} hint={L('Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.', 'Shared with every agent: your role, priorities, and rules.')}>
                 <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />

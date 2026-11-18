@@ -4,7 +4,7 @@ Settings are grouped by the decision being made, with one canonical section for 
 
 ## Page structure
 
-The settings page keeps its tabs. Each tab is a pane; the sections of that pane are listed in one rail above the controls.
+The settings page keeps its tabs. Each tab is a pane; the sections of that pane are listed in one rail under the tab bar, as that pane's second row of tabs: the same width as the tabs, the same underline for the section in view, and no separate pill for it.
 
 | Pane (tab id) | Decisions |
 | --- | --- |
@@ -16,7 +16,7 @@ The settings page keeps its tabs. Each tab is a pane; the sections of that pane 
 | Activity (`atividade`) | Workspace activity |
 | Servers (`servidores`) | Servers and the node, when the computer has them |
 
-Related controls share understated rounded containers with thin borders and no heavy shadows. Section headings and spacing clarify their order, and the danger zone retains a red border. Input controls keep the application's existing affordances.
+Related controls share understated rounded containers with thin borders and no heavy shadows. Section headings and spacing clarify their order, and the danger zone retains a red border. Input controls keep the application's existing affordances. Two short fields that belong together share one row, each keeping its own label.
 
 ## Declared sections
 
@@ -50,7 +50,7 @@ The source of order and ownership is [settings-structure.ts](../src/renderer/src
 
 ## Navigation
 
-The page's tabs still switch panes, and arrows, Home and End stay with the tab strip. Inside a pane, the rail lists that pane's sections only, because those sections stay visible together as one document. Links scroll the chosen section clear of the sticky rail and follow manual scrolling without moving focus or writing navigation state. Pointer navigation uses an interruptible 280 ms ease-in-out transition; keyboard activation and reduced motion move immediately. The rail scrolls horizontally at narrow widths.
+The page's tabs still switch panes, and arrows, Home and End stay with the tab strip. Inside a pane, the rail lists that pane's sections only, because those sections stay visible together as one document. It sticks under the tab strip rather than over it, so the tabs stay reachable. Links scroll the chosen section clear of the sticky rail and follow manual scrolling without moving focus or writing navigation state. Pointer navigation uses an interruptible 280 ms ease-in-out transition; keyboard activation and reduced motion move immediately. The rail scrolls horizontally at narrow widths.
 
 The section a pane last landed on is kept per pane, so returning to a tab resumes where the person was. Stable IDs are independent of translated labels. Destinations named before the sections existed (`geral`, `modelos`, `agentes`, `roteamento`, `integracoes`, `pessoas`, `atividade`, `servidores`, and the older page names) still resolve to a section; a destination that belongs to another pane, or to a section this person cannot see, leaves the current pane on its first section.
 

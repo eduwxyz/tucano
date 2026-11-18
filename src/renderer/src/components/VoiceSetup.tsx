@@ -21,6 +21,23 @@ export function useVoice(): VoiceStatus | null {
 
 const mb = (n: number): string => `${Math.round(n / 1_000_000)} MB`
 
+// The models on offer, one button each: side by side in a card, stacked in the balloon. The one in
+// use is marked the way a radio group marks its choice, so the pair reads as a choice in both places.
+export function VoiceChoices({ current, label, onPick }: { current: VoiceModelId; label?: string; onPick: (id: VoiceModelId) => void }): ReactNode {
+  return (
+    <div className="voice-setup__choices" role="radiogroup" aria-label={label}>
+      {VOICE_CHOICES().map((c) => (
+        <button key={c.id} type="button" role="radio" aria-checked={current === c.id} className={`voice-choice ${current === c.id ? 'is-on' : ''}`} onClick={() => onPick(c.id)}>
+          <span>
+            <b>{c.name}</b> <span className="muted">· {c.size}</span>
+          </span>
+          <small>{c.about}</small>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function VoiceSetup({ status }: { status: VoiceStatus }): ReactNode {
   const [pick, setPick] = useState<VoiceModelId>('recommended')
   const d = status.downloading
@@ -42,16 +59,7 @@ export function VoiceSetup({ status }: { status: VoiceStatus }): ReactNode {
     )
   return (
     <div className="voice-setup">
-      <div className="voice-setup__choices" role="radiogroup">
-        {VOICE_CHOICES().map((c) => (
-          <button key={c.id} type="button" role="radio" aria-checked={pick === c.id} className={`voice-choice ${pick === c.id ? 'is-on' : ''}`} onClick={() => setPick(c.id)}>
-            <span>
-              <b>{c.name}</b> <span className="muted">· {c.size}</span>
-            </span>
-            <small>{c.about}</small>
-          </button>
-        ))}
-      </div>
+      <VoiceChoices current={pick} onPick={setPick} />
       {status.error && <p className="field__error">{status.error}</p>}
       <button className="btn btn--primary btn--sm" onClick={() => void voiceDownload(pick)}>
         <Icon name="mic" size={13} /> {status.error ? L('Tentar de novo', 'Try again') : L('Ativar ditado', 'Turn dictation on')}

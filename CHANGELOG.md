@@ -6,11 +6,16 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
-- **Settings grouped by section.** Every settings pane now names the sections it holds in a rail above the controls, so a long pane such as General reads as Appearance, Workspace, Notifications and Backups instead of one list. The rail stays visible while scrolling, marks the section being read, and moves to a section without losing keyboard focus; reduced motion jumps instead of animating. Section order and the settings each one owns are declared once in `src/renderer/src/settings-structure.ts`, and `npm run check:settings` fails when a control is rendered outside its declared section.
+- **Settings grouped by section.** Every settings pane now names the sections it holds in a rail above the controls, so a long pane such as General reads as Appearance, Workspace, Notifications and Backups instead of one list. The rail is the pane's second tab row: it takes the width of the tabs above it, carries the same underline for the section being read, and stays under them while the pane scrolls. It moves to a section without losing keyboard focus; reduced motion jumps instead of animating. Section order and the settings each one owns are declared once in `src/renderer/src/settings-structure.ts`, and `npm run check:settings` fails when a control is rendered outside its declared section.
+
+### Changed
+
+- **Dictation shows both models.** With dictation on, Settings › General › Dictation lists Recommended and Light as the pair of choices they are, marks the one in use and switches on a click, with **Remove model** below them. The line saying which model was in use is gone: the marked choice says it.
 
 ### Fixed
 
 - **Clearer English labels and shorter hints.** Settings, Wiki, Memory, Skills, and related screens use more explicit actions and consistent terms. Hints repeat less information and fit more comfortably beside their controls; privacy and deletion warnings keep their consequences.
+- **The two workspace name fields share a row.** In Settings › General › Workspace, the workspace's name and the name the agents use sit side by side, each with its own label, instead of one above the other.
 
 ## [0.2.37] - 2026-11-17
 
