@@ -124,9 +124,14 @@ const gatewayHost = (url: string | undefined): string | undefined => {
 }
 
 // Checks the app's own Codex login (see codexEnv), not the user's.
-// Whether another login of Claude Code or Codex (Settings › Accounts) is signed in, and on which
-// plan, from the CLI's own status for that folder. The parsing is pure, to test it on their output.
+// Whether another login of a harness (Settings › Accounts) is signed in, and on which plan, from
+// the CLI's own status for that folder. The parsing is pure, to test it on their output.
 export function accountLogin(engine: AccountEngine, out: { code: number; stdout: string; stderr: string }): { loggedIn: boolean; detail?: string } {
+  if (engine === 'antigravity') {
+    // `agy models` in that home: the models its login can run, or "Please sign in".
+    const models = parseAntigravityModels(out.stdout).length
+    return models ? { loggedIn: true, detail: `Google · ${models} ${L('modelos', 'models')}` } : { loggedIn: false }
+  }
   if (engine === 'claude') {
     let status: Record<string, unknown> = {}
     try {
@@ -148,7 +153,12 @@ export function accountLogin(engine: AccountEngine, out: { code: number; stdout:
 export const accountDir = (dataDir: string, id: string): string => join(dataDir, 'accounts', id)
 
 export async function accountStatus(engine: AccountEngine, bin: string, dir: string): Promise<{ loggedIn: boolean; detail?: string }> {
-  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir, bin))
+  const out =
+    engine === 'claude'
+      ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir })
+      : engine === 'antigravity'
+        ? await run(bin, ['models'], 30_000, { ...process.env, HOME: dir })
+        : await run(bin, ['login', 'status'], 15_000, codexEnv(dir, bin))
   return accountLogin(engine, out)
 }
 

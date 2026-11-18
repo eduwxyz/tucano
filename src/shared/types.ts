@@ -571,8 +571,12 @@ export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, soun
 
 // Another login of a harness (a work account beside a personal one), in a folder of its own
 // in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
-// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
-export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+// CODEX_HOME, Antigravity's home (HOME) with no keychain in it, where agy keeps the login in a file
+// (only on a Mac: elsewhere its login goes to the system's store, whatever the home).
+// The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex', 'antigravity'] as const satisfies readonly EngineId[]
+// Where a harness may have another account: Antigravity's only on a Mac.
+export const accountsOn = (engine: AccountEngine, os: Os): boolean => engine !== 'antigravity' || os === 'mac'
 export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
 export interface Account {
   id: string
