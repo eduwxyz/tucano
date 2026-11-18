@@ -2100,7 +2100,9 @@ const api: Handlers = {
     const err = hooksPatchError(h)
     if (err) return { ok: false, message: err }
     if (!h?.enabled || !h.command) return { ok: false, message: L('Ligue o gancho e informe o comando antes de testar.', 'Turn the hook on and set the command before testing.') }
-    const run = await runTurnHook(h, withCaptureOwner(h, sampleHookEvent()))
+    const cwd = join(dataDir, 'teste')
+    mkdirSync(cwd, { recursive: true })
+    const run = await runTurnHook(h, withCaptureOwner(h, sampleHookEvent(cwd)))
     if (run.exit === 0) return { ok: true, message: L(`Gancho ok (${run.ms} ms).`, `Hook ok (${run.ms} ms).`), seconds: run.ms / 1000 }
     return { ok: false, message: run.error || L(`Saiu com código ${run.exit}.`, `Exited with code ${run.exit}.`) }
   },
@@ -2168,7 +2170,10 @@ const api: Handlers = {
       if (whyHooks) throw new Error(whyHooks)
       const hooks = cleanHooks(patch.hooks)
       if (hooks) patch.hooks = hooks
-      else delete patch.hooks
+      else {
+        delete patch.hooks
+        db.deleteSetting('hooks')
+      }
     }
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.

@@ -825,7 +825,7 @@ export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void 
 }
 
 export const refreshEngines = (): void => void fire(L('Não consegui conferir os modelos.', "I couldn't check the models."), 'refreshEngines')
-export const testTurnHook = (): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testTurnHook')
+export const testTurnHook = () => call('testTurnHook')
 export const voiceStatus = (): Promise<VoiceStatus> => call('voiceStatus')
 export const voiceDownload = (model: VoiceModelId): Promise<void> => call('voiceDownload', { model })
 export const voiceCancelDownload = (): Promise<void> => call('voiceCancelDownload')

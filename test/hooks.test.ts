@@ -11,6 +11,9 @@ describe('cleanHooks', () => {
     expect(cleanHooks(null)).toBeUndefined()
     expect(cleanHooks({ enabled: true, command: 'relative' })).toEqual({ enabled: true, command: 'relative' })
     expect(hooksPatchError({ enabled: true, command: 'relative' })).toBeTruthy()
+    expect(hooksPatchError({})).toBeUndefined()
+    expect(hooksPatchError({ enabled: false })).toBeUndefined()
+    expect(hooksPatchError([])).toBeTruthy()
     const abs = join(dir(), 'hook')
     expect(hooksPatchError({ enabled: true, command: abs })).toBeUndefined()
     expect(cleanHooks({ enabled: true, command: ` ${abs} `, captureOwner: true, timeoutMs: 50, env: { HOOK_OUT: '/tmp/x', 'bad key': 'no' }, args: ['--ok', ''] })?.env).toEqual({ HOOK_OUT: '/tmp/x' })
@@ -58,6 +61,12 @@ appendFileSync(process.env.HOOK_OUT, s)
     expect(run.error).toBeUndefined()
     const payload = JSON.parse(readFileSync(out, 'utf8'))
     expect(payload).toMatchObject({ version: 1, event: 'turn-end', session: 'run-test', captureOwner: 'tucano' })
+  })
+
+  it('does not throw when the command exits before reading stdin', async () => {
+    const run = await runTurnHook({ enabled: true, command: process.execPath, args: ['-e', 'process.exit(0)'] }, sampleHookEvent())
+    expect(run.exit).toBe(0)
+    expect(run).not.toHaveProperty('command')
   })
 
   it('fail-open: missing binary, nonzero exit and timeout still return a run', async () => {

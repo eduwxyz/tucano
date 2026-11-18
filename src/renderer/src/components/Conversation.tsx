@@ -71,6 +71,7 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
+  type HookRun,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -651,9 +652,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </button>
         )}
         {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
+        {(message.run?.receipt || (message.run?.hooks?.length ?? 0) > 0 || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
           <div className="msg__meta">
             {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} hooks={message.run.hooks} />}
+            {!message.run?.receipt && message.run?.hooks && message.run.hooks.length > 0 && <HookLine hooks={message.run.hooks} />}
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
@@ -1695,6 +1697,29 @@ function StepRow({ step }: { step: Step }): ReactNode {
   )
 }
 
+function hookEventLabel(event: HookRun['event']): string {
+  return event === 'turn-start' ? L('Início do turno', 'Turn start') : L('Fim do turno', 'Turn end')
+}
+
+function HookRows({ hooks }: { hooks: HookRun[] }): ReactNode {
+  return hooks.map((h) => (
+    <Fragment key={`${h.event}-${h.ms}`}>
+      <dt>{hookEventLabel(h.event)}</dt>
+      <dd>{h.exit === 0 ? `${h.ms} ms` : h.error || `exit ${h.exit}`}</dd>
+    </Fragment>
+  ))
+}
+
+function HookLine({ hooks }: { hooks: HookRun[] }): ReactNode {
+  return (
+    <div className="receipt">
+      <dl className="receipt__table">
+        <HookRows hooks={hooks} />
+      </dl>
+    </div>
+  )
+}
+
 function ReceiptLine({ receipt, hooks }: { receipt: NonNullable<NonNullable<Message['run']>['receipt']>; hooks?: NonNullable<Message['run']>['hooks'] }): ReactNode {
   const model = useStore((s) => modelById(s, receipt.model))
   const [open, setOpen] = useState(false)
@@ -1720,14 +1745,7 @@ function ReceiptLine({ receipt, hooks }: { receipt: NonNullable<NonNullable<Mess
               <dd>{usd(receipt.apiCostUsd)}</dd>
             </>
           )}
-          {(hooks ?? []).map((h) => (
-            <Fragment key={`${h.event}-${h.ms}`}>
-              <dt>{h.event}</dt>
-              <dd>
-                {h.exit === 0 ? `${h.ms} ms` : h.error || `exit ${h.exit}`}
-              </dd>
-            </Fragment>
-          ))}
+          <HookRows hooks={hooks ?? []} />
         </dl>
       )}
     </div>

@@ -1,9 +1,10 @@
 // Native turn hooks: one opt-in command, JSON on stdin, fail-open. Harness hook
 // formats stay out of isolated homes; this is Tucano's own seam.
 import { spawn } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import { L } from '../shared/lang'
-import type { Agent, HookEvent, HookEventName, HookRun, HookSettings, Settings } from '../shared/types'
+import type { Agent, HookEvent, HookRun, HookSettings, Settings } from '../shared/types'
 import { isWin, killTree, spawnable } from './platform'
 
 export const DEFAULT_HOOK_TIMEOUT_MS = 2_000
@@ -45,8 +46,11 @@ export function cleanHooks(raw: unknown): HookSettings | undefined {
 
 export function hooksPatchError(raw: unknown): string | undefined {
   if (raw == null) return undefined
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return L('Valor inválido pra hooks.', 'Invalid value for hooks.')
+  }
   const h = cleanHooks(raw)
-  if (!h) return L('Valor inválido pra hooks.', 'Invalid value for hooks.')
+  if (!h) return undefined
   if (h.enabled && (!h.command || !isAbsolute(h.command))) {
     return L('O comando do gancho precisa ser um caminho absoluto.', 'The hook command has to be an absolute path.')
   }
@@ -61,7 +65,7 @@ export function clipHookText(text: string): string {
   return text.length > HOOK_TEXT_MAX ? `${text.slice(0, HOOK_TEXT_MAX)}…` : text
 }
 
-export function sampleHookEvent(): HookEvent {
+export function sampleHookEvent(cwd = process.cwd()): HookEvent {
   return {
     version: 1,
     event: 'turn-end',
@@ -71,7 +75,7 @@ export function sampleHookEvent(): HookEvent {
     message: { id: 'm1', text: 'ping', author: 'person' },
     reply: { text: 'pong', ms: 1, tokens: { input: 1, output: 1 } },
     tools: [],
-    cwd: process.cwd()
+    cwd
   }
 }
 
@@ -80,7 +84,6 @@ export async function runTurnHook(settings: HookSettings, event: HookEvent): Pro
   const command = settings.command
   const result = (exit: number | null, error?: string): HookRun => ({
     event: event.event,
-    command,
     ms: Date.now() - started,
     exit,
     ...(error ? { error } : {})
@@ -92,8 +95,10 @@ export async function runTurnHook(settings: HookSettings, event: HookEvent): Pro
   const line = JSON.stringify(event)
   try {
     const s = spawnable(command, args)
+    if (event.cwd && isAbsolute(event.cwd)) mkdirSync(event.cwd, { recursive: true })
     const child = spawn(s.file, s.args, {
       env,
+      ...(event.cwd && isAbsolute(event.cwd) ? { cwd: event.cwd } : {}),
       stdio: ['pipe', 'ignore', 'pipe'],
       windowsHide: true,
       windowsVerbatimArguments: s.verbatim
@@ -114,6 +119,7 @@ export async function runTurnHook(settings: HookSettings, event: HookEvent): Pro
       child.on('error', (e) => finish(null, e.message))
       child.on('close', (code) => finish(code, code === 0 ? undefined : (stderr.trim().slice(0, 400) || `exit ${code}`)))
     })
+    child.stdin?.on('error', () => {}) // the command may exit before reading stdin
     child.stdin?.write(line)
     child.stdin?.end()
     return await done

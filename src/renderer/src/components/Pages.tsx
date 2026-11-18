@@ -2441,14 +2441,43 @@ export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChang
   return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
 }
 
+function absHookPath(p: string): boolean {
+  const s = p.trim()
+  return s.startsWith('/') || /^[A-Za-z]:[\\/]/.test(s)
+}
+
 function TurnHooksCard(): ReactNode {
   const hooks = useStore((s) => s.settings.hooks)
   const [testing, setTesting] = useState(false)
+  const [typed, setTyped] = useState(hooks?.command ?? '')
+  useEffect(() => {
+    setTyped(hooks?.command ?? '')
+  }, [hooks?.command])
   const on = !!hooks?.enabled
-  const command = hooks?.command ?? ''
   const captureOwner = !!hooks?.captureOwner
-  const patchHooks = (next: Partial<NonNullable<typeof hooks>>): void => {
-    updateSettings({ hooks: { enabled: on, command, ...hooks, ...next } })
+  const persist = (next: { enabled?: boolean; command?: string; captureOwner?: boolean }): void => {
+    const command = (next.command ?? hooks?.command ?? typed).trim()
+    const enabled = next.enabled ?? on
+    const mark = next.captureOwner ?? captureOwner
+    updateSettings({
+      hooks: {
+        enabled: command ? enabled : false,
+        command,
+        ...(hooks?.args ? { args: hooks.args } : {}),
+        ...(hooks?.timeoutMs != null ? { timeoutMs: hooks.timeoutMs } : {}),
+        ...(hooks?.env ? { env: hooks.env } : {}),
+        ...(mark ? { captureOwner: true } : {})
+      }
+    })
+  }
+  const saveCommand = (): void => {
+    const command = typed.trim()
+    if (command === (hooks?.command ?? '')) return
+    if (on && command && !absHookPath(command)) {
+      toast(L('O comando do gancho precisa ser um caminho absoluto.', 'The hook command has to be an absolute path.'))
+      return
+    }
+    persist({ command })
   }
   return (
     <Card
@@ -2462,28 +2491,44 @@ function TurnHooksCard(): ReactNode {
         <div className="grow">
           <strong>{L('Ligar ganchos nativos', 'Turn native hooks on')}</strong>
         </div>
-        <Toggle on={on} onChange={(v) => patchHooks({ enabled: v })} />
+        <Toggle
+          on={on}
+          onChange={(v) => {
+            if (v && !absHookPath(typed)) {
+              toast(L('Informe o comando antes de ligar o gancho.', 'Set the command before turning the hook on.'))
+              return
+            }
+            persist({ enabled: v, command: typed.trim() })
+          }}
+        />
       </div>
       <Field
         label={L('Comando (caminho absoluto)', 'Command (absolute path)')}
         hint={L('Sem shell. O app manda um JSON por linha na entrada padrão (turn-start e turn-end).', 'No shell. The app sends one JSON line on stdin (turn-start and turn-end).')}
       >
-        <input className="input" value={command} spellCheck={false} placeholder="/usr/local/bin/my-hook" onChange={(e) => patchHooks({ command: e.target.value })} />
+        <input
+          className="input"
+          value={typed}
+          spellCheck={false}
+          placeholder="/usr/local/bin/my-hook"
+          onChange={(e) => setTyped(e.target.value)}
+          onBlur={saveCommand}
+        />
       </Field>
       <div className="key-row">
         <div className="grow">
           <strong>TUCANO_CAPTURE_OWNER</strong>
           <p className="muted small">{L('Marca o Tucano como dono da captura, pra um produtor externo não gravar o turno duas vezes.', 'Marks Tucano as the capture owner, so an external producer doesn’t record the turn twice.')}</p>
         </div>
-        <Toggle on={captureOwner} onChange={(v) => patchHooks({ captureOwner: v })} />
+        <Toggle on={captureOwner} onChange={(v) => persist({ captureOwner: v })} />
       </div>
       <button
         className="btn btn--ghost btn--sm"
-        disabled={testing || !on || !command}
+        disabled={testing || !on || !typed.trim()}
         onClick={() => {
           setTesting(true)
           void testTurnHook()
-            .then((r) => toast(r.message))
+            .then((r) => toast(r.ok ? r.message : `${L('O gancho falhou.', 'The hook failed.')} ${r.message}`))
             .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)))
             .finally(() => setTesting(false))
         }}

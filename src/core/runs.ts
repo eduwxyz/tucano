@@ -2371,8 +2371,12 @@ ${note}`,
     }
 
     const hookRuns: HookRun[] = []
-    const source = anchor ?? [...history].reverse().find((m) => m.id !== msg.id)
-    const hookAuthor = source?.author.kind === 'routine' ? 'routine' : source?.author.kind === 'agent' ? 'agent' : 'person'
+    const source =
+      anchor ??
+      [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine') ??
+      [...history].reverse().find((m) => m.id !== msg.id)
+    const kind = source?.author.kind
+    const hookAuthor = kind === 'routine' || kind === 'agent' || kind === 'system' ? kind : 'person'
     const hookPayload = (event: HookEvent['event'], extra?: Partial<HookEvent>): HookEvent => ({
       version: 1,
       event,

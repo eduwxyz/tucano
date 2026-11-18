@@ -513,7 +513,7 @@ export interface HookEvent {
   session: string // Tucano's turn id (`run-<message-id>`), for an external store's session_id
   agent: { id: string; handle: string; name: string; engine: EngineId; model: string }
   conversation: { id: string; kind: Conversation['kind']; name: string; threadId: string | null }
-  message: { id: string; text: string; author: 'person' | 'agent' | 'routine' }
+  message: { id: string; text: string; author: 'person' | 'agent' | 'routine' | 'system' }
   reply?: { text: string; ms: number; tokens?: { input: number; output: number } }
   tools: { name: string; ok: boolean }[]
   cwd: string
@@ -522,7 +522,6 @@ export interface HookEvent {
 
 export interface HookRun {
   event: HookEventName
-  command: string
   ms: number
   exit: number | null
   error?: string

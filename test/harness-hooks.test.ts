@@ -17,6 +17,7 @@ function agent(id: string, handle: string, extra: Partial<Agent> = {}): Agent {
 let db: Db
 let events: CoreEvent[]
 let settings: Settings
+let workDir: string
 
 function runner(): Runner {
   const engines: Record<EngineId, ReturnType<typeof fakeEngine>> = {
@@ -31,7 +32,8 @@ function runner(): Runner {
     hermes: fakeEngine('hermes'),
     endpoint: fakeEngine('endpoint')
   }
-  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')) })
+  workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
+  return new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir })
 }
 
 const replies = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
@@ -81,9 +83,9 @@ describe('native turn hooks', () => {
     expect(reply?.run?.hooks).toHaveLength(2)
     expect(reply?.run?.hooks?.map((h) => h.event)).toEqual(['turn-start', 'turn-end'])
     expect(reply?.run?.hooks?.every((h) => h.exit === 0)).toBe(true)
-    const lines = readFileSync(out, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { event: string; version: number; session: string; captureOwner?: string; reply?: { text: string } })
+    const lines = readFileSync(out, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { event: string; version: number; session: string; captureOwner?: string; reply?: { text: string }; cwd: string; message: { author: string; text: string } })
     expect(lines).toHaveLength(2)
-    expect(lines[0]).toMatchObject({ version: 1, event: 'turn-start', session: `run-${reply!.id}`, captureOwner: 'tucano' })
+    expect(lines[0]).toMatchObject({ version: 1, event: 'turn-start', session: `run-${reply!.id}`, captureOwner: 'tucano', cwd: join(workDir, 'a1'), message: { author: 'person', text: 'oi' } })
     expect(lines[1]).toMatchObject({ version: 1, event: 'turn-end', session: `run-${reply!.id}` })
     expect(lines[1]!.reply?.text).toBeTruthy()
   })
