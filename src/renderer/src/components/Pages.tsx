@@ -963,7 +963,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   keep={stepsKeep(stepsLatest)}
                   follow
                   label={L(`Como as respostas de ${draft.name || 'o agente'} mostram os passos`, `How ${draft.name || 'the agent'}'s replies show their steps`)}
-                  onChange={(v) => (isNew ? patch({ steps: v }) : (setDraft((d) => ({ ...d, steps: v })), patchAgent(draft.id, { steps: v })))}
+                  onChange={(v) => patch({ steps: v }, true)}
                 />
               </Row>
               <p className="hint">
