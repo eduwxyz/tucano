@@ -243,14 +243,14 @@ export const askUserFor = (names: string[]): ToolDef =>
       }
 
 // What the agent proposes as the work that comes after this reply: a card with a box per step,
-// every box ticked. It is ask_user's multiple choice turned around: there, nothing is picked; here,
+// every box clear. It is ask_user's multiple choice turned around: there, nothing is picked; here,
 // the point is that nobody has to go hunting for the follow-up inside the text.
 export const NEXT_STEPS: ToolDef = {
   name: 'next_steps',
   get description() {
     return L(
-      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas marcadas, pra ninguém perder no meio do texto o que você sugeriu. Use quando a sua resposta termina propondo de 1 a ${MAX_STEPS} caminhos de continuação: um label curto por passo e, quando ajudar, uma description. A pessoa desmarca o que não quer e manda o resto de volta como a próxima mensagem; o que ela deixar marcado é o que você faz em seguida. Não use pra perguntar uma decisão (isso é ask_user) nem pra uma coisa só. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
-      `Puts what you propose as the next step into a card of checkboxes, all ticked, so nothing you suggested gets lost in the middle of the text. Use it when your reply ends by proposing 1 to ${MAX_STEPS} ways to go on: a short label per step and, when it helps, a description. The person unticks what they don't want and sends the rest back as the next message; whatever stays ticked is what you do next. Don't use it to ask a decision (that's ask_user) or for a single thing. After calling it, end your reply with one sentence at most, without repeating the steps.`
+      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas vazias, pra ninguém perder no meio do texto o que você sugeriu. Use quando a sua resposta termina propondo de 1 a ${MAX_STEPS} caminhos de continuação: um label curto por passo e, quando ajudar, uma description. A pessoa marca o que quer e manda de volta como a próxima mensagem; o que ela marcar é o que você faz em seguida. Não use pra perguntar uma decisão (isso é ask_user) nem pra uma coisa só. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
+      `Puts what you propose as the next step into a card of checkboxes, all clear, so nothing you suggested gets lost in the middle of the text. Use it when your reply ends by proposing 1 to ${MAX_STEPS} ways to go on: a short label per step and, when it helps, a description. The person ticks what they want and sends it back as the next message; whatever they tick is what you do next. Don't use it to ask a decision (that's ask_user) or for a single thing. After calling it, end your reply with one sentence at most, without repeating the steps.`
     )
   },
   get inputSchema() {
