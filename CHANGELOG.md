@@ -4,6 +4,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.39] - 2026-11-18
+
+> **Em português:**
+> - **Corrigido:** o uso do mês de um agente no **Antigravity** não fica mais negativo (como "−2003590 de 2 mi"), e o limite mensal dele volta a valer. Algumas respostas do Antigravity contam o cache à parte da entrada, e a conta subtraía o cache como se estivesse dentro. Os recibos antigos também passam a contar certo.
+
+### Fixed
+
+- **An Antigravity agent's month no longer goes negative.** Tokens count as input − 90% of cache reads + output, which assumes the input counts the cache reads in. Some Antigravity runs report more cache reads than input, so the month showed as "−2003590 of 2M" and the agent's monthly limit never fired. More cache reads than input now means they came apart: the input counts whole and the cache a tenth, in every total, so receipts already saved read right too; new ones from Antigravity add the cache reads to the input. Agents that were past their limit without it showing now stop at it, and say it can be raised on their page. (#547)
+
 ## [0.2.38] - 2026-11-18
 
 > **Em português:**
