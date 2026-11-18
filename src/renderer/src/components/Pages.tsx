@@ -2035,7 +2035,7 @@ export function InboxPage(): ReactNode {
             {questions.map(({ q, done }) => (
               <div key={q.id}>
                 {meta(q.conversationId, q.agentId, q.createdAt)}
-                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
+                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}), ...(q.recommended ? { recommended: q.recommended } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
               </div>
             ))}
           </div>
@@ -3325,9 +3325,10 @@ export function ClassifiersCard(): ReactNode {
   )
 }
 
-// Which job each classifier serves: who replies in a channel, what an agent clicks in a page. It
-// sits in its own card, apart from the list, because an assignment is a decision of its own — and
-// the settings rail needs a section of its own to link to it.
+// Which job each classifier serves: who replies in a channel, what an agent clicks in a page, and —
+// the one row that isn't a selector, because it is TypeSafe's Jev or nothing — the option it
+// suggests on an agent's question. It sits in its own card, apart from the list, because an
+// assignment is a decision of its own — and the settings rail needs a section of its own to link to it.
 export function ClassifierUsesCard(): ReactNode {
   const settings = useStore((s) => s.settings)
   const work = onGateway(settings)
@@ -3341,29 +3342,60 @@ export function ClassifierUsesCard(): ReactNode {
   }
   return (
     <>
-      {CLASSIFIER_JOBS.map((job) => (
-        <Field key={job} label={jobLabel(job)[lang()]} hint={jobAbout(job)[lang()]}>
-          <Select
-            value={jobs[job] ?? ''}
-            onChange={(v) => assign(job, v ?? '')}
-            options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
-          />
-        </Field>
-      ))}
-      {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
-        const c = list.find((x) => x.id === jobs[job])
-        if (!c || !work) return null
-        return (
-          <OutsideGateway
-            key={job}
-            what={
-              job === 'routing'
-                ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
-                : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
-            }
-          />
-        )
-      })}
+      {list.length > 0 && (
+        <>
+          {CLASSIFIER_JOBS.map((job) => (
+            <Field key={job} label={jobLabel(job)[lang()]} hint={jobAbout(job)[lang()]}>
+              <Select
+                value={jobs[job] ?? ''}
+                onChange={(v) => assign(job, v ?? '')}
+                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
+              />
+            </Field>
+          ))}
+          {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
+            const c = list.find((x) => x.id === jobs[job])
+            if (!c || !work) return null
+            return (
+              <OutsideGateway
+                key={job}
+                what={
+                  job === 'routing'
+                    ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
+                    : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
+                }
+              />
+            )
+          })}
+        </>
+      )}
+      {/* The third use, and the one that answers on a card instead of in a job like the two above:
+          TypeSafe's Jev names the option it would pick on an agent's question. */}
+      <div className="key-row">
+        <Icon name="spark" />
+        <div className="grow">
+          <strong>{L('Marcar a opção recomendada', 'Mark the recommended option')}</strong>
+          <p className="muted small">
+            {L(
+              'Desligado por padrão. Ligado, cada pergunta de agente com duas ou mais opções vai pro TypeSafe com o texto e as opções, e volta com a sugestão. É só uma sugestão: quem escolhe continua sendo você, e "Outra coisa" nunca é sugerida.',
+              'Off by default. On, every agent question with two or more options goes to TypeSafe with its text and options, and comes back with a suggestion. It is only a suggestion: you still choose, and "Something else" is never suggested.'
+            )}
+          </p>
+        </div>
+        <Toggle label={L('Marcar a opção recomendada', 'Mark the recommended option')} on={!!settings.jevRecommend} onChange={(v) => updateSettings({ jevRecommend: v })} />
+      </div>
+      {settings.jevRecommend && work && (
+        <OutsideGateway what={L('cada pergunta de agente com opções, com o texto da pergunta e das opções, vai pro TypeSafe.', "every agent question with options, with the question's and the options' text, goes to TypeSafe.")} />
+      )}
+      {settings.jevRecommend && (
+        <JevKey
+          saved={!!settings.jevKey}
+          hint={L(
+            'Sem a chave, o selo não aparece e a pergunta fica como está hoje: nenhuma opção marcada.',
+            'Without the key, the pill never shows and the question stays as it is today: no option marked.'
+          )}
+        />
+      )}
     </>
   )
 }
@@ -3616,11 +3648,11 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('modelos') && (settings.classifiers ?? []).length > 0 && (
+        {pane('modelos') && (
           <Card
             title={L('Usos dos classificadores', 'Classifier Uses')}
             section="models-classifier-uses"
-            lead={L('Que trabalho cada classificador faz. Um trabalho sem classificador fica desligado, e o do roteador volta pro modelo pequeno.', 'Which job each classifier does. A job with no classifier stays off, and the router’s one falls back to the small model.')}
+            lead={L('Que trabalho cada classificador faz, e qual deles sugere a opção numa pergunta do agente. Um trabalho sem classificador fica desligado, e o do roteador volta pro modelo pequeno.', 'Which job each classifier does, and which one suggests the option on an agent’s question. A job with no classifier stays off, and the router’s one falls back to the small model.')}
           >
             <ClassifierUsesCard />
           </Card>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../src/shared/classifiers'
+import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../src/shared/classifiers'
 import type { Settings } from '../src/shared/types'
 import { ask, checkClassifierKey } from '../src/core/classifiers'
 import { jevBox, routeJev } from '../src/core/jev'
@@ -54,6 +54,13 @@ describe('the classifiers a workspace has', () => {
   it('a row deleted from the list leaves no job pointing at it', () => {
     const s = settingsWith({ classifiers: [luna], routerModel: 'jev' })
     expect(classifierFor(s, 'routing')).toBeUndefined()
+  })
+
+  it('the recommended option is a switch, not a job selector of its own', () => {
+    expect(CLASSIFIER_JOBS).not.toContain('recommend')
+    expect(classifierJobsOf(settingsWith({ jevKey: true, jevRecommend: true }))).toEqual({ recommend: 'jev' })
+    expect(classifierFor(settingsWith({ jevKey: true, jevRecommend: true }), 'recommend')).toEqual(JEV_CLASSIFIER)
+    expect(classifierFor(settingsWith({ jevKey: true }), 'recommend')).toBeUndefined()
   })
 })
 
