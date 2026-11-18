@@ -3814,8 +3814,7 @@ export function SettingsPage(): ReactNode {
                     )}
                   </p>
                 </div>
-                <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
-              </div>
+                <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />              </div>
             </Card>
             <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>
               {owner && (
