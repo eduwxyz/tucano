@@ -1,6 +1,7 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
+import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
@@ -234,6 +235,21 @@ export interface Api {
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
+  // To the people who make Tucano, through tucano.sh (core/feedback.ts). image: the window's picture, base64 PNG or JPEG.
+  // Throws, in the person's words, when it didn't go.
+  sendFeedback(p: { kind: 'bug' | 'idea' | 'other'; message: string; image?: string; lang?: Lang }): Promise<void>
+  // The owner's: the survey to show in the sidebar's foot now, or none (off, answered, nothing running).
+  survey(p: { lang?: Lang }): Promise<SurveyView | null>
+  // A choice (kept the moment it's clicked), the same choice with its comment, or dismiss: "Não quero responder".
+  answerSurvey(p: { survey: string; choice?: string; comment?: string; dismiss?: boolean; lang?: Lang }): Promise<void>
+}
+
+// A survey as the app shows it, already in the person's language (core/feedback.ts).
+export interface SurveyView {
+  id: string
+  question: string
+  options: { id: string; label: string }[]
+  followUp?: string
 }
 
 export type Method = keyof Api

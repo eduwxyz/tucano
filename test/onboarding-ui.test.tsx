@@ -376,7 +376,8 @@ describe('the sidebar and the missions', () => {
   it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions, the settings', async () => {
     fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia', 'Configurações'])
+    // Enviar feedback is there from the start, for everyone.
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia', 'Configurações', 'Enviar feedback'])
     expect(text()).toContain('Missões')
     expect(text()).toContain('Próxima: fale com Lia')
   })
