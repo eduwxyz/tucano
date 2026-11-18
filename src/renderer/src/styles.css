@@ -8743,14 +8743,13 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-setup__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.25s; }
 .voice-setup__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .voice-on { display: grid; gap: 8px; }
-.voice-setup__actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.voice-setup__actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; width: 100%; }
 .voice-setup__actions > .row { margin: 0; }
 .voice-on > .btn { justify-self: start; }
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
 /* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
 .voice-prefs { display: grid; gap: 14px; }
 /* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
-.voice-card__top { display: flex; align-items: flex-start; gap: 14px; }
 .voice-prefs__row { display: flex; align-items: center; gap: 14px; }
 .voice-advanced__toggle { margin-left: auto; border: 0; background: none; padding: 0; cursor: pointer; }
 .voice-advanced__toggle::before { content: "› "; }
