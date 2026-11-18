@@ -1,4 +1,4 @@
-import { CLASSIFIER_JOBS, classifierFor, classifierLabel, jobAbout, jobLabel, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
+import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
 import { L, lang, locale, type Lang } from '../../../shared/lang'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
@@ -3254,10 +3254,9 @@ export function ClassifiersCard(): ReactNode {
   )
 }
 
-// Which job each classifier serves: who replies in a channel, what an agent clicks in a page, and —
-// the one row that isn't a selector, because it is TypeSafe's Jev or nothing — the option it
-// suggests on an agent's question. It sits in its own card, apart from the list, because an
-// assignment is a decision of its own — and the settings rail needs a section of its own to link to it.
+// Which job each classifier serves: who replies in a channel, the option it suggests on an agent's
+// question, and what an agent clicks in a page. It sits in its own card, apart from the list, because
+// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.
 export function ClassifierUsesCard(): ReactNode {
   const settings = useStore((s) => s.settings)
   const work = onGateway(settings)
@@ -3291,41 +3290,90 @@ export function ClassifierUsesCard(): ReactNode {
                 what={
                   job === 'routing'
                     ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
-                    : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
+                    : job === 'recommend'
+                      ? L(`o texto da pergunta e as opções vão pro ${providerSpec(c.provider).label} sugerir uma delas.`, `the question's text and options go to ${providerSpec(c.provider).label} to suggest one of them.`)
+                      : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
                 }
               />
             )
           })}
         </>
       )}
-      {/* The third use, and the one that answers on a card instead of in a job like the two above:
-          TypeSafe's Jev names the option it would pick on an agent's question. */}
-      <div className="key-row">
-        <Icon name="spark" />
-        <div className="grow">
-          <strong>{L('Marcar a opção recomendada', 'Mark the recommended option')}</strong>
-          <p className="muted small">
-            {L(
-              'Desligado por padrão. Ligado, cada pergunta de agente com duas ou mais opções vai pro TypeSafe com o texto e as opções, e volta com a sugestão. É só uma sugestão: quem escolhe continua sendo você, e "Outra coisa" nunca é sugerida.',
-              'Off by default. On, every agent question with two or more options goes to TypeSafe with its text and options, and comes back with a suggestion. It is only a suggestion: you still choose, and "Something else" is never suggested.'
-            )}
-          </p>
-        </div>
-        <Toggle label={L('Marcar a opção recomendada', 'Mark the recommended option')} on={!!settings.jevRecommend} onChange={(v) => updateSettings({ jevRecommend: v })} />
-      </div>
-      {settings.jevRecommend && work && (
-        <OutsideGateway what={L('cada pergunta de agente com opções, com o texto da pergunta e das opções, vai pro TypeSafe.', "every agent question with options, with the question's and the options' text, goes to TypeSafe.")} />
+    </>
+  )
+}
+
+// Settings › Agents: who finds the element an agent asks to click. A card of its own, beside the
+// other things agents do, because the choice is about the browser and not about a classifier row —
+// but it writes the same `classifierJobs.browser` as Classifier Uses, so either surface shows the
+// other's answer. Jev is offered on an install with no classifier rows: a fresh install has none to
+// pick from, and picking it makes the row the rest of the app reads.
+export function BrowserClickCard(): ReactNode {
+  const settings = useStore((s) => s.settings)
+  const work = onGateway(settings)
+  // Read through the migration: an install from before the section has no list, only the old
+  // browserJev switch, and the card shows that as its choice until it is changed here.
+  const list = classifierList(settings)
+  const jobs = classifierJobsOf(settings)
+  const chosen = jobs.browser ? list.find((c) => c.id === jobs.browser) : undefined
+  const choose = (id: string): void => {
+    const next = { ...jobs }
+    if (!id) {
+      delete next.browser
+      updateSettings({ classifierJobs: next })
+      return
+    }
+    // The id is one of the rows the selector was built from, or TypeSafe's Jev before there is a
+    // row: the job may only point at a classifier the list holds, so the row is written with it.
+    const known = list.some((c) => c.id === id)
+    updateSettings({ ...(known ? {} : { classifiers: [...list, { ...JEV_CLASSIFIER }] }), classifierJobs: { ...next, browser: id } })
+  }
+  return (
+    <Card
+      title={L('Navegador dos agentes', 'Agents’ browser')}
+      lead={L(
+        'Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.',
+        'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.'
       )}
-      {settings.jevRecommend && (
-        <JevKey
-          saved={!!settings.jevKey}
-          hint={L(
-            'Sem a chave, o selo não aparece e a pergunta fica como está hoje: nenhuma opção marcada.',
-            'Without the key, the pill never shows and the question stays as it is today: no option marked.'
+    >
+      <Field
+        label={L('Quem acha o clique', 'Who finds the click')}
+        hint={
+          chosen
+            ? L(
+                'Acha o elemento em menos de 1 segundo, até sem texto quando o classificador lê o print da tela. Cada clique que o texto não resolve manda a lista de elementos da página, e às vezes o print dela, pro provedor escolhido, inclusive em áreas logadas.',
+                'Finds the element in under 1 second, even without text when the classifier reads the screenshot. Every click text can’t resolve sends the page’s element list, and sometimes its screenshot, to the chosen provider, including signed-in areas.'
+              )
+            : L(
+                'De graça e resolve a maioria: o agente usa o texto e, quando não acha, o número do elemento.',
+                'Free, and it handles most cases: the agent uses the text and, when it can’t find it, the element’s number.'
+              )
+        }
+      >
+        <Select
+          value={jobs.browser ?? ''}
+          onChange={(v) => choose(v ?? '')}
+          options={[
+            { value: '', label: L('Só pelo texto da página', 'Only by the page’s text') },
+            { value: JEV_CLASSIFIER.id, label: 'Jev (TypeSafe)', hint: providerSpec(JEV_CLASSIFIER.provider).label },
+            ...list
+              .filter((c) => c.id !== JEV_CLASSIFIER.id)
+              .map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))
+          ]}
+        />
+      </Field>
+      {chosen && work && (
+        <OutsideGateway
+          what={L(
+            `a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(chosen.provider).label}.`,
+            `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(chosen.provider).label}.`
           )}
         />
       )}
-    </>
+      <p className="hint">
+        <Icon name="sliders" size={13} /> {L('Dá pra mudar aqui ou em Classifiers, no trabalho “O que o agente clica na página”: é a mesma escolha.', 'Change it here or in Classifiers, under “What an agent clicks in a page”: it is the same choice.')}
+      </p>
+    </Card>
   )
 }
 
@@ -3399,7 +3447,6 @@ export function SettingsPage(): ReactNode {
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
   const work = onGateway(settings)
   const routingClassifier = classifierFor(settings, 'routing')
-  const browserClassifier = classifierFor(settings, 'browser')
   const team = useStore(teamMode)
   const admin = useStore(amAdmin)
   const owner = useStore(amOwner)
@@ -3624,24 +3671,7 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('agentes') && (
-          <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
-            <div className="key-row">
-              <Icon name="spark" />
-              <div className="grow">
-                <strong>{browserClassifier ? classifierLabel(browserClassifier) : L('Só pelo texto da página', 'Only by the page’s text')}</strong>
-                <p className="muted small">
-                  {browserClassifier
-                    ? L('Acha o elemento em menos de 1 segundo, até sem texto quando o classificador lê o print da tela. Cada clique que o texto não resolve manda a lista de elementos da página, e às vezes o print dela, pro provedor escolhido, inclusive em áreas logadas.', 'Finds the element in under 1 second, even without text when the classifier reads the screenshot. Every click text can’t resolve sends the page’s element list, and sometimes its screenshot, to the chosen provider, including signed-in areas.')
-                    : L('De graça e resolve a maioria: o agente usa o texto e, quando não acha, o número do elemento.', 'Free, and it handles most cases: the agent uses the text and, when it can’t find it, the element’s number.')}
-                </p>
-              </div>
-            </div>
-            <p className="hint">
-              <Icon name="sliders" size={13} /> {L('Quem acha o clique é escolhido em Classifiers, no trabalho “O que o agente clica na página”.', 'Who finds the click is chosen in Classifiers, under “What an agent clicks in a page”.')}
-            </p>
-          </Card>
-        )}
+        {pane('agentes') && <BrowserClickCard />}
 
         {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
         {pane('integracoes') && window.tucano.phone && <HomePhoneCard />}

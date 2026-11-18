@@ -835,11 +835,11 @@ export class Runner {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
   }
 
-  // Turned on in the settings: one cheap Jev question per decision with options, and the pick is
-  // written on the reply after the card is already on screen — so asking never waits on TypeSafe.
+  // Assigned in Settings › Classifier Uses: one cheap Jev question per decision with options, and the
+  // pick is written on the reply after the card is already on screen — so asking never waits on TypeSafe.
   // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
   private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
-    if (!settings.jevRecommend || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
+    if (!classifierFor(settings, 'recommend') || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
     const key = await this.deps.jev?.key('recommend')
     if (!key) return
     try {
