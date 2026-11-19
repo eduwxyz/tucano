@@ -1995,18 +1995,8 @@ h3 {
 .work-row--queued .work-row__text {
   color: var(--text-2);
 }
-/* A queued prompt says why it has not started, and a working session carries its steer pill. */
-.work-row__prompt {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.work-row__sub {
-  color: var(--text-3);
-  font-size: 10.5px;
-  line-height: 13px;
-}
+/* A working session carries its steer pill. A row is the prompt alone on one line: nothing under it
+   says why it waits, because a queued reply is not drawn here at all (that group is #261's). */
 /* A reply that ended: the glyph says how, and its row stays until the trash takes it off. */
 .work-row__state {
   display: inline-flex;
