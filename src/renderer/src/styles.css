@@ -3467,6 +3467,78 @@ body.is-resizing webview {
 .msg__reply:focus-visible {
   opacity: 1;
 }
+/* The trash rides the same sticky rail, one row under the thread button. */
+.msg__anchor-pin .msg__delete {
+  position: absolute;
+  top: 28px;
+  right: -24px;
+  opacity: 0;
+  color: var(--text-2);
+  transition: var(--transition-ui);
+}
+.msg__anchor-pin--alone .msg__delete {
+  top: 4px;
+}
+.msg:hover .msg__delete,
+.msg__delete:focus-visible,
+.msg__delete.is-armed {
+  opacity: 1;
+}
+.msg__delete.is-armed {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.msg__delete--head {
+  position: static;
+  opacity: 1;
+}
+.msg__delete--post {
+  top: 28px;
+  right: -24px;
+}
+.msg__edit {
+  position: absolute;
+  top: 6px;
+  right: calc(100% + 32px);
+  color: var(--text-2);
+  opacity: 0;
+  transition: var(--transition-ui);
+}
+.msg--me .msg__delete--prompt {
+  top: 6px;
+  right: calc(100% + 58px);
+}
+.msg--me.is-left-stack .msg__edit {
+  top: 30px;
+  right: calc(100% + 6px);
+}
+.msg--me.is-left-stack .msg__delete--prompt {
+  top: 54px;
+  right: calc(100% + 6px);
+}
+.msg:hover .msg__edit,
+.msg__edit:focus-visible,
+.msg:hover .msg__delete--prompt,
+.msg__delete--prompt:focus-visible {
+  opacity: 1;
+}
+.msg__edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 4px;
+  width: 100%;
+  max-width: 100%;
+}
+.msg__edit-box textarea {
+  box-sizing: border-box;
+  resize: none;
+  min-height: 62px;
+}
+.msg__edit-actions {
+  display: flex;
+  gap: 8px;
+}
 @media (hover: none) {
   .msg__reply {
     opacity: 1;

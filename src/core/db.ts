@@ -1041,6 +1041,20 @@ export class Db {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
   }
 
+  // A message leaves with the thread it started and the approvals asked under any of its messages.
+  // Its prompt and receipts are separate messages and stay: the tokens were spent either way.
+  deleteMessage(id: string): string[] {
+    return this.tx(() => {
+      const inThread = (this.db.prepare('SELECT id FROM messages WHERE thread_id = ?').all(id) as { id: string }[]).map((r) => r.id)
+      const gone = [id, ...inThread]
+      for (const one of gone) {
+        this.db.prepare('DELETE FROM approvals WHERE message_id = ?').run(one)
+        this.db.prepare('DELETE FROM messages WHERE id = ?').run(one)
+      }
+      return gone
+    })
+  }
+
   // Puts the agent in exactly these channels (DMs are untouched).
   setAgentChannels(agentId: string, channelIds: string[]): string[] {
     const changed: string[] = []

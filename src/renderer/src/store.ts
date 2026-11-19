@@ -565,6 +565,17 @@ function apply(e: CoreEvent): void {
         const here = s.view?.kind === 'conversation' && s.view.id === id
         return { ...s, messages, ...(here ? { panel: { kind: 'thread' as const, id: m.id } } : {}) }
       }
+      // A deleted session takes its thread off the room and closes the panel if it was open on it.
+      case 'message_removed': {
+        const { [e.id]: _seen, ...seen } = s.threadSeen
+        const list = messagesIn(s, e.conversationId)
+        return {
+          ...s,
+          messages: { ...s.messages, [e.conversationId]: list.filter((m) => m.id !== e.id) },
+          threadSeen: seen,
+          panel: s.panel?.kind === 'thread' && s.panel.id === e.id ? null : s.panel
+        }
+      }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'conversation': {
@@ -1003,6 +1014,8 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+// A session's reply goes with the thread it started and the work under it.
+export const deleteMessage = (messageId: string): void => void fire(L('Não consegui apagar a sessão.', "Could not delete the session."), 'deleteMessage', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })

@@ -4,6 +4,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Adicionado:** a lixeira de uma sessão voltou ao rail da resposta e ao cabeçalho da thread. O primeiro clique avisa, o segundo apaga a resposta com a thread e o trabalho nela; o pedido e os recibos ficam. O lápis de editar o próprio pedido voltou junto.
+
+### Added
+
+- **Delete a session from the reply rail and the thread header.** The trash sits under the thread button in the sticky rail, or beside the summary and close buttons in the thread header. One press arms it; the second deletes the reply, its thread and the work under it. Escape, an outside press or four seconds disarms it. The prompt it answered and its receipts stay. My own prompt can be edited where it stands, and a routine's post can be removed without stopping the routine.
 ## [0.2.40] - 2026-11-18
 
 > **Em português:**
