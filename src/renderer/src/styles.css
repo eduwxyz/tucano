@@ -4037,6 +4037,14 @@ body.is-resizing webview {
 .msg__meta .wiki-keep {
   margin: 0;
 }
+/* The reply-to icon is the right end of the footer line, not a row under it. */
+.msg__meta .msg__actions {
+  margin: 0 0 0 auto;
+}
+.msg__meta .msg__replyto {
+  min-width: 0;
+  min-height: 0;
+}
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */
 .msg.is-thread-open::before {

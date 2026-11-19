@@ -636,6 +636,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const name = agent ? agent.name : ghost ? L('Agente', 'Agent') : (other ?? me.name)
   // A reply answers what an agent or a person said, once it stopped working (my own too: a note under it).
   const canReply = message.run?.status !== 'working' && (message.author.kind === 'agent' || message.author.kind === 'person')
+  const hasFooter = !!(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation))
   const openMenu = (e: React.MouseEvent<HTMLElement>): void => {
     if (!canReply || (e.target as HTMLElement).closest('a, button, input, textarea, select, [role="menu"]')) return
     const selected = selectedQuote(e.currentTarget)
@@ -805,30 +806,34 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </button>
         )}
         {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
+        {(hasFooter || canReply) && (
           <div className="msg__meta">
-            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
-            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
+            {hasFooter && (
+              <>
+                {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+                {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
+              </>
+            )}
+            {canReply && (
+              <div className="msg__actions">
+                <button
+                  className={`msg__replyto ${quote ? 'msg__replyto--excerpt' : ''}`}
+                  title={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
+                  aria-label={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={() => startReply(message, quote, replyKey)}
+                >
+                  <Icon name="reply" size={16} />
+                  {quote && <span>{L('Responder ao trecho', 'Reply to selection')}</span>}
+                </button>
+              </div>
+            )}
           </div>
         )}
         {message.author.kind === 'person' && !message.threadId && <AskedFromHere message={message} />}
         {replies && <ThreadLink message={message} replies={replies} noReply={!!message.run} />}
         {/* The routine's message had a thread of its own: still there, under the reply that carries it. */}
         {ask && !!askReplies?.length && <ThreadLink message={ask} replies={askReplies} noReply />}
-        {canReply && (
-          <div className="msg__actions">
-            <button
-              className={`msg__replyto ${quote ? 'msg__replyto--excerpt' : ''}`}
-              title={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
-              aria-label={quote ? L('Responder ao trecho', 'Reply to selection') : L('Responder mensagem', 'Reply to message')}
-              onPointerDown={(e) => e.preventDefault()}
-              onClick={() => startReply(message, quote, replyKey)}
-            >
-              <Icon name="reply" size={16} />
-              {quote && <span>{L('Responder ao trecho', 'Reply to selection')}</span>}
-            </button>
-          </div>
-        )}
       </div>
       {menu && createPortal(<ContextMenu menu={menu} onClose={closeMenu} />, document.body)}
     </article>
