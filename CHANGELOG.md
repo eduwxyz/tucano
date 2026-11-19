@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **What each provider has left, read from the logins already on this computer.** Usage and limits gains a column per provider that answers for a quota, with its own windows in its own unit: a percentage left for a subscription, the money left in a wallet, requests against a cap, and when each window resets. A provider whose login expired says so in its own column instead of hiding the others. The core reads them once as it comes up and every twenty minutes after that, and keeps the last reading, so the panel is on screen the moment the page opens: what it draws is the reading the core already holds, and when the fresh one lands the figures count from the old value to the new one instead of jumping. **Read again** forces a read, and the line above the panel says when the numbers were taken.
+
 ## [0.2.40] - 2026-11-18
 
 > **Em português:**
