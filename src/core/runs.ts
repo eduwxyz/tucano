@@ -47,7 +47,7 @@ import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teamSection, type Returned } from './delegations'
 import { askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
-import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
+import { canContinue, canResume, finishedSilently, WORKLESS_LABELS } from '../shared/run-progress'
 import { CONCLUIR_OBJETIVO, GOAL_MAX_TURNS, goalEnd, goalTask, goalText, sameReply, type Goal } from './goals'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) })
@@ -744,7 +744,11 @@ export class Runner {
   private async continueReply(messageId: string, auto?: 'cap' | 'restart'): Promise<void> {
     const { db } = this.deps
     const msg = db.message(messageId)
-    if (!msg?.run || msg.author.kind !== 'agent' || !canContinue(msg.run)) return
+    // Going on by itself asks for something to go on with; a person's Continue takes any reply the app
+    // cut, and a session left showing no answer at all (`done`, no words: the cut reply whose
+    // continuation never wrote one).
+    if (!msg?.run || msg.author.kind !== 'agent') return
+    if (auto ? !canContinue(msg.run) : !canResume(msg.run, msg.text)) return
     if (this.paused) return // startup recovery waits in the scheduler until unpaused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
@@ -752,6 +756,8 @@ export class Runner {
     const me = (await this.deps.settings()).workspaceName
     // Read before the status changes: how it was cut is what the next reply is told.
     const cut = msg.run.status
+    // A row marked done with nothing said is a cut reply whose continuation never wrote: say so.
+    const silent = finishedSilently(msg.run, msg.text)
     // Said before the new reply starts, so the cut one reads as answered rather than as an offer.
     // Going on by itself, it says so where the person sees it, under the reply that paused.
     const went: Step[] = auto ? [{ id: randomUUID(), label: L('Continuou sozinho', 'Went on by itself'), status: 'done' }] : []
@@ -781,10 +787,15 @@ export class Runner {
             `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
             `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
           )
-        : L(
-            `A sua última resposta foi cortada ${cutOf(cut)}, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
-            `Your last reply was cut ${cutOf(cut)}, and ${me} asked you to go on. What you wrote is in your last message above.`
-          ),
+        : silent
+          ? L(
+              `A sua última resposta não chegou a dizer nada: ela foi cortada quando o app fechou, e ${me} pediu pra continuar. Se você já escreveu algo antes disso, está na sua última mensagem acima.`,
+              `Your last reply never got to say anything: it was cut when the app closed, and ${me} asked you to go on. Anything you wrote before that is in your last message above.`
+            )
+          : L(
+              `A sua última resposta foi cortada ${cutOf(cut)}, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
+              `Your last reply was cut ${cutOf(cut)}, and ${me} asked you to go on. What you wrote is in your last message above.`
+            ),
       steps.length ? `${L('Os passos que você fez', 'The steps you took')}:\n${steps.join('\n')}` : '',
       L('Continue de onde parou, sem refazer o que já está feito, e termine com o resultado.', "Pick up where you left off, without redoing what's already done, and finish with the result.")
     ]

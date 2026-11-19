@@ -1,13 +1,13 @@
 // A reply the app cut with work behind it is worth more than a restart of the same work: it goes on
 // in a new reply that carries what it already read, wrote and ran in its task. A reply that never
-// got a tool call back has nothing to go on with, and is only ever tried again.
+// got a tool call back has nothing to go on with, so it goes on only when the person asks.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, EngineId, Message, Run, Settings, Step } from '../src/shared/types'
 import { setLang } from '../src/shared/lang'
-import { canContinue, workedOn } from '../src/shared/run-progress'
+import { canContinue, canResume, workedOn } from '../src/shared/run-progress'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
@@ -126,14 +126,38 @@ describe('continuing a reply the app cut', () => {
     expect(sent).toContain("Pick up where you left off, without redoing what's already done")
   })
 
-  it('is not offered on a reply killed before any tool call came back', async () => {
+  // A reply cut before any tool call came back used to be refused a Continue: nothing to go on with.
+  // That buried every reply the app closed while it was still thinking. Asked for, it goes on; the bar
+  // that keeps something to go on with is the automatic pass's, not the person's.
+  it('goes on when the person asks for it, even with no tool call behind it', async () => {
     const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'faça o relatório')
     const cut = put('d1', { kind: 'agent', id: 'a1' }, '', { status: 'failed', task: 'faça o relatório', steps: [step('Thought', 'done')] }, prompt.id)
     const r = runner()
     await r.continue(cut.id)
     await r.idle()
-    expect(replies().filter((m) => m.id !== cut.id)).toHaveLength(0)
-    expect(db.message(cut.id)?.run?.status).toBe('failed') // still waiting on "Try again"
+    const made = replies().filter((m) => m.id !== cut.id)
+    expect(made).toHaveLength(1)
+    expect(made[0]!.threadId).toBe(prompt.id)
+    expect(turns.map((t) => t.prompt).join(' ')).toContain('faça o relatório')
+  })
+
+  // The bar for what goes on by itself stays where it was: only the person's Continue is looser.
+  it('leaves the automatic bar where it was', () => {
+    const onlyThoughts = { status: 'interrupted' as const, steps: [step('Thinking', 'done')] }
+    expect(canContinue(onlyThoughts as never)).toBe(false)
+    expect(canResume(onlyThoughts as never)).toBe(true)
+  })
+
+  // A session that ended without a word (cut, continued from, and the continuation never wrote one):
+  // what it is told says that, instead of saying it was stopped before finishing.
+  it('goes on from a session that ended without saying anything, and says so', async () => {
+    const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'faça o relatório')
+    const cut = put('d1', { kind: 'agent', id: 'a1' }, '', { status: 'done', cutAt: clock, task: 'faça o relatório', steps: [step('Ran npx vitest run', 'done')] }, prompt.id)
+    const r = runner()
+    await r.continue(cut.id)
+    await r.idle()
+    expect(replies().filter((m) => m.id !== cut.id)).toHaveLength(1)
+    expect(turns.map((t) => t.prompt).join(' ')).toContain('never got to say anything')
   })
 
   it('says the failure differently from the app closing, and from a stop', async () => {

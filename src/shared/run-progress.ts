@@ -14,5 +14,18 @@ export const workedOn = (run: Run): boolean =>
   (run.steps ?? []).some((s) => s.status !== 'running' && !WORKLESS_LABELS.includes(s.label))
 
 // A reply paused at its budget always goes on; a cut one only when there is something to go on with.
+// A session that ended without a word: the app cut it while it worked (so the row reads `done` once a
+// continuation was asked for, `cutAt` behind it) or the turn ended with nothing said. A bubble with a
+// chain and no answer is a dead end unless the person can nudge it, and its own text is the only thing
+// that says whether it answered — which is why it comes in here instead of being read from the status.
+export const finishedSilently = (run: Run, text: string): boolean => run.status === 'done' && !text.trim()
+
+// What the person's Continue accepts: any reply the app cut, even one with nothing but thoughts behind
+// it (the app closing mid-sentence, a stop from the rail), and a session left showing no answer at all
+// because it was cut and the continuation asked for from it never wrote one. `canContinue` stays the
+// bar for going on by itself, so nothing restarts in a loop.
+export const canResume = (run: Run, text = ''): boolean =>
+  run.status === 'paused' || CUT.includes(run.status) || finishedSilently(run, text)
+
 export const canContinue = (run: Run): boolean =>
   run.status === 'paused' || (CUT.includes(run.status) && workedOn(run))

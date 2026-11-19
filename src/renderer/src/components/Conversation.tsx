@@ -11,7 +11,7 @@ import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
-import { CUT, canContinue } from '../../../shared/run-progress'
+import { canResume } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -626,8 +626,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </>
         )}
         {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
-            is in the task the new reply reads, so nothing it already did is done twice (#390). */}
-        {message.run && CUT.includes(message.run.status) && canContinue(message.run) && (
+            is in the task the new reply reads, so nothing it already did is done twice (#390). A session left
+            with no answer at all — the app cut it and what was asked to go on from it never wrote — takes it
+            too: a chain with no words and no pill is a dead end. */}
+        {message.run && message.run.status !== 'paused' && canResume(message.run, message.text) && (
           <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
             {L('Continuar', 'Continue')}
           </button>

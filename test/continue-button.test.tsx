@@ -83,11 +83,29 @@ describe('a reply the app cut', () => {
     expect(buttons()).toContain('Try again')
   })
 
-  it('offers only Try again when all it did was think', async () => {
+  // Cut while it was still thinking, with no tool call behind it: the person's call, not the app's.
+  // Try again alone buried every reply the app closed in the middle of before it had read anything.
+  it('offers Continue even when all it did was think', async () => {
     fake = { ...fake, messages: { d1: [cut([step('Thought', 'done')])] } }
     await render(<ConversationView id="d1" />)
-    expect(buttons()).not.toContain('Continue')
+    expect(buttons()[0]).toBe('Continue')
     expect(buttons()).toContain('Try again')
+  })
+
+  // A session left with no answer: the app cut it, a continuation was asked for from the row (which is
+  // why the row reads `done`, its `cutAt` still there) and the words never came. It showed a chain and
+  // nothing else to click — an install every ten minutes filled a channel with those.
+  it('offers Continue on a session that ended without a word', async () => {
+    const silent = {
+      id: 'm3', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: '', at: 4,
+      run: { status: 'done', task: 'fix the test', cutAt: 3, steps: [step('Thought', 'done'), step('Ran npx vitest run', 'done')] }
+    }
+    fake = { ...fake, messages: { d1: [silent] } }
+    await render(<ConversationView id="d1" />)
+    const button = [...document.querySelectorAll('button.retry')].find((b) => b.textContent?.trim() === 'Continue')
+    expect(button).toBeTruthy()
+    await act(async () => (button as unknown as { click: () => void }).click())
+    expect(continueRun).toHaveBeenCalledWith('m3')
   })
 
   it('goes on with the reply that was cut when Continue is pressed', async () => {
