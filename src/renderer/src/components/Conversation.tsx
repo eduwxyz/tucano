@@ -1635,6 +1635,16 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
+  // The steer is a sub-button of this row, beside Stop: it opens a field under the box, still held
+  // by this reply's id so it cannot direct another reply of the same agent.
+  const [steerOpen, setSteerOpen] = useState(false)
+  const [steerNote, setSteerNote] = useState('')
+  const steerTyped = steerNote.trim()
+  const steer = (text: string): void => {
+    sendMessage(message.conversationId, text, [], message.threadId, [], 'steer', message.id)
+    setSteerOpen(false)
+    setSteerNote('')
+  }
   const open = toggled ?? (working && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
@@ -1646,135 +1656,119 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
 
   return (
-    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
-      <button className="steps__toggle" onClick={() => setOpen(!open)}>
-        {working ? (
-          <span className="steps__pulse" />
-        ) : justDone ? (
-          <span className="steps__done">
-            <Icon name="check" size={12} />
-          </span>
-        ) : (
-          <span className="steps__chev">
-            <Icon name="chevron" size={12} />
-          </span>
-        )}
-        {working ? (
-          <span className="shimmer">
-            {current
-              ? `${current.label}…`
-              : now - message.at > 60_000
-                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
-                : run.steps.length === 0
-                  ? L('Lendo o pedido…', 'Reading the request…')
-                  : L('Pensando…', 'Thinking…')}
-          </span>
-        ) : (
-          <span className="steps__summary">
-            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-            {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
-            {total > 0 && ` · ${duration(total)}`}
-          </span>
-        )}
-        {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
-        {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
-        {working && (
-          <span
-            className="btn btn--xs btn--ghost steps__stop"
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              stopRun(message.id)
-            }}
-          >
-            <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
-          </span>
-        )}
-      </button>
-      {open && (
-        <ol className="steps__list">
-          {run.steps.map((st) => (
-            <StepRow key={st.id} step={st} />
-          ))}
-        </ol>
-      )}
-    </div>
-  )
-}
-
-// One reply's run as the conversation draws it: the line of steps it took, and, under that box and
-// outside it, whatever the reply offers while it still works. Anything the run says about itself —
-// its steps, and the thinking it streams under them — stays above that, never under it.
-export function RunBlock({ message }: { message: Message }): ReactNode {
-  return (
     <>
-      <RunSteps message={message} />
-      {message.run?.status === 'working' && <SteerPill message={message} />}
+      <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
+        <button className="steps__toggle" onClick={() => setOpen(!open)}>
+          {working ? (
+            <span className="steps__pulse" />
+          ) : justDone ? (
+            <span className="steps__done">
+              <Icon name="check" size={12} />
+            </span>
+          ) : (
+            <span className="steps__chev">
+              <Icon name="chevron" size={12} />
+            </span>
+          )}
+          {working ? (
+            <span className="shimmer">
+              {current
+                ? `${current.label}…`
+                : now - message.at > 60_000
+                  ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+                  : run.steps.length === 0
+                    ? L('Lendo o pedido…', 'Reading the request…')
+                    : L('Pensando…', 'Thinking…')}
+            </span>
+          ) : (
+            <span className="steps__summary">
+              {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
+              {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
+              {total > 0 && ` · ${duration(total)}`}
+            </span>
+          )}
+          {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
+          {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+          {working && (
+            <span
+              className="btn btn--xs btn--ghost steps__stop"
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                stopRun(message.id)
+              }}
+            >
+              <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
+            </span>
+          )}
+          {working && (
+            <span
+              className="steps__steer-pill"
+              role="button"
+              aria-expanded={steerOpen}
+              title={L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply')}
+              onClick={(e) => {
+                e.stopPropagation()
+                setSteerOpen((v) => !v)
+              }}
+            >
+              <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+            </span>
+          )}
+        </button>
+        {open && (
+          <ol className="steps__list">
+            {run.steps.map((st) => (
+              <StepRow key={st.id} step={st} />
+            ))}
+          </ol>
+        )}
+      </div>
+      {working && steerOpen && (
+        <div className="steps__steer">
+          <div className="steps__steer-note">
+            <textarea
+              aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+              placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+              rows={2}
+              value={steerNote}
+              autoFocus
+              onChange={(e) => setSteerNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && steerTyped) steer(steerTyped)
+                if (e.key === 'Escape') {
+                  setSteerOpen(false)
+                  setSteerNote('')
+                }
+              }}
+            />
+            <div className="steps__steer-row">
+              <button className="btn btn--primary btn--xs" disabled={!steerTyped} onClick={() => steer(steerTyped)}>
+                {L('Orientar', 'Steer')}
+              </button>
+              <button
+                className="link"
+                onClick={() => {
+                  setSteerOpen(false)
+                  setSteerNote('')
+                }}
+              >
+                {L('Cancelar', 'Cancel')}
+              </button>
+              <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
-// A steer, from the bottom of the chain: while the agent works, the person can say how to go on
-// without stopping it. What they write isn't a message of its own — it's handed to the reply at its
-// next tool call, and the chain says so, in the person's words (send mode `steer`, src/core/runs.ts).
-// With the reply already over, the same text is an ordinary prompt: nothing here holds it back.
-function SteerPill({ message }: { message: Message }): ReactNode {
-  const [open, setOpen] = useState(false)
-  const [note, setNote] = useState('')
-  const typed = note.trim()
-  const steer = (text: string): void => {
-    // This reply's id goes with it, so a second reply of the same agent in this DM is not steered by
-    // what was written for this one (src/core/runs.ts, `steerIn`).
-    sendMessage(message.conversationId, text, [], message.threadId, [], 'steer', message.id)
-    setOpen(false)
-    setNote('')
-  }
-  return (
-    <div className="steps__steer">
-      <button
-        className="steps__steer-pill"
-        aria-expanded={open}
-        title={L('Dizer como seguir, sem parar o que ele está fazendo', 'Say how to go on, without stopping what it is doing')}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
-      </button>
-      {open && (
-        <div className="steps__steer-note">
-          <textarea
-            aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
-            placeholder={L('Como ele deve seguir?', 'How should it go on?')}
-            rows={2}
-            value={note}
-            autoFocus
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) steer(typed)
-              if (e.key === 'Escape') {
-                setOpen(false)
-                setNote('')
-              }
-            }}
-          />
-          <div className="steps__steer-row">
-            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => steer(typed)}>
-              {L('Orientar', 'Steer')}
-            </button>
-            <button
-              className="link"
-              onClick={() => {
-                setOpen(false)
-                setNote('')
-              }}
-            >
-              {L('Cancelar', 'Cancel')}
-            </button>
-            <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+// One reply's run as the conversation draws it: its steps, the steer sub-button beside Stop in
+// the steps row, and the steer's field under the box. Anything the run says about itself — its steps
+// and the thinking under them — still sits above the field.
+export function RunBlock({ message }: { message: Message }): ReactNode {
+  return <RunSteps message={message} />
 }
 
 function StepRow({ step }: { step: Step }): ReactNode {

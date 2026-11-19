@@ -1,6 +1,6 @@
-// The steer pill, under the box of a reply's steps while the agent works: it opens a field, what the
-// person writes goes to the reply that's running (send mode `steer`) instead of becoming a message of
-// its own, and the chain then says so in their words — as what it is, not as a tool call.
+// The steer sub-button, beside Stop in a working reply's steps row: it opens a field under the box,
+// and what the person writes goes to that reply (send mode `steer`) instead of becoming a message of
+// its own. The chain then says so in their words — as what it is, not as a tool call.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -21,8 +21,9 @@ Object.assign(globalThis, {
   }
 })
 
-// What the pill sends: the same call the composer makes, with the send mode that hands it to the run.
-const sent = vi.hoisted(() => [] as { conversationId: string; text: string; mode?: string }[])
+// What the sub-button sends: the composer's call, with the mode and the run it was written for.
+const sent = vi.hoisted(() => [] as { conversationId: string; text: string; mode?: string; replyId?: string }[])
+const stopped = vi.hoisted(() => [] as string[])
 // The app's own state, so a selector that reads a setting reads the one the app ships with.
 let fake: State
 vi.mock('../src/renderer/src/store', async (original) => {
@@ -30,10 +31,12 @@ vi.mock('../src/renderer/src/store', async (original) => {
   return {
     ...real,
     useStore: <T,>(select: (s: State) => T): T => select(fake),
-    sendMessage: (conversationId: string, text: string, _images?: unknown, _threadId?: string, _files?: unknown, mode?: string): void => {
-      sent.push({ conversationId, text, mode })
+    sendMessage: (conversationId: string, text: string, _images?: unknown, _threadId?: string, _files?: unknown, mode?: string, replyId?: string): void => {
+      sent.push({ conversationId, text, mode, replyId })
     },
-    stopRun: (): void => {}
+    stopRun: (id: string): void => {
+      stopped.push(id)
+    }
   }
 })
 
@@ -55,6 +58,7 @@ const reply = (status: Message['run'] extends undefined ? never : NonNullable<Me
 let root: Root
 beforeEach(() => {
   sent.length = 0
+  stopped.length = 0
   fake = { ...getState() }
   root = createRoot(document.getElementById('root')!)
 })
@@ -89,14 +93,22 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the steer pill', () => {
-  it('sits under the steps of a reply at work, and is gone once it is done', async () => {
+  it('is one compact sub-button beside Stop in the steps row of a reply at work', async () => {
     await draw(reply('working'))
-    expect(pill()?.textContent?.trim()).toBe('Orientar')
+    const row = document.querySelector('.steps__toggle')!
+    const stop = row.querySelector('.steps__stop')!
+    const steer = row.querySelector<HTMLElement>('.steps__steer-pill')!
+    expect(steer.textContent?.trim()).toBe('Orientar')
+    expect(steer.getAttribute('title')).toMatch(/Dizer como seguir|Say how to go on/)
+    expect(document.querySelectorAll('.steps__steer-pill')).toHaveLength(1) // not a second steer control
+    expect(document.querySelectorAll('.steps__stop')).toHaveLength(1) // Stop stays the stop action
+    expect(steer.previousElementSibling).toBe(stop)
     expect(document.querySelector('.steps__list')).not.toBeNull()
-    // Under the box, not inside it: everything the run says about itself stays above the pill.
-    const block = document.querySelector('.steps')!
-    expect(block.querySelector('.steps__steer')).toBeNull()
-    expect(block.nextElementSibling?.className).toBe('steps__steer')
+    expect(document.querySelector('.steps__steer')).toBeNull() // no field until it is opened
+    await act(async () => steer.click())
+    expect(document.querySelector('.steps')!.nextElementSibling?.className).toBe('steps__steer')
+    expect(stopped).toHaveLength(0) // steering did not stop the reply
+    expect(document.querySelector('.steps__list')).not.toBeNull() // and did not toggle the steps
     await draw(reply('done'))
     expect(pill()).toBeNull()
   })
@@ -117,7 +129,7 @@ describe('the steer pill', () => {
     await act(async () => pill()!.click())
     await type('só as abertas, não mexa no resto')
     await act(async () => buttons()[0]!.click())
-    expect(sent).toEqual([{ conversationId: 'c1', text: 'só as abertas, não mexa no resto', mode: 'steer' }])
+    expect(sent).toEqual([{ conversationId: 'c1', text: 'só as abertas, não mexa no resto', mode: 'steer', replyId: 'm1' }])
     expect(field()).toBeNull() // closed on sending
   })
 
@@ -126,7 +138,7 @@ describe('the steer pill', () => {
     await act(async () => pill()!.click())
     await type('pelo caminho mais curto')
     await key('Enter', { ctrlKey: true })
-    expect(sent).toEqual([{ conversationId: 'c1', text: 'pelo caminho mais curto', mode: 'steer' }])
+    expect(sent).toEqual([{ conversationId: 'c1', text: 'pelo caminho mais curto', mode: 'steer', replyId: 'm1' }])
     expect(field()).toBeNull()
     await act(async () => pill()!.click())
     await type('isto não vai')
