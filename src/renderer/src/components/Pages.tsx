@@ -3281,6 +3281,14 @@ export function SettingsPage(): ReactNode {
 
         {pane('modelos') && admin && <AgentModelsPanel />}
 
+        {pane('modelos') && admin && (
+          <Card title={L('Nomes das sessões', 'Session names')} lead={L('Cada sessão ganha um nome quando começa, feito por um modelo pequeno numa chamada só: ele aparece na linha do agente, ao lado do nome dela, e vira o nome da thread. Sem nada escolhido, usa o modelo da memória.', 'Every session gets a name as it starts, made by a small model in one call: it shows on the agent’s line, beside its name, and becomes the thread’s name. With nothing picked, it uses the memory model.')}>
+            <Field label={L('Modelo dos nomes', 'Naming model')} hint={L('Uma chamada curta por sessão: prefira um modelo rápido e barato.', 'One short call per session: go for a fast, cheap model.')}>
+              <ModelSelect value={settings.sessionNameModel || settings.memoryModel} onChange={(sessionNameModel) => updateSettings({ sessionNameModel })} />
+            </Field>
+          </Card>
+        )}
+
         {pane('modelos') && (
           <Card
             title="Harnesses"

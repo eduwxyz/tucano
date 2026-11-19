@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Each session is named as it starts.** A small model reads the request and answers with two to five words — "Session names", "App icon on macOS" — one call, in the background, so the reply never waits for it. The name sits on the reply's head line beside the agent's name, and it is the name a thread carries in its header. The model is picked in **Settings › Models › Nomes das sessões**, between the agents' models and the runtimes; with nothing picked it uses the memory's model.
+
 ## [0.2.43] - 2026-11-19
 
 > **Em português:**
