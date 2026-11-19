@@ -4,8 +4,8 @@
 // has no address bar and keeps its screen in memory, so it doesn't use this.
 import type { View } from './store'
 
-type Simple = Extract<View['kind'], 'approvals' | 'usage' | 'connectors' | 'memory' | 'routines' | 'skills' | 'report' | 'settings' | 'missions' | 'new-agent'>
-const SIMPLE: readonly Simple[] = ['approvals', 'usage', 'connectors', 'memory', 'routines', 'skills', 'report', 'settings', 'missions', 'new-agent']
+type Simple = Extract<View['kind'], 'board' | 'approvals' | 'usage' | 'connectors' | 'memory' | 'routines' | 'skills' | 'report' | 'settings' | 'missions' | 'new-agent'>
+const SIMPLE: readonly Simple[] = ['board', 'approvals', 'usage', 'connectors', 'memory', 'routines', 'skills', 'report', 'settings', 'missions', 'new-agent']
 const WIKI_TABS = ['pages', 'pending', 'sources', 'review'] as const
 
 const part = (s: string): string => encodeURIComponent(s)

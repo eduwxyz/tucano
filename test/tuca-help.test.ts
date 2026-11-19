@@ -17,7 +17,7 @@ import { proposalFrom, workspaceState } from '../src/core/tuca-help'
 import { screenOf } from '../src/shared/screens'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: { installed: true, loggedIn: false }, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const linear: Connector = { id: 'c-lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth', status: 'needs_auth', error: 'O Linear pediu pra entrar de novo.', tools: [] }
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: 'Você tria tickets.', modelId: 'sonnet', effort: 'low', limit: 100_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const lia = agent('a1', 'lia', { grants: { 'c-lin': 'read' } })
@@ -192,7 +192,7 @@ describe('the Tuca helping, in a conversation', () => {
     turns.length = 0
     results.length = 0
     calls = []
-    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
     runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [] }) } })
     db.saveAgent(lia)
     const tuca = tucaAgent('sonnet', ['lia'], 1000)
@@ -315,15 +315,19 @@ describe("the Tuca's prompt, for several changes", () => {
   })
 
   it('brings a Tuca still on the instructions from before up to date, and leaves hand-written ones alone', () => {
+    // The rule on several new agents in one reply came last: every version before lacks it.
+    const lastRule = (): string => tucaInstructions().replace(/\n- (?:Mais de um agente novo|More than one new agent)[^\n]*/, '')
     const before = (lang: 'pt' | 'en'): string => {
       setLang(lang)
       // The lines that changed, as they were: the links he is taught, which carried a Portuguese
       // id (#abrir/conectores) before the screen ids lost the language.
-      return tucaInstructions().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
+      return lastRule().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
     }
     for (const lang of ['pt', 'en'] as const) {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }
       setLang(lang)
+      expect(lastRule()).not.toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: lastRule() })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate(old)?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: `${old.instructions}\nMinha regra.` })).toBeUndefined()
       expect(tucaUpToDate({ ...old, instructions: tucaInstructions() })).toBeUndefined()

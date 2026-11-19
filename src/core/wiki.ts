@@ -343,6 +343,8 @@ export class Wiki {
       CREATE INDEX IF NOT EXISTS provenance_by_title ON provenance (title COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS held (title TEXT PRIMARY KEY COLLATE NOCASE, person TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS held_log (title TEXT PRIMARY KEY, person TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS orphaned (key TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS carried (key TEXT NOT NULL, conv TEXT NOT NULL, PRIMARY KEY (key, conv));
     `)
     for (const col of ['status TEXT', 'error TEXT', 'changes INTEGER']) {
       try {
@@ -412,12 +414,47 @@ export class Wiki {
   }
 
   // Another folder: the index is that folder's own; what was in the old one stays there.
+  // Where each page came from goes along (reach): the new index sees its pages as written from
+  // outside, and a restricted member would read again what came from a conversation they don't see.
   relocate(dir: string, indexPath: string): void {
+    const reach = this.reach()
     this.close()
     this.dir = dir
     this.deps = { ...this.deps, dir, indexPath }
     this.init()
+    this.carry(reach)
     this.onChange()
+  }
+
+  // The conversations each page took something from ('' : unknown), for another index (carry).
+  reach(): { key: string; conv: string }[] {
+    const rows = this.db.prepare("SELECT v.key AS key, v.by AS by, v.source_id AS source_id, s.origin AS origin FROM versions v LEFT JOIN sources s ON s.id = v.source_id WHERE v.action != 'delete' AND v.key IS NOT NULL").all() as { key: string; by: string; source_id: string | null; origin: string | null }[]
+    const out = new Map<string, { key: string; conv: string }>()
+    const add = (key: string, conv: string): void => void out.set(`${key}\u0000${conv}`, { key, conv })
+    for (const r of rows) {
+      if (!r.source_id) {
+        if (r.by === 'auto') add(r.key, '')
+        continue
+      }
+      add(r.key, r.origin === null ? '' : ((JSON.parse(r.origin) as WikiSource['origin']).conversationId ?? ''))
+    }
+    for (const r of this.db.prepare('SELECT key FROM orphaned').all() as { key: string }[]) add(r.key, '')
+    for (const r of this.db.prepare('SELECT key, conv FROM carried').all() as { key: string; conv: string }[]) add(r.key, r.conv)
+    // a page with no history at all (outOfReach): the new index would give it one, from outside
+    const known = new Set((this.db.prepare('SELECT DISTINCT key FROM versions WHERE key IS NOT NULL').all() as { key: string }[]).map((r) => r.key))
+    for (const r of this.db.prepare('SELECT title FROM pages').all() as { title: string }[]) if (!known.has(pageKey(r.title))) add(pageKey(r.title), '')
+    return [...out.values()]
+  }
+  carry(rows: { key: string; conv: string }[]): void {
+    const ins = this.db.prepare('INSERT OR IGNORE INTO carried (key, conv) VALUES (?, ?)')
+    this.tx(() => {
+      for (const r of rows) ins.run(r.key, r.conv)
+    })
+  }
+  // A page moved outside save (git moving a file aside): where it came from goes with it.
+  carryKey(from: string, to: string): void {
+    if (from === to) return
+    this.carry(this.reach().filter((r) => r.key === from).map((r) => ({ key: to, conv: r.conv })))
   }
 
   close(): void {
@@ -650,6 +687,35 @@ export class Wiki {
     return new Set(rows.filter((r) => r.person !== person).map((r) => r.title))
   }
 
+  // The pages (keys) that took something from a conversation `sees` says no to: a restricted member
+  // (PersonAccess) doesn't read them. A version whose source is gone, or the curator's from before
+  // sources said where they came from, may have come from anywhere: it counts as one not seen.
+  outOfReach(sees: (conversationId: string) => boolean): Set<string> {
+    const rows = this.db.prepare("SELECT v.key AS key, v.by AS by, v.source_id AS source_id, s.origin AS origin FROM versions v LEFT JOIN sources s ON s.id = v.source_id WHERE v.action != 'delete'").all() as { key: string; by: string; source_id: string | null; origin: string | null }[]
+    const out = new Set<string>()
+    for (const r of rows) {
+      if (out.has(r.key)) continue
+      if (!r.source_id) {
+        if (r.by === 'auto') out.add(r.key)
+        continue
+      }
+      if (r.origin === null) {
+        out.add(r.key)
+        continue
+      }
+      const conv = (JSON.parse(r.origin) as WikiSource['origin']).conversationId
+      if (conv && !sees(conv)) out.add(r.key)
+    }
+    // Text left by a source deleted since (dropOrphans), and a page with no history at all (its
+    // sources deleted before the wiki kept track of that): where it came from is unknown.
+    for (const r of this.db.prepare('SELECT key FROM orphaned').all() as { key: string }[]) out.add(r.key)
+    // What another folder's index knew of where a page came from (relocate, carryKey).
+    for (const r of this.db.prepare('SELECT key, conv FROM carried').all() as { key: string; conv: string }[]) if (!r.conv || !sees(r.conv)) out.add(r.key)
+    const known = new Set((this.db.prepare('SELECT DISTINCT key FROM versions WHERE key IS NOT NULL').all() as { key: string }[]).map((r) => r.key))
+    for (const r of this.db.prepare('SELECT title FROM pages').all() as { title: string }[]) if (!known.has(pageKey(r.title))) out.add(pageKey(r.title))
+    return out
+  }
+
   // Every key ever held for someone other than `person`, released ones apart: a held page deleted or
   // renamed leaves its title here, so nothing that names it (the log) reaches anyone else.
   everHeld(person?: string): Set<string> {
@@ -740,6 +806,8 @@ export class Wiki {
     const gone = (this.db.prepare('SELECT id FROM changes WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').all() as { id: string }[]).map((r) => r.id)
     for (const id of gone) this.db.prepare('DELETE FROM findings WHERE change_id = ?').run(id)
     this.db.prepare('DELETE FROM changes WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
+    // The page keeps the text those versions wrote: where it came from is now unknown (outOfReach).
+    this.db.prepare('INSERT OR IGNORE INTO orphaned (key) SELECT DISTINCT key FROM versions WHERE key IS NOT NULL AND source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
     this.db.prepare('DELETE FROM versions WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)').run()
   }
 
@@ -922,6 +990,8 @@ export class Wiki {
         this.db.prepare('UPDATE OR REPLACE held SET title = ? WHERE title = ?').run(now, was)
         this.db.prepare('INSERT OR IGNORE INTO held_log (title, person) SELECT ?, person FROM held_log WHERE title = ?').run(now, was) // the old name stays unnamed too
         this.db.prepare('UPDATE versions SET key = ? WHERE key = ?').run(now, was)
+        this.db.prepare('INSERT OR IGNORE INTO orphaned (key) SELECT ? FROM orphaned WHERE key = ?').run(now, was)
+        this.db.prepare('INSERT OR IGNORE INTO carried (key, conv) SELECT ?, conv FROM carried WHERE key = ?').run(now, was)
       }
     }
     writeFileSync(join(this.pagesDir, file), text)
@@ -1239,6 +1309,11 @@ export class Wiki {
 
   // A new review's findings take the place of the old ones; what was dismissed, or still waits, isn't said again.
   setFindings(list: (Omit<WikiFinding, 'id' | 'at' | 'change'> & { key: string; ops?: WikiOp[]; reason?: string })[]): void {
+    // Only missing pages and broken links reset their dismissal once resolved.
+    // Other kinds stay dismissed even if a later review stops producing them.
+    const produced = new Set(list.map((f) => f.key))
+    const stale = this.db.prepare("SELECT id, key FROM findings WHERE state = 'dismissed' AND change_id IS NULL AND kind IN ('broken', 'missing')").all() as { id: string; key: string }[]
+    for (const r of stale) if (!produced.has(r.key)) this.db.prepare('DELETE FROM findings WHERE id = ?').run(r.id)
     // a fix refused counts as "leave it"
     const keep = new Set((this.db.prepare("SELECT key FROM findings WHERE state = 'dismissed' OR change_id IN (SELECT id FROM changes WHERE state = 'refused')").all() as { key: string }[]).map((r) => r.key))
     for (const f of this.findings()) if (f.change) keep.add((this.db.prepare('SELECT key FROM findings WHERE id = ?').get(f.id) as { key: string }).key)

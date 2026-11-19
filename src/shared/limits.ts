@@ -6,6 +6,23 @@
 /** The month's ceiling: Infinity when there is none, so every comparison against it is false. */
 export const monthlyCeiling = (limit: number): number => (limit > 0 ? limit : Infinity)
 
+/**
+ * The most a monthly limit can be, in tokens: far above any real month, and far below what a
+ * number or the database can hold exactly. Past it, the person meant "no limit".
+ */
+export const MAX_MONTHLY_LIMIT = 1_000_000_000_000_000
+
+/**
+ * A monthly limit as it is kept: a whole number of tokens, or 0 for no limit. Anything that isn't a
+ * positive number, and anything too large to be a limit (someone typing a huge number to mean "no
+ * limit"), is 0. Every place that writes a limit goes through this: a number the database can't
+ * hand back stops the whole workspace from opening.
+ */
+export const safeLimit = (limit: unknown): number => {
+  const n = Math.round(Number(limit))
+  return Number.isFinite(n) && n > 0 && n <= MAX_MONTHLY_LIMIT ? n : 0
+}
+
 /** Whether the agent has a monthly ceiling at all. */
 export const hasMonthlyLimit = (limit: number): boolean => limit > 0
 

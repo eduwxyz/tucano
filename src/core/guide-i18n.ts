@@ -17,7 +17,7 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   },
   backup: {
     title: 'Team, import and backups',
-    summary: 'Exporting and importing the team as a .md file, bringing agents over from OpenBot or Grok Bot, and the database backups.'
+    summary: 'Exporting and importing the team as a .md file, bringing agents over from OpenBot, Grok Bot or Hermes, and the database backups.'
   },
   celular: {
     title: 'Phone (iPhone and Telegram)',
@@ -74,6 +74,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   rotinas: {
     title: 'Routines',
     summary: 'An agent working on its own: at a time, when something new appears in a connector, or when called on this computer.'
+  },
+  setores: {
+    title: "Sectors (when the subject is another area's)",
+    summary: 'Each team on the board is a sector with a head. How to name it, say what it solves and how a request passes from one sector to another.'
   },
   servidor: {
     title: 'Tucano on a server',

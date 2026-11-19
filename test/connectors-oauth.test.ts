@@ -28,6 +28,7 @@ let tokenDown: number // the next refreshes answer 503
 let calls: number
 let offline: boolean // the authorization server offers offline_access, the MCP server lists only "openid" (Vercel's)
 let registered: { scope?: string }[]
+let loopbackOnly: boolean // the authorization page takes only a loopback address back (Canva's): it says "Invalid redirect URI."
 
 const body = async (req: import('node:http').IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -47,6 +48,7 @@ beforeEach(async () => {
   calls = 0
   offline = false
   registered = []
+  loopbackOnly = false
   let current = '' // only the newest access token works, as if the older one had expired
   expireAccessToken = () => {
     current = ''
@@ -80,6 +82,11 @@ beforeEach(async () => {
         const asked = JSON.parse(await body(req)) as { scope?: string }
         registered.push(asked)
         return json(201, { ...asked, client_id: `client-${registrations}` })
+      }
+      if (req.method === 'GET' && url.pathname === '/authorize') {
+        const back = url.searchParams.get('redirect_uri') ?? ''
+        if (loopbackOnly && !back.startsWith('http://127.0.0.1:')) return void res.writeHead(400, { 'content-type': 'text/plain' }).end('Invalid redirect URI.')
+        return void res.writeHead(302, { location: `${base}/login` }).end()
       }
       if (req.method === 'POST' && url.pathname === '/token') {
         const form = new URLSearchParams(await body(req))
@@ -316,6 +323,44 @@ describe("a saved sign-in the system key won't open", () => {
     expect(page).toBeTruthy()
     expect(opened).toHaveLength(2)
     await locked.closeAll()
+  })
+})
+
+// A server on its https address: the provider sends the browser back to it, unless it takes only a loopback
+// address. Then the sign-in goes to the loopback one, and the person pastes where the page ended.
+const onServer = (): ConnectorManager =>
+  new ConnectorManager({ db, secrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => 'https://ana.pro.example/oauth/callback', localCallbackUrl: () => 'http://127.0.0.1:51009/oauth/callback' })
+
+describe('signing in on a server', () => {
+  it("comes back to the server's own address where the provider takes it", async () => {
+    const app = onServer()
+    const id = await app.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await app.connect(id)
+    const page = new URL((await app.authorize(id))!)
+    expect(page.searchParams.get('redirect_uri')).toBe('https://ana.pro.example/oauth/callback')
+    expect(registrations).toBe(1)
+    await app.closeAll()
+  })
+
+  it('goes to the loopback address, to paste, where the provider takes only that one, and renews from it later', async () => {
+    loopbackOnly = true
+    const app = onServer()
+    const id = await app.add({ name: 'Canva', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await app.connect(id)
+    const page = new URL((await app.authorize(id))!)
+    expect(page.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:51009/oauth/callback')
+    expect(page.searchParams.get('client_id')).toBe('client-2') // registered again, with the loopback address
+    expect(await app.finishOAuthFromUrl(`http://127.0.0.1:51009/oauth/callback?code=code-1&state=${page.searchParams.get('state')}`)).toBe(true)
+    expect(app.get(id)!.status).toBe('connected')
+    await app.closeAll()
+    expireAccessToken()
+
+    const next = onServer() // a restart: the sign-in it got renews, with no browser and no new registration
+    await next.connect(id)
+    expect(next.get(id)!.status).toBe('connected')
+    expect(registrations).toBe(2)
+    expect(refreshes).toEqual(['client-2 (issued to client-2)'])
+    await next.closeAll()
   })
 })
 

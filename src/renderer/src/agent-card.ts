@@ -64,6 +64,14 @@ export function placeCard(anchor: Box, card: { width: number; height: number }, 
   return { left: x, top: clampTop(below + card.height <= view.height - EDGE ? below : anchor.top - GAP - card.height), width: card.width }
 }
 
+// A scroll moves the card's anchor only when the scrolled thing holds it (or is the whole page):
+// the chat list auto-scrolling under a card opened from the header leaves the card where it belongs.
+export function scrollMovesAnchor(scrolled: EventTarget | null, anchor: Node): boolean {
+  if (!anchor.isConnected) return true
+  const container = scrolled as Partial<Node> | null
+  return typeof container?.contains !== 'function' || container.contains(anchor)
+}
+
 // ---------- which card is open, and how ----------
 
 export const HOVER_OPEN_MS = 500 // the pointer rests on a face this long before its card opens

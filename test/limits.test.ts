@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Agent, EngineId, Settings } from '../src/shared/types'
+import { countedTokens, type Agent, type EngineId, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
@@ -37,7 +37,7 @@ let notes: string[]
 let bash: (command: string) => CallToolResult // what the agent's "computer" answers
 
 const runner = (claude: Engine): Runner => {
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   const computers = { call: async (_a: Agent, _n: string, args: Record<string, unknown>) => ({ result: bash(String(args['command'])) }) }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, computers, notify: (title) => notes.push(title) })
 }
@@ -46,7 +46,7 @@ const labels = () => reply().run!.steps.map((s) => s.label)
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-limits-')), 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   notes = []
   bash = () => textResult('ok')
   db.saveAgent(agent())
@@ -185,6 +185,12 @@ describe('the budget per reply', () => {
     expect(db.usedThisMonth('a1')).toBe(68_000)
   })
 
+  it('never goes below zero with a receipt whose cache reads came apart from its input (Antigravity)', () => {
+    db.addReceipt({ model: 'antigravity:gemini/x', inputTokens: 88_353, cacheReadTokens: 734_883, outputTokens: 2_602, ms: 1, messageId: 'split', agentId: 'a1', engine: 'antigravity', at: Date.now() })
+    expect(db.usedThisMonth('a1')).toBe(Math.round(88_353 + 734_883 * 0.1 + 2_602)) // the new input whole, the cache a tenth
+    expect(countedTokens({ inputTokens: 88_353, cacheReadTokens: 734_883, outputTokens: 2_602 })).toBe(db.usedThisMonth('a1'))
+  })
+
   it('cuts a reply that keeps spending far past it', async () => {
     const r = runner({
       id: 'claude',
@@ -234,7 +240,7 @@ describe('web', () => {
 describe('keeping the Mac awake', () => {
   it('says when replies start and when the last one ends', async () => {
     const busy: boolean[] = []
-    const r = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 5 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), onBusy: (b) => busy.push(b) })
+    const r = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 5 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), onBusy: (b) => busy.push(b) })
     db.saveAgent(agent({ id: 'a2', handle: 'theo', name: 'Theo' }))
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
     await r.send('c1', '@lia @theo oi')
