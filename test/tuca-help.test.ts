@@ -226,7 +226,7 @@ describe('the Tuca helping, in a conversation', () => {
     await runner.send('d1', 'a Lia está cara')
     await runner.idle()
     const reply = db.messages().find((m) => m.author.kind === 'agent' && m.text === 'pronto')!
-    expect(reply.run?.proposals).toEqual([{ kind: 'agent', agentId: 'a1', changes: { modelId: 'haiku' }, before: { modelId: 'sonnet' }, reason: 'Mais barato pra triagem' }])
+    expect(reply.run?.proposals).toEqual([{ id: expect.any(String), kind: 'agent', agentId: 'a1', changes: { modelId: 'haiku' }, before: { modelId: 'sonnet' }, reason: 'Mais barato pra triagem' }])
     expect(db.agent('a1')?.modelId).toBe('sonnet')
   })
 

@@ -21,7 +21,7 @@ import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines
 import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
-import { appliesNow } from './tuca-apply'
+import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
 import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
@@ -927,6 +927,8 @@ export class Runner {
 
   private update(m: Message, patch: Partial<Message>): void {
     Object.assign(m, patch)
+    // A card settled while the reply was working stays settled (keepDecided).
+    if (m.run?.agentDraft || m.run?.proposals?.length) m.run = keepDecided(m.run, this.deps.db.message(m.id)?.run)
     this.deps.db.saveMessage(m)
     this.deps.emit({ type: 'message', message: { ...m } })
   }
@@ -1183,7 +1185,7 @@ export class Runner {
     const goal = goalId ? this.goals.get(goalId) : undefined
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), ...(goalId ? { goal: goalId } : {}) }
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), ...(goalId ? { goal: goalId } : {}), ...decidedCards(opts.existing?.run) }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -1813,8 +1815,21 @@ ${note}`,
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
               : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run) })
           if (!r.proposal) return textResult(r.error!, true)
+          // Its cards as they are now: the person may have applied or discarded one meanwhile.
+          msg.run = keepDecided(msg.run!, db.message(msg.id)?.run)
           // Several in one reply, each its own card; one about the same thing as an earlier one replaces it.
+          // A team, channel or routine already applied stays as it is: a second card for the same one
+          // would make it twice. (Another change to the same agent is just a change.)
           const list = proposalsOf(msg.run)
+          if (r.proposal.kind !== 'agent' && list.some((x) => x.state === 'applied' && proposalKey(x) === proposalKey(r.proposal!)))
+            return textResult(
+              L(
+                'A pessoa já aplicou esse card nesta resposta: o que ele propunha já existe, e outro card igual faria tudo de novo. Não proponha de novo.',
+                'The person already applied that card in this reply: what it proposed exists now, and another card like it would make it all again. Don\'t propose it again.'
+              ),
+              true
+            )
+          r.proposal.id = randomUUID()
           const same = list.findIndex((x) => !x.state && proposalKey(x) === proposalKey(r.proposal!))
           if (same < 0 && list.length >= MAX_PROPOSALS) return textResult(L(`Já são ${MAX_PROPOSALS} propostas nesta resposta: termine aqui e mande o resto na próxima.`, `That's ${MAX_PROPOSALS} proposals in this reply already: finish here and send the rest in the next one.`), true)
           msg.run = { ...msg.run!, proposals: same < 0 ? [...list, r.proposal] : list.map((x, i) => (i === same ? r.proposal! : x)) }
@@ -1854,9 +1869,20 @@ ${note}`,
             connectors: this.deps.connectors?.list() ?? []
           })
           if (!r.draft) return textResult(r.error!, true)
+          // Its card as it is now: the person may have created or discarded it meanwhile.
+          msg.run = keepDecided(msg.run!, db.message(msg.id)?.run)
           // One new-agent card per reply. Another agent would take its place and leave the cards that
           // need the first one with nothing to make it from: say how to propose both instead.
           const before = msg.run?.agentDraft
+          // Already created: a new card in its place would make the agent again.
+          if (before?.state === 'created')
+            return textResult(
+              L(
+                `A pessoa já criou ${before.name} pelo card desta resposta. Pra mudar algo nele, use propor_ajuste; pra propor outro agente, faça isso na próxima resposta.`,
+                `The person already created ${before.name} from this reply's card. To change something in it, use propor_ajuste; to propose another agent, do it in the next reply.`
+              ),
+              true
+            )
           if (before && !before.state && before.name.toLowerCase() !== r.draft.name.toLowerCase())
             return textResult(
               L(
@@ -1865,7 +1891,7 @@ ${note}`,
               ),
               true
             )
-          msg.run = { ...msg.run!, agentDraft: r.draft }
+          msg.run = { ...msg.run!, agentDraft: { ...r.draft, id: randomUUID() } }
           addSteps({ id: randomUUID(), label: L('Propôs um agente', 'Proposed an agent'), detail: `${r.draft.name}${r.draft.role ? ` · ${r.draft.role}` : ''}`, status: 'done' })
           return textResult(
             helps && !!this.deps.applyNow && appliesNow(now) && isAdmin(requester)

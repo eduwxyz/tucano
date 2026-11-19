@@ -8,6 +8,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A reply's steps show one "Thinking" row, not two.** Engines run tool calls side by side (Pi, Codex and Claude Code all do). The second call to start closed the first one's row as "Thought", hiding the command it was running, and each call added its own "Thinking" row when it ended, so two rows spun and stopped together. A tool starting now closes only the "Thinking" row, and the row comes back once the last call running beside it ends.
 
+- **A card an agent proposes is applied once.** A team, agent, channel or routine card applied while the agent's reply was still working went back to **Create team** (or **Create**, **Apply**) as the reply went on, because the reply saved its own copy of the message over the card; a second click made the same agents again. The reply now keeps what was done with its cards, an agent proposing the same team again in that reply is told it already exists, and the core refuses to apply a card twice even if its message lost that it was applied (and puts the card back as it was). A reply tried again keeps the cards that were already applied.
+
 ## [0.2.42] - 2026-11-19
 
 > **Em português:**
