@@ -69,7 +69,9 @@ import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-impo
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
-import { Browser, browserTools, type BrowserHost } from './browser'
+import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
+import { BrowserLogins } from './browser-logins'
+import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
@@ -782,7 +784,8 @@ const chrome =
         undefined,
         (agentId, jpeg) => browser.frame(agentId, jpeg),
         serverMode,
-        serverMode ? 10 * 60_000 : undefined // on a server, an idle agent's Chrome gives its memory back
+        serverMode ? 10 * 60_000 : undefined, // on a server, an idle agent's Chrome gives its memory back
+        (agentId) => downloadsFolder(dataDir, agentId)
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -818,11 +821,13 @@ const desktopApps = new DesktopApps(undefined, {
   installed: async () => (await shelfNow()).map(({ bundleId, ...a }) => ({ ...a, ...(bundleId ? { id: bundleId } : {}) }))
 })
 
+const browserLogins = new BrowserLogins(db, secrets)
 const browser = new Browser({
   host,
   db,
   dataDir,
   emit,
+  logins: browserLogins,
   me: () => settings().workspaceName,
   jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
   onHandback: (agentId) => void runner.handedBack(agentId)
@@ -863,7 +868,8 @@ const computers = new Computers({ db, dataDir, emit, shoot })
 const nodeLog = new NodeLog(join(dataDir, 'node', 'log.jsonl'))
 const nodeServer = new NodeServer(new MacComputer({ db, dataDir, emit, shoot }), {
   connectors: { list: () => connectors.list().filter((c) => !nodeOf(c.url)), tools: (id) => db.tools(id), call: (id, name, args) => connectors.call(id, name, args) },
-  browser: { tools: browserTools, call: (agent, name, args, ctx) => browser.call(agent, name, args, ctx), approved: (agent, args) => browser.approved(agent, args) },
+  // Not the tools that hand files to this app's chat or type the logins saved here: the server's agents have neither.
+  browser: { tools: () => browserTools().filter((t) => !CHAT_ONLY_BROWSER_TOOLS.has(t.name)), call: (agent, name, args, ctx) => browser.call(agent, name, args, ctx), approved: (agent, args) => browser.approved(agent, args) },
   apps: { tools: appTools, call: (agent, name, args) => desktopApps.call(agent, name, args), approved: (agent, args) => desktopApps.approved(agent, args), lent: () => settings().node?.apps ?? [] },
   folders: () => settings().node?.folders ?? [],
   dataDir,
@@ -2278,6 +2284,20 @@ const api: Handlers = {
     if (!serverMode || !chrome) throw new Error(L('Só no Tucano em servidor.', 'Only on Tucano as a server.'))
     mayBrowser(ctx, agentId)
     await chrome.run(agentId, 'input', input)
+  },
+
+  // The logins the person saves for an agent's browser (browser-logins.ts): the page lists sites and
+  // usernames, never a password, and nothing here goes to a log.
+  browserLogins: async ({ agentId }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    return browserLogins.list(agentId)
+  },
+  saveBrowserLogin: async ({ agentId, site, username, password }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    await browserLogins.save(agentId, site, username, password)
+  },
+  removeBrowserLogin: async ({ agentId, origin }) => {
+    await browserLogins.remove(agentId, origin)
   },
 
   browserAction: ({ agentId, action }, ctx) => {

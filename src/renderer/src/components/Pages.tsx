@@ -6,6 +6,7 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
+import { BrowserLogins } from './BrowserLogins'
 import {
   agentById,
   getState,
@@ -929,6 +930,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <>
                   <p>{L('Busca na web: pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.', 'Web search: searches and reads pages with Claude Code’s or Codex’s own tool, on your subscription. Every search shows up in the reply’s steps.')}</p>
                   <p>{L('Navegador próprio: um Chrome só dele, que abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.', 'Own browser: a Chrome of its own that opens pages, clicks, fills in and reads like a person, with logins separate from yours (you sign in via Take over). A click that buys, publishes, sends or deletes asks for your approval.')}</p>
+                  <p>{L('O que ele baixa fica numa pasta só dele, e ele pode mandar no chat (uma fatura, um comprovante). Em Logins salvos, ele entra sozinho num site sem nunca ver a senha.', 'What it downloads stays in a folder of its own, and it can post it in the chat (a bill, a receipt). With Saved logins, it signs in to a site on its own without ever seeing the password.')}</p>
                 </>
               }
             >
@@ -949,7 +951,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                         onClick={() =>
                           void confirmDialog({
                             title: L(`Apagar os logins do navegador de ${draft.name}?`, `Delete the logins in ${draft.name}'s browser?`),
-                            body: L(`Saem os logins, os cookies e o histórico. ${draft.name} vai precisar que você entre de novo nas contas (pelo Assumir).`, `Logins, cookies and history go. ${draft.name} will need you to sign in to the accounts again (via Take over).`),
+                            body: L(`Saem os logins, os cookies, o histórico e os arquivos baixados. ${draft.name} vai precisar entrar de novo nas contas (pelo Assumir, ou sozinho nos logins salvos, que ficam).`, `Logins, cookies, history and downloaded files go. ${draft.name} will need to sign in to the accounts again (via Take over, or on its own with the saved logins, which stay).`),
                             confirm: L('Apagar logins', 'Delete logins'),
                             danger: true
                           }).then((ok) => ok && browserAction(draft.id, 'clear'))
@@ -963,6 +965,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               >
                 <Toggle label={L('Navegador próprio', 'Own browser')} on={!!draft.browser} onChange={(v) => patch({ browser: v }, true)} />
               </Row>
+              {!isNew && draft.browser && admin && <BrowserLogins agentId={draft.id} agentName={draft.name} />}
             </Section>
           )}
 

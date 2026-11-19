@@ -590,7 +590,7 @@ export interface Account {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'fill' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -621,6 +621,13 @@ export interface BrowserReply {
   text?: string
   shown?: boolean // the window is open for me
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
+}
+
+// A login the person saved for an agent's browser, as their page lists it: never the password.
+export interface SavedLogin {
+  origin: string // https://conta.example.com: the only place it's typed
+  username: string
+  onePassword?: boolean // the password is a 1Password reference, read when it's typed
 }
 
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.

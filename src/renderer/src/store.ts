@@ -60,7 +60,8 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo
+  type NodeInfo,
+  type SavedLogin
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -1061,6 +1062,10 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
+// The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
+export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
+export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
+export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)

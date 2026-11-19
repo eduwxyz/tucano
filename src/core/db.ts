@@ -1471,6 +1471,11 @@ export class Db {
     return (this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: string } | undefined)?.value
   }
 
+  // The keys that start with a prefix: what's saved, without opening any of it.
+  secretKeys(prefix: string): string[] {
+    return (this.db.prepare('SELECT key FROM secrets WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key)
+  }
+
   setSecret(key: string, value: string | undefined): void {
     if (value === undefined) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(key)
     else this.db.prepare('INSERT INTO secrets (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)

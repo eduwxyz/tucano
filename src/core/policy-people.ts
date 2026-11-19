@@ -136,6 +136,9 @@ export const NEEDS: Record<Method, Need> = {
   survey: 'owner', // one answer per install: the owner's
   answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
+  browserLogins: 'admin', // the logins saved for an agent's browser, like a connector's token
+  saveBrowserLogin: 'admin',
+  removeBrowserLogin: 'admin',
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',
   // the team's knowledge: anyone reads and writes pages; the curator's decisions and the wiki's place are the admins'

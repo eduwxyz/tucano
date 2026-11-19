@@ -15451,3 +15451,25 @@ button.agent-card__now:hover {
     width: 84px;
   }
 }
+
+/* The logins saved for an agent's browser, in its browser card. */
+.saved-logins {
+  display: grid;
+  gap: 8px;
+}
+.saved-logins__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.saved-logins__site {
+  overflow-wrap: anywhere;
+}
+.saved-logins__form {
+  display: grid;
+  gap: 6px;
+}
+.saved-logins .hint {
+  margin: 0;
+}
