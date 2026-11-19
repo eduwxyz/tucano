@@ -1890,6 +1890,9 @@ function MyApprovals(): ReactNode {
   const pending = approvals.filter((a) => a.state === 'pending')
   const conversations = useStore((s) => s.conversations)
   const agents = useStore((s) => s.agents)
+  // On my own there is no "Pra você", so the documents that wait on me and the dates found in them show here.
+  const docsWaiting = useStore((s) => s.inbox.documents) ?? []
+  const docDates = useStore((s) => s.inbox.docDates) ?? []
   const where = (a: Approval): string => {
     const conv = conversations.find((c) => c.id === a.conversationId)
     const who = agents.find((x) => x.id === a.agentId)?.name
@@ -1899,7 +1902,7 @@ function MyApprovals(): ReactNode {
   return (
     <Page title={L('Aprovações', 'Approvals')} subtitle={L('Nada sensível acontece sem você. Cada aprovação cobre uma ação exata.', 'Nothing sensitive happens without you. Each approval covers one exact action.')} actions={<AlwaysRulesLink />}>
       {pending.length === 0 ? (
-        <NothingWaiting why={L('Quando um agente quiser publicar, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.', 'When an agent wants to publish, delete or send something out, the request shows up here and in the conversation.')} />
+        docsWaiting.length + docDates.length > 0 ? null : <NothingWaiting why={L('Quando um agente quiser publicar, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.', 'When an agent wants to publish, delete or send something out, the request shows up here and in the conversation.')} />
       ) : (
         <>
           <div className="caps-title">{L(`Esperando você · ${pending.length}`, `Waiting for you · ${pending.length}`)}</div>
@@ -1910,6 +1913,7 @@ function MyApprovals(): ReactNode {
           </div>
         </>
       )}
+      <DocInboxSections docs={docsWaiting} dates={docDates} />
       <ApprovalHistory approvals={approvals} />
     </Page>
   )

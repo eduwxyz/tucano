@@ -50,6 +50,10 @@ export interface DocsBrainDeps {
   agents: () => Agent[]
 }
 
+// What a file says goes to the model between markers. The same markers written inside the file would
+// close the block early and pass the rest off as instructions, so they are taken out of the text.
+const fenced = (text: string): string => text.replace(/<<<\s*(ARQUIVO|TRECHO)|(ARQUIVO|TRECHO)\s*>>>/gi, ' ')
+
 interface Catalog {
   resumo: string
   datas: { date: string; what: string }[]
@@ -94,7 +98,8 @@ function parseCatalog(text: string): Catalog {
   if (typeof o['pasta'] === 'number' && Number.isInteger(o['pasta'])) out.pasta = o['pasta']
   if (typeof o['nome'] === 'string') {
     // eslint-disable-next-line no-control-regex
-    const name = o['nome'].replace(/[\\/\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100)
+    // No dots either: the name comes without its extension, and a dot in it would be read as one.
+    const name = o['nome'].replace(/[\\/.\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100)
     out.nome = name || null
   }
   return out
@@ -154,7 +159,7 @@ export class DocsBrain {
     const prompt = [
       `${L('Nome do arquivo', 'File name')}: ${doc.name}`,
       `${L('Hoje', 'Today')}: ${dayString(new Date())}`,
-      `<<<ARQUIVO\n${text}\nARQUIVO>>>`,
+      `<<<ARQUIVO\n${fenced(text)}\nARQUIVO>>>`,
       ...(list ? [`${L('Pastas possíveis', 'Possible folders')}:\n${list}`] : [])
     ].join('\n\n')
     let reply: string
@@ -175,7 +180,13 @@ export class DocsBrain {
       // Looked at again now: the folders may have changed while the model thought (a folder shared or removed).
       if (pick && person && docs.foldersToFileInto(person).some((c) => c.folder.id === pick.folder.id)) {
         try {
-          docs.fileInto(docId, pick.folder.id, r.nome ?? undefined, this.actor())
+          try {
+            docs.fileInto(docId, pick.folder.id, r.nome ?? undefined, this.actor())
+          } catch (e) {
+            // A name that doesn't work is no reason to leave the file unfiled: it goes with the name it has.
+            if (!r.nome) throw e
+            docs.fileInto(docId, pick.folder.id, undefined, this.actor())
+          }
           this.remember(doc.filing!.by)
         } catch (e) {
           console.warn('[docs] could not file', e)
@@ -219,7 +230,7 @@ export class DocsBrain {
     try {
       const ex = this.deps.docs.excerpts(person, question, scope, 6)
       if (!ex.length) return { found: false, answer: L('Não achei isso nos arquivos que você pode ver.', "I didn't find that in the files you can see."), sources: [] }
-      const prompt = `${L('Pergunta', 'Question')}: ${question}\n\n${ex.map((e, i) => `[${i + 1}] ${e.doc.name}\n<<<TRECHO\n${e.text}\nTRECHO>>>`).join('\n\n')}`
+      const prompt = `${L('Pergunta', 'Question')}: ${question}\n\n${ex.map((e, i) => `[${i + 1}] ${e.doc.name}\n<<<TRECHO\n${fenced(e.text)}\nTRECHO>>>`).join('\n\n')}`
       const reply = await this.deps.llm(answerSystem(), prompt, 60_000)
       const o = parseObject(reply)
       let found: boolean

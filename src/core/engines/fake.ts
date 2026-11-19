@@ -151,7 +151,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.mcpUrl && /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.test(last)) {
         // Documentos: "guarde em Empresa: ata.md = texto" saves a file; the two below list and read.
         const [, pasta, nome, texto] = /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.exec(last)!
-        reply = textOf(await callTool(turn.mcpUrl, 'docs_guardar', { pasta: pasta!.trim(), nome: nome!.trim(), texto: texto!, resumo: texto!.slice(0, 80) }))
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_guardar', { pasta: pasta!.trim(), nome: nome!.trim(), texto: texto!, resumo: texto!.split(/(?<=\.)\s/)[0]!.slice(0, 140) }))
       } else if (turn.mcpUrl && /^liste os documentos(?: de (.+))?/i.test(last)) {
         const pasta = /^liste os documentos(?: de (.+))?/i.exec(last)![1]?.trim()
         reply = textOf(await callTool(turn.mcpUrl, 'docs_listar', pasta ? { pasta } : {}))
@@ -376,12 +376,18 @@ function fakeCatalog(prompt: string): { resumo: string; datas: { data: string; o
       }
     }
   }
-  return { resumo: (file.split('\n').find((l) => l.trim()) ?? '').trim().slice(0, 120), datas, pasta, nome: null }
+  // The first line that says something, without what Markdown or a table puts around it.
+  const line = file.split('\n').map((l) => l.replace(/^#+\s*/, '').replace(/[|*_`>]+/g, ' ').replace(/\s+/g, ' ').trim()).find((l) => /\p{L}/u.test(l)) ?? ''
+  return { resumo: line.slice(0, 120), datas, pasta, nome: null }
 }
 
 // A question about the documents: an answer when there is at least one excerpt.
 function fakeAnswer(prompt: string): { achou: boolean; resposta?: string } {
-  return /^\[1\] .*\n<<<TRECHO/m.test(prompt) ? { achou: true, resposta: 'Resposta de teste com base no trecho [1].' } : { achou: false }
+  // The sentence of the first stretch that has a number in it (a date, a value), else its first one: enough to see an answer with its source.
+  const first = /^\[1\] .*\n<<<TRECHO\n([\s\S]*?)\nTRECHO>>>/m.exec(prompt)?.[1]
+  if (first === undefined) return { achou: false }
+  const said = first.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/).map((x) => x.trim()).filter(Boolean)
+  return { achou: true, resposta: `${(said.find((x) => /\d/.test(x)) ?? said[0] ?? '').slice(0, 200)} [1]` }
 }
 
 // The wiki's curator, for trying it without an engine: a page the stretch names gets a line

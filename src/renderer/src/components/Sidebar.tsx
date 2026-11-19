@@ -24,6 +24,7 @@ import {
   amOwner,
   canEditChannel,
   inboxCount,
+  docsWaitingCount,
   initials,
   personById,
   roleLabel,
@@ -284,7 +285,7 @@ export function Sidebar(): ReactNode {
   // A new install's sidebar starts short and grows with the missions (Missions.tsx).
   const parts = useSidebarParts()
   const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
-  const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length + docsWaitingCount(s)))
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
   const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')

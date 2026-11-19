@@ -45,7 +45,11 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   },
   documentos: {
     title: 'Documents',
-    summary: "The team's files, each in its folder: sending, keeping what an agent made, the folder rule, who sees it (people and agents), versions, the trash and the accepted types."
+    summary: "The team's files, each in its folder: the folder rule, who sees it (people and agents), showing versus saving, versions, the trash and the accepted types."
+  },
+  'documentos-aprovacao': {
+    title: 'Approval, Chegada and dates in Documents',
+    summary: 'Folders that ask for approval, drafts and the official version, living documents, Chegada for dropping files in, dates and reminders, and asking the documents questions.'
   },
   google: {
     title: 'Google: Gmail, Calendar, Drive, Docs and Sheets',

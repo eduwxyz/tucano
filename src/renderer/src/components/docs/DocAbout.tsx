@@ -84,13 +84,16 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
     )
   }
 
+  // The line for who asked (or made it) counts as a step too, with what the history holds.
+  const steps = events.length + (asker || maker ? 1 : 0)
+
   return (
     <aside className="dc-side">
       <div className="dc-side__body">
         <h5>{L('Resumo', 'Summary')}</h5>
         <p className={`dc-oneline ${doc.summary ? '' : 'is-muted'}`}>{doc.summary || L('Ainda sem resumo.', 'No summary yet.')}</p>
 
-        <Fold title={L('De onde veio', 'Where it came from')} meta={events.length ? (events.length === 1 ? L('1 passo', '1 step') : L(`${events.length} passos`, `${events.length} steps`)) : undefined}>
+        <Fold title={L('De onde veio', 'Where it came from')} meta={steps ? (steps === 1 ? L('1 passo', '1 step') : L(`${steps} passos`, `${steps} steps`)) : undefined}>
           {historyError && <p className="muted small">{historyError}</p>}
           {!history && !historyError && <p className="muted small">{L('Abrindo a história…', 'Opening the history…')}</p>}
           {history && (
