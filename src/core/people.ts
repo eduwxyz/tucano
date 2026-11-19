@@ -415,6 +415,7 @@ export class People {
       case 'skill':
       case 'skill_removed':
       case 'wiki':
+      case 'message_removed': // only its id, and only a solo Tucano has a queue
         return event
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.

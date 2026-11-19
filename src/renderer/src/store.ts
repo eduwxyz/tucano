@@ -316,6 +316,8 @@ function indexOf(list: Message[]): ConversationIndex {
   // In the order things were said (a reply when it ended), whoever is still working at the end.
   for (const m of asSaid(list)) {
     ix.byId.set(m.id, m)
+    // A message waiting in line isn't in the conversation yet: it's over the field until the agent reads it.
+    if (m.queued) continue
     if (!m.threadId) ix.timeline.push(m)
     else {
       const r = ix.replies.get(m.threadId)
@@ -551,7 +553,10 @@ function apply(e: CoreEvent): void {
         return { ...s, node: e.info }
       case 'message': {
         const id = e.message.conversationId
-        const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
+        const list = messagesIn(s, id)
+        // Out of the queue: it reaches the agent now, so it goes after what came in meanwhile.
+        const delivered = list.find((m) => m.id === e.message.id)?.queued && !e.message.queued
+        const messages = { ...s.messages, [id]: delivered ? [...list.filter((m) => m.id !== e.message.id), e.message] : upsertMessage(list, e.message) }
         // What I just wrote in a conversation that answers in threads opens its thread, where the
         // answers go: it's what clicking the thread's link would do, without having to find it.
         const m = e.message
@@ -560,11 +565,15 @@ function apply(e: CoreEvent): void {
           Date.now() < openNext.until &&
           !m.threadId &&
           isMine(s, m.author) &&
-          !messagesIn(s, id).some((x) => x.id === m.id)
+          !list.some((x) => x.id === m.id)
         if (!opens) return { ...s, messages }
         openNext = null
         const here = s.view?.kind === 'conversation' && s.view.id === id
         return { ...s, messages, ...(here ? { panel: { kind: 'thread' as const, id: m.id } } : {}) }
+      }
+      case 'message_removed': {
+        const found = Object.entries(s.messages).find(([, list]) => list.some((m) => m.id === e.id))
+        return found ? { ...s, messages: { ...s.messages, [found[0]]: found[1].filter((m) => m.id !== e.id) } } : s
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
@@ -1018,6 +1027,9 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+export const steer = (messageId: string): void => void fire(L('Não consegui orientar o agente.', "I couldn't steer the agent."), 'steer', { messageId })
+export const editQueued = (messageId: string, text: string): void => void fire(L('Não consegui editar a mensagem.', "I couldn't edit the message."), 'editQueued', { messageId, text })
+export const cancelQueued = (messageId: string): void => void fire(L('Não consegui tirar a mensagem da fila.', "I couldn't take the message out of the queue."), 'cancelQueued', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })

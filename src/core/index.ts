@@ -359,13 +359,15 @@ function refreshCodexQuota(): void {
   }, () => {})
 }
 
+// TUCANO_FAKE_DELAY_MS slows the fake engines down, to see in the app what happens while an agent works.
+const fakeOpts = { delayMs: Number(process.env['TUCANO_FAKE_DELAY_MS']) || undefined }
 // A harness that moved since it was found (an update to another folder) is looked for again.
 function moved(id: EngineId): Parameters<typeof relocating>[1] {
   return { path: () => engines[id].path, label: ENGINES[id].label, redetect: () => detect().then(() => undefined) }
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
+  ? { claude: fakeEngine('claude', fakeOpts), codex: fakeEngine('codex', fakeOpts), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode', fakeOpts), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode', fakeOpts), pi: fakeBrokenPi ? { ...fakeEngine('pi', fakeOpts), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi', fakeOpts), antigravity: fakeEngine('antigravity', fakeOpts), cursor: fakeEngine('cursor', fakeOpts), grok: fakeEngine('grok', fakeOpts), cline: fakeEngine('cline', fakeOpts), hermes: fakeEngine('hermes', fakeOpts), endpoint: fakeEngine('endpoint', fakeOpts) }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -1819,7 +1821,7 @@ const api: Handlers = {
     defaultWorkspace,
     settings: settings(),
     agents: db.agents(),
-    ...db.openingMessages(PAGE), // each conversation's latest: the rest come as the scroll gets there
+    ...(({ messages, since }) => ({ messages: runner.withQueue(messages), since }))(db.openingMessages(PAGE)), // each conversation's latest: the rest come as the scroll gets there
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
@@ -1866,6 +1868,12 @@ const api: Handlers = {
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
   retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
+
+  steer: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.steer(messageId)),
+
+  editQueued: ({ messageId, text }, ctx) => (reachMessage(ctx, messageId), runner.editQueued(messageId, text)),
+
+  cancelQueued: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.cancelQueued(messageId)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
 

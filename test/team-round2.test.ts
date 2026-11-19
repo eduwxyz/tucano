@@ -344,7 +344,7 @@ describe('10. routed replies in a busy channel', () => {
     expect(prompts).toEqual([])
   })
 
-  it('two messages 150 ms apart (one person): each reply ends at its own message and is told which one it answers', async () => {
+  it('two messages 150 ms apart (one person): the second waits for the router, and one reply answers both', async () => {
     const db = new Db(':memory:')
     db.saveAgent(agent('a1', 'leo'))
     db.saveAgent(agent('a2', 'nico'))
@@ -354,14 +354,11 @@ describe('10. routed replies in a busy channel', () => {
     await sleep(150)
     await runner.send('ch', 'leo: pergunta B sobre testes')
     await runner.idle()
-    expect(prompts.map((p) => p.agent)).toEqual(['Leo', 'Leo'])
-    const [first, second] = prompts.map((p) => lines(p.prompt))
-    expect(first!.at(-1)).toMatch(/pergunta A sobre deploy$/)
-    expect(first!.join('\n')).not.toContain('pergunta B')
-    // The second ends at B, not at Leo's own first reply (which came in after B), and says so.
-    expect(second!.at(-1)).toMatch(/pergunta B sobre testes$/)
-    expect(second!.join('\n')).toContain('Leo responde: leo: pergunta A sobre deploy')
-    expect(prompts[1]!.prompt).toContain('Você responde a esta mensagem de Ana: “leo: pergunta B sobre testes”')
+    expect(prompts.map((p) => p.agent)).toEqual(['Leo'])
+    const [only] = prompts.map((p) => lines(p.prompt))
+    expect(only!.join('\n')).toContain('pergunta A sobre deploy')
+    expect(only!.at(-1)).toMatch(/pergunta B sobre testes$/)
+    expect(prompts[0]!.prompt).toContain('Você responde a esta mensagem de Ana: “leo: pergunta B sobre testes”')
     // A mention, a DM: no such line, the prompt reads as always.
     prompts.length = 0
     await runner.send('ch', '@nico oi')

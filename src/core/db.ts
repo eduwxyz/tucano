@@ -1285,6 +1285,19 @@ export class Db {
     return r && this.toMessage(r)
   }
 
+  // A message that waited in line goes in the conversation when the agent reads it.
+  setMessageAt(id: string, at: number): void {
+    this.db.prepare('UPDATE messages SET at = ? WHERE id = ?').run(at, id)
+  }
+
+  // A message taken back before anyone read it, with its attached images' records.
+  deleteMessage(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM artifacts WHERE message_id = ?').run(id)
+      this.db.prepare('DELETE FROM messages WHERE id = ?').run(id)
+    })
+  }
+
   // A reply moved into a thread after it started (one that handed work on goes under the person's message).
   moveToThread(id: string, threadId: string): void {
     this.db.prepare('UPDATE messages SET thread_id = ? WHERE id = ? AND thread_id IS NULL').run(threadId, id)
@@ -1663,6 +1676,10 @@ export class Db {
       size: Number(r['size']),
       createdAt: Number(r['created_at'])
     }
+  }
+
+  artifactsOf(messageId: string): Artifact[] {
+    return this.artifacts().filter((a) => a.messageId === messageId)
   }
 
   saveArtifact(a: Artifact): void {
