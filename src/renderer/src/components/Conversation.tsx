@@ -101,6 +101,7 @@ import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '.
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
+import { AskStrip } from './AskStrip'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
@@ -2328,11 +2329,14 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   // messages, so a reply's steps don't redraw the field.
   const working = useStore((s) => workingIds(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
-  const asker = useStore((s) => {
+  // The message itself, not just the name: the strip above the field needs what was asked.
+  const asked = useStore((s) => {
     const q = askerIn(s, conversationId, threadId)
     if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
-    return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
+    return q
   })
+  const askerId = asked?.author.kind === 'agent' ? asked.author.id : undefined
+  const asker = useStore((s) => (askerId ? agentById(s, askerId)?.name : undefined))
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -2585,6 +2589,13 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
             </div>
           )}
         </div>
+      )}
+      {asked && (
+        <AskStrip
+          asked={asked}
+          who={asker}
+          onOpen={() => navigate({ kind: 'conversation', id: conversationId, message: asked.id })}
+        />
       )}
       <div className="composer">
         {images.length > 0 && (
