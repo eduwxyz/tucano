@@ -37,6 +37,8 @@ import {
 } from '../store'
 import type { SidebarPart } from '../../../shared/onboarding'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
+import { moveBefore, nudge } from '../../../shared/list-order'
+import { useHoldReorder, type HoldReorder } from '../reorder'
 import { call } from '../rpc'
 import { SurveyLine } from './Feedback'
 import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
@@ -190,7 +192,7 @@ function HubNavItem({ hub, icon }: { hub: HubId; icon: 'knowledge' | 'operations
 // One item at the top of the sidebar, with what it can do besides opening: a right click or its "•••"
 // opens a menu that takes it out of the sidebar (sidebar-top.ts). `back`: Aprovações, taken out, back
 // while something waits on the person, with a line that says so.
-function TopRow({ item, back, onMenu, children }: { item: TopItem; back?: boolean; onMenu: (at: { x: number; y: number }, items: MenuItem[]) => void; children: ReactNode }): ReactNode {
+function TopRow({ item, back, onMenu, sort, children }: { item: TopItem; back?: boolean; onMenu: (at: { x: number; y: number }, items: MenuItem[]) => void; sort?: HoldReorder; children: ReactNode }): ReactNode {
   const row = useRef<HTMLDivElement>(null)
   const team = useStore(teamMode)
   const items = (): MenuItem[] => [
@@ -200,7 +202,8 @@ function TopRow({ item, back, onMenu, children }: { item: TopItem; back?: boolea
   return (
     <div
       ref={row}
-      className={`top-row ${back ? 'is-back' : ''}`}
+      className={`top-row ${back ? 'is-back' : ''} ${sort?.picked === item ? 'is-picked' : ''} ${sort?.over === item && sort.picked !== item ? 'is-over' : ''}`}
+      {...(sort ? sort.rowProps(item) : {})}
       onContextMenu={(e) => {
         e.preventDefault()
         onMenu({ x: e.clientX, y: e.clientY }, items())
@@ -257,15 +260,28 @@ interface AgentGroup {
   name: string
   agents: Agent[]
 }
-function groupAgents(agents: Agent[]): AgentGroup[] | null {
+const byIds = <T extends { id: string }>(items: T[], ids: string[]): T[] => {
+  const seen = new Set<string>()
+  const ordered: T[] = []
+  for (const id of ids) {
+    const hit = items.find((x) => x.id === id)
+    if (hit && !seen.has(id)) {
+      ordered.push(hit)
+      seen.add(id)
+    }
+  }
+  return [...ordered, ...items.filter((x) => !seen.has(x.id))]
+}
+function groupAgents(agents: Agent[], sectorOrder?: string[], agentOrder?: string[]): AgentGroup[] | null {
   const heads = headsOf(agents)
   if (!heads.length) return null
   const team = agents.filter(isTeam)
   const of = new Map(team.map((a) => [a.id, sectorOf(agents, a.id)?.id]))
-  const groups: AgentGroup[] = heads.map((h) => ({ id: h.id, name: sectorName(h, L('Setor de', 'Sector of')), agents: [h, ...team.filter((a) => a.id !== h.id && of.get(a.id) === h.id)] }))
-  const loose = team.filter((a) => !of.get(a.id))
+  const order = (list: Agent[]): Agent[] => byIds(list, moveBefore(list, agentOrder ?? [], ''))
+  const groups: AgentGroup[] = heads.map((h) => ({ id: h.id, name: sectorName(h, L('Setor de', 'Sector of')), agents: order([h, ...team.filter((a) => a.id !== h.id && of.get(a.id) === h.id)]) }))
+  const loose = order(team.filter((a) => !of.get(a.id)))
   if (loose.length) groups.push({ id: 'none', name: L('Sem setor', 'No sector'), agents: loose })
-  return groups
+  return byIds(groups, moveBefore(groups, sectorOrder ?? [], ''))
 }
 
 export function Sidebar(): ReactNode {
@@ -287,14 +303,16 @@ export function Sidebar(): ReactNode {
   const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
-  const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
+  const dmsRaw = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
+  const dms = byIds(dmsRaw, moveBefore(dmsRaw, settings.dmOrder, ''))
   // Each agent's DM with me: what its row opens, and where its unread, working and waiting come from.
   const dmOf = new Map<string, Conversation>()
   for (const c of dms) if (!dmOf.has(c.name) || c.owner === you) dmOf.set(c.name, c)
   const teamAgents = agents.filter(isTeam)
+  const teamAgentsShown = byIds(teamAgents, moveBefore(teamAgents, settings.agentOrder, ''))
   // An archived agent leaves the list, but a DM with it stays reachable, quietly, at the end.
   const archivedWithDm = agents.filter((a) => a.archived && a.kind !== 'tuca' && dmOf.has(a.id))
-  const groups = useMemo(() => groupAgents(agents), [agents])
+  const groups = useMemo(() => groupAgents(agents, settings.sectorOrder, settings.agentOrder), [agents, settings.sectorOrder, settings.agentOrder])
   const [menu, setMenu] = useState<MenuState>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
   const menuAt = useCallback((at: { x: number; y: number }, items: MenuItem[]) => setMenu({ ...at, items }), [])
@@ -319,41 +337,32 @@ export function Sidebar(): ReactNode {
   const dmsWaiting = useStore((s) => anyWaiting(s, dms.map((c) => c.id)))
   const whole: ChannelLayout = { loose: arranged.loose.map((c) => c.id), groups: arranged.groups.map((g) => ({ ...g, channels: g.channels.map((c) => c.id) })) }
   const saveLayout = (next: ChannelLayout): void => updateSettings({ channelLayout: next })
+  const saveList = (key: 'dmOrder' | 'agentOrder' | 'navOrder' | 'sectorOrder', value: string[]): void => {
+    updateSettings({ [key]: value } as Partial<typeof settings>)
+  }
+  const groupOf = (channelId: string): string | undefined => arranged.groups.find((g) => g.channels.some((c) => c.id === channelId))?.id
+  const dropChannel = (id: string, before: string): void => {
+    if (before.startsWith('grp:')) return saveLayout(moveChannel(channels, layout, id, { group: before.slice(4) }))
+    if (before.startsWith('end:')) {
+      const at = before.slice(4)
+      return saveLayout(moveChannel(channels, layout, id, { group: at === 'loose' ? undefined : at }))
+    }
+    saveLayout(moveChannel(channels, layout, id, { group: groupOf(before), before }))
+  }
+  const channelsSort = useHoldReorder({ group: 'channels', onDrop: dropChannel, onNudge: (id, by) => saveLayout(nudgeChannel(channels, layout, id, by)) })
+  const dmsSort = useHoldReorder({ group: 'dms', onDrop: (id, before) => saveList('dmOrder', moveBefore(dms, settings.dmOrder, id, before)), onNudge: (id, by) => saveList('dmOrder', nudge(dms, settings.dmOrder, id, by)) })
+  const agentsSort = useHoldReorder({ group: 'agents', onDrop: (id, before) => saveList('agentOrder', moveBefore(teamAgents, settings.agentOrder, id, before)), onNudge: (id, by) => saveList('agentOrder', nudge(teamAgents, settings.agentOrder, id, by)) })
+  const navSort = useHoldReorder({ group: 'nav', onDrop: (id, before) => saveList('navOrder', moveBefore(available.map((i) => ({ id: i })), settings.navOrder, id, before === 'end:top' ? undefined : before)), onNudge: (id, by) => saveList('navOrder', nudge(available.map((i) => ({ id: i })), settings.navOrder, id, by)) })
+  const sectorSort = useHoldReorder({ group: 'sectors', onDrop: (id, before) => saveList('sectorOrder', moveBefore(groups ?? [], settings.sectorOrder, id, before === 'end:sectors' ? undefined : before)), onNudge: (id, by) => saveList('sectorOrder', nudge(groups ?? [], settings.sectorOrder, id, by)) })
+  const rowClass = (sort: HoldReorder, id: string): string => `${sort.picked === id ? ' is-picked' : ''}${sort.over === id && sort.picked !== id ? ' is-over' : ''}`
   const [naming, setNaming] = useState<string | null>(null)
   const newGroup = (channelId: string): void => {
     const id = crypto.randomUUID()
     saveLayout(moveChannel(channels, addGroup(layout, { id, name: L('Novo grupo', 'New group') }), channelId, { group: id }))
     setNaming(id)
   }
-  const dragged = useRef<string | null>(null)
-  const accept = (e: React.DragEvent): void => {
-    if (dragged.current) e.preventDefault()
-  }
-  const dropOn = (to: { group?: string; before?: string }) => ({
-    onDragEnter: accept,
-    onDragOver: accept,
-    onDrop: (e: React.DragEvent): void => {
-      const id = dragged.current
-      if (!id) return
-      e.preventDefault()
-      e.stopPropagation()
-      dragged.current = null
-      saveLayout(moveChannel(channels, layout, id, to))
-    }
-  })
-  const channelRow = (c: (typeof channels)[number], group?: string): ReactNode => (
-    <div
-      key={c.id}
-      draggable
-      onDragStart={(e) => {
-        dragged.current = c.id
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', c.name)
-      }}
-      onDragEnd={() => (dragged.current = null)}
-      onContextMenu={(e) => open(e, channelMenu(c))}
-      {...dropOn({ group, before: c.id })}
-    >
+  const channelRow = (c: (typeof channels)[number]): ReactNode => (
+    <div key={c.id} className={`channel-row${rowClass(channelsSort, c.id)}`} {...channelsSort.rowProps(c.id)} onContextMenu={(e) => open(e, channelMenu(c))}>
       <ChannelItem id={c.id} name={c.name} unread={c.unread} />
     </div>
   )
@@ -476,26 +485,19 @@ export function Sidebar(): ReactNode {
             <TucaItem />
           </TopRow>
         )}
-        {(shows('approvals') || back('approvals')) && (
-          <TopRow item="approvals" back={back('approvals')} onMenu={menuAt}>
-            <NavItem view={{ kind: 'approvals' }} icon="shield" label={topLabel('approvals', team)} badge={pending} />
-          </TopRow>
-        )}
-        {shows('board') && (
-          <TopRow item="board" onMenu={menuAt}>
-            <NavItem view={{ kind: 'board' }} icon="board" label={topLabel('board', team)} fresh={fresh('board')} />
-          </TopRow>
-        )}
-        {(shows('knowledge') || back('knowledge')) && (
-          <TopRow item="knowledge" back={back('knowledge')} onMenu={menuAt}>
-            <HubNavItem hub="knowledge" icon="knowledge" />
-          </TopRow>
-        )}
-        {shows('operations') && (
-          <TopRow item="operations" onMenu={menuAt}>
-            <HubNavItem hub="operations" icon="operations" />
-          </TopRow>
-        )}
+        {(byIds(available.filter((i) => i !== 'tuca').map((i) => ({ id: i })), moveBefore(available.map((i) => ({ id: i })), settings.navOrder, '')).map((x) => x.id) as TopItem[]).map((item) => {
+          const sortProps = navSort.rowProps(item)
+          if (!shows(item) && !back(item)) return null
+          return (
+            <TopRow key={item} item={item} back={back(item)} onMenu={menuAt} sort={navSort}>
+              {item === 'approvals' ? <NavItem view={{ kind: 'approvals' }} icon="shield" label={topLabel('approvals', team)} badge={pending} /> :
+                  item === 'board' ? <NavItem view={{ kind: 'board' }} icon="board" label={topLabel('board', team)} fresh={fresh('board')} /> :
+                    item === 'knowledge' ? <HubNavItem hub="knowledge" icon="knowledge" /> :
+                      <HubNavItem hub="operations" icon="operations" />}
+            </TopRow>
+          )
+        })}
+        <div className={`nav-drop ${navSort.over === 'end:top' && navSort.picked ? 'is-over' : ''}`} {...navSort.zoneProps('end:top')} />
         {tucked.length > 0 && <Tucked items={tucked} />}
 
         <Section
@@ -512,8 +514,7 @@ export function Sidebar(): ReactNode {
           }
         >
           {arranged.loose.map((c) => channelRow(c))}
-          {/* Dropped here, a channel goes last among those in no group. */}
-          <div className="channel-drop" {...dropOn({})} />
+          <div className={`channel-drop ${channelsSort.over === 'end:loose' && channelsSort.picked ? 'is-over' : ''}`} {...channelsSort.zoneProps('end:loose')} />
           {arranged.groups.map((g) => (
             <GroupFold
               key={g.id}
@@ -522,7 +523,7 @@ export function Sidebar(): ReactNode {
               unread={g.channels.reduce((n, c) => n + (c.unread ?? 0), 0)}
               waiting={waitingGroups.includes(g.id)}
               head={{
-                ...dropOn({ group: g.id }),
+                ...channelsSort.zoneProps(`grp:${g.id}`),
                 onContextMenu: (e) =>
                   open(e, [
                     { label: L('Renomear', 'Rename'), icon: 'edit', onClick: () => setNaming(g.id) },
@@ -549,7 +550,8 @@ export function Sidebar(): ReactNode {
                 )
               }
             >
-              {g.channels.map((c) => channelRow(c, g.id))}
+              {g.channels.map((c) => channelRow(c))}
+            <div className={`channel-drop ${channelsSort.over === `end:${g.id}` && channelsSort.picked ? 'is-over' : ''}`} {...channelsSort.zoneProps(`end:${g.id}`)} />
             </GroupFold>
           ))}
         </Section>
@@ -577,11 +579,25 @@ export function Sidebar(): ReactNode {
         >
           {groups
             ? groups.map((g) => (
-                <SectorGroup key={g.id} id={g.id} label={g.name} count={g.agents.length} unread={unreadIn(g.agents.map((a) => dmOf.get(a.id) ?? {}))} dms={g.agents.map((a) => dmOf.get(a.id)?.id ?? '').join(' ')}>
-                  {g.agents.map(agentRow)}
-                </SectorGroup>
+                <SectorGroup
+                  key={g.id}
+                  id={g.id}
+                  label={g.name}
+                  count={g.agents.length}
+                  unread={unreadIn(g.agents.map((a) => dmOf.get(a.id) ?? {}))}
+                  dms={g.agents.map((a) => dmOf.get(a.id)?.id ?? '').join(' ')}
+                  agents={g.agents}
+                  renderAgent={(a) => <AgentRow id={a.id} dm={dmOf.get(a.id)?.id} unread={dmOf.get(a.id)?.unread} owner={team && a.owner !== you ? personById({ people }, a.owner)?.name : undefined} />}
+                  onDrop={(id, before) => saveList('agentOrder', moveBefore(teamAgents, settings.agentOrder, id, before === `end:${g.id}` ? undefined : before))}
+                  onNudge={(id, by) => saveList('agentOrder', nudge(teamAgents, settings.agentOrder, id, by))}
+                  sort={sectorSort}
+                />
               ))
-            : teamAgents.map(agentRow)}
+            : teamAgentsShown.map((a) => (
+                <div key={a.id} className={`agent-row${agentsSort.picked === a.id ? ' is-picked' : ''}${agentsSort.over === a.id && agentsSort.picked !== a.id ? ' is-over' : ''}`} {...agentsSort.rowProps(a.id)}>
+                  {agentRow(a)}
+                </div>
+              ))}
           {archivedWithDm.map(agentRow)}
           {agents.some((a) => a.archived) && (
             <button className="nav-item nav-item--quiet" onClick={() => openDialog({ kind: 'archived' })}>
@@ -607,12 +623,13 @@ export function Sidebar(): ReactNode {
 
 // A sector folds like a channel group (Fold.tsx). Folded, it still says how many agents it has, how
 // many messages are new in it and how many things wait on me there. `dms`: its DMs' ids, as a string.
-function SectorGroup({ id, label, count, unread, dms, children }: { id: string; label: string; count: number; unread: number; dms: string; children: ReactNode }): ReactNode {
+function SectorGroup({ id, label, count, unread, dms, agents, renderAgent, onDrop, onNudge, sort }: { id: string; label: string; count: number; unread: number; dms: string; agents: Agent[]; renderAgent: (a: Agent) => ReactNode; onDrop: (id: string, before: string) => void; onNudge: (id: string, by: -1 | 1) => void; sort?: HoldReorder }): ReactNode {
   const { open, toggle } = useFold(`sector:${id}`)
+  const bots = useHoldReorder({ group: `sector:${id}`, onDrop, onNudge })
   const waiting = useStore((s) => waitingTotal(s, dms.split(' ')))
   return (
     <div className={`agent-sector ${open ? '' : 'is-folded'}`}>
-      <div className="agent-sector__head">
+      <div className={`agent-sector__head ${sort?.picked === id ? 'is-picked' : ''} ${sort?.over === id && sort.picked !== id ? 'is-over' : ''}`} {...(sort ? sort.rowProps(id) : {})}>
         <FoldToggle open={open} onToggle={toggle}>
           {label}
         </FoldToggle>
@@ -624,7 +641,12 @@ function SectorGroup({ id, label, count, unread, dms, children }: { id: string; 
           </span>
         )}
       </div>
-      {children}
+      {open && agents.map((a) => (
+        <div key={a.id} className={`agent-row ${bots.picked === a.id ? 'is-picked' : ''} ${bots.over === a.id && bots.picked !== a.id ? 'is-over' : ''}`} {...bots.rowProps(a.id)}>
+          {renderAgent(a)}
+        </div>
+      ))}
+      {open && <div className="agent-sector__drop" {...bots.zoneProps(`end:${id}`)} />}
     </div>
   )
 }
