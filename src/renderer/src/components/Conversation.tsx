@@ -95,7 +95,7 @@ import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
-import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
+import { ArtifactCard, ArtifactGallery, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
@@ -597,9 +597,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
-            {message.run.artifactIds.map((aid) => (
-              <ArtifactCard key={aid} id={aid} />
-            ))}
+            <ArtifactGallery ids={message.run.artifactIds} />
           </div>
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
