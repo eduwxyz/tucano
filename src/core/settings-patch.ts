@@ -38,6 +38,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   harnesses: { kind: 'array', max: 1_000, nullable: true },
   onboarding: { kind: 'object', max: 2_000, nullable: true },
   folded: { kind: 'array', max: 200_000, nullable: true },
+  hideEmptyAsks: { kind: 'boolean', max: 10, nullable: true },
+  hideEmptyApprovals: { kind: 'boolean', max: 10, nullable: true },
   sidebarHidden: { kind: 'array', max: 500, nullable: true },
   sounds: { kind: 'boolean', max: 10, nullable: true },
   stepsOpen: { kind: 'boolean', max: 10, nullable: true },
