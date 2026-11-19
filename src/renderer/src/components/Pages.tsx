@@ -43,6 +43,7 @@ import {
   type TelegramInfo,
   useStore,
   EFFORTS,
+  anthropicModel,
   ENGINES,
   MAX_AGENT_ROUTINES,
   MAX_CHAIN_DEPTH,
@@ -767,7 +768,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               )}
               {/* Cursor's models carry the effort in the name (…-high, …-xhigh): no separate pick. */}
               {engine !== 'cursor' && (
-                <Row label={L('Esforço de raciocínio', 'Reasoning effort')} sub={L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')}>
+                <Row
+                  label={L('Esforço de raciocínio', 'Reasoning effort')}
+                  sub={
+                    engine === 'claude' && !anthropicModel(modelInfo(draft.modelId)?.id ?? draft.modelId)
+                      ? L('Neste modelo, que não é da Anthropic, Baixo e Médio desligam o raciocínio: respostas bem mais rápidas. Alto e Máximo pensam antes de responder.', "On this model, which isn't Anthropic's, Low and Medium turn reasoning off: much faster replies. High and Max think before answering.")
+                      : L('Mais esforço pensa mais e gasta mais do plano.', 'More effort thinks longer and uses more of your plan.')
+                  }
+                >
                   <Select
                     aria-label={L('Esforço de raciocínio', 'Reasoning effort')}
                     value={draft.effort ?? null}

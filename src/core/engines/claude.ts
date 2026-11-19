@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { lastLines, LiveCli, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn, TurnShape } from './types'
 import { L } from '../../shared/lang'
+import { thinkingOff } from '../../shared/types'
 
 export const GATEWAY_NAME = 'tucano'
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
@@ -185,8 +186,10 @@ export function claudeParser(): Parser {
 // reply (its post-turn summary) and only then sends `result`: about 2.5 s on every reply, at
 // times over 10 s. Nobody reads that summary here.
 // The gateway's address goes in the environment, not the arguments (see claudeArgs).
-export function claudeEnv(p: Provider, account?: string, mcpUrl?: string): NodeJS.ProcessEnv {
-  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), ...(mcpUrl ? { [GATEWAY_ENV]: mcpUrl } : {}), MCP_TOOL_TIMEOUT: '900000' }
+// `noThinking`: a model that isn't Anthropic's at low or medium effort (thinkingOff). The person's own setting, in
+// the gateway's environment, still wins.
+export function claudeEnv(p: Provider, account?: string, mcpUrl?: string, noThinking = false): NodeJS.ProcessEnv {
+  return { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...(noThinking ? { CLAUDE_CODE_DISABLE_THINKING: '1' } : {}), ...p.env, ...(account ? { CLAUDE_CONFIG_DIR: account } : {}), ...(mcpUrl ? { [GATEWAY_ENV]: mcpUrl } : {}), MCP_TOOL_TIMEOUT: '900000' }
 }
 
 // Where Claude Code keeps a session: its config folder, then the working folder with every
@@ -273,7 +276,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       }
       // The gateway's token goes in the environment, never in the arguments (other processes can read those).
       const p = await provider()
-      const env = claudeEnv(p, turn.account, turn.mcpUrl)
+      const env = claudeEnv(p, turn.account, turn.mcpUrl, thinkingOff(turn.model, turn.effort))
       const session = turn.session
       if (!session) {
         // A process started for it ahead of time takes the turn, then goes.
@@ -337,7 +340,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
           return
         }
         if (had) dropSpare(key)
-        const cli = new LiveCli({ bin: path, args, cwd: turn.cwd, env: claudeEnv(p, turn.account, turn.mcpUrl) })
+        const cli = new LiveCli({ bin: path, args, cwd: turn.cwd, env: claudeEnv(p, turn.account, turn.mcpUrl, thinkingOff(turn.model, turn.effort)) })
         const spare = { cli, at: Date.now(), timer: setTimeout(() => spares.get(key)?.cli === cli && dropSpare(key), SPARE_MS) }
         spare.timer.unref()
         spares.set(key, spare)
@@ -356,7 +359,7 @@ export function claudeEngine(bin: () => string | undefined, provider: () => Prom
       if (!path || !shape) return
       void provider().then((p) => {
         if (kept.has(id) || !shapes.has(id)) return // a turn or a release got there first
-        const k: Kept = { cli: new LiveCli({ bin: path, args: claudeArgs({ ...shape, session: { id, resume: true } }, p.apiKeyHelper), cwd: shape.cwd, env: claudeEnv(p, shape.account, shape.mcpUrl) }), key: keptKey(path, shape, id, p), usedAt: Date.now() }
+        const k: Kept = { cli: new LiveCli({ bin: path, args: claudeArgs({ ...shape, session: { id, resume: true } }, p.apiKeyHelper), cwd: shape.cwd, env: claudeEnv(p, shape.account, shape.mcpUrl, thinkingOff(shape.model, shape.effort)) }), key: keptKey(path, shape, id, p), usedAt: Date.now() }
         kept.set(id, k)
         park(id, k)
       })
