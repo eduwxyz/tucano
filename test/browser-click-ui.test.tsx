@@ -28,7 +28,9 @@ Object.assign(globalThis, {
 })
 
 let settings: Partial<Settings>
-const save = vi.fn(async (_patch: Partial<Settings>) => {})
+const save = vi.fn(async (patch: Partial<Settings>) => {
+  settings = { ...settings, ...patch }
+})
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
   return {
@@ -64,7 +66,13 @@ afterEach(async () => {
 })
 
 const text = (): string => document.body.textContent ?? ''
-const trigger = (): HTMLElement => document.querySelector<HTMLElement>('.select__trigger')!
+const choice = (label: string): HTMLElement => {
+  const found = [...document.querySelectorAll<HTMLElement>('.browser-choice [role="radio"]')].find((b) => (b.textContent ?? '').trim() === label)
+  expect(found, label).toBeDefined()
+  return found!
+}
+const active = (): string => document.querySelector<HTMLElement>('.browser-choice [role="radio"].is-active')?.textContent?.trim() ?? ''
+const trigger = (): HTMLElement => document.querySelector<HTMLElement>('.browser-choice .select__trigger')!
 const shown = (): string => trigger().querySelector('.select__value, .select__placeholder')?.textContent ?? ''
 const options = (): string[] => [...document.querySelectorAll('[role="option"]')].map((o) => o.querySelector('.select__label')?.textContent ?? o.textContent ?? '')
 const open = async (): Promise<void> => {
@@ -77,19 +85,24 @@ const choose = async (label: string): Promise<void> => {
   await act(async () => option!.dispatchEvent(new window.Event('click', { bubbles: true })))
 }
 
-describe('who finds the click, on the Agents’ browser card', () => {
-  it('offers the page’s text and Jev when the install has no classifier rows', async () => {
+describe('who finds the click, on the Browser Use card', () => {
+  it('offers two full-width choices, and Jev when the install has no classifier rows', async () => {
     settings = { engines: engines(), language: 'en' }
     await render()
-    expect(shown()).toBe('Only by the page’s text')
+    expect(active()).toBe('By the page’s text')
+    expect(document.querySelectorAll('.browser-choice [role="radio"]').length).toBe(2)
+    await act(async () => choice('With a classifier').click())
+    await render()
+    expect(shown()).toBe('Jev (TypeSafe)')
     await open()
-    expect(options()).toEqual(['Only by the page’s text', 'Jev (TypeSafe)'])
+    expect(options()).toEqual(['Jev (TypeSafe)'])
   })
 
-  it('writes a Jev row and the browser job when Jev is chosen on a fresh install', async () => {
+  it('writes a Jev row and the browser job when a classifier is chosen on a fresh install', async () => {
     settings = { engines: engines(), language: 'en' }
     await render()
-    await choose('Jev (TypeSafe)')
+    await act(async () => choice('With a classifier').click())
+    await render()
     // The job may only point at a row the list holds: the row is written with it.
     expect(save).toHaveBeenCalledWith({ classifiers: [JEV_CLASSIFIER], classifierJobs: { browser: 'jev' } })
   })
@@ -97,16 +110,19 @@ describe('who finds the click, on the Agents’ browser card', () => {
   it('clears the browser job when the page’s text is chosen back', async () => {
     settings = { classifiers: [JEV_CLASSIFIER], classifierJobs: { browser: 'jev' }, engines: engines(), language: 'en' }
     await render()
+    expect(active()).toBe('With a classifier')
     expect(shown()).toBe('Jev (TypeSafe)')
-    await choose('Only by the page’s text')
+    await act(async () => choice('By the page’s text').click())
     expect(save).toHaveBeenCalledWith({ classifierJobs: {} })
   })
 
   it('shows a configured classifier as an option, and picks it without touching the list', async () => {
     settings = { classifiers: [JEV_CLASSIFIER, luna], classifierJobs: {}, engines: engines(), language: 'en' }
     await render()
+    await act(async () => choice('With a classifier').click())
+    await render()
     await open()
-    expect(options()).toEqual(['Only by the page’s text', 'Jev (TypeSafe)', 'Luna · OpenAI'])
+    expect(options()).toEqual(['Jev (TypeSafe)', 'Luna · OpenAI'])
     await choose('Luna · OpenAI')
     expect(save).toHaveBeenCalledWith({ classifierJobs: { browser: 'luna-01' } })
   })
@@ -125,6 +141,7 @@ describe('who finds the click, on the Agents’ browser card', () => {
   it('shows the choice it inherited from the old browserJev switch', async () => {
     settings = { browserJev: true, engines: engines(), language: 'en' }
     await render()
+    expect(active()).toBe('With a classifier')
     expect(shown()).toBe('Jev (TypeSafe)')
   })
 })
@@ -134,16 +151,16 @@ describe('the settings page', () => {
 
   it('renders the card in the Agents pane, with no hint sending the choice elsewhere alone', () => {
     expect(pages).toContain("{pane('agentes') && <BrowserClickCard />}")
-    const card = pages.slice(pages.indexOf('export function BrowserClickCard'), pages.indexOf('function VoiceCard'))
-    expect(card).toContain('updateSettings({ classifierJobs: next })')
-    expect(card).toContain('browser: id')
+    const card = pages.slice(pages.indexOf('export function BrowserClickCard'), pages.indexOf('function QuotasCard'))
+    expect(card).toContain("updateSettings({ classifierJobs: next })")
+    expect(card).toContain("browser: id")
     expect(card).not.toContain('is chosen in Classifiers')
   })
 
   it('keeps Classifier Uses off the same job, so the two surfaces stay one choice', () => {
     expect(pages).toContain('<ClassifierUsesCard />')
     const uses = pages.slice(pages.indexOf('export function ClassifierUsesCard'), pages.indexOf('export function BrowserClickCard'))
-    expect(uses).toContain('CLASSIFIER_JOBS.map((job) => (')
+    expect(uses).toContain("CLASSIFIER_JOBS.map((job) => (")
     expect(uses).toContain('updateSettings({ classifierJobs: next })')
   })
 })

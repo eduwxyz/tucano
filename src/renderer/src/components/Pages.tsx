@@ -3401,38 +3401,52 @@ export function BrowserClickCard(): ReactNode {
   }
   return (
     <Card
-      title={L('Navegador dos agentes', 'Agents’ browser')}
+      title={L('Uso do navegador', 'Browser Use')}
       lead={L(
         'Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.',
         'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.'
       )}
     >
-      <Field
-        label={L('Quem acha o clique', 'Who finds the click')}
-        hint={
-          chosen
-            ? L(
-                'Acha o elemento em menos de 1 segundo, até sem texto quando o classificador lê o print da tela. Cada clique que o texto não resolve manda a lista de elementos da página, e às vezes o print dela, pro provedor escolhido, inclusive em áreas logadas.',
-                'Finds the element in under 1 second, even without text when the classifier reads the screenshot. Every click text can’t resolve sends the page’s element list, and sometimes its screenshot, to the chosen provider, including signed-in areas.'
-              )
-            : L(
-                'De graça e resolve a maioria: o agente usa o texto e, quando não acha, o número do elemento.',
-                'Free, and it handles most cases: the agent uses the text and, when it can’t find it, the element’s number.'
-              )
-        }
-      >
-        <Select
-          value={jobs.browser ?? ''}
-          onChange={(v) => choose(v ?? '')}
-          options={[
-            { value: '', label: L('Só pelo texto da página', 'Only by the page’s text') },
-            { value: JEV_CLASSIFIER.id, label: 'Jev (TypeSafe)', hint: providerSpec(JEV_CLASSIFIER.provider).label },
-            ...list
-              .filter((c) => c.id !== JEV_CLASSIFIER.id)
-              .map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))
-          ]}
-        />
-      </Field>
+      <div className="browser-choice">
+        <strong>{L('Quem acha o clique', 'Who finds the click')}</strong>
+        <p className="muted small">
+          {jobs.browser
+            ? L('Um classificador lê a lista de elementos da página e às vezes a tela.', 'A classifier reads the page’s element list, and sometimes its screenshot.')
+            : L('Usa o texto da página e, quando não encontra, o número do elemento.', 'Uses the page’s text, then the element’s number when text fails.')}
+        </p>
+        <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Quem acha o clique', 'Who finds the click')}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!jobs.browser}
+            className={jobs.browser ? '' : 'is-active'}
+            onClick={() => choose('')}
+          >
+            {L('Pelo texto da página', 'By the page’s text')}
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!!jobs.browser}
+            className={jobs.browser ? 'is-active' : ''}
+            onClick={() => choose(jobs.browser || JEV_CLASSIFIER.id)}
+          >
+            {L('Com um classificador', 'With a classifier')}
+          </button>
+        </div>
+        {jobs.browser && (
+          <Select
+            value={jobs.browser}
+            onChange={(v) => choose(v ?? JEV_CLASSIFIER.id)}
+            options={[
+              { value: JEV_CLASSIFIER.id, label: 'Jev (TypeSafe)', hint: providerSpec(JEV_CLASSIFIER.provider).label },
+              ...list
+                .filter((c) => c.id !== JEV_CLASSIFIER.id)
+                .map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))
+            ]}
+          />
+        )}
+      </div>
       {chosen && work && (
         <OutsideGateway
           what={L(
@@ -3441,12 +3455,11 @@ export function BrowserClickCard(): ReactNode {
           )}
         />
       )}
-      <p className="hint">
-        <Icon name="sliders" size={13} /> {L('Dá pra mudar aqui ou em Classifiers, no trabalho “O que o agente clica na página”: é a mesma escolha.', 'Change it here or in Classifiers, under “What an agent clicks in a page”: it is the same choice.')}
-      </p>
     </Card>
   )
 }
+
+
 
 function VoiceCard(): ReactNode {
   const voice = useStore((s) => s.settings.voice)

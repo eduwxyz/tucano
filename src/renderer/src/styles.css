@@ -2234,6 +2234,17 @@ h3 {
   display: flex;
   margin-bottom: 12px;
 }
+.browser-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.browser-choice .segmented {
+  margin-bottom: 0;
+}
+.browser-choice p {
+  margin: 0;
+}
 .segmented--wide button {
   flex: 1;
   padding: 6px 10px;
