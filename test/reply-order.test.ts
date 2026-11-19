@@ -12,7 +12,7 @@ describe('asSaid', () => {
   const said = (id: string, at: number, status?: RunStatus, endedAt?: number): Message => ({
     id,
     conversationId: 'c',
-    author: status ? { kind: 'agent', id: 'a' } : { kind: 'me' },
+    author: status ? { kind: 'agent', id: 'a' } : { kind: 'person', id: 'owner' },
     text: id,
     at,
     ...(status ? { run: { status, steps: [], ...(endedAt ? { endedAt } : {}) } } : {})
@@ -69,12 +69,13 @@ describe('replies that overlap', () => {
         yield* (isLia(t) ? slow : fast).run(t)
       }
     }
-    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
-    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+    const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
     return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ro-work-')) })
   }
 
-  const whose = (m: Message): string => (m.author.kind === 'agent' ? m.author.id : m.author.kind)
+  // A person's message reads as 'me': the single person of the desktop app.
+  const whose = (m: Message): string => (m.author.kind === 'agent' ? m.author.id : m.author.kind === 'person' ? 'me' : m.author.kind)
   const of = (id: string): Message => db.messages().find((m) => whose(m) === id)!
 
   // Lia is asked first and is at work when Theo is asked: two messages, since agents called in one may take turns.
@@ -136,7 +137,9 @@ describe('replies that overlap', () => {
   })
 
   it('marks the end of a reply that never got to run', async () => {
-    db.saveAgent(agent('lia', 'lia', { limit: 0 }))
+    // Past the limit is a ceiling it really has and use it really made: a limit of 0 is no limit.
+    db.saveAgent(agent('lia', 'lia', { limit: 1_000 }))
+    db.addReceipt({ messageId: 'before', agentId: 'lia', engine: 'claude', model: 'sonnet', inputTokens: 1_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, at: Date.now() })
     const r = runner()
     await r.send('c', '@lia bom dia')
     await r.idle()

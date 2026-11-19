@@ -5,9 +5,9 @@
 // goes in or waits for you, as the wiki's settings say. The conversation shows what was kept,
 // with Undo. A message can also be kept on purpose ("Keep in the wiki"), and "guarda isso"
 // said in the conversation makes the curator keep it.
-import { L } from '../shared/lang'
-import type { Agent, Message, Settings, WikiChange, WikiOp } from '../shared/types'
-import { ftsQuery } from './wiki'
+import { L, locale } from '../shared/lang'
+import { asSaid, saidAt, type Agent, type Message, type Person, type Settings, type WikiChange, type WikiOp } from '../shared/types'
+import { cleanTitle, ftsQuery } from './wiki'
 import type { Wiki } from './wiki'
 
 const QUIET_MS = 20_000 // a conversation that went quiet this long gets read
@@ -18,10 +18,15 @@ const DOC_PART = 30_000 // a long document is read in parts this size, one after
 
 export interface CuratorDeps {
   wiki: Wiki
-  db: { conversation(id: string): { id: string; kind: string; name: string; wikiCapture?: boolean } | undefined; messagesAfter(conversationId: string, at: number): Message[]; message(id: string): Message | undefined; saveMessage(m: Message): void; agents(): Agent[] }
+  db: { conversation(id: string): { id: string; kind: string; name: string; wikiCapture?: boolean; owner?: string } | undefined; messagesAfter(conversationId: string, at: number): Message[]; messagesSaidAfter(conversationId: string, at: number): Message[]; message(id: string): Message | undefined; saveMessage(m: Message): void; agents(): Agent[]; ownerId?(): string; people?(opts: { removed?: boolean }): Person[]; teamMode?(): boolean }
   settings: () => Settings
   llm: (system: string, prompt: string) => Promise<string> // a cheap model, chosen inside; throws when none is ready
   emitMessage: (m: Message) => void
+  // The pages (lowercase titles) a curation from this conversation may not read: the ones held for
+  // someone other than whose DM it is (see Wiki.inherit). What it writes is read by others.
+  hidden?: (conversationId: string) => Set<string>
+  // Before it writes: the wiki brought up to date with its git repository, if it has one.
+  beforeWrite?: () => Promise<void>
 }
 
 export const curatorSystem = (): string =>
@@ -81,7 +86,14 @@ export function parseCuration(text: string): { worth: boolean; reason: string; t
   const str = (x: unknown): string => (typeof x === 'string' ? x.trim() : '')
   const ops = parseOps(v['mudancas'] ?? v['changes'])
   const worth = v['guardar'] === true || v['worth'] === true
-  return { worth: worth && ops.length > 0, reason: str(v['motivo'] ?? v['reason']), title: str(v['titulo_fonte'] ?? v['source_title']) || L('Trecho de conversa', 'Conversation excerpt'), ops }
+  return { worth: worth && ops.length > 0, reason: str(v['motivo'] ?? v['reason']), title: cleanTitle(str(v['titulo_fonte'] ?? v['source_title'])) || L('Trecho de conversa', 'Conversation excerpt'), ops }
+}
+
+// A swap's new passage. Models often write it under "text" (as for the other ops) or in Portuguese;
+// read as an empty "new", the swap would show nothing in its place and delete the passage on approval.
+const swapIn = (o: Record<string, unknown>): string => {
+  for (const k of ['new', 'novo', 'text', 'texto']) if (typeof o[k] === 'string' && (o[k] as string).trim()) return o[k] as string
+  return ''
 }
 
 // The changes a model wrote, in the JSON both the curator and the review use.
@@ -91,7 +103,7 @@ export function parseOps(list: unknown): WikiOp[] {
   for (const c of Array.isArray(list) ? list : []) {
     const o = c as Record<string, unknown>
     const op = str(o['op'])
-    const page = str(o['pagina'] ?? o['page']).replace(/^\[\[|\]\]$/g, '')
+    const page = cleanTitle(str(o['pagina'] ?? o['page']).replace(/^\[\[|\]\]$/g, ''))
     if (!page || !['create', 'append', 'replace'].includes(op)) continue
     if (op === 'replace' && !str(o['old'])) continue
     if (op !== 'replace' && !str(o['texto'] ?? o['text'])) continue
@@ -102,7 +114,7 @@ export function parseOps(list: unknown): WikiOp[] {
       page,
       ...(str(o['tipo'] ?? o['kind']) ? { kind: str(o['tipo'] ?? o['kind']) } : {}),
       ...(str(o['secao'] ?? o['section']) ? { section: str(o['secao'] ?? o['section']) } : {}),
-      ...(op !== 'replace' ? { text: str(o['texto'] ?? o['text']) } : { old: String(o['old']), new: String(o['new'] ?? '') })
+      ...(op !== 'replace' ? { text: str(o['texto'] ?? o['text']) } : { old: String(o['old']), new: swapIn(o) })
     })
   }
   return ops
@@ -145,30 +157,36 @@ export class WikiCurator {
 
   private name(m: Message): string {
     const me = this.deps.settings().workspaceName || L('Você', 'You')
-    if (m.author.kind === 'me') return me
+    const id = m.author.kind === 'person' ? m.author.id : ''
+    if (m.author.kind === 'person') return id === this.deps.db.ownerId?.() ? me : (this.deps.db.people?.({ removed: true }).find((p) => p.id === id)?.name ?? me)
     if (m.author.kind === 'routine') return L('Rotina', 'Routine')
-    const id = m.author.kind === 'agent' ? m.author.id : ''
-    return this.deps.db.agents().find((a) => a.id === id)?.name ?? L('Agente', 'Agent')
+    const agentId = m.author.kind === 'agent' ? m.author.id : ''
+    return this.deps.db.agents().find((a) => a.id === agentId)?.name ?? L('Agente', 'Agent')
   }
   private excerpt(messages: Message[]): string {
-    return messages.map((m) => `**${this.name(m)}** (${new Date(m.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
+    return messages.map((m) => `**${this.name(m)}** (${new Date(saidAt(m)).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
   }
 
   private async doRead(conversationId: string): Promise<void> {
     const { db, wiki } = this.deps
     const conv = db.conversation(conversationId)
     if (!conv || conv.wikiCapture === false) return // a conversation kept out of the wiki
+    // A DM is its person's alone: once the Tucano is a team (its first invite on), no DM (the owner's
+    // either) goes into the team's wiki on its own. One person alone keeps what it always did.
+    if (conv.kind === 'dm' && ((db.teamMode?.() ?? (db.people?.({}).length ?? 1) > 1) || (conv.owner && db.ownerId && conv.owner !== db.ownerId()))) return
     const since = wiki.mark(conversationId)
     // what was already kept on purpose ("Keep in the wiki") isn't read a second time
     const kept = wiki.readMessages(conversationId)
-    const all = db.messagesAfter(conversationId, since).filter((m) => (m.author.kind === 'me' || m.author.kind === 'agent') && m.text.trim() && m.run?.status !== 'working')
+    // In the order things were said, and the mark goes by that too: a reply still at work when the
+    // conversation was last read comes after what was read then, however early it started.
+    const all = asSaid(db.messagesSaidAfter(conversationId, since)).filter((m) => (m.author.kind === 'person' || m.author.kind === 'agent') && m.text.trim() && m.run?.status !== 'working')
     const fresh = all.filter((m) => !kept.has(m.id))
-    if (!fresh.length) return all.length ? wiki.setMark(conversationId, all.at(-1)!.at) : undefined
+    if (!fresh.length) return all.length ? wiki.setMark(conversationId, saidAt(all.at(-1)!)) : undefined
     const stretch = fresh.slice(-MAX_MESSAGES)
     const last = stretch.at(-1)!
-    if (stretch.reduce((n, m) => n + m.text.length, 0) < MIN_CHARS) return wiki.setMark(conversationId, last.at)
+    if (stretch.reduce((n, m) => n + m.text.length, 0) < MIN_CHARS) return wiki.setMark(conversationId, saidAt(last))
     await this.curate({ messages: stretch, kind: 'conversation', conversationId, force: false })
-    wiki.setMark(conversationId, last.at)
+    wiki.setMark(conversationId, saidAt(last))
   }
 
   // A message kept on purpose: with the one it answers, if it's a reply (in a thread, my last message there).
@@ -177,9 +195,9 @@ export class WikiCurator {
     if (!m) throw new Error(L('Essa mensagem não existe mais.', 'That message no longer exists.'))
     const before = this.deps.db
       .messagesAfter(m.conversationId, 0)
-      .filter((x) => x.at < m.at && x.author.kind === 'me' && (x.threadId === m.threadId || x.id === m.threadId))
+      .filter((x) => x.at < m.at && x.author.kind === 'person' && (x.threadId === m.threadId || x.id === m.threadId))
       .at(-1)
-    return this.curate({ messages: before && m.author.kind !== 'me' ? [before, m] : [m], kind: 'message', conversationId: m.conversationId, force: true })
+    return this.curate({ messages: before && m.author.kind !== 'person' ? [before, m] : [m], kind: 'message', conversationId: m.conversationId, force: true })
   }
 
   // A package that ran into a newer page: made again on the page as it is now; when a passage
@@ -225,17 +243,24 @@ export class WikiCurator {
       }
       let made = 0
       for (const [k, part] of parts.entries()) {
+        if (!wiki.source(sourceId)) return // taken back between two parts
         const head = parts.length > 1 ? L(`(parte ${k + 1} de ${parts.length} de "${src.title}")\n\n`, `(part ${k + 1} of ${parts.length} of "${src.title}")\n\n`) : ''
         made += (await this.curate({ messages: [], kind: src.kind === 'note' ? 'message' : 'document', conversationId: '', force: src.kind === 'note', text: head + part, plain: part, source: src })).length
       }
-      wiki.setSourceStatus(sourceId, 'done', { changes: made })
+      if (wiki.source(sourceId)) wiki.setSourceStatus(sourceId, 'done', { changes: made })
     } catch (e) {
-      wiki.setSourceStatus(sourceId, 'failed', { error: e instanceof Error ? e.message : String(e) })
+      if (wiki.source(sourceId)) wiki.setSourceStatus(sourceId, 'failed', { error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      wiki.dropOrphans()
     }
   }
 
   private async curate(p: { messages: Message[]; kind: 'conversation' | 'message' | 'document'; conversationId: string; force: boolean; text?: string; plain?: string; source?: { id: string; file: string; title: string } }): Promise<WikiChange[]> {
-    const { wiki } = this.deps
+    const wiki = this.deps.wiki
+    // A wiki that takes no writes (a read-only repository): nothing is read to be written.
+    const ro = wiki.readOnly()
+    if (ro) throw new Error(ro)
+    const shown = wiki.view(this.deps.hidden?.(p.conversationId) ?? new Set())
     const text = p.text ?? this.excerpt(p.messages)
     const plain = p.plain ?? p.messages.map((m) => m.text).join(' ')
     // The pages it may touch: the ones the words of the stretch find.
@@ -243,9 +268,9 @@ export class WikiCurator {
     // then what a search finds in its end, the newest part; a long reply up front can't crowd them out.
     const words = ftsQuery(plain, true)
     const low = plain.toLowerCase()
-    const named = wiki.list().filter((p) => p.title.length >= 3 && new RegExp(`(^|[^\\p{L}\\p{N}])${p.title.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(low)).map((p) => p.title)
-    const found = words ? wiki.search(plain.slice(-600), 4).map((h) => h.title) : []
-    const pages = [...new Set([...named, ...found])].slice(0, 6).map((t) => wiki.page(t)).filter((x): x is NonNullable<typeof x> => !!x)
+    const named = shown.list().filter((p) => p.title.length >= 3 && new RegExp(`(^|[^\\p{L}\\p{N}])${p.title.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(low)).map((p) => p.title)
+    const found = words ? shown.search(plain.slice(-600), 4).map((h) => h.title) : []
+    const pages = [...new Set([...named, ...found])].slice(0, 6).map((t) => shown.page(t)).filter((x): x is NonNullable<typeof x> => !!x)
     // What already waits for approval on those pages, so it isn't proposed twice or fought over.
     const titles = new Set(pages.map((pg) => pg.title))
     const waiting = wiki.changes('pending').flatMap((c) => c.ops.filter((o) => titles.has(o.page)).map((o) => `- [[${o.page}]] ${o.op}${o.section ? ` (${o.section})` : ''}: ${o.op === 'replace' ? `"${o.old}" → "${o.new}"` : (o.text ?? '').slice(0, 300)}`))
@@ -255,7 +280,7 @@ export class WikiCurator {
       L('## Esquema da wiki', "## The wiki's schema"),
       wiki.schema().trim(),
       L('## Índice', '## Index'),
-      wiki.indexText().trim() || L('(a wiki está vazia)', '(the wiki is empty)'),
+      shown.indexText().trim() || L('(a wiki está vazia)', '(the wiki is empty)'),
       ...(pages.length ? [L('## Páginas que podem ter a ver', '## Pages that may be related'), ...pages.map((pg) => `### [[${pg.title}]] (${pg.kind})\n${pg.body.slice(0, MAX_PAGE_CHARS)}`)] : []),
       ...(waiting.length ? [L('## Mudanças já propostas, esperando aprovação (não repita; se o trecho mudar algo delas, escreva sobre o texto atual da página)', '## Changes already proposed, waiting for approval (don\'t repeat them; if the stretch changes one, write against the page as it is now)'), waiting.join('\n')] : []),
       p.kind === 'message'
@@ -267,14 +292,24 @@ export class WikiCurator {
       L('Responda só com o JSON.', 'Reply with the JSON only.')
     ].join('\n\n')
     const out = parseCuration(await this.deps.llm(curatorSystem(), prompt))
+    // While the model read, the source may have been taken back, or its conversation deleted (a
+    // purge): nothing of it gets written, and what it left behind goes.
+    if ((p.source && !wiki.source(p.source.id)) || (p.conversationId && !this.deps.db.conversation(p.conversationId))) {
+      wiki.dropOrphans()
+      return []
+    }
     if (!out || (!out.worth && !p.force) || !out.ops.length) return []
+    // What the repository has now, before writing on top of it (a failed pull doesn't stop it: the
+    // sync deals with it later, conflicts included).
+    await this.deps.beforeWrite?.().catch(() => {})
+    if (wiki.readOnly()) throw new Error(wiki.readOnly())
     const source = p.source ?? wiki.addSource({ title: out.title, text, kind: p.kind === 'document' ? 'file' : p.kind, origin: { conversationId: p.conversationId, messageIds: p.messages.map((m) => m.id) }, by: 'auto' })
     const cite = ` ([[${source.file}|${L('fonte', 'source')}]])`
     // A swap whose passage isn't on that page: on the one page that has it, it goes there; on none, it
     // becomes an addition to the page named, so approving it can't fail.
     const fitted = out.ops.map((o): WikiOp => {
-      if (o.op !== 'replace' || wiki.page(o.page)?.body.includes(o.old!)) return o
-      const holders = wiki.list().filter((p) => wiki.page(p.title)?.body.includes(o.old!))
+      if (o.op !== 'replace' || shown.page(o.page)?.body.includes(o.old!)) return o
+      const holders = shown.list().filter((p) => shown.page(p.title)?.body.includes(o.old!))
       if (holders.length === 1) return { ...o, page: holders[0]!.title }
       const { old: _old, new: text = '', ...rest } = o
       return { ...rest, op: 'append', text }
@@ -291,6 +326,7 @@ export class WikiCurator {
       const c = wiki.addChange({ ops: edits, sourceId: source.id, by: 'auto', reason: out.reason })
       made.push(this.deps.settings().wikiEdits === 'auto' ? wiki.applyChange(c.id, L('Curador da wiki', 'Wiki curator')) : c)
     }
+    wiki.dropOrphans()
     // The reply it came from says so, with what was kept and Undo.
     const anchor = [...p.messages].reverse().find((m) => m.author.kind === 'agent') ?? p.messages.at(-1)
     const msg = anchor && this.deps.db.message(anchor.id)

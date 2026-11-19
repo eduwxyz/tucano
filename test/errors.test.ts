@@ -77,9 +77,12 @@ describe("errors in people’s words", () => {
   it("tells no internet, a slow answer, a missing command and a busy database apart", () => {
     expect(
       friendly(sys("getaddrinfo ENOTFOUND api.anthropic.com", "ENOTFOUND")).text
-    ).toMatch(/^Sem conexão com a internet/);
-    expect(friendly(new TypeError("fetch failed")).text).toMatch(
+    ).toMatch(/^Não achei o endereço \(api\.anthropic\.com\) na rede \(DNS\)/);
+    expect(friendly(sys("connect ENETUNREACH 1.2.3.4:443", "ENETUNREACH")).text).toMatch(
       /^Sem conexão com a internet/
+    );
+    expect(friendly(new TypeError("fetch failed")).text).toMatch(
+      /^Não consegui chegar ao servidor/
     );
     expect(friendly("Request timed out").text).toMatch(/^Demorou demais/);
     expect(friendly(sys("spawn npx ENOENT", "ENOENT"))).toEqual({

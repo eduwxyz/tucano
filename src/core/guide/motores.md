@@ -1,17 +1,22 @@
 # Motores e contas
-> Onde os agentes rodam: os harnesses, como entrar, contas extras, gateway da empresa e o roteador Jev.
+> Onde os agentes rodam: um endpoint próprio, os harnesses, como entrar, contas extras, gateway da empresa e o roteador Jev.
 
-Os agentes não têm modelo próprio: cada resposta roda num programa que você já tem no computador, chamado harness. O Tucano só lê a configuração de cada um; nunca vê nem guarda suas senhas e chaves.
+Os agentes não têm modelo próprio: cada resposta roda num endpoint seu ou num programa que você já tem no computador, chamado harness.
+
+## Endpoint próprio
+Sem instalar nada: em **Configurações › Modelos**, **Endpoint próprio** › **Configurar**. Cole o endereço no padrão da OpenAI (OpenRouter, OmniRoute, Ollama, LM Studio, vLLM; os atalhos preenchem) e a chave, **Buscar os modelos**, marque os que os agentes podem usar e **Salvar**. A chave fica guardada cifrada no Tucano. O modelo precisa saber chamar ferramentas. Com **Web** ligada, o agente busca na web (pela Exa) e lê páginas com as ferramentas do Tucano. Cobra por token, no endpoint.
 
 ## Os harnesses
-Claude Code, Codex, OpenCode, Pi, Gemini CLI, Cursor CLI e Grok. Cada um aparece em **Configurações › Modelos** (Settings › Models), no card **Harnesses**, com o estado: **Pronto**, **Falta entrar** ou **Não instalado**.
+Claude Code, Codex, OpenCode, Pi, Antigravity CLI, Cursor CLI, Grok, Cline CLI e Hermes. Cada um aparece em **Configurações › Modelos** (Settings › Models), no card **Harnesses**, com o estado: **Pronto**, **Falta entrar** ou **Não instalado**.
 
 - **Instalar**: abre um terminal que instala pra você. Alguns precisam do Node.js antes.
 - **Entrar**: abre um terminal com o comando de login (por exemplo `claude auth login`, `codex login`, `grok login`). Quando o login termina, o app percebe sozinho.
 - **Testar** / **Mandar teste**: confere se está funcionando.
 - **Verificar de novo**: procura de novo depois de instalar ou entrar.
 
-Cada harness pode rodar de três jeitos, conforme você configurou: no **plano** (o login do Claude, do ChatGPT etc., sem cobrança por uso), por **chave de API** (cobrado por token) ou pelo **gateway** da empresa (o proxy que está no `settings.json` do Claude Code ou no `config.toml` do Codex). Pelo gateway, os agentes usam o mesmo e a telemetria fica desligada.
+O **Cline CLI** entra num login só do Tucano (**Entrar** abre o `cline auth`); o seu `~/.cline` não é tocado, e o agente só usa as ferramentas do Tucano. Outro modelo vai em **Outro modelo…** como `<provedor>/<modelo>`. Imagens não vão pro Cline.
+
+Dos harnesses, o Tucano só lê a configuração; nunca vê nem guarda suas senhas e chaves. Cada um pode rodar de três jeitos, conforme você configurou: no **plano** (o login do Claude, do ChatGPT etc., sem cobrança por uso), por **chave de API** (cobrado por token) ou pelo **gateway** da empresa (o proxy que está no `settings.json` do Claude Code ou no `config.toml` do Codex). Pelo gateway, os agentes usam o mesmo e a telemetria fica desligada.
 
 ## Modelo de cada agente
 Na página do agente, em **Onde roda e modelo**, você escolhe o motor e o modelo da lista dele. Se o modelo não aparece, use **Outro modelo…** e digite o nome exato. Dá pra ter um **Modelo reserva**, usado quando o principal bate no limite da assinatura.

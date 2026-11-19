@@ -258,7 +258,7 @@ export class MacComputer {
     return (this.deps.env ?? loginEnv)()
   }
 
-  private async startService(agent: Agent, args: Record<string, unknown>, cwd: string, signal?: AbortSignal): Promise<ToolOutcome> {
+  private async startService(agent: Agent, args: Record<string, unknown>, cwd: string, signal?: AbortSignal, conversationId?: string): Promise<ToolOutcome> {
     const name = typeof args['name'] === 'string' ? args['name'].trim() : ''
     const command = typeof args['command'] === 'string' ? args['command'].trim() : ''
     const port = Number(args['port'])
@@ -281,7 +281,7 @@ export class MacComputer {
     child.unref()
     if (!child.pid) return { result: textResult(L('Não consegui iniciar o processo.', "I couldn't start the process."), true) }
     writeFileSync(this.pidFile(agent.id, name), String(child.pid))
-    this.deps.db.saveService(agent.id, { name, command, port, startedAt: Date.now() })
+    this.deps.db.saveService(agent.id, { name, command, port, startedAt: Date.now(), conversationId })
 
     let open = false
     for (let i = 0; i < 60 && !signal?.aborted && alive(child.pid); i++) {
@@ -405,7 +405,7 @@ export class MacComputer {
         return { result: r.isError ? r : textResult(edited(file, count)) }
       }
       case 'start_service':
-        return this.startService(agent, args, cwd, ctx.signal)
+        return this.startService(agent, args, cwd, ctx.signal, ctx.conversationId)
       case 'stop_service': {
         const svc = String(args['name'] ?? '')
         if (!this.deps.db.services(agent.id).some((s) => s.name === svc)) return { result: textResult(noService(svc), true) }
