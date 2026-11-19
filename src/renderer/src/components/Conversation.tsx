@@ -2562,7 +2562,14 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
     <div className="composer-wrap">
       {/* The work this conversation is carrying, attached to the field it belongs to. A thread has
           no drawer of its own: what runs inside one is a row of its conversation's. */}
-      {!threadId && <WorkDrawer key={conversationId} conversationId={conversationId} {...(onJump ? { onJump } : {})} />}
+      {!threadId && (
+        <WorkDrawer
+          key={conversationId}
+          conversationId={conversationId}
+          {...(onJump ? { onJump } : {})}
+          onThread={(rootId) => openThread(rootId)}
+        />
+      )}
       {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">

@@ -1917,7 +1917,9 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--panel);
+  box-shadow: var(--shadow);
   overflow: hidden;
+  animation: rise var(--dur-enter) var(--ease-out);
 }
 .work-drawer__head {
   display: flex;
@@ -1938,6 +1940,21 @@ h3 {
 .work-drawer__count {
   flex: 1;
   text-align: left;
+}
+.work-drawer__more {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.work-drawer__caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-3);
+  transform: rotate(90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.work-drawer__caret.is-open {
+  transform: rotate(-90deg);
 }
 .work-drawer__list {
   display: grid;
@@ -2006,6 +2023,17 @@ h3 {
 .work-row--done .work-row__text {
   color: var(--text-2);
 }
+.work-row__meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* Opening the thread a reply lives in, from its row: the glyph alone, so a row stays one line. */
+.work-row__thread-btn:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 .work-row .icon-btn:hover {
   color: var(--danger);
   background: var(--danger-soft);
@@ -2018,29 +2046,8 @@ h3 {
   background: var(--accent);
   animation: fade-pulse 1.6s ease-in-out infinite;
 }
-/* The rows of a reply that lives in one of this conversation's threads: a quiet chip saying which
-   thread, in the thread's own words, where the press opens it. */
-.work-row__thread {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  max-width: 46%;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-2);
-  font-size: 10.5px;
-  line-height: 15px;
-}
-.work-row__thread-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.work-row__go:hover .work-row__thread {
-  border-color: var(--border-strong);
-}
+/* A row in a thread says so through its thread button's tooltip, in that thread's own words,
+   rather than through a pill: the row stays one line however long the thread's first message is. */
 .work-drawer__group {
   padding: 4px 6px 2px;
   color: var(--text-2);

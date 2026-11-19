@@ -47,16 +47,32 @@ let root: Root
 const render = async (conversationId: string, messages: Message[]): Promise<void> => {
   fake = { ...getState(), ready: true, you: 'ana', people: [{ id: 'ana', name: 'Ana', role: 'owner', about: '' }], messages: { [conversationId]: messages } } as State
   await act(async () =>
-    root.render(<WorkDrawer key={conversationId} conversationId={conversationId} onJump={(id, threadId) => void stopped.push(`jump:${id}${threadId ? `@${threadId}` : ''}`)} />)
+    root.render(
+      <WorkDrawer
+        key={conversationId}
+        conversationId={conversationId}
+        onJump={(id, threadId) => void stopped.push(`jump:${id}${threadId ? `@${threadId}` : ''}`)}
+        onThread={(rootId) => void stopped.push(`thread:${rootId}`)}
+      />
+    )
   )
 }
 // A message inside a thread: `threadId` is the id of the message that started it.
 const inThread = (m: Message, threadId: string): Message => ({ ...m, threadId })
 const text = (): string => document.body.textContent ?? ''
 const button = (label: string): HTMLElement => {
-  const hit = [...document.querySelectorAll('button')].find((b) => b.getAttribute('title') === label || b.textContent?.trim() === label)
+  const hit = [...document.querySelectorAll('button')].find(
+    (b) => b.getAttribute('title') === label || b.textContent?.trim() === label || (b.classList.contains('work-drawer__head') && !!b.textContent?.includes(label))
+  )
   if (!hit) throw new Error(`no button "${label}": ${[...document.querySelectorAll('button')].map((b) => b.getAttribute('title') ?? b.textContent).join(' | ')}`)
   return hit as HTMLElement
+}
+// The thread button of the first row whose prompt is `said`, pressed: it opens the thread that reply
+// lives in, or the one its own reply starts.
+const threadOf = async (said: string): Promise<void> => {
+  const row = [...document.querySelectorAll('.work-row')].find((r) => r.textContent?.includes(said)) as HTMLElement
+  const btn = row.querySelector('.work-row__thread-btn') as HTMLElement
+  await act(async () => btn.click())
 }
 
 beforeEach(() => {
@@ -164,7 +180,7 @@ describe('the work drawer', () => {
     expect(text()).toContain('1 terminada')
   })
 
-  it('a reply at work inside a thread is work here too: its row says which thread, and opens it', async () => {
+  it('a reply at work inside a thread is work here too: its row opens that thread, and one outside opens its own', async () => {
     const conv = nextConv()
     await render(conv, [
       said('m1', 'primeiro pedido', 1),
@@ -176,13 +192,20 @@ describe('the work drawer', () => {
     expect(text()).toContain('2 respondendo') // the one outside, and the one in the thread
     expect(text()).toContain('primeiro pedido')
     expect(text()).toContain('segue o anexo')
-    const chips = document.querySelectorAll('.work-row__thread')
-    expect(chips.length).toBe(1) // only the row that lives in a thread carries one
-    expect(chips[0]!.textContent).toContain('a thread do orçamento') // the thread, in its own words
-    // Pressing it jumps into the thread, not to a message in the room.
+    // One thread button per row, the glyph alone: the row says which thread only in its tooltip, so
+    // a long thread title can't push the row onto a second line.
+    expect(document.querySelectorAll('.work-row__thread-btn').length).toBe(2)
+    expect(document.body.textContent).not.toContain('a thread do orçamento')
+    const inThreadBtn = [...document.querySelectorAll('.work-row')].find((r) => r.textContent?.includes('segue o anexo'))!.querySelector('.work-row__thread-btn') as HTMLElement
+    expect(inThreadBtn.getAttribute('title')).toContain('a thread do orçamento') // named in the tooltip, in its own words
+    await threadOf('segue o anexo')
+    expect(stopped).toEqual(['thread:t1']) // the thread it lives in, not its own id
+    await threadOf('primeiro pedido')
+    expect(stopped).toEqual(['thread:t1', 'thread:r1']) // a reply outside a thread opens the one it starts
+    // Pressing the row itself still jumps into the thread, not to a message in the room.
     const go = [...document.querySelectorAll('.work-row__go')].find((b) => b.textContent?.includes('segue o anexo')) as HTMLElement
     await act(async () => go.click())
-    expect(stopped).toEqual(['jump:r2@t1'])
+    expect(stopped).toEqual(['thread:t1', 'thread:r1', 'jump:r2@t1'])
   })
 
   it('stops a reply that lives in a thread like any other, without touching the rest', async () => {
@@ -194,16 +217,18 @@ describe('the work drawer', () => {
     expect(stopped).toEqual(['r2'])
   })
 
-  it('a reply that ended inside a thread stays as a finished row, with its thread, and still jumps', async () => {
+  it('a reply that ended inside a thread stays as a finished row, with its thread button, and still jumps', async () => {
     const conv = nextConv()
     const messages = (status: 'working' | 'done'): Message[] => [said('t1', 'a thread do orçamento', 1), inThread(reply('r2', 't1', status), 't1')]
     await render(conv, messages('working'))
     await render(conv, messages('done'))
     expect(text()).toContain('1 terminada')
     await act(async () => button('1 terminada').click())
-    expect(document.querySelectorAll('.work-row--done .work-row__thread').length).toBe(1)
+    expect(document.querySelectorAll('.work-row--done .work-row__thread-btn').length).toBe(1)
+    await threadOf('a thread do orçamento')
+    expect(stopped).toEqual(['thread:t1'])
     await act(async () => button('Ir para esta resposta').click())
-    expect(stopped).toEqual(['jump:r2@t1'])
+    expect(stopped).toEqual(['thread:t1', 'jump:r2@t1'])
   })
 
 
