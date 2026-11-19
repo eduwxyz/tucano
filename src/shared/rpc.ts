@@ -4,7 +4,7 @@ import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Schedule, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -59,6 +59,8 @@ export interface Api {
   saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
   removeTask(p: { id: string }): void
   startTask(p: { id: string }): { conversationId: string } // posts it as my message to its agent (its DM, or the channel set) and takes it off the list
+  acceptTask(p: { id: string }): Task // a task an agent suggested goes on my list; throws when it's gone
+  repeatTask(p: { id: string; schedule: Schedule | null }): Task // a routine works on it at those times until it's done (it needs an agent); null takes the routine away and puts it back in the list
   ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)

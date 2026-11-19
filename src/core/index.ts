@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -83,6 +83,7 @@ import { NodeLinks, NodeUplink, type LinkPort } from './node-link'
 import { nodeOf } from '../shared/node-link'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
+import { cleanSchedule, cleanTaskText, cleanTaskTitle, DONE_KEEP_MS, taskBody, taskState, topPosition } from './task-tools'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
 import { accessCard, agentStamp, appliesNow, changedSince, routineStamp, splitChange, UNDO_MS, undoErrors } from './tuca-apply'
@@ -1665,8 +1666,18 @@ function dmFor(ctx: Ctx, agentId: string): string {
   emitConversations([id])
   return id
 }
-// A to-do's text as kept: no control characters but newlines, no longer than `max`.
-const cleanTaskText = (s: unknown, max: number): string => (typeof s === 'string' ? s.replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim().slice(0, max) : '')
+// Who does a task and where it's posted: the agent, and the task's channel when the agent is in it, else
+// the agent's DM with this person. Starting a task and repeating it resolve it the same way.
+function taskTarget(ctx: Ctx, t: Task, agentId: string): { agent: Agent; conversationId: string; channel?: Conversation } {
+  assertAgentVisible(db, ctx.person, agentId)
+  const agent = db.agent(agentId)
+  if (!agent || !isTeam(agent)) throw new UserError(L('Esse agente não está mais no time.', 'That agent is no longer on the team.'))
+  const channel = t.conversationId ? db.conversation(t.conversationId) : undefined
+  if (t.conversationId) reach(ctx, t.conversationId)
+  const inChannel = channel?.kind === 'channel' && channel.members.includes(agent.id)
+  return { agent, conversationId: inChannel ? channel.id : dmFor(ctx, agent.id), ...(inChannel ? { channel } : {}) }
+}
+const taskGone = (): UserError => new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
 
 function reachMessage(ctx: Ctx, messageId: string): void {
   reach(ctx, db.messageConversation(messageId))
@@ -2133,8 +2144,8 @@ const api: Handlers = {
   tasks: (_p, ctx) => db.tasks(ctx.person.id),
   saveTask: ({ task }, ctx) => {
     const prev = task.id ? db.task(task.id) : undefined
-    if (task.id && prev?.owner !== ctx.person.id) throw new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
-    const title = cleanTaskText(task.title, MAX_TASK_TITLE).replace(/\s+/g, ' ')
+    if (task.id && prev?.owner !== ctx.person.id) throw taskGone()
+    const title = cleanTaskTitle(task.title)
     if (!title) throw new UserError(L('Escreva o que é pra fazer.', 'Write what is to be done.'))
     const notes = task.notes === undefined ? prev?.notes : cleanTaskText(task.notes, MAX_TASK_NOTES) || undefined
     const agentId = task.agentId === undefined ? prev?.agentId : task.agentId || undefined
@@ -2150,36 +2161,95 @@ const api: Handlers = {
       if (conv?.kind !== 'channel') throw new UserError(L('Escolha um canal, ou deixe na DM do agente.', 'Pick a channel, or leave it in the agent’s DM.'))
       if (agentId && !conv.members.includes(agentId)) throw new UserError(L('Esse agente não está nesse canal.', 'That agent isn’t in that channel.'))
     }
+    // The routine works with this agent and in this place: moving the task would leave it working somewhere else.
+    if (prev?.routineId && (agentId !== prev.agentId || conversationId !== prev.conversationId)) throw new UserError(L('Uma rotina trabalha nessa tarefa. Pare de repetir antes de trocar quem faz ou onde.', 'A routine works on this task. Stop repeating before changing who does it or where.'))
+    const now = Date.now()
+    const state = taskState(prev, task.state, now)
     const mine = db.tasks(ctx.person.id)
-    const position = Number.isFinite(task.position) ? Number(task.position) : (prev?.position ?? (mine.length ? Math.min(...mine.map((t) => t.position)) - 1 : 0))
+    const position = Number.isFinite(task.position) ? Number(task.position) : (prev?.position ?? topPosition(mine))
     const dueAt = task.dueAt === undefined ? prev?.dueAt : Number.isFinite(task.dueAt) && task.dueAt! > 0 ? Math.round(task.dueAt!) : undefined
-    const saved: Task = { id: prev?.id ?? randomUUID(), owner: ctx.person.id, title, position, createdAt: prev?.createdAt ?? Date.now(), ...(notes ? { notes } : {}), ...(agentId ? { agentId } : {}), ...(conversationId ? { conversationId } : {}), ...(dueAt ? { dueAt } : {}) }
+    // What marks a task as someone's suggestion or a routine's is never set from here: it comes from the stored one.
+    const finishing = state.state === 'done' && prev?.state !== 'done'
+    const routineId = finishing ? undefined : prev?.routineId
+    const saved: Task = { id: prev?.id ?? randomUUID(), owner: ctx.person.id, title, position, createdAt: prev?.createdAt ?? now, ...(notes ? { notes } : {}), ...(agentId ? { agentId } : {}), ...(conversationId ? { conversationId } : {}), ...(dueAt ? { dueAt } : {}), ...state, ...(prev?.suggestedBy ? { suggestedBy: prev.suggestedBy } : {}), ...(prev?.fromRoutine ? { fromRoutine: prev.fromRoutine } : {}), ...(routineId ? { routineId } : {}) }
     db.saveTask(saved)
+    if (finishing) {
+      if (prev?.routineId) routines.remove(prev.routineId) // after the save above, which no longer points at it
+      db.pruneDoneTasks(ctx.person.id, now - DONE_KEEP_MS)
+    } else if (routineId) {
+      // The routine's request is the task's text: an edit goes to it too.
+      const r = db.routine(routineId)
+      if (r) {
+        const synced = { ...r, name: saved.title, prompt: taskBody(saved) }
+        db.saveRoutine(synced)
+        emit({ type: 'routine', routine: synced })
+      }
+    }
     emit({ type: 'tasks', for: ctx.person.id })
     return saved
   },
   removeTask: ({ id }, ctx) => {
-    if (db.task(id)?.owner !== ctx.person.id) return
+    const t = db.task(id)
+    if (t?.owner !== ctx.person.id) return
     db.removeTask(id)
+    if (t.routineId) routines.remove(t.routineId) // its routine goes with it
     emit({ type: 'tasks', for: ctx.person.id })
   },
   // Posted as the person's own message: in the agent's DM, or in the channel set, addressed to it.
   startTask: ({ id }, ctx) => {
     const t = db.task(id)
-    if (t?.owner !== ctx.person.id) throw new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
+    if (t?.owner !== ctx.person.id) throw taskGone()
+    if (t.suggestedBy) throw new UserError(L('Aceite essa sugestão antes de começar.', 'Accept this suggestion before starting it.'))
+    if (t.routineId) throw new UserError(L('Uma rotina já trabalha nessa tarefa. Pare de repetir antes de começar agora.', 'A routine already works on this task. Stop repeating before starting it now.'))
     if (!t.agentId) throw new UserError(L('Escolha quem faz antes de começar.', 'Pick who does it before starting.'))
-    assertAgentVisible(db, ctx.person, t.agentId)
-    const agent = db.agent(t.agentId)
-    if (!agent || !isTeam(agent)) throw new UserError(L('Esse agente não está mais no time.', 'That agent is no longer on the team.'))
-    const channel = t.conversationId ? db.conversation(t.conversationId) : undefined
-    if (t.conversationId) reach(ctx, t.conversationId)
-    const conversationId = channel?.kind === 'channel' && channel.members.includes(agent.id) ? channel.id : dmFor(ctx, agent.id)
-    const body = `${t.title}${t.notes ? `\n\n${t.notes}` : ''}${t.dueAt ? `\n\n${L('Prazo', 'Due')}: ${new Date(t.dueAt).toLocaleDateString(locale(), { day: 'numeric', month: 'long' })}` : ''}`
+    const { agent, conversationId, channel } = taskTarget(ctx, t, t.agentId)
+    const body = taskBody(t)
     const text = conversationId === channel?.id ? `@${agent.handle} ${body}` : body
     db.removeTask(id)
     emit({ type: 'tasks', for: ctx.person.id })
     bg(runner.send(conversationId, text, [], undefined, ctx.person.id), 'startTask')
     return { conversationId }
+  },
+  // A suggestion an agent left goes on the person's list, at its top.
+  acceptTask: ({ id }, ctx) => {
+    const t = db.task(id)
+    if (t?.owner !== ctx.person.id) throw taskGone()
+    if (!t.suggestedBy) return t
+    const saved: Task = { ...t, suggestedBy: undefined, position: topPosition(db.tasks(ctx.person.id)) }
+    db.saveTask(saved)
+    emit({ type: 'tasks', for: ctx.person.id })
+    return db.task(id) ?? saved
+  },
+  // A routine works on the task at those times until it's done; null takes it away.
+  repeatTask: ({ id, schedule }, ctx) => {
+    const t = db.task(id)
+    if (t?.owner !== ctx.person.id) throw taskGone()
+    if (t.suggestedBy) throw new UserError(L('Aceite essa sugestão antes de repetir.', 'Accept this suggestion before repeating it.'))
+    if (schedule === null) {
+      // Nothing repeats it: leave the task as it is, so a done one stays done (clearing its state would send it back to "to do").
+      if (!t.routineId) return t
+      const saved: Task = { ...t, routineId: undefined, state: undefined }
+      db.saveTask(saved)
+      if (t.routineId) routines.remove(t.routineId)
+      emit({ type: 'tasks', for: ctx.person.id })
+      return db.task(id) ?? saved
+    }
+    const clean = cleanSchedule(schedule)
+    if (!t.agentId) throw new UserError(L('Escolha quem faz antes de repetir.', 'Pick who does it before repeating.'))
+    const { agent, conversationId } = taskTarget(ctx, t, t.agentId)
+    const prev = t.routineId ? db.routine(t.routineId) : undefined
+    let routine: Routine
+    try {
+      // The same path as a person's own routine; the task's id goes in separately, since a routine's input can't carry it.
+      routine = routines.save({ id: prev?.id, name: t.title, agentId: agent.id, conversationId, prompt: taskBody(t), schedule: clean, enabled: true }, ctx.person.id, t.id)
+    } catch (e) {
+      throw new UserError(e instanceof Error ? e.message : String(e))
+    }
+    const saved: Task = { ...t, routineId: routine.id, state: 'doing', doneAt: undefined, result: undefined }
+    db.saveTask(saved)
+    record(ctx, prev ? 'routine.updated' : 'routine.created', routine.id, routineDetail(db, routine))
+    emit({ type: 'tasks', for: ctx.person.id })
+    return db.task(id) ?? saved
   },
 
   saveSkill: ({ skill }, ctx) => {

@@ -67,6 +67,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'When something goes wrong',
     summary: "Diagnosing the common problems: an agent that doesn't answer, a harness without a sign-in, a connector asking for sign-in or failing, Docker off, limits, a routine that didn't run, an expired approval, a notification that doesn't arrive."
   },
+  quadro: {
+    title: 'Board (tasks)',
+    summary: "What each one is doing, in four columns. How to make a task for an agent or for yourself, accept what an agent suggests and let a routine look after a task until it's done."
+  },
   rede: {
     title: 'Company network, proxy and antivirus',
     summary: "A connector that only fails on one network: a certificate that isn't accepted (a proxy or antivirus inspecting HTTPS), proxy, DNS, firewall, and what to do in each case."

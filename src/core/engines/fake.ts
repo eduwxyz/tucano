@@ -125,6 +125,14 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         // Asked: it ends with no text, as told (the person sees whom it asked under their message). What
         // didn't go out is said.
         reply = out.filter((t) => !/^(?:Pedido|Request) \[/.test(t)).join('\n')
+      } else if (turn.mcpUrl && /(?:sugira|suggest)(?: (?:pr[ao]|to) @?([\w-]+))?: ([^\n]+)/i.test(last)) {
+        // "sugira: responder os comentários" (or "sugira pra nina: …"): work it noticed, left for the person to accept on the board.
+        const [, who, what] = /(?:sugira|suggest)(?: (?:pr[ao]|to) @?([\w-]+))?: ([^\n]+)/i.exec(last)!
+        reply = textOf(await callTool(turn.mcpUrl, 'sugerir_tarefa', { titulo: what!, ...(who ? { para: who } : {}) }))
+      } else if (turn.mcpUrl && /^(?:conclua|conclude): ([^\n]+)/im.test(turn.prompt)) {
+        // "conclua: os 8 pagaram" in a task's notes: the routine working on it ends it with that result. Read off
+        // the whole prompt: the task's words are followed there by the line that says which task it is.
+        reply = textOf(await callTool(turn.mcpUrl, 'concluir_tarefa', { resultado: /^(?:conclua|conclude): ([^\n]+)/im.exec(turn.prompt)![1]! }))
       } else if (turn.mcpUrl && /^continue (?:com|with) @?([\w-]+): (.+)/i.test(last)) {
         // "continue com clara: e mande também pro Beltrano": the request that came back from her, in its thread.
         const [, who, what] = /^continue (?:com|with) @?([\w-]+): (.+)/i.exec(last)!

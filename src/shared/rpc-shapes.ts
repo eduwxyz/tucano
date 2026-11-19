@@ -31,6 +31,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   saveTask: { task: 'o' },
   removeTask: { id: 's' },
   startTask: { id: 's' },
+  acceptTask: { id: 's' },
+  repeatTask: { id: 's', schedule: 'o|null' },
   ensureTuca: { modelId: 's?', fresh: 'b?' },
   createFromDraft: { messageId: 's' },
   applyProposal: { messageId: 's', index: 'n?' },

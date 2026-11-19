@@ -1,8 +1,8 @@
 // The board's cards (src/renderer/src/board.ts): one per request, read off the messages as they are.
 import { describe, expect, it } from 'vitest'
-import { boardCards, familyOf, storyOf, tasksOf, titleOf, type BoardInput } from '../src/renderer/src/board'
+import { boardCards, familyOf, storyOf, taskKind, tasksOf, titleOf, withoutRoutines, type BoardInput } from '../src/renderer/src/board'
 import { cleanTitle, shortTitle, titledAlready } from '../src/shared/titles'
-import type { Agent, Delegation, Inbox, Message, Run } from '../src/shared/types'
+import type { Agent, Delegation, Inbox, Message, Run, Task } from '../src/shared/types'
 
 const NOW = new Date(2026, 10, 16, 15, 0).getTime()
 const MIN = 60_000
@@ -160,5 +160,82 @@ describe('titles that say nothing', () => {
   it('a nudge alone keeps its words', () => {
     expect(shortTitle('E aí?')).toBe('E aí?')
     expect(shortTitle('Oi')).toBe('Oi')
+  })
+})
+
+describe('routines are not on the board', () => {
+  const routineRun = (conv: string, routineId: string, at: number, run: Partial<Run>, inboxId?: string): { msgs: Message[]; waiting?: string } => {
+    const r = { id: `rt${++n}`, conversationId: conv, author: { kind: 'routine', id: routineId }, text: 'Checar pedidos', at, routine: { name: 'Checar pedidos parados', scheduledAt: at } } as unknown as Message
+    const done = reply(conv, 'lia', at + MIN, run, { id: inboxId ?? `rr${++n}`, text: 'Nenhum pedido parado.' }) // a reply needs words (or steps) to be a card: this one has words
+    return { msgs: [r, done], ...(inboxId ? { waiting: inboxId } : {}) }
+  }
+  const tasksFor = (messages: Message[], inbox: Inbox = NO_INBOX) => tasksOf(boardCards(input(messages, { inbox }), NOW))
+
+  it('a routine’s run is on no column, whatever it did, unless the routine works on a task of mine', () => {
+    const ok = routineRun('c1', 'routine1', NOW - 30 * MIN, { status: 'done' })
+    const failed = routineRun('c2', 'routine2', NOW - 20 * MIN, { status: 'failed', error: 'O Linear pediu login.' })
+    const tasks = tasksFor([...ok.msgs, ...failed.msgs])
+    expect(tasks).toHaveLength(2)
+    const { shown, runs } = withoutRoutines(tasks, new Set())
+    expect(shown).toEqual([])
+    expect(runs.size).toBe(0)
+  })
+
+  it('what is not a routine’s passes through untouched', () => {
+    const ask = me('dm', 'Responder a cliente', NOW - 9 * MIN)
+    const working = reply('dm', 'lia', NOW - 8 * MIN, { status: 'working', replyTo: ask.id })
+    const tasks = tasksFor([ask, working])
+    expect(withoutRoutines(tasks, new Set(['routine1'])).shown).toEqual(tasks)
+  })
+
+  it('a linked routine keeps its newest run for the standing card, whatever its column, and shows nothing else', () => {
+    const old = routineRun('c1', 'routine1', NOW - 60 * MIN, { status: 'done' })
+    const last = routineRun('c2', 'routine1', NOW - 20 * MIN, { status: 'failed', error: 'Sem acesso.' })
+    const other = routineRun('c3', 'routine2', NOW - 10 * MIN, { status: 'done' })
+    const { shown, runs } = withoutRoutines(tasksFor([...old.msgs, ...last.msgs, ...other.msgs]), new Set(['routine1']))
+    expect(shown).toEqual([])
+    expect([...runs.keys()]).toEqual(['routine1'])
+    expect(runs.get('routine1')).toMatchObject({ column: 'stuck', state: 'failed', at: NOW - 20 * MIN })
+  })
+
+  it('a part a hidden routine run handed on is hidden with it, stuck or not', () => {
+    const r = { id: 'rtp', conversationId: 'cli', author: { kind: 'routine', id: 'routine3' }, text: 'Repassar pedidos', at: NOW - 30 * MIN, routine: { name: 'Repassar pedidos', scheduledAt: NOW - 30 * MIN } } as unknown as Message
+    const split = reply('cli', 'lia', NOW - 29 * MIN, { status: 'done', delegations: [{ id: 'dp1', to: 'theo', conversationId: 'dados', rootId: 'rootp' }] })
+    const part = reply('dados', 'theo', NOW - 28 * MIN, { status: 'failed', error: 'Sem acesso.', handed: 'dp1' }, { threadId: 'rootp' })
+    const d = { id: 'dp1', from: 'lia', to: 'theo', conversationId: 'dados', rootId: 'rootp', originConversationId: 'cli', originMessageId: split.id, requestedBy: 'ana', text: 'Ver os pedidos', state: 'open', createdAt: NOW - 29 * MIN } as Delegation
+    const cards = boardCards(input([r, split, part], { delegations: [d] }), NOW)
+    expect(cards.find((c) => c.id === 'd:dp1')).toMatchObject({ parent: cards.find((c) => c.by.kind === 'routine')!.id, column: 'stuck' })
+    expect(withoutRoutines(cards, new Set()).shown).toEqual([])
+    expect(withoutRoutines(cards, new Set(['routine3'])).shown.map((c) => c.id)).toContain('d:dp1')
+  })
+
+  it('a linked routine’s question to me stays where I answer it', () => {
+    const q = routineRun('c1', 'routine1', NOW - 5 * MIN, { status: 'waiting_input', question: 'Posso apagar?' }, 'ask1')
+    const tasks = tasksFor(q.msgs, { approvals: [], questions: [{ id: 'ask1' } as Inbox['questions'][number]] })
+    expect(tasks[0]).toMatchObject({ column: 'you' })
+    expect(withoutRoutines(tasks, new Set()).shown).toEqual([])
+    const kept = withoutRoutines(tasks, new Set(['routine1']))
+    expect(kept.shown.map((t) => t.column)).toEqual(['you'])
+    expect(kept.runs.get('routine1')).toBe(kept.shown[0])
+  })
+})
+
+describe('what a task of mine is', () => {
+  const task = (extra: Partial<Task> = {}): Task => ({ id: 't', owner: 'ana', title: 'Pagar o aluguel', position: 1, createdAt: NOW, ...extra })
+
+  it('a suggestion waits to be accepted, before anything else', () => {
+    expect(taskKind(task({ suggestedBy: 'lia', state: 'done' }))).toBe('suggestion')
+  })
+
+  it('no state, or todo, is a to-do; doing is one I do myself; done is done', () => {
+    expect(taskKind(task())).toBe('todo')
+    expect(taskKind(task({ state: 'todo' }))).toBe('todo')
+    expect(taskKind(task({ state: 'doing' }))).toBe('own')
+    expect(taskKind(task({ state: 'done', routineId: 'rt' }))).toBe('done')
+  })
+
+  it('with a routine on it, it is repeated, even when the routine is not in the store', () => {
+    expect(taskKind(task({ routineId: 'rt', agentId: 'lia' }))).toBe('repeated')
+    expect(taskKind(task({ routineId: 'rt', state: 'doing' }))).toBe('repeated')
   })
 })

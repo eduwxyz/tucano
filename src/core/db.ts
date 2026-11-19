@@ -24,6 +24,7 @@ import {
   type Conversation,
   type Delegation,
   type Task,
+  type TaskState,
   type Effort,
   type Invite,
   type LentFolder,
@@ -589,7 +590,15 @@ const COLUMNS: [string, string, string][] = [
   ['connector_tools', 'cls_floor', 'TEXT'],
   ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
-  ['messages', 'title', 'TEXT']
+  ['messages', 'title', 'TEXT'],
+  // A board task's state and what it carries: when and how it ended, who suggested it, the routine that works on it (and that routine's back-reference).
+  ['tasks', 'state', 'TEXT'],
+  ['tasks', 'done_at', 'INTEGER'],
+  ['tasks', 'result', 'TEXT'],
+  ['tasks', 'suggested_by', 'TEXT'],
+  ['tasks', 'from_routine', 'TEXT'],
+  ['tasks', 'routine_id', 'TEXT'],
+  ['routines', 'task_id', 'TEXT']
 ]
 
 
@@ -689,6 +698,7 @@ export class Db {
           DELETE FROM questions;
           DELETE FROM delegations;
           DELETE FROM tasks;
+          DELETE FROM routines WHERE task_id IS NOT NULL;
           DELETE FROM activity;
         `)
         target.keepOnly(parts)
@@ -735,6 +745,8 @@ export class Db {
     const connectors = new Set(this.connectors().map((c) => c.id))
     for (const r of this.routines())
       if (!this.agent(r.agentId) || !this.conversation(r.conversationId) || (r.trigger?.kind === 'poll' && !connectors.has(r.trigger.connectorId))) this.removeRoutine(r.id)
+    // The routines above may have been the only ones working on some kept tasks: those go back to the list.
+    this.releaseOrphanTasks()
   }
 
   private migrate(file: string): void {
@@ -1726,6 +1738,7 @@ export class Db {
       createdAt: Number(r['created_at']),
       ...(str(r['scope']) === 'channel' ? { scope: 'channel' as const } : {}),
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
+      ...(r['task_id'] ? { taskId: str(r['task_id']) } : {}),
       ...(watchers.has(str(r['id'])) ? { watchers: watchers.get(str(r['id']))! } : {})
     }))
   }
@@ -1770,7 +1783,7 @@ export class Db {
         r.schedule.times && r.schedule.times.length > 1 ? JSON.stringify(r.schedule.times) : null
       )
     // A routine nobody says is the team's is a person's own: the Tucano owner's when no one is named.
-    this.db.prepare('UPDATE routines SET scope = ?, owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(r.scope === 'channel' ? 'channel' : 'me', r.owner ?? null, 'owner', r.id)
+    this.db.prepare('UPDATE routines SET scope = ?, owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)), task_id = ? WHERE id = ?').run(r.scope === 'channel' ? 'channel' : 'me', r.owner ?? null, 'owner', r.taskId ?? null, r.id)
   }
 
   removeRoutine(id: string): void {
@@ -1932,6 +1945,9 @@ export class Db {
       // Only the hashes stay, to tell their browsers "you no longer have access" instead of counting a guess.
       this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(Date.now(), id)
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
+      // Routines that work on their to-dos go first: a routine left behind would point at a task that is gone.
+      this.db.prepare('DELETE FROM routine_watchers WHERE routine_id IN (SELECT id FROM routines WHERE task_id IN (SELECT id FROM tasks WHERE owner = ?))').run(id)
+      this.db.prepare('DELETE FROM routines WHERE task_id IN (SELECT id FROM tasks WHERE owner = ?)').run(id)
       this.db.prepare('DELETE FROM tasks WHERE owner = ?').run(id) // their to-dos: never started, only theirs
     })
   }
@@ -2227,7 +2243,13 @@ export class Db {
       ...(r['conversation_id'] ? { conversationId: str(r['conversation_id']) } : {}),
       ...(r['due_at'] ? { dueAt: Number(r['due_at']) } : {}),
       position: Number(r['position']),
-      createdAt: Number(r['created_at'])
+      createdAt: Number(r['created_at']),
+      ...(r['state'] ? { state: str(r['state']) as TaskState } : {}),
+      ...(r['done_at'] ? { doneAt: Number(r['done_at']) } : {}),
+      ...(r['result'] ? { result: str(r['result']) } : {}),
+      ...(r['suggested_by'] ? { suggestedBy: str(r['suggested_by']) } : {}),
+      ...(r['from_routine'] ? { fromRoutine: str(r['from_routine']) } : {}),
+      ...(r['routine_id'] ? { routineId: str(r['routine_id']) } : {})
     }))
   }
 
@@ -2239,10 +2261,25 @@ export class Db {
   saveTask(t: Task): void {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, owner, title, notes, agent_id, conversation_id, due_at, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET title = excluded.title, notes = excluded.notes, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, due_at = excluded.due_at, position = excluded.position`
+        `INSERT INTO tasks (id, owner, title, notes, agent_id, conversation_id, due_at, position, created_at, state, done_at, result, suggested_by, from_routine, routine_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET title = excluded.title, notes = excluded.notes, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, due_at = excluded.due_at, position = excluded.position,
+           state = excluded.state, done_at = excluded.done_at, result = excluded.result, suggested_by = excluded.suggested_by, from_routine = excluded.from_routine, routine_id = excluded.routine_id`
       )
-      .run(t.id, t.owner, t.title, t.notes ?? null, t.agentId ?? null, t.conversationId ?? null, t.dueAt ?? null, t.position, t.createdAt)
+      .run(t.id, t.owner, t.title, t.notes ?? null, t.agentId ?? null, t.conversationId ?? null, t.dueAt ?? null, t.position, t.createdAt, t.state ?? null, t.doneAt ?? null, t.result ?? null, t.suggestedBy ?? null, t.fromRoutine ?? null, t.routineId ?? null)
+  }
+
+  // A task whose routine is gone (deleted, or its conversation or agent was) goes back on the list as it was before
+  // it was repeated, so nothing points at a routine that doesn't exist. Returns the owners to tell.
+  releaseOrphanTasks(): string[] {
+    const orphaned = 'routine_id IS NOT NULL AND routine_id NOT IN (SELECT id FROM routines)'
+    const owners = (this.db.prepare(`SELECT DISTINCT owner FROM tasks WHERE ${orphaned}`).all() as Row[]).map((r) => str(r['owner']))
+    if (owners.length) this.db.prepare(`UPDATE tasks SET routine_id = NULL, state = NULL WHERE ${orphaned}`).run()
+    return owners
+  }
+
+  // One person's done tasks that ended before `before`: the board doesn't keep them forever.
+  pruneDoneTasks(owner: string, before: number): void {
+    this.db.prepare("DELETE FROM tasks WHERE owner = ? AND state = 'done' AND done_at < ?").run(owner, before)
   }
 
   removeTask(id: string): void {

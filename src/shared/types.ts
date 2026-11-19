@@ -220,20 +220,33 @@ export interface DelegationRef {
   back?: 'result' // on the message that brought the answer back to where it was asked: shown folded there
 }
 
-// A to-do on the board (Quadro): written before it starts, by one person, for an agent. Starting it posts it
-// as that person's message to the agent (its DM, or a channel it's in), and from there it's that reply's card.
+// A to-do on the board (Quadro): written by one person, or suggested to them by an agent. Three ways it goes on:
+// - started: posted as that person's message to its agent (its DM, or a channel it's in). The to-do ends
+//   there, and from then on it's that reply's card.
+// - done by its owner: no agent runs. `state` says where it stands, moved by hand.
+// - repeated until it's done: a routine works on it (`routineId`, the routine's `taskId`). It stays in
+//   "Fazendo" between runs, and the routine goes away when the task is done or deleted.
+export type TaskState = 'todo' | 'doing' | 'done'
 export interface Task {
   id: string
   owner: string // the person whose list it is
   title: string
   notes?: string // what the agent should know: it goes in the message, under the title
-  agentId?: string // who does it; unset until picked
+  agentId?: string // who does it; unset until picked, or when its owner does it
   conversationId?: string // where it's posted; unset: the agent's DM
   dueAt?: number
   position: number // its place in the list, smallest first
   createdAt: number
+  state?: TaskState // unset: to do
+  doneAt?: number
+  result?: string // what the agent said when it marked it done (`concluir_tarefa`)
+  suggestedBy?: string // the agent that suggested it (`sugerir_tarefa`); it isn't on the list until its owner accepts it
+  fromRoutine?: string // the name of the routine whose run suggested it
+  routineId?: string // the routine that works on it until it's done
 }
-export type TaskInput = Pick<Task, 'title'> & Partial<Pick<Task, 'id' | 'notes' | 'agentId' | 'conversationId' | 'dueAt' | 'position'>>
+export type TaskInput = Pick<Task, 'title'> & Partial<Pick<Task, 'id' | 'notes' | 'agentId' | 'conversationId' | 'dueAt' | 'position' | 'state'>>
+export const MAX_TASK_RESULT = 600
+export const MAX_AGENT_SUGGESTIONS = 5 // how many suggestions of one agent may wait on one person
 export const MAX_TASK_TITLE = 300
 export const MAX_TASK_NOTES = 8_000
 
@@ -1057,6 +1070,7 @@ export interface Routine {
   scope?: 'me' | 'channel' // a person's own (unset), or the team's: admins make those, and they notify only who watches
   owner?: string // the person a 'me' routine belongs to, runs for and notifies
   watchers?: string[] // who asked to be told of a channel routine's runs ("me avise")
+  taskId?: string // the board task it works on until that task is done (Task.routineId); such a routine is made and removed with the task
 }
 
 export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string; scope?: Routine['scope'] }

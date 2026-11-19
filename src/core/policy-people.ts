@@ -103,6 +103,8 @@ export const NEEDS: Record<Method, Need> = {
   saveTask: 'anyone',
   removeTask: 'anyone',
   startTask: 'anyone',
+  acceptTask: 'anyone',
+  repeatTask: 'anyone',
   ensureTuca: 'anyone',
   settleDraft: 'anyone',
   dismissProposal: 'anyone',
