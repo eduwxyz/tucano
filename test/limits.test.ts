@@ -175,6 +175,65 @@ describe('the budget per reply', () => {
     expect(seen.turns.at(-1)!.prompt).toContain('- Chegou no teto da resposta: 100 mil tokens')
   })
 
+  // Runs a command that works, then spends past the budget and wraps up: a reply that got somewhere.
+  const working = (tokens: number, seen: { turns: Turn[] }): Engine => ({
+    id: 'claude',
+    async *run(turn) {
+      seen.turns.push(turn)
+      await callTool(turn.mcpUrl!, 'bash', { command: 'swift test' })
+      yield { type: 'progress', tokens, cacheRead: 0 }
+      yield { type: 'text', delta: 'Rodei os testes; falta o filtro.' }
+      yield { type: 'done', text: 'Rodei os testes; falta o filtro.', usage: { inputTokens: tokens, cacheReadTokens: 0, outputTokens: 0 } }
+    }
+  })
+  const agentReplies = () => db.messages().filter((m) => m.author.kind === 'agent')
+
+  it('goes on by itself when it paused while getting somewhere, twice in a row at most, then waits', async () => {
+    const seen: { turns: Turn[] } = { turns: [] }
+    const r = runner(working(120_000, seen))
+    await r.send('d1', 'investiga o bug')
+    await r.idle()
+    expect(seen.turns).toHaveLength(3)
+    expect(seen.turns[1]!.prompt).toContain('como estava avançando, segue sozinho agora (1 de 2 vezes seguidas')
+    expect(seen.turns[2]!.prompt).toContain('(2 de 2 vezes seguidas')
+    const [first, second, third] = agentReplies()
+    expect(first!.run).toMatchObject({ status: 'done' })
+    expect(first!.run!.steps.at(-1)?.label).toBe('Continuou sozinho')
+    expect(second!.run).toMatchObject({ status: 'done', autoContinued: 1 })
+    // The third paused too, and now it's the person's call.
+    expect(third!.run).toMatchObject({ status: 'paused', autoContinued: 2 })
+    // Continuing by hand starts the count over.
+    await r.continue(third!.id)
+    await r.idle()
+    expect(seen.turns).toHaveLength(6)
+  })
+
+  it('waits for the person when the month has no room for another reply that size, or when that is turned off', async () => {
+    const seen: { turns: Turn[] } = { turns: [] }
+    db.addReceipt({ model: 'sonnet', inputTokens: 850_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, messageId: 'before', agentId: 'a1', engine: 'claude', at: Date.now() })
+    const r = runner(working(120_000, seen))
+    await r.send('d1', 'investiga o bug')
+    await r.idle()
+    expect(seen.turns).toHaveLength(1) // 970k used: another 100k would pass the 1M of the month
+    expect(reply().run?.status).toBe('paused')
+
+    db.addReceipt({ model: 'sonnet', inputTokens: -970_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, messageId: 'reset', agentId: 'a1', engine: 'claude', at: Date.now() })
+    settings = { ...settings, autoContinue: false }
+    await r.send('d1', 'investiga de novo')
+    await r.idle()
+    expect(seen.turns).toHaveLength(2)
+    expect(reply().run?.status).toBe('paused')
+  })
+
+  it('does not go on by itself when nothing it tried came back well', async () => {
+    const seen: { refused?: string; turns: Turn[] } = { turns: [] }
+    const r = runner(spending(120_000, 0, seen)) // its only command is refused past the cap
+    await r.send('d1', 'investiga o bug')
+    await r.idle()
+    expect(seen.turns).toHaveLength(1)
+    expect(reply().run?.status).toBe('paused')
+  })
+
   it('counts a token read from the cache as a tenth', async () => {
     const seen: { refused?: string; turns: Turn[] } = { turns: [] }
     const r = runner(spending(500_000, 480_000, seen)) // 20k new + 480k cached: counts 68k

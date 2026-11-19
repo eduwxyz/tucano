@@ -439,7 +439,7 @@ describe('one reply at a time per agent and thread', () => {
 describe('Db', () => {
   it('marks runs left working as interrupted on startup', () => {
     db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'meio', at: 1, run: { status: 'working', steps: [{ id: 's', label: 'Pensando', status: 'running' }] } })
-    expect(db.interruptStaleRuns()).toBe(1)
+    expect(db.interruptStaleRuns()).toHaveLength(1)
     expect(db.message('m1')?.run).toMatchObject({ status: 'interrupted', steps: [{ status: 'error' }] })
   })
 

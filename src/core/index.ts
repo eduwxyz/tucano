@@ -128,7 +128,7 @@ if (!serverMode && isTheme(appTheme)) db.setSettings({ theme: appTheme })
 // A new install has nothing new to show: the news start with the next update.
 if (db.created && process.env['TUCANO_VERSION']) db.setSettings({ seenVersion: process.env['TUCANO_VERSION'] })
 const interrupted = db.interruptStaleRuns()
-if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
+if (interrupted.length) console.log(`[core] ${interrupted.length} run(s) marked as interrupted`)
 
 const user = userInfo().username
 const DEFAULTS: Omit<Settings, 'engines'> = {
@@ -1089,6 +1089,8 @@ const runner = new Runner({
   }
 })
 runner.setPaused(!!settings().paused)
+// What the app cut when it closed goes on by itself once the agents' engines are found (see resumeInterrupted).
+if (interrupted.length) void enginesReady.then(() => runner.resumeInterrupted(interrupted))
 // Installs from before the Tuca get him at the first start after the introduction.
 void enginesReady.then(() => {
   if (settings().onboarding?.done) ensureTuca()

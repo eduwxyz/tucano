@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -96,6 +96,7 @@ const cutOf = (status: RunStatus): string =>
 export const MAX_RESULT_BYTES = 40_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
+const RESUME_WINDOW_MS = 12 * 3_600_000 // a reply the app cut longer ago than this, when it reopens, is left for the person
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 // An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
@@ -356,7 +357,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -479,6 +480,7 @@ export class Runner {
   setPaused(paused: boolean): void {
     this.paused = paused
     if (!paused) this.pump() // resumed: any queued work that was blocked can go on
+    if (!paused) void this.resumePending() // and what the app cut when it closed
   }
 
   // The person is writing here. What will answer gets its Claude Code started now, so the reply
@@ -718,7 +720,9 @@ export class Runner {
   // transcript, and its steps go in the task. Cutting it two ways is one path: at its budget it
   // always has somewhere to go on from; stopped, interrupted or failed, only when a step came back.
   // A reply that never got a tool call back is not continued: the person tries again instead.
-  async continue(messageId: string): Promise<void> {
+  // `auto`: it goes on by itself, not because the person asked: at its cap while it was getting
+  // somewhere (goesOnAlone), or cut because the app closed (resumeInterrupted).
+  async continue(messageId: string, auto?: 'cap' | 'restart'): Promise<void> {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (!msg?.run || msg.author.kind !== 'agent' || !canContinue(msg.run)) return
@@ -730,14 +734,28 @@ export class Runner {
     // Read before the status changes: how it was cut is what the next reply is told.
     const cut = msg.run.status
     // Said before the new reply starts, so the cut one reads as answered rather than as an offer.
-    this.update(msg, { run: { ...msg.run, status: 'done' } })
+    // Going on by itself, it says so where the person sees it, under the reply that paused.
+    const went: Step[] = auto ? [{ id: randomUUID(), label: L('Continuou sozinho', 'Went on by itself'), status: 'done' }] : []
+    this.update(msg, { run: { ...msg.run, status: 'done', steps: [...(msg.run.steps ?? []), ...went] } })
+    // At its cap, each time it goes on by itself counts; a person's Continue starts the count over.
+    const autoContinued = auto === 'cap' ? (msg.run.autoContinued ?? 0) + 1 : auto === 'restart' ? msg.run.autoContinued : undefined
     const steps = (msg.run.steps ?? [])
       .filter((s) => s.status !== 'running' && !WORKLESS_LABELS.includes(s.label))
       .slice(-40)
       .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
     const task = [
       msg.run.task, // what it was asked: a trigger's event is only there
-      cut === 'paused'
+      auto === 'cap'
+        ? L(
+            `Você pausou a sua última resposta ao chegar no teto de gasto dela e, como estava avançando, segue sozinho agora (${autoContinued} de ${AUTO_CONTINUES} vezes seguidas; depois disso, espera ${me}). O que você escreveu está na sua última mensagem acima.`,
+            `You paused your last reply when it reached its spending cap and, since it was getting somewhere, you go on by yourself now (${autoContinued} of ${AUTO_CONTINUES} times in a row; after that, you wait for ${me}). What you wrote is in your last message above.`
+          )
+        : auto === 'restart'
+          ? L(
+              `A sua última resposta foi cortada porque o app fechou no meio dela, e ela segue sozinha agora que ele abriu de novo. O que você escreveu está na sua última mensagem acima.`,
+              `Your last reply was cut because the app closed in the middle of it, and it goes on by itself now that it's open again. What you wrote is in your last message above.`
+            )
+          : cut === 'paused'
         ? L(
             `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
             `You paused your last reply when it reached its spending cap, and ${me} asked you to go on. What you wrote is in your last message above.`
@@ -751,7 +769,42 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}) }, { urgent: true })
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}) }, { urgent: true })
+  }
+
+  // Whether a reply that paused at its cap goes on by itself: the person didn't turn that off, it hasn't
+  // gone on by itself too many times in a row already, it got something done (a step that came back
+  // well: going on from nothing would spend the same again for nothing), and the month has room for
+  // another reply that size.
+  private goesOnAlone(agent: Agent, run: Run, settings: Settings, budget: number): boolean {
+    if (settings.autoContinue === false || this.paused) return false
+    if ((run.autoContinued ?? 0) >= AUTO_CONTINUES) return false
+    if (!(run.steps ?? []).some((s) => s.status === 'done' && !WORKLESS_LABELS.includes(s.label))) return false
+    return this.deps.db.usedThisMonth(agent.id) + budget <= monthlyCeiling(agent.limit)
+  }
+
+  // Replies that were working when the app closed (interruptStaleRuns): they go on by themselves once
+  // the app is back, unless the person turned that off. While everything is paused they wait for the
+  // resume; one cut long ago is left for the person, who may no longer want it.
+  private toResume: string[] = []
+  resumeInterrupted(ids: string[]): void {
+    this.toResume.push(...ids)
+    void this.resumePending()
+  }
+
+  private async resumePending(): Promise<void> {
+    if (this.paused || this.toResume.length === 0) return
+    const settings = await this.deps.settings()
+    const ids = this.toResume.splice(0)
+    if (settings.autoContinue === false) return
+    const { db } = this.deps
+    for (const id of ids) {
+      const msg = db.message(id)
+      if (msg?.author.kind !== 'agent' || msg.run?.status !== 'interrupted' || Date.now() - msg.at > RESUME_WINDOW_MS) continue
+      // With something done, it goes on from there; with nothing, it just starts over.
+      if (canContinue(msg.run)) await this.continue(id, 'restart')
+      else this.retry(id)
+    }
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -1098,7 +1151,9 @@ export class Runner {
     const task = opts.task ?? opts.existing?.run?.task
     // The request it works on, kept on every save: what it ends with goes back to whoever asked.
     const handedId = opts.handed ?? opts.existing?.run?.handed
-    const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}) }
+    // How many times in a row the work went on by itself to get here: kept, so it stops going on at the cap.
+    const autoContinued = opts.autoContinued ?? opts.existing?.run?.autoContinued
+    const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}), ...(autoContinued ? { autoContinued } : {}) }
     const replyTo = opts.trigger ?? opts.replyTo ?? opts.existing?.run?.replyTo
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
@@ -2682,10 +2737,14 @@ ${note}`,
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     const st = msg.run?.status
+    // Paused at its cap while it was getting somewhere: it goes on by itself (a few times), instead of waiting.
+    const goesOn = st === 'paused' && !!msg.run && this.goesOnAlone(agent, msg.run, settings, budget)
     // Handed work that stopped short: whoever asked hears why, and takes it to the person.
-    const short = st === 'failed' || st === 'limit_reached' || st === 'paused' || st === 'stopped' ? this.handedIn(msg) : undefined
+    const short = !goesOn && (st === 'failed' || st === 'limit_reached' || st === 'paused' || st === 'stopped') ? this.handedIn(msg) : undefined
     if (short) this.settle(short, st === 'stopped' ? 'cancelled' : 'failed', msg)
     else if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id])
+
+    if (goesOn) void this.continue(msg.id, 'cap')
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
@@ -3377,6 +3436,7 @@ ${note}`,
         continue
       }
       if (last.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
+      if (this.toResume.includes(last.id)) continue // cut when the app closed: it goes on by itself (resumeInterrupted)
       if (now - (last.run.endedAt ?? last.at) < 60_000) continue // its own reply settles it; this is for the ones that never got to
       this.settle(d, last.run.status === 'stopped' ? 'cancelled' : 'failed', last)
     }

@@ -47,6 +47,7 @@ import {
   MAX_CHAIN_DEPTH,
   chainDepthCap,
   RUN_BUDGET_PCT,
+  AUTO_CONTINUES,
   routineCap,
   RUN_STALL_MINUTES,
   archiveAgent,
@@ -3422,7 +3423,7 @@ export function SettingsPage(): ReactNode {
                   onChange={(n) => updateSettings({ defaultLimit: safeLimit(n * 1_000_000) })}
                 />
               </Field>
-              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua. Num agente sem limite mensal, a conta é sobre 10 milhões de tokens.', 'When it hits it, the agent pauses and you decide whether it continues. For an agent with no monthly limit, it is taken over 10 million tokens.')}>
+              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa. Se estava avançando, segue sozinho (veja Continuar sozinho, abaixo); senão, você decide se continua. Num agente sem limite mensal, a conta é sobre 10 milhões de tokens.', 'When it hits it, the agent pauses. If it was getting somewhere it goes on by itself (see Keep going on its own, below); if not, you decide whether it continues. For an agent with no monthly limit, it is taken over 10 million tokens.')}>
                 <NumberInput
                   min={1}
                   max={100}
@@ -3457,6 +3458,19 @@ export function SettingsPage(): ReactNode {
                   placeholder={L('Escolha', 'Pick')}
                 />
               </Field>
+            </div>
+            <div className="key-row">
+              <Icon name="play" />
+              <div className="grow">
+                <strong>{L('Continuar sozinho', 'Keep going on its own')}</strong>
+                <p className="muted small">
+                  {L(
+                    `Quando uma resposta chega no limite e estava avançando, o agente segue sozinho até ${AUTO_CONTINUES} vezes seguidas antes de esperar você. Uma resposta cortada porque o app fechou continua quando ele abre de novo. O limite do mês continua valendo.`,
+                    `When a reply reaches its limit while it was getting somewhere, the agent goes on by itself up to ${AUTO_CONTINUES} times in a row before waiting for you. A reply cut because the app closed goes on when it opens again. The monthly limit still holds.`
+                  )}
+                </p>
+              </div>
+              <Toggle on={settings.autoContinue !== false} onChange={(v) => updateSettings({ autoContinue: v })} />
             </div>
           </Card>
         )}

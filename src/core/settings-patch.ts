@@ -27,6 +27,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   language: { kind: ['pt', 'en'], max: 10 },
   openAtLogin: { kind: 'boolean', max: 10, nullable: true },
   runBudgetPct: { kind: 'number', max: 30, nullable: true },
+  autoContinue: { kind: 'boolean', max: 10, nullable: true },
   runStallMinutes: { kind: 'number', max: 30, nullable: true },
   chainDepth: { kind: 'number', max: 30, nullable: true },
   actionRules: { kind: 'object', max: 2_000, nullable: true },

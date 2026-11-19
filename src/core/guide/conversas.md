@@ -23,7 +23,7 @@ Nos dois jeitos dá pra abrir uma thread numa mensagem com **Responder na thread
 ## Durante a resposta
 - Os passos aparecem enquanto o agente trabalha. **Parar** interrompe.
 - **Tentar de novo** numa resposta que falhou ou foi interrompida.
-- Chegou no teto da resposta: ele pausa e pergunta. **Continuar** segue de onde parou.
+- Chegou no teto da resposta: ele pausa e, se estava avançando, segue sozinho (até 2 vezes). Depois pergunta: **Continuar** segue de onde parou.
 - Uma pergunta do agente: sua próxima mensagem ali é a resposta.
 - **Ver recibo**: tokens, cache, tempo e o equivalente na API.
 
@@ -35,5 +35,5 @@ O botão **Resumo** no topo mostra o que a conversa já cobriu. As últimas 30 m
 - Ditado: o microfone do campo, ou ⌥ Espaço no Mac e Ctrl+Espaço nos outros. O áudio vira texto no próprio computador, sem internet. Ative em **Configurações › Geral** › **Ditado**.
 
 ## Quando dá errado
-- "Interrompido: o app fechou no meio da resposta": **Tentar de novo**.
+- "Interrompido: o app fechou no meio da resposta": quando o app abre de novo, ela continua sozinha (se cortada há menos de 12 horas e **Continuar sozinho** estiver ligado). Senão, **Tentar de novo**.
 - Ninguém responde e aparece a nota de pausa: os agentes estão pausados (botão no topo da barra lateral).

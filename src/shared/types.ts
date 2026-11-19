@@ -197,6 +197,7 @@ export interface Run {
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
@@ -530,6 +531,7 @@ export interface Settings {
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
@@ -675,6 +677,7 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const AUTO_CONTINUES = 2 // times in a row a reply that paused while getting somewhere goes on by itself before it waits for you
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops

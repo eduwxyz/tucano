@@ -1304,18 +1304,19 @@ export class Db {
     return r ? this.toApproval(r) : undefined
   }
 
-  // Runs that were working when the app closed can't continue: their CLI process is gone.
-  interruptStaleRuns(): number {
-    let n = 0
+  // Runs that were working when the app closed can't continue: their CLI process is gone. Returns
+  // their messages, so the work can go on in new replies (Runner.resumeInterrupted).
+  interruptStaleRuns(): string[] {
+    const ids: string[] = []
     for (const m of this.messagesWithRun(['working'])) {
       if (m.run?.status !== 'working') continue
-      n++
+      ids.push(m.id)
       this.saveMessage({
         ...m,
         run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
-    return n
+    return ids
   }
 
   // ---------- receipts ----------
