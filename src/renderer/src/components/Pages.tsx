@@ -46,6 +46,8 @@ import {
   MAX_AGENT_ROUTINES,
   MAX_CHAIN_DEPTH,
   chainDepthCap,
+  MAX_PARALLEL_SESSIONS,
+  maxParallelSessionsCap,
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
@@ -63,6 +65,7 @@ import {
   type EngineId,
   type GrantLevel,
   type MemoryMode,
+  type SendMode,
   type Skill,
   type ToolClass,
   isTeam,
@@ -110,7 +113,7 @@ import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
-import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
+import { ACCESS_REQUEST, type Approval, type Settings } from '../../../shared/types'
 
 // Every page's head, the same on all of them: the title big, inside the content and at the same
 // place; the actions on its line, at the right; one line under it. Tabs, when a page has them,
@@ -1620,9 +1623,11 @@ function ActionRulesList({ rules, fallback, readOnly, onChange }: { rules: Actio
   )
 }
 
-export function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
+// `section`: the settings rail's own name for this card, when it has one, so the rail can link to
+// it and a test can find it (`id` and `data-section` are the same value).
+export function Card({ title, lead, action, section, children }: { title: string; lead?: string; action?: ReactNode; section?: string; children: ReactNode }): ReactNode {
   return (
-    <div className="card">
+    <div className="card" id={section} data-section={section}>
       <div className="card__head">
         <div className="row row--between">
           <h2>{title}</h2>
@@ -3135,6 +3140,70 @@ function VoiceCard(): ReactNode {
   )
 }
 
+// The two ways a prompt sent while a reply is running can use Enter (see `send` in
+// src/core/runs.ts). Steering and interrupting stay one key away, but are not Enter defaults.
+export const REPLY_MODES = ['parallel', 'queue'] as const satisfies readonly SendMode[]
+
+// What the card saves for the numbers: whatever was typed, the core gets whole numbers inside the
+// caps, so a hand-edited settings file can't lift either one.
+export const chainDepthPatch = (n: number): Pick<Settings, 'chainDepth'> => ({ chainDepth: chainDepthCap(n) })
+export const maxParallelSessionsPatch = (n: number): Pick<Settings, 'maxParallelSessions'> => ({ maxParallelSessions: maxParallelSessionsCap(n) })
+
+// The agent replies card the 0.2.36 settings had, back on the Agents pane: what Enter does while a
+// reply is running, the most replies that work in one channel at once, and how many replies the
+// agents may pass between themselves.
+export function AgentRepliesCard({ settings, update }: { settings: Settings; update: (patch: Partial<Omit<Settings, 'engines'>>) => void }): ReactNode {
+  return (
+    <Card section="agents-replies" title={L('Respostas dos agentes', 'Agent replies')}>
+      <div className="grid2">
+        <Field
+          label={L('Um novo prompt com uma resposta em curso', 'While a reply is running')}
+          hint={L(
+            'O Enter segue esta escolha. Ctrl+Enter põe na fila, Alt+Enter entrega e Shift+Alt+Enter interrompe: cada um só uma vez. Shift+Enter quebra a linha.',
+            'Enter follows this choice. Ctrl+Enter queues, Alt+Enter steers, Shift+Alt+Enter interrupts — each just once. Shift+Enter adds a line.'
+          )}
+        >
+          <Select
+            value={settings.sendMode ?? 'parallel'}
+            onChange={(v) => { if (v) update({ sendMode: v as SendMode }) }}
+            options={[
+              { value: 'parallel', label: L('Sessões paralelas em execução', 'Parallel Running Sessions') },
+              { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') }
+            ]}
+            placeholder={L('Escolha', 'Pick')}
+          />
+        </Field>
+        <Field
+          label={L('Sessões paralelas por canal', 'Parallel sessions per channel')}
+          hint={L('As demais esperam na fila.', 'Replies past this limit wait in the queue.')}
+        >
+          <NumberInput
+            aria-label={L('Sessões paralelas por canal', 'Parallel sessions per channel')}
+            min={1}
+            max={MAX_PARALLEL_SESSIONS}
+            value={maxParallelSessionsCap(settings.maxParallelSessions)}
+            onChange={(n) => update(maxParallelSessionsPatch(n))}
+          />
+        </Field>
+        <Field
+          label={L('Respostas seguidas entre agentes', 'Consecutive agent replies')}
+          hint={L(
+            `Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a ${MAX_CHAIN_DEPTH}. Limita essa sequência; não muda quantas respostas rodam ao mesmo tempo.`,
+            `How many replies the agents may give in a row, passing the turn between them, before one stops and waits for you. From 1 to ${MAX_CHAIN_DEPTH}. It caps that chain; it does not change how many replies run at once.`
+          )}
+        >
+          <NumberInput
+            min={1}
+            max={MAX_CHAIN_DEPTH}
+            value={chainDepthCap(settings.chainDepth)}
+            onChange={(n) => update(chainDepthPatch(n))}
+          />
+        </Field>
+      </div>
+    </Card>
+  )
+}
+
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
@@ -3327,6 +3396,9 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
+        {/* Back from 0.2.36: the send mode and the chain, on the Agents pane, as one card. */}
+        {pane('agentes') && <AgentRepliesCard settings={settings} update={updateSettings} />}
+
         {pane('agentes') && (
           <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
@@ -3435,14 +3507,6 @@ export function SettingsPage(): ReactNode {
                   min={5}
                   value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
                   onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
-                />
-              </Field>
-              <Field label={L('Respostas seguidas entre agentes', 'Agent replies in a row')} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', 'How many replies agents can give in a row, passing the turn between them, before they stop and wait for you. From 1 to 10.')}>
-                <NumberInput
-                  min={1}
-                  max={MAX_CHAIN_DEPTH}
-                  value={chainDepthCap(settings.chainDepth)}
-                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
                 />
               </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>

@@ -157,6 +157,9 @@ export interface Step {
   output?: string // what came back, in a few words ("120 rows")
   status: StepStatus
   ms?: number
+  // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran, between
+  // two calls; `followup` is the instruction a finished reply goes on with (runs.ts, followUp).
+  kind?: 'steer' | 'followup'
 }
 
 export interface Receipt {
@@ -448,6 +451,9 @@ export interface Message {
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
   title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
+  // A prompt of mine waiting its turn in a conversation that was already answering: 'queue' while it
+  // waits, unset once its reply goes. Kept in the database, so it outlives a restart (runs.ts, resumeQueued).
+  sendMode?: SendMode
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
@@ -516,6 +522,8 @@ export interface Settings {
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
+  sendMode?: SendMode // what Enter does while a reply is running: beside it, two replies at once (the default), after it, into it, or stopping it
+  maxParallelSessions?: number // replies that may run at once in one channel when sendMode is parallel; default DEFAULT_MAX_PARALLEL_SESSIONS
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
@@ -688,6 +696,10 @@ export const CHAIN_DEPTH = 3 // agent replies chained from one human message bef
 export const MAX_CHAIN_DEPTH = 10
 // Agents mentioning each other can't loop and burn tokens with nobody watching: a whole number from 1 to MAX_CHAIN_DEPTH, whatever reached the core.
 export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
+export const DEFAULT_MAX_PARALLEL_SESSIONS = 2 // one reply beside the one already running; further prompts wait in the queue
+export const MAX_PARALLEL_SESSIONS = 8
+// A whole number from 1 to MAX_PARALLEL_SESSIONS, whatever reached the core.
+export const maxParallelSessionsCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_PARALLEL_SESSIONS, Math.max(1, Math.round(n as number))) : DEFAULT_MAX_PARALLEL_SESSIONS)
 
 // What a reply counts against limits: a token read from the cache costs about a
 // tenth of a new one, so it counts a tenth. The input counts the cache reads in; more cache reads than
@@ -1268,6 +1280,11 @@ export interface Report {
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
 }
+
+// How a new prompt arrives in a conversation that is already answering (src/core/runs.ts): beside
+// what's running, after it, handed to it between tool calls, or in place of it. No mode at all (the
+// phone, an approval's outcome, a routine) is the way replies have always gone: one at a time there.
+export type SendMode = 'parallel' | 'queue' | 'steer' | 'interrupt'
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'

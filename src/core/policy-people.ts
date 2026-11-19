@@ -14,7 +14,7 @@ export const ownerError = (): string => L('Só o dono do Tucano pode fazer isso.
 
 // What a person may change of the settings without being an admin: how the app looks to them.
 // Each person's own (kept on them, see People.settingsFor); the owner's are the settings themselves.
-export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']
+export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'maxParallelSessions', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']
 export const isPersonalSetting = (k: string): boolean => (PERSONAL_SETTINGS as readonly string[]).includes(k)
 
 export type Action =
@@ -91,6 +91,7 @@ export const NEEDS: Record<Method, Need> = {
   threadMessages: 'anyone',
   stopRun: 'anyone',
   retryRun: 'anyone',
+  followUpRun: 'anyone',
   continueRun: 'anyone',
   createChannel: 'anyone',
   renameChannel: 'anyone',
