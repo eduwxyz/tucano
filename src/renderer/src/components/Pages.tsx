@@ -1861,13 +1861,24 @@ export function AskedRow({
                               className={`history-question__option ${taken.includes(j) ? 'is-answered' : ''} ${q.recommended?.[i] === j ? 'is-recommended' : ''}`}
                             >
                               <span className="history-question__number">{j + 1}</span>
-                              <span className="history-question__label">{option.label}</span>
-                              {option.description && <span className="history-question__detail">{option.description}</span>}
-                              {q.recommended?.[i] === j && (
-                                <span className="history-question__star" role="img" title={L('Recomendado', 'Recommended')} aria-label={L('Recomendado', 'Recommended')}>
-                                  <Icon name="star" size={11} />
-                                </span>
-                              )}
+                              {/* The answer is running text beside the number, not a row of items:
+                                  a long label wraps inside the card, and the agent's tag follows the
+                                  last line of it instead of being pinned to the right of one line. */}
+                              <span className="history-question__body">
+                                <span className="history-question__label">{option.label}</span>
+                                {option.description && (
+                                  <>
+                                    {' '}
+                                    <span className="history-question__detail">{option.description}</span>
+                                  </>
+                                )}
+                                {q.recommended?.[i] === j && (
+                                  <>
+                                    {' '}
+                                    <span className="history-question__pill">{L('Recomendado', 'Recommended')}</span>
+                                  </>
+                                )}
+                              </span>
                             </span>
                           ))}
                           {answer?.other && (

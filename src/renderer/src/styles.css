@@ -2983,6 +2983,13 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
+  /* The record's own wrapping: its ancestor, the approvals history row, sets white-space: nowrap so a
+     long tool name stays on one line, and that inherited value is why an answer never broke. Here the
+     answer is text again — it wraps at spaces, the longest word breaks, and whatever still cannot fit
+     is clipped at the padding edge instead of running over the card's frame. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: hidden;
 }
 .history-question__title {
   margin: 0 0 7px;
@@ -2994,20 +3001,34 @@ h3 {
 .history-question__options {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
-/* One option, as the card draws it: the rounded square with the number the field takes, the label, the
-   note under it, and the tag when the agent pointed at it. */
+/* One option, as the card draws it: the number's square held at the top left, and the answer as
+   running text in the column beside it, so a long label wraps onto as many lines as it needs and the
+   agent's tag lands at the end of the last one. */
 .history-question__option {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: 7px;
+  min-width: 0;
   max-width: 100%;
   padding: 3px 9px 3px 3px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg);
   color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* The answer's text: its own box so the wrap happens here, inside the card, and never outside it. */
+.history-question__body {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .history-question__label,
 .history-question__detail {
@@ -3034,12 +3055,20 @@ h3 {
 .history-question__option.is-recommended {
   border-color: var(--border-strong);
 }
-/* The agent's pick in the record: one filled star, no pill and no word. The working card keeps its
-   accent pill; here a single grey mark says which option the agent pointed at. */
-.history-question__star {
-  display: inline-flex;
-  flex: none;
+/* The tag of the option the agent pointed at: the record's own grey pill, never the working card's
+   accent one, and inline so it rides the end of the answer's last line rather than a column of its
+   own at the row's right edge. */
+.history-question__pill {
+  display: inline-block;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
   color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: 1px;
 }
 /* The option the person took: the negative of every other row — filled with the text colour and
    carrying the background's own text on it, so the answer is the one thing that reads as solid. */
@@ -3054,7 +3083,7 @@ h3 {
   color: var(--bg);
 }
 .history-question__option.is-answered .history-question__detail,
-.history-question__option.is-answered .history-question__star {
+.history-question__option.is-answered .history-question__pill {
   border-color: color-mix(in srgb, var(--bg) 45%, transparent);
   color: var(--bg);
   opacity: 0.8;
@@ -3064,6 +3093,7 @@ h3 {
   font-style: italic;
 }
 .history-question__option--none {
+  display: block;
   border-style: dashed;
   color: var(--text-3);
 }

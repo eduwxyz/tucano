@@ -101,7 +101,7 @@ describe('a row of the asks history', () => {
     expect(html).toContain('Ver na conversa')
   })
 
-  it('draws opened questions as rounded widgets, with a star on the option the agent pointed at', () => {
+  it('draws opened questions as rounded widgets, with the record\'s own grey pill on the option the agent pointed at', () => {
     const q = asked({
       decisions: [{ question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] }],
       recommended: [0]
@@ -110,13 +110,39 @@ describe('a row of the asks history', () => {
     expect(html).toContain('history-question')
     expect(html).toContain('history-question__number') 
     expect(html).toContain('>1</span>')
-    // The pick is a star, not the word: the mark says it, and the word survives only as its name.
-    expect(html).toContain('history-question__star')
-    expect(html).toContain('aria-label="Recomendado"')
-    expect(html).not.toContain('>Recomendado<')
-    // No pill of any kind around it, and never the working card's accent pill.
-    expect(html).not.toContain('history-question__pill')
+    // The pick is the word in the record's grey pill again, and it belongs to the answer's own text:
+    // the label, the note and the pill share one box so a long answer wraps with the colour on it.
+    expect(html).toContain('history-question__pill')
+    expect(html).toContain('>Recomendado<')
+    const body = html.slice(html.indexOf('history-question__body'), html.indexOf('</span></span>', html.indexOf('history-question__body')))
+    expect(body).toContain('Sim, publico')
+    expect(body).toContain('Recomendado')
+    // Never the star it replaced, and never the working card's accent pill.
+    expect(html).not.toContain('history-question__star')
     expect(html).not.toContain('ask-option__pill')
+  })
+
+  it('keeps the whole answer of a long option inside one wrapping box', () => {
+    const q = asked({
+      decisions: [
+        {
+          question: 'Publico o post hoje?',
+          options: [{ label: 'Sim, publico', description: 'com a foto que a Lia revisou ontem à noite' }]
+        }
+      ],
+      recommended: [0]
+    } as never)
+    const html = row(true, q)
+    // Label, note and pill are children of the answer's box — not siblings of the number, which is
+    // what pinned the pill to the right of a one-line row instead of the end of a wrapped answer.
+    const start = html.indexOf('history-question__body')
+    const open = html.lastIndexOf('<span', start)
+    const body = html.slice(open, html.indexOf('</span></span>', start) + 14)
+    expect(body).toContain('history-question__label')
+    expect(body).toContain('history-question__detail')
+    expect(body).toContain('history-question__pill')
+    // One number square, before the box, out of it.
+    expect(html.slice(html.indexOf('history-question__number'), start)).not.toContain('history-question__pill')
   })
 
   it('keeps the questions the agent asked one after another on one row of widgets', () => {
