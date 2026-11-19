@@ -3,6 +3,7 @@
 // them, or it goes in the next time the app quits. The release carries each system's
 // feed: latest-mac.yml next to the .zip (scripts/release.sh), latest-linux*.yml and
 // latest.yml, for Windows, from the workflows that build those installers.
+import { existsSync } from 'node:fs'
 import { app } from 'electron'
 import electronUpdater from 'electron-updater'
 import { offline } from '../shared/errors'
@@ -15,6 +16,7 @@ const EVERY_MS = 4 * 3_600_000
 export class Updates {
   private state: UpdateState
   private timer: NodeJS.Timeout | null = null
+  private downloaded: string | null = null
   // Made when first used: making it reads the app's version, and an unpacked build's may not be one
   // it accepts, which would stop the app from opening. With updates off it's never used.
   private get updater() {
@@ -34,7 +36,13 @@ export class Updates {
     this.updater.on('update-not-available', () => this.set({ status: 'latest', checkedAt: Date.now() }))
     this.updater.on('update-available', (info) => this.set({ status: 'downloading', next: info.version, percent: 0, checkedAt: Date.now() }))
     this.updater.on('download-progress', (p) => this.set({ status: 'downloading', percent: Math.round(p.percent) }))
-    this.updater.on('update-downloaded', (info) => this.set({ status: 'ready', next: info.version, percent: undefined }))
+    this.updater.on('update-downloaded', (info) => {
+      this.downloaded = info.downloadedFile
+      this.set({ status: 'ready', next: info.version, percent: undefined })
+    })
+    app.on('will-quit', () => {
+      if (this.downloadGone()) this.updater.autoInstallOnAppQuit = false
+    })
     // No internet just waits for the next check; anything else may need the new version by hand.
     this.updater.on('error', (e) => {
       console.error('[updates]', e)
@@ -65,9 +73,20 @@ export class Updates {
 
   install(): void {
     if (this.state.status !== 'ready') return
+    if (this.downloadGone()) {
+      this.set({ status: 'idle', next: undefined })
+      this.check()
+      return
+    }
     // On Windows the installer runs without its window, then opens the app again.
     if (process.platform === 'win32') this.updater.quitAndInstall(true, true)
     else this.updater.quitAndInstall()
+  }
+
+  // electron-updater deletes the AppImage in use before it moves the download into place, so
+  // installing a download that's no longer there leaves the person with no app at all.
+  private downloadGone(): boolean {
+    return Boolean(process.env['APPIMAGE'] && this.downloaded && !existsSync(this.downloaded))
   }
 
   private set(patch: Partial<UpdateState>): void {

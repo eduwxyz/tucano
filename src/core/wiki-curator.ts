@@ -5,7 +5,7 @@
 // goes in or waits for you, as the wiki's settings say. The conversation shows what was kept,
 // with Undo. A message can also be kept on purpose ("Keep in the wiki"), and "guarda isso"
 // said in the conversation makes the curator keep it.
-import { L } from '../shared/lang'
+import { L, locale } from '../shared/lang'
 import { asSaid, saidAt, type Agent, type Message, type Person, type Settings, type WikiChange, type WikiOp } from '../shared/types'
 import { cleanTitle, ftsQuery } from './wiki'
 import type { Wiki } from './wiki'
@@ -25,6 +25,8 @@ export interface CuratorDeps {
   // The pages (lowercase titles) a curation from this conversation may not read: the ones held for
   // someone other than whose DM it is (see Wiki.inherit). What it writes is read by others.
   hidden?: (conversationId: string) => Set<string>
+  // Before it writes: the wiki brought up to date with its git repository, if it has one.
+  beforeWrite?: () => Promise<void>
 }
 
 export const curatorSystem = (): string =>
@@ -87,6 +89,13 @@ export function parseCuration(text: string): { worth: boolean; reason: string; t
   return { worth: worth && ops.length > 0, reason: str(v['motivo'] ?? v['reason']), title: cleanTitle(str(v['titulo_fonte'] ?? v['source_title'])) || L('Trecho de conversa', 'Conversation excerpt'), ops }
 }
 
+// A swap's new passage. Models often write it under "text" (as for the other ops) or in Portuguese;
+// read as an empty "new", the swap would show nothing in its place and delete the passage on approval.
+const swapIn = (o: Record<string, unknown>): string => {
+  for (const k of ['new', 'novo', 'text', 'texto']) if (typeof o[k] === 'string' && (o[k] as string).trim()) return o[k] as string
+  return ''
+}
+
 // The changes a model wrote, in the JSON both the curator and the review use.
 export function parseOps(list: unknown): WikiOp[] {
   const str = (x: unknown): string => (typeof x === 'string' ? x.trim() : '')
@@ -105,7 +114,7 @@ export function parseOps(list: unknown): WikiOp[] {
       page,
       ...(str(o['tipo'] ?? o['kind']) ? { kind: str(o['tipo'] ?? o['kind']) } : {}),
       ...(str(o['secao'] ?? o['section']) ? { section: str(o['secao'] ?? o['section']) } : {}),
-      ...(op !== 'replace' ? { text: str(o['texto'] ?? o['text']) } : { old: String(o['old']), new: String(o['new'] ?? '') })
+      ...(op !== 'replace' ? { text: str(o['texto'] ?? o['text']) } : { old: String(o['old']), new: swapIn(o) })
     })
   }
   return ops
@@ -155,7 +164,7 @@ export class WikiCurator {
     return this.deps.db.agents().find((a) => a.id === agentId)?.name ?? L('Agente', 'Agent')
   }
   private excerpt(messages: Message[]): string {
-    return messages.map((m) => `**${this.name(m)}** (${new Date(saidAt(m)).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
+    return messages.map((m) => `**${this.name(m)}** (${new Date(saidAt(m)).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}): ${m.text.trim()}`).join('\n\n')
   }
 
   private async doRead(conversationId: string): Promise<void> {
@@ -248,6 +257,9 @@ export class WikiCurator {
 
   private async curate(p: { messages: Message[]; kind: 'conversation' | 'message' | 'document'; conversationId: string; force: boolean; text?: string; plain?: string; source?: { id: string; file: string; title: string } }): Promise<WikiChange[]> {
     const wiki = this.deps.wiki
+    // A wiki that takes no writes (a read-only repository): nothing is read to be written.
+    const ro = wiki.readOnly()
+    if (ro) throw new Error(ro)
     const shown = wiki.view(this.deps.hidden?.(p.conversationId) ?? new Set())
     const text = p.text ?? this.excerpt(p.messages)
     const plain = p.plain ?? p.messages.map((m) => m.text).join(' ')
@@ -287,6 +299,10 @@ export class WikiCurator {
       return []
     }
     if (!out || (!out.worth && !p.force) || !out.ops.length) return []
+    // What the repository has now, before writing on top of it (a failed pull doesn't stop it: the
+    // sync deals with it later, conflicts included).
+    await this.deps.beforeWrite?.().catch(() => {})
+    if (wiki.readOnly()) throw new Error(wiki.readOnly())
     const source = p.source ?? wiki.addSource({ title: out.title, text, kind: p.kind === 'document' ? 'file' : p.kind, origin: { conversationId: p.conversationId, messageIds: p.messages.map((m) => m.id) }, by: 'auto' })
     const cite = ` ([[${source.file}|${L('fonte', 'source')}]])`
     // A swap whose passage isn't on that page: on the one page that has it, it goes there; on none, it

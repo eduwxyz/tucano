@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
 import { overlongSkillNote } from '../shared/skills'
+import { bossOf, possibleBosses } from '../shared/org'
 import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
 import { cleanLook } from './agent-look'
 import type { Db } from './db'
@@ -32,6 +33,10 @@ interface TeamFile {
     web: boolean
     computer: boolean
     grants: Record<string, GrantLevel> // by connector name
+    reportsTo?: string // the handle of the agent it answers to (src/shared/org.ts)
+    sectorName?: string // a sector head's name for its sector
+    sectorDoes?: string // and what the sector solves
+    entry?: boolean // an entry point, over the sectors
   }[]
   skills: { name: string; description: string; body: string; agents: string[] }[] // agents by handle
   channels: { name: string; topic?: string; members: string[] }[]
@@ -66,7 +71,11 @@ export function exportTeam(db: Db, by = db.ownerId()): string {
       limit: a.limit,
       web: a.web !== false,
       computer: a.computer,
-      grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : [])))
+      grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : []))),
+      ...(bossOf(agents, a) ? { reportsTo: bossOf(agents, a)!.handle } : {}),
+      ...(a.sectorName ? { sectorName: a.sectorName } : {}),
+      ...(a.sectorDoes ? { sectorDoes: a.sectorDoes } : {}),
+      ...(a.entry ? { entry: true } : {})
     })),
     skills: db.skills().filter((k) => k.state === 'active').map((k) => ({ name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((id) => handle(id) ?? []) })),
     channels: channels.map((c) => ({ name: c.name, topic: c.topic, members: c.members.flatMap((id) => handle(id) ?? []) })),
@@ -134,6 +143,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number, by = db.o
   const added = { agents: 0, skills: 0, channels: 0, routines: 0, skipped: [] as string[] }
   const longSkills: string[] = []
 
+  const cameIn: string[] = []
   for (const a of data.agents ?? []) {
     if (db.agents().some((x) => x.handle === a.handle)) continue
     const agent: Agent = {
@@ -154,12 +164,22 @@ export function importTeam(db: Db, text: string, defaultLimit: number, by = db.o
       memory: 'auto',
       computer: false, // turned on by hand: it downloads a system
       web: a.web,
-      archived: false
+      archived: false,
+      ...(typeof a.sectorName === 'string' && a.sectorName.trim() ? { sectorName: a.sectorName.trim().slice(0, 40) } : {}),
+      ...(typeof a.sectorDoes === 'string' && a.sectorDoes.trim() ? { sectorDoes: a.sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) } : {}),
+      ...(a.entry === true ? { entry: true } : {})
     }
     db.saveAgent(cleanLook(agent))
     added.agents++
+    cameIn.push(a.handle)
   }
   const byHandle = (h: string): string | undefined => db.agents().find((x) => x.handle === h)?.id
+  // Who answers to whom, once everyone is in: only for the agents that came in now, and never into a loop.
+  for (const a of data.agents ?? []) {
+    const id = cameIn.includes(a.handle) ? byHandle(a.handle) : undefined
+    const boss = a.reportsTo ? byHandle(a.reportsTo) : undefined
+    if (id && boss && possibleBosses(db.agents(), id).some((x) => x.id === boss)) db.saveAgent({ ...db.agent(id)!, reportsTo: boss })
+  }
 
   for (const k of data.skills ?? []) {
     if (db.skills().some((x) => x.state === 'active' && x.name === k.name)) continue

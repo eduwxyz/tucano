@@ -63,6 +63,23 @@ export class Grants {
   }
 }
 
+// What a page gets of the core's notification: what to show, where a click goes, and how it sounds.
+// Who it reaches is Streams.deliver's (its `to`), never the page's.
+export function notifyNote(msg: Record<string, unknown>): { notify: Record<string, unknown> } {
+  const kind = msg.kind === 'approval' || msg.kind === 'question' || msg.kind === 'done' ? msg.kind : undefined
+  return {
+    notify: {
+      title: String(msg.title ?? ''),
+      body: String(msg.body ?? ''),
+      conversationId: msg.conversationId,
+      ...(msg.threadId ? { threadId: msg.threadId } : {}),
+      page: msg.page,
+      ...(kind ? { kind } : {}),
+      ...(typeof msg.sound === 'boolean' ? { sound: msg.sound } : {})
+    }
+  }
+}
+
 // Who a request is: the owner (by the server's token) or a person (by their key).
 export type Who = { owner: true; person?: undefined; role: 'owner' } | { owner?: undefined; person: string; role: Person['role'] }
 
@@ -151,11 +168,11 @@ export function personNotice(
   return true
 }
 
-const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+export const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
 // The plain page every server-made page shares (the OAuth callback's look).
 export const PAGE_STYLE =
-  'body{font:15px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f3ee;color:#1d1a16}@media(prefers-color-scheme:dark){body{background:#1a1917;color:#f1ece4}input{background:#262421;color:inherit}}main{max-width:460px;padding:24px}p{opacity:.8;line-height:1.5}form{display:grid;gap:10px;margin-top:16px}input{font:inherit;padding:10px 12px;border:1px solid #8884;border-radius:8px}button{font:inherit;padding:10px 12px;border:0;border-radius:8px;background:#1d1a16;color:#f6f3ee;cursor:pointer}.err{color:#b3261e;opacity:1}'
+  'body{font:15px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f3ee;color:#1d1a16}@media(prefers-color-scheme:dark){body{background:#1a1917;color:#f1ece4}input{background:#262421;color:inherit}}main{max-width:460px;padding:24px}p{opacity:.8;line-height:1.5}form{display:grid;gap:10px;margin-top:16px}input{font:inherit;padding:10px 12px;border:1px solid #8884;border-radius:8px}button{font:inherit;padding:10px 12px;border:0;border-radius:8px;background:#1d1a16;color:#f6f3ee;cursor:pointer}.err{color:#b3261e;opacity:1}@media(prefers-color-scheme:dark){button{background:#f1ece4;color:#1a1917}}'
 export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"
 
 // "Você foi convidado pro Tucano de <name>": a name, and in. The code goes back in a hidden field;

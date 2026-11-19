@@ -1,8 +1,10 @@
 // One-time codes that sign a device in (a phone, a browser, the desktop app) as a person of this
 // Tucano. A code is made on a page already signed in (Settings › Pessoas › Conectar um celular) for
 // whoever is asking, or by `server.js pair` on the server for the owner, and is good once, for a few
-// minutes. Spent at POST /pair (or the browser's /?code=), it becomes a key of that person's own
-// (the core makes it, like an invite's): one per device, so one can go without the others.
+// minutes. Spent at POST /pair (the phone's JSON, or the form the browser's /?code= page posts), it
+// becomes a key of that person's own (the core makes it, like an invite's): one per device, so one
+// can go without the others. Opening /?code= only looks at it (peek): link previews, prefetches and
+// scanners open links too, and must not spend one.
 //
 // `server.js pair` runs as another process than the server, so the codes live in a file of the data
 // folder (only this user reads it), read again whenever it changed. Only each code's hash is kept.
@@ -66,6 +68,15 @@ export class PairCodes {
     this.codes.push({ hash: hashOf(code), expires: expiresAt, person })
     this.save()
     return { code, expiresAt }
+  }
+
+  // Whose the code is, without spending it: undefined when it's wrong, used or late.
+  peek(code: unknown): { person: string | null } | undefined {
+    if (typeof code !== 'string' || !CODE_SHAPE.test(code)) return undefined
+    this.load()
+    const h = hashOf(code)
+    const found = this.codes.find((c) => c.hash === h && c.expires > this.now())
+    return found ? { person: found.person ?? null } : undefined
   }
 
   // The code, spent (once, even when it's late): whose it was, or undefined when it's wrong, used or late.

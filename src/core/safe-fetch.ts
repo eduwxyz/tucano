@@ -8,6 +8,7 @@ import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest, type RequestOptions } from 'node:https'
 import { isIP } from 'node:net'
 import { L } from '../shared/lang'
+import { InsideNetworkError } from '../shared/errors'
 
 export const MAX_REDIRECTS = 5
 const MAX_BODY = 21 * 1024 * 1024 // a little past the wiki's 20 MB, so it can say the page is too big
@@ -82,7 +83,7 @@ export function blockedAddress(ip: string): boolean {
 }
 
 const insideError = (): Error =>
-  new Error(L('Esse link aponta pra rede interna do servidor; não dá pra ler daqui.', "That link points into the server's internal network; it can't be read from here."))
+  new InsideNetworkError(L('Esse link aponta pra rede interna do servidor; não dá pra ler daqui.', "That link points into the server's internal network; it can't be read from here."))
 
 // A fetch (the parts the wiki uses) that refuses the inside. `resolve` and `blocked` are for tests.
 export function safeFetch(opts: { resolve?: Resolve; blocked?: (ip: string) => boolean } = {}): (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response> {
@@ -119,6 +120,9 @@ function once(at: URL, addr: { address: string; family: number }, init: { header
       ...(init.headers ? { headers: init.headers } : {}),
       ...(init.signal ? { signal: init.signal } : {}),
       ...(isIP(host) ? {} : { servername: host }),
+      // Straight to the checked address, never through a proxy (src/core/network.ts): a proxy would look the
+      // name up again on its own, and could reach the inside this guard keeps out.
+      agent: false,
       lookup: ((_h: string, o: { all?: boolean }, cb: (...a: unknown[]) => void) => (o?.all ? cb(null, [addr]) : cb(null, addr.address, addr.family))) as unknown as RequestOptions['lookup']
     }
     const req = request(options, ok)

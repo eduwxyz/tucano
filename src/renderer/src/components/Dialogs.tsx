@@ -7,6 +7,8 @@ import { agentById, amAdmin, archiveAgent, canEditChannel, deleteAgent, isTeam, 
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
+import { LoginHost } from './LoginTerminal'
+import { FeedbackDialog } from './Feedback'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
 
@@ -15,6 +17,7 @@ export function Dialogs(): ReactNode {
     <>
       <DialogBody />
       <ConfirmHost />
+      <LoginHost />
     </>
   )
 }
@@ -92,6 +95,7 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
+  if (dialog?.kind === 'feedback') return <FeedbackDialog image={dialog.image} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
   if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />
@@ -362,10 +366,12 @@ const fold = (s: string): string =>
 // The report and the usage are the admins' screens, as in the sidebar.
 const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] => [
   { label: L('Aprovações', 'Approvals'), view: { kind: 'approvals' }, icon: 'shield' },
+  { label: L('Quadro', 'Board'), view: { kind: 'board' }, icon: 'board' },
   { label: L('Memória', 'Memory'), view: { kind: 'memory' }, icon: 'book' },
   { label: 'Wiki', view: { kind: 'wiki' }, icon: 'layers' },
   { label: L('Rotinas', 'Routines'), view: { kind: 'routines' }, icon: 'clock' },
   { label: 'Skills', view: { kind: 'skills' }, icon: 'layers' },
+  { label: L('Time', 'Team'), view: { kind: 'org' }, icon: 'users' },
   ...(admin
     ? ([
         { label: L('Boletim', 'Report'), view: { kind: 'report' }, icon: 'report' },

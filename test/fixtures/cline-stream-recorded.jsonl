@@ -1,0 +1,19 @@
+{"ts":"2026-11-09T11:31:16.169Z","type":"hook_event","hookEventName":"agent_start","agentId":"agent_8486ff1f-f4a7-40b2-a8bd-38b8fb4b7849","taskId":"conv_1794223876165_49i4xi3","parentAgentId":null}
+{"ts":"2026-11-09T11:31:16.170Z","type":"agent_event","event":{"type":"iteration_start","iteration":1}}
+{"ts":"2026-11-09T11:31:16.202Z","type":"agent_event","event":{"type":"content_start","contentType":"text","text":"Let me save that. ","accumulated":"Let me save that. "}}
+{"ts":"2026-11-09T11:31:16.204Z","type":"agent_event","event":{"type":"usage","inputTokens":1000,"outputTokens":20,"cacheReadTokens":400,"totalInputTokens":1000,"totalOutputTokens":20,"totalCacheReadTokens":400,"totalCost":0}}
+{"ts":"2026-11-09T11:31:16.205Z","type":"agent_event","event":{"type":"content_end","contentType":"text","text":"Let me save that. "}}
+{"ts":"2026-11-09T11:31:16.206Z","type":"hook_event","hookEventName":"tool_call","agentId":"agent_8486ff1f-f4a7-40b2-a8bd-38b8fb4b7849","taskId":"conv_1794223876165_49i4xi3","parentAgentId":null}
+{"ts":"2026-11-09T11:31:16.206Z","type":"agent_event","event":{"type":"content_start","contentType":"tool","toolName":"tucano__lembrar","toolCallId":"call_1","input":{"fact":"sky is blue"}}}
+{"ts":"2026-11-09T11:31:16.209Z","type":"hook_event","hookEventName":"tool_result","agentId":"agent_8486ff1f-f4a7-40b2-a8bd-38b8fb4b7849","taskId":"conv_1794223876165_49i4xi3","parentAgentId":null}
+{"ts":"2026-11-09T11:31:16.209Z","type":"agent_event","event":{"type":"content_end","contentType":"tool","toolName":"tucano__lembrar","toolCallId":"call_1","output":{"content":[{"type":"text","text":"remembered: sky is blue"}]},"durationMs":3}}
+{"ts":"2026-11-09T11:31:16.209Z","type":"agent_event","event":{"type":"iteration_end","iteration":1,"hadToolCalls":true,"toolCallCount":1}}
+{"ts":"2026-11-09T11:31:16.209Z","type":"agent_event","event":{"type":"iteration_start","iteration":2}}
+{"ts":"2026-11-09T11:31:16.213Z","type":"agent_event","event":{"type":"content_start","contentType":"text","text":"Hello ","accumulated":"Hello "}}
+{"ts":"2026-11-09T11:31:16.214Z","type":"agent_event","event":{"type":"content_start","contentType":"text","text":"from mock.","accumulated":"Hello from mock."}}
+{"ts":"2026-11-09T11:31:16.214Z","type":"agent_event","event":{"type":"usage","inputTokens":1200,"outputTokens":5,"cacheReadTokens":1000,"totalInputTokens":2200,"totalOutputTokens":25,"totalCacheReadTokens":1400,"totalCost":0}}
+{"ts":"2026-11-09T11:31:16.214Z","type":"agent_event","event":{"type":"content_end","contentType":"text","text":"Hello from mock."}}
+{"ts":"2026-11-09T11:31:16.214Z","type":"agent_event","event":{"type":"iteration_end","iteration":2,"hadToolCalls":false,"toolCallCount":0}}
+{"ts":"2026-11-09T11:31:16.215Z","type":"hook_event","hookEventName":"agent_end","agentId":"agent_8486ff1f-f4a7-40b2-a8bd-38b8fb4b7849","taskId":"conv_1794223876165_49i4xi3","parentAgentId":null}
+{"ts":"2026-11-09T11:31:16.215Z","type":"agent_event","event":{"type":"done","reason":"completed","text":"Hello from mock.","iterations":2,"usage":{"inputTokens":2200,"outputTokens":25,"cacheReadTokens":1400,"totalCost":0}}}
+{"ts":"2026-11-09T11:31:16.245Z","type":"run_result","finishReason":"completed","iterations":2,"usage":{"inputTokens":2200,"outputTokens":25,"cacheReadTokens":1400,"cacheWriteTokens":0,"totalCost":0},"aggregateUsage":{"inputTokens":2200,"outputTokens":25,"cacheReadTokens":1400,"cacheWriteTokens":0,"totalCost":0},"durationMs":49,"text":"Hello from mock.","model":{"id":"mock-model","provider":"openai-compatible"}}

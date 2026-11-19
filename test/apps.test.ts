@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import { appStep, appTools, DesktopApps, grantOf, isTucano, itemize, keyFor, parseLsappinfo, parseMdls, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
+import { launcherDirs } from '../src/core/apps-os'
+import { appStep, appTools, DesktopApps, grantOf, isAgentBrowser, isTucano, itemize, keyFor, parseLsappinfo, parseMdls, pick, riskyClick, riskyKey, run, typeKeys, type Cli, type Envelope } from '../src/core/apps'
 import type { Agent } from '../src/shared/types'
 
 // A Notes window as agent-desktop describes it.
@@ -290,7 +291,111 @@ describe('on Windows and Linux', () => {
     expect(await apps.foreground()).toEqual([{ name: 'Editor de texto', bundleId: 'org.gnome.TextEditor' }])
     await apps.call(agent([{ name: 'Editor de texto', level: 'read' }]), 'app_menu', { app: 'Editor de texto' })
     // The menu bar is part of the window there: no menubar surface.
-    expect(calls.at(-1)).toEqual(['snapshot', '--app', 'gnome-text-editor', '-i', '--compact'])
+    expect(calls.at(-1)).toEqual(['snapshot', '--app', 'gnome-text-editor', '-i', '--compact', '--timeout-ms', '15000'])
+  })
+
+  it("on Linux, reads and presses keys in the person's Chrome, not the agents' headless one of the same name", async () => {
+    const calls: string[][] = []
+    const windows = [
+      { id: 'w-agent', pid: 10, bounds: { width: 1280, height: 800 } },
+      { id: 'w-person', pid: 20, bounds: { width: 900, height: 700 } }
+    ]
+    const cli: Cli = async (a) => {
+      calls.push(a)
+      if (a[0] === 'list-apps') return { ok: true, data: { apps: [{ name: 'chrome', pid: 10, presentation: 'foreground' }, { name: 'chrome', pid: 20, presentation: 'foreground' }] } }
+      if (a[0] === 'list-windows') return { ok: true, data: { windows } }
+      return { ok: true, data: tree }
+    }
+    const chrome = { name: 'Google Chrome', id: 'google-chrome', exec: ['/usr/bin/google-chrome-stable'], chromium: true }
+    const apps = new DesktopApps(cli, { platform: 'linux', installed: async () => [chrome], agentBrowser: (pid) => pid === 10 })
+    apps.target = async () => 'chrome'
+    expect(await apps.foreground()).toEqual([{ name: 'chrome' }])
+    const nina = agent([{ name: 'Google Chrome', level: 'read_write' }])
+    await apps.call(nina, 'app_ver', { app: 'Google Chrome' })
+    expect(calls.at(-1)).toEqual(['snapshot', '--app', 'chrome', '-i', '--compact', '--window-id', 'w-person', '--timeout-ms', '15000'])
+    await apps.call(nina, 'app_tecla', { app: 'Google Chrome', tecla: 'cmd+l' })
+    expect(calls.find((c) => c[0] === 'press')).toEqual(['press', 'ctrl+l', '--app', 'chrome', '--window-id', 'w-person'])
+    // Only the agents' Chrome there: says so instead of reading the wrong one.
+    windows.splice(1)
+    expect((await apps.call(nina, 'app_ver', { app: 'Google Chrome' })).result.isError).toBe(true)
+  })
+
+  it('on Wayland, sends a key only with the window in front, and then to the window in front', async () => {
+    const calls: string[][] = []
+    let focused = false
+    const cli: Cli = async (a) => (calls.push(a), a[0] === 'list-windows' ? { ok: true, data: { windows: [{ id: 'w1', pid: 20, is_focused: focused }] } } : { ok: true, data: tree })
+    const apps = new DesktopApps(cli, { platform: 'linux', wayland: true, agentBrowser: () => false })
+    apps.target = async () => 'chrome'
+    const nina = agent([{ name: 'Google Chrome', level: 'read_write' }])
+    const away = await apps.call(nina, 'app_tecla', { app: 'Google Chrome', tecla: 'cmd+l' })
+    expect(away.result.isError).toBe(true)
+    expect(calls.some((c) => c[0] === 'press')).toBe(false)
+    focused = true
+    await apps.call(nina, 'app_tecla', { app: 'Google Chrome', tecla: 'cmd+l' })
+    expect(calls.find((c) => c[0] === 'press')).toEqual(['press', 'ctrl+l'])
+  })
+
+  it('reads an area that repeats in the window from the last whole read', async () => {
+    const page = { snapshot_id: 's1', tree: { role: 'document', children: [{ role: 'row', name: 'Colônia', ref_id: '@s1:e1', children: [{ role: 'link', name: 'Mina de Metal', ref_id: '@s1:e2' }] }] } }
+    const cli: Cli = async (a) => (a.includes('--root') ? { ok: false, error: { code: 'AMBIGUOUS_TARGET', message: 'not proven unique' } } : { ok: true, data: page })
+    const apps = new DesktopApps(cli, { platform: 'linux', agentBrowser: () => false })
+    apps.target = async () => 'chrome'
+    const nina = agent([{ name: 'Google Chrome', level: 'read' }])
+    await apps.call(nina, 'app_ver', { app: 'Google Chrome' })
+    const area = await apps.call(nina, 'app_ver', { app: 'Google Chrome', area: '1' })
+    expect(area.result.isError).toBeFalsy()
+    expect(JSON.stringify(area.result.content)).toContain('Mina de Metal')
+    // And a group inside it, the same way.
+    expect((await apps.call(nina, 'app_ver', { app: 'Google Chrome', area: '1' })).result.isError).toBeFalsy()
+  })
+
+  it('pages a big window without changing its numbers, and numbers an area after the list it came from', async () => {
+    const rows = Array.from({ length: 250 }, (_, i) => ({ role: 'link', name: `Planeta ${i + 1}`, ref_id: `@s1:e${i + 1}` }))
+    const page = { snapshot_id: 's1', tree: { role: 'document', children: rows } }
+    const cli: Cli = async (a) => (a.includes('--root') ? { ok: true, data: { snapshot_id: 's1', tree: { role: 'group', ref_id: '@s1:e200', children: [{ role: 'link', name: 'Defesa', ref_id: '@s1:e999' }] } } } : { ok: true, data: page })
+    const apps = new DesktopApps(cli, { platform: 'linux', agentBrowser: () => false })
+    apps.target = async () => 'chrome'
+    const nina = agent([{ name: 'Google Chrome', level: 'read_write' }])
+    const first = JSON.stringify((await apps.call(nina, 'app_ver', { app: 'Google Chrome' })).result.content)
+    expect(first).toContain('pagina=2')
+    expect(first).toContain('os próximos com app_ver pagina=2,')
+    const second = JSON.stringify((await apps.call(nina, 'app_ver', { app: 'Google Chrome', pagina: 2 })).result.content)
+    expect(second).toContain('#200 link \\"Planeta 200\\"')
+    expect(second).not.toContain('#1 link')
+    const area = JSON.stringify((await apps.call(nina, 'app_ver', { app: 'Google Chrome', area: '200' })).result.content)
+    expect(area).toContain('#251')
+    // The window's own numbers still work after the area.
+    expect((await apps.call(nina, 'app_ver', { app: 'Google Chrome', area: '127' })).result.isError).toBeFalsy()
+  })
+
+  it('knows a Chromium app already open under its process name, so opening it brings it forward', async () => {
+    const cli: Cli = async (a) => (a[0] === 'list-apps' ? { ok: true, data: { apps: [{ name: 'chrome', pid: 20, presentation: 'foreground' }] } } : { ok: true, data: {} })
+    const apps = new DesktopApps(cli, {
+      platform: 'linux',
+      installed: async () => [{ name: 'Google Chrome', id: 'google-chrome', exec: ['/usr/bin/google-chrome-stable'], chromium: true }],
+      agentBrowser: () => false,
+      exe: () => '/opt/google/chrome/chrome',
+      dirs: () => ['/opt/google/chrome']
+    })
+    expect(await apps.foreground()).toEqual([{ name: 'Google Chrome', bundleId: 'google-chrome' }])
+  })
+
+  it('finds the process a launcher script starts under another name (google-chrome-stable → chrome)', async () => {
+    const cli: Cli = async (a) => (a[0] === 'list-apps' ? { ok: true, data: { apps: [{ name: 'gnome-shell', pid: 5, presentation: 'background' }, { name: 'nautilus', pid: 6, presentation: 'foreground' }, { name: 'chrome', pid: 10, presentation: 'foreground' }, { name: 'chrome', pid: 20, presentation: 'foreground' }] } } : { ok: true, data: {} })
+    const exes: Record<number, string> = { 5: '/usr/bin/gnome-shell', 6: '/usr/bin/nautilus', 10: '/opt/google/chrome/chrome', 20: '/opt/google/chrome/chrome' }
+    const apps = new DesktopApps(cli, {
+      platform: 'linux',
+      installed: async () => [{ name: 'Google Chrome', id: 'google-chrome', exec: ['/usr/bin/google-chrome-stable'] }],
+      agentBrowser: (pid) => pid === 10,
+      exe: (pid) => exes[pid],
+      dirs: (p) => (p === '/usr/bin/google-chrome-stable' ? ['/opt/google/chrome'] : [])
+    })
+    expect(await apps.target('Google Chrome')).toBe('chrome')
+  })
+
+  it('knows the agents\' Chrome by its debugging pipe', () => {
+    expect(isAgentBrowser(['/opt/google/chrome/chrome', '--user-data-dir=/x', '--remote-debugging-pipe', ''].join('\0'))).toBe(true)
+    expect(isAgentBrowser(['/opt/google/chrome/chrome', '--force-renderer-accessibility', ''].join('\0'))).toBe(false)
   })
 
   it('sends shortcuts with Ctrl, and asks first for one that deletes', async () => {
@@ -353,5 +458,18 @@ describe('the Mac apps, many per mdls', () => {
 
   it('an answer whose values don’t pair up is refused, so each app is asked alone', () => {
     expect(parseMdls('com.apple.Safari\0Safari\0com.apple.Notes', ['/a/Safari.app', '/a/Notes.app'])).toBeUndefined()
+  })
+})
+
+describe('launcher folders', () => {
+  it("follows a symlink, and the programs a small script execs", () => {
+    const script = '#!/bin/bash\nexec /opt/google/chrome/google-chrome $CHROME_USER_FLAGS "$@"\n'
+    expect(launcherDirs('/usr/bin/google-chrome-stable', { real: (p) => p, script: () => script })).toEqual(['/opt/google/chrome'])
+    // A program that is itself in /usr/bin: no folder to tell it by.
+    expect(launcherDirs('/usr/bin/gnome-text-editor', { real: (p) => p, script: () => undefined })).toEqual([])
+    expect(launcherDirs('/usr/bin/google-chrome', { real: () => '/opt/google/chrome/google-chrome', script: () => undefined })).toEqual(['/opt/google/chrome'])
+    // Shared library folders a script names don't tell its program either.
+    const wrapper = '#!/bin/sh\nexport LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/nss\nLD_PRELOAD=/usr/lib/x86_64-linux-gnu/libfoo.so /usr/lib/libbar.so exec /usr/lib/chromium/chromium "$@"\n'
+    expect(launcherDirs('/usr/bin/chromium', { real: (p) => p, script: () => wrapper })).toEqual(['/usr/lib/chromium'])
   })
 })

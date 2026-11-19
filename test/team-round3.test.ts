@@ -133,9 +133,11 @@ describe('G. every event reaches only who may see what it is about', () => {
     // hidden: Bruno gets nothing. shown: as it is. own: something of his own instead (his settings, his inbox, a view without the secret).
     const cases: Record<CoreEvent['type'], { event: CoreEvent; is: 'hidden' | 'shown' | 'own' }> = {
       voice: { event: { type: 'voice' }, is: 'shown' },
+      node: { event: { type: 'node', info: { apps: [], folders: ['/Users/ana/segredo'], links: [] } }, is: 'hidden' },
       message: { event: { type: 'message', message }, is: 'hidden' },
       delta: { event: { type: 'delta', id: 'm-dm', text: 'segredo' }, is: 'hidden' },
       agent: { event: { type: 'agent', agent: db.agent('a1')! }, is: 'shown' },
+      agent_removed: { event: { type: 'agent_removed', id: 'a9' }, is: 'shown' },
       conversation: { event: { type: 'conversation', conversation: db.conversation('dm-ana')! }, is: 'hidden' },
       settings: { event: { type: 'settings', settings }, is: 'own' },
       connector: { event: { type: 'connector', connector: { id: 'c1', name: 'Linear', kind: 'remote', status: 'connected', tools: [] } as unknown as Connector }, is: 'shown' },
@@ -154,7 +156,9 @@ describe('G. every event reaches only who may see what it is about', () => {
       skill_removed: { event: { type: 'skill_removed', id: 's1' }, is: 'shown' },
       wiki: { event: { type: 'wiki' }, is: 'shown' },
       people: { event: { type: 'people', people: db.people() }, is: 'shown' },
-      inbox: { event: { type: 'inbox' }, is: 'own' }
+      inbox: { event: { type: 'inbox' }, is: 'own' },
+      delegations: { event: { type: 'delegations' }, is: 'own' },
+      tasks: { event: { type: 'tasks', for: ana.id }, is: 'hidden' }
     }
     expect(Object.keys(cases).sort()).toEqual([...CORE_EVENT_TYPES].sort())
     for (const [type, c] of Object.entries(cases)) {
@@ -218,7 +222,7 @@ function recordingMemory(db: Db): { memory: Memories; prompts: string[]; hold: (
     }
   }
   const ready = { installed: true, loggedIn: true }
-  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'approve', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready } } as unknown as Settings
+  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'approve', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready } } as unknown as Settings
   const memory = new Memories({ db, engines: { claude } as Record<EngineId, Engine>, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'tucano-r3-')) })
   return {
     memory,
@@ -385,7 +389,7 @@ describe('K. a purge leaves nothing of the DMs on disk', () => {
 
 describe("L. what someone says about another person isn't kept as a fact about anyone", () => {
   const ready = { installed: true, loggedIn: true }
-  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'auto', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready } } as unknown as Settings
+  const settings = { workspaceName: 'Ana', memoryModel: 'haiku', memoryLearning: 'auto', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready } } as unknown as Settings
   const answering = (json: unknown): Engine => ({
     id: 'claude',
     async *run() {

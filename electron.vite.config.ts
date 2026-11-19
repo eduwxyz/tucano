@@ -13,7 +13,7 @@ export default defineConfig({
   preload: {
     build: {
       rolldownOptions: {
-        input: { index: 'src/preload/index.ts' },
+        input: { index: 'src/preload/index.ts', server: 'src/preload/server.ts' },
         output: { format: 'cjs', entryFileNames: '[name].cjs' }
       }
     }

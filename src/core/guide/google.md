@@ -18,7 +18,12 @@ Prefere não criar o app? A Composio conecta o Google sem isso, mas seus dados p
 O Gmail busca, lê, rascunha e põe marcadores, mas não envia nem apaga de vez. O Drive lê tudo e só escreve nos arquivos que criou ou abriu.
 
 ## Quando dá errado
-- "Access to this tool requires that your Google Cloud project (...) is enrolled in the Google Workspace Developer Preview Program": falta o passo 3. Só a própria pessoa resolve, no projeto dela: inscreva-o em developers.google.com/workspace/preview e espere a aprovação (uns dias). Nem o Tuca nem os agentes conseguem fazer isso. Enquanto espera, a Composio conecta o Google sem esse passo, mas seus dados passam pelos servidores dela (veja **composio**).
+- "...enrolled in the Google Workspace Developer Preview Program": falta o passo 3. Inscreva o projeto em developers.google.com/workspace/preview e espere uns dias. Enquanto isso, a Composio conecta sem esse passo (veja **composio**).
 - **Falta o seu app do Google**: clique em **Conectar** num deles e siga os passos.
-- O Google recusa no login ou o conector não conecta depois: confira se o cliente é **App para computador**, se tem **Usar este cliente para um agente com IA** marcado, se as APIs estão ativadas no mesmo projeto do cliente e se o e-mail está em **Usuários de teste**.
-- Pede login de novo toda semana: o app está **em teste**; publique-o (acima).
+- **Precisa autorizar**: o Google só pede login numa chamada. Clique em **Autorizar**; **Conectar de novo** não abre o navegador.
+- "Falta autorizar o Gmail": o login acabou (com o app em teste, a cada 7 dias). Clique em **Autorizar**.
+- "Recusou o login, mesmo renovado": clique em **Autorizar** pra entrar de novo. Se continuar, confira **Usuários de teste** e o cliente (**App para computador**, com a marca de agente com IA).
+- "Falta permissão no login": alguma caixa ficou desmarcada na tela do Google. **Autorize** de novo e marque todas.
+- "Uma API não está ativada" (SERVICE_DISABLED): ative a API citada no mesmo projeto do cliente e espere uns minutos. Autorizar não resolve.
+- Erro na página de login do Google: "access_denied" é e-mail fora de **Usuários de teste**; "org_internal", app **Interno** com conta de fora; "redirect_uri_mismatch", cliente que não é **App para computador**; "invalid_client", ID ou chave errados (troque em **Seu app do Google**).
+- Pede login toda semana: o app está **em teste**; publique-o (acima).

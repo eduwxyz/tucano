@@ -6,9 +6,7 @@ at the top of the sidebar to switch or use the **+** beside the gear to create a
 the same setup as a fresh installation; it does not copy another workspace's data.
 
 Use the gear icon in the workspace menu to open **Manage workspaces**. It lists
-every workspace with create, duplicate and delete actions. You can also open it
-from **Getting started > Explore workspaces**; that item is marked done when the
-manager opens.
+every workspace with create, duplicate and delete actions.
 
 Each row also has a pause/resume control. It uses the same per-workspace pause
 as the sidebar: no new agent work or routines start, but running work can finish.

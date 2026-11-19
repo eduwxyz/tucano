@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Agent, Conversation, Message, Person, WikiChange, WikiPage } from '../src/shared/types'
 import { bootCore, type Client, type TestCore } from './helpers/core'
 
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: process.platform === 'win32' ? 60_000 : 30_000 })
 
 let core: TestCore
 let ana: Client // the owner

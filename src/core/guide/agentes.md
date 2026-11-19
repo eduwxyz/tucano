@@ -1,9 +1,15 @@
 # Agentes
-> Criar um agente, instruções, modelo, limites, ferramentas e acesso, memória, aparência, arquivar e excluir.
+> Criar um agente, instruções, modelo, limites, ferramentas e acesso, memória, aparência e arquivar.
 
 ## Criar
-- Com o Tuca: o **+** ao lado de **Agentes** na barra lateral abre o Tuca. Conte a tarefa, ele propõe um agente num card: **Criar**, **Editar antes** ou **Descartar**.
+- Com o Tuca: o **+** ao lado de **Agentes** na barra lateral abre o Tuca. Conte a tarefa e ele monta o agente.
 - À mão: **Novo agente (formulário)** no ⌘K (Ctrl+K). Preencha e **Criar agente**.
+
+## O que o Tuca faz na hora
+Agentes, times, canais e rotinas novos, e mudanças de nome, função, instruções, modelo, esforço e web entram quando o Tuca termina de responder. O card vira um recibo com **Desfazer**: apaga o que foi criado e volta o que mudou, por 24 horas. Se o agente já trabalhou, alguém mexeu depois ou o canal tem conversa, ele diz por que não desfaz.
+- Conectores e limite do mês ficam num card à parte: só valem quando você clica **Aplicar**.
+- Membro de um time: agentes esperam um admin.
+- Desligar: **Configurações › Agentes** › **Aplicar mudanças do Tuca na hora, com Desfazer**. Desligado, tudo espera **Aplicar** (ou **Criar**).
 
 ## A página do agente
 Clique no agente na barra lateral (ou **Ver perfil** na conversa). Ela tem quatro abas:
@@ -27,9 +33,6 @@ Clique no agente na barra lateral (ou **Ver perfil** na conversa). Ela tem quatr
 
 ## Arquivar
 No menu do agente na barra lateral (clique com o botão direito), **Arquivar…**. Ele sai da barra lateral, para de responder e as rotinas dele desligam. Histórico e recibos ficam. Pra voltar: **Arquivados**, no fim da lista de agentes, **Reativar** (as rotinas você liga de novo em Rotinas).
-
-## Excluir
-**Excluir** fica na página do agente, no menu da barra lateral e em **Arquivados**. É para sempre: vão as configurações, as DMs, as rotinas, as memórias e skills só dele, o computador com tudo que está lá e os logins do navegador. As mensagens nos canais e os recibos ficam, e as pastas emprestadas não são tocadas. O @handle fica livre. O Tuca não pode ser excluído. Em dúvida, arquive.
 
 ## Quando dá errado
 - Não responde: veja se o motor dele está **Pronto** em Configurações › Modelos e se ele não bateu o limite do mês (**Uso e limites**).

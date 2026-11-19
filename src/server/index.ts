@@ -8,7 +8,7 @@
 //   node out/main/server.js        (TUCANO_DATA, TUCANO_HOST, TUCANO_PORT, TUCANO_TOKEN, TUCANO_URL, TUCANO_TRUST_PROXY)
 //   node out/main/server.js link   prints the link that signs a browser in
 //   node out/main/server.js pair [minutes]   a one-time link for the owner's phone (or a browser)
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { chmodSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
@@ -17,20 +17,32 @@ import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Forwarder, isPrivate } from './forward'
-import { ARTIFACT_CSP, BASE_HEADERS, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, sameOrigin, signIn } from './guard'
-import { browserName, CODE_SHAPE, codeMinutes, deviceLabel, PairCodes } from './pair-codes'
+import { ARTIFACT_CSP, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
+import { codeMinutes, PairCodes } from './pair-codes'
+import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
+import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
+import { applyRestore } from '../core/restore'
 import { verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
-import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, PAGE_CSP, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
+import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
 import type { Person } from '../shared/types'
 
 const dataDir = process.env['TUCANO_DATA'] || join(homedir(), '.tucano-server')
 const host = process.env['TUCANO_HOST'] || '127.0.0.1'
 const port = Number(process.env['TUCANO_PORT'] || 7337)
 const page = join(import.meta.dirname, '..', 'renderer')
+// This build's version: what a browser's Settings shows, and what the core takes as its own
+// (the desktop says its over the environment; a server reads the package.json next to the build).
+const version = (() => {
+  try {
+    return String((JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version?: string }).version ?? '')
+  } catch {
+    return ''
+  }
+})()
 mkdirSync(dataDir, { recursive: true, mode: 0o700 })
 
 // A file only this user reads, made once: the server's key or token.
@@ -102,6 +114,8 @@ function ask<T>(msg: Record<string, unknown>, timeoutMs = 10_000): Promise<T | u
     toCore({ ...msg, id })
   })
 }
+// Computers lent to this server (shared/node-link.ts): each link's port goes to the core, as a page's does.
+const nodeLinks = new NodeLinkHttp((data, port) => toCore(data, [port as unknown as Port]))
 const signins = new Signins((key) => ask<Person | { removed: true } | undefined>({ type: 'auth', key }))
 const grants = new Grants((person, what) => ask<boolean>({ type: 'access', person, ...what }))
 
@@ -112,15 +126,25 @@ function fromCore(msg: CoreRequest): void {
     oauthWaits.delete(id ?? '')
     return
   }
+  // A backup to restore: a start of its own puts it in (applyRestore, above the core's import).
+  // A non-zero code, so systemd's Restart=on-failure brings it back as Docker's restart policy does.
+  if (msg.type === 'restart') {
+    console.log('Restarting to restore a backup. If nothing starts this server again, start it by hand.')
+    server.close()
+    setTimeout(() => process.exit(75), 300)
+    return
+  }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
+  // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
+  // computer calls again in a moment, with its key checked anew: a removed one is turned away.
+  if ((msg.type === 'person-removed' || msg.type === 'person-changed') && msg.id) nodeLinks.closeAll(msg.id)
   if (personNotice(msg, { signins, grants, viewers, streams })) return
   // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
-    const note = { notify: { title: String(msg.title ?? ''), body: String(msg.body ?? ''), conversationId: msg.conversationId, page: msg.page } }
-    streams.deliver(note, Array.isArray(msg.to) ? msg.to : undefined, ownerId)
+    streams.deliver(notifyNote(msg as unknown as Record<string, unknown>), Array.isArray(msg.to) ? msg.to : undefined, ownerId)
     return
   }
   if (msg.type === 'secret') {
@@ -215,7 +239,11 @@ const watcher = new Port((msg) => {
   } else if (m.event?.type === 'computer' && m.event.computer) sawComputers([m.event.computer])
   else if (m.event?.type === 'people') sawPeople(m.event.people ?? [])
 })
+// Everyone's name by id: whom a pairing link's page says the browser signs in as.
+const names = new Map<string, string>()
 function sawPeople(list: Person[]): void {
+  names.clear()
+  for (const p of list) names.set(p.id, p.name)
   const owner = list.find((p) => p.role === 'owner')
   if (owner) [ownerId, ownerName] = [owner.id, owner.name]
 }
@@ -228,19 +256,6 @@ function index(): string {
     .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
 }
 
-function body(req: IncomingMessage, max = 64 * 1024 * 1024): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (c: Buffer) => {
-      size += c.length
-      if (size > max) return reject(new Error('too large'))
-      chunks.push(c)
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-  })
-}
 
 function oauthCallback(url: URL, res: ServerResponse): void {
   const id = randomUUID()
@@ -259,6 +274,14 @@ function oauthCallback(url: URL, res: ServerResponse): void {
 const trustProxy = process.env['TUCANO_TRUST_PROXY'] === '1'
 const MAX_UPLOAD = 1024 * 1024 * 1024 // a vault with its pictures, zipped
 const doors = new Doors()
+// A one-time code's door (pair-http.ts): a spent code's person gets a key of this device's own, from the core.
+const pairDoor: PairDoor = {
+  codes: pairCodes,
+  doors,
+  mint: async (person, label) => (await ask<{ key?: string }>({ type: 'device-key', person, label }))?.key,
+  owner: () => ownerName,
+  nameOf: (person) => names.get(person ?? ownerId ?? '')
+}
 
 // A request it can't read (a scanner's, a broken client's) gets an answer, never the whole server.
 const server = createServer((req, res) => {
@@ -280,11 +303,12 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
-  // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here;
-  // a browser opens /?code=. No sign-in: the code is what counts, and a wrong one counts as a guess.
-  if (url.pathname === '/pair' && req.method === 'POST') return void pairDevice(req, res, ip)
+  // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,
+  // and so does the page a browser's /?code= opens (opening it spends nothing: see pair-http.ts).
+  // No sign-in: the code is what counts, and a wrong one counts as a guess.
+  if (url.pathname === '/pair' && req.method === 'POST') return void pairPost(pairDoor, req, res, ip)
   const offeredCode = url.searchParams.get('code')
-  if (offeredCode !== null && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) return void pairBrowser(req, res, ip, offeredCode)
+  if (offeredCode !== null && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) return pairLinkPage(pairDoor, req, res, ip, offeredCode)
   const offered = url.searchParams.get('token') ?? undefined
   // An invite's page and its form come before signing in: they're how someone new gets a key. A
   // guesser of codes waits at that door; the other door stays open (see Doors).
@@ -307,7 +331,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       if (r.status === 'person') return authed(req, res, url, { person: r.person.id, role: r.person.role })
       if (r.status === 'blocked') return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
       // Someone removed: their page says so (the bridge reads the 401), and nothing more.
-      if (r.status === 'removed') return page200(res, NO_ACCESS_PAGE, 401)
+      if (r.status === 'removed') return htmlPage(res, NO_ACCESS_PAGE, 401)
       res.writeHead(401, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(UNAUTHORIZED_TEXT)
     })
     .catch((e: unknown) => {
@@ -321,56 +345,12 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 async function invitePageFor(req: IncomingMessage, res: ServerResponse, code: string): Promise<void> {
   const info = code ? await ask<{ name?: string }>({ type: 'invite-info', code: code.slice(0, 200) }, 5_000) : undefined
   if (wantsJson(req)) return json(res, 200, { owner: ownerName, ...(info?.name ? { name: info.name } : {}) })
-  page200(res, invitePage({ owner: ownerName, code, ...(info?.name ? { name: info.name } : {}) }))
+  htmlPage(res, invitePage({ owner: ownerName, code, ...(info?.name ? { name: info.name } : {}) }))
 }
 
 const wantsJson = (req: IncomingMessage): boolean => /application\/json/.test(String(req.headers['accept'] ?? ''))
 const json = (res: ServerResponse, status: number, value: unknown): void =>
   void res.writeHead(status, { ...BASE_HEADERS, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(value))
-const cookieFor = (req: IncomingMessage, key: string): string => `tucano=${key}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''}`
-
-// A spent code's person gets a key of this device's own, from the core (people.deviceKey).
-async function keyFor(code: unknown, label: string): Promise<string | undefined> {
-  const spent = pairCodes.spend(code)
-  if (!spent) return undefined
-  const out = await ask<{ key?: string }>({ type: 'device-key', person: spent.person, label })
-  return out?.key
-}
-
-// POST /pair {code, name, platform}: the phone's (or the desktop app's) key, as {key}. A code that's
-// wrong, used or late answers 410 and counts as a guess at the invite's door.
-async function pairDevice(req: IncomingMessage, res: ServerResponse, ip: string): Promise<void> {
-  if (doors.blocked('join', ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
-  let asked: { code?: unknown; name?: unknown; platform?: unknown } = {}
-  try {
-    asked = JSON.parse(await body(req, 4 * 1024)) as typeof asked
-  } catch {
-    return void res.writeHead(400, BASE_HEADERS).end()
-  }
-  const key = await keyFor(asked?.code, deviceLabel(asked?.name, asked?.platform))
-  if (!key) {
-    doors.fail('join', ip)
-    return json(res, 410, { error: 'Esse código já foi usado ou passou do prazo. Gere outro. · That code was already used or has expired. Make a new one.' })
-  }
-  json(res, 200, { key })
-}
-
-// /?code=: this browser becomes a device of the code's person, signed in with its key.
-async function pairBrowser(req: IncomingMessage, res: ServerResponse, ip: string, code: string): Promise<void> {
-  if (doors.blocked('join', ip)) return void res.writeHead(429, { ...BASE_HEADERS, 'retry-after': '600' }).end()
-  const key = CODE_SHAPE.test(code) ? await keyFor(code, deviceLabel(browserName(String(req.headers['user-agent'] ?? '')), 'browser')) : undefined
-  if (key) return void res.writeHead(302, { ...BASE_HEADERS, 'set-cookie': cookieFor(req, key), location: '/', 'cache-control': 'no-store' }).end()
-  doors.fail('join', ip)
-  res
-    .writeHead(410, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
-    .end('Tucano: este link já foi usado ou passou do prazo. Gere outro em Configurações › Pessoas, ou com `node out/main/server.js pair`.\nTucano: this link was already used or has expired. Make a new one in Settings › People, or with `node out/main/server.js pair`.')
-}
-
-// Same-origin, not no-referrer: with no-referrer the browser sends the invite form's POST with
-// `Origin: null`, which /join (rightly) refuses as another site's.
-function page200(res: ServerResponse, html: string, status = 200): void {
-  res.writeHead(status, { ...BASE_HEADERS, 'referrer-policy': 'same-origin', 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': PAGE_CSP, 'x-frame-options': 'DENY' }).end(html)
-}
 
 // The invite's form: a code and a name become a person with a key, kept in this browser's cookie.
 // A code that's wrong, used or expired counts as a guess.
@@ -386,14 +366,14 @@ async function joinPage(req: IncomingMessage, res: ServerResponse, ip: string): 
   }
   if (!fields.name.trim()) {
     if (app) return json(res, 400, { error: 'Diga seu nome. · Tell us your name.' })
-    return page200(res, invitePage({ owner: ownerName, code: fields.code, error: 'Diga seu nome. · Tell us your name.' }), 400)
+    return htmlPage(res, invitePage({ owner: ownerName, code: fields.code, error: 'Diga seu nome. · Tell us your name.' }), 400)
   }
   const out = await ask<{ key?: string; error?: string }>({ type: 'join', code: fields.code, name: fields.name })
   if (!out?.key) {
     doors.fail('join', ip)
     const error = out?.error ?? 'O Tucano não respondeu. Tente de novo. · Tucano didn’t answer. Try again.'
     if (app) return json(res, 400, { error })
-    return page200(res, invitePage({ owner: ownerName, code: fields.code, name: fields.name, error }), 400)
+    return htmlPage(res, invitePage({ owner: ownerName, code: fields.code, name: fields.name, error }), 400)
   }
   if (app) return json(res, 200, { key: out.key })
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''
@@ -454,8 +434,12 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     return
   }
 
+  // A computer lent to this server, calling in with its own key (shared/node-link.ts).
+  if (nodeLinks.handles(url)) return nodeLinks.handle(req, res, url, who, BASE_HEADERS)
+
   if (url.pathname === '/events') {
-    const port = new Port((msg) => res.write(`data: ${JSON.stringify(msg)}\n\n`))
+    // Once the line is closed (the person removed, a device disconnected), a late answer goes nowhere.
+    const port = new Port((msg) => void (!res.writableEnded && res.write(`data: ${JSON.stringify(msg)}\n\n`)))
     const id = randomUUID()
     // Ended by the server (the person was removed) or by the core (it closed the port): the page loses the line.
     const end = (): void => {
@@ -468,8 +452,10 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     res.write(`event: hello\ndata: ${id}\n\n`)
     // A beat the page can hear (a comment line it couldn't): it tells a dead line from a quiet one.
     const beat = setInterval(() => res.write('event: ping\ndata: \n\n'), 25_000)
-    // The core learns whose port this is: nothing named is the owner, as on a desktop.
-    toCore(who.owner ? null : { person: who.person }, [port])
+    // The core learns whose port this is: nothing named is the owner, as on a desktop. A person's
+    // page also says which of their keys (by its hash): the one Settings › Pessoas marks as this device.
+    const cookie = cookieToken(req)
+    toCore(who.owner ? null : { person: who.person, ...(cookie && PERSON_KEY.test(cookie) ? { device: createHash('sha256').update(cookie).digest('base64url') } : {}) }, [port])
     req.on('close', () => {
       clearInterval(beat)
       streams.delete(id)
@@ -656,22 +642,42 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       })
     }
   }
-  // A notification of the system, as the desktop app shows, while the person isn't on this page.
-  // The browser asks for permission once, on the first click (it won't ask without one).
+  // A notification of the system, as the desktop app shows, unless the person is reading that
+  // conversation here. Inside the Tucano app (Settings › Servers) the app shows it as its own
+  // (src/preload/server.ts), and a click brings that server and conversation back on screen.
+  // A browser asks for permission once, on the first click (it won't ask without one), and shows
+  // none over plain HTTP outside this machine (Tailscale, a home network): it only does on HTTPS.
   let toConversation = () => {}
   let toPage = () => {}
+  const desktop = window.tucanoDesktop
+  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : (n.page === 'skills' || n.page === 'connectors') && toPage(n.page)))
+  const notifyState = () =>
+    desktop ? 'on' : !('Notification' in window) ? 'unsupported' : !window.isSecureContext ? 'insecure' : Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'blocked' : 'ask'
   const notify = (n) => {
-    if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return
+    if (document.hasFocus() && n.conversationId && n.conversationId === looking) return
+    if (desktop) return desktop.notify(n)
+    if (notifyState() !== 'on') return
     const shown = new Notification(n.title, { body: n.body, tag: n.conversationId || undefined })
     shown.onclick = () => {
       window.focus()
-      if (n.conversationId) toConversation(n.conversationId)
+      if (n.conversationId) toConversation(n.conversationId, n.threadId)
       else if (n.page === 'skills') toPage('skills')
       shown.close()
     }
   }
+  // Settings › General › Notifications: one sent now, or why none can come here.
+  const testNotify = async () => {
+    if (!desktop && notifyState() === 'ask') await Notification.requestPermission().catch(() => {})
+    const state = notifyState()
+    if (state !== 'on') return state
+    const title = 'Tucano'
+    const body = document.documentElement.lang !== 'en' ? 'As notificações estão chegando.' : 'Notifications are coming through.'
+    if (desktop) desktop.notify({ title, body })
+    else new Notification(title, { body })
+    return 'shown'
+  }
   // The server's folders, in the app's own dialog look: a browser can't show the server's disk.
-  const pickFolder = () =>
+  const pickFolder = (o) =>
     new Promise((done) => {
       const pt = document.documentElement.lang !== 'en'
       const t = (a, b) => (pt ? a : b)
@@ -688,13 +694,21 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       const head = el('header', 'modal__head')
       head.append(el('strong', '', t('Escolher pasta no servidor', 'Choose a folder on the server')))
       const where = el('p', 'small muted mono modal__lead')
+      // The person's own folders aren't here: they're lent from the app on their computer.
+      const mine = el('p', 'small muted', t('Estas são as pastas do servidor. Pra uma pasta do seu computador, ligue no app do Tucano nele Configurações › Servidores › Deixar este servidor usar este computador e empreste a pasta por lá.', "These are the server's folders. For a folder on your computer, turn on Settings › Servers › Let this server use this computer in the Tucano app there, and lend the folder from it."))
       const list = el('div', 'folder-pick')
       list.style.cssText = 'max-height:320px;overflow:auto;display:grid;gap:2px;margin:8px 0'
       const foot = el('footer', 'modal__foot')
       const cancel = el('button', 'btn btn--ghost btn--sm', t('Cancelar', 'Cancel'))
       const choose = el('button', 'btn btn--primary btn--sm', t('Escolher esta pasta', 'Choose this folder'))
       foot.append(el('span', 'grow'), cancel, choose)
-      card.append(head, where, list, foot)
+      // In the desktop app, one click there: this computer's Tucano, on Settings › Servers.
+      if (desktop && desktop.openLending) {
+        const lend = el('button', 'btn btn--ghost btn--sm', t('Abrir no Tucano deste computador', "Open in this computer's Tucano"))
+        lend.onclick = () => (close(null), desktop.openLending())
+        foot.prepend(lend)
+      }
+      card.append(head, where, list, mine, foot)
       shade.append(card)
       document.body.append(shade)
       let current = ''
@@ -728,14 +742,16 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
             if (!r.folders.length) list.append(el('p', 'small muted', t('Nenhuma pasta aqui dentro.', 'No folders in here.')))
           })
           .catch(() => (where.textContent = t('Não consegui abrir essa pasta.', "Couldn't open that folder.")))
-      go('')
+      // o.start (from the home folder, like ".hermes"), or the home folder when it is not there
+      if (o && typeof o.start === 'string') fetch('./folders?path=' + encodeURIComponent(o.start)).then((r) => go(r.ok ? o.start : ''), () => go(''))
+      else go('')
       choose.focus()
     })
-  if ('Notification' in window && Notification.permission === 'default')
+  if (!desktop && notifyState() === 'ask')
     document.addEventListener('pointerdown', () => void Notification.requestPermission().catch(() => {}), { once: true })
   window.tucano = {
     connect,
-    pickFolder: () => pickFolder(),
+    pickFolder: (o) => pickFolder(o),
     // A file from this computer up to the server; where it landed there.
     upload: (file, purpose) =>
       fetch('./upload?name=' + encodeURIComponent(file.name) + (purpose === 'message' ? '&for=message' : ''), { method: 'POST', body: file }).then((r) =>
@@ -747,18 +763,28 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       looking = typeof id === 'string' ? id : null
       tellViewing()
     },
-    updateState: async () => ({ version: '', status: 'off' }),
-    onUpdate: () => {},
-    checkUpdates: () => {},
-    installUpdate: () => {}
+    notifyState,
+    testNotify,
+    // In the desktop app, the app's own updates (its page is what's on screen, so it is the one to
+    // say a version is ready); in a browser, the server's version, which updates on the server.
+    updateState: async () => (desktop && desktop.updateState && (await desktop.updateState())) || { version: ${JSON.stringify(version)}, status: 'off' },
+    onUpdate: (cb) => { if (desktop && desktop.onUpdate) desktop.onUpdate(cb) },
+    checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
+    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() },
+    // In the desktop app: this computer's Tucano, on Settings › Servers, to lend it here.
+    openLending: desktop && desktop.openLending ? () => desktop.openLending() : undefined
   }
 })()
 `
+
+// A backup the owner confirmed: its files take the place of these before the core opens them.
+if (applyRestore(dataDir)) console.log('Restored a backup; what was here is in restore/before-…')
 
 process.env['TUCANO_DATA'] = dataDir
 process.env['TUCANO_LOCAL_KEY'] = localKey
 process.env['TUCANO_PACKAGED'] = '1'
 process.env['TUCANO_SERVER'] = '1'
+process.env['TUCANO_VERSION'] ??= version
 ;(process as unknown as { parentPort: Port }).parentPort = parent
 await import(pathToFileURL(join(import.meta.dirname, 'core.js')).href)
 toCore(null, [watcher])

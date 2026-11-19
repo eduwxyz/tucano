@@ -2,7 +2,7 @@
 > O que os agentes sabem sobre você: como aprendem, aprovar ou deixar automático, notas de cada agente e o resumo das conversas longas.
 
 ## Dois tipos
-- **Sobre você**: preferências, padrões e fatos que valem pra todos os agentes. Entram no prompt de cada resposta.
+- **Você**: preferências, padrões e fatos que valem pra todos os agentes. Entram no prompt de cada resposta.
 - **Notas de trabalho** de um agente: só ele vê.
 
 O **Contexto** em **Configurações › Geral** é outra coisa: um texto fixo que você escreve e todo agente lê sempre.

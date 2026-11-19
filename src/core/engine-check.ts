@@ -3,8 +3,8 @@
 // it, and the next one runs behind. A check takes seconds and starts a dozen processes, so
 // whoever asks while one runs shares it instead of starting another.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
-import type { EngineId, EngineStatus } from '../shared/types'
-import { codexModels, detectClaude, detectCodex, detectCursor, detectGemini, detectGrok, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
+import { ENGINE_IDS, type EngineId, type EngineStatus } from '../shared/types'
+import { codexModels, detectClaude, detectCodex, detectCursor, detectAntigravity, detectGrok, detectCline, detectHermes, detectOpenCode, detectPi, type CodexModel } from './engines/detect'
 import { withInstallDirs } from './platform'
 
 export interface AccountLogin {
@@ -26,7 +26,9 @@ export interface OneFinding {
   codexCatalog?: CodexModel[]
 }
 
-const IDS: EngineId[] = ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor', 'grok']
+// Every harness this version knows: a list written out by hand here left the newest one out, and the
+// screens read a status that wasn't there until the first check ended.
+const IDS: EngineId[] = ENGINE_IDS
 
 // Before the first check ever: nothing known yet, and the screens can say so.
 export const checkingFindings = (): EngineFindings => ({
@@ -120,7 +122,7 @@ function readKept(file: string): EngineFindings | undefined {
 }
 
 // One harness's own check, the same detectEngines runs for each.
-export async function detectEngine(engine: EngineId, codexHome: string): Promise<OneFinding> {
+export async function detectEngine(engine: EngineId, codexHome: string, clineLogin: string): Promise<OneFinding> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   switch (engine) {
@@ -136,12 +138,18 @@ export async function detectEngine(engine: EngineId, codexHome: string): Promise
       return found(await detectOpenCode())
     case 'pi':
       return found(await detectPi())
-    case 'gemini':
-      return found(await detectGemini())
+    case 'antigravity':
+      return found(await detectAntigravity())
     case 'cursor':
       return found(await detectCursor())
     case 'grok':
       return found(await detectGrok())
+    case 'cline':
+      return found(await detectCline(clineLogin))
+    case 'hermes':
+      return found(await detectHermes())
+    case 'endpoint':
+      return { status: { installed: false, loggedIn: false } } // nothing to find: it's set up in Settings (see the core's settings())
   }
 }
 const found = (r: { status: EngineStatus; models: string[] }): OneFinding => ({ status: r.status, listed: r.models })

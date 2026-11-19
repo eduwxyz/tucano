@@ -179,13 +179,13 @@ describe('importing agents from OpenBot', () => {
   })
 
   it('keeps a Gemini agent on Gemini, and moves a model whose CLI is not ready to one that is', () => {
-    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'gemini', model: 'gemini-3-pro', skills: [] }
+    const gem = { ...gil, key: 'gem', name: 'Gem', provider: 'antigravity', model: 'gemini-3-pro', skills: [] }
     const cur = { ...gil, key: 'cur', name: 'Cur', provider: 'cursor', model: 'composer-2', skills: [] }
     const db = fresh()
-    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'gemini:gemini-3-pro', works: (id) => id.startsWith('gemini:') })
-    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'gemini:gemini-3-pro'], ['Cur', 'gemini:gemini-3-pro']])
+    const r = applyForeignTeam(db, readForeignZip(zipFromBuffer(zip({ 'openbot-transfer.json': transfer([gem, cur]) }))), { ...opts, defaultModel: 'antigravity:gemini-3-pro', works: (id) => id.startsWith('antigravity:') })
+    expect(db.agents().map((a) => [a.name, a.modelId])).toEqual([['Gem', 'antigravity:gemini-3-pro'], ['Cur', 'antigravity:gemini-3-pro']])
     expect(r.summary).not.toContain('não roda no Tucano')
-    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou gemini:gemini-3-pro)')
+    expect(r.summary).toContain('@cur: o modelo cursor:composer-2 (o CLI dele não está pronto aqui: ficou antigravity:gemini-3-pro)')
   })
 
   it('brings at most so many agents, memories and routines, and says how many stayed out', () => {
@@ -215,11 +215,16 @@ describe('importing agents from OpenBot', () => {
     expect(openBotSchedule({ kind: 'weekly', weekday: 0, time: '18:00' })).toEqual({ days: [0], time: '18:00' })
     expect(openBotSchedule({ kind: 'advanced', months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], days: { kind: 'days-of-week', days: [5, 1] }, time: { kind: 'at-time', time: '10:00' } })).toEqual({ days: [1, 5], time: '10:00' })
     expect(openBotSchedule({ kind: 'advanced', months: [1], days: { kind: 'every-day' }, time: { kind: 'at-time', time: '10:00' } })).toBeUndefined()
-    expect(openBotSchedule({ kind: 'monthly', day: 1, time: '10:00' })).toBeUndefined()
+    expect(openBotSchedule({ kind: 'monthly', day: 1, time: '10:00' })).toEqual({ days: [0, 1, 2, 3, 4, 5, 6], time: '10:00', monthDay: 1 })
+    expect(openBotSchedule({ kind: 'monthly', day: 40, time: '10:00' })).toBeUndefined()
     expect(openBotSchedule({ kind: 'custom', expression: '* * * * *' })).toBeUndefined()
     const soon = new Date(Date.now() + 2 * 86_400_000)
     const date = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}`
-    expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true })
+    expect(openBotSchedule({ kind: 'once', date, time: '12:00' })).toEqual({ days: [soon.getDay()], time: '12:00', once: true, date })
+    // Weeks ahead too, on that date (it used to be dropped past the coming week).
+    const later = new Date(Date.now() + 40 * 86_400_000)
+    const far = `${later.getFullYear()}-${String(later.getMonth() + 1).padStart(2, '0')}-${String(later.getDate()).padStart(2, '0')}`
+    expect(openBotSchedule({ kind: 'once', date: far, time: '12:00' })).toMatchObject({ once: true, date: far })
     expect(openBotSchedule({ kind: 'once', date: '2020-01-01', time: '12:00' })).toBeUndefined()
     expect(hueColor(0)).toMatch(/^#[0-9a-f]{6}$/)
   })
@@ -261,6 +266,33 @@ describe('importing agents from Grok Bot, through our skill', () => {
     'agents/ledger/picture.png': PNG,
     'agents/ledger/skills/reconcile/SKILL.md': '---\nname: reconcile\ndescription: When reconciling\n---\n\nKeep it short.\n',
     'agents/ledger/skills/reconcile/template.txt': 'x'
+  })
+
+  it('imports instructions over the recommendation exactly from Tucano exports', () => {
+    const instructions = ` ${'x'.repeat(32_000)} END\n`
+    const source = files()
+    source['tucano-import.json'] = manifest({ agents: [{ key: 'ledger', name: 'Ledger', instructions }] })
+    expect(readForeignZip(zipFromBuffer(zip(source))).agents[0]?.instructions).toBe(instructions)
+  })
+
+  it('imports OpenBot instructions over the recommendation whole', () => {
+    const instructions = ` ${'x'.repeat(40_000)} END\n`
+    const source = files()
+    source['agents/lia/workspace/AGENTS.md'] = instructions
+    source['openbot-transfer.json'] = transfer([{ ...lia, description: 'Fallback description', files: 'agents/lia/workspace' }])
+    const team = readForeignZip(zipFromBuffer(zip(source, { deflate: true })))
+    expect(team.agents[0]?.instructions).toHaveLength(instructions.length)
+    expect(team.agents[0]?.instructions).toMatch(/^ x{10,} END\n$/)
+    expect(team.agents[0]?.notes).not.toContain('o AGENTS.md (não deu pra ler)')
+  })
+
+  it('reports when imported instructions exceed the recommendation, without shortening them', () => {
+    const instructions = `${'x'.repeat(32_000)} END`
+    const source = files()
+    source['tucano-import.json'] = manifest({ agents: [{ key: 'ledger', name: 'Ledger', instructions }] })
+    const result = applyForeignTeam(fresh(), readForeignZip(zipFromBuffer(zip(source))), opts)
+    expect(result.summary).toContain('Prompt longo')
+    expect(result.summary).toContain('32.004')
   })
 
   it('imports long skills whole and reports how far they exceed the recommendation', () => {

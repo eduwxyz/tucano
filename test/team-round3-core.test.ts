@@ -5,7 +5,7 @@ import type { ActivityEntry, Conversation, Message, Person, WikiChange, WikiPage
 import { bootCore, type Client, type TestCore } from './helpers/core'
 
 // Under a full run's load, a reply with the fake engines can take a few seconds.
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: process.platform === 'win32' ? 60_000 : 30_000 })
 
 let core: TestCore
 let ana: Client // the owner

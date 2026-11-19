@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { L } from '../../shared/lang'
 import { getState, navigate, openDialog, setNav, useStore } from './store'
 import { Sidebar } from './components/Sidebar'
+import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
 import { Lightbox } from './components/Lightbox'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
@@ -11,7 +12,13 @@ import { WikiView } from './components/Wiki'
 import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
+import { BoardPage } from './components/Board'
+import { OrgPage } from './components/OrgChart'
 import { Onboarding } from './components/Onboarding'
+import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
+import { MissionsPage } from './components/Missions'
+import { Hub, hubTab } from './components/Hubs'
+import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
 import { AgentCardLayer } from './components/AgentCard'
 import { WhatsNew } from './components/Update'
@@ -24,8 +31,10 @@ export function App(): ReactNode {
   const theme = useStore((s) => s.settings.theme)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
+  const guest = useStore(guestWelcome)
   const mac = useStore((s) => s.platform === 'mac')
   const navOpen = useStore((s) => s.navOpen)
+  const tab = hubTab(view)
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
@@ -44,7 +53,7 @@ export function App(): ReactNode {
   useEffect(() => {
     const keys = (e: KeyboardEvent): void => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-      if (!mod || e.altKey || intro) return
+      if (!mod || e.altKey || intro || guest) return
       const s = getState()
       const channels = s.conversations.filter((c) => c.kind === 'channel')
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
@@ -56,7 +65,7 @@ export function App(): ReactNode {
     }
     window.addEventListener('keydown', keys)
     return () => window.removeEventListener('keydown', keys)
-  }, [intro, mac])
+  }, [intro, guest, mac])
 
   // The core may stop before the app shows: the banner says so even then.
   if (!view)
@@ -66,10 +75,10 @@ export function App(): ReactNode {
       </div>
     )
   // Dialogs too: connecting a tool from the introduction may open one (on a server).
-  if (intro)
+  if (intro || guest)
     return (
       <>
-        <Onboarding />
+        {guest ? <GuestWelcome /> : <Intro />}
         <Dialogs />
         <Toasts />
         <CoreDown />
@@ -93,20 +102,31 @@ export function App(): ReactNode {
       </button>
       <div className="nav-shade" onClick={() => setNav(false)} />
       <Sidebar />
+      <SidebarResize />
       <main className="main">
         {view.kind === 'conversation' && <ConversationView key={view.id} id={view.id} />}
         {view.kind === 'agent' && <AgentPage key={view.id} id={view.id} />}
         {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
         {view.kind === 'approvals' && <ApprovalsPage />}
-        {view.kind === 'usage' && <UsagePage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
-        {view.kind === 'memory' && <MemoryPage />}
-        {view.kind === 'wiki' && <WikiView />}
-        {view.kind === 'routines' && <RoutinesPage />}
-        {view.kind === 'skills' && <SkillsPage />}
-        {view.kind === 'report' && <ReportPage />}
+        {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
+        {tab && (
+          <Hub tab={tab}>
+            {tab === 'memory' && <MemoryPage />}
+            {tab === 'wiki' && <WikiView />}
+            {tab === 'skills' && <SkillsPage />}
+            {tab === 'routines' && <RoutinesPage />}
+            {tab === 'report' && <ReportPage />}
+            {tab === 'usage' && <UsagePage />}
+          </Hub>
+        )}
+        {view.kind === 'wiki' && !tab && <WikiView />}
+        {view.kind === 'org' && <OrgPage />}
+        {view.kind === 'board' && <BoardPage />}
         {view.kind === 'settings' && <SettingsPage />}
+        {view.kind === 'missions' && <MissionsPage />}
       </main>
+      <CoachLayer />
       <AgentCardLayer />
       <Dialogs />
       <NameModal />

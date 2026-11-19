@@ -51,12 +51,12 @@ for (let i = 0; i < rounds; i++) {
 
 // ---------- DM after the kept process closed ----------
 const ready = { installed: true, loggedIn: true }
-const settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
+const settings = { workspaceName: 'Gabriel', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' } as Settings
 const db = new Db(join(mkdtempSync(join(tmpdir(), 'bench-db-')), 'bench.db'))
 db.saveAgent(lia)
 db.createConversation({ id: 'dm', kind: 'dm', name: 'lia', members: ['lia'] })
 const dmEngine = claudeEngine(() => bin)
-const engines: Record<EngineId, Engine> = { claude: dmEngine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor') }
+const engines: Record<EngineId, Engine> = { claude: dmEngine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor') }
 const gateway = new Gateway()
 await gateway.start()
 let firstAt = 0

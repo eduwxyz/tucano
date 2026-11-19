@@ -34,8 +34,8 @@ Nos agentes, o nível por conector é **Sem acesso**, **Ler** (só as de leitura
 
 ## Quando dá errado
 - **precisa autorizar**: **Autorizar no navegador** e entre de novo. Um conector OAuth renova sozinho entre aberturas do app; se o servidor recusar a renovação, ele pede login de novo.
-- **não conectou**: **Conectar de novo**. Se continuar, confira o endereço e o login.
+- **não conectou**: **Conectar de novo**. Se continuar, confira o endereço e o login. Rede de empresa, proxy ou antivírus: veja **rede**.
 - O pedido de autorização expirou: feche e clique em **Conectar** de novo.
 - Um do Google ou o Slack que não conecta: veja **google** ou **slack**.
-- Ferramenta que o agente precisa não aparece: veja se está ligada na página do conector, se o agente tem o nível certo e use **Atualizar ferramentas**.
+- Ferramenta que não aparece: confira se está ligada na página do conector e o nível do agente; **Atualizar ferramentas**.
 - **Remover** tira o acesso de todos os agentes; pra voltar, adicione de novo.

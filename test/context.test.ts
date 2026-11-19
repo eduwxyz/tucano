@@ -109,3 +109,19 @@ describe('transcript', () => {
     expect(next.at(-1)).toMatch(/^Edu aprovou o pedido\.\n\nAgora: .+\.$/)
   })
 })
+
+describe('what waits for an approval, at the agent’s level', () => {
+  const at = (a: Agent, autonomy?: 'careful' | 'normal' | 'free') => systemPrompt({ agent: a, settings: { workspaceName: 'Edu', context: '', autonomy }, conversation: dm, peers: [] })
+  it('Normal (the default): sensitive actions become a request', () => {
+    expect(at(theo)).toContain('Ações sensíveis (enviar, apagar, publicar, pagar) não rodam na hora')
+  })
+  it('Careful: anything that changes something asks, from Settings or the agent', () => {
+    expect(at(theo, 'careful')).toContain('Edu quer aprovar tudo que muda algo')
+    expect(at({ ...theo, autonomy: 'careful' }, 'free')).toContain('Edu quer aprovar tudo que muda algo')
+  })
+  it('No guardrails: it acts without asking, and never hears that sensitive actions wait', () => {
+    const p = at({ ...theo, autonomy: 'free' })
+    expect(p).toContain('Edu deixou você agir sem pedir aprovação')
+    expect(p).not.toContain('Ações sensíveis')
+  })
+})
