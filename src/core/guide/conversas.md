@@ -9,6 +9,7 @@
 ## Quem responde num canal
 - Com @handle, responde quem foi chamado.
 - Sem menção, o **Roteador** lê a conversa e escolhe quem responde, pelo papel e pelos conectores de cada um.
+- Quando mais de um vai responder (chamados por @ ou pelo Roteador), eles respondem um depois do outro, na ordem: cada um lê o que os anteriores já fizeram e faz a sua parte em cima disso.
 - Quando um agente menciona outro na resposta, o roteador lê antes e só chama quem tem algo a fazer: um "obrigado" não acorda ninguém. Se o chamado já está respondendo ali, ele não abre uma segunda resposta: vê isso na próxima.
 - Depois de 3 respostas seguidas entre agentes a partir de uma mensagem sua, a conversa entre eles para. Mande uma mensagem pra continuar.
 

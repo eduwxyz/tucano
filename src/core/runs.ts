@@ -362,15 +362,18 @@ type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boole
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
-// it (what was already said, its own earlier one too), and its message last.
+// it (what was already said, its own earlier one too), its message, and then what the other agents
+// called before it on that same message answered (they go one after another: each reads the one before).
 export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anchor: Message, self: string): Message[] {
-  const before = windowed.filter((m) => m.at <= anchor.at && m.id !== anchor.id && m.id !== self)
+  const answers = (m: Message): boolean => m.author.kind === 'agent' && m.run?.replyTo === anchor.id // to that same message, even if made in the same instant
+  const before = windowed.filter((m) => m.at <= anchor.at && m.id !== anchor.id && m.id !== self && !answers(m))
   const earlier = (m: Message): boolean => {
     const to = m.run?.replyTo ? db.message(m.run.replyTo) : undefined
     return !!to && to.id !== anchor.id && to.at <= anchor.at
   }
   const since = windowed.filter((m) => m.at > anchor.at && m.id !== self && m.author.kind === 'agent' && earlier(m))
-  return [...before, ...since, anchor]
+  const alongside = windowed.filter((m) => m.id !== self && answers(m) && m.run?.status !== 'working')
+  return [...before, ...since, anchor, ...alongside]
 }
 
 export class Runner {
@@ -639,7 +642,16 @@ export class Runner {
         return
       }
     }
-    for (const agent of responders) void this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
+    const reply = (agent: Agent, opts: Partial<ReplyOpts> = {}): Promise<Message | undefined> =>
+      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
+    if (responders.length === 1) return void reply(responders[0]!)
+    // Several called by name answer one after another, in the order written: each answers my message
+    // and reads what the ones before it answered (routedHistory), like a routed message.
+    let before: Promise<unknown> | undefined
+    for (const agent of responders) {
+      const go = (): Promise<Message | undefined> => reply(agent, { trigger: mine.id })
+      before = before ? before.then(go, go) : go()
+    }
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -906,10 +918,13 @@ export class Runner {
 
   // Each reply answers the message that was routed (`trigger`), not whatever came in while it
   // waited. One already waiting for the same agent there takes the newer message instead: one reply.
+  // Two or more go one after another, in the order picked: each starts once the one before ends, and
+  // reads what it answered (routedHistory), so a part that needs another's result has it.
   private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string): void {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
-    this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
+    this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(agents.length > 1 ? L(', depois ', ', then ') : '')}${why}`, run: undefined })
+    let before: Promise<void> | undefined // the first starts right away, as one alone always did
     for (const agent of agents) {
       const key = replyKey(agent.id, conv.id, note.threadId)
       const waiting = this.waiting.get(key)
@@ -917,21 +932,30 @@ export class Runner {
         waiting.trigger = trigger
         continue
       }
+      let ended!: () => void
+      const done = new Promise<void>((resolve) => (ended = resolve))
+      let held = !!before // until the one before it has answered
       const slot = {
         trigger,
         queued: false,
         start: (): void => {
-          if (slot.queued) return
+          if (slot.queued || held) return
           slot.queued = true
           this.followups.reserve(key) // taken now: what comes meanwhile waits for this reply
           this.enqueue(() => {
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
-            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger, reserved: true })
+            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger, reserved: true }).finally(ended)
           }, true)
         }
       }
       this.waiting.set(key, slot)
-      if (!this.followups.busy(key) && !this.parked.has(key)) slot.start()
+      const go = (): void => {
+        held = false
+        if (this.waiting.get(key) === slot && !this.followups.busy(key) && !this.parked.has(key)) slot.start()
+      }
+      if (before) void before.then(go)
+      else go()
+      before = done
     }
   }
 
@@ -2408,7 +2432,7 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.at(-1)?.id === anchor.id ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.some((m) => m.id === anchor.id) ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))

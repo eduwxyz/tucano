@@ -6,7 +6,7 @@
 // straight to its sector's head (what isn't the sector's), never one step at a time: each step is one
 // more reply and one more retelling. Each tree is a sector (its top agent is the head): only heads ask
 // other sectors, and only their heads, who pass it down their own branch.
-// With no one answering to anyone there is no tree, and everything works as it always did.
+// With no one answering to anyone there is no tree: then each agent may ask any other, as colleagues.
 import type { Agent, Conversation } from './types'
 
 type Node = Pick<Agent, 'id' | 'reportsTo'> & Partial<Pick<Agent, 'archived' | 'kind' | 'entry'>>
@@ -53,6 +53,18 @@ export function peersOf<T extends Node>(agents: T[], id: string): T[] {
   return boss ? directReports(agents, boss.id).filter((a) => a.id !== id) : []
 }
 
+// Whether `a` is in no tree: it answers to no agent, no one answers to it, and the person didn't make it
+// an entry point. The Tuca (it builds the others) and the archived are never counted.
+const isLoose = <T extends Node>(agents: T[], a: T): boolean => !a.archived && a.kind !== 'tuca' && a.entry !== true && !bossOf(agents, a) && directReports(agents, a.id).length === 0
+
+// Those `id` works beside when neither is in any tree: a team nobody drew is still a team, and its agents
+// may ask each other. Whoever is in a tree keeps the tree's ways, and is not one of these.
+export function looseColleaguesOf<T extends Node>(agents: T[], id: string): T[] {
+  const me = agents.find((a) => a.id === id)
+  if (!me || !isLoose(agents, me)) return []
+  return agents.filter((a) => a.id !== id && isLoose(agents, a))
+}
+
 // The tops of the trees: those who answer to no agent and have someone below, Tuca aside.
 const topsOf = <T extends Node>(agents: T[]): T[] => agents.filter((a) => !a.archived && a.kind !== 'tuca' && !bossOf(agents, a) && directReports(agents, a.id).length > 0)
 
@@ -93,7 +105,10 @@ export const sectorName = (head: Pick<Agent, 'name'> & Partial<Pick<Agent, 'sect
 
 // Everyone `id` may hand work to: those below it, its colleagues, its own boss, its sector's head (however
 // far above), and, when it heads a sector or is an entry point, the sectors' heads. Nearest first, each once.
+// One in no tree reaches the others in none (looseColleaguesOf).
 export const reachOf = <T extends Node>(agents: T[], id: string): T[] => {
+  const loose = looseColleaguesOf(agents, id)
+  if (loose.length) return loose
   const me = agents.find((a) => a.id === id)
   const boss = me && !me.archived ? bossOf(agents, me) : undefined
   const isHead = headsOf(agents).some((h) => h.id === id)
@@ -107,6 +122,7 @@ export const reachOf = <T extends Node>(agents: T[], id: string): T[] => {
 export type AskKind = 'down' | 'peer' | 'up' | 'sector'
 export function askKind(agents: Node[], from: string, to: string): AskKind {
   if (from === to) return 'peer' // a head and itself are not two sectors
+  if (looseColleaguesOf(agents, from).some((a) => a.id === to)) return 'peer' // two agents in no tree
   // Two heads, whether each tops a tree or both answer to the entry point: one sector asking another.
   const heads = headsOf(agents)
   if (heads.some((h) => h.id === from) && heads.some((h) => h.id === to)) return 'sector'
