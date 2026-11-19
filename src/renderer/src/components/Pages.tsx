@@ -1,4 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { JobWatchSettingsCard } from './JobWatch'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -967,6 +968,17 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <Toggle label={L('Navegador próprio', 'Own browser')} on={!!draft.browser} onChange={(v) => patch({ browser: v }, true)} />
               </Row>
               {!isNew && draft.browser && admin && <BrowserLogins agentId={draft.id} agentName={draft.name} />}
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
+              title={L('Acompanhar jobs', 'Follow jobs')}
+              help={L('Acompanha runs do Databricks pela CLI, com um cartão ao vivo na conversa. Só usa os comandos permitidos em Configurações › Agentes. Essas regras não valem pra um agente em Este computador, que roda comandos como você: use um perfil só de leitura, ou deixe ele em Linux isolado ou sem computador.', 'Follows Databricks runs through the CLI, with a live card in the conversation. It only uses the commands allowed in Settings › Agents. Those rules don’t bind an agent on This computer, which runs commands as you: use a read-only profile, or keep it on isolated Linux or with no computer.')}
+            >
+              <Row label={L('Acompanhar jobs', 'Follow jobs')}>
+                <Toggle label={L('Acompanhar jobs', 'Follow jobs')} on={!!draft.jobWatch} onChange={(v) => patch({ jobWatch: v }, true)} />
+              </Row>
             </Section>
           )}
 
@@ -3496,6 +3508,7 @@ export function SettingsPage(): ReactNode {
             </div>
           </Card>
         )}
+        {pane('agentes') && admin && <JobWatchSettingsCard />}
         {pane('geral') && owner && <WorkspaceDangerArea />}
       </div>
     </Page>

@@ -4,6 +4,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **An agent follows a Databricks run.** Ask it to follow a job or a run: the app checks through the Databricks CLI, on the login you already have and spending no tokens, shows a live card with state, tasks, shuffle, spill and memory, and wakes the agent only on a failure, the end or a possible stall (no progress, a straggler task, a run far past its median). The analysis goes in the card's thread. It finds the CLI and the profile on its own. Off by default for each agent (**Tools › Follow jobs**), with the allowed commands and every limit in **Settings › Agents**; starting and canceling jobs are off too, and ask for approval when on. Spark's numbers come only from a run still going on a classic cluster, and how the app reaches them is still to be checked against a real workspace.
+- **A query's rows show as a table under the reply.** When an agent runs SQL, through a connector or a command, what came back shows in a card: up to 100 rows and 30 columns, numbers to the right, a column to sort by with a click, a filter, and **Copy CSV** or **Copy Markdown** of what's shown. The agent is told the rows show, so it sums them up instead of copying them, and a later question about them ("the average by state") gets a new query built from the first.
+
 ## [0.2.41] - 2026-11-19
 
 > **Em português:**

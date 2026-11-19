@@ -133,6 +133,9 @@ export const NEEDS: Record<Method, Need> = {
   saveRoutine: 'target',
   removeRoutine: 'target',
   runRoutine: 'target',
+  stopJobWatch: 'anyone', // the call checks the person sees its conversation
+  cancelJobRun: 'admin',
+  checkDatabricks: 'admin',
   watchRoutine: 'anyone',
   sendFeedback: 'anyone', // to the people who make Tucano: what anyone here saw go wrong
   survey: 'owner', // one answer per install: the owner's
