@@ -25,6 +25,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
 - **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
 
+- **Each session is named as it starts.** A small model reads the request and answers with two to five words — "Session names", "App icon on macOS" — one call, in the background, so the reply never waits for it. The name sits on the reply's head line beside the agent's name, and it is the name a thread carries in its header. The model is picked in **Settings › Models › Nomes das sessões**, between the agents' models and the runtimes; with nothing picked it uses the memory's model.
+
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)

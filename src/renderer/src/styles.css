@@ -16783,3 +16783,14 @@ button.agent-card__now:hover {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* A session's name, beside the agent's own and before the time (src/core/titles.ts). Cut with an
+   ellipsis rather than wrap: the head line stays one line however long the model's name is. */
+.msg__session {
+  color: var(--text-2);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
