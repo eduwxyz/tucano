@@ -46,6 +46,8 @@ import {
   MAX_AGENT_ROUTINES,
   MAX_CHAIN_DEPTH,
   chainDepthCap,
+  MAX_PARALLEL_SESSIONS,
+  maxParallelSessionsCap,
   RUN_BUDGET_PCT,
   routineCap,
   RUN_STALL_MINUTES,
@@ -3138,18 +3140,18 @@ function VoiceCard(): ReactNode {
   )
 }
 
-// The four ways a prompt sent while a reply is running can meet that reply (see `send` in
-// src/core/runs.ts). Order and values are the ones the 0.2.36 setting had, so an old value still
-// means what the person chose.
-export const REPLY_MODES = ['parallel', 'queue', 'steer', 'interrupt'] as const satisfies readonly SendMode[]
+// The two ways a prompt sent while a reply is running can use Enter (see `send` in
+// src/core/runs.ts). Steering and interrupting stay one key away, but are not Enter defaults.
+export const REPLY_MODES = ['parallel', 'queue'] as const satisfies readonly SendMode[]
 
-// What the card saves for the number: whatever was typed, the core gets a whole number from 1 to
-// MAX_CHAIN_DEPTH, so a hand-edited settings file can't lift the chain.
+// What the card saves for the numbers: whatever was typed, the core gets whole numbers inside the
+// caps, so a hand-edited settings file can't lift either one.
 export const chainDepthPatch = (n: number): Pick<Settings, 'chainDepth'> => ({ chainDepth: chainDepthCap(n) })
+export const maxParallelSessionsPatch = (n: number): Pick<Settings, 'maxParallelSessions'> => ({ maxParallelSessions: maxParallelSessionsCap(n) })
 
 // The agent replies card the 0.2.36 settings had, back on the Agents pane: what Enter does while a
-// reply is running, and how many replies the agents may pass between themselves. The number caps that
-// chain only; how many replies run at once is the core's own fixed limit, not a setting.
+// reply is running, the most replies that work in one channel at once, and how many replies the
+// agents may pass between themselves.
 export function AgentRepliesCard({ settings, update }: { settings: Settings; update: (patch: Partial<Omit<Settings, 'engines'>>) => void }): ReactNode {
   return (
     <Card section="agents-replies" title={L('Respostas dos agentes', 'Agent replies')}>
@@ -3157,8 +3159,8 @@ export function AgentRepliesCard({ settings, update }: { settings: Settings; upd
         <Field
           label={L('Um novo prompt com uma resposta em curso', 'While a reply is running')}
           hint={L(
-            'O que o Enter faz quando o agente já está respondendo ali. Ctrl+Enter põe na fila, Alt+Enter entrega no meio do trabalho e Shift+Alt+Enter interrompe, seja qual for o ajuste. Shift+Enter quebra a linha.',
-            'Enter uses the mode you pick here. Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line.'
+            'O Enter segue esta escolha. Ctrl+Enter põe na fila, Alt+Enter entrega e Shift+Alt+Enter interrompe: cada um só uma vez. Shift+Enter quebra a linha.',
+            'Enter follows this choice. Ctrl+Enter queues, Alt+Enter steers, Shift+Alt+Enter interrupts — each just once. Shift+Enter adds a line.'
           )}
         >
           <Select
@@ -3166,11 +3168,21 @@ export function AgentRepliesCard({ settings, update }: { settings: Settings; upd
             onChange={(v) => { if (v) update({ sendMode: v as SendMode }) }}
             options={[
               { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Parallel replies') },
-              { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') },
-              { value: 'steer', label: L('Entregue à resposta em curso', 'Steer current reply') },
-              { value: 'interrupt', label: L('Interrompe e começa com esta', 'Interrupt and restart') }
+              { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') }
             ]}
             placeholder={L('Escolha', 'Pick')}
+          />
+        </Field>
+        <Field
+          label={L('Sessões paralelas por canal', 'Parallel sessions per channel')}
+          hint={L('As demais esperam na fila.', 'Replies past this limit wait in the queue.')}
+        >
+          <NumberInput
+            aria-label={L('Sessões paralelas por canal', 'Parallel sessions per channel')}
+            min={1}
+            max={MAX_PARALLEL_SESSIONS}
+            value={maxParallelSessionsCap(settings.maxParallelSessions)}
+            onChange={(n) => update(maxParallelSessionsPatch(n))}
           />
         </Field>
         <Field

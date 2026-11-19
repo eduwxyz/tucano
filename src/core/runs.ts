@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type SendMode, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, RUN_STALL_MINUTES, chainDepthCap, maxParallelSessionsCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type SendMode, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -605,7 +605,11 @@ export class Runner {
     // No mode at all (the phone, an approval's outcome, a routine, a retry) is the way replies have
     // always gone here: one at a time per agent and thread, a person's newer message taking over.
     const mode = opts.mode
-    const queued = mode === 'queue' && this.busyIn(conv.id)
+    // Parallel has a per-channel cap. What comes past it waits in that channel's queue like a
+    // queued prompt, marked on the message so it starts once after a restart, not twice.
+    const parallelCap = mode === 'parallel' ? maxParallelSessionsCap((await this.deps.settings()).maxParallelSessions) : 0
+    const room = (): boolean => (this.convRuns.get(conv.id) ?? 0) < parallelCap
+    const queued = this.busyIn(conv.id) && (mode === 'queue' || (mode === 'parallel' && !room()))
     if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
@@ -690,15 +694,19 @@ export class Runner {
       else if (may.length > 1) {
         // A queued prompt waits for everything running there to end; any other goes as it always
         // has, straight to the router, without taking one of the queue's places while it decides.
-        if (mode === 'queue') void this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id), true, mine)
-        else void this.routeAndRun(conv, may, replyIn, mine.id, mode === 'parallel')
+        if (mode === 'queue' || (mode === 'parallel' && !room())) void this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id), true, mine)
+        else void this.routeAndRun(conv, may, replyIn, mine.id, parallelCap)
         return
       }
     }
-    // A parallel one goes beside the reply running there, two at once; no mode (or a steer that found
-    // nothing to go into) goes as a reply always does, one at a time per agent and thread there, the
-    // person's newer messages taking over; a queued one waits for everything running there to end.
+    // A parallel one goes beside the reply running there, two at once, until the channel's cap is
+    // full; the rest wait with the queued ones. No mode (or a steer that found nothing to go into)
+    // goes as a reply always does, one at a time per agent and thread there, the person's newer
+    // messages taking over.
     for (const agent of responders) {
+      // Checked per responder: mentioning two agents past the cap queues the second one too.
+      const beside = mode === 'parallel' && room()
+      const wait = mode === 'queue' || (mode === 'parallel' && !beside)
       const start = (): Promise<unknown> => {
         // startReply takes its own place in the queue once the agent is free, so the job that only
         // launches it gives its place back at once instead of holding one until the reply ends.
@@ -707,11 +715,11 @@ export class Runner {
           conv,
           { depth: 1, threadId: replyIn, replyTo: mine.id, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) },
           // A queued prompt answers the message it was written for, never taking over an earlier one.
-          { urgent: true, merge: mode !== 'queue', parallel: mode === 'parallel' }
+          { urgent: true, merge: !wait, parallel: beside }
         )
         return Promise.resolve()
       }
-      if (mode === 'queue') this.runIn(conv.id, start, true, queued ? mine : undefined)
+      if (wait) this.runIn(conv.id, start, true, queued ? mine : undefined)
       else void start()
     }
   }
@@ -1042,9 +1050,9 @@ export class Runner {
   }
 
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
-  // `parallel`: the prompt was sent beside the reply running there, so the reply the router picks goes
-  // beside it too (see `routed`), instead of waiting for that reply to end.
-  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, parallel = false): Promise<void> {
+  // `parallelCap`: when the prompt was sent beside a running reply, the most replies that may run in
+  // this channel at once. The router takes a while, so the room is checked again when it picks.
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, parallelCap = 0): Promise<void> {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
     this.routing++
@@ -1072,7 +1080,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, parallel)
+        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, parallelCap)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -1086,7 +1094,7 @@ export class Runner {
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
+      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallelCap)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1097,9 +1105,9 @@ export class Runner {
 
   // Each reply answers the message that was routed (`trigger`), not whatever came in while it
   // waited. One already waiting for the same agent there takes the newer message instead: one reply.
-  // `parallel`: it goes beside whatever is running there, two at once, as the person asked of their
-  // own prompt. Otherwise it waits for that reply to end (a routed reply reads what it said).
-  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string, parallel = false): void {
+  // `parallelCap`: it goes beside what is running there while the channel has room, as the person
+  // asked of their own prompt. Past that it waits (a routed reply reads what the running one said).
+  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string, parallelCap = 0): void {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(L(' e ', ' and '))}${why}`, run: undefined })
@@ -1124,7 +1132,7 @@ export class Runner {
         }
       }
       this.waiting.set(key, slot)
-      if (parallel || (!this.followups.busy(key) && !this.parked.has(key))) slot.start()
+      if (parallelCap > 0 ? (this.convRuns.get(conv.id) ?? 0) < parallelCap : !this.followups.busy(key) && !this.parked.has(key)) slot.start()
     }
   }
 

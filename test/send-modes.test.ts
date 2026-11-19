@@ -134,6 +134,38 @@ describe('a prompt that arrives while a reply is running', () => {
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done']) // both answered
   })
 
+  it('parallel: past the channel cap, a prompt waits in the queue until a reply ends', async () => {
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d1', 'ao lado', [], undefined, undefined, { mode: 'parallel' })
+    await r.send('d1', 'na fila', [], undefined, undefined, { mode: 'parallel' })
+    expect(rec.filter((x) => x === 'start')).toHaveLength(2) // the cap is two, so the third waits
+    expect(mine().at(-1)?.sendMode).toBe('queue') // and says so in the conversation
+    expect(db.queuedMessages().map((m) => m.text)).toEqual(['na fila']) // and survives a restart
+    await r.idle()
+    expect(rec.filter((x) => x === 'start')).toHaveLength(3)
+    expect(rec.at(-1)).toBe('end') // it went after the two already there
+    expect(db.queuedMessages()).toEqual([])
+  })
+
+  it('parallel: a lower setting puts the extra prompt in the queue, and it still gets an answer', async () => {
+    settings.maxParallelSessions = 1
+    db.saveAgent(agent())
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'primeiro')
+    await r.send('d1', 'segundo', [], undefined, undefined, { mode: 'parallel' })
+    expect(rec).toEqual(['start'])
+    expect(mine().at(-1)?.sendMode).toBe('queue')
+    await r.idle()
+    expect(rec).toEqual(['start', 'end', 'start', 'end'])
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
+  })
+
   it('parallel: only one of the two holds the kept session, the other reads the whole conversation', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -272,6 +304,21 @@ describe('a channel prompt the router picks for', () => {
     await r.idle()
     expect(rec).toEqual(['start', 'start', 'end', 'end'])
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
+  })
+
+  it('parallel: the cap also holds for the reply the router picks', async () => {
+    settings.maxParallelSessions = 1
+    channel()
+    const rec: string[] = []
+    const r = runnerWith(recording(rec))
+    await r.send('c1', '@lia comece, demore 1 s')
+    await r.send('c1', 'e isto também', [], undefined, undefined, { mode: 'parallel' }) // the router picks Lia again
+    await expect.poll(() => rec.filter((x) => x === 'start').length, { timeout: 5000 }).toBe(1)
+    expect(mine().at(-1)?.sendMode).toBe('queue')
+    await new Promise((res) => setTimeout(res, 400)) // long enough for the router to have picked someone
+    expect(rec.filter((x) => x === 'start')).toHaveLength(1)
+    await r.idle()
+    expect(rec.filter((x) => x === 'start')).toHaveLength(2)
   })
 
   it('no mode: it waits for the reply running there to end, as any other reply', async () => {

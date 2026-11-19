@@ -1386,11 +1386,20 @@ h3 {
   color: var(--text-3);
   font-size: 11.5px;
 }
-/* A prompt of mine waiting its turn behind the reply above: it goes when that one ends. */
+/* A prompt of mine waiting its turn behind the reply above: the label says queued, the line under it why. */
 .msg__queued {
-  display: inline-block;
+  display: block;
   margin-top: 4px;
   color: var(--text-3);
+}
+.msg__queued-label {
+  display: block;
+  font-weight: 600;
+}
+.msg__queued-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
   font-style: italic;
 }
 .md > :first-child {

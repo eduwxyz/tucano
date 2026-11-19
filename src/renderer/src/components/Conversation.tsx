@@ -473,6 +473,16 @@ const NO_ATTACHED: Artifact[] = []
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
+// The mark under a prompt that hasn't started: the label says it is queued, the line below why.
+export function QueuedNote(): ReactNode {
+  return (
+    <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
+      <span className="msg__queued-label">{L('Na fila', 'Queued')}</span>
+      <span className="msg__queued-sub">{L('Esperando a resposta acima terminar', 'Waiting for the reply above to finish')}</span>
+    </span>
+  )
+}
+
 const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
@@ -590,11 +600,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         )}
         {/* A prompt of mine waiting its turn behind the reply above (the mode on the message, runs.ts):
             it says so until its own reply starts, and then the mark goes. */}
-        {message.sendMode === 'queue' && (
-          <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
-            {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
-          </span>
-        )}
+        {message.sendMode === 'queue' && <QueuedNote />}
         {/* A prompt handed into the reply above, which reads it between two tool calls (runs.ts). It's
             said here, so a message that gets no reply of its own never looks lost. */}
         {message.sendMode === 'steer' && (

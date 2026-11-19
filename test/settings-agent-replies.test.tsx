@@ -1,11 +1,13 @@
-// The agent replies card, back on the Agents pane: the 0.2.36 send mode with its four ways, and the
-// number of replies the agents may pass between themselves. The card is anchored where the settings
-// rail expects it (`agents-replies`), the four modes each save, and the number stays within the cap.
+// The agent replies card, back on the Agents pane: the two Enter modes, the cap on replies working
+// in one channel, and the number of replies the agents may pass between themselves. The card is
+// anchored where the settings rail expects it (`agents-replies`), both numbers stay within their caps,
+// and steering and interrupting are only one-shot keys now.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MAX_CHAIN_DEPTH, type Settings } from '../src/shared/types'
+import { DEFAULT_MAX_PARALLEL_SESSIONS, MAX_CHAIN_DEPTH, MAX_PARALLEL_SESSIONS, maxParallelSessionsCap, type Settings } from '../src/shared/types'
+import { PERSONAL_SETTINGS } from '../src/core/policy-people'
 import { GENERAL_SETTINGS } from '../src/shared/workspaces'
 import { settingsPatchError } from '../src/core/settings-patch'
 import type { State } from '../src/renderer/src/store'
@@ -48,7 +50,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 
 const { createRoot } = await import('react-dom/client')
-const { SettingsPage, REPLY_MODES, chainDepthPatch } = await import('../src/renderer/src/components/Pages')
+const { SettingsPage, REPLY_MODES, chainDepthPatch, maxParallelSessionsPatch } = await import('../src/renderer/src/components/Pages')
 const base = (await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')).getState()
 
 const ready = { installed: true, loggedIn: true, route: 'local' }
@@ -108,15 +110,16 @@ describe('the agent replies card on the Agents pane', () => {
     expect(card.contains(capped[0]!)).toBe(true)
   })
 
-  it('offers the four modes, and each one saves itself', async () => {
+  it('offers only the two Enter modes, and each one saves itself', async () => {
     const card = await draw()
     const shown = await optionsOf(card)
-    expect(shown.map((o) => o.label)).toEqual([
-      'Ao lado dela, em paralelo',
-      'Na fila, quando a resposta acabar',
-      'Entregue à resposta em curso',
-      'Interrompe e começa com esta'
-    ])
+    expect(shown.map((o) => o.label)).toEqual(['Ao lado dela, em paralelo', 'Na fila, quando a resposta acabar'])
+    expect(card.textContent).not.toContain('Entregue à resposta em curso')
+    expect(card.textContent).not.toContain('Interrompe e começa com esta')
+    // The hint still names the one-shot keys, but no longer offers them as Enter choices.
+    expect(card.textContent).toContain('Alt+Enter entrega')
+    expect(card.textContent).toContain('Shift+Alt+Enter interrompe')
+    expect(card.textContent).toContain('Ctrl+Enter põe na fila')
     // In the order of REPLY_MODES, one row each: picking a row saves that mode.
     expect(shown).toHaveLength(REPLY_MODES.length)
     for (const [i, mode] of REPLY_MODES.entries()) {
@@ -126,9 +129,23 @@ describe('the agent replies card on the Agents pane', () => {
     }
   })
 
+  it('sets how many sessions may work in one channel, between one and the cap', async () => {
+    const card = await draw()
+    const input = [...document.querySelectorAll('input[type=number]')].find((i) => i.getAttribute('max') === String(MAX_PARALLEL_SESSIONS)) as unknown as HTMLInputElement
+    expect(card.contains(input)).toBe(true)
+    expect(input.getAttribute('min')).toBe('1')
+    expect((input as unknown as HTMLInputElement).value).toBe(String(DEFAULT_MAX_PARALLEL_SESSIONS))
+    expect(input.getAttribute('aria-label')).toBe('Sessões paralelas por canal')
+    // Whatever reached the core, the saved value is a whole number inside the cap.
+    expect(maxParallelSessionsPatch(50)).toEqual({ maxParallelSessions: MAX_PARALLEL_SESSIONS })
+    expect(maxParallelSessionsPatch(0)).toEqual({ maxParallelSessions: 1 })
+    expect(maxParallelSessionsPatch(3.6)).toEqual({ maxParallelSessions: 4 })
+    expect(maxParallelSessionsCap(undefined)).toBe(DEFAULT_MAX_PARALLEL_SESSIONS)
+  })
+
   it('caps the number of consecutive replies at both ends', async () => {
     const card = await draw()
-    const input = card.querySelector('input[type=number]')!
+    const input = [...card.querySelectorAll('input[type=number]')].find((i) => i.getAttribute('max') === String(MAX_CHAIN_DEPTH))!
     // The control itself stops at the cap…
     expect(input.getAttribute('min')).toBe('1')
     expect(input.getAttribute('max')).toBe(String(MAX_CHAIN_DEPTH))
@@ -142,16 +159,18 @@ describe('the agent replies card on the Agents pane', () => {
   })
 })
 
-describe('the settings these two keys travel by', () => {
-  it('both pass the patch rules, and a mode that is not one of the four does not', () => {
-    expect(settingsPatchError({ sendMode: 'steer', chainDepth: 4 })).toBeUndefined()
+describe('the settings the card travels by', () => {
+  it('pass the patch rules, and bad values do not', () => {
+    expect(settingsPatchError({ sendMode: 'steer', chainDepth: 4, maxParallelSessions: 2 })).toBeUndefined()
     expect(settingsPatchError({ sendMode: 'parallel' })).toBeUndefined()
     expect(settingsPatchError({ sendMode: 'sideways' })).toBeTruthy()
     expect(settingsPatchError({ chainDepth: 'four' })).toBeTruthy()
+    expect(settingsPatchError({ maxParallelSessions: 'two' })).toBeTruthy()
   })
 
-  it('both are general settings, so a new workspace takes them', () => {
+  it('goes to the right scope, with sendMode and chainDepth general', () => {
     expect(GENERAL_SETTINGS).toContain('sendMode')
     expect(GENERAL_SETTINGS).toContain('chainDepth')
+    expect(PERSONAL_SETTINGS).toContain('maxParallelSessions')
   })
 })
