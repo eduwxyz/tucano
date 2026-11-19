@@ -1015,10 +1015,10 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('ferramentas') && (
             <Section
               title="Wiki"
-              help={`${L(
+              help={L(
                 'A wiki é o que você e o time sabem, em páginas. Com acesso, o agente consulta antes de responder e cita as páginas; lendo e escrevendo, ele também cria e corrige páginas por conta própria.',
                 'The wiki is what you and the team know, as pages. With access, the agent looks there before replying and cites the pages; reading and writing, it also creates and corrects pages on its own.'
-              )}${isNew || !admin ? '' : L(' Muda na hora, sem precisar salvar.', ' Takes effect right away, no need to save.')}`}
+              )}
             >
               <Row label={L('Acesso à wiki', 'Wiki access')}>
                 <div className="segmented segmented--quiet" role="radiogroup" aria-label="Wiki">
