@@ -1848,22 +1848,47 @@ export function AskedRow({
             <div className="grow">
               {q.decisions?.length ? (
                 <div className="history-questions">
-                  {q.decisions.map((question, i) => (
-                    <div key={i} className="history-question">
-                      <p className="history-question__title">{question.question}</p>
-                      {question.options && (
+                  {q.decisions.map((question, i) => {
+                    const answer = q.answers?.[i] ?? undefined
+                    const taken = answer?.chosen ?? []
+                    return (
+                      <div key={i} className="history-question">
+                        <p className="history-question__title">{question.question}</p>
                         <div className="history-question__options">
-                          {question.options.map((option, j) => (
-                            <span key={j} className={`history-question__option ${q.recommended?.[i] === j ? 'is-recommended' : ''}`}>
+                          {(question.options ?? []).map((option, j) => (
+                            <span
+                              key={j}
+                              className={`history-question__option ${taken.includes(j) ? 'is-answered' : ''} ${q.recommended?.[i] === j ? 'is-recommended' : ''}`}
+                            >
                               <span className="history-question__number">{j + 1}</span>
                               <span className="history-question__label">{option.label}</span>
-                              {q.recommended?.[i] === j && <span className="ask-option__pill">{L('Recomendado', 'Recommended')}</span>}
+                              {option.description && <span className="history-question__detail">{option.description}</span>}
+                              {q.recommended?.[i] === j && (
+                                <span className="history-question__star" role="img" title={L('Recomendado', 'Recommended')} aria-label={L('Recomendado', 'Recommended')}>
+                                  <Icon name="star" size={11} />
+                                </span>
+                              )}
                             </span>
                           ))}
+                          {answer?.other && (
+                            <span className="history-question__option history-question__option--said is-answered">
+                              <span className="history-question__number">…</span>
+                              <span className="history-question__label">{answer.other}</span>
+                            </span>
+                          )}
+                          {answer?.text && (
+                            <span className="history-question__option history-question__option--said is-answered">
+                              <span className="history-question__number">…</span>
+                              <span className="history-question__label">{answer.text}</span>
+                            </span>
+                          )}
+                          {!answer?.other && !answer?.text && (answer?.skipped || !(question.options?.length ?? 0)) && (
+                            <span className="history-question__option history-question__option--none">{L('sem resposta', 'no answer')}</span>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
                 <Markdown remarkPlugins={[remarkGfm]}>{askMarkdown(q.text)}</Markdown>

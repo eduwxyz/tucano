@@ -46,6 +46,9 @@ const PATHS: Record<string, ReactNode> = {
   send: <path d="M4 12 20 4l-6 16-3-7-7-1Z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" />,
+  // A star that is solid on purpose: it marks a pick, so it has to read at 11 px where an outline
+  // five-point star turns to mush.
+  star: <path d="M12 3.4l2.7 5.5 6 .9-4.3 4.2 1 6-5.4-2.8-5.4 2.8 1-6L3.3 9.8l6-.9L12 3.4Z" fill="currentColor" stroke="none" />,
   clock: (
     <>
       <circle cx="12" cy="12" r="9" />

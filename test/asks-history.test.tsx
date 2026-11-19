@@ -101,7 +101,7 @@ describe('a row of the asks history', () => {
     expect(html).toContain('Ver na conversa')
   })
 
-  it('draws opened questions as rounded widgets with numbered options and the recommended pill', () => {
+  it('draws opened questions as rounded widgets, with a star on the option the agent pointed at', () => {
     const q = asked({
       decisions: [{ question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] }],
       recommended: [0]
@@ -110,7 +110,55 @@ describe('a row of the asks history', () => {
     expect(html).toContain('history-question')
     expect(html).toContain('history-question__number') 
     expect(html).toContain('>1</span>')
-    expect(html).toContain('Recomendado')
+    // The pick is a star, not the word: the mark says it, and the word survives only as its name.
+    expect(html).toContain('history-question__star')
+    expect(html).toContain('aria-label="Recomendado"')
+    expect(html).not.toContain('>Recomendado<')
+    // No pill of any kind around it, and never the working card's accent pill.
+    expect(html).not.toContain('history-question__pill')
+    expect(html).not.toContain('ask-option__pill')
+  })
+
+  it('keeps the questions the agent asked one after another on one row of widgets', () => {
+    const q = asked({
+      decisions: [
+        { question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] },
+        { question: 'Reviso o texto?', options: [{ label: 'Reviso agora' }, { label: 'Depois' }] }
+      ]
+    } as never)
+    const html = row(true, q)
+    // One container, two widgets: the row is what puts them side by side (styles.css, .history-questions).
+    expect(html.split('history-questions').length - 1).toBe(1)
+    expect(html.split('class="history-question"').length - 1).toBe(2)
+    const first = html.indexOf('Publico o post hoje?')
+    const second = html.indexOf('Reviso o texto?')
+    expect(first).toBeGreaterThan(-1)
+    expect(second).toBeGreaterThan(first)
+    expect(html.lastIndexOf('history-questions')).toBeLessThan(second)
+  })
+
+  it('marks the option the person took, and only that one, as the answered row', () => {
+    const q = asked({
+      decisions: [
+        { question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] },
+        { question: 'Quando reviso?', kind: 'text' }
+      ],
+      answers: [{ chosen: [1] }, { text: 'sexta de manhã' }]
+    } as never)
+    const html = row(true, q)
+    // The taken option and the typed answer, not the option left behind.
+    expect(html.split('is-answered').length - 1).toBe(2)
+    expect(html).toContain('sexta de manhã')
+    const taken = html.slice(html.indexOf('is-answered'), html.indexOf('history-question__option', html.indexOf('is-answered') + 12))
+    expect(taken).toContain('Não, espero')
+    expect(taken).not.toContain('Sim, publico')
+  })
+
+  it('says a decision was left unanswered rather than drawing an empty widget', () => {
+    const q = asked({ decisions: [{ question: 'Quando reviso?', kind: 'text' }], answers: [{ skipped: true }] } as never)
+    const html = row(true, q)
+    expect(html).toContain('history-question__option--none')
+    expect(html).toContain('sem resposta')
   })
 
   it('says how it ended: by you, by someone else, or with no answer at all', () => {
