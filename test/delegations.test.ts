@@ -256,6 +256,37 @@ describe('work handed down the tree', () => {
     expect(db.openDelegations()).toEqual([])
   })
 
+  it('lets agents in no tree ask each other with no chart drawn, and brings the answer back', async () => {
+    db.saveAgent(agent('lia', { role: 'Pesquisa' }))
+    db.createConversation({ id: 'pesquisa', kind: 'channel', name: 'pesquisa', members: ['lia'] })
+    db.createConversation({ id: 'ds', kind: 'dm', name: 'solo', members: ['solo'] })
+    const r = runner()
+    await r.send('ds', 'delegue a lia: ache três concorrentes')
+    await r.idle()
+    // Solo reads Lia as a colleague in a team with no boss; Clara, in Orion's tree, isn't one.
+    const solo = claude.turns[0]!.prompt
+    expect(solo).toContain('## Seus colegas\nVocês são um time sem chefe')
+    expect(solo).toContain('- @lia · Lia')
+    expect(solo).not.toContain('- @clara')
+    const asked = by('solo', 'pesquisa')[0]!
+    expect(asked.text).toContain('@lia, um pedido')
+    expect(by('lia', 'pesquisa')[0]?.threadId).toBe(asked.id)
+    expect(claude.turns.some((t) => t.prompt.includes('um pedido de Solo, seu colega de time'))).toBe(true)
+    expect(claude.turns.at(-1)?.prompt).toMatch(/Lia, #pesquisa: terminou/)
+    expect(db.openDelegations()).toEqual([])
+    // Outside the tree, it reaches no one in it.
+    await r.send('ds', 'delegue a clara: qualquer coisa')
+    await r.idle()
+    expect(by('solo', 'ds').at(-1)?.text).toContain('Você não alcança ninguém chamado "clara". Quem você alcança: @lia.')
+  })
+
+  it('tells whoever gets a request to decide what it can and ask only what blocks it', async () => {
+    const r = runner()
+    await r.send('dm', 'delegue a clara: responda o Fulano')
+    await r.idle()
+    expect(claude.turns.some((t) => t.prompt.includes('Não pare pra confirmar o que dá pra decidir') && t.prompt.includes('uma pergunta só, com a sua recomendação'))).toBe(true)
+  })
+
   it('never asks back whoever is waiting on the work, nor another branch', async () => {
     db.saveAgent(agent('duda', { reportsTo: 'bento' }))
     db.createConversation({ id: 'dn', kind: 'dm', name: 'nico', members: ['nico'] })
