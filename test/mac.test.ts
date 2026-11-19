@@ -2,13 +2,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFi
 import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, Conversation } from '../src/shared/types'
 import { liveContext, systemPrompt } from '../src/core/context'
 import { artifactKind, Computers, computerTools, linuxTools, stepFor } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
 import { systemName } from '../src/core/platform'
+
+// This file drives real processes (python3, node, lsof, a port) the way the core tests drive the
+// core, so it gets their deadline rather than the 5 s default: on GitHub's macOS runner the service
+// test ran past 5 s while the machine was busy, and a starved worker isn't a failed test.
+vi.setConfig({ testTimeout: process.platform === 'win32' ? 60_000 : 30_000 })
 
 const agent = (extra: Partial<Agent> = {}): Agent => ({
   id: 'prod-0001',

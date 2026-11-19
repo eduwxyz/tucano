@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { checkingFindings, EngineCheck, type EngineFindings, type OneFinding } from '../src/core/engine-check'
-import type { EngineId, EngineStatus } from '../src/shared/types'
+import { ENGINE_IDS, type EngineId, type EngineStatus } from '../src/shared/types'
 
 // A promise the test settles by hand: a check that takes as long as the test wants.
 function later<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
@@ -144,5 +144,17 @@ describe('the last check, kept', () => {
     expect(check.known).toBe(true)
     expect(check.current.engines.claude).toEqual(signedIn)
     expect(check.current.engines.grok.checking).toBe(true)
+  })
+
+  it('knows every harness from the first moment, also over a check kept by an older version', () => {
+    // Before any check, and on a file written when there were fewer harnesses: each one has a status
+    // to read (still checking), so no screen finds a hole where the newest one should be.
+    expect(Object.keys(checkingFindings().engines).sort()).toEqual([...ENGINE_IDS].sort())
+    const file = tmpFile()
+    writeFileSync(file, JSON.stringify({ engines: { claude: signedIn }, listed: {}, codexCatalog: [] }))
+    const check = new EngineCheck({ all: async () => findings(), one: async () => ({ status: signedIn }), file })
+    for (const e of ENGINE_IDS) expect(check.current.engines[e], e).toBeDefined()
+    expect(check.current.engines.claude).toEqual(signedIn)
+    expect(check.current.engines[ENGINE_IDS[ENGINE_IDS.length - 1]!].checking).toBe(true)
   })
 })

@@ -4,7 +4,8 @@
 // The desktop's one person is the owner, so on a desktop everything is allowed, as always.
 import { L } from '../shared/lang'
 import type { Method } from '../shared/rpc'
-import { delegating, scopePerson, type Person, type Question, type Role, type Routine, type Settings } from '../shared/types'
+import { covers } from '../shared/access'
+import { scopePerson, type Person, type Question, type Role, type Routine, type Settings } from '../shared/types'
 
 export const isAdmin = (p: Pick<Person, 'role'>): boolean => p.role === 'owner' || p.role === 'admin'
 
@@ -13,7 +14,7 @@ export const ownerError = (): string => L('Só o dono do Tucano pode fazer isso.
 
 // What a person may change of the settings without being an admin: how the app looks to them.
 // Each person's own (kept on them, see People.settingsFor); the owner's are the settings themselves.
-export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']
+export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']
 export const isPersonalSetting = (k: string): boolean => (PERSONAL_SETTINGS as readonly string[]).includes(k)
 
 export type Action =
@@ -42,14 +43,14 @@ export function can(person: Person, action: Action): boolean {
     case 'routine':
       return action.routine.scope === 'channel' ? isAdmin(person) : isAdmin(person) || action.routine.owner === person.id
     case 'approval':
-      return isAdmin(person) || action.agentOwner?.id === person.id || delegating(action.agentOwner, person.id)
+      return isAdmin(person) || action.agentOwner?.id === person.id || covers(action.agentOwner, person)
     case 'question': {
       const q = action.question
       if (q.state !== 'open') return false
       // Waiting on the DM's person to say yes: no one else has seen it yet.
       if (q.confirm === 'pending') return person.id === q.requestedBy
       const late = (action.now ?? Date.now()) >= q.deadlineAt
-      return person.id === q.askedTo || isAdmin(person) || delegating(action.askedTo, person.id, action.now) || (late && person.id === q.requestedBy)
+      return person.id === q.askedTo || isAdmin(person) || covers(action.askedTo, person, action.now) || (late && person.id === q.requestedBy)
     }
     case 'confirm':
       return action.question.state === 'open' && action.question.confirm === 'pending' && person.id === action.question.requestedBy
@@ -83,6 +84,7 @@ export const NEEDS: Record<Method, Need> = {
   markRead: 'anyone',
   snapshot: 'anyone',
   artifactText: 'anyone',
+  revealArtifact: 'anyone',
   sendMessage: 'anyone',
   typing: 'anyone',
   olderMessages: 'anyone',
@@ -96,12 +98,19 @@ export const NEEDS: Record<Method, Need> = {
   setChannelMembers: 'anyone',
   deleteConversation: 'target', // one's DM; a channel, admins
   openDm: 'anyone',
+  // one's own to-dos on the board: each handler checks it's theirs
+  tasks: 'anyone',
+  saveTask: 'anyone',
+  removeTask: 'anyone',
+  startTask: 'anyone',
   ensureTuca: 'anyone',
   settleDraft: 'anyone',
   dismissProposal: 'anyone',
   applyProposal: 'target', // agents and teams, admins (a member's card tells them); a routine, its rules; a channel, anyone
   applyProposals: 'target', // each card as applyProposal checks it
   dismissProposals: 'anyone',
+  undoProposal: 'target', // as applying it: agents and teams, admins; a routine, its rules; a channel, whoever made it
+  undoProposals: 'target',
   localPath: 'anyone',
   openLocal: 'anyone',
   openExternal: 'anyone',
@@ -125,7 +134,13 @@ export const NEEDS: Record<Method, Need> = {
   removeRoutine: 'target',
   runRoutine: 'target',
   watchRoutine: 'anyone',
+  sendFeedback: 'anyone', // to the people who make Tucano: what anyone here saw go wrong
+  survey: 'owner', // one answer per install: the owner's
+  answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
+  browserLogins: 'admin', // the logins saved for an agent's browser, like a connector's token
+  saveBrowserLogin: 'admin',
+  removeBrowserLogin: 'admin',
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',
   // the team's knowledge: anyone reads and writes pages; the curator's decisions and the wiki's place are the admins'
@@ -197,6 +212,9 @@ export const NEEDS: Record<Method, Need> = {
   exportTeam: 'admin',
   importTeam: 'admin',
   importAgents: 'admin',
+  // Owner: with no path, these read the server's own ~/.hermes (the owner's SOUL.md and USER.md).
+  hermesPreview: 'owner',
+  importHermes: 'owner',
   exportBackup: 'owner',
   restoreCheck: 'owner',
   restoreApply: 'owner',
@@ -217,6 +235,7 @@ export const NEEDS: Record<Method, Need> = {
   harnessMcps: 'admin',
   importHarnessMcp: 'admin',
   updateTool: 'admin',
+  shareComputer: 'target', // a lent computer's person, or an admin (checked in the core)
   checkTrigger: 'admin',
   refreshEngines: 'admin',
   loginEngine: 'admin',
@@ -233,6 +252,13 @@ export const NEEDS: Record<Method, Need> = {
   engineModels: 'anyone', // the models a harness lists: an agent's page names its model with them
   testEngine: 'admin',
   setJevKey: 'admin',
+  probeEndpoint: 'admin',
+  setEndpoint: 'admin',
+  nodeInfo: 'owner',
+  setNode: 'owner',
+  addNodeFolder: 'owner',
+  removeNodeFolder: 'owner',
+  nodeLog: 'owner',
   voiceDownload: 'admin',
   voiceCancelDownload: 'admin',
   voiceRemoveModel: 'admin',
@@ -256,6 +282,7 @@ export const NEEDS: Record<Method, Need> = {
   removeDevice: 'anyone', // one's own (the core looks only among theirs)
   removePerson: 'target',
   setRole: 'target',
+  setPersonAccess: 'target', // the admins change members' (the owner, admins' too: always everything)
   activity: 'admin',
   purgePerson: 'owner',
   leave: 'anyone', // one's own access (the owner is refused in the core)

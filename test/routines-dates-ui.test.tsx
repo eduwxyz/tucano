@@ -25,7 +25,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 })
 const { getState, saveRoutine, isoDay } = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
-const { RoutinesPage } = await import('../src/renderer/src/components/Routines')
+const { RoutinesPage, duplicateDraft } = await import('../src/renderer/src/components/Routines')
 
 const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
 const DAY = 86_400_000
@@ -114,5 +114,14 @@ describe('the week view', () => {
     await click(next)
     await click(next)
     expect(inCalendar()).toBe(true)
+  })
+})
+
+describe('duplicating a routine', () => {
+  it('opens a copy that saves as new, is yours, and starts off', () => {
+    const r: Routine = { id: 'r9', name: 'Standup', agentId: 'a1', conversationId: 'd1', prompt: 'Sum up', schedule: { days: [1, 3], time: '09:00' }, enabled: true, nextAt: 1, lastAt: 1, createdBy: 'a1', createdAt: 1, owner: 'p2', trigger: { kind: 'webhook', token: 'tok' } }
+    const d = duplicateDraft(r)
+    expect(d).toEqual({ name: 'Standup (cópia)', prompt: 'Sum up', agentId: 'a1', conversationId: 'd1', schedule: { days: [1, 3], time: '09:00' }, enabled: false, trigger: { kind: 'webhook', token: '' } }) // the core gives the copy its own address
+    expect(d.schedule.days).not.toBe(r.schedule.days)
   })
 })

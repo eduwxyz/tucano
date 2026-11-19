@@ -1,5 +1,5 @@
 # Time, importação e backups
-> Exportar e importar o time num arquivo .md, trazer agentes do OpenBot ou do Grok Bot, e os backups do banco.
+> Exportar e importar o time num arquivo .md, trazer agentes do OpenBot, do Grok Bot ou do Hermes, e os backups do banco.
 
 Fica em **Configurações › Geral** (Settings › General).
 
@@ -12,6 +12,12 @@ No card **Time** (Team):
 **Importar de outro app…** aceita um .zip:
 - **OpenBot**: em Configurações do servidor → Transfer → Export from this server, com os arquivos.
 - **Grok Bot**: ele não exporta sozinho. **Skill pro Grok Bot (experimental)** baixa uma skill: dê ela a um dos seus agentes de lá (ou cole o texto numa conversa) e peça "Exporte meus agentes pro Tucano". Ele devolve um .zip. É experimental: confira o resumo da importação.
+
+## Do Hermes
+**Importar do Hermes…** lê a pasta do Hermes Agent neste computador (`HERMES_HOME` ou `~/.hermes`, ou outra que você escolher) e mostra o que vem antes de importar. Cada perfil vira um agente; com vários, você escolhe.
+- **Vem:** o `SOUL.md` como instruções, as memórias dele e as suas (`USER.md`), as skills que você criou ou instalou, as que vieram com o Hermes e você editou, e as tarefas agendadas que cabem numa rotina daqui.
+- **Só o nome, no resumo:** servidores MCP, Telegram/Discord/Slack, tarefas de horário sem equivalente (a cada 30 minutos, várias horas por dia) e o modelo.
+- **Nunca:** `.env`, `auth.json`, conversas, histórico, logs e as skills que vieram com o Hermes sem mudança. Um link dentro da pasta do Hermes não é seguido.
 
 Os agentes importados entram sem nenhum conector, com a busca na web desligada, as rotinas desligadas e as memórias esperando você confirmar. Um servidor MCP do outro app só aparece no resumo; nunca vira conector sozinho.
 
@@ -27,3 +33,4 @@ Cada workspace tem os seus backups, dentro da pasta dele: excluir um workspace a
 ## Quando dá errado
 - "Arquivo grande demais pra mandar pelo navegador" (no servidor): importe no app do computador, ou exporte sem os arquivos.
 - Importei e nada mudou: tudo já existia aqui (o resumo diz isso).
+- "Não parece uma pasta do Hermes": escolha a pasta do Hermes, a que tem o `SOUL.md` e a pasta `memories` (no servidor, é a pasta do servidor). Uma pasta com só um `config.yaml` ou uma `skills/`, como a `~/.claude`, não conta.

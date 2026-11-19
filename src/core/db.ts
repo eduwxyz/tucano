@@ -1,5 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
+import { cleanAccess } from '../shared/access'
+import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { ALL_PARTS, GENERAL_SETTINGS, WORKSPACE_PARTS, type WorkspaceParts } from '../shared/workspaces'
@@ -20,6 +22,8 @@ import {
   type ConnectorAuth,
   type ConnectorTool,
   type Conversation,
+  type Delegation,
+  type Task,
   type Effort,
   type Invite,
   type LentFolder,
@@ -28,6 +32,7 @@ import {
   type MemoryState,
   type Message,
   type Person,
+  type PersonAccess,
   type Question,
   type ActivityEntry,
   type Receipt,
@@ -42,6 +47,7 @@ import {
   type ToolClass,
   type Trigger
 } from '../shared/types'
+import { stricter } from '../shared/classify'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
@@ -498,6 +504,51 @@ export const MIGRATIONS = [
   UPDATE agents SET fallback_model = 'antigravity:' || substr(fallback_model, 8) WHERE fallback_model LIKE 'gemini:%';
   UPDATE receipts SET engine = 'antigravity' WHERE engine = 'gemini';
   UPDATE receipts SET model = 'antigravity:' || substr(model, 8) WHERE model LIKE 'gemini:%';
+  `,
+  // The work one agent hands to another below it (src/shared/org.ts): a thread in that one's channel,
+  // whose end goes back to where it was asked from. Who answers to whom is a column of agents (COLUMNS).
+  `
+  CREATE TABLE IF NOT EXISTS delegations (
+    id TEXT PRIMARY KEY,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    root_id TEXT NOT NULL,
+    origin_conversation_id TEXT NOT NULL,
+    origin_thread_id TEXT,
+    origin_message_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    text TEXT NOT NULL,
+    done TEXT,
+    due_at INTEGER,
+    state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'done', 'failed', 'cancelled')),
+    asking TEXT,
+    asking_told INTEGER NOT NULL DEFAULT 0,
+    parked_told INTEGER NOT NULL DEFAULT 0,
+    nudges INTEGER NOT NULL DEFAULT 0,
+    result TEXT,
+    told INTEGER NOT NULL DEFAULT 0,
+    late_told INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    ended_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
+  CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
+  `,
+  // The board's to-dos (Quadro): each person's own list, until it's started (then it's that reply's card).
+  `
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    title TEXT NOT NULL,
+    notes TEXT,
+    agent_id TEXT,
+    conversation_id TEXT,
+    due_at INTEGER,
+    position REAL NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS tasks_by_owner ON tasks (owner, position);
   `
 ]
 
@@ -513,14 +564,48 @@ const COLUMNS: [string, string, string][] = [
   ['person_keys', 'push', 'TEXT'],
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
-  ['routines', 'month_day', 'INTEGER']
+  ['routines', 'month_day', 'INTEGER'],
+  ['routines', 'times', 'TEXT'],
+  // The agent an agent answers to (src/shared/org.ts); empty: no one.
+  ['agents', 'reports_to', 'TEXT'],
+  // A sector head's name for its sector and what it solves, in a line (src/shared/org.ts).
+  ['agents', 'sector_name', 'TEXT'],
+  ['agents', 'sector_does', 'TEXT'],
+  // The person's entry point: an agent over the sectors, chosen by hand (src/shared/org.ts).
+  ['agents', 'entry', 'INTEGER'],
+  // What a person sees of the team (PersonAccess, as JSON; empty: everything), and what an invite grants.
+  ['people', 'access', 'TEXT'],
+  ['invites', 'access', 'TEXT'],
+  // A request that answered as far as it goes before stopping on an approval of mine, and how often
+  // the one asked was knocked on after leaving no reply at all (src/core/delegations.ts).
+  ['delegations', 'parked_told', 'INTEGER NOT NULL DEFAULT 0'],
+  ['delegations', 'nudges', 'INTEGER NOT NULL DEFAULT 0'],
+  // The approval a request's work stopped on, shown with the request where it was asked from.
+  ['delegations', 'approval', 'TEXT'],
+  // The thread a request is worked in, when it was asked inside another's in the same channel.
+  ['delegations', 'thread_id', 'TEXT'],
+  // What a connector's server says can't be loosened here (META_FLOOR, META_HIGH_RISK in shared/classify.ts):
+  // the class a tool can't go below, and that it's high risk. A node says both for the person's computer.
+  ['connector_tools', 'cls_floor', 'TEXT'],
+  ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
+  // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
+  ['messages', 'title', 'TEXT']
 ]
 
 
 type Row = Record<string, unknown>
 
-// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
-const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
+// A stored access back to its shape; anything unreadable is "everything".
+function parseAccess(v: unknown): PersonAccess | undefined {
+  if (typeof v !== 'string') return undefined
+  try {
+    const a = JSON.parse(v) as PersonAccess
+    return a?.mode === 'picked' ? { mode: 'picked', sectors: a.sectors ?? [], agents: a.agents ?? [], channels: a.channels ?? [] } : undefined
+  } catch { return undefined }
+}
+
+// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT, and more of them than input came apart from it.
+const COUNTED = `(CASE WHEN cache_read_tokens > input_tokens THEN input_tokens + cache_read_tokens * ${CACHE_READ_WEIGHT} ELSE input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} END) + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
@@ -588,7 +673,7 @@ export class Db {
           DELETE FROM artifacts;
           DELETE FROM services;
           UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
-          DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts');
+          DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts');
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
           DELETE FROM person_keys;
@@ -602,6 +687,8 @@ export class Db {
           UPDATE people SET delegate_to = NULL, delegate_until = NULL;
           DELETE FROM routine_watchers;
           DELETE FROM questions;
+          DELETE FROM delegations;
+          DELETE FROM tasks;
           DELETE FROM activity;
         `)
         target.keepOnly(parts)
@@ -669,6 +756,10 @@ export class Db {
       const has = (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column)
       if (!has) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
     }
+    // A monthly limit too large to read back as a number (written before limits were checked, by
+    // someone meaning "no limit") makes every read of the agents fail, and the workspace doesn't
+    // open. It becomes what was meant: 0, no limit.
+    this.db.exec(`UPDATE agents SET limit_tokens = 0 WHERE typeof(limit_tokens) NOT IN ('integer', 'real') OR limit_tokens < 0 OR limit_tokens > ${MAX_MONTHLY_LIMIT}`)
   }
 
   // Nested calls join the outer transaction.
@@ -699,7 +790,7 @@ export class Db {
         DELETE FROM person_keys;
         DELETE FROM removed_keys;
         DELETE FROM invites;
-        DELETE FROM settings WHERE key IN ('quota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
+        DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
         UPDATE agents SET account = NULL, fallback_account = NULL, apps = '[]', folders = '[]', computer = CASE WHEN computer_kind = 'mac' THEN 0 ELSE computer END;
         UPDATE routines SET enabled = 0;
       `)
@@ -749,6 +840,11 @@ export class Db {
     return { ...defaults, ...stored }
   }
 
+  // A setting gone, back to its default (setSettings skips what is undefined).
+  deleteSetting(key: keyof Omit<Settings, 'engines'>): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+  }
+
   setSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
     const stmt = this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
     this.tx(() => {
@@ -793,7 +889,11 @@ export class Db {
       archived: r['archived'] === 1,
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
-      owner: r['owner'] ? str(r['owner']) : this.ownerId()
+      owner: r['owner'] ? str(r['owner']) : this.ownerId(),
+      ...(r['reports_to'] ? { reportsTo: str(r['reports_to']) } : {}),
+      ...(r['sector_name'] ? { sectorName: str(r['sector_name']) } : {}),
+      ...(r['sector_does'] ? { sectorDoes: str(r['sector_does']) } : {}),
+      ...(r['entry'] ? { entry: true as const } : {})
     }
   }
 
@@ -816,9 +916,10 @@ export class Db {
            limit_tokens = excluded.limit_tokens, max_routines = excluded.max_routines, grants = excluded.grants, memory_mode = excluded.memory_mode,
            computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, browser = excluded.browser, apps = excluded.apps, auto_approve = excluded.auto_approve, action_rules = excluded.action_rules, autonomy = excluded.autonomy, outside_guard = excluded.outside_guard, archived = excluded.archived, kind = COALESCE(excluded.kind, agents.kind), custom_color = excluded.custom_color, picture = excluded.picture, avatar = excluded.avatar, wiki = excluded.wiki`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, a.limit, routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
+    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.id)
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -887,9 +988,9 @@ export class Db {
   }
 
   // Only whose a conversation is, for checks on every event (no counts, no members).
-  conversationOwner(id: string): Pick<Conversation, 'kind' | 'owner'> | undefined {
-    const r = this.db.prepare('SELECT kind, owner FROM conversations WHERE id = ?').get(id) as Row | undefined
-    return r && { kind: str(r['kind']) as Conversation['kind'], ...(r['owner'] ? { owner: str(r['owner']) } : {}) }
+  conversationOwner(id: string): Pick<Conversation, 'id' | 'kind' | 'name' | 'owner'> | undefined {
+    const r = this.db.prepare('SELECT id, kind, name, owner FROM conversations WHERE id = ?').get(id) as Row | undefined
+    return r && { id: str(r['id']), kind: str(r['kind']) as Conversation['kind'], name: str(r['name']), ...(r['owner'] ? { owner: str(r['owner']) } : {}) }
   }
 
   // The conversation a message is in, without reading the message.
@@ -938,6 +1039,27 @@ export class Db {
   // Its messages and members go with it (foreign keys).
   deleteConversation(id: string): void {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
+  }
+
+  // Whether anything was said there yet, by anyone.
+  hasMessages(conversationId: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1').get(conversationId)
+  }
+
+  // Whether an agent left any trace of work: a message it wrote, a to-do on someone's board, a memory or note.
+  agentUsed(agentId: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 WHERE EXISTS (SELECT 1 FROM messages WHERE author_kind = 'agent' AND author_id = ?) OR EXISTS (SELECT 1 FROM tasks WHERE agent_id = ?) OR EXISTS (SELECT 1 FROM memories WHERE agent_id = ? OR scope = ?)")
+      .get(agentId, agentId, agentId, agentId)
+  }
+
+  // An agent gone for good, with its places in channels: only for one taken back before it did anything
+  // (its DMs go first, through deleteConversation).
+  deleteAgent(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM members WHERE agent_id = ?').run(id)
+      this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    })
   }
 
   // Puts the agent in exactly these channels (DMs are untouched).
@@ -1025,8 +1147,14 @@ export class Db {
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
-      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
+      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
+      ...(r['title'] ? { title: str(r['title']) } : {})
     }
+  }
+
+  // A request's short title (src/core/titles.ts).
+  setMessageTitle(id: string, title: string): void {
+    this.db.prepare('UPDATE messages SET title = ? WHERE id = ?').run(title, id)
   }
 
   messages(): Message[] {
@@ -1157,6 +1285,11 @@ export class Db {
     return r && this.toMessage(r)
   }
 
+  // A reply moved into a thread after it started (one that handed work on goes under the person's message).
+  moveToThread(id: string, threadId: string): void {
+    this.db.prepare('UPDATE messages SET thread_id = ? WHERE id = ? AND thread_id IS NULL').run(threadId, id)
+  }
+
   saveMessage(m: Message): void {
     this.db
       .prepare(
@@ -1192,18 +1325,19 @@ export class Db {
     return r ? this.toApproval(r) : undefined
   }
 
-  // Runs that were working when the app closed can't continue: their CLI process is gone.
-  interruptStaleRuns(): number {
-    let n = 0
+  // Runs that were working when the app closed can't continue: their CLI process is gone. Returns
+  // their messages, so the work can go on in new replies (Runner.resumeInterrupted).
+  interruptStaleRuns(): string[] {
+    const ids: string[] = []
     for (const m of this.messagesWithRun(['working'])) {
       if (m.run?.status !== 'working') continue
-      n++
+      ids.push(m.id)
       this.saveMessage({
         ...m,
         run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
-    return n
+    return ids
   }
 
   // ---------- receipts ----------
@@ -1292,15 +1426,22 @@ export class Db {
 
   tools(connectorId: string): (ConnectorTool & { inputSchema: Record<string, unknown> })[] {
     const rows = this.db.prepare('SELECT * FROM connector_tools WHERE connector_id = ? ORDER BY rowid').all(connectorId) as Row[]
-    return rows.map((r) => ({
-      name: str(r['name']),
-      description: str(r['description']),
-      inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
-      cls: str(r['cls']) as ToolClass,
-      enabled: r['enabled'] === 1,
-      highRisk: r['high_risk'] === 1,
-      isNew: r['is_new'] === 1
-    }))
+    return rows.map((r) => {
+      // What the server said can't be loosened: a class under its floor reads as the floor, its high-risk mark holds.
+      const floor = r['cls_floor'] ? (str(r['cls_floor']) as ToolClass) : undefined
+      const locked = r['remote_high_risk'] === 1
+      return {
+        name: str(r['name']),
+        description: str(r['description']),
+        inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
+        cls: stricter(str(r['cls']) as ToolClass, floor),
+        enabled: r['enabled'] === 1,
+        highRisk: r['high_risk'] === 1 || locked,
+        isNew: r['is_new'] === 1,
+        ...(floor ? { floor } : {}),
+        ...(locked ? { lockedHighRisk: true } : {})
+      }
+    })
   }
 
   // Applies the server's current tool list. On the first sync every tool comes
@@ -1308,7 +1449,8 @@ export class Db {
   // `cls`: the class the rules give the tool now; `legacyCls`, the one the rules before outbound verbs
   // gave it, which tells an automatic class from a hand-picked one on a tool synced before cls_auto.
   // A class still automatic follows the rules; one chosen by hand stays.
-  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass }[]): void {
+  // `floor` and `highRisk`: what the server says can't be loosened here (a node's command, its owner's mark).
+  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass; floor?: ToolClass; highRisk?: boolean }[]): void {
     this.tx(() => {
       const first = !(this.db.prepare('SELECT synced FROM connectors WHERE id = ?').get(connectorId) as { synced: number } | undefined)?.synced
       const stored = new Map((this.db.prepare('SELECT name, cls, cls_auto FROM connector_tools WHERE connector_id = ?').all(connectorId) as Row[]).map((r) => [str(r['name']), { cls: str(r['cls']), auto: r['cls_auto'] == null ? undefined : str(r['cls_auto']) }]))
@@ -1317,12 +1459,12 @@ export class Db {
         if (was) {
           const automatic = was.cls === (was.auto ?? t.legacyCls ?? t.cls)
           this.db
-            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ? WHERE connector_id = ? AND name = ?')
-            .run(t.description, JSON.stringify(t.inputSchema), automatic ? t.cls : was.cls, t.cls, connectorId, t.name)
+            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ?, cls_floor = ?, remote_high_risk = ? WHERE connector_id = ? AND name = ?')
+            .run(t.description, JSON.stringify(t.inputSchema), stricter(automatic ? t.cls : (was.cls as ToolClass), t.floor), t.cls, t.floor ?? null, t.highRisk ? 1 : 0, connectorId, t.name)
         } else {
           this.db
-            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)')
-            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), t.cls, t.cls, first ? 1 : 0, first ? 0 : 1)
+            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, cls_floor, remote_high_risk, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
+            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), stricter(t.cls, t.floor), t.cls, t.floor ?? null, t.highRisk ? 1 : 0, first ? 1 : 0, first ? 0 : 1)
         }
       }
       const known = stored.keys()
@@ -1336,16 +1478,23 @@ export class Db {
   updateTool(connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void {
     const t = this.tools(connectorId).find((x) => x.name === name)
     if (!t) return
-    const next = { ...t, ...patch }
+    // A class under the server's floor is kept at the floor; the mark the server set holds (tools() reads it back).
+    const next = { ...t, ...patch, cls: stricter(patch.cls ?? t.cls, t.floor) }
+    const stored = this.db.prepare('SELECT high_risk FROM connector_tools WHERE connector_id = ? AND name = ?').get(connectorId, name) as { high_risk: number }
     this.db
       .prepare('UPDATE connector_tools SET cls = ?, enabled = ?, high_risk = ?, is_new = 0 WHERE connector_id = ? AND name = ?')
-      .run(next.cls, next.enabled ? 1 : 0, next.highRisk ? 1 : 0, connectorId, name)
+      .run(next.cls, next.enabled ? 1 : 0, (patch.highRisk ?? stored.high_risk === 1) ? 1 : 0, connectorId, name)
   }
 
   // ---------- secrets (already encrypted by the caller) ----------
 
   getSecret(key: string): string | undefined {
     return (this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: string } | undefined)?.value
+  }
+
+  // The keys that start with a prefix: what's saved, without opening any of it.
+  secretKeys(prefix: string): string[] {
+    return (this.db.prepare('SELECT key FROM secrets WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key)
   }
 
   setSecret(key: string, value: string | undefined): void {
@@ -1565,7 +1714,8 @@ export class Db {
         time: str(r['time']),
         ...(r['once'] === 1 ? { once: true } : {}),
         ...(r['date'] ? { date: str(r['date']) } : {}),
-        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {})
+        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {}),
+        ...(r['times'] ? { times: JSON.parse(str(r['times'])) as string[] } : {})
       },
       enabled: r['enabled'] === 1,
       nextAt: r['next_at'] == null ? undefined : Number(r['next_at']),
@@ -1593,10 +1743,10 @@ export class Db {
   saveRoutine(r: Routine): void {
     this.db
       .prepare(
-        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger, times)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
-           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
+           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, times = excluded.times, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
            last_message_id = excluded.last_message_id, trigger = excluded.trigger`
       )
       .run(
@@ -1616,7 +1766,8 @@ export class Db {
         r.lastMessageId ?? null,
         r.createdBy ?? null,
         r.createdAt,
-        r.trigger ? JSON.stringify(r.trigger) : null
+        r.trigger ? JSON.stringify(r.trigger) : null,
+        r.schedule.times && r.schedule.times.length > 1 ? JSON.stringify(r.schedule.times) : null
       )
     // A routine nobody says is the team's is a person's own: the Tucano owner's when no one is named.
     this.db.prepare('UPDATE routines SET scope = ?, owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(r.scope === 'channel' ? 'channel' : 'me', r.owner ?? null, 'owner', r.id)
@@ -1684,7 +1835,8 @@ export class Db {
 
   private toPerson(r: Row): Person {
     const until = r['delegate_until'] == null ? undefined : Number(r['delegate_until'])
-    return { id: str(r['id']), name: str(r['name']), role: str(r['role']) as Role, about: str(r['about']), ...(r['delegate_to'] && until ? { delegateTo: str(r['delegate_to']), delegateUntil: until } : {}) }
+    const access = parseAccess(r['access'])
+    return { id: str(r['id']), name: str(r['name']), role: str(r['role']) as Role, about: str(r['about']), ...(r['delegate_to'] && until ? { delegateTo: str(r['delegate_to']), delegateUntil: until } : {}), ...(access ? { access } : {}) }
   }
 
   // The one owner, from the migration on; read once (every legacy message row asks).
@@ -1755,7 +1907,7 @@ export class Db {
 
   // A new person reads from now on: nothing from before is unread for them.
   addPerson(p: Person): void {
-    this.db.prepare('INSERT INTO people (id, name, role, about, created_at, named) VALUES (?, ?, ?, ?, ?, 1)').run(p.id, p.name, p.role, p.about, Date.now())
+    this.db.prepare('INSERT INTO people (id, name, role, about, created_at, named, access) VALUES (?, ?, ?, ?, ?, 1, ?)').run(p.id, p.name, p.role, p.about, Date.now(), p.access ? JSON.stringify(p.access) : null)
   }
 
   // A removed person back (re-invited): their DMs and memories are still theirs. One whose data
@@ -1780,6 +1932,7 @@ export class Db {
       // Only the hashes stay, to tell their browsers "you no longer have access" instead of counting a guess.
       this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(Date.now(), id)
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
+      this.db.prepare('DELETE FROM tasks WHERE owner = ?').run(id) // their to-dos: never started, only theirs
     })
   }
 
@@ -1852,6 +2005,7 @@ export class Db {
       role: str(r['role']) as Invite['role'],
       about: str(r['about']),
       ...(r['restore'] ? { restore: str(r['restore']) } : {}),
+      ...(parseAccess(r['access']) ? { access: parseAccess(r['access']) } : {}),
       createdBy: str(r['created_by']),
       createdAt: Number(r['created_at']),
       expiresAt: Number(r['expires_at']),
@@ -1861,8 +2015,8 @@ export class Db {
 
   saveInvite(i: Omit<Invite, 'usedAt' | 'usedBy'>): void {
     this.db
-      .prepare('INSERT INTO invites (hash, role, about, restore, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(i.id, i.role, i.about, i.restore ?? null, i.createdBy, i.createdAt, i.expiresAt)
+      .prepare('INSERT INTO invites (hash, role, about, restore, created_by, created_at, expires_at, access) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(i.id, i.role, i.about, i.restore ?? null, i.createdBy, i.createdAt, i.expiresAt, i.access ? JSON.stringify(i.access) : null)
   }
 
   invites(): Invite[] {
@@ -1892,6 +2046,17 @@ export class Db {
 
   setRole(id: string, role: Exclude<Role, 'owner'>): void {
     this.db.prepare("UPDATE people SET role = ? WHERE id = ? AND role <> 'owner'").run(role, id)
+  }
+
+  // What this person sees; 'all' stores nothing. Cleaned of agents and channels that are gone.
+  setPersonAccess(id: string, access: PersonAccess): void {
+    const clean = cleanAccess(access, this.agents().map((a) => a.id), this.conversations().filter((c) => c.kind !== 'dm').map((c) => c.id))
+    this.db.prepare("UPDATE people SET access = ? WHERE id = ? AND role = 'member'").run(clean.mode === 'all' ? null : JSON.stringify(clean), id)
+  }
+
+  // No one is covered by this person any more.
+  dropCoversBy(personId: string): void {
+    this.db.prepare('UPDATE people SET delegate_to = NULL, delegate_until = NULL WHERE delegate_to = ?').run(personId)
   }
 
   // Someone answering and approving for this person until then; none ends it.
@@ -1996,6 +2161,113 @@ export class Db {
 
   openQuestions(): Question[] {
     return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toQuestion(r))
+  }
+
+  // ---------- delegations ----------
+
+  private toDelegation(r: Row): Delegation {
+    return {
+      id: str(r['id']),
+      from: str(r['from_agent']),
+      to: str(r['to_agent']),
+      conversationId: str(r['conversation_id']),
+      rootId: str(r['root_id']),
+      ...(r['thread_id'] ? { threadId: str(r['thread_id']) } : {}),
+      originConversationId: str(r['origin_conversation_id']),
+      ...(r['origin_thread_id'] ? { originThreadId: str(r['origin_thread_id']) } : {}),
+      originMessageId: str(r['origin_message_id']),
+      requestedBy: str(r['requested_by']),
+      text: str(r['text']),
+      ...(r['done'] ? { done: str(r['done']) } : {}),
+      ...(r['due_at'] ? { dueAt: Number(r['due_at']) } : {}),
+      state: str(r['state']) as Delegation['state'],
+      ...(r['asking'] ? { asking: str(r['asking']) } : {}),
+      ...(r['asking_told'] === 1 ? { askingTold: true } : {}),
+      ...(r['parked_told'] === 1 ? { parkedTold: true } : {}),
+      ...(Number(r['nudges'] ?? 0) ? { nudges: Number(r['nudges']) } : {}),
+      ...(r['result'] ? { result: str(r['result']) } : {}),
+      ...(r['told'] === 1 ? { told: true } : {}),
+      ...(r['late_told'] === 1 ? { lateTold: true } : {}),
+      ...(r['approval'] ? { approval: str(r['approval']) } : {}),
+      createdAt: Number(r['created_at']),
+      ...(r['ended_at'] ? { endedAt: Number(r['ended_at']) } : {})
+    }
+  }
+
+  saveDelegation(d: Delegation): void {
+    this.db
+      .prepare(
+        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, thread_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, approval, created_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET origin_conversation_id = excluded.origin_conversation_id, origin_thread_id = excluded.origin_thread_id, origin_message_id = excluded.origin_message_id, requested_by = excluded.requested_by, text = excluded.text, done = excluded.done, due_at = excluded.due_at, state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, approval = excluded.approval, created_at = excluded.created_at, ended_at = excluded.ended_at`
+      )
+      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.threadId ?? null, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.approval ?? null, d.createdAt, d.endedAt ?? null)
+  }
+
+  delegation(id: string): Delegation | undefined {
+    const r = this.db.prepare('SELECT * FROM delegations WHERE id = ?').get(id) as Row | undefined
+    return r && this.toDelegation(r)
+  }
+
+  // The one whose thread `rootId` opened.
+  delegationAt(rootId: string): Delegation | undefined {
+    const r = this.db.prepare('SELECT * FROM delegations WHERE root_id = ?').get(rootId) as Row | undefined
+    return r && this.toDelegation(r)
+  }
+
+  // ---------- the board's to-dos ----------
+
+  tasks(owner: string): Task[] {
+    return (this.db.prepare('SELECT * FROM tasks WHERE owner = ? ORDER BY position, created_at').all(owner) as Row[]).map((r) => ({
+      id: str(r['id']),
+      owner: str(r['owner']),
+      title: str(r['title']),
+      ...(r['notes'] ? { notes: str(r['notes']) } : {}),
+      ...(r['agent_id'] ? { agentId: str(r['agent_id']) } : {}),
+      ...(r['conversation_id'] ? { conversationId: str(r['conversation_id']) } : {}),
+      ...(r['due_at'] ? { dueAt: Number(r['due_at']) } : {}),
+      position: Number(r['position']),
+      createdAt: Number(r['created_at'])
+    }))
+  }
+
+  task(id: string): Task | undefined {
+    const r = this.db.prepare('SELECT owner FROM tasks WHERE id = ?').get(id) as Row | undefined
+    return r ? this.tasks(str(r['owner'])).find((t) => t.id === id) : undefined
+  }
+
+  saveTask(t: Task): void {
+    this.db
+      .prepare(
+        `INSERT INTO tasks (id, owner, title, notes, agent_id, conversation_id, due_at, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET title = excluded.title, notes = excluded.notes, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, due_at = excluded.due_at, position = excluded.position`
+      )
+      .run(t.id, t.owner, t.title, t.notes ?? null, t.agentId ?? null, t.conversationId ?? null, t.dueAt ?? null, t.position, t.createdAt)
+  }
+
+  removeTask(id: string): void {
+    this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  }
+
+  // Open, or ended since `since`: what a screen shows as going on, newest first.
+  liveDelegations(since: number): Delegation[] {
+    return (this.db.prepare("SELECT * FROM delegations WHERE state = 'open' OR ended_at >= ? ORDER BY created_at DESC").all(since) as Row[]).map((r) => this.toDelegation(r))
+  }
+
+  openDelegations(): Delegation[] {
+    return (this.db.prepare("SELECT * FROM delegations WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toDelegation(r))
+  }
+
+  // What whoever asked hasn't heard yet: an end, a question left waiting, a deadline gone by.
+  untoldDelegations(now: number): Delegation[] {
+    const rows = this.db.prepare("SELECT * FROM delegations WHERE (state <> 'open' AND told = 0) OR (state = 'open' AND asking IS NOT NULL AND asking_told = 0) OR (state = 'open' AND due_at IS NOT NULL AND due_at < ? AND late_told = 0) ORDER BY created_at").all(now) as Row[]
+    return rows.map((r) => this.toDelegation(r))
+  }
+
+  // What `from` asked for from one place (a conversation, or a thread of it), oldest first.
+  delegationsFrom(from: string, originConversationId: string, originThreadId?: string): Delegation[] {
+    const rows = this.db.prepare(`SELECT * FROM delegations WHERE from_agent = ? AND origin_conversation_id = ? AND ${originThreadId ? 'origin_thread_id = ?' : 'origin_thread_id IS NULL'} ORDER BY created_at`).all(...[from, originConversationId, ...(originThreadId ? [originThreadId] : [])]) as Row[]
+    return rows.map((r) => this.toDelegation(r))
   }
 
   // ---------- activity ----------

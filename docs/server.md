@@ -2,7 +2,52 @@
 
 Tucano can run on a server you own, such as a VPS or a machine at home. On a server, routines keep running when your computer sleeps, and you use Tucano from a browser, on any computer or phone. The server runs Tucano's core on plain Node and serves the app's own screens to the browser. Nothing goes through a Tucano service: the server is yours, and so are the data and the logins on it.
 
-Status: **new and experimental.** The core, the screens and the agents work in a browser, tested on Linux (Debian 12, Node 24) and macOS. A real agent turn on a server has only been tested with the test engine so far.
+Status: **new.** It's what the Tucano Pro servers run, one container per person, with real agents, since November 2026. Tested on Linux (Debian 12, Node 24) and macOS.
+
+There are two ways to put it on a server: the **Docker image** (below), with the harnesses and Chromium already in it, or **from the source**, with Node.
+
+## With Docker
+
+The image is the one the Tucano Pro servers run: Tucano, Chromium for the agents' browsers, and the harnesses (Claude Code, Codex, Gemini, OpenCode, Pi, Cursor, Grok and Antigravity), for Linux x64 and ARM64. Each release publishes it as `ghcr.io/eduwxyz/tucano`, with the version (`0.2.35`) and `latest`.
+
+```bash
+docker run -d --name tucano --restart unless-stopped \
+  -p 127.0.0.1:7337:7337 -v tucano:/home/tucano \
+  ghcr.io/eduwxyz/tucano:latest
+docker exec tucano node out/main/server.js link     # the link that signs a browser in
+```
+
+Everything is in the `tucano` volume: the database, memory, agents' files, the harnesses' logins, the key and the token. Sign the harnesses in from **Settings › Models** (below), with no SSH. For the phone, `docker exec tucano node out/main/server.js pair`.
+
+Inside the container Tucano listens on every address, so `-p` decides who reaches it: keep `127.0.0.1:` and reach it through one of the ways under **Reaching it**. Pass the settings (below) with `-e`, for example `-e TUCANO_URL=https://tucano.example.com -e TUCANO_TRUST_PROXY=1` behind a proxy.
+
+To update, pull the new image and start the container again with the same command; the volume stays:
+
+```bash
+docker pull ghcr.io/eduwxyz/tucano:latest && docker rm -f tucano
+```
+
+The Pro servers also run each container with no privileges and a read-only system, which the image supports. With Docker Compose:
+
+```yaml
+services:
+  tucano:
+    image: ghcr.io/eduwxyz/tucano:latest
+    restart: unless-stopped
+    ports: ['127.0.0.1:7337:7337']
+    volumes: ['tucano:/home/tucano']
+    read_only: true
+    tmpfs: ['/tmp:size=1g,mode=1777']
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+volumes:
+  tucano: {}
+```
+
+In the container, an agent's computer is **This computer** (the container itself) or **None**. The isolated Linux computer needs Docker, and the container has none: don't hand it the host's Docker socket, which would give the agents the whole server.
+
+To build the image yourself, `docker build -t tucano .` in a clone.
 
 ## What you need
 
@@ -14,7 +59,7 @@ Status: **new and experimental.** The core, the screens and the agents work in a
 | Optional: Docker Engine | For agents' isolated Linux computers |
 | Optional: Chromium or Google Chrome | For agents' browsers (`apt install chromium`) |
 
-## Install
+## From the source
 
 As the user that will run Tucano (not root):
 
@@ -36,7 +81,7 @@ Open that link once. The token signs the browser in, and a cookie keeps it signe
 
 ### Signing the harnesses in
 
-Install the harnesses on the server, in a terminal over SSH, as the user that runs Tucano:
+The Docker image has them already. From the source, install them on the server, in a terminal over SSH, as the user that runs Tucano:
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
@@ -64,7 +109,7 @@ By default the server only listens on the server itself (`127.0.0.1`), because a
 
 - **SSH tunnel**, the simplest: run `ssh -L 7337:127.0.0.1:7337 you@your-server`, then open the printed link on your computer.
 - **Tailscale** (or another private network): set `TUCANO_HOST` to the server's Tailscale address, then open `http://<that address>:7337/?token=…` from any of your devices, including your phone.
-- **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Set `TUCANO_URL` to the address people open, so `link` prints it, and `TUCANO_TRUST_PROXY=1`, so wrong tokens are counted per visitor rather than all as the proxy. Turn off response buffering for `/events`, which is a live event stream, and keep the proxy's access log off or without query strings, since the first link carries the token. For example, with Caddy:
+- **A reverse proxy with HTTPS** (Caddy, nginx) on a domain of yours: keep Tucano on `127.0.0.1` and point the proxy at it. Set `TUCANO_URL` to the address people open, so `link` prints it, and `TUCANO_TRUST_PROXY=1`, so wrong tokens are counted per visitor rather than all as the proxy. Turn off response buffering for `/events` and `/node/link`, which are live event streams, and keep the proxy's access log off or without query strings, since the first link carries the token. For example, with Caddy:
 
   ```
   tucano.example.com {
@@ -118,6 +163,7 @@ Once a browser has the cookie, the server answers only its own page: a page of a
 
 ## How it differs from the desktop app
 
+- **Your computer's terminal, files, browser and apps** stay on your computer. To let the server's agents use them, lend it from the desktop app (**Settings › Servers › Let this server use this computer**): see [Your computer lent to a server](local-node.md).
 - **Connectors that sign in with OAuth** (an **Authorize in the browser** button): Tucano opens the authorization page in your browser. When you allow access, the page ends on an address starting with `http://127.0.0.1` that doesn't load, because that address is the server's own. Copy the whole address from the address bar and paste it into Tucano.
 - **Secrets** (connector keys, Telegram, GitHub) are encrypted with AES-256-GCM. The key is in `server.key` in the data folder, and only your user can read that file. A desktop app keeps that key in the system's keychain instead. Back the key up together with the data folder: the secrets can't be read without it.
 - **Notifications:** the Tucano desktop app shows the notifications of the servers connected to it (**Settings › Servers**) as its own, while the app runs, and the iPhone app gets them too. A browser shows them only over HTTPS (a reverse proxy, or `tailscale serve`): over plain `http://` on a Tailscale or home address, browsers show none. Telegram (**Settings › Phone**) works either way. **Settings › General › Notifications › Send one** tests them.

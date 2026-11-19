@@ -83,3 +83,35 @@ footer a { text-decoration: none; }
 .contact { margin-top: 24px; padding: 22px 26px; border-radius: 20px; background: #FFF4E6; box-shadow: 0 0 0 1px var(--line); }
 .contact a { color: var(--beak-2); font-weight: 600; }
 @media (max-width: 960px) { .cols--3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* The guides (guia.html, filled by build.mjs from guias/<guide>/pt.md and en.md) and their indexes. */
+.crumbs { padding-top: 28px; font-size: 14px; color: var(--ink-3); }
+.crumbs a { color: var(--ink-2); text-decoration: none; }
+.crumbs a:hover { text-decoration: underline; }
+.guide .hero { padding: 26px 0 8px; }
+.guide h1 { font-size: clamp(34px, 5vw, 56px); line-height: 1.05; }
+.guide .prose { padding-top: 18px; }
+.guide .prose > p:first-child { font-size: 20px; line-height: 1.55; color: var(--ink); }
+.guide .prose h2 { margin-top: 44px; font-size: clamp(26px, 3.2vw, 34px); scroll-margin-top: 16px; }
+.guide .prose h3 { scroll-margin-top: 16px; }
+.prose ol { margin-top: 14px; padding-left: 24px; color: var(--ink-2); }
+.prose ol li + li { margin-top: 8px; }
+.prose code { padding: 1px 6px; border-radius: 6px; background: var(--cream-2); font: 500 .88em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+.prose pre { margin: 16px 0 0; padding: 18px 20px; overflow-x: auto; border-radius: 14px; background: var(--ink); color: var(--cream); }
+.prose pre code { padding: 0; background: none; color: inherit; font-size: 14.5px; line-height: 1.6; }
+.prose .table { margin-top: 18px; }
+.prose .table table { min-width: 0; }
+.note { margin-top: 18px; padding: 16px 20px; border-radius: 14px; background: #FFF4E6; box-shadow: 0 0 0 1px var(--line); }
+.note p { margin: 0; }
+.updated { max-width: 760px; font-size: 14px; color: var(--ink-3); }
+.updated a { color: var(--ink-2); }
+.more ul { margin: 18px 0 0; padding-left: 20px; }
+.more li + li { margin-top: 8px; }
+.more a { color: var(--beak-2); }
+.guide-list { margin: 22px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.guide-list a { display: block; height: 100%; padding: 20px 22px; border-radius: 16px; background: var(--paper); box-shadow: 0 0 0 1px var(--line); text-decoration: none; }
+.guide-list a:hover { box-shadow: 0 0 0 1.5px var(--beak); }
+.guide-list b { display: block; font: 700 19px/1.25 var(--display); letter-spacing: -.015em; }
+.guide-list span { display: block; margin-top: 8px; font-size: 15px; color: var(--ink-2); }
+@media (max-width: 760px) { .guide-list { grid-template-columns: minmax(0, 1fr); } }
+.guide .qa, .guide section > h2 { max-width: 760px; }

@@ -32,8 +32,17 @@ const page = (tab: string, you: string): string => {
 }
 
 describe("an agent's page a member only looks at", () => {
+  it('shows the character recommendation for a long existing prompt without restricting the textarea', () => {
+    fake = { ...fake, agents: [{ ...lia, instructions: `${'x'.repeat(32_000)} END` }] }
+    const html = page('perfil', 'ana')
+    expect(html).toContain('Prompt longo')
+    expect(html).toContain('32.004')
+    expect(html).not.toMatch(/<textarea[^>]*maxlength=/i)
+  })
+
   it('has no "takes effect right away" and no "authorize in the browser"', () => {
-    for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).toContain('Muda na hora, sem precisar salvar.')
+    // Everything saves by itself now, so no one is told "no need to save" any more.
+    for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).not.toContain('Muda na hora')
     expect(page('ferramentas', 'ana')).toContain('Autorizar no navegador')
     for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'bia')).not.toContain('Muda na hora')
     const tools = page('ferramentas', 'bia')
@@ -115,10 +124,11 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
     const css = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'styles.css'), 'utf8')
     expect(css).toMatch(/\.history-row__what \{[^}]*min-width: 0;[^}]*overflow-wrap: anywhere;/)
     expect(css).toMatch(/\.history-row > :not\(\.history-row__what\):not\(\.history-row__outcome\) \{[^}]*flex-shrink: 0;/)
-    const { HistoryRow } = await import('../src/renderer/src/components/Pages')
+    const { HistoryRow, approvalWhat } = await import('../src/renderer/src/components/Pages')
+    const { groupHistory } = await import('../src/renderer/src/approval-history')
     fake = { ...fake, approvals: [{ id: 'ap', hash: 'h', agentId: 'a1', conversationId: 'ch', messageId: 'm', connectorName: 'GitLab', tool: 'mcp__gitlab__create_merge_request_with_a_really_long_name', args: {}, why: '', highRisk: false, state: 'approved', createdAt: 1, expiresAt: 2, decidedAt: 3 } as never] }
-    const html = renderToStaticMarkup(<HistoryRow id="ap" />)
-    expect(html).toContain('class="table__row history-row"')
+    const html = renderToStaticMarkup(<HistoryRow group={groupHistory(fake.approvals, approvalWhat)[0]!.rows[0]!} />)
+    expect(html).toContain('class="history-row history-row--approved')
     expect(html).toContain('class="history-row__what"')
   })
 

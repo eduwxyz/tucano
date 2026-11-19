@@ -6,7 +6,7 @@
 // Also the key of an agent's kept session: same agent, same conversation, same thread.
 export const replyKey = (agentId: string, convId: string, threadId?: string): string => `${agentId}:${convId}:${threadId ?? ''}`
 
-export type Followup = { depth: number; work?: string }
+export type Followup = { depth: number; work?: string; goal?: string } // goal: the goal the hand-off works on (src/core/goals.ts)
 
 type Slot = { running: number; reserved: number; pending?: Followup }
 
@@ -51,7 +51,7 @@ export class Followups {
   // Several hand-offs while it replies become one follow-up: the deepest chain, the latest work.
   add(key: string, f: Followup): void {
     const s = this.slot(key)
-    s.pending = { depth: Math.max(s.pending?.depth ?? 0, f.depth), work: f.work ?? s.pending?.work }
+    s.pending = { depth: Math.max(s.pending?.depth ?? 0, f.depth), work: f.work ?? s.pending?.work, ...((f.goal ?? s.pending?.goal) ? { goal: f.goal ?? s.pending?.goal } : {}) }
   }
 
   // Only once the agent is free: whoever finishes last in a crowded key is the one that gets it.
