@@ -10,6 +10,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A card an agent proposes is applied once.** A team, agent, channel or routine card applied while the agent's reply was still working went back to **Create team** (or **Create**, **Apply**) as the reply went on, because the reply saved its own copy of the message over the card; a second click made the same agents again. The reply now keeps what was done with its cards, an agent proposing the same team again in that reply is told it already exists, and the core refuses to apply a card twice even if its message lost that it was applied (and puts the card back as it was). A reply tried again keeps the cards that were already applied.
 
+- **Archived agents fold away under "Archived" in the sidebar.** An archived agent with a DM was drawn above the "Archived" entry, mixed with the last sector's agents, and couldn't be hidden. "Archived" is now a group like a sector: closed until you open it, remembered when you do, with its agents below it (each opens its DM, or its page when there's none) and "Reactivate…" at the end.
+
+- **The laptop on an agent's row stays in one place.** It sat before the working dots, the unread count and the gear, so it jumped left whenever the agent started working or you hovered the row. It's now the row's last item, with the gear's room kept, and what comes and goes shows before it.
+
 ## [0.2.42] - 2026-11-19
 
 > **Em português:**

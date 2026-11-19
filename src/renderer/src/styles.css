@@ -13570,6 +13570,9 @@ button.agent-card__now:hover {
 .is-folded .agent-row:not(:has(> .nav-item.is-active)) {
   display: none;
 }
+.is-folded .agent-sector__more {
+  display: none;
+}
 
 /* An agent's row: the name, and on the right only what changed. The role and the gear come on hover or focus. */
 .agent-row {
@@ -13594,8 +13597,10 @@ button.agent-card__now:hover {
   background: var(--hover);
   color: var(--text);
 }
+/* Room for the gear on hover. A row with the laptop (last in it) keeps that room always, so the gear coming doesn't push the laptop. */
 .agent-row:hover > .nav-item,
-.agent-row:focus-within > .nav-item {
+.agent-row:focus-within > .nav-item,
+.agent-row:has(.nav-item__mac) > .nav-item {
   padding-right: 32px;
 }
 .agent-row__gear {
