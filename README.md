@@ -97,6 +97,8 @@ Give an agent the apps on your computer, such as Notes, Calendar or Spotify, eac
 
 Each agent picks its harness and model, so a team can mix them: Opus to fix, GPT to review, Haiku to route.
 
+**Native turn hooks (opt-in, off by default).** Harness hooks stay out of isolated homes. In **Settings → Agents** you can point Tucano at an absolute command; each reply then sends a small JSON payload on stdin at `turn-start` and `turn-end` (fail-open, with a line on the receipt). Use that to feed an external memory or capture pipeline without scraping the database.
+
 **Behind a company gateway?** If your Claude Code or Codex already sends requests to your company's AI proxy, Tucano's agents go the same way, with no extra setup. Telemetry and error reports of a harness on a gateway stay off, and the model list comes from the gateway itself. To use only the gateway, uncheck the other harnesses in **Settings → Models**.
 
 ## Install

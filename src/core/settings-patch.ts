@@ -32,6 +32,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   actionRules: { kind: 'object', max: 2_000, nullable: true },
   autonomy: { kind: ['careful', 'normal', 'free'], max: 20, nullable: true },
   outsideGuard: { kind: 'boolean', max: 10, nullable: true },
+  hooks: { kind: 'object', max: 8_000, nullable: true },
   paused: { kind: 'boolean', max: 10, nullable: true },
   quietHours: { kind: 'object', max: 200, nullable: true },
   harnesses: { kind: 'array', max: 1_000, nullable: true },

@@ -97,6 +97,8 @@ Dê a um agente os apps do seu computador, como Notas, Calendário ou Spotify, c
 
 Cada agente escolhe o harness e o modelo, então um time pode misturar: Opus pra corrigir, GPT pra revisar, Haiku pra rotear.
 
+**Ganchos nativos do turno (opt-in, desligados por padrão).** Os hooks dos harnesses continuam de fora dos homes isolados. Em **Configurações → Agentes** você aponta o Tucano pra um comando absoluto; cada resposta manda um JSON pequeno na entrada padrão em `turn-start` e `turn-end` (fail-open, com uma linha no recibo). Serve pra alimentar uma memória ou captura externa sem ler o banco.
+
 **Atrás do gateway da empresa?** Se o seu Claude Code ou Codex já manda os pedidos pro proxy de IA da empresa, os agentes do Tucano vão pelo mesmo caminho, sem configuração extra. A telemetria e os relatórios de erro de um harness no gateway ficam desligados, e a lista de modelos vem do próprio gateway. Pra usar só o gateway, desmarque os outros harnesses em **Configurações → Modelos**.
 
 ## Instalar

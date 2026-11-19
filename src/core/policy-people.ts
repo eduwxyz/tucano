@@ -246,6 +246,7 @@ export const NEEDS: Record<Method, Need> = {
   cancelEngineSetup: 'admin',
   engineModels: 'anyone', // the models a harness lists: an agent's page names its model with them
   testEngine: 'admin',
+  testTurnHook: 'admin',
   setJevKey: 'admin',
   probeEndpoint: 'admin',
   setEndpoint: 'admin',
