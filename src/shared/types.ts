@@ -174,6 +174,8 @@ export interface Run {
   status: RunStatus
   steps: Step[]
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
+  restartPending?: boolean // interrupted at shutdown, still eligible for startup recovery
+  cutAt?: number // when the app cut it at startup; a run cut long ago is left for the person
   receipt?: Receipt
   approvalId?: string
   outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
@@ -546,6 +548,7 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
+  resumeInterrupted?: boolean // resume replies cut off by shutdown or a crash; unset: off
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES

@@ -381,6 +381,7 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
 }
 
 export class Runner {
+  private recovering = new Set<string>()
   private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
   private routing = 0
@@ -485,7 +486,7 @@ export class Runner {
   setPaused(paused: boolean): void {
     this.paused = paused
     if (!paused) this.pump() // resumed: any queued work that was blocked can go on
-    if (!paused) void this.resumePending() // and what the app cut when it closed
+    if (!paused) void this.resumeInterrupted() // and what the app cut when it closed
   }
 
   // The person is writing here. What will answer gets its Claude Code started now, so the reply
@@ -737,10 +738,14 @@ export class Runner {
   // `auto`: it goes on by itself, not because the person asked: at its cap while it was getting
   // somewhere (goesOnAlone), or cut because the app closed (resumeInterrupted).
   async continue(messageId: string, auto?: 'cap' | 'restart'): Promise<void> {
+    await this.continueReply(messageId, auto)
+  }
+
+  private async continueReply(messageId: string, auto?: 'cap' | 'restart'): Promise<void> {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (!msg?.run || msg.author.kind !== 'agent' || !canContinue(msg.run)) return
-    if (this.paused) return // nobody starts working while paused
+    if (this.paused) return // startup recovery waits in the scheduler until unpaused
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
@@ -750,7 +755,9 @@ export class Runner {
     // Said before the new reply starts, so the cut one reads as answered rather than as an offer.
     // Going on by itself, it says so where the person sees it, under the reply that paused.
     const went: Step[] = auto ? [{ id: randomUUID(), label: L('Continuou sozinho', 'Went on by itself'), status: 'done' }] : []
-    this.update(msg, { run: { ...msg.run, status: 'done', steps: [...(msg.run.steps ?? []), ...went] } })
+    // The flag a restart left behind goes with the status it was waiting for: said once, never replayed.
+    const { restartPending: _, ...run } = msg.run
+    this.update(msg, { run: { ...run, status: 'done', steps: [...(run.steps ?? []), ...went] } })
     // At its cap, each time it goes on by itself counts; a person's Continue starts the count over.
     const autoContinued = auto === 'cap' ? (msg.run.autoContinued ?? 0) + 1 : auto === 'restart' ? msg.run.autoContinued : undefined
     const steps = (msg.run.steps ?? [])
@@ -801,23 +808,64 @@ export class Runner {
   // the app is back, unless the person turned that off. While everything is paused they wait for the
   // resume; one cut long ago is left for the person, who may no longer want it.
   private toResume: string[] = []
-  resumeInterrupted(ids: string[]): void {
-    this.toResume.push(...ids)
-    void this.resumePending()
+  // With the ids the app marked at its own start, what it was running is known. Without them — the
+  // settings' Recovery — the runs marked restartPending are the ones to pick up, and every one of them
+  // is read from the database rather than from a list that lived in the process that died.
+  // One pass, whichever way it is reached: two passes reading the same rows start a reply twice and
+  // lose the ones the first one marked done, so a restart brings back one session out of six.
+  private bootPass: Promise<void> | undefined
+  resumeInterrupted(ids?: string[]): Promise<void> {
+    if (ids) this.toResume.push(...ids)
+    if (!this.bootPass) this.bootPass = this.recoverCutRuns().finally(() => { this.bootPass = undefined })
+    return this.bootPass
   }
 
-  private async resumePending(): Promise<void> {
-    if (this.paused || this.toResume.length === 0) return
-    const settings = await this.deps.settings()
-    const ids = this.toResume.splice(0)
-    if (settings.autoContinue === false) return
+  private async recoverCutRuns(): Promise<void> {
+    // While everything is paused they are still taken in here: the scheduler holds them and starts
+    // them the moment it is unpaused, which is what "queued until the resume" means.
     const { db } = this.deps
-    for (const id of ids) {
+    const settings = await this.deps.settings()
+    const automatic = settings.autoContinue !== false
+    const opted = settings.resumeInterrupted === true
+    if (!automatic && !opted) {
+      // Nothing resumes, and these rows stop being eligible: turning the switch on later doesn't
+      // replay them. The reply keeps its Continue, which is a click the person makes.
+      for (const msg of db.messagesWithRun(['interrupted'])) {
+        if (!msg.run?.restartPending) continue
+        const { restartPending: _, cutAt: __, ...rest } = msg.run
+        db.saveMessage({ ...msg, run: rest })
+      }
+      return
+    }
+    const live = this.toResume.splice(0)
+    // One row per reply, whichever of the two readings found it: a reply can't be started twice.
+    const candidates = new Map<string, Message>()
+    for (const msg of db.messagesWithRun(['interrupted'])) if (msg.run?.restartPending) candidates.set(msg.id, msg)
+    for (const id of live) {
       const msg = db.message(id)
-      if (msg?.author.kind !== 'agent' || msg.run?.status !== 'interrupted' || Date.now() - msg.at > RESUME_WINDOW_MS) continue
-      // With something done, it goes on from there; with nothing, it just starts over.
-      if (canContinue(msg.run)) await this.continue(id, 'restart')
-      else this.retry(id)
+      if (msg?.run?.status === 'interrupted') candidates.set(id, msg)
+    }
+    for (const msg of candidates.values()) {
+      const run = msg.run!
+      const { restartPending: _, cutAt, ...rest } = run
+      if (this.recovering.has(msg.id)) continue
+      // From when the app cut it, not from when it was asked.
+      const stale = Date.now() - (cutAt ?? msg.at) > RESUME_WINDOW_MS
+      const goes = !stale && (automatic || canContinue(run))
+      const agent = msg.author.kind === 'agent' ? db.agent(msg.author.id) : undefined
+      const conv = msg.conversationId ? db.conversation(msg.conversationId) : undefined
+      const reachable = !!agent && !agent.archived && !!conv && conv.members.includes(agent.id)
+      if (!goes || !reachable) {
+        db.saveMessage({ ...msg, run: rest })
+        continue
+      }
+      this.recovering.add(msg.id)
+      this.enqueue(async () => {
+        try {
+          if (canContinue(run)) await this.continueReply(msg.id, 'restart')
+          else this.retry(msg.id)
+        } finally { this.recovering.delete(msg.id) }
+      }, false)
     }
   }
 

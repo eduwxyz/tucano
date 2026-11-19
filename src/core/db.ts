@@ -1334,7 +1334,7 @@ export class Db {
       ids.push(m.id)
       this.saveMessage({
         ...m,
-        run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
+        run: { ...m.run, status: 'interrupted', restartPending: true, cutAt: Date.now(), steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
     return ids
