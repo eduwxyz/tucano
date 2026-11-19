@@ -1,6 +1,8 @@
 // The Tuca over the real core (fake engines): his conversation is kept when the person leaves his
 // screen and comes back, "Nova conversa" starts another, each person has their own; and a reply with
 // several proposals is applied card by card or all at once, in order, one failing not stopping the rest.
+// These are the cards as they were before the Tuca's changes applied by themselves: the setting is off
+// here (tucaApplyNow: false), and test/tuca-apply-now-core.test.ts covers it on.
 // One core for the whole file: the describes run in order and build on each other.
 import { rmSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -46,6 +48,7 @@ beforeAll(async () => {
   core = await bootCore({ server: true })
   ana = core.connect()
   await ana.call('setMyName', { name: 'Ana' })
+  await ana.call('updateSettings', { patch: { tucaApplyNow: false } })
 }, 30_000)
 afterAll(() => {
   process.off('unhandledRejection', onCrash)

@@ -1041,6 +1041,27 @@ export class Db {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
   }
 
+  // Whether anything was said there yet, by anyone.
+  hasMessages(conversationId: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1').get(conversationId)
+  }
+
+  // Whether an agent left any trace of work: a message it wrote, a to-do on someone's board, a memory or note.
+  agentUsed(agentId: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 WHERE EXISTS (SELECT 1 FROM messages WHERE author_kind = 'agent' AND author_id = ?) OR EXISTS (SELECT 1 FROM tasks WHERE agent_id = ?) OR EXISTS (SELECT 1 FROM memories WHERE agent_id = ? OR scope = ?)")
+      .get(agentId, agentId, agentId, agentId)
+  }
+
+  // An agent gone for good, with its places in channels: only for one taken back before it did anything
+  // (its DMs go first, through deleteConversation).
+  deleteAgent(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM members WHERE agent_id = ?').run(id)
+      this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    })
+  }
+
   // Puts the agent in exactly these channels (DMs are untouched).
   setAgentChannels(agentId: string, channelIds: string[]): string[] {
     const changed: string[] = []
@@ -1304,18 +1325,19 @@ export class Db {
     return r ? this.toApproval(r) : undefined
   }
 
-  // Runs that were working when the app closed can't continue: their CLI process is gone.
-  interruptStaleRuns(): number {
-    let n = 0
+  // Runs that were working when the app closed can't continue: their CLI process is gone. Returns
+  // their messages, so the work can go on in new replies (Runner.resumeInterrupted).
+  interruptStaleRuns(): string[] {
+    const ids: string[] = []
     for (const m of this.messagesWithRun(['working'])) {
       if (m.run?.status !== 'working') continue
-      n++
+      ids.push(m.id)
       this.saveMessage({
         ...m,
         run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
-    return n
+    return ids
   }
 
   // ---------- receipts ----------
@@ -1468,6 +1490,11 @@ export class Db {
 
   getSecret(key: string): string | undefined {
     return (this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: string } | undefined)?.value
+  }
+
+  // The keys that start with a prefix: what's saved, without opening any of it.
+  secretKeys(prefix: string): string[] {
+    return (this.db.prepare('SELECT key FROM secrets WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key)
   }
 
   setSecret(key: string, value: string | undefined): void {

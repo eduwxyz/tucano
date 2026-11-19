@@ -6,6 +6,7 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
+import { BrowserLogins } from './BrowserLogins'
 import {
   agentById,
   getState,
@@ -47,6 +48,7 @@ import {
   MAX_CHAIN_DEPTH,
   chainDepthCap,
   RUN_BUDGET_PCT,
+  AUTO_CONTINUES,
   routineCap,
   RUN_STALL_MINUTES,
   archiveAgent,
@@ -80,6 +82,7 @@ import {
   restoreApply,
   restoreCancel,
   restoreInfo,
+  UNDO_HOURS,
   type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
@@ -928,6 +931,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 <>
                   <p>{L('Busca na web: pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.', 'Web search: searches and reads pages with Claude Code’s or Codex’s own tool, on your subscription. Every search shows up in the reply’s steps.')}</p>
                   <p>{L('Navegador próprio: um Chrome só dele, que abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.', 'Own browser: a Chrome of its own that opens pages, clicks, fills in and reads like a person, with logins separate from yours (you sign in via Take over). A click that buys, publishes, sends or deletes asks for your approval.')}</p>
+                  <p>{L('O que ele baixa fica numa pasta só dele, e ele pode mandar no chat (uma fatura, um comprovante). Em Logins salvos, ele entra sozinho num site sem nunca ver a senha.', 'What it downloads stays in a folder of its own, and it can post it in the chat (a bill, a receipt). With Saved logins, it signs in to a site on its own without ever seeing the password.')}</p>
                 </>
               }
             >
@@ -948,7 +952,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                         onClick={() =>
                           void confirmDialog({
                             title: L(`Apagar os logins do navegador de ${draft.name}?`, `Delete the logins in ${draft.name}'s browser?`),
-                            body: L(`Saem os logins, os cookies e o histórico. ${draft.name} vai precisar que você entre de novo nas contas (pelo Assumir).`, `Logins, cookies and history go. ${draft.name} will need you to sign in to the accounts again (via Take over).`),
+                            body: L(`Saem os logins, os cookies, o histórico e os arquivos baixados. ${draft.name} vai precisar entrar de novo nas contas (pelo Assumir, ou sozinho nos logins salvos, que ficam).`, `Logins, cookies, history and downloaded files go. ${draft.name} will need to sign in to the accounts again (via Take over, or on its own with the saved logins, which stay).`),
                             confirm: L('Apagar logins', 'Delete logins'),
                             danger: true
                           }).then((ok) => ok && browserAction(draft.id, 'clear'))
@@ -962,6 +966,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               >
                 <Toggle label={L('Navegador próprio', 'Own browser')} on={!!draft.browser} onChange={(v) => patch({ browser: v }, true)} />
               </Row>
+              {!isNew && draft.browser && admin && <BrowserLogins agentId={draft.id} agentName={draft.name} />}
             </Section>
           )}
 
@@ -3328,6 +3333,24 @@ export function SettingsPage(): ReactNode {
         )}
 
         {pane('agentes') && (
+          <Card title="Tuca" lead={L('O que o Tuca muda dentro do app: agentes, times, canais e rotinas.', 'What Tuca changes inside the app: agents, teams, channels and routines.')}>
+            <div className="key-row">
+              <Icon name="spark" />
+              <div className="grow">
+                <strong>{L('Aplicar mudanças do Tuca na hora, com Desfazer', 'Apply Tuca’s changes right away, with Undo')}</strong>
+                <p className="muted small">
+                  {L(
+                    `O que ele propõe entra assim que ele termina de responder, e o card ganha um Desfazer por ${UNDO_HOURS} horas. Acesso a conectores e o limite do mês continuam esperando você confirmar. Desligado, tudo espera você clicar em Aplicar.`,
+                    `What he proposes goes in as soon as he finishes replying, and the card gets an Undo for ${UNDO_HOURS} hours. Connector access and the monthly limit still wait for you to confirm. Off, everything waits for you to click Apply.`
+                  )}
+                </p>
+              </div>
+              <Toggle on={settings.tucaApplyNow !== false} onChange={(v) => updateSettings({ tucaApplyNow: v })} />
+            </div>
+          </Card>
+        )}
+
+        {pane('agentes') && (
           <Card title={L('Navegador dos agentes', 'Agents’ browser')} lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.')}>
             <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
               {[false, true].map((v) => (
@@ -3422,7 +3445,7 @@ export function SettingsPage(): ReactNode {
                   onChange={(n) => updateSettings({ defaultLimit: safeLimit(n * 1_000_000) })}
                 />
               </Field>
-              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa e você decide se continua. Num agente sem limite mensal, a conta é sobre 10 milhões de tokens.', 'When it hits it, the agent pauses and you decide whether it continues. For an agent with no monthly limit, it is taken over 10 million tokens.')}>
+              <Field label={L('Limite por resposta (% do limite do mês)', 'Limit per reply (% of the monthly limit)')} hint={L('Chegou nele, o agente pausa. Se estava avançando, segue sozinho (veja Continuar sozinho, abaixo); senão, você decide se continua. Num agente sem limite mensal, a conta é sobre 10 milhões de tokens.', 'When it hits it, the agent pauses. If it was getting somewhere it goes on by itself (see Keep going on its own, below); if not, you decide whether it continues. For an agent with no monthly limit, it is taken over 10 million tokens.')}>
                 <NumberInput
                   min={1}
                   max={100}
@@ -3457,6 +3480,19 @@ export function SettingsPage(): ReactNode {
                   placeholder={L('Escolha', 'Pick')}
                 />
               </Field>
+            </div>
+            <div className="key-row">
+              <Icon name="play" />
+              <div className="grow">
+                <strong>{L('Continuar sozinho', 'Keep going on its own')}</strong>
+                <p className="muted small">
+                  {L(
+                    `Quando uma resposta chega no limite e estava avançando, o agente segue sozinho até ${AUTO_CONTINUES} vezes seguidas antes de esperar você. Uma resposta cortada porque o app fechou continua quando ele abre de novo. O limite do mês continua valendo.`,
+                    `When a reply reaches its limit while it was getting somewhere, the agent goes on by itself up to ${AUTO_CONTINUES} times in a row before waiting for you. A reply cut because the app closed goes on when it opens again. The monthly limit still holds.`
+                  )}
+                </p>
+              </div>
+              <Toggle on={settings.autoContinue !== false} onChange={(v) => updateSettings({ autoContinue: v })} />
             </div>
           </Card>
         )}

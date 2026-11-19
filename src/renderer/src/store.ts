@@ -60,7 +60,8 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo
+  type NodeInfo,
+  type SavedLogin
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -567,6 +568,8 @@ function apply(e: CoreEvent): void {
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
+      case 'agent_removed':
+        return { ...s, agents: s.agents.filter((a) => a.id !== e.id) }
       case 'conversation': {
         return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
@@ -934,6 +937,8 @@ export const applyProposal = (messageId: string, index = 0): Promise<{ id: strin
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
 export const applyProposals = (messageId: string, draft: boolean): Promise<ProposalsResult> => call('applyProposals', { messageId, draft })
 export const dismissProposals = (messageId: string, draft: boolean): void => void call('dismissProposals', { messageId, draft }).catch(() => {})
+export const undoProposal = (messageId: string, index?: number, draft?: boolean): Promise<void> => call('undoProposal', { messageId, ...(index !== undefined ? { index } : {}), ...(draft ? { draft } : {}) })
+export const undoProposals = (messageId: string): Promise<ProposalsResult> => call('undoProposals', { messageId })
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {
@@ -1061,6 +1066,10 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
+// The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
+export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
+export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
+export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)

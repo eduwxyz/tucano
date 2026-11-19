@@ -197,6 +197,8 @@ export interface Run {
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  goal?: string // the goal it works on: the message that set it (src/core/goals.ts)
+  autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
@@ -278,15 +280,30 @@ export interface AgentDraft {
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
   reason?: string
-  state?: 'created' | 'dismissed'
+  state?: 'created' | 'dismissed' | 'undone'
   agentId?: string // once created
+  auto?: true // created by itself when the Tuca proposed it (Settings.tucaApplyNow), not by a click
+  undo?: UndoInfo // once created: how to take it back
+}
+
+// How long a change the Tuca applied can be taken back with Desfazer.
+export const UNDO_HOURS = 24
+
+// What taking an applied card back needs: until when, and what to check first, so a later change
+// to the same thing is never thrown away. `prior`: an agent's fields as they were just before;
+// `stamps`: what each thing it made looked like right after (an agent's or a routine's, by id).
+export interface UndoInfo {
+  until: number
+  prior?: AgentChanges
+  stamps?: Record<string, string>
 }
 
 // What the Tuca may propose to change in an agent that exists.
 export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
-// with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
+// with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
+// inside the app (Settings.tucaApplyNow): that applies when his reply ends, and the card offers Desfazer. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
 // A reply may hold several (a group under it, each applied on its own or all at once). `needs`: agents
 // proposed in the same reply (by name: propor_agente's card or a team's) that must exist first; a
@@ -296,7 +313,7 @@ export type Proposal = (
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
   | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
-) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; needs?: string[] }
+) & { reason?: string; state?: 'applied' | 'dismissed' | 'undone'; appliedId?: string; error?: string; needs?: string[]; auto?: true; undo?: UndoInfo } // auto: applied by itself, as the Tuca proposed it; undo: how to take it back
 
 // What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
 // agents and teams); `draft`: the reply's new-agent card, when it went too.
@@ -530,6 +547,7 @@ export interface Settings {
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
@@ -559,6 +577,7 @@ export interface Settings {
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
+  tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work
@@ -587,7 +606,7 @@ export interface Account {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'fill' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -618,6 +637,13 @@ export interface BrowserReply {
   text?: string
   shown?: boolean // the window is open for me
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
+}
+
+// A login the person saved for an agent's browser, as their page lists it: never the password.
+export interface SavedLogin {
+  origin: string // https://conta.example.com: the only place it's typed
+  username: string
+  onePassword?: boolean // the password is a 1Password reference, read when it's typed
 }
 
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.
@@ -675,6 +701,7 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const AUTO_CONTINUES = 2 // times in a row a reply that paused while getting somewhere goes on by itself before it waits for you
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
