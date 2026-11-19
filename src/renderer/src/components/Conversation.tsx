@@ -588,6 +588,42 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
     return () => seen.disconnect()
   }, [])
   const leftStack = height >= 74
+  // The way back to this session's start appears only once that start has scrolled out of sight.
+  // A press records where we were and parks the row's first line at the top; the down arrow then
+  // returns to the exact scroll position the person left.
+  const [pastStart, setPastStart] = useState(false)
+  const [returnTop, setReturnTop] = useState<number | null>(null)
+  useEffect(() => {
+    if (!message.run) return
+    const row = rowEl.current
+    const list = row?.closest<HTMLElement>('.messages')
+    if (!row || !list) return
+    const check = (): void => setPastStart(row.getBoundingClientRect().top < list.getBoundingClientRect().top - 6)
+    check()
+    list.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      list.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [message.run, height])
+  const scrollList = (): HTMLElement | undefined => rowEl.current?.closest<HTMLElement>('.messages') ?? undefined
+  const toStart = (): void => {
+    const list = scrollList()
+    const row = rowEl.current
+    if (!list || !row) return
+    setReturnTop(list.scrollTop)
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+    list.scrollTo({ top, behavior: 'smooth' })
+    row.classList.add('is-flash')
+    setTimeout(() => row.classList.remove('is-flash'), 1800)
+  }
+  const back = (): void => {
+    const list = scrollList()
+    if (!list || returnTop === null) return
+    list.scrollTo({ top: returnTop, behavior: 'smooth' })
+    setReturnTop(null)
+  }
   const ownPrompt = !agent && !other && message.author.kind === 'person' && !message.run
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.text)
@@ -689,7 +725,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             <div className={`msg__anchor-pin ${replies ? '' : 'msg__anchor-pin--alone'}`}>
               {replies ? <ThreadButton message={message} /> : null}
               {agent && <DeleteSession message={message} />}
-              {message.run?.replyTo && <PromptJump id={message.run.replyTo} />}
+              {message.run && (pastStart || returnTop !== null) && <PromptJump back={returnTop !== null} onClick={returnTop !== null ? back : toStart} />}
             </div>
             <RunSteps message={message} />
           </div>
@@ -1244,22 +1280,6 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-// The way back to the prompt this reply answers, one row below the trash in the same rail. A run
-// taller than the screen otherwise leaves the question far above the work it started.
-export function PromptJump({ id }: { id: string }): ReactNode {
-  const jump = useContext(JumpTo)
-  return (
-    <button
-      className="icon-btn icon-btn--sm msg__reply msg__reply--up"
-      title={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
-      aria-label={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
-      onClick={() => jump(id)}
-    >
-      <Icon name="up" size={12} />
-    </button>
-  )
-}
-
 // A session's reply leaves the room in two presses: the first arms the trash, the second deletes
 // the reply, the thread it started and the work under it. Escape, an outside press or four seconds
 // disarms it. The same control rides the thread header and closes the panel with the session.
@@ -1309,6 +1329,25 @@ export function DeleteSession({ message, where = 'corner' }: { message: Message;
       onClick={press}
     >
       <Icon name="trash" size={head ? 14 : 13} />
+    </button>
+  )
+}
+
+// The way back to the start of a long run, and the way home after taking it. The up arrow parks
+// the first line of the run at the top of the list; the down arrow returns to the exact scroll
+// position the person left. The row owns that state so several replies can each hold their place.
+export function PromptJump({ back, onClick }: { back?: boolean; onClick: () => void }): ReactNode {
+  const label = back
+    ? L('Voltar aonde estava', 'Return to where you were')
+    : L('Ir para o começo desta sessão', 'Go to the start of this session')
+  return (
+    <button
+      className={`icon-btn icon-btn--sm msg__reply ${back ? 'msg__reply--down' : 'msg__reply--up'}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+    >
+      <Icon name={back ? 'down' : 'up'} size={12} />
     </button>
   )
 }

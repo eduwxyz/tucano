@@ -141,10 +141,6 @@ describe('the trash that deletes a session', () => {
     expect(trash()!.closest('.msg__anchor-pin')).toBeTruthy()
     expect(trash()!.closest('.msg__anchor-pin--alone')).toBeTruthy()
     expect(trash()!.closest('.msg')).toBeTruthy()
-    await render([said('m1', 'corrige o login'), said('m2', 'e o logout?'), reply('r1')])
-    const jump = document.querySelector('.msg__reply--up')
-    expect(jump).toBeTruthy()
-    expect(jump!.closest('.msg__anchor-pin')).toBeTruthy()
   })
 
   it("sits in the thread's own header, beside close, and takes the panel away with the session", async () => {
