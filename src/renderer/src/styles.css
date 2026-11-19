@@ -12715,9 +12715,28 @@ button.agent-card__now:hover {
      line instead of pushing the column wider and leaving a horizontal scrollbar in a thread. */
   overflow-wrap: anywhere;
   opacity: 0.85;
-  scrollbar-width: thin;
-  /* The newest line never sits against the edge of the box: it fades in from the bottom. */
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 10px), transparent 100%);
+  /* Down only, and with the same dim scrollbar the rest of the app wears: the rules under this block
+     draw it in `--border-strong`, as the window's own do. (the standard `scrollbar-*`
+     properties are deliberately left unset: in Chromium they take precedence over `::-webkit-scrollbar`
+     and hand the box back to the overlay bar, which is only there while the wheel turns.) The fade that used to sit over the last line was
+     a `mask-image` on the whole box — scrollbar included — which is why nothing scrolled visibly in
+     it: the bar was there and painted away. */
+}
+.thought__text::-webkit-scrollbar {
+  width: 8px;
+}
+.thought__text::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thought__text::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+.thought__text::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
 }
 .thought:not(.is-working) .thought__text {
   max-height: none;
