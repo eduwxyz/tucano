@@ -1159,7 +1159,16 @@ export class Runner {
     const msg: Message = opts.existing ?? { id: randomUUID(), conversationId: conv.id, author: { kind: 'agent', id: agent.id }, text: '', at: Date.now(), ...(opts.threadId ? { threadId: opts.threadId } : {}) }
     const started = Date.now()
     let stepStarted = started
-    const thinking = (): Step => ({ id: randomUUID(), label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' })
+    // The "Thinking" rows, by id: only these close as "Thought" when a tool starts.
+    const thoughts = new Set<string>()
+    const thinking = (): Step => {
+      const id = randomUUID()
+      thoughts.add(id)
+      return { id, label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' }
+    }
+    // Back to thinking once a tool is done, unless another call it started beside it (engines run tool
+    // calls in parallel) still runs: that one adds the row when it ends, so there's only ever one.
+    const andThink = (steps: Step[]): Step[] => (steps.some((s) => s.status === 'running') ? steps : [...steps, thinking()])
     msg.text = ''
     // "Try again" passes no task: it repeats the one of the reply it's redoing.
     const task = opts.task ?? opts.existing?.run?.task
@@ -1187,8 +1196,11 @@ export class Runner {
       return text
     }
     const closeThinking = (status: 'done' | 'error', label: string): Step[] => {
-      const note = label === THOUGHT() ? said() : undefined
-      return msg.run!.steps.map((s) => (s.status === 'running' ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
+      // A tool starting closes only the "Thinking" row: a call already running beside it keeps its own label.
+      // The reply ending (replied, stopped, failed) closes whatever still runs.
+      const thought = label === THOUGHT()
+      const note = thought ? said() : undefined
+      return msg.run!.steps.map((s) => (s.status === 'running' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
@@ -1574,7 +1586,7 @@ ${note}`,
 
     const addSteps = (...steps: Step[]): void => {
       flush() // keep streamed text and the full-message event in order
-      msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), ...steps, thinking()] }
+      msg.run = { ...msg.run!, steps: andThink([...closeThinking('done', THOUGHT()), ...steps]) }
       stepStarted = Date.now()
       save()
     }
@@ -2083,7 +2095,7 @@ ${note}`,
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
             services: services.length ? [...services] : undefined,
-            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
+            steps: andThink(msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...end, status: failed ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)))
           }
           stepStarted = Date.now()
           save()
@@ -2106,20 +2118,20 @@ ${note}`,
           // A risky click or key: by how far this agent goes on its own, it waits for me, runs now, or never.
           const risky = out.approval ? verdict({ cls: 'write', kinds: ['browser'], p: await policyNow(), outside, askByDefault: true }) : undefined
           if (out.approval && risky?.off) {
-            msg.run = { ...msg.run!, steps: [...close('error', { detail: out.approval.detail }), thinking()] }
+            msg.run = { ...msg.run!, steps: andThink(close('error', { detail: out.approval.detail })) }
             save()
             return textResult(L(`Não fiz: cliques arriscados no navegador estão desligados pra você (${settings.workspaceName} decide isso). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`, `I didn't: risky clicks in the browser are turned off for you (${settings.workspaceName} decides that). Go on without it, or tell ${settings.workspaceName} what's missing.`), true)
           }
           if (out.approval && risky?.run) {
             const done = await browser.approved(current, out.approval.args)
-            msg.run = { ...msg.run!, artifactIds: artifactIds.length ? [...artifactIds] : undefined, steps: [...close(done.ok ? 'done' : 'error', { label: L('Clicou (sem pedir: autonomia)', 'Clicked (no ask: autonomy)'), detail: out.approval.detail }), thinking()] }
+            msg.run = { ...msg.run!, artifactIds: artifactIds.length ? [...artifactIds] : undefined, steps: andThink(close(done.ok ? 'done' : 'error', { label: L('Clicou (sem pedir: autonomia)', 'Clicked (no ask: autonomy)'), detail: out.approval.detail })) }
             stepStarted = Date.now()
             save()
             return textResult(done.text, !done.ok)
           }
           if (out.approval) {
             if (questions || approval) {
-              msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
+              msg.run = { ...msg.run!, steps: andThink(close('error')) }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
             }
@@ -2147,7 +2159,7 @@ ${note}`,
               ...msg.run!,
               approvalId: approval.id,
               artifactIds: artifactIds.length ? [...artifactIds] : undefined,
-              steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()]
+              steps: andThink(close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }))
             }
             stepStarted = Date.now()
             save()
@@ -2162,7 +2174,7 @@ ${note}`,
           msg.run = {
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
-            steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()]
+            steps: andThink(close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}))
           }
           stepStarted = Date.now()
           save()
@@ -2185,7 +2197,7 @@ ${note}`,
           // A click or key that sends, pays or deletes: by how far this agent goes on its own, it waits, runs now, or never.
           const risky = out.approval ? verdict({ cls: 'write', kinds: ['apps'], p: await policyNow(), outside, askByDefault: true }) : undefined
           if (out.approval && risky?.off) {
-            msg.run = { ...msg.run!, steps: [...close('error', { detail: out.approval.detail }), thinking()] }
+            msg.run = { ...msg.run!, steps: andThink(close('error', { detail: out.approval.detail })) }
             save()
             return textResult(L(`Não fiz: ações arriscadas nos apps estão desligadas pra você (${settings.workspaceName} decide isso). Siga sem isso, ou diga a ${settings.workspaceName} o que falta.`, `I didn't: risky actions in apps are turned off for you (${settings.workspaceName} decides that). Go on without it, or tell ${settings.workspaceName} what's missing.`), true)
           }
@@ -2195,7 +2207,7 @@ ${note}`,
             const let_ = await apps.approved(current, out.approval.args)
             if (let_.ok) out = await apps.call(current, name, args)
             if (!out.approval) {
-              msg.run = { ...msg.run!, steps: [...close(!let_.ok || out.result.isError ? 'error' : 'done', { label: L('Fez (sem pedir: autonomia)', 'Did it (no ask: autonomy)'), detail }), thinking()] }
+              msg.run = { ...msg.run!, steps: andThink(close(!let_.ok || out.result.isError ? 'error' : 'done', { label: L('Fez (sem pedir: autonomia)', 'Did it (no ask: autonomy)'), detail })) }
               stepStarted = Date.now()
               save()
               return let_.ok ? clip(out.result) : textResult(let_.text, true)
@@ -2203,7 +2215,7 @@ ${note}`,
           }
           if (out.approval) {
             if (questions || approval) {
-              msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
+              msg.run = { ...msg.run!, steps: andThink(close('error')) }
               save()
               return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
             }
@@ -2227,7 +2239,7 @@ ${note}`,
             }
             db.createApproval(approval)
             emit({ type: 'approval', approval })
-            msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
+            msg.run = { ...msg.run!, approvalId: approval.id, steps: andThink(close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail })) }
             stepStarted = Date.now()
             save()
             notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`)
@@ -2238,7 +2250,7 @@ ${note}`,
               )
             )
           }
-          msg.run = { ...msg.run!, steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()] }
+          msg.run = { ...msg.run!, steps: andThink(close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {})) }
           stepStarted = Date.now()
           save()
           return clip(out.result)
@@ -2373,7 +2385,7 @@ ${note}`,
           const error = why && maskSecrets(why)
           if (error) console.warn(`[connector] ${detail} failed: ${error}`)
           const reason = error ? { error: error.length > STEP_ERROR_MAX ? `${error.slice(0, STEP_ERROR_MAX)}…` : error } : output ? { output } : {}
-          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s)), thinking()] }
+          msg.run = { ...msg.run!, steps: andThink(msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0, ...reason } : s))) }
           stepStarted = Date.now()
           save()
         }
