@@ -1,0 +1,17 @@
+// Permanent redirects from Tucano's other domains to tucano.sh:
+//   cd site/redirect && npx wrangler deploy
+// Each domain must first be a zone in the same Cloudflare account.
+{
+  "name": "tucano-redirect",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "routes": [
+    { "pattern": "www.tucano.sh", "custom_domain": true },
+    { "pattern": "tucano.chat", "custom_domain": true },
+    { "pattern": "www.tucano.chat", "custom_domain": true },
+    { "pattern": "usetucano.com", "custom_domain": true },
+    { "pattern": "www.usetucano.com", "custom_domain": true },
+    { "pattern": "tucano.bot", "custom_domain": true },
+    { "pattern": "www.tucano.bot", "custom_domain": true }
+  ]
+}

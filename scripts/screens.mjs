@@ -55,9 +55,21 @@ await shot('03-router-escolheu')
 await send('@lia antes de sugerir qualquer coisa, use a ferramenta de pergunta pra me perguntar qual é o meu prazo.')
 await settle()
 await shot('04-pergunta')
-await send('Até sexta.')
+await send('Até sexta.') // the message box still answers, as before
 await settle()
 await shot('05-respondeu-pergunta')
+
+// Several decisions: a card under the reply, one at a time, then a review before sending.
+await send('@lia me ajuda a decidir')
+await settle()
+await win.waitForSelector('.ask--answer')
+await shot('05a-decisoes')
+await win.locator('.ask-option').first().click()
+await win.fill('.ask__text', 'Até sexta.')
+await win.keyboard.press('Enter')
+await shot('05b-decisoes-revisao')
+await win.locator('.ask .btn--primary').click()
+await settle()
 
 // Handoff: Lia mentions Theo, who answers next.
 await send('@lia peça pro Theo calcular a mediana de 3, 9 e 4, mencionando ele com arroba. Você não calcula.')
@@ -70,13 +82,12 @@ await shot('07-uso')
 // ---------- M3: connector, grant, tools, approval ----------
 
 await win.click('.nav-item:has-text("Conectores")')
-await win.click('text=Adicionar conector')
+await win.click('button:has-text("Adicionar personalizado")')
 await win.click('button[role=radio]:has-text("Local")')
 await win.click('text=Preencher com o servidor de demonstração')
 await shot('08-novo-conector')
-await win.click('button:has-text("Conectar")')
-await win.waitForSelector('.connector .tag:has-text("conectado")', { timeout: 20_000 })
-await win.click('.connector__head')
+await win.click('.connector__actions button.btn--primary')
+await win.waitForSelector('.connector-modal .tag:text-is("conectado")', { timeout: 20_000 }) // the new connector opens in a window
 await shot('09-conector-ferramentas')
 
 // Give Lia read and write on it.
@@ -105,7 +116,7 @@ await win.click('.nav-item:has-text("Aprovações")')
 await shot('14-aprovacoes')
 
 await win.click('.nav-item:has-text("Conectores")')
-await win.click('.connector__head')
+await win.click('.catalog__card.is-mine')
 await shot('15-ferramenta-nova')
 
 // Theo (Codex) reads the same connector.
@@ -169,6 +180,7 @@ await shot('21-computador-chat')
 await win.click('.artifact-image')
 await win.waitForTimeout(500)
 await shot('22-painel-print')
+await win.keyboard.press('Escape') // close the screenshot lightbox
 const open = win.locator('.artifact-card--service button:has-text("Abrir")')
 if (await open.count()) {
   await open.first().click()
@@ -180,14 +192,25 @@ if (await open.count()) {
 
 await win.click('.nav-item:has-text("Rotinas")')
 await shot('24-rotinas-vazio')
-await win.click('.routine-example:has-text("Fechamento da semana")')
+await win.click('.cal__empty button:has-text("Fechamento da semana")')
 await win.locator('.routine-form select').nth(1).selectOption({ label: '#engenharia' })
 await shot('25-rotina-nova')
 await win.click('button:has-text("Criar rotina")')
-await win.click('.routine button:has-text("Rodar agora")')
-await win.waitForSelector('.routine .tag:text-is("respondeu")', { timeout: 120_000 })
+await win.locator('.routine-form').waitFor({ state: 'detached' })
+// The routine is a block on the calendar. The calendar shows only what's still to come, so past
+// Friday 17:00 this week's block is gone: find it next week, and come back to this one for the run.
+const routine = win.locator('.cal__ev:has-text("Fechamento da semana")')
+const later = (await routine.count()) === 0
+if (later) await win.keyboard.press('ArrowRight')
+await routine.first().click()
+await win.click('.cal-pop button:has-text("Rodar agora")')
+if (later) await win.keyboard.press('t')
+const ran = win.locator('.cal__ev:has-text("Fechamento da semana"):has(.cal__ev-ok)')
+await ran.waitFor({ timeout: 120_000 })
+await win.keyboard.press('Escape') // the popover can cover the run's block
+await ran.first().click()
 await shot('26-rotinas')
-await win.click('.routine button.link:text-is("ver")')
+await win.click('.cal-pop button:has-text("Ver a")')
 await settle()
 await shot('27-rotina-na-conversa')
 

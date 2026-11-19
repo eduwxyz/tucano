@@ -27,6 +27,8 @@ export function Modal({ title, onClose, children, className, variant = 'dialog',
     // Captured before the page's own keys, so an Esc here doesn't also close what's behind.
     const keys = (e: KeyboardEvent): void => {
       if (openModals[openModals.length - 1] !== me) return
+      // Esc with a select's menu open closes just the menu (it's in a portal, outside the card).
+      if (e.key === 'Escape' && e.target instanceof Element && e.target.closest('.select__menu')) return
       if (e.key === 'Escape') {
         e.stopImmediatePropagation()
         e.preventDefault()

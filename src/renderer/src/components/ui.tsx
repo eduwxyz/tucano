@@ -1,4 +1,5 @@
 import { L, lang, locale } from '../../../shared/lang'
+import { hasMonthlyLimit } from '../../../shared/limits'
 import { examples, type AvatarDefinition } from 'open-bot-avatar'
 import { mountAvatar, type AvatarOptions, type MountedAvatar } from 'open-bot-avatar/dom'
 import { useEffect, useRef, useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react'
@@ -32,6 +33,7 @@ const PATHS: Record<string, ReactNode> = {
   ),
   x: <path d="M6 6l12 12M18 6 6 18" />,
   chevron: <path d="m9 6 6 6-6 6" />,
+  caret: <path d="m6 9 6 6 6-6" />,
   shield: <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" />,
   chart: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
   plug: <path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v5" />,
@@ -71,6 +73,7 @@ const PATHS: Record<string, ReactNode> = {
   ),
   layers: <path d="m12 3 9 5-9 5-9-5 9-5ZM3 13l9 5 9-5" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
+  clip: <path d="m21 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
   globe: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -90,6 +93,14 @@ const PATHS: Record<string, ReactNode> = {
     <>
       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
       <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  hide: <path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6" />,
+  more: (
+    <>
+      <circle cx="5.5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="18.5" cy="12" r="1" />
     </>
   ),
   keyboard: <path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" />,
@@ -119,7 +130,14 @@ const PATHS: Record<string, ReactNode> = {
   volume: <path d="M4 9v6h4l5 4V5L8 9H4ZM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />,
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />,
   archive: <path d="M3 4h18v4H3V4ZM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />,
-  thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />
+  board: (
+    <>
+      <rect x="3.5" y="4" width="17" height="16" rx="3" />
+      <path d="M9.2 4v16M14.8 4v16M5.8 8h1.2M11.4 8h1.2M17 8h1.2M11.4 11.5h1.2" />
+    </>
+  ),
+  thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />,
+  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />
 }
 
 export type IconName = keyof typeof PATHS
@@ -210,11 +228,11 @@ export const AVATARS: AvatarDefinition[] = [...examples, ...(gallery as AvatarDe
 const HEX: Record<AgentColor, string> = { sky: '#3b9eea', indigo: '#5b6cf0', violet: '#8b5cf6', rose: '#e5557a', amber: '#e3a008', green: '#22a35a', teal: '#14a3a3', graphite: '#5d6470' }
 
 // A drawn avatar. Big ones and busy ones move (busy: thinking); the rest are one still SVG,
-// so a long chat stays light. The biggest follow the pointer with their eyes.
-function DrawnAvatar({ definition, color, size, busy, happy }: { definition: AvatarDefinition; color: string; size: number; busy?: boolean; happy?: boolean }): ReactNode {
+// so a long chat stays light (a caller can ask for a still one). The biggest follow the pointer with their eyes.
+function DrawnAvatar({ definition, color, size, busy, happy, still }: { definition: AvatarDefinition; color: string; size: number; busy?: boolean; happy?: boolean; still?: boolean }): ReactNode {
   const host = useRef<HTMLSpanElement>(null)
   const avatar = useRef<MountedAvatar | null>(null)
-  const options: AvatarOptions = { definition, color, mood: busy ? 'thinking' : happy ? 'happy' : 'idle', still: size < 40 && !busy && !happy, followPointer: size >= 64, label: '' }
+  const options: AvatarOptions = { definition, color, mood: busy ? 'thinking' : happy ? 'happy' : 'idle', still: (still || size < 40) && !busy && !happy, followPointer: size >= 64, label: '' }
   useEffect(() => {
     avatar.current = mountAvatar(host.current!, options)
     return () => avatar.current?.destroy()
@@ -225,18 +243,18 @@ function DrawnAvatar({ definition, color, size, busy, happy }: { definition: Ava
 
 // busy: the eyes read, left to right, while the agent works. Otherwise they blink now and then.
 // Right after the work ends, one happy squint. A picture wins over a drawn avatar, and both over the face.
-export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture' | 'avatar'>>; size?: number; busy?: boolean }): ReactNode {
+export function AgentAvatar({ agent, size = 32, busy, still }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture' | 'avatar'>>; size?: number; busy?: boolean; still?: boolean }): ReactNode {
   const happy = useJustEnded(!!busy, 600)
   if (agent.kind === 'tuca') return <TucaMark size={size} busy={busy} happy={happy} />
   if (!agent.picture && agent.avatar)
     return (
       <span className="avatar avatar--drawn" style={{ width: size, height: size }}>
-        <DrawnAvatar definition={agent.avatar} color={agent.customColor ?? HEX[agent.color]} size={size} busy={busy} happy={happy} />
+        <DrawnAvatar definition={agent.avatar} color={agent.customColor ?? HEX[agent.color]} size={size} busy={busy} happy={happy} still={still} />
         <span className="sr-only">{agent.name}</span>
       </span>
     )
   return (
-    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''} ${happy ? 'is-happy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
+    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''} ${happy ? 'is-happy' : ''} ${still && !busy && !happy ? 'is-still' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
       {agent.picture ? (
         <img className="avatar__photo" src={agent.picture} alt="" />
       ) : (
@@ -269,6 +287,9 @@ export const tokens = (n: number): string =>
     : n >= 1000
       ? `${(n / 1000).toLocaleString(locale(), { maximumFractionDigits: n >= 100_000 ? 0 : 1 })}k`
       : String(n)
+
+/** A month's limit as it reads to a person: a figure, or "no limit" when there isn't one (0). */
+export const monthlyLimitText = (limit: number): string => (hasMonthlyLimit(limit) ? tokens(limit) : L('sem limite', 'no limit'))
 
 export function duration(ms: number): string {
   if (ms < 1000) return `${ms} ms`
@@ -322,10 +343,19 @@ export function time(at: number): string {
 }
 
 export function UsageBar({ used, limit }: { used: number; limit: number }): ReactNode {
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 100
-  const tone = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
+  // No limit draws an empty bar: a full red one reads as "already spent it all".
+  const unlimited = !(limit > 0)
+  const pct = unlimited ? 0 : Math.min(100, (used / limit) * 100)
+  const tone = unlimited ? 'ok' : pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
   return (
-    <span className={`budget budget--${tone}`} role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <span
+      className={`budget budget--${tone}`}
+      role="meter"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      {...(unlimited ? { 'aria-valuetext': L('sem limite', 'no limit') } : {})}
+    >
       <span className="budget__fill" style={{ transform: `scaleX(${pct / 100})` }} />
     </span>
   )

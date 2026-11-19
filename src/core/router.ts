@@ -4,7 +4,8 @@
 // can read Linear. It also screens an agent's reply that mentions others, so a
 // "thanks, @bia" doesn't wake her up.
 import { L } from '../shared/lang'
-import type { Agent, Connector, Message } from '../shared/types'
+import { MENTION } from '../shared/mention-text'
+import { CODE_SPANS, type Agent, type Connector, type Message, type Person } from '../shared/types'
 import type { Engine, TurnShape, Usage } from './engines/types'
 import type { ThreadDigest } from './memory'
 
@@ -20,6 +21,7 @@ export const routerSystem = (): string =>
       '- "todos": true quando a mensagem é pro grupo todo (um cumprimento, "pessoal", uma pergunta pra todos, uma apresentação): aí todos os agentes respondem.',
       '- "reason": um motivo de até 12 palavras, em português.',
       'Se a mensagem depende de um sistema externo (ex.: Linear, GitHub), prefira quem tem acesso a ele; se ninguém tem, escolha pelo papel.',
+      'Uma resposta curta a uma pergunta ou pedido de um agente ("pode", "sim", "pode disparar", "manda ver") vai pra esse agente, mesmo quando a pergunta está numa mensagem anterior do canal ou em outra thread: é ele quem está esperando.',
       'Um cumprimento nunca fica sem resposta. Lista vazia (e "todos" falso) só quando ninguém precisa responder: agradecimento, recado, conversa já encerrada.'
     ].join('\n'),
     [
@@ -29,6 +31,7 @@ export const routerSystem = (): string =>
       '- "everyone": true when the message is for the whole group (a greeting, "everyone", a question for all, an introduction): then every agent answers.',
       '- "reason": a reason of up to 12 words, in English.',
       'If the message depends on an external system (e.g. Linear, GitHub), prefer whoever has access to it; if no one does, choose by role.',
+      'A short answer to an agent\'s question or request ("yes", "go ahead", "you can run it", "do it") goes to that agent, even when the question is in an earlier message of the channel or in another thread: that agent is the one waiting.',
       "A greeting never goes unanswered. An empty list (and \"everyone\" false) only when no one needs to answer: a thank-you, a note, a conversation that's already over."
     ].join('\n')
   )
@@ -49,41 +52,64 @@ export const REPLY_JSON = (): string => L('Responda só com o JSON.', 'Reply wit
 
 const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
 
+// A long message as its opening and its end: a question or a request is usually at the end of a
+// long reply ("…posso disparar agora?"), and the router needs it to know who is waiting for an answer.
+export const opensAndEnds = (text: string, max: number): string => {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (t.length <= max) return t
+  const half = Math.floor((max - 5) / 2)
+  return `${t.slice(0, half).trimEnd()} […] ${t.slice(-half).trimStart()}`
+}
+
 // Who wrote a message, as the router reads it.
+// A person's message reads with their name (one not in `people`, as `me`).
+type People = Pick<Person, 'id' | 'name'>[]
 const speaker =
-  (agents: Agent[], me: string) =>
+  (agents: Agent[], me: string, people?: People) =>
   (m: Message): string =>
-    m.author.kind === 'me'
-      ? me
+    m.author.kind === 'person'
+      ? (people?.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? me)
       : m.author.kind === 'routine'
         ? L(`rotina de ${me}`, `${me}'s routine`)
         : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
 
 // `thread`: the message that started the thread the last message is in; `messages` are then
 // that thread, and `threads` the conversation's other threads, a line each (who took what).
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[] }): string {
-  const { messages, agents, me, connectors = [], thread, threads = [] } = opts
+// `team`: more than one person talks here; what they say to each other isn't for the agents.
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; people?: People; connectors?: Connector[]; thread?: Message; threads?: ThreadDigest[]; team?: boolean }): string {
+  const { messages, agents, me, people, connectors = [], thread, threads = [], team } = opts
   const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
-  const name = speaker(agents, me)
+  const name = speaker(agents, me, people)
   const recent = messages.filter((m) => said(m) && m.id !== thread?.id).slice(-ROUTER_HISTORY)
-  const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`)
-  // Who answered what elsewhere, so a follow-up goes to whoever handled the subject.
+  const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${opensAndEnds(m.text, 800)}`)
+  // Who answered what elsewhere, so a follow-up goes to whoever handled the subject, and how an
+  // agent's last word there ended: a question there may be what this message answers.
   const others = threads
     .filter((t) => t.root && said(t.root))
     .map((t) => {
       const who = t.agents.map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent')).join(', ')
-      return `- [${name(t.root!)}] ${t.root!.text.replace(/\s+/g, ' ').trim().slice(0, 200)} → ${who || L('sem resposta', 'no reply')}`
+      const last = t.last && t.last.id !== t.root!.id && t.last.author.kind === 'agent' ? ` · ${L('por último', 'last')} [${name(t.last)}] ${opensAndEnds(t.last.text, 300)}` : ''
+      return `- [${name(t.root!)}] ${opensAndEnds(t.root!.text, 300)} → ${who || L('sem resposta', 'no reply')}${last}`
     })
   return [
     L('Agentes no canal:', 'Agents in the channel:'),
     ...roster,
     '',
-    ...(others.length ? [L('Outras threads recentes (outros assuntos, só contexto: quem respondeu cada uma):', 'Other recent threads (other subjects, context only: who answered each):'), ...others, ''] : []),
+    ...(others.length ? [L('Antes, no canal (outras threads e mensagens, das mais antigas pras mais novas: quem respondeu cada uma e como terminou):', 'Earlier in the channel (other threads and messages, oldest to newest: who answered each and how it ended):'), ...others, ''] : []),
     thread
       ? L('Thread (a primeira mensagem abriu a thread; a última é a que precisa de resposta):', 'Thread (the first message started it; the last one is the one that needs an answer):')
       : L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),
     ...lines,
     '',
+    ...(team
+      ? [
+          L(
+            'Aqui conversam várias pessoas. Um cumprimento ou recado entre as pessoas, sem pergunta nem pedido pros agentes ("bom dia", "chego às 10", "@Ana valeu"), não precisa de agente: lista vazia e "todos" falso. Isso vale no lugar da regra do cumprimento.',
+            'Several people talk here. A greeting or note between the people, with no question or request for the agents ("good morning", "in at 10", "@Ana thanks"), needs no agent: empty list and "everyone" false. This replaces the greeting rule.'
+          ),
+          ''
+        ]
+      : []),
     REPLY_JSON()
   ].join('\n')
 }
@@ -110,10 +136,62 @@ export const handoffSystem = (): string =>
     ].join('\n')
   )
 
+// A long reply goes to the hand-off screen as its opening plus the lines around each mention
+// of a candidate, so an ask written at the end of a long plan ("@rafa, I need two decisions")
+// is what gets judged. What's left out shows as "[…]". A short reply goes in whole.
+const REPLY_MAX = 3000
+const OPENING = 1000
+const BEFORE = 600
+const AFTER = 1200
+// A cut moves to the nearest line break when one is this close, so lines arrive whole.
+const SNAP = 200
+
+const lineStart = (t: string, i: number): number => {
+  const n = t.lastIndexOf('\n', i)
+  return n >= 0 && i - n <= SNAP ? n + 1 : i
+}
+const lineEnd = (t: string, i: number): number => {
+  const n = t.indexOf('\n', i)
+  return n >= 0 && n - i <= SNAP ? n : i
+}
+
+export function replyExcerpt(reply: string, handles: string[]): string {
+  const text = reply.trim()
+  if (text.length <= REPLY_MAX) return text
+  const wanted = new Set(handles.map((h) => h.toLowerCase()))
+  // Same rule as `mentioned`: a handle inside code doesn't count. Blanking keeps the offsets.
+  const plain = text.replace(CODE_SPANS, (s) => ' '.repeat(s.length))
+  // The first and the last mention of each candidate: the ask is usually one of them, and a reply
+  // that names someone on every line still goes in bounded.
+  const at = new Map<string, number[]>()
+  for (const m of plain.matchAll(MENTION)) {
+    const h = m[2]!.toLowerCase()
+    if (!wanted.has(h)) continue
+    const i = m.index + m[1]!.length
+    const seen = at.get(h)
+    if (!seen) at.set(h, [i])
+    else seen[1] = i
+  }
+  const spans: [number, number][] = [[0, lineEnd(text, OPENING)]]
+  for (const i of [...at.values()].flat()) spans.push([lineStart(text, Math.max(0, i - BEFORE)), lineEnd(text, Math.min(text.length, i + AFTER))])
+  spans.sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = []
+  for (const [from, to] of spans) {
+    const last = merged[merged.length - 1]
+    if (last && from <= last[1] + 1) last[1] = Math.max(last[1], to)
+    else merged.push([from, to])
+  }
+  const parts = merged.map(([from, to]) => text.slice(from, to).trim())
+  const end = merged[merged.length - 1]![1]
+  return parts.join('\n[…]\n') + (end < text.length ? '\n[…]' : '')
+}
+
 // The reply sits between <reply> tags so it can't be confused with the roster or the history.
-export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; connectors?: Connector[]; busy?: Agent[] }): string {
-  const { reply, author, candidates, messages, members, me, connectors = [], busy = [] } = opts
-  const name = speaker(members, me)
+export function handoffPrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; people?: People; connectors?: Connector[]; busy?: Agent[] }): string {
+  const { reply, author, candidates, messages, members, me, people, connectors = [], busy = [] } = opts
+  const name = speaker(members, me, people)
+  const excerpt = replyExcerpt(reply, candidates.map((a) => a.handle))
+  const cut = excerpt !== reply.trim()
   return [
     L('Agentes mencionados:', 'Mentioned agents:'),
     ...candidates.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
@@ -129,9 +207,14 @@ export function handoffPrompt(opts: { reply: string; author: Agent; candidates: 
     L('Conversa recente:', 'Recent conversation:'),
     ...messages.filter(said).slice(-ROUTER_HISTORY).map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`),
     '',
-    L(`Resposta de ${author.name} que você avalia:`, `${author.name}'s reply you are judging:`),
+    cut
+      ? L(
+          `Resposta de ${author.name} que você avalia (longa: vão o começo e os trechos com as menções; […] marca o que ficou de fora):`,
+          `${author.name}'s reply you are judging (long: its opening and the parts with the mentions; […] marks what was left out):`
+        )
+      : L(`Resposta de ${author.name} que você avalia:`, `${author.name}'s reply you are judging:`),
     '<reply>',
-    reply.trim().slice(0, 3000),
+    excerpt,
     '</reply>',
     '',
     REPLY_JSON()
@@ -172,9 +255,11 @@ export async function route(opts: {
   messages: Message[]
   agents: Agent[]
   me: string
+  people?: People
   connectors?: Connector[]
   thread?: Message
   threads?: ThreadDigest[]
+  team?: boolean
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
@@ -204,6 +289,7 @@ export async function screenHandoff(opts: {
   messages: Message[]
   members: Agent[]
   me: string
+  people?: People
   connectors?: Connector[]
   busy?: Agent[]
   cwd: string

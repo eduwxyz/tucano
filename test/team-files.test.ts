@@ -212,4 +212,35 @@ describe("the team's .md file", () => {
     expect(b.db.routines()[0]).toMatchObject({ enabled: false, trigger: { connectorId: 'lin2' } })
     expect(b.teams.preview(old).changes).toEqual([])
   })
+
+  it('carries the org chart: whom each agent answers to, a sector head, an entry point; a new boss comes as a change', () => {
+    const a = author()
+    a.db.saveAgent(agent('l', 'lia', { sectorName: 'Produto', sectorDoes: 'Decide o que entra no app.' }))
+    a.db.saveAgent({ ...a.db.agent('p')!, reportsTo: 'l' })
+    a.db.saveAgent(agent('e', 'entrada', { entry: true }))
+    const b = app()
+    importAll(b, a.teams.export())
+    const lia = byHandle(b.db, 'lia')
+    expect(lia).toMatchObject({ sectorName: 'Produto', sectorDoes: 'Decide o que entra no app.' })
+    expect(byHandle(b.db, 'pm').reportsTo).toBe(lia.id)
+    expect(byHandle(b.db, 'staff').reportsTo).toBeUndefined()
+    expect(byHandle(b.db, 'entrada').entry).toBe(true)
+
+    // Staff now answers to Lia on the author's side: an update, applied once everyone is in.
+    a.db.saveAgent({ ...a.db.agent('s')!, reportsTo: 'l' })
+    const u = b.teams.preview(a.teams.export())
+    expect(u.changes.find((c) => c.title.includes('@staff'))?.fields.map((f) => f.name)).toEqual(['reportsTo'])
+    b.teams.apply(a.teams.export(), all(u))
+    expect(byHandle(b.db, 'staff').reportsTo).toBe(lia.id)
+  })
+
+  it('brings a long skill whole and says how far it goes over the recommendation', () => {
+    const a = author()
+    a.db.saveSkill({ id: 'long', name: 'longa', description: 'Ao usar', body: 'x'.repeat(32_345), agents: ['s'], state: 'active', createdAt: 1, updatedAt: 1 })
+    const b = app()
+    const md = a.teams.export()
+    const r = b.teams.apply(md, all(b.teams.preview(md)))
+    expect(b.db.skills().find((k) => k.name === 'longa')?.body).toHaveLength(32_345)
+    expect(r.note).toContain('22.345 acima do recomendado de 10.000')
+  })
 })

@@ -1,9 +1,13 @@
-// The team's file from before teams had ids (spec §21), still read by team-files.ts, and the
-// daily copies of the database.
+// The team's file from before teams had ids (spec §21): team-files.ts still reads it, and
+// exportTeam/importTeam still write and read it whole. And the daily copies of the database.
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { L } from '../shared/lang'
-import type { Agent, AgentColor, Effort, GrantLevel, Schedule } from '../shared/types'
+import { L, locale } from '../shared/lang'
+import { overlongSkillNote } from '../shared/skills'
+import { bossOf, possibleBosses } from '../shared/org'
+import { describeSchedule, MAX_AGENT_ROUTINES, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
+import { cleanLook } from './agent-look'
 import type { Db } from './db'
 
 const FENCE = 'tucano-team'
@@ -27,6 +31,10 @@ export interface TeamFile {
     web: boolean
     computer: boolean
     grants: Record<string, GrantLevel> // by connector name
+    reportsTo?: string // the handle of the agent it answers to (src/shared/org.ts)
+    sectorName?: string // a sector head's name for its sector
+    sectorDoes?: string // and what the sector solves
+    entry?: boolean // an entry point, over the sectors
   }[]
   skills: { name: string; description: string; body: string; agents: string[] }[] // agents by handle
   channels: { name: string; topic?: string; members: string[] }[]
@@ -45,6 +53,197 @@ export function parseTeamFile(text: string): TeamFile {
   }
   if (data.version !== 1) throw new Error(L('Versão de time desconhecida.', 'Unknown team version.'))
   return data
+}
+
+// `by`: who exports (the owner when left out). A routine in a DM goes only when the DM is theirs:
+// no one takes another person's DM along (with one person, as always, every routine goes).
+export function exportTeam(db: Db, by = db.ownerId()): string {
+  const agents = db.agents().filter((a) => !a.archived && a.kind !== 'tuca') // each install has its own Tuca
+  const handle = (id: string): string | undefined => agents.find((a) => a.id === id)?.handle
+  const connectors = db.connectors()
+  const connectorName = (id: string): string | undefined => connectors.find((c) => c.id === id)?.name
+  const channels = db.conversations().filter((c) => c.kind === 'channel')
+  const where = (convId: string): string => {
+    const c = db.conversation(convId)
+    return c?.kind === 'channel' ? `#${c.name}` : 'dm'
+  }
+
+  const data: TeamFile = {
+    version: 1,
+    agents: agents.map((a) => ({
+      handle: a.handle,
+      name: a.name,
+      role: a.role,
+      color: a.color,
+      ...(a.customColor ? { customColor: a.customColor } : {}),
+      ...(a.avatar ? { avatar: a.avatar } : {}),
+      instructions: a.instructions,
+      model: a.modelId,
+      effort: a.effort,
+      limit: a.limit,
+      web: a.web !== false,
+      computer: a.computer,
+      grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : []))),
+      ...(bossOf(agents, a) ? { reportsTo: bossOf(agents, a)!.handle } : {}),
+      ...(a.sectorName ? { sectorName: a.sectorName } : {}),
+      ...(a.sectorDoes ? { sectorDoes: a.sectorDoes } : {}),
+      ...(a.entry ? { entry: true } : {})
+    })),
+    skills: db.skills().filter((k) => k.state === 'active').map((k) => ({ name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((id) => handle(id) ?? []) })),
+    channels: channels.map((c) => ({ name: c.name, topic: c.topic, members: c.members.flatMap((id) => handle(id) ?? []) })),
+    routines: db.routines().flatMap((r) => {
+      const agent = handle(r.agentId)
+      const c = db.conversationOwner(r.conversationId)
+      if (!agent || !c || (c.kind === 'dm' && (c.owner ?? db.ownerId()) !== by)) return []
+      const t = r.trigger
+      const trigger = t?.kind === 'poll' ? (connectorName(t.connectorId) ? { kind: 'poll' as const, connector: connectorName(t.connectorId)!, tool: t.tool, args: t.args, everyMinutes: t.everyMinutes } : undefined) : t ? { kind: 'webhook' as const } : undefined
+      return [{ name: r.name, agent, where: where(r.conversationId), prompt: r.prompt, schedule: r.schedule, ...(trigger ? { trigger } : {}) }]
+    })
+  }
+
+  const md = [
+    L('# Time do Tucano', '# Tucano team'),
+    '',
+    L(
+      `Exportado em ${new Date().toLocaleString(locale())}. Sem credenciais, memórias nem conversas. Pra usar em outro computador: Configurações → Time → Importar.`,
+      `Exported on ${new Date().toLocaleString(locale())}. No credentials, memories or conversations. To use it on another computer: Settings → Team → Import.`
+    ),
+    '',
+    L('## Agentes', '## Agents'),
+    ...data.agents.map(
+      (a) =>
+        `- **${a.name}** (@${a.handle})${a.role ? ` · ${a.role}` : ''} · ${modelInfo(a.model)?.label ?? a.model}${a.computer ? L(' · com computador', ' · with a computer') : ''}${Object.keys(a.grants).length ? ` · ${L('acessa', 'uses')} ${Object.keys(a.grants).join(', ')}` : ''}`
+    ),
+    '',
+    ...(data.skills.length ? ['## Skills', ...data.skills.map((k) => `- **${k.name}**: ${k.description}`), ''] : []),
+    ...(data.channels.length ? [L('## Canais', '## Channels'), ...data.channels.map((c) => `- #${c.name}: ${c.members.map((h) => `@${h}`).join(', ') || L('sem agentes', 'no agents')}`), ''] : []),
+    ...(data.routines.length
+      ? [
+          L('## Rotinas', '## Routines'),
+          ...data.routines.map(
+            (r) =>
+              `- **${r.name}** (@${r.agent}, ${r.where === 'dm' ? L('na DM', 'in the DM') : r.where}): ${r.trigger ? (r.trigger.kind === 'poll' ? L(`quando aparece algo novo em ${r.trigger.connector} · ${r.trigger.tool}`, `when something new shows up in ${r.trigger.connector} · ${r.trigger.tool}`) : L('quando chamada neste computador', 'when called on this computer')) : describeSchedule(r.schedule)}`
+          ),
+          ''
+        ]
+      : []),
+    L('<!-- O bloco abaixo é o que o app importa. -->', '<!-- The block below is what the app imports. -->'),
+    `\`\`\`json ${FENCE}`,
+    JSON.stringify(data, null, 2),
+    '```',
+    ''
+  ]
+  return md.join('\n')
+}
+
+// Adds what isn't there yet (agents by handle, skills and channels by name).
+// Routines come in off; a grant or trigger whose connector doesn't exist here is left out.
+// `by`: who imports (the owner when left out): a routine for a DM goes into their DM with that
+// agent, never into someone else's; what comes in is theirs.
+export function importTeam(db: Db, text: string, defaultLimit: number, by = db.ownerId()): string {
+  const data = parseTeamFile(text)
+  const connectors = db.connectors()
+  const connectorId = (name: string): string | undefined => connectors.find((c) => c.name === name)?.id
+  const added = { agents: 0, skills: 0, channels: 0, routines: 0, skipped: [] as string[] }
+  const longSkills: string[] = []
+
+  const cameIn: string[] = []
+  for (const a of data.agents ?? []) {
+    if (db.agents().some((x) => x.handle === a.handle)) continue
+    const agent: Agent = {
+      id: randomUUID(),
+      name: a.name,
+      handle: a.handle,
+      role: a.role ?? '',
+      color: a.color ?? 'sky',
+      customColor: a.customColor,
+      avatar: a.avatar,
+      instructions: a.instructions ?? '',
+      modelId: modelInfo(a.model)?.id ? a.model : 'sonnet',
+      effort: a.effort ?? 'medium',
+      maxRoutines: MAX_AGENT_ROUTINES,
+      limit: a.limit || defaultLimit,
+      used: 0,
+      grants: Object.fromEntries(Object.entries(a.grants ?? {}).flatMap(([name, g]) => (connectorId(name) ? [[connectorId(name)!, g]] : (added.skipped.push(L(`acesso de @${a.handle} ao ${name}`, `@${a.handle}'s access to ${name}`)), [])))),
+      memory: 'auto',
+      computer: false, // turned on by hand: it downloads a system
+      web: a.web,
+      archived: false,
+      ...(typeof a.sectorName === 'string' && a.sectorName.trim() ? { sectorName: a.sectorName.trim().slice(0, 40) } : {}),
+      ...(typeof a.sectorDoes === 'string' && a.sectorDoes.trim() ? { sectorDoes: a.sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) } : {}),
+      ...(a.entry === true ? { entry: true } : {})
+    }
+    db.saveAgent(cleanLook(agent))
+    added.agents++
+    cameIn.push(a.handle)
+  }
+  const byHandle = (h: string): string | undefined => db.agents().find((x) => x.handle === h)?.id
+  // Who answers to whom, once everyone is in: only for the agents that came in now, and never into a loop.
+  for (const a of data.agents ?? []) {
+    const id = cameIn.includes(a.handle) ? byHandle(a.handle) : undefined
+    const boss = a.reportsTo ? byHandle(a.reportsTo) : undefined
+    if (id && boss && possibleBosses(db.agents(), id).some((x) => x.id === boss)) db.saveAgent({ ...db.agent(id)!, reportsTo: boss })
+  }
+
+  for (const k of data.skills ?? []) {
+    if (db.skills().some((x) => x.state === 'active' && x.name === k.name)) continue
+    const note = overlongSkillNote(k.name, k.body.length)
+    if (note) longSkills.push(note)
+    const at = Date.now()
+    db.saveSkill({ id: randomUUID(), name: k.name, description: k.description, body: k.body, agents: k.agents.flatMap((h) => byHandle(h) ?? []), state: 'active', createdAt: at, updatedAt: at })
+    added.skills++
+  }
+
+  for (const c of data.channels ?? []) {
+    const existing = db.conversations().find((x) => x.kind === 'channel' && x.name === c.name)
+    const members = c.members.flatMap((h) => byHandle(h) ?? [])
+    if (existing) {
+      for (const id of members) if (!existing.members.includes(id)) db.setAgentChannels(id, [...db.conversations().filter((x) => x.kind === 'channel' && x.members.includes(id)).map((x) => x.id), existing.id])
+      continue
+    }
+    db.createConversation({ id: randomUUID(), kind: 'channel', name: c.name, topic: c.topic, members, createdBy: by })
+    added.channels++
+  }
+
+  for (const r of data.routines ?? []) {
+    const agentId = byHandle(r.agent)
+    const mine = (id: string): boolean => {
+      const c = db.conversationOwner(id)
+      return !!c && (c.kind !== 'dm' || (c.owner ?? db.ownerId()) === by)
+    }
+    if (!agentId || db.routines().some((x) => x.name === r.name && x.agentId === agentId && mine(x.conversationId))) continue
+    let conversationId: string | undefined
+    if (r.where === 'dm') {
+      conversationId = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && (c.owner ?? db.ownerId()) === by)?.id
+      if (!conversationId) {
+        conversationId = randomUUID()
+        db.createConversation({ id: conversationId, kind: 'dm', name: agentId, members: [agentId], owner: by })
+      }
+    } else conversationId = db.conversations().find((c) => c.kind === 'channel' && `#${c.name}` === r.where)?.id
+    let trigger: Trigger | undefined
+    if (r.trigger?.kind === 'poll') {
+      const id = connectorId(r.trigger.connector)
+      if (!id) {
+        added.skipped.push(L(`a rotina "${r.name}" (precisa do conector ${r.trigger.connector})`, `the routine "${r.name}" (needs the ${r.trigger.connector} connector)`))
+        continue
+      }
+      trigger = { kind: 'poll', connectorId: id, tool: r.trigger.tool, args: r.trigger.args, everyMinutes: r.trigger.everyMinutes }
+    } else if (r.trigger?.kind === 'webhook') trigger = { kind: 'webhook', token: randomUUID().replace(/-/g, '') }
+    if (!conversationId) continue
+    const routine: Routine = { id: randomUUID(), name: r.name, agentId, conversationId, prompt: r.prompt, schedule: r.schedule, trigger, enabled: false, createdAt: Date.now(), owner: by }
+    db.saveRoutine(routine)
+    added.routines++
+  }
+
+  const parts = [
+    added.agents && L(`${added.agents} agente${added.agents > 1 ? 's' : ''}`, `${added.agents} agent${added.agents > 1 ? 's' : ''}`),
+    added.skills && `${added.skills} skill${added.skills > 1 ? 's' : ''}`,
+    added.channels && L(`${added.channels} canal${added.channels > 1 ? 'is' : ''}`, `${added.channels} channel${added.channels > 1 ? 's' : ''}`),
+    added.routines && L(`${added.routines} rotina${added.routines > 1 ? 's' : ''} (desligadas)`, `${added.routines} routine${added.routines > 1 ? 's' : ''} (off)`)
+  ].filter(Boolean)
+  const done = parts.length ? L(`Importei ${parts.join(', ')}.`, `Imported ${parts.join(', ')}.`) : L('Nada novo: tudo já existia aqui.', 'Nothing new: everything already existed here.')
+  const long = longSkills.length ? L(` Skills longas: ${longSkills.join('; ')}.`, ` Long skills: ${longSkills.join('; ')}.`) : ''
+  return `${done}${added.skipped.length ? L(` Ficou de fora: ${added.skipped.join('; ')}.`, ` Left out: ${added.skipped.join('; ')}.`) : ''}${long}`
 }
 
 // ---------- backups ----------

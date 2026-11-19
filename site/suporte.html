@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- build.mjs publishes this page twice: as is at /suporte/, and with the data-en texts at /en/support/ -->
+<title data-en="Support · Tucano">Suporte · Tucano</title>
+<meta name="description" content="Como conseguir ajuda com o Tucano e com o app do Tucano para iPhone: conectar o celular, entrar num Tucano por convite, recuperar o acesso e sair de um Tucano apagando os seus dados." data-en="How to get help with Tucano and the Tucano app for iPhone: connecting your phone, joining a Tucano by invite, getting access back and leaving a Tucano with your data deleted.">
+<meta property="og:title" content="Suporte · Tucano" data-en="Support · Tucano">
+<meta property="og:description" content="Como conseguir ajuda com o Tucano e com o app do Tucano para iPhone." data-en="How to get help with Tucano and the Tucano app for iPhone.">
+<meta property="og:image" content="https://tucano.sh/assets/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://tucano.sh/assets/brand/og.png">
+<meta name="twitter:site" content="@tucanosh">
+<meta name="theme-color" content="#F3EFE6">
+<link rel="icon" type="image/png" href="/assets/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/brand/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/compare.css?v=2">
+</head>
+<body>
+<script>
+// A visitor who picked the other language on tucano.sh goes to this page in that language.
+;(() => {
+  let l
+  try { l = localStorage.getItem('tucano-lang') } catch {}
+  const other = (l === 'en' || l === 'pt-BR') && l !== document.documentElement.lang && document.querySelector(`link[rel="alternate"][hreflang="${l}"]`)
+  if (other) location.replace(other.href)
+})()
+</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="mark-clip"><rect width="100" height="100" rx="28"/></clipPath>
+    <symbol id="mark" viewBox="0 0 100 100">
+      <g clip-path="url(#mark-clip)">
+        <rect width="100" height="100" fill="#F1ECE2"/>
+        <circle cx="27" cy="73" r="48" fill="#121212"/>
+        <circle cx="38" cy="47" r="14" fill="#fff"/>
+        <circle cx="43" cy="47" r="5.5" fill="#121212"/>
+        <path d="M53 24 Q84 25 93 44 L96 57 L53 57 Z" fill="#FF8C24"/>
+        <path d="M53 57 L95 57 Q86 70 53 71 Z" fill="#E5531F"/>
+        <path d="M83 57 A9 12 0 0 1 97 47 L97 57 Z" fill="#121212"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <a class="brand" href="/" data-en-href="/en/"><svg><use href="#mark"/></svg><span>tucano</span></a>
+  <div class="lang" role="group" aria-label="Idioma / Language"><a href="/suporte/" hreflang="pt-BR" data-lang>PT</a><a href="/en/support/" hreflang="en" data-lang>EN</a></div>
+  <a class="btn btn--beak" href="/#instalar" data-en-href="/en/#instalar"><span lang="pt-BR">Baixar o Tucano</span><span lang="en">Get Tucano</span></a>
+</header>
+
+<main>
+<div class="hero">
+  <div class="eyebrow"><span lang="pt-BR">Suporte</span><span lang="en">Support</span></div>
+  <h1><span lang="pt-BR">Precisa de ajuda? <em>Fala com a gente.</em></span><span lang="en">Need help? <em>Talk to us.</em></span></h1>
+  <p class="answer"><span lang="pt-BR">Pra qualquer dúvida sobre o Tucano ou o app do Tucano para iPhone, escreva pra <b><a href="mailto:contato@tucano.sh">contato@tucano.sh</a></b>. Se for um problema no app ou uma ideia, você também pode <a href="https://github.com/eduwxyz/tucano/issues">abrir uma issue no GitHub</a> ou falar com a comunidade no <a href="https://discord.gg/uQp4x7wUgT">Discord</a>.</span><span lang="en">For any question about Tucano or the Tucano app for iPhone, write to <b><a href="mailto:contato@tucano.sh">contato@tucano.sh</a></b>. For a problem in the app or an idea, you can also <a href="https://github.com/eduwxyz/tucano/issues">open an issue on GitHub</a> or talk to the community on <a href="https://discord.gg/uQp4x7wUgT">Discord</a>.</span></p>
+  <div class="ctas">
+    <a class="btn btn--beak" href="mailto:contato@tucano.sh"><span lang="pt-BR">Escrever pra gente</span><span lang="en">Email us</span></a>
+    <a class="btn btn--ghost" href="https://github.com/eduwxyz/tucano/issues"><span lang="pt-BR">Abrir uma issue</span><span lang="en">Open an issue</span></a>
+    <a class="btn btn--ghost" href="https://discord.gg/uQp4x7wUgT">Discord</a>
+  </div>
+</div>
+
+<section>
+  <h2><span lang="pt-BR">O app do Tucano para iPhone</span><span lang="en">The Tucano app for iPhone</span></h2>
+  <div class="qa" data-faq>
+    <details open><summary><span lang="pt-BR">Como conecto o iPhone ao meu Tucano?</span><span lang="en">How do I connect my iPhone to my Tucano?</span></summary><p><span lang="pt-BR">No Tucano, abra Configurações › Pessoas › Conectar um celular e leia o QR code com o app (ou toque em Colar link, se copiou o link). O código vale uma vez, por 10 minutos, e conecta o celular como você. Num servidor, quem cuida dele também gera um link com <code>node out/main/server.js pair</code>.</span><span lang="en">In Tucano, open Settings › People › Connect a phone and scan the QR code with the app (or tap Colar link, Paste link, if you copied the link). The code works once, for 10 minutes, and connects the phone as you. On a server, whoever runs it can also make a link with <code>node out/main/server.js pair</code>.</span></p></details>
+    <details><summary><span lang="pt-BR">Recebi um convite. Como entro pelo app?</span><span lang="en">I got an invite. How do I join from the app?</span></summary><p><span lang="pt-BR">Copie o link do convite e, no app, toque em Colar link. O app pergunta o seu nome e você entra no Tucano do seu time. O convite vale uma vez, por 7 dias.</span><span lang="en">Copy the invite link and, in the app, tap Colar link (Paste link). The app asks your name and you're in your team's Tucano. The invite works once, for 7 days.</span></p></details>
+    <details><summary><span lang="pt-BR">O app diz que o acesso não vale mais. E agora?</span><span lang="en">The app says the access no longer works. What now?</span></summary><p><span lang="pt-BR">A chave deste iPhone foi removida: você saiu do Tucano, ou um admin tirou o seu acesso. Peça um novo código de conexão ou um novo convite a quem cuida do Tucano.</span><span lang="en">This iPhone's key was removed: you left the Tucano, or an admin took your access away. Ask whoever runs the Tucano for a new connection code or a new invite.</span></p></details>
+    <details><summary><span lang="pt-BR">Como saio de um Tucano e apago os meus dados?</span><span lang="en">How do I leave a Tucano and delete my data?</span></summary><p><span lang="pt-BR">No app, abra Mais › Pessoas › Sair deste Tucano. O seu acesso acaba na hora, em todos os aparelhos, e as suas conversas diretas, memórias e rotinas são apagadas. O que você disse nos canais fica com o time. O dono de um Tucano não sai dele: pra apagar tudo, desliga o servidor e apaga a pasta de dados.</span><span lang="en">In the app, open Mais (More) › Pessoas (People) › Sair deste Tucano (Leave this Tucano). Your access ends at once, on every device, and your direct messages, memories and routines are deleted. What you said in channels stays with the team. A Tucano's owner doesn't leave it: to delete everything, they stop the server and delete its data folder.</span></p></details>
+    <details><summary><span lang="pt-BR">Só quero tirar o Tucano deste iPhone.</span><span lang="en">I just want to remove a Tucano from this iPhone.</span></summary><p><span lang="pt-BR">Em Mais › Trocar de servidor, deslize o Tucano pra esquerda. O iPhone esquece a chave, e o Tucano continua lá, com tudo.</span><span lang="en">In Mais (More) › Trocar de servidor (Switch server), swipe the Tucano to the left. The iPhone forgets its key, and the Tucano stays there, with everything.</span></p></details>
+  </div>
+</section>
+
+<section class="prose">
+  <h2><span lang="pt-BR">Privacidade</span><span lang="en">Privacy</span></h2>
+  <p><span lang="pt-BR">Onde ficam os seus dados, o que o app guarda e como pedir uma cópia ou a exclusão: veja a <a href="/privacidade/" data-en-href="/en/privacy/">política de privacidade</a>, ou escreva pra <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a>.</span><span lang="en">Where your data lives, what the app keeps and how to ask for a copy or deletion: see the <a href="/privacidade/" data-en-href="/en/privacy/">privacy policy</a>, or write to <a href="mailto:privacidade@tucano.sh">privacidade@tucano.sh</a>.</span></p>
+</section>
+</main>
+
+<footer>
+  <span><span lang="pt-BR">Feito no Brasil.</span><span lang="en">Made in Brazil.</span></span>
+  <nav><a href="/" data-en-href="/en/">tucano.sh</a><a href="/privacidade/" data-en-href="/en/privacy/"><span lang="pt-BR">Privacidade</span><span lang="en">Privacy</span></a><a href="https://github.com/eduwxyz/tucano">GitHub</a><a href="https://x.com/tucanosh">X (@tucanosh)</a><a href="https://discord.gg/uQp4x7wUgT">Discord</a><a href="https://github.com/eduwxyz/tucano/blob/HEAD/LICENSE">Apache-2.0</a></nav>
+</footer>
+</div>
+<script>
+// PT | EN remembers the choice, as on the home page.
+document.querySelectorAll('.lang a').forEach((a) => a.addEventListener('click', () => { try { localStorage.setItem('tucano-lang', a.hreflang) } catch {} }))
+</script>
+</body>
+</html>

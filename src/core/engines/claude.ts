@@ -7,6 +7,7 @@ import { L } from '../../shared/lang'
 
 export const GATEWAY_NAME = 'tucano'
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
+const TOOL_SEARCH = 'ToolSearch' // loads a deferred MCP tool by name; touches nothing on the computer
 
 // How the user's own Claude Code reaches the model, from their settings.json:
 // the `env` block (a company gateway: ANTHROPIC_BASE_URL and its token, or
@@ -34,11 +35,16 @@ export function userProvider(dir = process.env['CLAUDE_CONFIG_DIR'] || join(home
 // --bare: it turns off the subscription login. The app's gateway, when given,
 // is the only MCP server, and its tools are pre-allowed: the gateway decides.
 // With web, the only built-in tools are web search and page reading.
+// With the gateway, also ToolSearch: without it the CLI turns tool search off and puts every
+// connector tool in every model call (measured: 198 tools, 239k tokens a call, up to 7.8 s to the
+// first token; with it, 11k). The CLI then lists the connector tools by name and the model loads
+// the ones it needs; the app's own tools stay in the prompt (ALWAYS_LOAD in the gateway).
 export const GATEWAY_ENV = 'TUCANO_MCP_URL'
 
 export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web' | 'blocks' | 'images' | 'session'>, apiKeyHelper?: string): string[] {
   const web = turn.web ? WEB_TOOLS : []
-  const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...web]
+  const search = turn.mcpUrl ? [TOOL_SEARCH] : []
+  const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...search, ...web]
   // The address carries the gateway's token: the CLI fills it in from the environment, so it
   // never shows in the arguments, which any program on the computer can list.
   const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: `\${${GATEWAY_ENV}}` } } })] : []
@@ -51,7 +57,7 @@ export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcp
     '--model', turn.model,
     '--effort', turn.effort,
     '--system-prompt', turn.system,
-    '--tools', web.join(','),
+    '--tools', [...search, ...web].join(','),
     '--strict-mcp-config',
     '--setting-sources', '',
     ...(turn.session ? [turn.session.resume ? '--resume' : '--session-id', turn.session.id] : ['--no-session-persistence']),
@@ -197,10 +203,11 @@ const configDirOf = (account?: string): string => account || process.env['CLAUDE
 
 // A process kept open after a reply waits this long for the next one, and only this many wait at
 // once (each holds about 140 MB): past either, it closes, and the next reply resumes the session
-// from disk in a new process instead.
+// from disk in a new process instead. Two were too few for a team: switching between three agents
+// started a process on every reply.
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const KEEP_IDLE_MS = 5 * 60_000
-export const MAX_IDLE = 2
+export const KEEP_IDLE_MS = 10 * 60_000
+export const MAX_IDLE = 4
 // A process started ahead of a turn with no session (the router's) waits this long, and only this
 // many wait: it's started while the person types, so the message comes soon or not at all.
 export const SPARE_MS = 2 * 60_000

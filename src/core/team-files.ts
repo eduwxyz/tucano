@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
+import { bossOf, possibleBosses } from '../shared/org'
+import { overlongSkillNote } from '../shared/skills'
 import {
   MAX_AGENT_ROUTINES,
   describeSchedule,
@@ -234,6 +236,14 @@ function fromTeamFile(text: string): Team {
   return { id: LEGACY_ID, name: L('Time importado', 'Imported team'), revision: 1, items }
 }
 
+// A sector head's name and what it solves, and an entry point, as they come in a file: trimmed and
+// cut to the sizes the screens allow.
+function sector(f: Fields): Pick<Agent, 'sectorName' | 'sectorDoes' | 'entry'> {
+  const name = str(f['sectorName']).trim().slice(0, 40)
+  const does = str(f['sectorDoes']).replace(/\s+/g, ' ').trim().slice(0, 200)
+  return { ...(name ? { sectorName: name } : {}), ...(does ? { sectorDoes: does } : {}), ...(f['entry'] === true ? { entry: true } : {}) }
+}
+
 // ---------- the app's team, as items ----------
 
 interface Local {
@@ -242,7 +252,7 @@ interface Local {
   fields: Fields
 }
 
-function localItems(db: Db, context: string): Local[] {
+function localItems(db: Db, context: string, by = db.ownerId()): Local[] {
   const agents = db.agents().filter((a) => !a.archived && a.kind !== 'tuca') // each install has its own Tuca
   const handle = (id: string): string | undefined => agents.find((a) => a.id === id)?.handle
   const connectors = db.connectors()
@@ -269,6 +279,11 @@ function localItems(db: Db, context: string): Local[] {
         wiki: a.wiki,
         computer: a.computer,
         grants: Object.fromEntries(Object.entries(a.grants).flatMap(([id, g]) => (g !== 'none' && connectorName(id) ? [[connectorName(id)!, g]] : [])).sort(([x], [y]) => x!.localeCompare(y!))),
+        // The org chart (src/shared/org.ts): whom it answers to, by handle, and a sector head's name for it.
+        reportsTo: bossOf(agents, a)?.handle,
+        sectorName: a.sectorName,
+        sectorDoes: a.sectorDoes,
+        entry: a.entry ? true : undefined,
         instructions: a.instructions
       }
     })
@@ -276,7 +291,9 @@ function localItems(db: Db, context: string): Local[] {
   for (const k of db.skills().filter((x) => x.state === 'active')) out.push({ kind: 'skill', localId: k.id, fields: { name: k.name, description: k.description, agents: sorted(k.agents.flatMap((id) => handle(id) ?? [])), body: k.body } })
   for (const r of db.routines()) {
     const agent = handle(r.agentId)
-    if (!agent) continue
+    // A routine in a DM goes only when the DM is theirs: no one takes another person's DM along.
+    const place = db.conversationOwner(r.conversationId)
+    if (!agent || !place || (place.kind === 'dm' && (place.owner ?? db.ownerId()) !== by)) continue
     const conv = db.conversation(r.conversationId)
     const t = r.trigger
     const trigger = t?.kind === 'poll' ? { kind: 'poll', connector: connectorName(t.connectorId), tool: t.tool, args: t.args, everyMinutes: t.everyMinutes } : t ? { kind: 'webhook' } : undefined
@@ -302,12 +319,18 @@ export interface Applied {
 }
 
 export class TeamFiles {
+  private by?: string // who is importing: what comes in is theirs
+  // While applying: whom each agent should answer to (a handle; '' for no one), set once every agent
+  // is in, and the long skills to mention.
+  private bosses: { id: string; handle: string }[] = []
+  private long: string[] = []
+
   constructor(private deps: TeamFilesDeps) {
     mkdirSync(deps.dir, { recursive: true })
   }
 
-  private locals(): Local[] {
-    return localItems(this.deps.db, this.deps.context())
+  private locals(by?: string): Local[] {
+    return localItems(this.deps.db, this.deps.context(), by)
   }
   private all(): Follow[] {
     return readdirSync(this.deps.dir)
@@ -411,7 +434,10 @@ export class TeamFiles {
   // Applies the chosen changes: new items come in (routines off, connectors waiting for each
   // person's sign-in), updates take the file's fields where I hadn't changed them and, on a
   // conflict, the side I picked. 'later' leaves a change to be offered again next import.
-  apply(text: string, choices: Record<string, TeamChoice>): Applied {
+  apply(text: string, choices: Record<string, TeamChoice>, by = this.deps.db.ownerId()): Applied {
+    this.by = by
+    this.bosses = []
+    this.long = []
     const team = parseTeam(text)
     const f = this.find(team.id) ?? { id: team.id, name: team.name, revision: 0, base: [], links: {}, at: Date.now() }
     const changes = this.diff(f, team)
@@ -451,6 +477,7 @@ export class TeamFiles {
       done.updated++
       base.set(ch.key, it)
     }
+    this.setBosses(done.skipped)
     // Items without changes follow the file too: their base moves to its version.
     for (const it of team.items) if (f.links[keyOf(it)] && !changes.some((c) => c.key === keyOf(it))) base.set(keyOf(it), it)
     this.save({ ...f, name: team.name, base: [...base.values()], revision: Math.max(f.revision, team.revision), at: Date.now() })
@@ -464,7 +491,8 @@ export class TeamFiles {
       parts.length ? L(`Time importado: ${parts.join(', ')}.`, `Team imported: ${parts.join(', ')}.`) : L('Nada aplicado.', 'Nothing applied.'),
       left ? L(`${left} ficou pra depois: importe o arquivo de novo pra ver.`, `${left} left for later: import the file again to see it.`) : '',
       done.connectors.length ? L('Entre nos conectores novos com a sua conta, em Conectores.', 'Sign in to the new connectors with your own account, in Connectors.') : '',
-      done.skipped.length ? L(`Ficou de fora: ${done.skipped.join('; ')}.`, `Left out: ${done.skipped.join('; ')}.`) : ''
+      done.skipped.length ? L(`Ficou de fora: ${done.skipped.join('; ')}.`, `Left out: ${done.skipped.join('; ')}.`) : '',
+      this.long.length ? L(`Skills longas: ${this.long.join('; ')}.`, `Long skills: ${this.long.join('; ')}.`) : ''
     ]
       .filter(Boolean)
       .join(' ')
@@ -475,11 +503,11 @@ export class TeamFiles {
   // new one the first time), with that team's ids, so whoever imports it gets updates, not copies.
   // What I said no to goes on as the team had it. The base stays what I last took in: another
   // file made from it in the meantime still merges with mine field by field.
-  export(): string {
+  export(by = this.deps.db.ownerId()): string {
     const f = this.all().sort((a, b) => b.at - a.at)[0] ?? { id: randomUUID(), name: this.deps.name() ? L(`Time de ${this.deps.name()}`, `${this.deps.name()}'s team`) : L('Time do Tucano', 'Tucano team'), revision: 0, base: [], links: {}, at: Date.now() }
     const first = f.revision === 0
     const ids = new Map(Object.entries(f.links).filter(([, lid]) => lid).map(([k, lid]) => [`${kindOf(k)}:${lid}`, k.slice(k.indexOf(':') + 1)]))
-    const items: Item[] = this.locals()
+    const items: Item[] = this.locals(by)
       .filter((l) => l.kind !== 'context' || str(l.fields['text']).trim())
       .map((l) => ({ kind: l.kind, id: ids.get(`${l.kind}:${l.localId}`) ?? l.localId, fields: l.fields }))
     for (const b of f.base) if (f.links[keyOf(b)] === '') items.push(b)
@@ -490,6 +518,22 @@ export class TeamFiles {
   }
 
   // ----- changing the app's items -----
+
+  // Who answers to whom, once everyone is in, and never into a loop. An entry point answers to no agent.
+  private setBosses(skipped: string[]): void {
+    const { db } = this.deps
+    const handles = this.ids()
+    for (const { id, handle } of this.bosses) {
+      const a = db.agent(id)
+      if (!a) continue
+      const boss = handle ? handles.agent(handle) : undefined
+      if (!handle || a.entry) {
+        if (a.reportsTo) db.saveAgent({ ...a, reportsTo: undefined })
+      } else if (boss && possibleBosses(db.agents(), id).some((x) => x.id === boss)) {
+        if (a.reportsTo !== boss) db.saveAgent({ ...a, reportsTo: boss })
+      } else skipped.push(L(`a quem @${a.handle} responde (@${handle} não pode ser o chefe aqui)`, `whom @${a.handle} answers to (@${handle} can't be its boss here)`))
+    }
+  }
 
   private ids(): { agent: (h: string) => string | undefined; connector: (n: string) => string | undefined } {
     const agents = this.deps.db.agents().filter((a) => !a.archived)
@@ -507,10 +551,11 @@ export class TeamFiles {
   private conversation(where: string, agentId: string): string | undefined {
     const { db } = this.deps
     if (where === 'dm') {
-      const dm = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId)
+      const by = this.by ?? db.ownerId()
+      const dm = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && (c.owner ?? db.ownerId()) === by)
       if (dm) return dm.id
       const id = randomUUID()
-      db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId] })
+      db.createConversation({ id, kind: 'dm', name: agentId, members: [agentId], owner: by })
       return id
     }
     return db.conversations().find((c) => c.kind === 'channel' && `#${c.name}` === where)?.id
@@ -562,17 +607,21 @@ export class TeamFiles {
           web: f['web'] !== false,
           browser: f['browser'] === true ? true : undefined,
           wiki: (str(f['wiki']) || undefined) as WikiAccess | undefined,
-          archived: false
+          archived: false,
+          ...sector(f)
         }
         db.saveAgent(cleanLook(agent))
+        if (str(f['reportsTo'])) this.bosses.push({ id, handle: str(f['reportsTo']) })
         return id
       }
       case 'channel':
         if (db.conversations().some((c) => c.kind === 'channel' && c.name === str(f['name']))) return void done.skipped.push(`#${str(f['name'])}`)
-        db.createConversation({ id, kind: 'channel', name: str(f['name']), topic: str(f['topic']) || undefined, members: ((f['members'] as string[] | undefined) ?? []).flatMap((h) => handles.agent(h) ?? []) })
+        db.createConversation({ id, kind: 'channel', name: str(f['name']), topic: str(f['topic']) || undefined, members: ((f['members'] as string[] | undefined) ?? []).flatMap((h) => handles.agent(h) ?? []), createdBy: this.by ?? db.ownerId() })
         return id
       case 'skill': {
         const at = Date.now()
+        const note = overlongSkillNote(str(f['name']), str(f['body']).length)
+        if (note) this.long.push(note)
         db.saveSkill({ id, name: str(f['name']), description: str(f['description']), body: str(f['body']), agents: ((f['agents'] as string[] | undefined) ?? []).flatMap((h) => handles.agent(h) ?? []), state: 'active', createdAt: at, updatedAt: at })
         return id
       }
@@ -584,7 +633,7 @@ export class TeamFiles {
         if (trigger === null) return undefined
         const conversationId = this.conversation(str(f['where']) || 'dm', agentId)
         if (!conversationId) return void done.skipped.push(L(`a rotina "${name}" (o canal ${str(f['where'])} não está aqui)`, `the routine "${name}" (channel ${str(f['where'])} isn't here)`))
-        const routine: Routine = { id, name, agentId, conversationId, prompt: str(f['prompt']), schedule: (f['schedule'] as Schedule | undefined) ?? { days: [], time: '' }, trigger, enabled: false, createdAt: Date.now() }
+        const routine: Routine = { id, name, agentId, conversationId, prompt: str(f['prompt']), schedule: (f['schedule'] as Schedule | undefined) ?? { days: [], time: '' }, trigger, enabled: false, createdAt: Date.now(), owner: this.by ?? db.ownerId() }
         db.saveRoutine(routine)
         return id
       }
@@ -636,7 +685,11 @@ export class TeamFiles {
         if (has('browser')) next.browser = patch['browser'] === true ? true : undefined
         if (has('wiki')) next.wiki = (str(patch['wiki']) || undefined) as WikiAccess | undefined
         if (has('grants')) next.grants = this.grants(patch['grants'], done.skipped, next.handle)
+        if (has('sectorName')) next.sectorName = sector(patch).sectorName
+        if (has('sectorDoes')) next.sectorDoes = sector(patch).sectorDoes
+        if (has('entry')) next.entry = sector(patch).entry
         db.saveAgent(cleanLook(next))
+        if (has('reportsTo')) this.bosses.push({ id: a.id, handle: str(patch['reportsTo']) })
         return
       }
       case 'channel': {
@@ -650,6 +703,8 @@ export class TeamFiles {
       case 'skill': {
         const k = db.skills().find((x) => x.id === localId)
         if (!k) return
+        const note = has('body') ? overlongSkillNote(has('name') ? str(patch['name']) || k.name : k.name, str(patch['body']).length) : ''
+        if (note) this.long.push(note)
         db.saveSkill({
           ...k,
           name: has('name') ? str(patch['name']) || k.name : k.name,

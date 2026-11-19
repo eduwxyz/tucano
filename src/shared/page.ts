@@ -1,8 +1,23 @@
 // What an agent's browser runs inside a page (spec §24), the same in Chrome and in
 // Electron's Chromium: the numbered elements, where to click one, the text.
+import { L } from './lang'
+
+// A saved password typed by navegador_login is kept in our isolated world (the page can't read it
+// there) only so it never comes back out: a field holding it is shown as dots, even after the page's
+// "show password" turned it to text or swapped the field for a new one, and the page's text masks it.
+const SECRETS = `const secrets = window.__adSecrets || []
+  const secretIn = (v) => !!v && secrets.some((s) => v.includes(s))
+  const hideSecrets = () => { if (!secrets.length) return; const walk = (root) => { for (const f of root.querySelectorAll('input')) { if (f.type !== 'password' && secretIn(f.value)) f.type = 'password' } for (const e of root.querySelectorAll('*')) if (e.shadowRoot) walk(e.shadowRoot) }; walk(document) }`
+
+// Before a picture of the screen: a saved password shown as text goes back to dots.
+export const HIDE_SECRETS = `(() => { ${SECRETS}
+  hideSecrets()
+  return true
+})()`
 
 // What can be clicked or filled, numbered, inside shadow roots too.
-export const SNAPSHOT = `(() => {
+export const SNAPSHOT = `(() => { ${SECRETS}
+  hideSecrets()
   const SEL = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=tab],[role=checkbox],[role=radio],[role=menuitem],[role=menuitemcheckbox],[role=option],[role=combobox],[role=switch],[role=textbox],[role=searchbox],[role=slider],[contenteditable=""],[contenteditable=true],[onclick]'
   const found = []
   const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.matches(SEL)) found.push(el); if (el.shadowRoot) walk(el.shadowRoot) } }
@@ -36,9 +51,10 @@ export const SNAPSHOT = `(() => {
     let label = clean(el.getAttribute('aria-label')) || byIds(el.getAttribute('aria-labelledby')) || clean(el.getAttribute('title'))
     if (!label && field) label = clean(el.labels && el.labels[0] && el.labels[0].innerText) || clean(el.getAttribute('placeholder')) || clean(el.getAttribute('name'))
     if (!label && !field) label = clean(el.innerText) || clean(el.getAttribute('alt')) || clean(el.querySelector && el.querySelector('img[alt]') && el.querySelector('img[alt]').alt) || clean(el.value)
+    if (secretIn(label)) label = '••••'
     let value
     if (tag === 'select') value = clean(el.selectedOptions[0] && el.selectedOptions[0].text)
-    else if (field && !el.isContentEditable) value = type === 'password' ? (el.value ? '••••' : '') : clean(el.value).slice(0, 80)
+    else if (field && !el.isContentEditable) value = type === 'password' || secretIn(el.value) ? (el.value ? '••••' : '') : clean(el.value).slice(0, 80)
     else if (el.isContentEditable) value = clean(el.innerText).slice(0, 80)
     const c = el.checked !== undefined && (type === 'checkbox' || type === 'radio') ? el.checked : el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true' ? true : undefined
     refs.push(new WeakRef(el))
@@ -74,8 +90,38 @@ export const PICK = (ref: number, text: string): string => `(() => {
   return true
 })()`
 
+// A field of the last snapshot about to take a saved login, or why not: the page must be on the
+// exact origin the login was saved for, and a password goes only into a password field. With focus,
+// the field is focused and selected (what's there gets replaced) and a password is remembered as
+// one, to be masked from then on (SECRETS above).
+export const FILL = (ref: number, origin: string, password: boolean, focus: boolean, secret = ''): string => `(() => {
+  if (location.origin !== ${JSON.stringify(origin)}) return 'origin'
+  const el = window.__adRefs && window.__adRefs[${ref - 1}] && window.__adRefs[${ref - 1}].deref()
+  if (!el || !el.isConnected) return 'gone'
+  const type = (el.getAttribute('type') || 'text').toLowerCase()
+  if (el.tagName !== 'INPUT' || el.disabled || el.readOnly) return 'field'
+  if (${password} ? type !== 'password' : !['text', 'email', 'tel', 'number', 'search', 'url'].includes(type)) return ${password} ? 'password' : 'field'
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+  const r = el.getBoundingClientRect()
+  if (${focus}) {
+    ${secret ? `window.__adSecrets = (window.__adSecrets || []).filter((s) => s !== ${JSON.stringify(secret)}).concat(${JSON.stringify(secret)})` : ''}
+    el.focus()
+    el.select()
+  }
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+})()`
+
+// Why FILL said no, for the agent: never the text it was going to type.
+export const fillRefused = (why: string): string =>
+  ({
+    origin: L('A página mudou de endereço: o login salvo não foi digitado.', 'The page changed address: the saved login was not typed.'),
+    gone: L('Esse campo não está mais na página. Leia a página de novo.', 'That field is no longer on the page. Read the page again.'),
+    password: L('Esse não é um campo de senha: a senha salva só entra num campo de senha.', 'That is not a password field: the saved password only goes into a password field.'),
+    field: L('Esse não é um campo de usuário ou email.', 'That is not a username or email field.')
+  })[why] ?? L('O login salvo não foi digitado.', 'The saved login was not typed.')
+
 // The text a person reads on the page, shadow roots included, line by block.
-export const TEXT = `(() => {
+export const TEXT = `(() => { ${SECRETS}
   const out = [], SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG'])
   const walk = (node) => {
     for (const c of (node.shadowRoot || node).childNodes) {
@@ -91,5 +137,7 @@ export const TEXT = `(() => {
     }
   }
   walk(document.body)
-  return out.join('').replace(/ +\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim()
+  let text = out.join('').replace(/ +\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim()
+  for (const s of secrets) if (s.length >= 4) text = text.split(s).join('••••')
+  return text
 })()`
