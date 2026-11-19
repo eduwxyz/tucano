@@ -3,7 +3,7 @@
 // application menu's (.desktop entries, Flatpak's and Snap's too). Each with its name in the
 // person's language, an icon and how to start it. The Mac's are in apps.ts (macApps).
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { posix } from 'node:path'
@@ -143,6 +143,34 @@ export function isChromium(program: string, exists: (p: string) => boolean = dis
   return ['resources/app.asar', 'resources.pak', 'chrome_100_percent.pak', 'chrome-sandbox', 'v8_context_snapshot.bin', 'libcef.so', 'libcef.dll'].some((f) => exists(join(dir, f)))
 }
 
+// The folders a Linux launcher leads to: its own, symlinks resolved, and for a small shell
+// script (Arch's /usr/bin/google-chrome-stable) the folders of the programs it names. The
+// process that opens the window lives in one of them, under a name of its own ("chrome").
+export function launcherDirs(program: string, fs: { real: (p: string) => string; script: (p: string) => string | undefined } = { real: realpathSync, script: smallScript }): string[] {
+  let real = program
+  try {
+    real = fs.real(program)
+  } catch {
+    // a launcher that isn't there: its own folder still
+  }
+  const script = fs.script(real)
+  // A script's own folder is just where launchers sit: the program it starts is elsewhere.
+  const dirs = script === undefined ? [dirname(real)] : [...script.matchAll(/(?:^|[\s"'=])(\/(?:opt|usr|snap|var\/lib\/flatpak)\/[^\s"'$;]+)/gm)].map((m) => dirname(m[1]!))
+  // Folders every program shares say nothing about which one it is (gnome-shell is in /usr/bin too),
+  // nor do the shared library folders a script may name (/usr/lib/x86_64-linux-gnu/libfoo.so).
+  return [...new Set(dirs)].filter((d) => !SHARED_BIN.has(d) && !/^\/usr\/(lib(32|64|exec)?|share)(\/[^/]+-linux-gnu[^/]*)?$/.test(d))
+}
+const SHARED_BIN = new Set(['/bin', '/sbin', '/usr/bin', '/usr/sbin', '/usr/local/bin', '/usr/local/sbin'])
+const smallScript = (p: string): string | undefined => {
+  try {
+    if (statSync(p).size > 64 * 1024) return undefined
+    const text = readFileSync(p, 'utf8')
+    return text.startsWith('#!') ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const whichSync = (cmd: string, env: NodeJS.ProcessEnv = process.env): string | undefined => {
   if (cmd.includes('/')) return existsSync(cmd) ? cmd : undefined
   for (const d of (env['PATH'] ?? '').split(':')) if (d && existsSync(join(d, cmd))) return join(d, cmd)
@@ -191,7 +219,7 @@ export function linuxApps(env: NodeJS.ProcessEnv = process.env, home = homedir()
         id,
         ...(url ? { icon: url } : {}),
         ...(exec?.length ? { exec } : {}),
-        ...(program && isChromium(program) ? { chromium: true } : {})
+        ...(program && launcherDirs(program).some((d) => isChromium(join(d, 'x'))) ? { chromium: true } : {})
       })
     }
   }
@@ -338,7 +366,10 @@ export function startApp(a: SystemApp, platform: NodeJS.Platform = process.platf
     } else if (a.id) (cmd = 'gtk-launch'), (args = [a.id])
     else return resolve(false)
     try {
-      const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: false })
+      // On Linux a Chromium window joins the accessibility bus only with this set, whatever the flag says
+      // (GNOME leaves org.a11y.Status IsEnabled off unless a screen reader is on).
+      const env = a.chromium && platform === 'linux' ? { ...process.env, ACCESSIBILITY_ENABLED: '1' } : process.env
+      const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: false, env })
       child.on('error', () => resolve(false))
       child.on('spawn', () => (child.unref(), resolve(true)))
     } catch {

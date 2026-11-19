@@ -96,6 +96,16 @@ export const findChrome = (os: Os = osOf(), exists: (p: string) => boolean = exi
 // uses its built-in store instead. A desktop keeps the keyring: its profiles' cookies are in it already.
 export const chromeKeyringFlags = (os: Os = osOf(), env: NodeJS.ProcessEnv = process.env): string[] => (os === 'linux' && env['TUCANO_SERVER'] === '1' ? ['--password-store=basic'] : [])
 
+// Electron only tries the keyring on desktops it knows. Elsewhere (Hyprland, niri, sway, MATE, LXQt) it
+// falls back to a fixed key even with a keyring open, so Tucano can't keep a password there. The
+// Secret Service is what the desktops it knows use too, and it answers on any of them. KDE stays
+// on KWallet, where its saved secrets are.
+export const electronPasswordStore = (os: Os = osOf(), env: NodeJS.ProcessEnv = process.env): 'gnome-libsecret' | undefined => {
+  if (os !== 'linux') return undefined
+  const kde = env['KDE_FULL_SESSION'] || /kde/i.test(env['XDG_CURRENT_DESKTOP'] ?? '') || /kde/i.test(env['DESKTOP_SESSION'] ?? '')
+  return kde ? undefined : 'gnome-libsecret'
+}
+
 // What a headless Chrome tells sites about the machine, matching the real one.
 export const userAgentPlatform = (os: Os = osOf(), arch: string = process.arch): { platform: string; platformVersion: string; architecture: string } => ({
   platform: systemName(os),
@@ -129,7 +139,7 @@ export const pathDirs = (): string[] => (process.env['PATH'] ?? process.env['Pat
 export function withInstallDirs(path: string, os: Os = osOf(), home = homedir(), env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync): string {
   // Windows: npm's global folder, and Cursor's installer (%LOCALAPPDATA%\cursor-agent).
   // Grok's installer puts `grok` in ~/.grok/bin and may not add it to PATH.
-  const dirs = [join(home, '.local', 'bin'), join(home, '.grok', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'cursor-agent')] : [])].filter((d): d is string => !!d)
+  const dirs = [join(home, '.local', 'bin'), join(home, '.grok', 'bin'), ...(os === 'windows' ? [env['APPDATA'] && join(env['APPDATA'], 'npm'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'cursor-agent'), env['LOCALAPPDATA'] && join(env['LOCALAPPDATA'], 'agy', 'bin')] : [])].filter((d): d is string => !!d)
   const have = path.split(delimiter).filter(Boolean)
   const same = (a: string, b: string): boolean => (os === 'windows' ? a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase() : a.replace(/\/+$/, '') === b.replace(/\/+$/, ''))
   const missing = dirs.filter((d) => exists(d) && !have.some((h) => same(h, d)))

@@ -7,6 +7,7 @@ import { L } from '../shared/lang'
 import { offline, UserError } from '../shared/errors'
 import type { Approval, Message, TelegramInfo } from '../shared/types'
 import type { Secrets } from './secrets'
+import { questionsAsText, questionsOf } from '../shared/questions'
 
 const API = 'https://api.telegram.org'
 const TOKEN = 'telegram:token'
@@ -234,9 +235,11 @@ export class Telegram {
   }
 
   async questionAsked(msg: Message, agentName: string, where: string): Promise<void> {
-    if (!msg.run?.question) return
+    const questions = questionsOf(msg.run)
+    if (!questions.length) return
+    const text = questionsAsText(questions)
     const id = await this.send(
-      L(`${agentName} pergunta (${where}):\n\n${msg.run.question}\n\nResponda a esta mensagem.`, `${agentName} asks (${where}):\n\n${msg.run.question}\n\nReply to this message.`),
+      L(`${agentName} pergunta (${where}):\n\n${text}\n\nResponda a esta mensagem.`, `${agentName} asks (${where}):\n\n${text}\n\nReply to this message.`),
       { reply_markup: { force_reply: true, input_field_placeholder: L('Sua resposta', 'Your answer') } }
     )
     if (id) this.questions.set(id, { conversationId: msg.conversationId, ...(msg.threadId ? { threadId: msg.threadId } : {}) })

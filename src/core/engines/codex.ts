@@ -1,17 +1,41 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { parse } from 'smol-toml'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
-import type { Engine, EngineEvent, Turn } from './types'
+import { AppServer, CodexApp, Unsupported, type Launch } from './codex-app'
+import type { Engine, EngineEvent, Turn, TurnShape } from './types'
+import type { CodexQuota } from '../../shared/types'
 import { L } from '../../shared/lang'
 
 // Codex reads AGENTS.md, skills, plugins and memories from the user's home no
 // matter which flags are passed, so Tucano runs it with a home of its
 // own. The user logs into Codex once more, for the app, through Codex itself.
-export function codexEnv(home: string): NodeJS.ProcessEnv {
-  return { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex') }
+export function asdfEnv(bin?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  // An asdf shim needs its install directory and selected tool version: HOME
+  // and the working directory both belong to Tucano when it checks the login.
+  if (bin) {
+    try {
+      const shim = readFileSync(bin, 'utf8')
+      const match = /^# asdf-plugin:\s+([\w-]+)\s+([^\s]+)/m.exec(shim)
+      if (match) {
+        env['ASDF_DATA_DIR'] = dirname(dirname(bin))
+        const versionKey = `ASDF_${match[1]!.replaceAll('-', '_').toUpperCase()}_VERSION`
+        if (!process.env[versionKey]) env[versionKey] = match[2]
+        return env
+      }
+    } catch {
+      // Native harness installs do not need an asdf data directory.
+    }
+  }
+  if (process.env['ASDF_DATA_DIR']) env['ASDF_DATA_DIR'] = process.env['ASDF_DATA_DIR']
+  return env
+}
+
+export function codexEnv(home: string, bin?: string): NodeJS.ProcessEnv {
+  return { ...process.env, ...asdfEnv(bin), HOME: home, CODEX_HOME: join(home, '.codex') }
 }
 
 // How the user's own Codex reaches the model, from their config.toml: the
@@ -86,12 +110,32 @@ export const CODEX_DISABLED_FEATURES = [
 // took that for the agent's computer: it answered "this session has read-only filesystem access"
 // without trying write_file, or tried Codex's own apply_patch and gave up. Said plainly, it writes
 // (GPT-6-Astra: 0 of 6 without it, 6 of 6 with it); hedged ("if you have a computer"), 1 of 3.
-// So only an agent whose instructions give it write_file gets it.
-const sandboxNote = (): string =>
-  L(
-    'O sandbox do próprio Codex aqui é só leitura e vazio de propósito: não é o seu computador, e o apply_patch e o shell dele não chegam lá. Os seus arquivos estão no seu computador: crie e mude com write_file e edit_file, que funcionam.',
-    "Codex's own sandbox here is read-only and empty on purpose: it isn't your computer, and its apply_patch and shell don't reach it. Your files are on your computer: create and change them with write_file and edit_file, which do work."
-  )
+// So only an agent whose instructions give it write_file gets the part about files.
+// The same block also says "Network access is restricted" and "Approval policy is never", and a model
+// read that as "this session is read-only" for a push or a PR it had every grant for (0.2.18, an agent
+// on "Este computador" with GitHub "Ler e escrever"). Codex's own sandbox has no say over the gateway's
+// tools, so that block is left out (include_permissions_instructions=false), and the note says what
+// does decide: each tool's result.
+const sandboxNote = (computer: boolean): string =>
+  [
+    L(
+      'O sandbox do próprio Codex aqui é vazio de propósito e não limita as suas ferramentas. Nunca diga que a sessão é só leitura: o que cada ferramenta pode fazer, e o que pede aprovação, vem do resultado dela; se algo for recusado ou pedir aprovação, diga exatamente o quê e por quê, com as palavras do resultado.',
+      "Codex's own sandbox here is empty on purpose and doesn't limit your tools. Never say the session is read-only: what each tool can do, and what asks for approval, comes from its result; if something is refused or asks for approval, say exactly what and why, in the result's words."
+    ),
+    computer &&
+      L(
+        'Ele não é o seu computador, e o apply_patch e o shell dele não chegam lá. Os seus arquivos estão no seu computador: crie e mude com write_file e edit_file, que funcionam; comandos (git, instalar, rede) rodam com bash.',
+        "It isn't your computer, and its apply_patch and shell don't reach it. Your files are on your computer: create and change them with write_file and edit_file, which do work; commands (git, installs, network) run with bash."
+      )
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+// The agent's instructions, with the sandbox note when it has the app's tools (and its part about files when it has a computer).
+export const codexInstructions = (turn: Pick<Turn, 'system' | 'mcpUrl'>): string => (turn.mcpUrl ? `${turn.system}\n\n${sandboxNote(turn.system.includes('write_file'))}` : turn.system)
+
+// What Codex says about its own sandbox and approvals: left out (see sandboxNote).
+const NO_PERMISSIONS_TEXT = 'include_permissions_instructions=false'
 
 export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web' | 'images'>, provider: string[] = []): string[] {
   const gateway = turn.mcpUrl
@@ -114,11 +158,12 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-C', turn.cwd,
     '-m', turn.model,
     '-c', `model_reasoning_effort=${JSON.stringify(turn.effort)}`,
-    '-c', `developer_instructions=${JSON.stringify(turn.mcpUrl && turn.system.includes('write_file') ? `${turn.system}\n\n${sandboxNote()}` : turn.system)}`,
+    '-c', `developer_instructions=${JSON.stringify(codexInstructions(turn))}`,
     '-c', 'skills.include_instructions=false',
     '-c', 'skills.bundled.enabled=false',
     '-c', `web_search=${turn.web ? '"live"' : '"disabled"'}`,
     '-c', 'project_doc_max_bytes=0',
+    '-c', NO_PERMISSIONS_TEXT,
     ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
     ...provider,
     ...gateway,
@@ -175,25 +220,169 @@ export function codexParser(): Parser {
   }
 }
 
+// The same isolation as codexArgs, for `codex app-server`: what's the same for every thread goes in
+// the process's flags; the rest (model, effort, instructions, folder, web, the gateway) in each
+// thread's settings (web search on or off always said there), sent over stdin, so the gateway's
+// address and its token never show in the arguments. The app-server has no --ignore-user-config or --ignore-rules: see codexIsolated.
+// mcp_optional_startup_grace_ms=0: since Codex 0.147 a turn may start before an MCP server is up,
+// and then goes without its tools; this waits for the gateway (local, quick to answer).
+export function codexAppArgs(provider: string[] = []): string[] {
+  return [
+    'app-server',
+    ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
+    '-c', 'sandbox_mode="read-only"',
+    '-c', 'approval_policy="never"',
+    '-c', NO_PERMISSIONS_TEXT,
+    '-c', 'skills.include_instructions=false',
+    '-c', 'skills.bundled.enabled=false',
+    '-c', 'project_doc_max_bytes=0',
+    '-c', 'history.persistence="none"',
+    '-c', 'mcp_optional_startup_grace_ms=0',
+    ...provider
+  ]
+}
+
+export function codexThread(turn: TurnShape): Record<string, unknown> {
+  return {
+    model: turn.model,
+    cwd: turn.cwd,
+    sandbox: 'read-only',
+    approvalPolicy: 'never',
+    developerInstructions: codexInstructions(turn),
+    config: {
+      model_reasoning_effort: turn.effort,
+      web_search: turn.web ? 'live' : 'disabled',
+      ...(turn.mcpUrl ? { [`mcp_servers.${GATEWAY_NAME}`]: { url: turn.mcpUrl, default_tools_approval_mode: 'approve', tool_timeout_sec: 900 } } : {})
+    }
+  }
+}
+
+// What --ignore-user-config and --ignore-rules leave out, absent from the home: then the
+// app-server loads nothing exec wouldn't. With either there, Codex runs as exec.
+export const codexIsolated = (codexHome: string): boolean => !existsSync(join(codexHome, 'config.toml')) && !existsSync(join(codexHome, 'rules'))
+
+// account/rateLimits/read's answer as the subscription's windows; undefined when it has none (an API key).
+export function codexQuota(r: unknown, at = Date.now()): CodexQuota | undefined {
+  const snap = ((r ?? {}) as Record<string, unknown>)['rateLimits'] as Record<string, unknown> | undefined
+  if (!snap) return undefined
+  const windows = [snap['primary'], snap['secondary']].flatMap((w) => {
+    const o = (w ?? {}) as Record<string, unknown>
+    const used = o['usedPercent']
+    const minutes = o['windowDurationMins']
+    if (typeof used !== 'number' || typeof minutes !== 'number' || minutes <= 0) return []
+    return [{ minutes, utilization: Math.min(1, Math.max(0, used / 100)), resetsAt: num(o['resetsAt']) * 1000 }]
+  })
+  if (!windows.length) return undefined
+  windows.sort((a, b) => a.minutes - b.minutes)
+  return { windows, ...(typeof snap['planType'] === 'string' ? { plan: snap['planType'] } : {}), at }
+}
+
+// Each turn as one `codex exec` (the CLI before the app-server, or a home that has its own
+// config): it gets the whole conversation every time.
+const EXEC_ONLY = 'TUCANO_CODEX_EXEC'
+
 export function codexEngine(
   bin: () => string | undefined,
   home: string,
   shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({}),
   provider: () => Promise<CodexProvider & { env?: Record<string, string> }> = async () => userCodexProvider()
 ): Engine {
+  const codexHome = (account?: string): string => join(account ?? home, '.codex')
+  const notIsolated = new Set<string>() // homes found with a config of their own
+  const isolated = (account?: string): boolean => {
+    const h = codexHome(account)
+    if (codexIsolated(h)) return true
+    notIsolated.add(h)
+    return false
+  }
+  // The gateway's key lives in the user's shell (.zshrc), which an app opened from Finder doesn't get.
+  const launch = async (t: Pick<TurnShape, 'account'>): Promise<{ env: NodeJS.ProcessEnv; config: string[]; launch: Launch }> => {
+    const p = await provider()
+    const shell = await shellEnv() // read once per launch
+    const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
+    const env = { ...codexEnv(t.account ?? home, bin()), ...keys, ...p.env }
+    return { env, config: p.config, launch: { key: JSON.stringify([t.account ?? home, p.config, keys, p.env ?? {}]), home: codexHome(t.account), args: codexAppArgs(p.config), env, cwd: t.account ?? home } }
+  }
+  const app = new CodexApp({ thread: codexThread })
+  const appLaunch = async (t: Pick<TurnShape, 'account'>): Promise<Launch> => (await launch(t)).launch
+  // Whether this turn can go to the app-server: one that resumes a session has to.
+  const usable = (path: string, account?: string): boolean => !process.env[EXEC_ONLY] && app.supports(path) && isolated(account)
+
+  const exec = (path: string, turn: Turn, l: { env: NodeJS.ProcessEnv; config: string[] }): AsyncIterable<EngineEvent> =>
+    runCli({ bin: path, args: codexArgs(turn, l.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: l.env })
+
   return {
     id: 'codex',
+    // Sessions only while every turn can go to the app-server; otherwise each gets the whole conversation.
+    get sessions() {
+      const path = bin()
+      return !!path && !notIsolated.size && usable(path)
+    },
     async *run(turn) {
       const path = bin()
       if (!path) {
         yield { type: 'error', message: L('O Codex não está instalado. Veja em Configurações.', "Codex isn't installed. See Settings.") }
         return
       }
-      // The gateway's key lives in the user's shell (.zshrc), which an app opened from Finder doesn't get.
-      const p = await provider()
-      const shell = await shellEnv() // read once per launch
-      const keys = Object.fromEntries(p.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
-      yield* runCli({ bin: path, args: codexArgs(turn, p.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(turn.account ?? home), ...keys, ...p.env } })
-    }
+      const l = await launch(turn)
+      if (!usable(path, turn.account)) {
+        if (turn.session?.resume) {
+          yield { type: 'error', message: L('O Codex não tem mais essa conversa; ela recomeça na próxima resposta.', "Codex no longer has this conversation; it starts over on the next reply.") }
+          return
+        }
+        yield* exec(path, turn, l)
+        return
+      }
+      const session = turn.session
+      const events = session ? app.session(path, { ...turn, session }, l.launch) : app.oneShot(path, turn, l.launch)
+      let any = false
+      try {
+        for await (const ev of events) {
+          any = true
+          yield ev
+        }
+      } catch (e) {
+        if (!(e instanceof Unsupported) || any) throw e
+        // No app-server to take it (an old CLI): exec does, with everything, and from now on. A
+        // session's first turn only then: the next would come with only what's new.
+        if (session && app.supports(path)) {
+          yield { type: 'error', message: e.message }
+          return
+        }
+        yield* exec(path, turn, l)
+      }
+    },
+    warm(turn) {
+      const path = bin()
+      if (!path || !usable(path, turn.account)) return
+      void appLaunch(turn).then((l) => app.warm(path, turn, l), () => {})
+    },
+    rewarm(id) {
+      const path = bin()
+      if (path) app.rewarm(path, id, appLaunch)
+    },
+    release(id) {
+      app.release(bin(), id, appLaunch)
+    },
+    clean(workDir, accountDirs = []) {
+      app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..'), bin()), cwd: join(h, '..') }))
+    },
+    // A short-lived app-server of the usual login, asked once: the turns' own processes may be busy or gone.
+    async planUsage() {
+      const path = bin()
+      if (!path || !app.supports(path)) return undefined
+      const { launch: l } = await launch({})
+      const server = new AppServer({ bin: path, args: l.args, cwd: l.cwd, env: l.env })
+      try {
+        await server.ready
+        return codexQuota(await server.request('account/rateLimits/read', undefined, 15_000))
+      } catch {
+        return undefined
+      } finally {
+        server.kill()
+      }
+    },
+    settle: () => app.settle(),
+    dispose: () => app.dispose()
   }
 }

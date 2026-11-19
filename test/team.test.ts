@@ -44,6 +44,16 @@ describe('the team as a file', () => {
     expect(() => importTeam(b, '# outro arquivo', 1)).toThrow('não é um time exportado')
   })
 
+  it('imports a long team skill whole and reports the excess over the recommendation', () => {
+    const source = fresh()
+    source.saveAgent(agent('s', 'staff'))
+    source.saveSkill({ id: 'long', name: 'longa', description: 'Ao usar', body: 'x'.repeat(32_345), agents: ['s'], state: 'active', createdAt: 1, updatedAt: 1 })
+    const target = fresh()
+    const summary = importTeam(target, exportTeam(source), 2_000_000)
+    expect(target.skills()[0]?.body).toHaveLength(32_345)
+    expect(summary).toContain('22.345 acima do recomendado de 10.000')
+  })
+
   it('backs up the database to a file', () => {
     const a = fresh()
     a.saveAgent(agent('s', 'staff'))

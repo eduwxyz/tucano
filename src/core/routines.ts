@@ -6,11 +6,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { L, locale } from '../shared/lang'
 import { firstSentence } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
-import { describeSchedule, MAX_AGENT_ROUTINES, nextRun, routineCap, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
+import { cleanTimes, dateAt, describeSchedule, isoDay, MAX_AGENT_ROUTINES, MAX_TIMES, nextRun, routineCap, validDate, validTime, type Schedule, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
+import { routineCut } from './access-policy'
+import { nodeOf } from '../shared/node-link'
 import { errorReason } from './connectors'
 import type { ToolDef } from './gateway'
 import type { RoutineEvent } from './runs'
+import { questionHeadline, questionsOf } from '../shared/questions'
 
 export { MAX_AGENT_ROUTINES } // the default; each agent's own is agent.maxRoutines
 
@@ -28,8 +31,8 @@ export const AGENDAR: ToolDef = {
   name: 'agendar_rotina',
   get description() {
     return L(
-      'Agenda uma rotina pra você mesmo: no horário, o app posta o pedido nesta conversa e você roda sozinho, sem ninguém pedir. Use quando pedirem algo pra depois ("daqui a 10 minutos", "toda segunda às 9h", "amanhã cedo"). Também muda uma rotina sua, com substitui.',
-      'Schedules a routine for yourself: at the time, the app posts the request in this conversation and you run on your own, without anyone asking. Use it when someone asks for something later ("in 10 minutes", "every Monday at 9am", "tomorrow morning"). It also changes one of your routines, with substitui.'
+      'Agenda uma rotina pra você mesmo: no horário, o app posta o pedido nesta conversa e você roda sozinho, sem ninguém pedir. Use quando pedirem algo pra depois ("daqui a 10 minutos", "toda segunda às 9h", "amanhã cedo", "dia 17 às 9h", "todo dia 5"). Uma data específica, mesmo daqui a semanas ou meses, vai em data (roda uma vez só, naquele dia); todo mês num dia, em dia_do_mes. Mais de um horário no mesmo dia ("às 9h e às 15h") é uma rotina só, com horarios. Também muda uma rotina sua, com substitui.',
+      'Schedules a routine for yourself: at the time, the app posts the request in this conversation and you run on your own, without anyone asking. Use it when someone asks for something later ("in 10 minutes", "every Monday at 9am", "tomorrow morning", "on the 17th at 9am", "on the 5th of every month"). A specific date, even weeks or months ahead, goes in data (it runs once, on that day); every month on a day, in dia_do_mes. More than one time on the same day ("at 9am and 3pm") is one routine, with horarios. It also changes one of your routines, with substitui.'
     )
   },
   get inputSchema() {
@@ -44,7 +47,23 @@ export const AGENDAR: ToolDef = {
             "What to do when it runs, written as a complete request to yourself. Include the context you'll need: when it runs, you only see this conversation's recent messages."
           )
         },
-        horario: { type: 'string', description: L('HH:MM, 24 h, no horário local (o mesmo das mensagens).', 'HH:MM, 24 h, in local time (the same as the messages).') },
+        horario: { type: 'string', description: L('HH:MM, 24 h, no horário local (o mesmo das mensagens). Pode faltar se data já traz a hora.', 'HH:MM, 24 h, in local time (the same as the messages). May be left out when data has the time.') },
+        horarios: {
+          type: 'array',
+          items: { type: 'string' },
+          description: L(
+            `Vários horários no mesmo dia, cada um HH:MM (ex.: ["09:00", "13:00", "17:00"]), até ${MAX_TIMES}: uma rotina só, que roda em cada um. Vale com dias ou dia_do_mes; no lugar de horario. Com substitui, mande todos os horários que ela deve ter: o que ficar de fora sai.`,
+            `Several times on the same day, each HH:MM (e.g. ["09:00", "13:00", "17:00"]), up to ${MAX_TIMES}: one routine, which runs at each. Goes with dias or dia_do_mes; instead of horario. With substitui, send every time it should have: one left out is taken off.`
+          )
+        },
+        data: {
+          type: 'string',
+          description: L(
+            'Uma data específica, ISO: "2026-11-17" (com horario) ou "2026-11-17T09:00", no horário local. Roda uma vez só, nesse dia, e desliga; ignora dias e uma_vez. Uma data que já passou é recusada.',
+            'A specific date, ISO: "2026-11-17" (with horario) or "2026-11-17T09:00", in local time. Runs once, on that day, then turns off; dias and uma_vez are ignored. A date already past is refused.'
+          )
+        },
+        dia_do_mes: { type: 'number', description: L('1 a 31: roda todo mês nesse dia (num mês mais curto, no último dia). Ignora dias.', '1 to 31: runs every month on that day (in a shorter month, on its last day). dias is ignored.') },
         dias: {
           type: 'array',
           items: { type: 'string', enum: DAY_KEYS },
@@ -53,7 +72,7 @@ export const AGENDAR: ToolDef = {
         uma_vez: { type: 'boolean', description: L('true pra rodar uma vez só (no próximo horário que bate com os dias) e depois desligar.', 'true to run only once (at the next time that matches the days) and then turn off.') },
         substitui: { type: 'string', description: L('Id de uma rotina sua que esta muda.', 'Id of one of your routines that this one changes.') }
       },
-      required: ['nome', 'pedido', 'horario']
+      required: ['nome', 'pedido']
     }
   }
 }
@@ -70,6 +89,21 @@ export const CANCELAR: ToolDef = {
 
 export const ROUTINE_TOOL_NAMES = new Set([AGENDAR.name, CANCELAR.name])
 
+// An agent's date: "2026-11-17", "2026-11-17T09:00" or with a zone ("…T12:00Z", "…T09:00-03:00"),
+// which is turned into this computer's day and time. null: not a date.
+export function dateArg(v: string): { date: string; time?: string } | null {
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{1,2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/i.exec(v.trim())
+  if (!m || !validDate(m[1]!)) return null
+  if (!m[2]) return { date: m[1]! }
+  const time = m[2].padStart(5, '0')
+  if (!validTime(time)) return null
+  if (!m[3]) return { date: m[1]!, time }
+  const at = new Date(`${m[1]}T${time}:00${m[3].toUpperCase() === 'Z' ? 'Z' : m[3].replace(/^([+-]\d{2})(\d{2})$/, '$1:$2')}`).getTime()
+  if (!Number.isFinite(at)) return null
+  const d = new Date(at)
+  return { date: isoDay(at), time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+}
+
 // "sáb, 18/10, 13:15"
 export const whenText = (at: number): string =>
   new Date(at).toLocaleString(locale(), { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace('.', '')
@@ -77,6 +111,9 @@ export const whenText = (at: number): string =>
 type ToolOutcome = { routine?: Routine; reply: string; error?: boolean }
 
 const MAX_SEEN = 500 // item ids remembered per connector trigger
+// A lent computer (shared/node-link.ts) is reached only by an agent working for its person; a check that
+// runs on its own, for whoever made the routine, would read it for someone else.
+const NOT_A_TRIGGER = (): string => L('Um computador emprestado não serve de gatilho: escolha outro conector.', "A lent computer can't be a trigger: pick another connector.")
 const MAX_EVENT_CHARS = 6_000
 
 export interface RoutineDeps {
@@ -91,7 +128,7 @@ export interface RoutineDeps {
   blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   paused?: () => boolean // paused: a call from outside says so instead of starting a run
   emit: (e: CoreEvent) => void
-  notify?: (title: string, shortText: string, conversationId: string, fullText?: string) => void
+  notify?: (title: string, shortText: string, conversationId: string, fullText?: string, to?: string[]) => void // to: the people it's for
   now?: () => number
   wait?: (ms: number) => Promise<void> // between tries (tests skip it)
 }
@@ -134,14 +171,19 @@ export class Routines {
     for (const r of this.deps.db.routines()) {
       if (r.enabled && r.trigger?.kind === 'poll' && now - (r.trigger.checkedAt ?? 0) >= r.trigger.everyMinutes * 60_000) void this.check(r)
       if (!r.enabled || r.trigger || r.nextAt === undefined || r.nextAt > now) continue
-      const scheduledAt = r.nextAt
-      this.store(r.schedule.once ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: nextRun(r.schedule, now) })
-      if (now - scheduledAt > LATE_GRACE_MS) continue
+      // Of the times it missed (asleep, closed), the latest within LATE_GRACE_MS runs, once.
+      const scheduledAt = lastMissed(r.schedule, r.nextAt, now)
+      // A one-off with no date that missed its time by too much waits for its next matching day.
+      const later = r.schedule.once && scheduledAt === undefined && r.schedule.date === undefined ? nextRun(r.schedule, now) : undefined
+      this.store(r.schedule.once && later === undefined ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: later ?? nextRun(r.schedule, now) })
+      if (scheduledAt === undefined) continue
       this.fire(r.id, { scheduledAt, late: now - scheduledAt > LATE_AFTER_MS })
     }
   }
 
-  save(input: RoutineInput): Routine {
+  // `owner`: the person a new one is for (unset: the Tucano's owner). A 'channel' routine is the
+  // team's: it posts in a channel and tells only who watches it.
+  save(input: RoutineInput, owner?: string): Routine {
     const { db } = this.deps
     const name = input.name.trim()
     const prompt = input.prompt.trim()
@@ -155,10 +197,33 @@ export class Routines {
       throw new Error(L(`Escolha a DM com ${agent.name} ou um canal de que ele participa.`, `Pick the DM with ${agent.name} or a channel they're in.`))
     const prev = input.id ? db.routine(input.id) : undefined
     const trigger = input.trigger && this.cleanTrigger(input.trigger, prev?.trigger)
-    if (!trigger && days.length === 0) throw new Error(L('Escolha pelo menos um dia.', 'Pick at least one day.'))
-    if (!trigger && !validTime(input.schedule.time)) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    const date = input.schedule.date
+    const monthDay = input.schedule.monthDay
+    if (!trigger && date !== undefined && !validDate(date)) throw new Error(L('Data inválida: use AAAA-MM-DD.', 'Invalid date: use YYYY-MM-DD.'))
+    if (!trigger && date === undefined && monthDay !== undefined && !(Number.isInteger(monthDay) && monthDay >= 1 && monthDay <= 31)) throw new Error(L('O dia do mês vai de 1 a 31.', 'The day of the month goes from 1 to 31.'))
+    if (!trigger && date === undefined && monthDay === undefined && days.length === 0) throw new Error(L('Escolha pelo menos um dia.', 'Pick at least one day.'))
+    // Several times a day repeat (a week's days, a day of the month); a date or "once" runs at the first.
+    // A client that knows of one time (an older phone app) keeps the others while it keeps the first.
+    const given = input.schedule.times ?? (prev?.schedule.times && prev.schedule.time === input.schedule.time ? prev.schedule.times : [input.schedule.time])
+    if (!trigger && given.some((t) => !validTime(t.trim()))) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    const times = cleanTimes(date !== undefined || input.schedule.once ? given.slice(0, 1) : given)
+    if (!trigger && !times.length) throw new Error(L('Horário inválido.', 'Invalid time.'))
+    if (times.length > MAX_TIMES) throw new Error(L(`Uma rotina roda em até ${MAX_TIMES} horários por dia.`, `A routine runs at up to ${MAX_TIMES} times a day.`))
+    const time = times[0] ?? input.schedule.time
+    const many = times.length > 1 ? { times } : {}
+    const scope = input.scope ?? prev?.scope
+    if (scope === 'channel' && conv.kind !== 'channel') throw new Error(L('Uma rotina do canal posta num canal.', 'A channel routine posts in a channel.'))
 
-    const schedule = { days, time: input.schedule.time, ...(input.schedule.once ? { once: true } : {}) }
+    // A date runs once, on its weekday; a day of the month repeats.
+    const schedule: Schedule =
+      date !== undefined
+        ? { days: [new Date(dateAt(date, '12:00')).getDay()], time, once: true, date }
+        : monthDay !== undefined
+          ? { days: [0, 1, 2, 3, 4, 5, 6], time, ...many, monthDay }
+          : { days, time, ...many, ...(input.schedule.once ? { once: true } : {}) }
+    // A date that's past is refused when it's turned on (an old one that already ran can still be edited, off).
+    if (!trigger && date !== undefined && input.enabled && nextRun(schedule, this.now()) === undefined)
+      throw new Error(L(`Essa data já passou (${describeSchedule(schedule).replace(/^Uma vez, /, '')}). Escolha um dia e horário que ainda vão chegar.`, `That date has already passed (${describeSchedule(schedule).replace(/^Once, /, '')}). Pick a day and time still to come.`))
     const r: Routine = {
       ...prev,
       id: prev?.id ?? randomUUID(),
@@ -171,7 +236,9 @@ export class Routines {
       enabled: input.enabled,
       nextAt: input.enabled && !trigger ? nextRun(schedule, this.now()) : undefined,
       createdBy: prev ? prev.createdBy : input.createdBy,
-      createdAt: prev?.createdAt ?? this.now()
+      createdAt: prev?.createdAt ?? this.now(),
+      ...(scope === 'channel' ? { scope } : { scope: undefined }),
+      ...((prev?.owner ?? owner) ? { owner: prev?.owner ?? owner } : {})
     }
     this.store(r)
     if (r.enabled && trigger?.kind === 'poll' && trigger.seen === undefined) void this.check(r) // what's there now doesn't fire
@@ -183,7 +250,9 @@ export class Routines {
   private cleanTrigger(t: Trigger, prev?: Trigger): Trigger {
     if (t.kind === 'webhook') return { kind: 'webhook', token: prev?.kind === 'webhook' ? prev.token : randomBytes(18).toString('base64url') }
     const tool = this.deps.db.tools(t.connectorId).find((x) => x.name === t.tool)
-    if (!this.deps.connectors?.list().some((c) => c.id === t.connectorId)) throw new Error(L('Escolha um conector.', 'Pick a connector.'))
+    const c = this.deps.connectors?.list().find((x) => x.id === t.connectorId)
+    if (!c) throw new Error(L('Escolha um conector.', 'Pick a connector.'))
+    if (nodeOf(c.url)) throw new Error(NOT_A_TRIGGER())
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L('Escolha uma ferramenta de leitura do conector.', "Pick one of the connector's read tools."))
     const everyMinutes = Math.max(1, Math.round(t.everyMinutes))
     const same = prev?.kind === 'poll' && prev.connectorId === t.connectorId && prev.tool === t.tool && JSON.stringify(prev.args) === JSON.stringify(t.args)
@@ -205,6 +274,7 @@ export class Routines {
   private async look(t: Extract<Trigger, { kind: 'poll' }>): Promise<{ items: EventItem[]; source: string }> {
     const connector = this.deps.connectors?.list().find((c) => c.id === t.connectorId)
     if (!this.deps.connectors || !connector) throw new Error(L('o conector não existe mais', 'the connector no longer exists'))
+    if (nodeOf(connector.url)) throw new Error(NOT_A_TRIGGER())
     const tool = this.deps.db.tools(t.connectorId).find((x) => x.name === t.tool)
     if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(L(`a ferramenta ${t.tool} não está liberada como leitura`, `the tool ${t.tool} isn't enabled for reading`))
     const r = await this.deps.connectors.call(t.connectorId, t.tool, t.args)
@@ -226,9 +296,15 @@ export class Routines {
       const latest = this.deps.db.routine(r.id)
       if (latest?.trigger?.kind !== 'poll') return
       const seen = latest.trigger.seen
-      const fresh = seen ? items.filter((i) => !seen.includes(i.key)) : []
+      const known = new Set(seen ?? items.map((i) => i.key))
+      const fresh = seen ? items.filter((i) => !known.has(i.key)) : []
       const next = fresh[0]
-      const keep = [...(seen ?? items.map((i) => i.key)), ...(next ? [next.key] : [])].slice(-MAX_SEEN)
+      // Everything in the answer that's been seen stays remembered, however long the list: dropping
+      // one would make it new again, and fire again. Room left goes to the latest of those gone from it.
+      const listed = new Set(items.map((i) => i.key))
+      const here = [...listed].filter((k) => known.has(k) || k === next?.key)
+      const gone = [...known].filter((k) => !listed.has(k))
+      const keep = [...here, ...gone.slice(Math.max(0, gone.length - Math.max(0, MAX_SEEN - here.length)))]
       this.store({ ...latest, trigger: { ...latest.trigger, seen: keep, checkedAt: this.now(), error: undefined } })
       if (next && latest.enabled) this.fire(r.id, { scheduledAt: this.now(), late: false, event: { source, title: next.title, body: next.body } }, fresh.length > 1)
     } catch (e) {
@@ -256,12 +332,16 @@ export class Routines {
   }
 
   // `agendar_rotina`: an agent schedules (or changes) a routine for itself, posted where it was asked.
-  schedule(agent: Agent, conv: Conversation, args: Record<string, unknown>): ToolOutcome {
+  // `owner`: whom the agent was working for: the routine is theirs.
+  // `visible`: whether the person it works for sees a conversation (a routine in someone else's DM isn't theirs to change).
+  schedule(agent: Agent, conv: Conversation, args: Record<string, unknown>, owner?: string, visible: (conversationId: string) => boolean = () => true): ToolOutcome {
     const text = (k: string): string => (typeof args[k] === 'string' ? (args[k] as string).trim() : '')
     const fail = (reply: string): ToolOutcome => ({ reply, error: true })
     const replaces = text('substitui')
     const prev = replaces ? this.deps.db.routine(replaces) : undefined
-    if (replaces && prev?.agentId !== agent.id) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
+    if (replaces && (prev?.agentId !== agent.id || !visible(prev.conversationId))) return fail(L(`Não achei uma rotina sua com id ${replaces}.`, `I couldn't find a routine of yours with id ${replaces}.`))
+    // Changed only for whom it is (mayChange): asked by someone else in a shared channel, the change would run as its person.
+    if (prev && !this.mayChange(prev, owner)) return fail(notTheirs(prev))
     const max = routineCap(agent.maxRoutines)
     if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
@@ -270,7 +350,14 @@ export class Routines {
           return DAY_KEYS.includes(k) ? DAY_KEYS.indexOf(k) : DAY_KEYS_EN.indexOf(k)
         }) : []
     if (keys.includes(-1)) return fail(L(`Dias inválidos: use ${DAY_KEYS.join(', ')}.`, `Invalid days: use ${DAY_KEYS.join(', ')}.`))
-    const time = text('horario').padStart(5, '0')
+    const when = text('data') ? dateArg(text('data')) : undefined
+    if (when === null) return fail(L(`Data inválida: "${text('data')}". Use "2026-11-17" ou "2026-11-17T09:00".`, `Invalid date: "${text('data')}". Use "2026-11-17" or "2026-11-17T09:00".`))
+    const several = Array.isArray(args['horarios']) ? (args['horarios'] as unknown[]).map((t) => String(t).trim().padStart(5, '0')) : []
+    const time = (several[0] || text('horario') || when?.time || '').padStart(5, '0')
+    if (!time.trim() || time === '00000') return fail(L('Falta o horario (HH:MM).', 'Missing horario (HH:MM).'))
+    // Always the whole list, even of one: with `substitui`, a time left out is a time taken off.
+    const times = { times: several.length && !when ? several : [time] }
+    const monthDay = typeof args['dia_do_mes'] === 'number' || (typeof args['dia_do_mes'] === 'string' && args['dia_do_mes'] !== '') ? Number(args['dia_do_mes']) : undefined
     try {
       const routine = this.save({
         id: prev?.id,
@@ -278,10 +365,10 @@ export class Routines {
         prompt: text('pedido'),
         agentId: agent.id,
         conversationId: prev?.conversationId ?? conv.id,
-        schedule: { days: keys.length ? keys : [0, 1, 2, 3, 4, 5, 6], time, once: args['uma_vez'] === true },
+        schedule: when ? { days: [], time, once: true, date: when.date } : monthDay !== undefined ? { days: [], time, ...times, monthDay } : { days: keys.length ? keys : [0, 1, 2, 3, 4, 5, 6], time, ...times, once: args['uma_vez'] === true },
         enabled: true,
         createdBy: agent.id
-      })
+      }, owner)
       return {
         routine,
         reply: L(
@@ -295,16 +382,28 @@ export class Routines {
   }
 
   // `cancelar_rotina`
-  cancel(agent: Agent, id: string): ToolOutcome {
+  cancel(agent: Agent, id: string, visible: (conversationId: string) => boolean = () => true, owner?: string): ToolOutcome {
     const r = this.deps.db.routine(id)
-    if (r?.agentId !== agent.id) return { reply: L(`Não achei uma rotina sua com id ${id}.`, `I couldn't find a routine of yours with id ${id}.`), error: true }
+    if (r?.agentId !== agent.id || !visible(r.conversationId)) return { reply: L(`Não achei uma rotina sua com id ${id}.`, `I couldn't find a routine of yours with id ${id}.`), error: true }
+    if (!this.mayChange(r, owner)) return { reply: notTheirs(r), error: true }
     this.remove(id)
     return { routine: r, reply: L(`Rotina "${r.name}" apagada.`, `Routine "${r.name}" deleted.`) }
   }
 
+  // Whether the person an agent works for (`owner`, unset: the Tucano's owner) may change a routine through it:
+  // someone's own routine by them, the team's (a channel's) by an admin.
+  private mayChange(r: Routine, owner?: string): boolean {
+    const asker = this.deps.db.person(owner ?? this.deps.db.ownerId())
+    return r.scope === 'channel' ? asker?.role === 'owner' || asker?.role === 'admin' : (r.owner ?? this.deps.db.ownerId()) === asker?.id
+  }
+
   remove(id: string): void {
-    this.deps.db.removeRoutine(id)
-    this.deps.emit({ type: 'routine_removed', id })
+    const { db } = this.deps
+    // One in a DM: only its person hears it went.
+    const c = db.conversationOwner(db.routine(id)?.conversationId ?? '')
+    const only = c?.kind === 'dm' ? (c.owner ?? db.ownerId()) : undefined
+    db.removeRoutine(id)
+    this.deps.emit({ type: 'routine_removed', id, ...(only ? { for: only } : {}) })
   }
 
   runNow(id: string): void {
@@ -319,6 +418,17 @@ export class Routines {
   // An archived agent's routines stop; turning one back on is up to me.
   pauseAgent(agentId: string): void {
     for (const r of this.deps.db.routines()) if (r.agentId === agentId && r.enabled) this.store({ ...r, enabled: false, nextAt: undefined })
+  }
+
+  // Routines on again (their person came back): each from its next time.
+  resume(ids: string[]): void {
+    for (const id of ids) {
+      const r = this.deps.db.routine(id)
+      if (!r?.enabled) continue
+      const nextAt = r.trigger ? undefined : nextRun(r.schedule, this.now())
+      // A date that passed meanwhile doesn't come back on.
+      this.store(!r.trigger && nextAt === undefined && r.schedule.date ? { ...r, enabled: false, nextAt } : { ...r, nextAt })
+    }
   }
 
   private store(r: Routine): void {
@@ -368,6 +478,7 @@ export class Routines {
   private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
+    if (routineCut(this.deps.db, r)) return // its person can no longer see its agent: it doesn't run (until they can)
     this.running.add(id)
     // The first tick comes before the connectors have connected, with what was missed while the
     // app was closed and what is due right then: a run waits for them (a little), or the agent
@@ -380,7 +491,9 @@ export class Routines {
         if (latest) this.store({ ...latest, lastAt: this.now(), lastMessageId: reply.id })
         const title = `${agentName(this.deps.db, r.agentId)} · ${r.name}`
         const fullText = reply.run?.status === 'done' ? reply.text.trim() : ''
-        this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined)
+        // A person's routine tells them; the team's, only who asked to be told.
+        const to = (latest ?? r).scope === 'channel' ? ((latest ?? r).watchers ?? []) : (latest ?? r).owner ? [(latest ?? r).owner!] : undefined
+        if (!to || to.length) this.deps.notify?.(title, outcome(reply), r.conversationId, fullText || undefined, to)
       })
       .catch((e: unknown) => console.error('[routines]', e))
       .finally(() => {
@@ -391,6 +504,18 @@ export class Routines {
       })
     this.runs.add(run)
   }
+}
+
+// The latest time a schedule was due at, from `due` (its nextAt, already past) up to `now`, no
+// older than LATE_GRACE_MS. undefined: all of them are older (or it isn't due).
+export function lastMissed(s: Schedule, due: number, now: number): number | undefined {
+  if (due > now) return undefined
+  const from = Math.max(due, now - LATE_GRACE_MS)
+  let at = from === due ? due : nextRun(s, from - 1)
+  if (at === undefined || at > now) return undefined
+  // A one-off runs at its one time; a repeating one, at the latest it reached.
+  for (let next = s.once ? undefined : nextRun(s, at); next !== undefined && next <= now; next = nextRun(s, at)) at = next
+  return at
 }
 
 // Runs a routine, and a reply that failed again in place up to RETRY_WAITS_MS.length times.
@@ -432,6 +557,9 @@ export async function retrying(
   return reply
 }
 
+const notTheirs = (r: Routine): string =>
+  L(`A rotina ${r.name} não é de quem pediu: só ${r.scope === 'channel' ? 'um admin' : 'a pessoa dela'} muda.`, `The routine ${r.name} isn't the asker's: only ${r.scope === 'channel' ? 'an admin' : 'its person'} changes it.`)
+
 const agentName = (db: Db, id: string): string => db.agent(id)?.name ?? L('Agente', 'Agent')
 
 // The notification's body: how the run ended, or the start of the reply.
@@ -440,7 +568,7 @@ export function outcome(reply: Message): string {
     case 'waiting_approval':
       return L('Pediu aprovação pra continuar.', 'Asked for approval to go on.')
     case 'waiting_input':
-      return `${L('Perguntou', 'Asked')}: ${reply.run.question ?? ''}`.trim()
+      return `${L('Perguntou', 'Asked')}: ${questionHeadline(questionsOf(reply.run))}`.trim()
     case 'limit_reached':
       return L('Parou: chegou no limite de tokens do mês.', "Stopped: hit the month's token limit.")
     case 'paused':

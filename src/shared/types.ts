@@ -1,12 +1,15 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { UplinkStatus } from './node-link'
 import type { AvatarDefinition } from 'open-bot-avatar'
+import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
-import { L, lang, type Lang } from './lang'
+import type { Answer, Decision } from './questions'
+import { L, lang, locale, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'gemini' | 'cursor' | 'grok'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'endpoint'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -43,10 +46,11 @@ export interface EngineStatus {
   warning?: string // e.g. logged in with an API key instead of a subscription
   // Where it sends requests, read from its own config: the person's plan, a gateway
   // (a company's, or a provider like OpenCode Go), an API key, or the providers it has logins for.
-  route?: 'plan' | 'gateway' | 'apikey' | 'providers'
+  route?: 'plan' | 'gateway' | 'apikey' | 'providers' | 'endpoint'
   gateway?: string // the gateway's host
   off?: boolean // the person didn't pick this harness: no agent runs on it
   soon?: boolean // the app can't run agents on it yet
+  checking?: boolean // not checked yet: the app has just opened for the first time
 }
 
 // The agents of the team: not archived, and not the Tuca, who belongs to the app.
@@ -83,9 +87,17 @@ export interface Agent {
   browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   apps?: AgentApp[] // the person's own apps it may use (Notes, Mail…), each to read or to read and change
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
+  actionRules?: ActionRules // what it does about a commit, a push, a PR…: over settings.actionRules, kind by kind; unset kinds follow them
+  autonomy?: Autonomy // how far it goes on its own (src/shared/actions.ts); unset: Settings' level
+  outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
+  owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
+  reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
+  sectorName?: string // on a sector's head (src/shared/org.ts headsOf): the sector's name; unset: "Setor de <name>"
+  sectorDoes?: string // on a sector's head: what the sector handles, in one line, read by the other heads
+  entry?: boolean // the person chose it as an entry point (src/shared/org.ts entriesOf): it answers to no agent, is in no sector, and the teams below it are sectors
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -119,6 +131,8 @@ export interface Conversation {
   unread?: number
   wikiCapture?: boolean // false: the wiki's curator leaves this conversation out
   threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
+  owner?: string // a DM's person: one DM per agent and person, and only they read it
+  createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -163,10 +177,20 @@ export interface Run {
   receipt?: Receipt
   approvalId?: string
   steered?: boolean // stopped by "Orientar agora": the reply right after it carries on
+  outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
   error?: string // what happened and what to do, for people (src/shared/errors.ts)
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
-  question?: string // asked with ask_user; answered by the next human message here
+  replyTo?: string // the message (a person's) it answers, when one did
+  handed?: string // the request (Delegation) this reply works on: what it ends with goes back to whoever asked
+  answeredBy?: string // who answered its question (another person than the one asked, maybe)
+  question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
+  questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
+  answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  answeredInText?: true // the reply had text of its own, beyond the decisions answered
+  answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
+  answerTyped?: string // what that message had beyond them, written in the message box
+  askedTo?: string // the person the question is for (unset with one person: whoever asked the agent)
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   wikiChanges?: string[] // what the wiki's curator kept from this exchange (change packages)
   artifactIds?: string[] // files and screenshots shown in this reply
@@ -174,10 +198,74 @@ export interface Run {
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  goal?: string // the goal it works on: the message that set it (src/core/goals.ts)
+  autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
-  proposal?: Proposal // what an agent proposed (a change to an agent, a routine, a channel, a team), shown as a card
+  proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
+  proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
+  delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back
+  delegations?: DelegationRef[] // the work this reply handed to the agents below its author
+  routineAsk?: string // a routine's run: the message the routine posted, which this reply answers
+  noNews?: true // a routine's run that found nothing new (it answered only noNewsPhrase): the conversation folds these into one line
+}
+
+// Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.
+export interface DelegationRef {
+  id: string
+  to: string // the agent doing it
+  conversationId: string
+  rootId: string
+  threadId?: string // the thread it is worked in, when it was asked inside another's (rootId is then the asking message)
+  back?: 'result' // on the message that brought the answer back to where it was asked: shown folded there
+}
+
+// A to-do on the board (Quadro): written before it starts, by one person, for an agent. Starting it posts it
+// as that person's message to the agent (its DM, or a channel it's in), and from there it's that reply's card.
+export interface Task {
+  id: string
+  owner: string // the person whose list it is
+  title: string
+  notes?: string // what the agent should know: it goes in the message, under the title
+  agentId?: string // who does it; unset until picked
+  conversationId?: string // where it's posted; unset: the agent's DM
+  dueAt?: number
+  position: number // its place in the list, smallest first
+  createdAt: number
+}
+export type TaskInput = Pick<Task, 'title'> & Partial<Pick<Task, 'id' | 'notes' | 'agentId' | 'conversationId' | 'dueAt' | 'position'>>
+export const MAX_TASK_TITLE = 300
+export const MAX_TASK_NOTES = 8_000
+
+// A piece of work an agent handed to one below it (src/shared/org.ts), in that one's channel: a thread
+// there, opened by `rootId`. What it ends with goes back to where it was asked from, and whoever asked
+// gets the turn again. `asking`: the one doing it left a question, which goes up to whoever asked.
+export interface Delegation {
+  id: string
+  from: string // the agent that asked
+  to: string // the agent asked
+  conversationId: string // where the work is done
+  rootId: string // the message that asked for it there: it opens its thread, or sits in `threadId`
+  threadId?: string // the thread it is worked in, when asked inside one already there (a request's, in the same channel)
+  originConversationId: string // where it was asked from
+  originThreadId?: string
+  originMessageId: string // the reply that asked
+  requestedBy: string // the person that reply was for
+  text: string // what to do
+  done?: string // what counts as finished
+  dueAt?: number
+  state: 'open' | 'done' | 'failed' | 'cancelled'
+  asking?: string // the message whose question waits for whoever asked
+  askingTold?: boolean // whoever asked has heard of that question
+  parkedTold?: boolean // whoever asked has heard it's held on an approval of theirs
+  nudges?: number // how many times the one asked was knocked on after leaving no reply at all
+  result?: string // the message it ended with
+  told?: boolean // whoever asked has heard how it ended
+  lateTold?: boolean // whoever asked has heard it's past its deadline
+  approval?: string // the approval its work last stopped on, shown with the request where it was asked from
+  createdAt: number
+  endedAt?: number
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
@@ -193,24 +281,179 @@ export interface AgentDraft {
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
   reason?: string
-  state?: 'created' | 'dismissed'
+  state?: 'created' | 'dismissed' | 'undone'
   agentId?: string // once created
+  auto?: true // created by itself when the Tuca proposed it (Settings.tucaApplyNow), not by a click
+  undo?: UndoInfo // once created: how to take it back
+}
+
+// How long a change the Tuca applied can be taken back with Desfazer.
+export const UNDO_HOURS = 24
+
+// What taking an applied card back needs: until when, and what to check first, so a later change
+// to the same thing is never thrown away. `prior`: an agent's fields as they were just before;
+// `stamps`: what each thing it made looked like right after (an agent's or a routine's, by id).
+export interface UndoInfo {
+  until: number
+  prior?: AgentChanges
+  stamps?: Record<string, string>
 }
 
 // What the Tuca may propose to change in an agent that exists.
 export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
-// with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
+// with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
+// inside the app (Settings.tucaApplyNow): that applies when his reply ends, and the card offers Desfazer. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
+// A reply may hold several (a group under it, each applied on its own or all at once). `needs`: agents
+// proposed in the same reply (by name: propor_agente's card or a team's) that must exist first; a
+// routine for one has no agentId until then, and a channel adds them to `members`.
 export type Proposal = (
   | { kind: 'agent'; agentId: string; changes: AgentChanges; before?: AgentChanges } // before: those fields as they were
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
-  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean } } // several agents at once, and a channel with them
-) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string }
+  | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
+) & { reason?: string; state?: 'applied' | 'dismissed' | 'undone'; appliedId?: string; error?: string; needs?: string[]; auto?: true; undo?: UndoInfo } // auto: applied by itself, as the Tuca proposed it; undo: how to take it back
 
-export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
+// What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
+// agents and teams); `draft`: the reply's new-agent card, when it went too.
+export interface ProposalsResult {
+  applied: { index: number; id: string }[]
+  failed: { index: number; error: string }[]
+  forwarded: number[]
+  draft?: { agentId?: string; error?: string }
+}
+
+// The most proposals one reply holds.
+export const MAX_PROPOSALS = 20
+
+// A reply's proposals: the list, or the one a reply from before had.
+export const proposalsOf = (run: { proposal?: Proposal; proposals?: Proposal[] } | undefined): Proposal[] => run?.proposals ?? (run?.proposal ? [run.proposal] : [])
+
+// What a proposal is about: a newer one about the same thing replaces it (in the reply, or a later one).
+export function proposalKey(p: Proposal): string {
+  if (p.kind === 'agent') return `agent:${p.agentId}`
+  if (p.kind === 'routine') return `routine:${p.routine.agentId || p.needs?.[0] || ''}:${p.routine.name.toLowerCase()}`
+  if (p.kind === 'channel') return `channel:${p.name}`
+  return `team:${p.channel?.name ?? p.agents.map((a) => a.name.toLowerCase()).sort().join(',')}`
+}
+
+// The order "apply all" goes in: what makes agents first (a team), then changes to agents, then
+// channels and routines, which may need an agent made just before. Same kind: as proposed.
+const RANK: Record<Proposal['kind'], number> = { team: 0, agent: 1, channel: 2, routine: 3 }
+export const applyOrder = (ps: Proposal[]): number[] => ps.map((_, i) => i).sort((a, b) => RANK[ps[a]!.kind] - RANK[ps[b]!.kind] || a - b)
+
+export type Author = { kind: 'person'; id: string } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
+
+// ---------- people ----------
+
+// Every Tucano has people: a desktop has one, its owner; a server, whoever was invited.
+export type Role = 'owner' | 'admin' | 'member'
+
+// What everyone may know of a person: never their keys.
+export interface Person {
+  id: string
+  name: string
+  role: Role
+  about: string // what they do, for the agents ("cuida do financeiro")
+  delegateTo?: string // someone answering and approving for them…
+  delegateUntil?: number // …until then
+  seenAt?: number // when they last opened the Tucano with a key of theirs
+  devices?: number // how many keys (browsers, apps) they have
+  access?: PersonAccess // what they see; unset: everything. Sent to admins and to the person alone
+}
+
+// What a person sees of the team. 'all': everything, as always. 'picked': the agents and channels
+// marked, plus every agent of a marked sector (by its head, so one who joins it later is in too).
+// The owner and admins always see everything, whatever is stored here.
+export interface PersonAccess {
+  mode: 'all' | 'picked'
+  sectors: string[] // sector heads' agent ids
+  agents: string[]
+  channels: string[]
+}
+
+// One of my own keys (a browser, the phone, the desktop app), as Settings › Pessoas lists them.
+// `id` is the key's hash, never the key. No `seenAt`: it never signed in (a link preview's, say).
+export interface Device {
+  id: string
+  label: string
+  createdAt: number
+  seenAt?: number
+  current?: boolean // the one this page is signed in with
+}
+
+// Whether `of` has `who` covering for them right now.
+export const delegating = (of: Pick<Person, 'delegateTo' | 'delegateUntil'> | undefined, who: string, now = Date.now()): boolean =>
+  !!of && of.delegateTo === who && (of.delegateUntil ?? 0) > now
+
+// A question an agent asked someone (ask_user). `confirm`: in a DM, a question to someone else
+// waits first for the DM's person to say yes ('pending'); 'no' ends it there.
+export interface Question {
+  id: string // the agent's message that asked it
+  conversationId: string
+  threadId?: string
+  agentId: string
+  text: string
+  askedTo: string // the person it's for
+  requestedBy: string // whose request the agent was working on
+  confirm?: 'pending' | 'yes' | 'no'
+  state: 'open' | 'answered' | 'closed'
+  deadlineAt: number // past it, the requester is told and may answer instead
+  toldAt?: number
+  answeredBy?: string
+  answeredAt?: number
+  createdAt: number
+}
+
+// What's waiting on a person: approvals they can decide and questions to them.
+// A question from someone else's DM comes without where it was asked (they see the question only).
+export interface Inbox {
+  approvals: Approval[]
+  // With the decisions asked (ask_user's options) and what was answered on the card so far.
+  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
+  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
+}
+
+// A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
+export interface InboxProposal {
+  id: string // the card's message
+  index?: number // which of its proposals (unset: the first)
+  agentId: string // who proposed it (the Tuca)
+  proposal: Proposal
+  by: string // the member who asked
+  at: number
+}
+
+// The team's log, for owners and admins: who did what, never what a DM said.
+export interface ActivityEntry {
+  id: string
+  at: number
+  personId?: string // who did it (none: the app itself, a sweep)
+  kind: string // 'person.joined', 'approval.decided', 'agent.created'…
+  target?: string // what it was done to: an id
+  detail?: Record<string, unknown>
+}
+
+// An invite as admins see it: never its code, which only its link carries.
+export interface Invite {
+  id: string // the code's hash
+  role: Exclude<Role, 'owner'>
+  about: string
+  restore?: string // a removed person this brings back
+  access?: PersonAccess // what whoever joins with it sees; unset: everything
+  createdBy: string
+  createdAt: number
+  expiresAt: number
+  usedAt?: number
+  usedBy?: string
+}
+
+// A person's own memories ("about me") live in this scope.
+export const personScope = (personId: string): string => `person:${personId}`
+export const scopePerson = (scope: string): string | undefined => (scope.startsWith('person:') ? scope.slice('person:'.length) : undefined)
 
 export interface Message {
   id: string
@@ -225,6 +468,7 @@ export interface Message {
   // Sent while this agent was still on my last message: it waits and goes with that reply's follow-up. Not
   // stored: it lives as long as the reply it waits for, and the app forgets it with that reply.
   queued?: string
+  title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
 }
 
 // `queued` on a message of mine that waits while the router still picks who answers the one before it.
@@ -273,15 +517,26 @@ export interface LocalInfo {
   download?: string // on a server, where the file isn't on this computer: to save it here
 }
 
+export interface EndpointSettings {
+  baseUrl: string // e.g. https://openrouter.ai/api/v1, http://localhost:11434/v1
+  models: string[] // the ones the agents may run on
+  hasKey?: boolean // computed: a key is saved
+}
+
 export interface Settings {
+  node?: { apps?: AgentApp[]; folders?: string[]; device?: string } // this computer lent to servers' Tucanos (core/node-server.ts): the apps and folders it lends, and its id there
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  // An address in OpenAI's format the agents run on with no harness: its base URL and the models picked
+  // from what it lists. The key is a secret (ENDPOINT_SECRET); `hasKey` only says one is saved.
+  endpoint?: EndpointSettings
   voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
+  orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
@@ -291,23 +546,45 @@ export interface Settings {
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
+  questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
+  actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
+  autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)
+  outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
+  chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
+  codexQuota?: CodexQuota // the Codex subscription's, read when the usage page is open
   // The harnesses agents may run on, picked in the introduction. Unset: every one that's ready.
   harnesses?: EngineId[]
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
-  onboarding?: { done: boolean; checklistHidden?: boolean; workspaceManagerSeen?: boolean; carried?: boolean } // carried: the general settings came from another workspace
+  onboarding?: {
+    done: boolean
+    checklistHidden?: boolean // the missions, hidden from the sidebar
+    workspaceManagerSeen?: boolean
+    carried?: boolean // the general settings came from another workspace
+    fresh?: boolean // a new install: the sidebar starts short and grows with the missions
+    showAll?: boolean // "Mostrar tudo de uma vez": the whole sidebar, missions or not
+    seen?: string[] // the sidebar parts a mission brought that the person already opened (no "new" tag)
+    channel?: string // the channel the introduction made, where the first message waits
+    tour?: { done?: string[]; skipped?: boolean } // the marks over the real screens, once each
+    guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
+  }
   folded?: string[] // the ids of what I folded in the sidebar
+  sidebarHidden?: string[] // what I took out of the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: none
   sounds?: boolean // the toucan's chirp on a notification; unset: on
+  stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
+  tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work
@@ -320,8 +597,12 @@ export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, soun
 
 // Another login of a harness (a work account beside a personal one), in a folder of its own
 // in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
-// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
-export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+// CODEX_HOME, Antigravity's home (HOME) with no keychain in it, where agy keeps the login in a file
+// (only on a Mac: elsewhere its login goes to the system's store, whatever the home).
+// The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex', 'antigravity'] as const satisfies readonly EngineId[]
+// Where a harness may have another account: Antigravity's only on a Mac.
+export const accountsOn = (engine: AccountEngine, os: Os): boolean => engine !== 'antigravity' || os === 'mac'
 export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
 export interface Account {
   id: string
@@ -332,7 +613,7 @@ export interface Account {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'fill' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -365,6 +646,13 @@ export interface BrowserReply {
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
 }
 
+// A login the person saved for an agent's browser, as their page lists it: never the password.
+export interface SavedLogin {
+  origin: string // https://conta.example.com: the only place it's typed
+  username: string
+  onePassword?: boolean // the password is a 1Password reference, read when it's typed
+}
+
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.
 export interface BrowserView {
   agentId: string
@@ -375,12 +663,21 @@ export interface BrowserView {
   log: { label: string; detail: string; at: number }[] // the latest actions, oldest first
   doing?: { label: string; detail: string } // the action under way ("Clicando em", "Buscar")
   cursor?: { x: number; y: number; at: number } // where the agent last clicked or typed, as a fraction of the screen
+  conversationId?: string // the conversation whose reply drives it now: only who sees that one sees the page
   at: number
 }
 
 export interface Quota {
   fiveHour?: { utilization: number; resetsAt: number } // 0..1, ms
   sevenDay?: { utilization: number; resetsAt: number }
+  at: number
+}
+
+// The Codex subscription's windows, as its app-server tells (account/rateLimits/read): how long
+// each is depends on the plan (Plus has only the week).
+export interface CodexQuota {
+  windows: { minutes: number; utilization: number; resetsAt: number }[] // 0..1, ms
+  plan?: string // "plus", "pro"…
   at: number
 }
 
@@ -411,6 +708,7 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const AUTO_CONTINUES = 2 // times in a row a reply that paused while getting somewhere goes on by itself before it waits for you
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
@@ -420,24 +718,61 @@ export const SAME_TOOL_STOP = 60 // ...and past it, that tool is refused for the
 export const SLEEPS_FREE = 1 // commands that start by sleeping 20 s or more: the first runs, the next ones are refused
 export const SLEEPS_STOP = 4 // refused sleeps in a reply before it stops
 export const PENDING_WAIT_MINUTES = 5 // a connector result still running (a SQL statement) is awaited by the app this long
+export const CHAIN_DEPTH = 3 // agent replies chained from one human message before Tucano stops them
+export const MAX_CHAIN_DEPTH = 10
+// Agents mentioning each other can't loop and burn tokens with nobody watching: a whole number from 1 to MAX_CHAIN_DEPTH, whatever reached the core.
+export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
 
 // What a reply counts against limits: a token read from the cache costs about a
-// tenth of a new one, so it counts a tenth.
+// tenth of a new one, so it counts a tenth. The input counts the cache reads in; more cache reads than
+// input means they came apart from it (an Antigravity receipt): the input is all new then.
 export const CACHE_READ_WEIGHT = 0.1
 export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number; outputTokens: number }): number =>
-  Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
+  Math.round((u.cacheReadTokens > u.inputTokens ? u.inputTokens + u.cacheReadTokens * CACHE_READ_WEIGHT : u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT)) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
-export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; windows?: string; site: string }> = {
+export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; min?: string; windows?: string; site: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login', install: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex', site: 'https://code.claude.com' },
   codex: { label: 'Codex', cli: 'codex', login: 'codex login', install: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' },
   opencode: { label: 'OpenCode', cli: 'opencode', login: 'opencode auth login', install: 'curl -fsSL https://opencode.ai/install | bash', windows: 'npm install -g opencode-ai', site: 'https://opencode.ai' },
   pi: { label: 'Pi', cli: 'pi', login: 'pi', install: 'npm install -g @earendil-works/pi-coding-agent', site: 'https://pi.dev' },
-  gemini: { label: 'Gemini CLI', cli: 'gemini', login: 'gemini', install: 'npm install -g @google/gemini-cli', site: 'https://github.com/google-gemini/gemini-cli' },
+  antigravity: { label: 'Antigravity CLI', cli: 'agy', login: 'agy', install: 'curl -fsSL https://antigravity.google/cli/install.sh | bash', windows: 'irm https://antigravity.google/cli/install.ps1 | iex', site: 'https://antigravity.google/docs/cli/overview' },
   cursor: { label: 'Cursor CLI', cli: 'cursor-agent', login: 'cursor-agent login', install: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex", site: 'https://cursor.com/cli' },
-  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' }
+  grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
+  cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' },
+  hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' },
+  // No program to install: the app itself talks to an address in OpenAI's format (OpenRouter, OmniRoute,
+  // Ollama, LM Studio, vLLM…) with a key, and runs each reply's tools itself (src/core/engines/endpoint.ts).
+  endpoint: { label: 'Endpoint', cli: '', login: '', install: '', site: 'https://openrouter.ai' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
+
+// Codex or Claude Code being set up from the introduction, with no terminal (src/core/engine-setup.ts):
+// getting the CLI, then the CLI's own sign-in (the screen does the test reply after).
+export type SetupEngine = 'claude' | 'codex'
+export interface SetupState {
+  engine: SetupEngine
+  step: 'install' | 'login'
+  state: 'running' | 'done' | 'error' | 'cancelled'
+  progress?: number // 0..1, while downloading
+  url?: string // the sign-in page, in case the browser didn't open
+  error?: string
+}
+
+// A harness's sign-in in the server's own terminal (src/core/login-terminal.ts), shown on a page or a phone.
+export interface LoginScreen {
+  id: string
+  engine: EngineId
+  account?: string // another login's id (Settings › Accounts); unset: the harness's usual one
+  lines: string[]
+  url?: string // the page to open, as the CLI shows it
+  code?: string // a code to type on that page
+  hint?: string // what to do first, for a harness whose sign-in starts inside its own screen
+  state: 'running' | 'done' | 'failed' | 'cancelled'
+  error?: string
+}
+export const LOGIN_KEYS = ['enter', 'up', 'down', 'left', 'right', 'esc', 'tab', 'backspace', 'space'] as const
+export type LoginKey = (typeof LOGIN_KEYS)[number]
 
 // A harness starts picked only when it can actually run: one not installed or not
 // signed in yet starts off.
@@ -503,6 +838,8 @@ export interface ConnectorTool {
   enabled: boolean
   highRisk: boolean
   isNew: boolean // appeared after the first sync; starts disabled until reviewed
+  floor?: ToolClass // the server says it's at least this (a node's command or file write): the class can't go below it
+  lockedHighRisk?: boolean // the server marks it high risk (a computer's owner did, on a node): it can't be unmarked here
 }
 
 export type ConnectorAuth = 'none' | 'token' | 'oauth'
@@ -519,6 +856,7 @@ export interface Connector {
   auth: ConnectorAuth
   status: ConnectorStatus
   error?: string
+  errorDetail?: string // the raw error and its causes (a certificate's code, the DNS's), under "Ver detalhes"
   tools: ConnectorTool[]
 }
 
@@ -569,10 +907,13 @@ export interface Approval {
   createdAt: number
   expiresAt: number
   decidedAt?: number
+  requestedBy?: string // the person whose request the agent was working on
+  decidedBy?: string // the person who decided it
+  behalf?: string // what it's for, when not a person's message: "rotina da Ana", "rotina do #vendas"
 }
 
-// 'me' memories go to every agent; otherwise the scope is the id of the one agent they belong to.
-export type MemoryScope = 'me' | string
+// A person's memories are `person:<id>` (personScope); otherwise the scope is the id of the one agent they belong to.
+export type MemoryScope = string
 export type MemoryState = 'active' | 'pending' | 'archived' | 'forgotten'
 
 export interface Memory {
@@ -586,6 +927,7 @@ export interface Memory {
   messageIds: string[] // evidence
   replaces?: string // the memory this one supersedes; it becomes archived when this one is active
   reason?: string // why it was forgotten
+  privateTo?: string // an agent's note made in a DM: that DM's person's alone
   createdAt: number
   confirmedAt: number // creation, edit, "still valid", or reinforced by a later conversation
 }
@@ -622,6 +964,7 @@ export interface Service {
   url?: string // on the Mac (127.0.0.1), while the computer runs
   running: boolean
   startedAt: number
+  conversationId?: string // started by a reply there: only who sees that conversation sees it
 }
 
 export interface ComputerInfo {
@@ -658,6 +1001,15 @@ export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // what the models take per image
 export const MAX_IMAGES_PER_MESSAGE = 10
 
+// A file I attach to a message that isn't an image (a PDF, a Word doc, a spreadsheet, text): kept with
+// the message, and what it says goes to the agents as text (any engine, with a computer or not).
+export interface FileUpload {
+  name: string
+  data: string // base64
+}
+export const MAX_FILE_BYTES = 20 * 1024 * 1024 // as the wiki takes
+export const MAX_FILES_PER_MESSAGE = 5
+
 // In a browser (Tucano as a server) the server itself serves them, under /artifact.
 export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
   `${(globalThis as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ ? './artifact/' : 'tucano://artifact/'}${a.id}/${encodeURIComponent(a.name)}`
@@ -666,8 +1018,11 @@ export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
 
 export interface Schedule {
   days: number[] // 0 = Sunday … 6 = Saturday
-  time: string // "HH:MM", Mac local time
+  time: string // "HH:MM", Mac local time; with `times`, the first of them
+  times?: string[] // several times a day (a week's days or a day of the month): every one, sorted, two or more; unset with one
   once?: boolean // runs at the next matching time, then turns itself off
+  date?: string // "YYYY-MM-DD": that day only, at `time` (always once; `days` is its weekday)
+  monthDay?: number // 1–31: every month on that day (a shorter month's last day), at `time`
 }
 
 // What starts a routine other than the clock (spec §17). The app is local, so
@@ -706,9 +1061,12 @@ export interface Routine {
   lastMessageId?: string // the agent's reply in the last run
   createdBy?: string // the agent that scheduled it with `agendar_rotina`; undefined when I did
   createdAt: number
+  scope?: 'me' | 'channel' // a person's own (unset), or the team's: admins make those, and they notify only who watches
+  owner?: string // the person a 'me' routine belongs to, runs for and notifies
+  watchers?: string[] // who asked to be told of a channel routine's runs ("me avise")
 }
 
-export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string }
+export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string; scope?: Routine['scope'] }
 
 // What the routine's message in the conversation remembers about that run.
 export interface RoutineRun {
@@ -727,10 +1085,60 @@ const EVERY_DAY = (): string[] =>
 
 export const validTime = (t: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)
 
-// The first time after `after` that matches the schedule.
+// "2026-11-17", a day that exists.
+export const validDate = (d: string): boolean => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d)
+  if (!m) return false
+  const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return at.getFullYear() === Number(m[1]) && at.getMonth() === Number(m[2]) - 1 && at.getDate() === Number(m[3])
+}
+
+// A date's local time on this computer ("2026-11-17", "09:00").
+export const dateAt = (date: string, time: string): number => {
+  const [y, mo, d] = date.split('-').map(Number) as [number, number, number]
+  const [h, m] = time.split(':').map(Number) as [number, number]
+  return new Date(y, mo - 1, d, h, m).getTime()
+}
+
+// "2026-11-17" of a local time.
+export const isoDay = (at: number): string => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// How many times one routine runs a day, at most.
+export const MAX_TIMES = 12
+
+// A schedule's times of day: `times` when it has several, else its one `time`.
+export const timesOf = (s: Pick<Schedule, 'time' | 'times'>): string[] => (s.times && s.times.length > 1 ? s.times : [s.time])
+
+// Times as a schedule keeps them: valid, each once, in order.
+export const cleanTimes = (list: string[]): string[] => [...new Set(list.map((t) => t.trim()).filter(validTime))].sort()
+
+// The first time after `after` that matches the schedule (the earliest of its times).
 export function nextRun(s: Schedule, after: number): number | undefined {
-  if (!validTime(s.time) || s.days.length === 0) return undefined
+  if (s.times && s.times.length > 1 && s.date === undefined && !s.once) {
+    const all = s.times.map((time) => nextRun({ ...s, time, times: undefined }, after)).filter((t): t is number => t !== undefined)
+    return all.length ? Math.min(...all) : undefined
+  }
+  if (!validTime(s.time)) return undefined
+  if (s.date !== undefined) {
+    if (!validDate(s.date)) return undefined
+    const at = dateAt(s.date, s.time)
+    return at > after ? at : undefined
+  }
   const [h, m] = s.time.split(':').map(Number) as [number, number]
+  if (s.monthDay !== undefined) {
+    if (!Number.isInteger(s.monthDay) || s.monthDay < 1 || s.monthDay > 31) return undefined
+    const d = new Date(after)
+    for (let i = 0; i <= 12; i++) {
+      const last = new Date(d.getFullYear(), d.getMonth() + i + 1, 0).getDate()
+      const at = new Date(d.getFullYear(), d.getMonth() + i, Math.min(s.monthDay, last), h, m).getTime()
+      if (at > after) return at
+    }
+    return undefined
+  }
+  if (s.days.length === 0) return undefined
   const d = new Date(after)
   for (let i = 0; i <= 7; i++) {
     const at = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, h, m).getTime()
@@ -739,10 +1147,13 @@ export function nextRun(s: Schedule, after: number): number | undefined {
   return undefined
 }
 
+const ordinal = (n: number): string => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`
+
 export function describeSchedule(s: Schedule): string {
   const days = [...new Set(s.days)].sort()
-  const hour = L(s.time.replace(/^0(\d)/, '$1').replace(':00', 'h'), s.time.replace(/^0(\d)/, '$1'))
   const and = L(' e ', ' and ')
+  const one = (t: string): string => L(t.replace(/^0(\d)/, '$1').replace(':00', 'h'), t.replace(/^0(\d)/, '$1'))
+  const hour = (s.date === undefined && !s.once ? timesOf(s) : [s.time]).map(one).join(', ').replace(/, ([^,]+)$/, `${and}$1`)
   const when =
     days.length === 7
       ? L('Todo dia', 'Every day')
@@ -757,6 +1168,11 @@ export function describeSchedule(s: Schedule): string {
                 .join(', ')
                 .replace(/, ([^,]+)$/, `${and}$1`)
                 .replace(/^./, (c) => c.toUpperCase())
+  if (s.date !== undefined && validDate(s.date)) {
+    const day = new Date(dateAt(s.date, '12:00')).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', ...(Number(s.date.slice(0, 4)) !== new Date().getFullYear() ? { year: 'numeric' } : {}) }).replace(/\./g, '')
+    return L(`Uma vez, ${day} às ${hour}`, `Once, ${day} at ${hour}`)
+  }
+  if (s.monthDay !== undefined) return L(`Todo dia ${s.monthDay} do mês às ${hour}`, `Every month on the ${ordinal(s.monthDay)} at ${hour}`)
   if (s.once) return days.length === 7 ? L(`Uma vez, às ${hour}`, `Once, at ${hour}`) : L(`Uma vez, ${days.map((d) => DAY_LONG()[d]).join(' ou ')} às ${hour}`, `Once, ${days.map((d) => DAY_LONG()[d]).join(' or ')} at ${hour}`)
   return L(`${when} às ${hour}`, `${when} at ${hour}`)
 }
@@ -781,11 +1197,29 @@ export interface Skill {
   updatedAt: number
 }
 
+// This computer lent to servers' Tucanos: what it lends, and how each server's line is doing.
+export interface NodeInfo {
+  apps: AgentApp[] // the apps the node lends the servers' agents
+  folders: string[] // the folders it lends: the servers' file tools reach only these (absolute, real paths)
+  links: UplinkStatus[] // one per server it's lent to (Settings › Servers)
+}
+
+// One call the server made on this computer as a node, kept here for the owner to read (newest first).
+export interface NodeLogEntry {
+  at: number // when it started (ms)
+  tool: string // node_bash, node_read_file, navegador_clicar, premiere_pro__export…
+  summary: string // the command, the path, or the arguments, cut short and with secrets masked
+  ok: boolean
+  ms: number
+  error?: string // why it failed or was refused (outside the lent folders…)
+}
+
 // A skill already on this Mac (Claude Code, its plugins, Codex), that can be linked.
 export interface LocalSkill {
   source: string // the SKILL.md
   name: string
   description: string
+  bodyLength: number // recipe characters, excluding frontmatter
   origin: string // "Claude Code", "Plugin <name>", "Codex"
   files: string[] // its other text files, relative to its folder
   scripts: boolean // it has scripts: an agent needs a computer to run them
@@ -914,6 +1348,7 @@ export interface WikiSource {
   changes?: number // how many change packages it became
   addedBy: string // 'me', 'auto' (the curator) or an agent's id
   addedAt: number
+  private?: boolean // from someone else's DM, as an admin sees it: that it exists, nothing more (decision 1)
 }
 // One change in a package: write a new page, add under a section of one, or swap an exact passage.
 export interface WikiOp {
@@ -939,7 +1374,7 @@ export interface WikiChange {
 export interface WikiFinding {
   id: string
   at: number
-  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' // log: a page that reads like a record of what was done
+  kind: 'broken' | 'missing' | 'orphan' | 'contradiction' | 'stale' | 'duplicate' | 'link' | 'log' | 'git' // log: a page that reads like a record of what was done; git: what the sync with the repository ran into (a conflict, a file too big, read-only)
   pages: string[] // the pages it is about
   text: string // what's wrong, in a sentence (Markdown, with [[links]])
   name?: string // broken, missing: the page it would take
@@ -955,9 +1390,57 @@ export interface WikiImport {
   missing: number // links to pages nobody wrote yet
   kinds: [string, number][] // the kinds the new pages got (their tipo, folder or first tag)
 }
+// The wiki's folder kept in a git repository (src/core/wiki-git.ts), as Wiki settings show it.
+export type WikiGitHost = 'github' | 'gitlab' | 'bitbucket' | 'gitea'
+export interface WikiGitSetup {
+  sshUrl: string // what Tucano clones and pushes (git@host:owner/repo.git)
+  converted?: boolean // an https address was given: this is its SSH one
+  host: string
+  provider?: WikiGitHost
+  publicKey: string // the deploy key to add to the repository
+  deployKeyUrl?: string // the page that adds it, when the host is known
+}
+export interface WikiGitTest {
+  branch: string
+  empty: boolean // a repository with nothing in it yet
+  pages: number // Markdown notes in it
+  pdfs: number
+  docx: number
+  currentPages: number // pages the wiki has now: with some, connecting asks how
+}
+export type WikiGitError = { kind: 'auth' | 'network' | 'notfound' | 'hostkey' | 'nogit' | 'other'; message: string }
+export interface WikiGitStatus {
+  state: 'off' | 'setup' | 'ok' | 'syncing' | 'error' // setup: a key made, not connected yet
+  setup?: WikiGitSetup
+  test?: WikiGitTest // the last test, until it's connected
+  branch?: string
+  readOnly: boolean // the key can't push: the wiki shows the repository and takes no writes
+  lastSync?: number
+  nextTry?: number // after a failure, when it tries again on its own
+  error?: WikiGitError
+  skipped: { path: string; mb: number }[] // files over 50 MB, kept out of the repository
+  git: boolean // git was found on this computer
+}
 export interface WikiReview {
   at?: number // the last review
   running: boolean
   error?: string // the last review failed
   findings: WikiFinding[] // still open
+}
+
+// A whole Tucano in one .zip (Settings › General › Export everything), and what a server finds in
+// one before restoring it (src/core/restore.ts).
+export interface BackupSummary {
+  version: 1
+  madeAt: number
+  app: string
+  workspace: string
+  schema: number
+  agents: number
+  channels: number
+  messages: number
+  memories: number
+  wikiPages: number
+  files: number
+  filesLeftOut: number // the agents' files that didn't fit in one upload
 }

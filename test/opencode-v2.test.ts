@@ -123,7 +123,7 @@ describe.skipIf(process.platform === 'win32')('the OpenCode engine on V2', () =>
     await collect(opencodeEngine(() => oc.bin, mkdtempSync(join(tmpdir(), 'oc2-app-')), async () => ({}), () => '1.15.10').run(turn()))
     const calls = oc.calls()
     expect(calls).toHaveLength(1)
-    expect(calls[0]).toContain('run --pure')
+    expect(calls[0]).toContain('run --print-logs --log-level ERROR --pure')
     expect(calls[0]).not.toContain('--session')
   }, 20_000)
 })

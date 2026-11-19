@@ -20,6 +20,15 @@ let registrations: number
 let refreshes: string[]
 let expireAccessToken: () => void
 let revokeRefreshTokens: () => void
+// How the authorization server behaves: rotating refresh tokens (each works once, like Linear's and
+// Notion's), a slow token endpoint (so two refreshes overlap), and a token endpoint that's down.
+let rotate: boolean
+let tokenDelayMs: number
+let tokenDown: number // the next refreshes answer 503
+let calls: number
+let offline: boolean // the authorization server offers offline_access, the MCP server lists only "openid" (Vercel's)
+let registered: { scope?: string }[]
+let loopbackOnly: boolean // the authorization page takes only a loopback address back (Canva's): it says "Invalid redirect URI."
 
 const body = async (req: import('node:http').IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -33,6 +42,13 @@ beforeEach(async () => {
   opened = []
   registrations = 0
   refreshes = []
+  rotate = false
+  tokenDelayMs = 0
+  tokenDown = 0
+  calls = 0
+  offline = false
+  registered = []
+  loopbackOnly = false
   let current = '' // only the newest access token works, as if the older one had expired
   expireAccessToken = () => {
     current = ''
@@ -46,7 +62,7 @@ beforeEach(async () => {
         void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
       const url = new URL(req.url ?? '/', base)
       if (req.method === 'GET' && url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
-        return json(200, { resource: `${base}/mcp`, authorization_servers: [base] })
+        return json(200, { resource: `${base}/mcp`, authorization_servers: [base], ...(offline ? { scopes_supported: ['openid'] } : {}) })
       }
       if (req.method === 'GET' && url.pathname.startsWith('/.well-known/oauth-authorization-server')) {
         return json(200, {
@@ -57,12 +73,20 @@ beforeEach(async () => {
           response_types_supported: ['code'],
           grant_types_supported: ['authorization_code', 'refresh_token'],
           code_challenge_methods_supported: ['S256'],
-          token_endpoint_auth_methods_supported: ['none']
+          token_endpoint_auth_methods_supported: ['none'],
+          ...(offline ? { scopes_supported: ['openid', 'email', 'offline_access', 'profile'] } : {})
         })
       }
       if (req.method === 'POST' && url.pathname === '/register') {
         registrations += 1
-        return json(201, { ...JSON.parse(await body(req)), client_id: `client-${registrations}` })
+        const asked = JSON.parse(await body(req)) as { scope?: string }
+        registered.push(asked)
+        return json(201, { ...asked, client_id: `client-${registrations}` })
+      }
+      if (req.method === 'GET' && url.pathname === '/authorize') {
+        const back = url.searchParams.get('redirect_uri') ?? ''
+        if (loopbackOnly && !back.startsWith('http://127.0.0.1:')) return void res.writeHead(400, { 'content-type': 'text/plain' }).end('Invalid redirect URI.')
+        return void res.writeHead(302, { location: `${base}/login` }).end()
       }
       if (req.method === 'POST' && url.pathname === '/token') {
         const form = new URLSearchParams(await body(req))
@@ -70,9 +94,19 @@ beforeEach(async () => {
         const refreshToken = form.get('refresh_token')
         if (refreshToken) {
           refreshes.push(`${clientId} (issued to ${owner.get(refreshToken) ?? 'nobody'})`)
+          if (tokenDelayMs) await new Promise((r) => setTimeout(r, tokenDelayMs))
+          if (tokenDown > 0) {
+            tokenDown -= 1
+            res.writeHead(502, { 'content-type': 'text/html' }).end('<html>Bad Gateway</html>')
+            return
+          }
           if (owner.get(refreshToken) !== clientId) return json(400, { error: 'invalid_grant' })
-          current = `at-${owner.size + 1}-${Date.now()}`
-          return json(200, { access_token: current, token_type: 'Bearer', expires_in: 3600, refresh_token: refreshToken })
+          current = `at-${refreshes.length}-${Date.now()}`
+          if (!rotate) return json(200, { access_token: current, token_type: 'Bearer', expires_in: 3600, refresh_token: refreshToken })
+          owner.delete(refreshToken)
+          const next = `rt-r${refreshes.length}`
+          owner.set(next, clientId)
+          return json(200, { access_token: current, token_type: 'Bearer', expires_in: 3600, refresh_token: next })
         }
         current = `at-${owner.size + 1}-${Date.now()}`
         const fresh = `rt-${owner.size + 1}`
@@ -93,7 +127,11 @@ beforeEach(async () => {
       if (call.method === 'initialize') {
         return json(200, { jsonrpc: '2.0', id: call.id, result: { protocolVersion: call.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } } })
       }
-      if (call.method === 'tools/list') return json(200, { jsonrpc: '2.0', id: call.id, result: { tools: [] } })
+      if (call.method === 'tools/list') return json(200, { jsonrpc: '2.0', id: call.id, result: { tools: [{ name: 'search', inputSchema: { type: 'object' } }] } })
+      if (call.method === 'tools/call') {
+        calls += 1
+        return json(200, { jsonrpc: '2.0', id: call.id, result: { content: [{ type: 'text', text: 'ok' }] } })
+      }
       res.writeHead(202).end()
     })()
   })
@@ -109,8 +147,17 @@ afterEach(async () => {
 })
 
 // One launch of the app, listening for the OAuth callback on its own port.
-const launch = (callbackPort: number): ConnectorManager =>
-  new ConnectorManager({ db, secrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => `http://127.0.0.1:${callbackPort}/oauth/callback` })
+const launch = (callbackPort: number, withSecrets: Secrets = secrets): ConnectorManager =>
+  new ConnectorManager({ db, secrets: withSecrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => `http://127.0.0.1:${callbackPort}/oauth/callback` })
+
+// A launch whose system key won't open what was saved (the Keychain said no, or the key changed).
+const lockedOut = (): Secrets =>
+  new Secrets(db, {
+    encrypt: plainCipher.encrypt,
+    decrypt: async () => {
+      throw new Error("I couldn't open the saved credentials (the system's key changed).")
+    }
+  })
 
 describe('OAuth credentials across launches', () => {
   it('signs in once and refreshes on the next launch, when only the callback port changed', async () => {
@@ -155,6 +202,165 @@ describe('OAuth credentials across launches', () => {
     expect(again.searchParams.get('client_id')).toBe('client-2')
     expect(again.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:51002/oauth/callback')
     await second.closeAll()
+  })
+})
+
+// Signs a new connector in on a first launch, then closes that launch with the access token gone stale.
+const signedIn = async (): Promise<string> => {
+  const first = launch(51001)
+  const id = await first.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+  await first.connect(id)
+  const state = new URL((await first.authorize(id))!).searchParams.get('state')!
+  await first.finishOAuth(state, 'code-1')
+  expect(first.get(id)!.status).toBe('connected')
+  await first.closeAll()
+  expireAccessToken()
+  return id
+}
+
+describe('renewing the sign-in', () => {
+  it('asks to stay signed in when the authorization server offers it, though the server lists only its own scopes', async () => {
+    offline = true
+    const m = launch(51001)
+    const id = await m.add({ name: 'Vercel', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await m.connect(id)
+    const page = new URL((await m.authorize(id))!)
+    // Without it the sign-in has no refresh token and asks again when the access token expires, every day.
+    expect(page.searchParams.get('scope')?.split(' ').sort()).toEqual(['offline_access', 'openid'])
+    expect(page.searchParams.get('prompt')).toBe('consent')
+    expect(registered.at(-1)?.scope?.split(' ')).toContain('offline_access')
+    expect(await m.finishOAuth(page.searchParams.get('state')!, 'code-1')).toBe(true)
+    expect(m.get(id)!.status).toBe('connected')
+    await m.closeAll()
+  })
+
+  it('asks for nothing more of a server that does not offer it', async () => {
+    const m = launch(51001)
+    const id = await m.add({ name: 'Atlassian', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await m.connect(id)
+    const page = new URL((await m.authorize(id))!)
+    expect(page.searchParams.get('scope') ?? '').not.toContain('offline_access')
+    expect(registered.at(-1)?.scope ?? '').not.toContain('offline_access')
+    await m.closeAll()
+  })
+
+  it('renews once when two calls find the access token expired together, and keeps the new refresh token', async () => {
+    rotate = true
+    tokenDelayMs = 50
+    const id = await signedIn()
+    const second = launch(51002)
+    await second.connect(id)
+    expect(second.get(id)!.status).toBe('connected')
+    expireAccessToken() // it grows old again while the app is open
+    const results = await Promise.allSettled([second.call(id, 'search', {}), second.call(id, 'search', {})])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    expect(await secrets.getJson(`connector:${id}:oauth_tokens`)).toMatchObject({ refresh_token: expect.stringMatching(/^rt-r/) })
+    await second.closeAll()
+
+    // And the next launch still renews on its own.
+    expireAccessToken()
+    const third = launch(51003)
+    await third.connect(id)
+    expect(third.get(id)!.status).toBe('connected')
+    expect(opened).toHaveLength(1)
+    await third.closeAll()
+  })
+
+  it("doesn't ask to sign in when the token endpoint is down at launch, and connects when it's back", async () => {
+    const id = await signedIn()
+    tokenDown = 1
+    const second = launch(51002)
+    await second.connect(id)
+    expect(second.get(id)!.status).toBe('error')
+    expect(second.get(id)!.error).toMatch(/renovar/)
+    expect(await secrets.getJson(`connector:${id}:oauth_tokens`)).toMatchObject({ refresh_token: 'rt-1' })
+    await second.connect(id) // the retry
+    expect(second.get(id)!.status).toBe('connected')
+    expect(opened).toHaveLength(1)
+    await second.closeAll()
+  })
+
+  it('renews with the saved sign-in when Authorize is clicked, instead of signing in again', async () => {
+    const id = await signedIn()
+    tokenDown = 1
+    const second = launch(51002)
+    await second.connect(id) // fails for now
+    expect(await second.authorize(id)).toBeUndefined()
+    expect(second.get(id)!.status).toBe('connected')
+    expect(opened).toHaveLength(1)
+    expect(registrations).toBe(1)
+    await second.closeAll()
+  })
+})
+
+describe("a saved sign-in the system key won't open", () => {
+  it('keeps it, says so once per connector without retrying, and works again once the key is back', async () => {
+    const id = await signedIn()
+    const before = db.getSecret(`connector:${id}:oauth_tokens`)
+    const locked = launch(51002, lockedOut())
+    await locked.connect(id)
+    const c = locked.get(id)!
+    expect(c.status).toBe('needs_auth')
+    expect(c.error).toMatch(/Nada foi apagado|Nothing was deleted/)
+    expect(db.getSecret(`connector:${id}:oauth_tokens`)).toBe(before)
+    expect(db.getSecret(`connector:${id}:oauth_client`)).toBeDefined()
+    expect(opened).toHaveLength(1)
+    expect(refreshes).toEqual([]) // nothing went to the server
+    await locked.closeAll()
+
+    const back = launch(51003)
+    await back.connect(id)
+    expect(back.get(id)!.status).toBe('connected')
+    expect(registrations).toBe(1)
+    await back.closeAll()
+  })
+
+  it('signs in again when Authorize is clicked, in place of what it could not open', async () => {
+    const id = await signedIn()
+    const locked = launch(51002, lockedOut())
+    await locked.connect(id)
+    const page = await locked.authorize(id)
+    expect(page).toBeTruthy()
+    expect(opened).toHaveLength(2)
+    await locked.closeAll()
+  })
+})
+
+// A server on its https address: the provider sends the browser back to it, unless it takes only a loopback
+// address. Then the sign-in goes to the loopback one, and the person pastes where the page ended.
+const onServer = (): ConnectorManager =>
+  new ConnectorManager({ db, secrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => 'https://ana.pro.example/oauth/callback', localCallbackUrl: () => 'http://127.0.0.1:51009/oauth/callback' })
+
+describe('signing in on a server', () => {
+  it("comes back to the server's own address where the provider takes it", async () => {
+    const app = onServer()
+    const id = await app.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await app.connect(id)
+    const page = new URL((await app.authorize(id))!)
+    expect(page.searchParams.get('redirect_uri')).toBe('https://ana.pro.example/oauth/callback')
+    expect(registrations).toBe(1)
+    await app.closeAll()
+  })
+
+  it('goes to the loopback address, to paste, where the provider takes only that one, and renews from it later', async () => {
+    loopbackOnly = true
+    const app = onServer()
+    const id = await app.add({ name: 'Canva', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await app.connect(id)
+    const page = new URL((await app.authorize(id))!)
+    expect(page.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:51009/oauth/callback')
+    expect(page.searchParams.get('client_id')).toBe('client-2') // registered again, with the loopback address
+    expect(await app.finishOAuthFromUrl(`http://127.0.0.1:51009/oauth/callback?code=code-1&state=${page.searchParams.get('state')}`)).toBe(true)
+    expect(app.get(id)!.status).toBe('connected')
+    await app.closeAll()
+    expireAccessToken()
+
+    const next = onServer() // a restart: the sign-in it got renews, with no browser and no new registration
+    await next.connect(id)
+    expect(next.get(id)!.status).toBe('connected')
+    expect(registrations).toBe(2)
+    expect(refreshes).toEqual(['client-2 (issued to client-2)'])
+    await next.closeAll()
   })
 })
 

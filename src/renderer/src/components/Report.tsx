@@ -2,8 +2,9 @@
 // whatever needs a look. One calendar week at a time, like the routines.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
-import { agentById, loadReport, navigate, useStore, type AgentReport, type Problem, type Rate, type Report } from '../store'
+import { agentById, amAdmin, loadReport, navigate, useStore, type AgentReport, type Problem, type Rate, type Report } from '../store'
 import { Sheet } from './Pages'
+import { AdminOnly } from './People'
 import { when } from './Routines'
 import { ago, AgentAvatar, Icon, shiftWeek, startOfWeek, tokens, weekRange } from './ui'
 
@@ -28,14 +29,17 @@ export function ReportPage(): ReactNode {
   const [week, setWeek] = useState(() => startOfWeek(Date.now()))
   const [report, setReport] = useState<Report | null>(null)
   const thisWeek = week === startOfWeek(Date.now())
+  // The team's report is the admins' (a member can still land here from the search).
+  const admin = useStore(amAdmin)
 
   useEffect(() => {
+    if (!admin) return
     let on = true
     void loadReport(week).then((r) => on && setReport(r))
     return () => {
       on = false
     }
-  }, [week])
+  }, [week, admin])
 
   // ← → change the week, T comes back to this one.
   useEffect(() => {
@@ -52,6 +56,12 @@ export function ReportPage(): ReactNode {
   const active = report?.agents.filter((a) => a.total.replies > 0).sort((a, b) => b.total.replies - a.total.replies) ?? []
   const quiet = report?.agents.filter((a) => a.total.replies === 0) ?? []
 
+  if (!admin)
+    return (
+      <Sheet title={L('Boletim', 'Report')}>
+        <AdminOnly>{L('Só um admin vê o boletim do Tucano.', 'Only an admin sees the Tucano’s report.')}</AdminOnly>
+      </Sheet>
+    )
   return (
     <Sheet
       title={L('Boletim', 'Report')}

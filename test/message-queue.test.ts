@@ -52,7 +52,7 @@ function runner(): Runner {
   removed = []
   routerGates = []
   gates = []
-  const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), gemini: fakeEngine('gemini'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok') }
+  const engines: Record<EngineId, Engine> = { claude: slow, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   return new Runner({ dataDir: DATA, db, engines, settings: async () => settings, emit: (e) => (e.type === 'message' ? events.push(e.message) : e.type === 'message_removed' ? removed.push(e.id) : 0), workDir: mkdtempSync(join(tmpdir(), 'mq-w-')), gateway })
 }
 
@@ -60,12 +60,12 @@ const until = async (ok: () => boolean): Promise<void> => {
   for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10))
   expect(ok()).toBe(true)
 }
-const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'me')
+const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'person')
 const replies = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
 
 beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'mq-db-')), 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent({ id: 'teo', name: 'Teo', handle: 'teo', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
   db.createConversation({ id: 'dm', kind: 'dm', name: 'teo', members: ['teo'] })
   gateway = new Gateway()
@@ -154,14 +154,20 @@ describe('messages sent while the agent is still answering', () => {
     const r = runner()
     await r.send('dm', 'primeiro assunto')
     await until(() => turns.length === 1)
-    const other = { id: 'outra', conversationId: 'dm', author: { kind: 'me' as const }, text: 'assunto velho', at: 1 }
+    const other = { id: 'outra', conversationId: 'dm', author: { kind: 'person' as const, id: db.ownerId() }, text: 'assunto velho', at: 1 }
     db.saveMessage(other)
     await r.send('dm', 'sobre aquilo', [], 'outra')
-    await until(() => turns.length === 2) // a reply of its own, at once
-    expect(mine().at(-1)!.threadId).toBe('outra')
+    expect(mine().at(-1)!.threadId).toBe('outra') // not moved into the busy reply's thread
+    expect(events.find((m) => m.id === mine().at(-1)!.id)?.queued).toBeUndefined()
+    // Teo does one thing at a time: it's a reply of its own, once the first is done.
+    release()
+    await until(() => turns.length === 2)
+    expect(turns[1]!.prompt).toContain('sobre aquilo')
+    expect(turns[1]!.prompt).not.toContain('Enquanto você respondia')
     release()
     await r.idle()
     expect(turns).toHaveLength(2)
+    expect(replies().map((m) => m.threadId)).toEqual([undefined, 'outra']) // the first in the conversation, where the DM answers
   })
 })
 

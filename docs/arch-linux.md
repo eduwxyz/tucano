@@ -125,7 +125,7 @@ rm -r -- "$validation_data"
 | Open at login | With a persistent install, turn the option on and check `~/.config/autostart/tucano.desktop` (or the `XDG_CONFIG_HOME` folder); then test a new login to the session |
 | AppImage | Check that it opens, the applications menu, the packaged resources, and updating |
 
-`gnome-keyring` was installed in the tested environment, but that wasn't enough to make encryption available to Electron. Tucano refuses to store credentials with `basic_text` or without encryption available. Don't force that backend to get around the protection, and don't use real credentials while the keyring isn't working.
+`gnome-keyring` was installed in the tested environment, but that wasn't enough to make encryption available to Electron, which only tries the keyring on desktops it knows. Tucano now asks for the Secret Service on any desktop except KDE, so this result predates that change and needs checking again on Niri. Tucano refuses to store credentials with `basic_text` or without encryption available. Don't force that backend to get around the protection, and don't use real credentials while the keyring isn't working.
 
 Tucano writes an XDG entry for opening at login on Linux. Whether it runs depends on the Niri session's setup. Don't turn on Open at login from the checkout or from the temporary instance above: the development executable isn't a persistent install.
 
