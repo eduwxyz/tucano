@@ -22,6 +22,8 @@ import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
 import { proxyFromPac } from '../core/network'
+import { Notices } from './notice'
+import type { NoticeArea, NoticePicture } from '../shared/notice'
 
 const NAME = 'Tucano'
 app.setName(NAME)
@@ -172,6 +174,7 @@ function startWorkspaces(): void {
 type CoreRequest =
   | { type: 'theme'; theme: Settings['theme']; initial?: boolean }
   | { type: 'ready' }
+  | { type: 'notice-pref'; on: boolean; area?: NoticeArea }
   | { type: 'workspace-summary'; name: string; paused: boolean; unread: number; approvals: number }
   | { type: 'workspace-cleaned'; agentIds?: string[]; error?: string }
   | { type: 'workspace-duplicated'; error?: string }
@@ -182,7 +185,7 @@ type CoreRequest =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string }
-  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; messageId?: string; pictures?: NoticePicture[] }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'lang'; lang: Lang }
@@ -201,6 +204,9 @@ function fromApp(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   if (!ok) console.error('[main] ignored a message from', frame?.url ?? 'a closed frame')
   return ok
 }
+
+// The cards over every window (src/main/notice.ts): its own page, so its own window is what it is.
+const notices = new Notices({ open: (conversationId, page, threadId) => showWindow(conversationId, page, threadId) })
 
 // The conversation open in the window, so a notification about it can stay quiet.
 let viewing: string | null = null
@@ -361,10 +367,17 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     const sound = chirpOf(msg.kind, msg.sound)
     if (sound) chirp(sound)
-    if (launch.qa || !Notification.isSupported()) return
+    if (launch.qa) return
+    // The cards over every window take it while they're on (Settings); the system's own is for when
+    // they're off. Both open the conversation, and the thread it's about.
+    if (notices.push(msg)) return
+    if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId, msg.page, msg.threadId)).catch(console.error) })
     n.show()
+  } else if (msg.type === 'notice-pref') {
+    // Only the workspace on screen sets how its own notifications show.
+    if (registry.selected().id === workspace.id) notices.setPrefs(msg.on, msg.area)
   } else if (msg.type === 'busy') {
     runtime.busy = msg.busy
     syncBusy()
@@ -452,7 +465,7 @@ function serveArtifact(req: Request): Promise<Response> | Response {
 
 // Each page load asks for a port; one end goes to the core, the other to the page.
 ipcMain.on('core:connect', async (event) => {
-  if (!fromApp(event)) return
+  if (!fromApp(event) && !notices.owns(event) && !notices.ownsPicker(event)) return
   await systemProxyRead
   const workspace = registry.selected()
   const runtime = startCore(workspace)
@@ -475,6 +488,7 @@ async function switchWorkspace(id: string): Promise<void> {
     registry.select(id)
     viewing = null
     mainWindow?.reload()
+    notices.reload()
   } finally { switching = false }
 }
 
@@ -875,10 +889,24 @@ ipcMain.on('server:lend', (e) => {
   const frame = e.senderFrame
   if (frame && frame === e.sender.mainFrame && servers.serverOf(e.sender, frame.url)) showWindow(undefined, 'servers')
 })
+// Settings › Notifications › Where: the rectangle the cards go in, drawn on screen.
+ipcMain.on('notice:pick', (e) => {
+  if (!process.argv.includes('--qa-background') && fromApp(e)) notices.pick()
+})
+// Settings › Notifications › Test notifications: a card of each, so the person sees the whole set.
+ipcMain.on('notice:demo', (e) => {
+  if (!process.argv.includes('--qa-background') && fromApp(e)) notices.demo()
+})
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.
 ipcMain.handle('notify:test', (e) => {
-  if (launch.qa || !fromApp(e) || !Notification.isSupported()) return 'unsupported'
+  if (launch.qa || !fromApp(e)) return 'unsupported'
+  // With the cards over the window on, the test is one of them: what the person will actually see.
+  if (notices.enabled) {
+    notices.test()
+    return 'shown'
+  }
+  if (!Notification.isSupported()) return 'unsupported'
   new Notification({ title: NAME, body: L('As notificações estão chegando.', 'Notifications are coming through.'), silent: true, ...noteIcon() }).show()
   return 'shown'
 })

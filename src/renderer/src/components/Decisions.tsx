@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isRecommended, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { answerDecision, submitDecisions, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
@@ -43,7 +43,8 @@ export function AskCard({
   badge,
   byline,
   answeredInText,
-  children
+  children,
+  onSend
 }: {
   id: string
   questions: Decision[]
@@ -53,8 +54,11 @@ export function AskCard({
   byline?: string
   answeredInText?: boolean
   children?: ReactNode
+  // A card the app drew for a look (Settings' test): there is nothing behind it to answer, so
+  // choosing and sending stay on the card and this is what Send does.
+  onSend?: (() => void) | undefined
 }): ReactNode {
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} extra={children} />
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} extra={children} onSend={onSend} />
   return (
     <section className={`ask ask--${mode}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} />
@@ -120,7 +124,7 @@ function Summary({ questions, answers, answeredInText }: { questions: Decision[]
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, extra, onSend }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; extra?: ReactNode; onSend?: (() => void) | undefined }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -137,6 +141,8 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
 
   const send = (): void => {
     if (sending) return
+    // A card the app drew has no question behind it: Send is what its card says it is.
+    if (onSend) return onSend()
     setSending(true)
     void submitDecisions(id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
   }
@@ -146,7 +152,7 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
     drafts.delete(draftKey(id, index))
     const next = answers.map((a, i) => (i === index ? answer : a))
     setAnswers(next)
-    answerDecision(id, index, answer)
+    if (!onSend) answerDecision(id, index, answer)
     if (!answer) return
     if (questions.length === 1) return send()
     const after = questions.findIndex((_, i) => i > index && !isAnswered(next[i]))
@@ -163,7 +169,7 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
     const answer = draftAnswer(questions[step]!, draft)
     const next = answers.map((a, i) => (i === step ? answer : a))
     setAnswers(next)
-    answerDecision(id, step, answer)
+    if (!onSend) answerDecision(id, step, answer)
     return next
   }
 
@@ -278,7 +284,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
     <div className="ask__body" ref={body} tabIndex={-1} onKeyDown={keys}>
       <Title q={question} />
       {question.kind === 'text' ? (
-        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => edit({ text: e.target.value })} />
+        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onFocus={() => window.tucano?.notice?.focus?.()} onChange={(e) => edit({ text: e.target.value })} />
       ) : (
         <div className="ask-options" role={multiple ? 'group' : 'radiogroup'} aria-label={question.question}>
           {options.map((o, i) => {
@@ -287,7 +293,10 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
               <button key={i} role={multiple ? 'checkbox' : 'radio'} aria-checked={on} className={`ask-option ${on ? 'is-on' : ''} ${focus === i ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(i)} onClick={() => pick(i)}>
                 <span className="ask-option__key">{i + 1}</span>
                 <span className="ask-option__text">
-                  <span className="ask-option__label">{o.label}</span>
+                  <span className="ask-option__label">
+                    {o.label}
+                    {isRecommended(o) && <span className="tag tag--agent ask-option__rec">{L('recomendado', 'recommended')}</span>}
+                  </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
                 <span className={`ask-option__mark ${multiple ? 'is-box' : ''}`} aria-hidden>
@@ -299,7 +308,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
           {writing ? (
             <label className={`ask-option ask-option--other is-open ${other.trim() ? 'is-on' : ''}`} onMouseEnter={() => setFocus(options.length)}>
               <span className="ask-option__key">{options.length + 1}</span>
-              <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onChange={(e) => edit({ other: e.target.value })} />
+              <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onFocus={() => window.tucano?.notice?.focus?.()} onChange={(e) => edit({ other: e.target.value })} />
             </label>
           ) : (
             <button className={`ask-option ask-option--other ${focus === options.length ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(options.length)} onClick={openOther}>
