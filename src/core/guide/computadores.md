@@ -22,7 +22,9 @@ Pra publicar no GitHub (criar uma branch, mandar arquivos, abrir uma PR), o agen
 Na aba **Ferramentas**, **Navegador**: um Chrome só dele, com logins separados dos seus. Ele abre páginas, clica, preenche e lê como uma pessoa. Um clique que compra, publica, envia ou apaga pede sua aprovação.
 - Você acompanha no painel **Navegador de …**. Pra entrar numa conta, resolver um código ou captcha: **Assumir**, faça o que precisa e **Devolver**.
 - **Abrir o navegador dele** abre a janela pra você entrar nas contas antes.
-- **Apagar logins** tira os logins, cookies e histórico dele.
+- **Logins salvos**: site, usuário e senha (ou `op://…` do 1Password), no chaveiro do sistema. Ele entra sozinho só no endereço exato, sem ver a senha. Código por email: lê no conector de email, se houver; senão, pergunta.
+- O que ele baixa (até 20 MB por arquivo) fica numa pasta só dele, e ele manda no chat: uma fatura, um comprovante.
+- **Apagar logins** tira os logins, cookies, histórico e downloads dele; os logins salvos ficam.
 - Em **Configurações › Agentes** › **Navegador dos agentes**: achar o que clicar **Só pelo texto da página** (de graça) ou com o Jev, da TypeSafe (manda a lista de elementos, às vezes o print, pra TypeSafe).
 
 ## Quando dá errado

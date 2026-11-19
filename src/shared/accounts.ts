@@ -5,7 +5,6 @@
 // A session lives in its login's folder: changing login sends the whole conversation again. So the
 // login in use is kept until another has clearly more left, or it is nearly out.
 import type { Account, CodexQuota, EngineId, Quota, Settings } from './types'
-import { ACCOUNT_ENGINES } from './types'
 
 export interface QuotaWindow {
   minutes: number
@@ -73,8 +72,14 @@ export function paceOf(logins: Pick<Login, 'windows'>[], now: number): Pace[] {
 }
 
 // The signed-in logins of a harness: the usual one first, then the accounts in the order they were added.
+// The harnesses whose logins report how much they have left: only these are checked and balanced.
+// Another harness's extra logins (Antigravity's) stay each with its own agents.
+export const QUOTA_ENGINES = ['claude', 'codex'] as const
+export type QuotaEngine = (typeof QUOTA_ENGINES)[number]
+export const hasQuota = (engine: EngineId): engine is QuotaEngine => (QUOTA_ENGINES as readonly EngineId[]).includes(engine)
+
 export function loginsOf(settings: Pick<Settings, 'engines' | 'accounts' | 'quota' | 'codexQuota' | 'accountQuota'>, engine: EngineId): Login[] {
-  if (!(ACCOUNT_ENGINES as readonly EngineId[]).includes(engine)) return []
+  if (!hasQuota(engine)) return []
   const usualQuota = engine === 'claude' ? settings.quota : settings.codexQuota
   const usual = { windows: quotaWindows(usualQuota), at: usualQuota?.at }
   return [

@@ -5,7 +5,7 @@
 Cada agente tem um **Limite mensal (milhões de tokens)** na página dele (aba **Perfil**). O padrão pra agentes novos fica em **Configurações › Agentes** › **Limites** › **Limite padrão por agente** (2 milhões por padrão). O limite é conferido antes de cada resposta. Ler do cache conta 10%. Bateu, o agente para até o mês virar ou você subir o limite; na resposta aparece **Aumentar o limite de …**.
 
 ## Teto por resposta
-**Limite por resposta (% do limite do mês)**, 10% por padrão. Chegou nele, o agente pausa e pergunta se continua: **Continuar** segue de onde parou.
+**Limite por resposta (% do limite do mês)**, 10% por padrão. Chegou nele, o agente pausa. Se estava avançando, segue sozinho até 2 vezes seguidas, enquanto o mês tiver espaço; depois pergunta se continua: **Continuar** segue de onde parou. Desligue em **Continuar sozinho**, no mesmo lugar.
 
 ## Respostas cortadas
 - **Considerar travado após (min sem sinal)**, 20 min por padrão: sem texto nem ferramenta terminando nesse tempo, a resposta é cortada. Trabalho longo que anda não é cortado.

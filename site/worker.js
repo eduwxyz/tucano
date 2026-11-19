@@ -1,5 +1,6 @@
 // tucano.sh: the static pages (dist/, served as assets), the push relay for the iPhone app (push.js,
-// /api/push/*) and /api/lista, where
+// /api/push/*), the app's feedback and surveys (feedback.js, /api/feedback and /api/surveys*) and
+// /api/lista, where
 // the Tucano Pro beta's waitlist form (pro.html) lands. It checks the anti-robot token (Cloudflare
 // Turnstile), then saves the sign-up in Supabase (supabase/migrations/0001_waitlist.sql) with the
 // project's secret key, which only this worker holds:
@@ -8,6 +9,7 @@
 // The same email twice is saved once, and both answers are the same "you're on the list": the
 // form never tells anyone whether an address was already there.
 
+import { answer as surveyAnswer, feedback, surveys, sweep } from './feedback.js'
 import { register as pushRegister, send as pushSend } from './push.js'
 
 const MAX_BODY = 8 * 1024
@@ -95,6 +97,14 @@ export default {
     // The push relay for the iPhone app (push.js).
     if (url.pathname === '/api/push/register') return pushRegister(request, env)
     if (url.pathname === '/api/push/send') return pushSend(request, env)
+    // What the app sends from "Enviar feedback", and its surveys (feedback.js).
+    if (url.pathname === '/api/feedback') return feedback(request, env)
+    if (url.pathname === '/api/surveys') return surveys(request, env)
+    if (url.pathname === '/api/surveys/answer') return surveyAnswer(request, env)
     return env.ASSETS.fetch(request)
+  },
+  // The daily cron (wrangler.jsonc): feedback pictures older than 90 days are deleted.
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(sweep(env).then((n) => console.log('feedback sweep:', n), (e) => console.error('feedback sweep:', e instanceof Error ? e.message : e)))
   },
 }

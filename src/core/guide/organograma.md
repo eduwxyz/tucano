@@ -1,7 +1,7 @@
 # Time (quem responde a quem)
 > Um agente acima dos outros passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta. Como montar, o que acontece num pedido, perguntas, cancelar, prazos e limites.
 
-Por padrão os agentes só se falam no mesmo canal. Quando um **responde a** outro, o de cima passa trabalho ao de baixo, e a resposta volta pra ele. Você fala com um só, que divide o pedido.
+Sem ninguém ligado, qualquer agente pede trabalho a outro, e a resposta volta pra quem pediu. Quando um **responde a** outro, vale o desenho: o de cima passa trabalho ao de baixo. Você fala com um só, que divide o pedido.
 
 ## Montar
 Em **Time**, na barra lateral. Cada agente é um cartão num quadro: arraste o fundo pra andar, ⌘ e rolar (ou pinça) pro zoom. Sem ninguém ligado, escolha **Quem fica no topo**.

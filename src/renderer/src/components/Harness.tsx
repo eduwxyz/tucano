@@ -6,6 +6,7 @@ import { L } from '../../../shared/lang'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import {
   ACCOUNT_ENGINES,
+  accountsOn,
   addAccount,
   ENGINES,
   ENGINE_IDS,
@@ -559,13 +560,15 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
   )
 }
 
-// More logins of Claude Code and Codex: a work account beside a personal one. Each lives in a
-// folder of its own and is signed into through the CLI, in a terminal; an agent picks one on its page.
+// More logins of Claude Code, Codex and Antigravity (that one on a Mac): a work account beside a
+// personal one. Each lives in a folder of its own and is signed into through the CLI, in a terminal;
+// an agent picks one on its page.
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])
   const engines = useStore((s) => s.settings.engines)
   const use = useStore((s) => s.settings.accountUse) ?? 'order'
   const admin = useStore(amAdmin)
+  const os = useStore((s) => s.platform)
   const [engine, setEngine] = useState<AccountEngine>('claude')
   const [name, setName] = useState('')
   const [manual, setManual] = useState<Record<string, string>>({})
@@ -631,7 +634,7 @@ export function AccountsCard(): ReactNode {
         <Select
           value={engine}
           onChange={(v) => { if (v) void setEngine(v as AccountEngine) }}
-          options={ACCOUNT_ENGINES.filter((e) => engines[e].installed).map((e) => ({ value: e, label: ENGINES[e].label }))}
+          options={ACCOUNT_ENGINES.filter((e) => engines[e].installed && accountsOn(e, os)).map((e) => ({ value: e, label: ENGINES[e].label }))}
           placeholder={L('Motor', 'Engine')}
         />
         <input className="grow" placeholder={L('Nome da conta (ex.: Trabalho)', 'Account name (e.g. Work)')} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
@@ -639,6 +642,11 @@ export function AccountsCard(): ReactNode {
           {L('Adicionar e entrar', 'Add and sign in')}
         </button>
       </div>
+      {engine === 'antigravity' && (
+        <p className="hint">
+          {L('O login abre o Antigravity num terminal: entre com a outra conta Google, espere ele responder e saia com /quit.', 'Signing in opens Antigravity in a terminal: sign in with the other Google account, wait for it to answer and leave with /quit.')}
+        </p>
+      )}
       {removing && (
         <p className="hint hint--warn">
           {L(

@@ -76,6 +76,24 @@ export const permits = (cls: ToolClass, grant: GrantLevel | undefined): boolean 
 
 const RANK: Record<ToolClass, number> = { read: 0, write: 1, sensitive: 2 }
 const strictest = (classes: ToolClass[]): ToolClass => classes.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), 'read')
+export const stricter = (a: ToolClass, b: ToolClass | undefined): ToolClass => (b && RANK[b] > RANK[a] ? b : a)
+
+// What a server may say about its own tools, in a tool's _meta, that only ever makes it stricter here:
+// the class it can't go below, and that it's high risk. A node (core/node-server.ts) says both, so the
+// class of a command on the person's computer, or the high-risk mark its owner set there, can't be
+// loosened on the server that calls it.
+export const META_FLOOR = 'tucano/floor'
+export const META_HIGH_RISK = 'tucano/highRisk'
+// A node's own tools, whatever the node says: a command is at least a write (and is judged as a command),
+// writing a file is a write, and a risky click goes through the approvals as a browser or app action.
+const NODE_FLOORS: Record<string, ToolClass> = { node_bash: 'write', node_write_file: 'write', node_edit_file: 'write', node_approved: 'sensitive' }
+export function floorOf(tool: { name: string; _meta?: Record<string, unknown> }): ToolClass | undefined {
+  const said = tool._meta?.[META_FLOOR]
+  const meta = said === 'read' || said === 'write' || said === 'sensitive' ? said : undefined
+  const own = NODE_FLOORS[tool.name]
+  return own ? stricter(own, meta) : meta
+}
+export const saysHighRisk = (tool: { _meta?: Record<string, unknown> }): boolean => tool._meta?.[META_HIGH_RISK] === true
 
 // Words that run code or a workflow: inside a Composio call they're sensitive, like the runners themselves.
 const RUNS_CODE = new Set(['execute', 'exec', 'run', 'bash', 'shell', 'eval', 'script'])
@@ -85,7 +103,8 @@ const CHANGE_WORDS = new Set(['post', 'create', 'update', 'set', 'add', 'edit', 
 const OPERATION_KEYS = new Set(['action', 'method', '_method', 'op', 'operation', 'do', 'cmd', 'command', 'mode', 'verb'])
 
 // Remote code tools called directly: they run anything, so a call to them is never allowed for good.
-const RUNS_CODE_DIRECTLY = new Set(['composio_remote_workbench', 'composio_remote_bash_tool'])
+// A node's risky click or key (node_approved) is never allowed for good either: each one asks, as on this computer.
+const RUNS_CODE_DIRECTLY = new Set(['composio_remote_workbench', 'composio_remote_bash_tool', 'node_approved'])
 export const neverAllowedForGood = (toolName: string): boolean => RUNS_CODE_DIRECTLY.has(toolName.toLowerCase())
 
 // A Composio tool inside a call that can't be allowed for good: Composio's own (a runner inside a

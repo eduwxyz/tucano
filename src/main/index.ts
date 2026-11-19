@@ -1,16 +1,19 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
+import { readInstall } from '../core/feedback'
+import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
+import { thisDevice } from './redeem'
 import { serverNote } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
@@ -91,14 +94,14 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
   const ready = new Promise<void>((yes, no) => { resolve = yes; reject = no })
   // Background startup errors are visible in the switcher, not unhandled rejections.
   void ready.catch(() => {})
-  const runtime: Runtime = { child, ready, busy: false, wikiFolder: '', summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`) }
+  const runtime: Runtime = { child, ready, busy: false, wikiFolder: '', summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`, (agentId) => downloadsFolder(workspace.dataDir, agentId)) }
   cores.set(workspace.id, runtime)
   const timer = setTimeout(() => {
     reject(new Error(L('O workspace demorou demais para iniciar.', 'The workspace took too long to start.')))
@@ -116,6 +119,7 @@ function startCore(workspace: Workspace): Runtime {
       runtime.summary.status = 'ready'
       resolve()
       publishWorkspaces()
+      if (workspace.isDefault) lendTo()
     } else if (msg.type === 'workspace-summary') {
       registry.rename(workspace.id, msg.name)
       runtime.summary = { ...runtime.summary, name: msg.name || runtime.summary.name, paused: msg.paused, unread: msg.unread, approvals: msg.approvals }
@@ -621,7 +625,7 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
+function showWindow(conversationId?: string, page?: 'skills' | 'servers', threadId?: string): void {
   if (launch.qa) return
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
@@ -639,6 +643,26 @@ const updates = new Updates((state) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update', state)
   // With a server on screen, its page is what the person sees: it says a version is ready too.
   servers.tell('server:update', state)
+})
+// "Enviar feedback": the app's window as it is, taken before the dialog opens over it. At most 1600
+// pixels wide, a PNG, or a JPEG when the PNG would pass what the feedback bucket takes (core/feedback.ts).
+ipcMain.handle('window:capture', async (e) => {
+  if (!fromApp(e)) return null
+  try {
+    let image = await e.sender.capturePage()
+    const { width } = image.getSize()
+    if (width > 1600) image = image.resize({ width: 1600, quality: 'good' })
+    const png = image.toPNG()
+    if (png.length <= 2_500_000) return { type: 'image/png', data: png.toString('base64') }
+    for (const quality of [80, 60, 40]) {
+      const jpg = image.toJPEG(quality)
+      if (jpg.length <= 2_500_000) return { type: 'image/jpeg', data: jpg.toString('base64') }
+    }
+    return null
+  } catch (err) {
+    console.error('[main] capture:', err instanceof Error ? err.message : err)
+    return null
+  }
 })
 ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
 ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
@@ -795,8 +819,28 @@ const servers = new Servers({
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
   },
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
-  showLocal: () => showWindow()
+  showLocal: () => showWindow(),
+  lent: (links) => lendTo(links)
 })
+// The servers this computer is lent to go to the default workspace's core, which calls them (core/node-link.ts).
+function lendTo(links = servers.lentLinks()): void {
+  const core = [...cores.entries()].find(([id]) => registry.list().find((w) => w.id === id)?.isDefault)?.[1]
+  if (core?.summary.status === 'ready') core.child.postMessage({ type: 'node-uplinks', name: machineName(), links })
+}
+// This computer's name as people see it: a Mac's from its Sharing settings ("MacBook Pro de Eduardo"), not the hostname.
+let machine = ''
+function machineName(): string {
+  if (machine) return machine
+  if (process.platform === 'darwin') {
+    try {
+      machine = execFileSync('scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim()
+    } catch {
+      // the hostname below
+    }
+  }
+  machine ||= thisDevice(hostname(), process.platform).name.replace(/-/g, ' ')
+  return machine
+}
 // Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
 // pasted link, opening and forgetting.
 ipcMain.handle('servers:list', (e) => (fromApp(e) ? servers.summary() : []))
@@ -804,6 +848,9 @@ ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link 
 ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
+ipcMain.on('servers:node', (e, id: unknown, on: unknown) => fromApp(e) && typeof id === 'string' && typeof on === 'boolean' && servers.setNode(id, on))
+// Its server on screen at Connectors, where the person picks the agents that use this computer.
+ipcMain.on('servers:agents', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.openNote(id, { title: '', body: '', page: 'connectors' }).catch(console.error))
 // A server's page in this window hands its notifications here (src/preload/server.ts): the app
 // shows them as its own, and a click puts that server, and what it's about, on screen. The page
 // already left out the conversation being read there; a server can't send more than a few a minute.
@@ -822,6 +869,12 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
   const n = new Notification({ title: note.title, body: note.body, silent: true, ...noteIcon() })
   n.on('click', () => void servers.openNote(id, note).catch(console.error))
   n.show()
+})
+// A server's page asks to lend this computer (its folder picker, an agent's Computer): this computer's Tucano
+// comes on screen on Settings › Servers. Only a server's own page asks, and it changes nothing by itself.
+ipcMain.on('server:lend', (e) => {
+  const frame = e.senderFrame
+  if (frame && frame === e.sender.mainFrame && servers.serverOf(e.sender, frame.url)) showWindow(undefined, 'servers')
 })
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.
@@ -902,6 +955,9 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   })
   setMenu()
   protocol.handle('tucano', serveArtifact)
+  // This computer's install (core/feedback.ts), for every workspace: made once. Nothing here yet is a new
+  // install; a folder with a Tucano in it is one from before the file existed.
+  readInstall(dataDir(), app.getVersion(), !existsSync(join(dataDir(), 'tucano.db')))
   registry = new Workspaces(dataDir(), launch.ports)
   nativeTheme.themeSource = registry.theme() ?? 'system'
   systemProxyRead = readSystemProxy()

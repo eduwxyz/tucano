@@ -185,7 +185,7 @@ export function MissionsPage(): ReactNode {
         <button className="missions-link missions-link--quiet" onClick={() => (updateSettings({ onboarding: { ...(onboarding ?? { done: true }), checklistHidden: true } }), navigate({ kind: 'approvals' }))}>
           {L('Esconder as missões', 'Hide the missions')}
         </button>{' '}
-        <span>{L('Voltam em Configurações.', 'They come back in Settings.')}</span>
+        <span>{L('Voltam no menu do nome do workspace, no topo.', 'They come back from the workspace’s menu, at the top.')}</span>
       </p>
     </div>
   )

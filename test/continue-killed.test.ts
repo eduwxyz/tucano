@@ -175,7 +175,7 @@ describe('a run the app died under, read at the next startup', () => {
       },
       prompt.id
     )
-    expect(db.interruptStaleRuns()).toBe(1)
+    expect(db.interruptStaleRuns()).toHaveLength(1)
     const after = db.message(cut.id)!
     expect(after.run?.status).toBe('interrupted')
     // The step that was running when the process died is not finished work, and says so.
@@ -183,10 +183,67 @@ describe('a run the app died under, read at the next startup', () => {
     expect(canContinue(after.run!)).toBe(true)
   })
 
+  it('goes on by itself once the app is back, and starts over one that had nothing done', async () => {
+    clock = Date.now() - 10_000 // cut just now, not long ago
+    const asked = put('d1', { kind: 'person', id: db.ownerId() }, 'guarde e procure a preferência do time')
+    const cut = put('d1', { kind: 'agent', id: 'a1' }, 'Vou guardar.', { status: 'working', task: asked.text, depth: 1, steps: [step('Thought', 'done'), step('Saved to memory', 'done'), step('Thinking', 'running')] }, asked.id)
+    const other = put('d1', { kind: 'person', id: db.ownerId() }, 'faça o relatório')
+    const bare = put('d1', { kind: 'agent', id: 'a1' }, '', { status: 'working', task: other.text, depth: 1, steps: [step('Thinking', 'running')] }, other.id)
+    const ids = db.interruptStaleRuns()
+    const r = runner()
+    r.resumeInterrupted(ids)
+    await new Promise((res) => setTimeout(res, 20))
+    await r.idle()
+    // The one with work goes on in a new reply, told why; the reply that was cut says it went on.
+    expect(db.message(cut.id)?.run?.status).toBe('done')
+    expect(db.message(cut.id)?.run?.steps.at(-1)?.label).toBe('Went on by itself')
+    expect(turns.some((t) => t.prompt.includes('because the app closed in the middle of it, and it goes on by itself now'))).toBe(true)
+    // The one with nothing done runs again in place.
+    expect(db.message(bare.id)?.run?.status).toBe('done')
+  })
+
+  it('leaves it to the person when that is turned off, waits while everything is paused, and skips old ones', async () => {
+    clock = Date.now() - 10_000
+    const asked = put('d1', { kind: 'person', id: db.ownerId() }, 'guarde a preferência')
+    const run: Run = { status: 'working', task: asked.text, depth: 1, steps: [step('Saved to memory', 'done')] }
+    const cut = put('d1', { kind: 'agent', id: 'a1' }, 'Vou guardar.', run, asked.id)
+    const ids = db.interruptStaleRuns()
+
+    settings = { ...settings, autoContinue: false }
+    const off = runner()
+    off.resumeInterrupted(ids)
+    await new Promise((res) => setTimeout(res, 20))
+    await off.idle()
+    expect(db.message(cut.id)?.run?.status).toBe('interrupted')
+    expect(turns).toHaveLength(0)
+
+    settings = { ...settings, autoContinue: true }
+    const r = runner()
+    r.setPaused(true)
+    r.resumeInterrupted(ids)
+    await new Promise((res) => setTimeout(res, 20))
+    expect(turns).toHaveLength(0)
+    r.setPaused(false)
+    await new Promise((res) => setTimeout(res, 20))
+    await r.idle()
+    expect(db.message(cut.id)?.run?.status).toBe('done')
+
+    // Cut over half a day ago: the person may no longer want it.
+    clock = Date.now() - 13 * 3_600_000
+    const old = put('d1', { kind: 'agent', id: 'a1' }, 'Antigo.', { ...run, status: 'interrupted' }, asked.id)
+    const resumed = () => turns.filter((t) => t.prompt.includes('because the app closed in the middle of it')).length
+    const before = resumed()
+    r.resumeInterrupted([old.id])
+    await new Promise((res) => setTimeout(res, 20))
+    await r.idle()
+    expect(resumed()).toBe(before)
+    expect(db.message(old.id)?.run?.status).toBe('interrupted')
+  })
+
   it('and one that had only thought has nothing to go on with', () => {
     const prompt = put('d1', { kind: 'person', id: db.ownerId() }, 'pergunte em 30 s')
     const cut = put('d1', { kind: 'agent', id: 'a1' }, '', { status: 'working', task: 'pergunte em 30 s', depth: 1, steps: [step('Thinking', 'running')] }, prompt.id)
-    expect(db.interruptStaleRuns()).toBe(1)
+    expect(db.interruptStaleRuns()).toHaveLength(1)
     expect(db.message(cut.id)?.run?.status).toBe('interrupted')
     expect(canContinue(db.message(cut.id)!.run!)).toBe(false)
   })

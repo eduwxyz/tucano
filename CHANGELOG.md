@@ -4,20 +4,120 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.41] - 2026-11-19
+
 > **Em português:**
-> - **Novo:** uma rotina roda em **vários horários no mesmo dia**. Em **Às**, cada horário é uma pílula: **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um, e o × tira. Os dias valem pra todos, o resumo embaixo diz quantas vezes por semana, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
-> - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
-> - **Corrigido:** uma rotina que perdeu horários com o Mac dormindo roda o mais recente (até 12 h), e uma "uma vez" em vários dias espera o próximo dia em vez de desligar sem rodar.
-> - **Corrigido:** ligar uma rotina com data vencida diz por que não ligou, e um horário apagado no formulário avisa em vez de sumir.
-> - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
+> - **Novo:** **modo objetivo**. Escreva `/objetivo …` num canal e os agentes trabalham nele sozinhos, passando a vez entre si (faz, revisa, corrige, revisa de novo), até um deles marcar como cumprido. Para sozinho, com um aviso no canal, em 12 respostas, se o time andar em círculos, se ninguém passar a vez ou se uma resposta falhar.
+> - **Novo:** **Continuar sozinho**. Uma resposta que pausa no limite por resposta e estava avançando segue sozinha, até 2 vezes seguidas, se o mês ainda comporta. Quando o app reabre, as respostas cortadas pelo fechamento continuam sozinhas. A chave fica em Configurações › Agentes › Limites.
+> - **Novo:** o navegador do agente **baixa arquivos** e **manda no chat**, e entra em sites com **logins salvos** (na página do agente, só admin), sem o modelo ver a senha. Códigos de verificação ele lê no e-mail conectado ou pergunta pra você.
+> - **Mudou:** o que o **Tuca** propõe e só mexe dentro do app (agentes, times, canais, rotinas) **entra na hora, com Desfazer** por 24 horas. Acesso a conectores e limite do mês continuam esperando você confirmar.
+> - **Mudou:** agentes fora de qualquer time e sem chefe **trabalham juntos** sem organograma, e vários chamados na mesma mensagem **respondem um depois do outro**, cada um lendo o que os anteriores disseram. Eles também perguntam menos: fazem o que dá pra decidir e, quando perguntam, é uma pergunta só, com a recomendação deles.
+> - **Mudou:** o navegador do agente só aparece grande no chat enquanto tem algo pra ver.
+> - **Corrigido:** uma pergunta de um pedido que chegou até você fecha onde quer que você responda, e dá pra acrescentar algo a um pedido ainda em andamento.
 
 ### Added
 
+- **Goals: `/objetivo …` (or `/goal …`) in a channel.** The agents there work on it by themselves, passing the turn to each other with @ (build, review, fix, review again), past the usual replies in a row, until one of them calls `concluir_objetivo` with the result. Each reply is told the goal and how many replies are left. It stops by itself, with a line in the channel saying why, at 12 replies, when an agent says the same as before, when a reply neither passes the turn nor ends it, or when a reply fails, is stopped or hits its limit. A goal lives in memory: if the app closes, it ends there. (#556)
+- **Keep going on its own.** A reply that pauses at its per-reply limit while getting somewhere (a tool call went through) goes on by itself, up to 2 times in a row, when the month still has room for another reply that size; after that it waits for **Continue**. When the app opens again, replies cut off by it closing go on by themselves, unless the workspace is paused (they wait for it to resume) or it was more than 12 hours ago. Settings › Agents › Limits › **Keep going on its own**, on by default. (#556, part of #389)
+- **An agent's browser downloads files, posts them in the chat and signs in.** Downloads go to a folder of the agent's own, up to 20 MB each; `navegador_anexar` posts one in the conversation. An admin saves **Saved logins** on the agent's page, kept in the system keychain (or as a 1Password reference): `navegador_login` fills them in without the model ever seeing the password, only on the exact address saved and only over HTTPS (http just on localhost), and the password is masked in snapshots and screenshots. For a verification code, the agent reads the connected email or asks you. (#556)
+
+### Changed
+
+- **Tuca's changes inside the app go in at once, with Undo.** What Tuca proposes for agents, teams, channels and routines, or an agent's name, role, instructions, model, effort and web access, applies as soon as Tuca finishes replying, with the same checks as before, and its card gets **Undo** for 24 hours. Undo says why when it's no longer safe (the agent already worked, it was edited since, the channel has messages). Connector access, the monthly limit and anything the person couldn't apply themselves still wait for **Apply**. Settings › Agents › Tuca turns it off. (#556)
+- **Agents work together without an org chart.** Agents in no team and with no lead know each other as colleagues and can ask each other with `pedir`, with no setup. Several agents called in one message, or routed to one, answer one after another, each reading what the ones before said. Agents are told to do what they can decide instead of asking, and to ask one question, with their recommendation, when they must. (#554)
+- **An agent's browser is big in the chat only while there's something to watch:** while the reply using it is working or waiting on an approval, or while a person has taken over. Otherwise it's the small card, which opens the browser on the side. (#552)
+- **More for a request still under way.** `pedir` with `continuar` adds to a request that's still being worked, in its thread, instead of opening a second one. (#551)
+
+### Fixed
+
+- **A question taken up from a request closes wherever it's answered.** Answering it in the request's thread now also closes the one the agent took to the person, so it no longer stays open for good with a second badge in the sidebar. (#551)
+
+## [0.2.40] - 2026-11-18
+
+> **Em português:**
+> - **Mudou:** emprestar o seu computador a um **Tucano num servidor** (como o do Tucano Pro) ficou em dois cliques. Ao ligar **Deixar este servidor usar este computador**, o app já pede a primeira pasta, e logo abaixo da chave aparece **Escolher os agentes**, que abre o servidor em **Conectores**. Lá, **Seu computador** vem primeiro: cada agente com a sua chave, e **Dar acesso a todos**.
+> - **Mudou:** quem emprestou o computador escolhe os agentes que o usam mesmo sem ser admin do servidor, já que um agente só alcança esse computador quando trabalha pra essa pessoa.
+> - **Mudou:** no servidor, o cartão **Computador** de um agente chama de **O servidor** o que antes dizia "Este computador", mostra o seu computador emprestado com **Dar acesso** e **Tirar o acesso**, e um **Linux isolado** sem Docker oferece **Trocar pra Nenhum** em vez de "verificar de novo".
+
+### Changed
+
+- **Lending your computer to a server takes two clicks.** Turning on Settings › Servers › Let this server use this computer asks for the first folder when none is lent, and the row under the switch shows the folders lent and **Pick the agents**, which brings the server on screen at Connectors. There, **Your computer** comes first: each computer you lent, whether it's connected, every agent on its own switch and **Give all of them access**. The computer's window in Connectors has the same switches. In a browser with nothing lent, it says what to open on the computer. (#549)
+- **Whoever lent a computer picks its agents, admin or not.** An agent reaches a lent computer only when it works for that person, so they may give it to the agents they see, or take it away, without being an admin of the server. An admin still may too. Other connectors stay an admin's. (#549)
+- **An agent's Computer card, on a server, says what is the server's and what is yours.** "This computer" reads "The server", and its confirmation says the commands run on the server. **Your computer** shows the computer you lent, whether it's connected and whether this agent uses it, with **Give access** and **Take access away**. An isolated Linux on a server without Docker says it can't run there and offers **Switch to None**, instead of asking to check again. (#549)
+
+## [0.2.39] - 2026-11-18
+
+> **Em português:**
+> - **Corrigido:** o uso do mês de um agente no **Antigravity** não fica mais negativo (como "−2003590 de 2 mi"), e o limite mensal dele volta a valer. Algumas respostas do Antigravity contam o cache à parte da entrada, e a conta subtraía o cache como se estivesse dentro. Os recibos antigos também passam a contar certo.
+
+### Fixed
+
+- **An Antigravity agent's month no longer goes negative.** Tokens count as input − 90% of cache reads + output, which assumes the input counts the cache reads in. Some Antigravity runs report more cache reads than input, so the month showed as "−2003590 of 2M" and the agent's monthly limit never fired. More cache reads than input now means they came apart: the input counts whole and the cache a tenth, in every total, so receipts already saved read right too; new ones from Antigravity add the cache reads to the input. Agents that were past their limit without it showing now stop at it, and say it can be raised on their page. (#547)
+
+## [0.2.38] - 2026-11-18
+
+> **Em português:**
+> - **Corrigido:** no **Tucano num servidor** (como o do Tucano Pro), o **Canva** conecta. Ele só aceita voltar pra um endereço local, então o Tucano percebe e passa pro jeito de colar o endereço em que a página terminou.
+> - **Mudou:** no servidor, escolher uma pasta diz que essas são as pastas do servidor, e um **Linux isolado** sem Docker diz que o Docker precisa estar no servidor. Os dois apontam pra **Configurações › Servidores › Deixar este servidor usar este computador**, no app do computador, pra usar as pastas e o terminal dele.
+
+### Fixed
+
+- **Canva connects on a server.** Canva's MCP registers any return address, but its authorization page takes only a loopback one and answered a server's https address with "Invalid redirect URI.", so it never connected on a server such as Tucano Pro's. When a provider turns the server's own address away, the sign-in starts again with the loopback one and the step where you paste the address the page ended on; it then renews by itself after a restart. (#544)
+
+### Changed
+
+- **On a server, folders and the isolated Linux say where they live.** The folder picker says these are the server's folders, and a missing Docker says the isolated Linux needs Docker on the server, instead of asking to install it on "this computer". Both point to Settings › Servers › Let this server use this computer, in the app on your computer, to use its folders and terminal. (#544)
+
+## [0.2.37] - 2026-11-17
+
+> **Em português:**
+> - **Novo:** um **Tucano mais leve, com a mesma cara**. Agentes numa lista só, agrupada por setor; **Conhecimento** (Memória · Wiki · Skills) e **Operação** (Rotinas · Boletim · Uso) com abas; **Enviar feedback**, **Conectores** e a engrenagem no pé da barra. A página de rotinas abre na semana, as aprovações se agrupam por dia, a página do agente salva sozinha e o Tuca começa direto na conversa, com a proposta preenchendo ao lado.
+> - **Novo:** **tire da barra** o que você não usa (Tuca, Aprovações, Quadro, Conhecimento, Operação): clique com o botão direito ou no **•••** e escolha **Tirar da barra**. O que saiu fica numa linha **N escondidos** logo abaixo, de onde volta num clique, e o aviso tem **Desfazer**. Aprovações e Conhecimento voltam sozinhos enquanto algo espera por você.
+> - **Novo:** o **Quadro**, com o trabalho de todos os agentes em cartões, um por tarefa: A fazer, Fazendo, Precisa de você e Feito.
+> - **Novo:** **Enviar feedback** de dentro do app, com um print da janela se você quiser, e pesquisas rápidas numa linha discreta no pé da barra (dá pra desligar em Configurações).
+> - **Novo:** **outra conta do Antigravity**, no Mac, como já dava com o Claude Code e o Codex: em **Configurações › Modelos › Contas**, e cada agente escolhe a sua.
+> - **Mudou:** na conversa, uma rotina não repete mais o pedido inteiro a cada vez: ele vira um chip com o nome dela, e as execuções seguidas sem novidade se dobram numa linha só.
+> - **Corrigido:** o **Time** com muitos setores não vira mais uma faixa ilegível: **Organizar** quebra os setores em linhas, e arrastar e dar zoom ficou leve.
+> - **Corrigido:** quando o Tuca propunha dois agentes novos na mesma resposta, o segundo tomava o lugar do primeiro, e as rotinas do primeiro não aplicavam. Agora ele propõe os dois num time, e uma resposta antiga assim destrava quando o agente já existe.
+
+### Added
+
+- **A lighter desktop app, same identity.** Fewer things side by side, nothing said twice, what needs you in sight, and what you set up now and then one click away; no feature goes away. "Direct messages" and "Agents" are one list, grouped by sector when there are sectors, each sector folding and still showing what waits in it. **Knowledge** (Memory · Wiki · Skills) and **Operations** (Routines · Report · Usage) are hubs with tabs, each opening on its last tab. The foot of the sidebar is **Send feedback**, then **Connectors** and the settings gear; pausing the team and the theme moved to the menu on the workspace's name. The routines page opens on the week, with routines that run several times a day in an "all day" strip; Approvals puts pending ones first and groups the history by day, folding repeated actions; the agent page saves by itself, with its facts in a header; Tuca starts in the conversation with four suggestions and fills the proposal beside it. Every page has its title in the same place, with its actions on the same line. (#525)
+- **Take items out of the top of the sidebar.** Tuca, Approvals, Board, Knowledge and Operations each leave it from a right click or their "•••" ("Take out of the sidebar"), with Undo on the toast. What was taken out shows as one quiet line under them, "2 hidden", which opens to those items, dimmed, each going back to its place on a click; the workspace's menu also lists them under "In the sidebar". Approvals and Knowledge come back by themselves while something waits on you in them (an approval; a suggested memory or a proposed skill). It's each person's own setting. (#525)
+- **The Board.** Every agent's work as cards in To do, Doing, Needs you and Done (today's). A request split among agents is one card in every view, saying who has it now; anything in it waiting on you brings the whole card to Needs you. Long requests get a short title from the memory's model. The card's panel puts the decision first, then the task's story by agent. (#524)
+- **Send feedback from the app, and small surveys.** "Send feedback" (at the foot of the sidebar and in Settings › General) sends a kind, your text and, if you keep it ticked, a picture of the Tucano window, with a line saying what goes along. Now and then the owner sees a survey as one quiet line above the foot; it can be turned off in Settings, and "Não quero responder" hides it for good. (#534)
+- **Another Antigravity account, on a Mac.** Antigravity kept its Google login in one keychain entry, so a second account replaced the first. Settings › Models › Accounts now takes Antigravity too: its login lives in a file in the account's own folder, and an agent on that account runs with that login and no keychain. On Linux and Windows its login lives in the system store, so it isn't offered there yet. (#538)
+
+### Changed
+
+- **A routine's run in the conversation is lighter.** Its prompt no longer sits above every reply: the reply gets a chip with the routine's name, which opens what it asked. Consecutive runs with nothing new fold into one line ("Vigia do GitHub · 3 execuções sem novidade"), and an approval already decided is one line. "On your computer" shows once, in the conversation's header. (#525)
+
+### Fixed
+
+- **The Team board with many sectors.** Tidy up put every sector in one row, so a team of 17 in 5 sectors was a strip over 4,000 px wide that only fit at the 30% zoom floor. Sectors now wrap into rows to about a screen's shape, with each line to a lower row going down a gap between sectors; panning and zooming no longer redraw every card on each step. (#535)
+- **Tuca proposing two new agents in one reply.** The second new agent's card replaced the first one's, and the first one's routines couldn't be applied ("Create Sustinho first: it's in a card of this same reply", with no such card). Tuca now proposes several new agents as one team, and a card whose agent is in no card of its reply applies to an agent of that name already on the team. (#537)
+
+## [0.2.36] - 2026-11-16
+
+> **Em português:**
+> - **Novo:** **empreste o seu computador a um Tucano num servidor** (o seu ou o Tucano Pro). Em **Configurações › Servidores**, ligue **Deixar este servidor usar este computador** e empreste as pastas dos seus projetos: os agentes de lá passam a usar o terminal, os arquivos, o navegador, os apps e os conectores deste computador, com as aprovações do servidor. Não precisa abrir porta nem configurar rede: o app liga para o servidor. Num servidor com várias pessoas, um agente só alcança o seu computador quando trabalha pra você. Ideia e primeira versão do @pedrojaques99.
+> - **Novo:** uma rotina roda em **vários horários no mesmo dia**. Em **Às**, cada horário é uma pílula: **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um, e o × tira. Os dias valem pra todos, o resumo embaixo diz quantas vezes por semana, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
+> - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
+> - **Corrigido:** agentes com modelos do **Antigravity** (Gemini Argon, Hydrogen, Flash) agora veem as imagens que você anexa. Antes eles respondiam que não conseguiam ver o print.
+> - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
+> - **Corrigido:** uma rotina que perdeu horários com o Mac dormindo roda o mais recente (até 12 h), e uma "uma vez" em vários dias espera o próximo dia em vez de desligar sem rodar.
+> - **Corrigido:** ligar uma rotina com data vencida diz por que não ligou, e um horário apagado no formulário avisa em vez de sumir.
+> - **Corrigido:** o cartão de uma rotina no calendário abria deslocado, cortado no canto da tela, sem os botões de editar. Agora abre ao lado da rotina.
+
+### Added
+
+- **Lend your computer to a Tucano on a server** (yours, or Tucano Pro). Agents on a server lose what only exists on your computer: the terminal, your projects, the browser with your sign-ins, your apps and local connectors. Now **Settings › Servers › Let this server use this computer** lends them: the desktop app calls the server with the key it was paired with (a live stream at `/node/link`, answered by POST), and the computer becomes a connector there, reached under the server's approvals. Nothing listens on the computer and nothing needs a private network, so it works from behind any router and with Tucano Pro. It holds the same locks as an agent on this computer: a command is judged as a command and never below a write; the file tools reach only the folders you lend, never a credentials folder or Tucano's data, and never write what runs later (`.git`, a shell profile); a risky click goes by the browser's or apps' rule and is never allowed for good; a class or high-risk mark set on the computer can't be loosened on the server. On a server with several people, a computer is its person's: an agent reaches it only working for someone named as that person (a team routine reaches no one's), only they approve what waits on it, it can't be a routine's trigger, and removing the person, or the device's key, cuts it off at once. The app never follows a redirect, and pairing the same server again turns lending off. A person lends up to 5 computers. The computer keeps a log of what the server ran there. Designed and first built by @pedrojaques99 (#494); see `docs/local-node.md`.
 - **One routine at several times a day.** A routine had one time, so "weekdays at 9, 1 and 5" took three copies of the same routine, each edited on its own. Now the times are pills in one row: **+ time** adds another (an hour after the last), **×** takes one off, and the days go for every time; repeats, days and times sit in one block whose last line says them all and how often ("Seg a sex às 9h, 13h e 17h · 15 vezes por semana"), the week shows each run, and editing or deleting changes them all. It goes with a week's days and a day of the month (up to 12 times); once and a date keep one. Agents ask for it with `horarios` in `agendar_rotina` and Tuca with `horas`, a team file carries the times, and a phone app that knows of one time keeps the others as long as it keeps the first.
 - **An official Docker image for the server.** Running Tucano on a VPS meant cloning, building with Node and installing each harness over SSH, and nothing said a container was a supported way. Now each release publishes `ghcr.io/eduwxyz/tucano` (the version and `latest`, x64 and ARM64), the image the Tucano Pro servers run: Tucano, Chromium for the agents' browsers and the harnesses, with everything a person makes in one volume. `docs/server.md` has the `docker run`, a Compose file with the Pro servers' restrictions (no privileges, a read-only system), updating, and why the container gets no Docker socket. The server is no longer called experimental there.
 
 ### Fixed
 
+- **Agents on Antigravity models see attached images.** Antigravity CLI takes text only in the prompt, so Tucano left images out and told the agent to say it couldn't see them, and it did ("Não consegui ver o print que você anexou"). The CLI does pass on an image a tool returns, though: the agent is now told to open an attached image with `ver_imagem`, which the gateway already offered. Checked with gemini-4-argon-high on agy 1.5.9: it calls the tool on its own and reads the picture. With no tools (no gateway) it still says it can't see it.
 - **A "when something new shows up" routine no longer runs forever on a long list.** It remembered the last 500 ids it had seen, so a read tool that returned more than that (or a filter whose old items outlived 500 new ones) made forgotten items look new again, and each one became a full agent reply. Now every id still in the answer stays remembered, and the room left goes to the latest ones that left it.
 - **After a long sleep, a routine runs the latest time it missed.** It only looked at the first missed time, so with 9:00 and 21:30, a Mac asleep until 22:00 skipped both (9:00 was past the 12 h) and a run at 10:05 said it was due at 9:00. A "once" routine on several days that missed one by more than 12 h now waits for the next of its days instead of turning off without running.
 - **An agent that changes a routine with `substitui` can take times off.** Sending one time kept the others, because the server kept them for older clients; the tool now always sends the whole list.
@@ -26,6 +126,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **Turning on a date routine that has passed says why** (in the off list and the card), instead of doing nothing.
 - **A late run tells the agent it is late, not that the app was closed**: quiet hours, a pause or the Mac asleep make it late too.
 - **A time cleared in the form says so and holds the save**, instead of being dropped.
+- **A routine's card opens beside it again.** Pages rise in when they open, and the animation kept its (empty) transform after ending, which made the page the box that fixed things inside it are placed in. The card was placed by the window's measures inside the page's box, so it opened off to the side, was cut by the page, and its Edit and Delete were out of reach. The animation now ends with nothing left on the page.
 
 ## [0.2.35] - 2026-11-16
 
