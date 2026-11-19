@@ -722,6 +722,16 @@ export const modelById = (s: State, id: string): Model | undefined => s.models.f
 export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a) => a.state === 'pending')
 export const computerOf = (s: State, agentId: string): ComputerInfo | undefined => s.computers.find((c) => c.agentId === agentId)
 export const browserOf = (s: State, agentId: string): BrowserView | undefined => s.browsers.find((b) => b.agentId === agentId)
+// The browser shows big and live on an agent's latest message that used it, while there is something to
+// watch there: that reply still at work (or held on an approval), or a person in control of it. Otherwise,
+// and while it's open on the side, the small card: an idle browser doesn't take half the screen.
+export const liveBrowserOn = (s: State, message: Message): boolean => {
+  const agentId = message.author.kind === 'agent' ? message.author.id : undefined
+  if (!agentId || !message.run?.browser || lastBrowserIn(s, message.conversationId, agentId) !== message.id) return false
+  if (s.panel?.kind === 'browser' && s.panel.agentId === agentId) return false
+  const status = message.run.status
+  return status === 'working' || status === 'waiting_approval' || !!browserOf(s, agentId)?.shown
+}
 export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
 // A message of this window's person (one from before people has no id to compare, and was the owner's: theirs too).
 export const isMine = (s: Pick<State, 'you'>, a: Message['author']): boolean => a.kind === 'person' && (!s.you || a.id === s.you)

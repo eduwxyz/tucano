@@ -25,7 +25,7 @@ import { canEditChannel,
   isMine,
   personName,
   conversationTitle,
-  lastBrowserIn,
+  liveBrowserOn,
   loadOlder,
   loadThread,
   messageById,
@@ -480,14 +480,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   // Someone else's message reads with their name and initials; mine, as always.
   const other = useStore((s) => (message.author.kind === 'person' && !isMine(s, message.author) ? personName(s, message.author.id) : undefined))
   const attached = useStore((s) => (message.author.kind === 'person' ? attachedTo(s, message.id) : NO_ATTACHED))
-  // The browser shows live on the agent's latest message that used it, unless it's open on the side.
-  const liveBrowser = useStore(
-    (s) =>
-      !!message.run?.browser &&
-      !(s.panel?.kind === 'browser' && s.panel.agentId === agent?.id) &&
-      !!agent &&
-      lastBrowserIn(s, message.conversationId, agent.id) === message.id
-  )
+  // The browser shows live on the agent's latest message that used it while there is something to watch (store.ts).
+  const liveBrowser = useStore((s) => !!agent && liveBrowserOn(s, message))
   // Streamed words wake only this row; while they come, the Markdown is drawn a few times a second,
   // whole again once the reply ends.
   const said = useLiveText(message, message.run?.status === 'working' ? STREAM_MS : 0)
