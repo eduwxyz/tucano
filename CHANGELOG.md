@@ -14,6 +14,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **The laptop on an agent's row stays in one place.** It sat before the working dots, the unread count and the gear, so it jumped left whenever the agent started working or you hovered the row. It's now the row's last item, with the gear's room kept, and what comes and goes shows before it.
 
+> **Em português:**
+> - **Corrigido:** numa **wiki** em inglês, uma página nova não abre mais com uma linha em negrito "tipo: … criada: … atualizada: …". As propriedades da página ficam no idioma do Tucano (`type`, `created`, `updated` em inglês), e um bloco de propriedades que o curador escreva no texto vira propriedade, não texto.
+
+- **A wiki page in an English workspace no longer opens with "tipo: … criada: … atualizada: …" in bold.** Tucano wrote a page's frontmatter keys in Portuguese whatever the language, and the curator, having seen them, wrote that block into a new page's text, where it rendered as a rule and a heading. The keys now follow the workspace's language (`type`, `created`, `updated` in English; a page that has them in the other language keeps its own), a frontmatter block at the top of a page's text is taken out of the text and into the page's properties, and the curator is told its text is the body only.
+
 ## [0.2.42] - 2026-11-19
 
 > **Em português:**
