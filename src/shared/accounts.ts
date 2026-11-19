@@ -43,6 +43,35 @@ export const usedOf = (w: QuotaWindow, now: number): number => (w.resetsAt > 0 &
 // full here, but isn't picked while another has reported (see pickLogin): the app checks it first.
 export const leftOf = (login: Pick<Login, 'windows'>, now: number): number => (login.windows?.length ? 1 - Math.max(...login.windows.map((w) => usedOf(w, now))) : 1)
 
+// All the accounts of a harness added up, window by window, against an even pace. Windows are matched by
+// length (the 5-hour of one account with the 5-hour of the others); a length that fewer than two accounts
+// reported says nothing about a sum, so it is left out. `pace` is where the average usage would be if it were
+// spent evenly until the reset, so `used` past it means the accounts together run out before the window ends.
+export interface Pace { minutes: number; used: number; pace: number; counted: number } // used, pace: 0..1
+export const PACE_OVER = 3 // points past the pace the total may run before it counts as over
+export const PACE_MIN_USED = 10 // below this many points used, a window that just opened is never over
+export function paceOf(logins: Pick<Login, 'windows'>[], now: number): Pace[] {
+  const reported = logins.filter((l) => l.windows?.length)
+  if (reported.length < 2) return []
+  const groups = new Map<number, QuotaWindow[]>()
+  for (const l of reported)
+    for (const w of l.windows ?? []) {
+      if (w.resetsAt <= 0) continue
+      groups.set(w.minutes, [...(groups.get(w.minutes) ?? []), w])
+    }
+  const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length
+  const paces: Pace[] = [...groups.entries()]
+    .filter(([, ws]) => ws.length >= 2)
+    .map(([minutes, ws]) => ({
+      minutes,
+      used: mean(ws.map((w) => usedOf(w, now))),
+      pace: mean(ws.map((w) => (w.resetsAt <= now ? 0 : Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / (w.minutes * 60_000)))))),
+      counted: ws.length
+    }))
+    .sort((a, b) => a.minutes - b.minutes)
+  return paces.filter((_, i) => i === 0 || i === paces.length - 1)
+}
+
 // The signed-in logins of a harness: the usual one first, then the accounts in the order they were added.
 export function loginsOf(settings: Pick<Settings, 'engines' | 'accounts' | 'quota' | 'codexQuota' | 'accountQuota'>, engine: EngineId): Login[] {
   if (!(ACCOUNT_ENGINES as readonly EngineId[]).includes(engine)) return []

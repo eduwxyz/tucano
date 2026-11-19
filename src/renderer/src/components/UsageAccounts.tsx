@@ -2,7 +2,7 @@
 // one a reply goes to next when the accounts are balanced.
 import { L, locale } from '../../../shared/lang'
 import { useState, type ReactNode } from 'react'
-import { checkKey, leftOf, loginsOf, pickLogin, usedOf } from '../../../shared/accounts'
+import { checkKey, leftOf, loginsOf, PACE_MIN_USED, PACE_OVER, paceOf, pickLogin, usedOf, type Login } from '../../../shared/accounts'
 import type { AccountEngine } from '../../../shared/types'
 import type { EngineId } from '../store'
 import { amAdmin, checkAccount, useStore } from '../store'
@@ -40,6 +40,57 @@ function NoData({ id, engine, state }: { id: string; engine: EngineId; state?: '
   )
 }
 
+const shortWindow = (minutes: number): string => {
+  if (minutes === 10080) return L('Semana', 'Week')
+  if (minutes === 1440) return L('Dia', 'Day')
+  if (minutes % 1440 === 0) return L(`${minutes / 1440} dias`, `${minutes / 1440} days`)
+  if (minutes % 60 === 0) return L(`${minutes / 60} horas`, `${minutes / 60} hours`)
+  return L(`${minutes} min`, `${minutes} min`)
+}
+
+// The accounts added up, next to the heading: one thin bar per window, with a tick where an even pace would be.
+function Pace({ logins, now, total }: { logins: Login[]; now: number; total: number }): ReactNode {
+  const paces = paceOf(logins, now)
+  if (!paces.length) return null
+  const meters = paces.map((p) => {
+    const usedPct = Math.round(p.used * 100)
+    const diff = Math.round(p.pace * 100) - usedPct
+    const over = usedPct >= PACE_MIN_USED && -diff > PACE_OVER
+    const note = diff > 0 ? L(`${diff}% de folga`, `${diff}% to spare`) : over ? L(`${-diff}% acima do ritmo`, `${-diff}% over the pace`) : L('no ritmo', 'on pace')
+    const tip =
+      p.counted === total
+        ? L(`Soma das ${total} contas.`, `Sum of the ${total} accounts.`)
+        : L(`Soma de ${p.counted} de ${total} contas.`, `Sum of ${p.counted} of ${total} accounts.`)
+    return { p, usedPct, note, tip, over, label: shortWindow(p.minutes) }
+  })
+  const warn = meters.some((m) => m.over)
+  const verdict = warn ? L('Acima do ritmo', 'Over the pace') : L('Dá até zerar', 'Lasts until reset')
+  const aria = `${verdict}. ${meters.map((m) => `${m.label}: ${L(`${m.usedPct}% usado`, `${m.usedPct}% used`)}, ${m.note}.`).join(' ')}`
+  return (
+    <span className="usage-pace" role="img" aria-label={aria}>
+      <span className={`usage-pace__verdict${warn ? ' is-warn' : ''}`}>{verdict}</span>
+      {meters.map((m) => (
+        <span
+          key={m.p.minutes}
+          className="usage-pace__meter"
+          title={`${m.tip} ${L('A linha verde é o ritmo: onde o uso estaria se fosse gasto por igual até zerar.', 'The green line is the pace: where usage would be if it were spent evenly until the reset.')}`}
+        >
+          <span className="usage-pace__row">
+            <span>
+              <b>{m.label}</b> {L(`${m.usedPct}% usado`, `${m.usedPct}% used`)}
+            </span>
+            <span className="usage-pace__note">{m.note}</span>
+          </span>
+          <span className={`usage-pace__bar${m.over ? ' is-warn' : ''}`}>
+            <i style={{ width: `${(m.p.used * 100).toFixed(1)}%` }} />
+            <em style={{ left: `${(m.p.pace * 100).toFixed(1)}%` }} />
+          </span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
 export function AccountsQuota({ engine }: { engine: EngineId }): ReactNode {
   const settings = useStore((s) => s.settings)
   const logins = loginsOf(settings, engine)
@@ -51,9 +102,10 @@ export function AccountsQuota({ engine }: { engine: EngineId }): ReactNode {
   const claude = engine === 'claude'
   return (
     <section className="read-group">
-      <h2>
+      <h2 className="usage-accounts-head">
         {claude ? L('Contas do Claude', 'Claude accounts') : L('Contas do Codex', 'Codex accounts')}
         <span>{balancing ? L('equilibrando entre as contas', 'balancing between the accounts') : L('cada agente na conta dele', 'each agent on its own account')}</span>
+        {balancing && <Pace logins={logins} now={now} total={logins.length} />}
       </h2>
       <div className="usage-accounts">
         {logins.map((l) => {
