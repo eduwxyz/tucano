@@ -64,6 +64,22 @@ describe("a channel's agent list", () => {
     expect(checkedFor(html, 'Modo menção', 'Astra')).toBe(false)
   })
 
+  it('puts the two modes on a second row under the agent, each with a hover explanation', () => {
+    const html = dialog({})
+    const rows = html.split('<div class="member-row">').slice(1)
+    expect(rows).toHaveLength(3)
+    for (const row of rows) {
+      expect(row.indexOf('class="member ')).toBeGreaterThanOrEqual(0)
+      expect(row.indexOf('member-row__modes')).toBeGreaterThan(row.indexOf('class="member '))
+      expect(row.indexOf('member-row__modes')).toBeLessThan(row.indexOf('</div>'))
+    }
+    expect(html.match(/class="mode-help"/g)).toHaveLength(6)
+    expect(html).toContain('>?</span>')
+    expect(html).not.toContain('(?)</span>')
+    expect(html).toContain('Lê todas as mensagens do canal')
+    expect(html).toContain('Fica de fora das respostas normais')
+  })
+
   it('offers listen mode only for agents in the channel', () => {
     const html = dialog({})
     expect(html).toContain('Modo escuta para Lia')
