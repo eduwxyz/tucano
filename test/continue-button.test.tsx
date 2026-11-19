@@ -96,7 +96,7 @@ describe('a reply the app cut', () => {
   // why the row reads `done`, its `cutAt` still there) and the words never came. It showed a chain and
   // nothing else to click — an install every ten minutes filled a channel with those.
   it('offers Continue on a session that ended without a word', async () => {
-    const silent = {
+    const silent: Message = {
       id: 'm3', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: '', at: 4,
       run: { status: 'done', task: 'fix the test', cutAt: 3, steps: [step('Thought', 'done'), step('Ran npx vitest run', 'done')] }
     }
