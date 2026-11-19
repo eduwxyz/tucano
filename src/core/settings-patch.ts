@@ -43,7 +43,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   stepsOpen: { kind: 'boolean', max: 10, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true },
   surveys: { kind: 'boolean', max: 10, nullable: true },
-  tucaApplyNow: { kind: 'boolean', max: 10, nullable: true }
+  tucaApplyNow: { kind: 'boolean', max: 10, nullable: true },
+  computerSetup: { kind: 'string', max: 50_000, nullable: true } // a bash script every new Linux computer starts with
 }
 
 const fits = (kind: Kind, v: unknown): boolean =>

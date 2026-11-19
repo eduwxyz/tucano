@@ -860,7 +860,7 @@ gateway.route('/oauth/callback', oauthCallback)
 const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 titles = new Titles({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
-const computers = new Computers({ db, dataDir, emit, shoot })
+const computers = new Computers({ db, dataDir, emit, shoot, setup: () => settings().computerSetup })
 
 // This computer lent to servers' Tucanos (core/node-server.ts, core/node-link.ts): the app calls each server it
 // was paired with and lends it (Settings › Servers), and that server's agents use this computer's terminal, files,

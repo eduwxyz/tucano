@@ -1,4 +1,5 @@
 import { L, locale, type Lang } from '../../../shared/lang'
+import { SETUP_PRESETS } from '../../../shared/computer-setup'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -3347,6 +3348,43 @@ export function SettingsPage(): ReactNode {
               </div>
               <Toggle on={settings.tucaApplyNow !== false} onChange={(v) => updateSettings({ tucaApplyNow: v })} />
             </div>
+          </Card>
+        )}
+
+        {pane('agentes') && admin && (
+          <Card
+            title={L('Computador dos agentes', 'Agents’ computer')}
+            lead={L(
+              'O que todo computador Linux novo já traz instalado, pra os agentes não perderem tempo instalando (e errando) a cada computador. É um script bash, rodado como root no Debian deles. Roda uma vez só: o resultado vira a base de todo computador criado depois.',
+              'What every new Linux computer comes with, so agents don’t spend time installing (and getting it wrong) on each one. A bash script, run as root on their Debian. It runs once: the result is the base of every computer made after it.'
+            )}
+          >
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+              {SETUP_PRESETS().map((p) => {
+                const has = (settings.computerSetup ?? '').includes(p.marker)
+                return (
+                  <button
+                    key={p.marker}
+                    className="btn btn--sm"
+                    disabled={has}
+                    title={has ? L('Já está no script', 'Already in the script') : p.what}
+                    onClick={() => updateSettings({ computerSetup: [(settings.computerSetup ?? '').trim(), p.script].filter(Boolean).join('\n\n') })}
+                  >
+                    {has ? '✓ ' : '+ '}
+                    {p.label}
+                  </button>
+                )
+              })}
+            </div>
+            <Field
+              label={L('Script de preparação', 'Setup script')}
+              hint={L(
+                'Vale pros computadores criados depois de mudar. Um que já existe guarda o que tem; pra ele pegar o novo, apague o computador na página do agente (Ferramentas). Sem senhas nem tokens aqui: o resultado fica no computador de todos os agentes.',
+                'It applies to computers made after a change. One that exists keeps what it has; to give it the new one, erase that computer on the agent’s page (Tools). No passwords or tokens here: the result is on every agent’s computer.'
+              )}
+            >
+              <textarea rows={8} spellCheck={false} className="mono" placeholder={L('# ex.: apt-get update && apt-get install -y jq', '# e.g. apt-get update && apt-get install -y jq')} value={settings.computerSetup ?? ''} onChange={(e) => updateSettings({ computerSetup: e.target.value })} />
+            </Field>
           </Card>
         )}
 
