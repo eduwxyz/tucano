@@ -1,6 +1,8 @@
 // The Tuca over the real core (fake engines): his conversation is kept when the person leaves his
 // screen and comes back, "Nova conversa" starts another, each person has their own; and a reply with
 // several proposals is applied card by card or all at once, in order, one failing not stopping the rest.
+// These are the cards as they were before the Tuca's changes applied by themselves: the setting is off
+// here (tucaApplyNow: false), and test/tuca-apply-now-core.test.ts covers it on.
 // One core for the whole file: the describes run in order and build on each other.
 import { rmSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -46,6 +48,7 @@ beforeAll(async () => {
   core = await bootCore({ server: true })
   ana = core.connect()
   await ana.call('setMyName', { name: 'Ana' })
+  await ana.call('updateSettings', { patch: { tucaApplyNow: false } })
 }, 30_000)
 afterAll(() => {
   process.off('unhandledRejection', onCrash)
@@ -145,6 +148,27 @@ describe('B. several proposals in one reply', () => {
     await ana.call('dismissProposals', { messageId: migration.id, draft: true })
     const m = (await inConv(ana, first.conversationId)).find((x) => x.id === migration.id)!
     expect(proposalsOf(m.run)[4]!.state).toBe('dismissed')
+  })
+})
+
+describe('B2. two new agents in one reply', () => {
+  it('a second new agent is refused and told to use a team; the team takes the first card\'s place, and all of it applies', async () => {
+    const m = await reply(ana, first.conversationId, 'importa os bots do GrokBot')
+    const told = m.text.split('\n---\n')
+    expect(told[2]).toContain('já propôs um agente novo, Sustinho')
+    expect(told[2]).toContain('propor_time')
+    // The team with both replaced the lone card: nothing is left that needs an agent no card makes.
+    expect(m.run?.agentDraft).toBeUndefined()
+    const ps = proposalsOf(m.run)
+    expect(ps.map((p) => p.kind)).toEqual(['routine', 'team', 'routine'])
+    expect(ps.map((p) => p.needs)).toEqual([['Sustinho'], undefined, ['Faro']])
+    const r = await ana.call<ProposalsResult>('applyProposals', { messageId: m.id, draft: false })
+    expect(r.failed).toEqual([])
+    const snap = await ana.call<Snap>('snapshot')
+    const sustinho = snap.agents.find((a) => a.name === 'Sustinho')!
+    const faro = snap.agents.find((a) => a.name === 'Faro')!
+    expect(snap.routines.find((x) => x.name === 'Preparo do susto')?.agentId).toBe(sustinho.id)
+    expect(snap.routines.find((x) => x.name === 'Faro da manhã')?.agentId).toBe(faro.id)
   })
 })
 

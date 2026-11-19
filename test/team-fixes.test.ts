@@ -96,8 +96,9 @@ describe("a member's read-only pages", () => {
     // Screens only an admin reaches: the connectors' admin view, the introduction (the owner's; someone
     // invited gets GuestWelcome) and the agent builder (admins'), the activity log, adding a skill from
     // the terminal, a skill's history, a harness's sign-in on the server's terminal (opened by an admin's Sign in), and
-    // the Hermes import (the Team card shows it only to the owner: it reads the server's ~/.hermes).
-    const ADMIN_SCREENS = new Set(['LoginTerminal.tsx:loginScreen', 'LoginTerminal.tsx:refreshEngines', 'ConnectorStore.tsx:ownApp', 'Harness.tsx:harnessMcps', 'Intro.tsx:testEngine', 'Intro.tsx:refreshEngines', 'Intro.tsx:harnessMcps', 'Intro.tsx:localSkills', 'People.tsx:activity', 'People.tsx:removedPeople', 'Skills.tsx:localSkills', 'Skills.tsx:skillVersions', 'HermesImport.tsx:hermesPreview'])
+    // the Hermes import (the Team card shows it only to the owner: it reads the server's ~/.hermes), and the
+    // saved logins of an agent's browser (its page shows them only to admins).
+    const ADMIN_SCREENS = new Set(['BrowserLogins.tsx:browserLogins', 'LoginTerminal.tsx:loginScreen', 'LoginTerminal.tsx:refreshEngines', 'ConnectorStore.tsx:ownApp', 'Harness.tsx:harnessMcps', 'Intro.tsx:testEngine', 'Intro.tsx:refreshEngines', 'Intro.tsx:harnessMcps', 'Intro.tsx:localSkills', 'People.tsx:activity', 'People.tsx:removedPeople', 'Skills.tsx:localSkills', 'Skills.tsx:skillVersions', 'HermesImport.tsx:hermesPreview'])
     const found: string[] = []
     for (const file of readdirSync(join(root, 'components')).filter((f) => f.endsWith('.tsx'))) {
       const src = readFileSync(join(root, 'components', file), 'utf8')

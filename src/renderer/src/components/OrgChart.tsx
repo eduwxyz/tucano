@@ -7,7 +7,7 @@
 import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
-import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyBoard, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
+import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyLayout, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
 import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
 import { Sheet } from './Pages'
@@ -50,13 +50,51 @@ export function OrgPage(): ReactNode {
   // The one the person talks to, when one agent tops teams of their own: the sectors hang from it.
   const entries = entriesOf(agents)
   const entry = entries[0]
-  const base = spotsOf([ME, ...agents.map((a) => a.id)], tidyBoard(roots, loose, BOARD, entries.map((e) => e.id)), saved)
+  const tidy = tidyLayout(roots, loose, BOARD, entries.map((e) => e.id))
+  const base = spotsOf([ME, ...agents.map((a) => a.id)], tidy.spots, saved)
 
   const board = useRef<HTMLDivElement>(null)
+  const stage = useRef<HTMLDivElement>(null)
+  const zoomLabel = useRef<HTMLButtonElement>(null)
   const gesture = useRef<Gesture | null>(null)
   const hover = useRef<string | null>(null)
   const [room, setRoom] = useState({ w: 0, h: 0 })
   const [stored, setView] = useState<View | null>(null)
+  // While the board is being moved or zoomed, the view lives here and goes straight to the page: the cards,
+  // the lines and the zones aren't drawn again on every step, only once when the move ends.
+  const live = useRef<View | null>(null)
+  const storedNow = useRef<View | null>(null)
+  storedNow.current = stored
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const paint = (v: View): void => {
+    live.current = v
+    const el = board.current
+    if (stage.current) stage.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`
+    if (el) {
+      el.classList.add('is-panning')
+      el.style.backgroundSize = `${24 * v.k}px ${24 * v.k}px`
+      el.style.backgroundPosition = `${v.x}px ${v.y}px`
+    }
+    const pct = `${Math.round(v.k * 100)}%`
+    if (zoomLabel.current && zoomLabel.current.textContent !== pct) zoomLabel.current.textContent = pct // new text lays the page out again
+  }
+  const settle = (): void => {
+    clearTimeout(settleTimer.current)
+    const v = live.current
+    board.current?.classList.remove('is-panning')
+    if (!v) return
+    live.current = null
+    setView(v)
+  }
+  useEffect(() => () => clearTimeout(settleTimer.current), [])
+  // The view right now, even in the middle of a move; and a view set from a button, which ends any move.
+  const current = (): View => live.current ?? storedNow.current ?? NO_VIEW
+  const show = (v: View): void => {
+    clearTimeout(settleTimer.current)
+    live.current = null
+    board.current?.classList.remove('is-panning')
+    setView(v)
+  }
   const [sent, setSent] = useState<string | null>(null) // whoever was just asked something, for a moment
   const mine = useRef(false) // I moved or zoomed the board: it stays where I left it
   const [moved, setMoved] = useState<{ ids: string[]; dx: number; dy: number } | null>(null)
@@ -69,7 +107,7 @@ export function OrgPage(): ReactNode {
   const [text, setText] = useState('')
   // The last change to who answers to whom: what it was, in words, and how each one stood before it.
   const [undo, setUndo] = useState<{ text: string; was: [string, string | null][] } | null>(null)
-  const view = stored ?? NO_VIEW
+  const view = live.current ?? stored ?? NO_VIEW
   const spot = (id: string): Point => {
     const p = base[id] ?? { x: 0, y: 0 }
     return moved?.ids.includes(id) ? { x: p.x + moved.dx, y: p.y + moved.dy } : p
@@ -82,7 +120,7 @@ export function OrgPage(): ReactNode {
     const right = (picked || sector) && wide ? SIDE_ROOM : 0
     const v = fitView(boundsOf(Object.values(spots)), { w: room.w - left - right, h: room.h - ASK_ROOM })
     mine.current = false
-    setView({ ...v, x: v.x + left })
+    show({ ...v, x: v.x + left })
   }
   const fit = (): void => fitTo(base)
 
@@ -128,10 +166,11 @@ export function OrgPage(): ReactNode {
       e.preventDefault()
       mine.current = true
       const r = el.getBoundingClientRect()
-      setView((v) => {
-        const now = v ?? NO_VIEW
-        return e.ctrlKey || e.metaKey ? zoomAt(now, { x: e.clientX - r.left, y: e.clientY - r.top }, now.k * Math.exp(-e.deltaY * 0.01)) : { ...now, x: now.x - e.deltaX, y: now.y - e.deltaY }
-      })
+      const now = live.current ?? storedNow.current ?? NO_VIEW
+      paint(e.ctrlKey || e.metaKey ? zoomAt(now, { x: e.clientX - r.left, y: e.clientY - r.top }, now.k * Math.exp(-e.deltaY * 0.01)) : { ...now, x: now.x - e.deltaX, y: now.y - e.deltaY })
+      // The wheel has no end: the move is over when it stops for a moment.
+      clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(settle, 140)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -187,8 +226,8 @@ export function OrgPage(): ReactNode {
   const begin = (g: Gesture): void => {
     gesture.current = g
     const onMove = (e: PointerEvent): void => {
-      if (g.kind === 'pan') (mine.current = true), setView({ ...g.view, x: g.view.x + e.clientX - g.x, y: g.view.y + e.clientY - g.y })
-      else if (g.kind === 'link') setLink({ from: g.from, side: g.side, to: toBoard(view, local(e)) })
+      if (g.kind === 'pan') (mine.current = true), paint({ ...g.view, x: g.view.x + e.clientX - g.x, y: g.view.y + e.clientY - g.y })
+      else if (g.kind === 'link') setLink({ from: g.from, side: g.side, to: toBoard(current(), local(e)) })
       else {
         const dx = e.clientX - g.x
         const dy = e.clientY - g.y
@@ -201,7 +240,8 @@ export function OrgPage(): ReactNode {
       document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerup', onUp)
       gesture.current = null
-      if (g.kind === 'link') {
+      if (g.kind === 'pan') settle()
+      else if (g.kind === 'link') {
         const target = hover.current
         setLink(null)
         setOver(null)
@@ -227,12 +267,12 @@ export function OrgPage(): ReactNode {
     setPicked(null)
     setSector(null)
     setEdge(null)
-    begin({ kind: 'pan', x: e.clientX, y: e.clientY, view })
+    begin({ kind: 'pan', x: e.clientX, y: e.clientY, view: current() })
   }
   // A card takes everyone below along, like a branch; with ⌥, it goes alone.
   const onCard = (id: string) => (e: ReactPointerEvent): void => {
     if (!press(e)) return
-    begin({ kind: 'card', id, ids: id === ME || e.altKey ? [id] : [id, ...reportsOf(agents, id).map((a) => a.id)], x: e.clientX, y: e.clientY, k: view.k, dragged: false })
+    begin({ kind: 'card', id, ids: id === ME || e.altKey ? [id] : [id, ...reportsOf(agents, id).map((a) => a.id)], x: e.clientX, y: e.clientY, k: current().k, dragged: false })
   }
   const onPort = (id: string, side: 'out' | 'in') => (e: ReactPointerEvent): void => {
     if (!press(e)) return
@@ -240,7 +280,7 @@ export function OrgPage(): ReactNode {
     setPicked(null)
     setSector(null)
     setEdge(null)
-    setLink({ from: id, side, to: toBoard(view, local(e)) })
+    setLink({ from: id, side, to: toBoard(current(), local(e)) })
     begin({ kind: 'link', from: id, side })
   }
   const enter = (id: string) => (): void => {
@@ -320,7 +360,7 @@ export function OrgPage(): ReactNode {
       (e: unknown) => (setText(what), setError(e instanceof Error ? e.message : String(e)))
     )
   }
-  const zoom = (f: number): void => ((mine.current = true), setView(zoomAt(view, { x: room.w / 2, y: room.h / 2 }, view.k * f)))
+  const zoom = (f: number): void => ((mine.current = true), show(zoomAt(current(), { x: room.w / 2, y: room.h / 2 }, current().k * f)))
   const size = { width: BOARD.w, height: BOARD.h }
   const cut = lines.find((l) => l.to === edge && l.from !== ME)
 
@@ -333,7 +373,7 @@ export function OrgPage(): ReactNode {
         admin ? (
           <>
             {saved && (
-              <button className="btn btn--ghost btn--sm org-tidy" title={L('Volta cada cartão pro lugar dele na árvore', 'Puts each card back in its place in the tree')} onClick={() => (updateSettings({ orgLayout: null as unknown as undefined }), fitTo(tidyBoard(roots, loose)))}>
+              <button className="btn btn--ghost btn--sm org-tidy" title={L('Volta cada cartão pro lugar dele na árvore', 'Puts each card back in its place in the tree')} onClick={() => (updateSettings({ orgLayout: null as unknown as undefined }), fitTo(tidy.spots))}>
                 {L('Organizar', 'Tidy up')}
               </button>
             )}
@@ -369,12 +409,13 @@ export function OrgPage(): ReactNode {
         style={{ backgroundSize: `${24 * view.k}px ${24 * view.k}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
         onPointerDown={onBoard}
       >
-        <div className="orgb__stage" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+        <div ref={stage} className="orgb__stage" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
           <SectorZones agents={agents} spot={spot} admin={admin} picked={sector} onPick={(id) => (setPicked(null), setEdge(null), setSector(sector === id ? null : id))} />
           <svg className="orgb__lines" width="1" height="1" aria-hidden="true">
             {lines.map((l) => {
               const flow = flowing.get(`${l.from}>${l.to}`)
-              const d = curve(l.a, l.b)
+              const routed = base === tidy.spots && !moved ? tidy.routes[`${l.from}>${l.to}`] : undefined
+              const d = routed ?? curve(l.a, l.b)
               const mine = l.from === ME
               return (
                 <g key={`${l.from}>${l.to}`} className={`${mine ? 'is-me' : ''} ${flow ? `is-flow is-${flow}` : ''} ${edge === l.to && !mine ? 'is-picked' : ''}`}>
@@ -477,7 +518,7 @@ export function OrgPage(): ReactNode {
           <button className="icon-btn" title={L('Afastar', 'Zoom out')} disabled={view.k <= MIN_K} onClick={() => zoom(1 / 1.2)}>
             −
           </button>
-          <button className="org-tools__k" title={L('Tamanho real', 'Actual size')} onClick={() => setView(zoomAt(view, { x: room.w / 2, y: room.h / 2 }, 1))}>
+          <button ref={zoomLabel} className="org-tools__k" title={L('Tamanho real', 'Actual size')} onClick={() => show(zoomAt(current(), { x: room.w / 2, y: room.h / 2 }, 1))}>
             {Math.round(view.k * 100)}%
           </button>
           <button className="icon-btn" title={L('Aproximar', 'Zoom in')} disabled={view.k >= MAX_K} onClick={() => zoom(1.2)}>

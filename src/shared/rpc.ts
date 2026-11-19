@@ -1,9 +1,10 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
+import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -64,6 +65,8 @@ export interface Api {
   dismissProposal(p: { messageId: string; index?: number }): void
   applyProposals(p: { messageId: string; draft?: boolean }): ProposalsResult // every card of the reply still open, in an order that makes agents first; one failing doesn't stop the rest. draft: its new-agent card too
   dismissProposals(p: { messageId: string; draft?: boolean }): void
+  undoProposal(p: { messageId: string; index?: number; draft?: boolean }): void // takes back what an applied card did (draft: the new-agent card), unless it changed since or its time is up
+  undoProposals(p: { messageId: string }): ProposalsResult // every applied card of the reply taken back, last first; `applied` lists the ones undone
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
@@ -107,6 +110,7 @@ export interface Api {
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode
   importHarnessMcp(p: { key: string }): Promise<string> // adds one as a connector; its secrets never pass through the screen
   updateTool(p: { connectorId: string; name: string; patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>> }): void
+  shareComputer(p: { connectorId: string; agentIds: string[] }): void // a computer lent to this server: exactly these agents may use it (its person or an admin)
   decideApproval(p: { id: string; decision: 'approved' | 'refused'; reason?: string; always?: boolean }): void // always: the agent may use that tool without asking again
   addMemory(p: { scope: MemoryScope; text: string }): void
   editMemory(p: { id: string; text: string }): void
@@ -120,6 +124,9 @@ export interface Api {
   summarizeThreadNow(p: { rootId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
+  browserLogins(p: { agentId: string }): Promise<SavedLogin[]> // the logins saved for an agent's browser: sites and usernames, never a password
+  saveBrowserLogin(p: { agentId: string; site: string; username: string; password: string }): Promise<void> // password: the value or an op:// reference
+  removeBrowserLogin(p: { agentId: string; origin: string }): Promise<void>
   browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void
   browserInput(p: { agentId: string; input: BrowserInput }): Promise<void> // a server's taken-over browser, driven from the panel // show: I take over the agent's browser; clear: logins and history go
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
@@ -234,6 +241,21 @@ export interface Api {
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
+  // To the people who make Tucano, through tucano.sh (core/feedback.ts). image: the window's picture, base64 PNG or JPEG.
+  // Throws, in the person's words, when it didn't go.
+  sendFeedback(p: { kind: 'bug' | 'idea' | 'other'; message: string; image?: string; lang?: Lang }): Promise<void>
+  // The owner's: the survey to show in the sidebar's foot now, or none (off, answered, nothing running).
+  survey(p: { lang?: Lang }): Promise<SurveyView | null>
+  // A choice (kept the moment it's clicked), the same choice with its comment, or dismiss: "Não quero responder".
+  answerSurvey(p: { survey: string; choice?: string; comment?: string; dismiss?: boolean; lang?: Lang }): Promise<void>
+}
+
+// A survey as the app shows it, already in the person's language (core/feedback.ts).
+export interface SurveyView {
+  id: string
+  question: string
+  options: { id: string; label: string }[]
+  followUp?: string
 }
 
 export type Method = keyof Api
@@ -247,6 +269,7 @@ export type CoreEvent =
   | { type: 'message'; message: Message }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
+  | { type: 'agent_removed'; id: string } // one just made and taken back with Desfazer before it did anything
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'settings'; settings: Settings }
   | { type: 'connector'; connector: Connector }
@@ -269,7 +292,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

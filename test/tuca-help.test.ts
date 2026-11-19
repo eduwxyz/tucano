@@ -315,15 +315,38 @@ describe("the Tuca's prompt, for several changes", () => {
   })
 
   it('brings a Tuca still on the instructions from before up to date, and leaves hand-written ones alone', () => {
+    // Last came how his proposals go in (at once, with Desfazer): before it, every card waited for a click.
+    const CLICK: Record<'pt' | 'en', [string, string][]> = {
+      pt: [
+        ['a pessoa desfaz ou ajusta pedindo.', 'a pessoa ajusta no card ou pedindo.'],
+        ['com um canal pra eles. Depois, sugira', 'com um canal pra eles. Depois que a pessoa criar, sugira'],
+        ['- Cada proposta vira um card. Como ela entra (na hora, com Desfazer, ou esperando a pessoa confirmar) está em "Como suas propostas entram". Não pergunte "posso aplicar?" nem "quer que eu crie?": proponha direto.', '- Cada proposta vira um card com Aplicar e Descartar: é a pessoa quem confirma.'],
+        ['Elas aparecem juntas, num grupo. Nunca uma por mensagem esperando a pessoa.', 'Elas aparecem juntas, num grupo com "Aplicar todos". Nunca uma por mensagem esperando a pessoa aplicar.'],
+        ['- Depois de propor, uma frase curta basta: o que você fez, ou o que falta ela confirmar.', '- Depois de propor, uma frase curta basta.']
+      ],
+      en: [
+        ['the person undoes it or asks for a change.', 'the person adjusts it on the card or by asking.'],
+        ['with a channel for them. Then suggest', 'with a channel for them. Once the person creates it, suggest'],
+        ['- Each proposal becomes a card. How it goes in (right away, with Undo, or waiting for the person to confirm) is in "How your proposals go in". Don\'t ask "can I apply it?" or "want me to create it?": just propose.', '- Each proposal becomes a card with Apply and Discard: the person confirms.'],
+        ['They show up together, in a group. Never one per message waiting for the person.', 'They show up together, in a group with "Apply all". Never one per message waiting for the person to apply it.'],
+        ['- After proposing, one short sentence is enough: what you did, or what is left for them to confirm.', '- After proposing, one short sentence is enough.']
+      ]
+    }
+    const clicked = (lang: 'pt' | 'en'): string => CLICK[lang].reduce((t, [now, then]) => (expect(t).toContain(now), t.replace(now, then)), tucaInstructions())
+    // Before that, the rule on several new agents in one reply: every version before lacks it.
+    const lastRule = (lang: 'pt' | 'en'): string => clicked(lang).replace(/\n- (?:Mais de um agente novo|More than one new agent)[^\n]*/, '')
     const before = (lang: 'pt' | 'en'): string => {
       setLang(lang)
       // The lines that changed, as they were: the links he is taught, which carried a Portuguese
       // id (#abrir/conectores) before the screen ids lost the language.
-      return tucaInstructions().replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
+      return lastRule(lang).replace(/#abrir\/connectors/g, '#abrir/conectores').replace('#abrir/agent/<handle>', '#abrir/agente/<handle>')
     }
     for (const lang of ['pt', 'en'] as const) {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }
       setLang(lang)
+      expect(clicked(lang)).not.toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: clicked(lang) })?.instructions).toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: lastRule(lang) })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate(old)?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: `${old.instructions}\nMinha regra.` })).toBeUndefined()
       expect(tucaUpToDate({ ...old, instructions: tucaInstructions() })).toBeUndefined()

@@ -37,6 +37,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   dismissProposal: { messageId: 's', index: 'n?' },
   applyProposals: { messageId: 's', draft: 'b?' },
   dismissProposals: { messageId: 's', draft: 'b?' },
+  undoProposal: { messageId: 's', index: 'n?', draft: 'b?' },
+  undoProposals: { messageId: 's' },
   settleDraft: { messageId: 's', agentId: 's?' },
   updateSettings: { patch: 'o' },
   refreshEngines: {},
@@ -78,6 +80,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   harnessMcps: {},
   importHarnessMcp: { key: 's' },
   updateTool: { connectorId: 's', name: 's', patch: 'o' },
+  shareComputer: { connectorId: 's', agentIds: 'S' },
   decideApproval: { id: 's', decision: '[approved,refused]', reason: 's?', always: 'b?' },
   addMemory: { scope: 's', text: 's' },
   editMemory: { id: 's', text: 's' },
@@ -91,6 +94,9 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   summarizeThreadNow: { rootId: 's' },
   computerAction: { agentId: 's', action: '[start,restart,erase,open_folder,refresh]' },
   stopService: { agentId: 's', name: 's' },
+  browserLogins: { agentId: 's' },
+  saveBrowserLogin: { agentId: 's', site: 's', username: 's', password: 's' },
+  removeBrowserLogin: { agentId: 's', origin: 's' },
   browserAction: { agentId: 's', action: '[show,hide,clear]' },
   browserInput: { agentId: 's', input: 'o' },
   lendFolder: { agentId: 's', path: 's' },
@@ -197,6 +203,9 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   answerDecision: { messageId: 's', index: 'n', answer: 'o|null' },
   submitDecisions: { messageId: 's' },
   watchRoutine: { id: 's', on: 'b' },
+  sendFeedback: { kind: '[bug,idea,other]', message: 's', image: 's?', lang: '[pt,en]?' },
+  survey: { lang: '[pt,en]?' },
+  answerSurvey: { survey: 's', choice: 's?', comment: 's?', dismiss: 'b?', lang: '[pt,en]?' }
 }
 
 const fits = (v: unknown, t: string): boolean => {
@@ -257,7 +266,10 @@ export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
   wikiRelease: { title: 200 },
   wikiGitSetup: { url: 1_000 },
   loginInput: { text: 4_000 }, // a code or an API key, typed into a sign-in
-  setPush: { handle: 2_000, tag: 200 }
+  setPush: { handle: 2_000, tag: 200 },
+  // The text, and a picture of up to 3 MB as base64 (core/feedback.ts checks the bytes).
+  sendFeedback: { message: 5_000, image: 4_200_000 },
+  answerSurvey: { survey: 100, choice: 100, comment: 2_000 }
 }
 
 export function limitError(method: Method, params: unknown): string | undefined {

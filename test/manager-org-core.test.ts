@@ -35,6 +35,8 @@ beforeAll(async () => {
   core = await bootCore({ server: true })
   ana = core.connect()
   await ana.call('setMyName', { name: 'Ana' })
+  // The Tuca's changes inside the app apply at once by default (tuca-apply-now-core): here they wait for my yes.
+  await ana.call('updateSettings', { patch: { tucaApplyNow: false } })
 }, 30_000)
 afterAll(() => {
   try { rmSync(core.dataDir, { recursive: true, force: true }) } catch {} // Windows: still open

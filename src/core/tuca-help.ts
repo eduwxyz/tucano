@@ -1,6 +1,7 @@
 // What the Tuca has besides building agents: a look at how the workspace is doing (ver_estado),
 // and proposals for what already exists (an agent's change, a routine, a channel). A proposal is a
-// card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
+// card, like his new agents: applied when his reply ends, with Desfazer, unless it grants access or
+// that's turned off (src/core/tuca-apply.ts); then nothing changes until the person applies it.
 // He sees settings, statuses and error messages, never what was said in a conversation.
 import { L } from '../shared/lang'
 import { safeLimit } from '../shared/limits'
@@ -131,8 +132,8 @@ export const PROPOR_AJUSTE: ToolDef = {
   name: 'propor_ajuste',
   get description() {
     return L(
-      'Propõe mudar um agente que já existe. Vira um card com o antes e o depois, Aplicar e Descartar: nada muda até a pessoa aplicar. Mande só o que muda; instruções vão inteiras.',
-      'Proposes changing an agent that exists. It becomes a card with before and after, Apply and Discard: nothing changes until the person applies it. Send only what changes; instructions go whole.'
+      'Propõe mudar um agente que já existe, num card com o antes e o depois. Com "aplicar na hora", muda quando sua resposta termina e a pessoa pode desfazer; conectores e limite do mês sempre esperam ela confirmar. Mande só o que muda; instruções vão inteiras.',
+      'Proposes changing an agent that exists, as a card with before and after. With "apply right away", it changes when your reply ends and the person can undo it; connectors and the monthly limit always wait for them to confirm. Send only what changes; instructions go whole.'
     )
   },
   get inputSchema() {
@@ -164,8 +165,8 @@ export const PROPOR_ROTINA: ToolDef = {
   name: 'propor_rotina',
   get description() {
     return L(
-      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos, numa data específica ou todo mês num dia), como um card com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
-      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time, on a specific date, or every month on a day), as a card with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
+      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos, numa data específica ou todo mês num dia), num card: com "aplicar na hora", criada quando sua resposta termina, com Desfazer; senão, com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
+      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time, on a specific date, or every month on a day), as a card: with "apply right away", made when your reply ends, with Undo; otherwise with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
     )
   },
   get inputSchema() {
@@ -192,7 +193,7 @@ export const PROPOR_ROTINA: ToolDef = {
 export const PROPOR_CANAL: ToolDef = {
   name: 'propor_canal',
   get description() {
-    return L('Propõe um canal novo, com os agentes que ficam nele. Vira um card com Aplicar e Descartar.', 'Proposes a new channel, with the agents in it. It becomes a card with Apply and Discard.')
+    return L('Propõe um canal novo, com os agentes que ficam nele, num card: com "aplicar na hora", criado quando sua resposta termina, com Desfazer; senão, com Aplicar e Descartar.', 'Proposes a new channel, with the agents in it, as a card: with "apply right away", made when your reply ends, with Undo; otherwise with Apply and Discard.')
   },
   get inputSchema() {
     return {

@@ -102,6 +102,22 @@ describe('Runner', () => {
     expect(replies.find((m) => (m.author as { id: string }).id === 'a2')?.text).toContain('codex · gpt-5.6-luna')
   })
 
+  it('calls several agents named in a message one after another, in the order written, each reading the one before', async () => {
+    const r = runner()
+    await r.send('c1', '@theo levanta os números, @lia escreve o resumo com eles')
+    await r.idle()
+    const theo = agentMessages().find((m) => (m.author as { id: string }).id === 'a2')!
+    const lia = agentMessages().find((m) => (m.author as { id: string }).id === 'a1')!
+    expect(theo.run?.status).toBe('done')
+    expect(lia.at).toBeGreaterThan(theo.at)
+    // Lia (on Claude) went second: her turn had Theo's finished answer, and was told so.
+    expect(claude.turns).toHaveLength(1)
+    const prompt = claude.turns[0]!.prompt
+    expect(prompt).toContain(theo.text.trim().slice(0, 40))
+    expect(prompt).toContain('theo já respondeu a ela antes de você')
+    expect(lia.run?.replyTo).toBe(theo.run?.replyTo)
+  })
+
   it('in a channel without a mention, the router picks who answers and leaves a receipt', async () => {
     db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
     db.saveAgent(agent('a2', 'theo', { role: 'Dados', modelId: 'gpt-5.6-luna' }))
@@ -423,7 +439,7 @@ describe('one reply at a time per agent and thread', () => {
 describe('Db', () => {
   it('marks runs left working as interrupted on startup', () => {
     db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'agent', id: 'a1' }, text: 'meio', at: 1, run: { status: 'working', steps: [{ id: 's', label: 'Pensando', status: 'running' }] } })
-    expect(db.interruptStaleRuns()).toBe(1)
+    expect(db.interruptStaleRuns()).toHaveLength(1)
     expect(db.message('m1')?.run).toMatchObject({ status: 'interrupted', steps: [{ status: 'error' }] })
   })
 

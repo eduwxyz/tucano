@@ -65,6 +65,30 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           const one = (nome: string, funcao: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao, instrucoes: L(`Você é ${nome}, de ${funcao}.\nEntrega em tópicos.`, `You're ${nome}, in ${funcao}.\nDeliver in bullet points.`), ...extra })
           const r = await callTool(turn.mcpUrl, 'propor_time', { agentes: [one('Duda', L('Dados', 'Data'), { responde_a: 'lia' }), one('Caio', L('Análise', 'Analysis'), { responde_a: 'Duda' })], motivo: L('Um time de dados sob a Lia.', 'A data team under Lia.') })
           reply = textOf(r)
+        } else if (/time de conte[uú]do/i.test(last)) {
+          // A team with a channel, one of them with a connector to write to, and a routine for the other.
+          const each = (nome: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao: L('Conteúdo', 'Content'), cor: 'violet', instrucoes: L(`Você é ${nome}.\nCuida do conteúdo do time.\nResponde curto.`, `You are ${nome}.\nLook after the team's content.\nAnswer briefly.`), esforco: 'low', web: false, ...extra })
+          await callTool(turn.mcpUrl, 'propor_time', { agentes: [each('Escriba', { conectores: [{ conector: 'Planilha', nivel: 'escrita' }] }), each('Revisora')], canal: { nome: L('redacao', 'writing'), tema: L('Posts da semana', "The week's posts") } })
+          await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'Revisora', nome: L('Revisão da manhã', 'Morning review'), pedido: L('Revise os posts do dia.', "Review the day's posts."), dias: [1, 2, 3, 4, 5], hora: '09:00' })
+          reply = L('Criei o time de conteúdo. Dá pra desfazer no card.', 'I made the content team. It can be undone on the card.')
+        } else if (/mais esperta/i.test(last)) {
+          // A change with a part inside the app (effort) and a part that spends money (the month's limit).
+          await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'nina', esforco: 'high', limite: 500_000, motivo: L('Tarefas mais difíceis.', 'Harder tasks.') })
+          reply = L('Subi o esforço da Nina; o limite novo espera você confirmar.', "I raised Nina's effort; the new limit waits for you to confirm.")
+        } else if (/resumo di[aá]rio/i.test(last)) {
+          await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'nina', nome: L('Resumo diário', 'Daily summary'), pedido: L('Resuma o dia.', 'Sum up the day.'), dias: [1, 2, 3, 4, 5], hora: '18:00' })
+          reply = L('Criei a rotina.', 'I made the routine.')
+        } else if (/importa os bots/i.test(last)) {
+          // Two new agents, each with a routine: a second propor_agente is refused and says to use a team,
+          // and the team with both takes the first one's place. What it was told is kept in the reply.
+          const agent = (nome: string): Record<string, unknown> => ({ nome, funcao: 'Bot', cor: 'rose', instrucoes: L(`Você é o ${nome}.\nFaz o que o bot antigo fazia.\nResponde curto.`, `You are ${nome}.\nDo what the old bot did.\nAnswer briefly.`), esforco: 'low', web: false })
+          const told: string[] = []
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_agente', agent('Sustinho'))))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'Sustinho', nome: 'Preparo do susto', pedido: 'Prepare o susto do dia.', dias: [0, 1, 2, 3, 4, 5, 6], hora: '08:00' })))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_agente', agent('Faro'))))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_time', { agentes: [agent('Sustinho'), agent('Faro')] })))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'Faro', nome: 'Faro da manhã', pedido: 'Fareje as novidades.', dias: [1, 2, 3, 4, 5], hora: '09:00' })))
+          reply = told.join('\n---\n')
         } else if (/migra/i.test(last)) {
           const calls: [string, Record<string, unknown>][] = [
             ['propor_agente', { nome: 'Léo', funcao: L('Financeiro', 'Finance'), cor: 'amber', instrucoes: L('Você cuida das contas do time.\nLê os gastos do dia e separa por categoria.\nResponde em tópicos curtos.\nNunca paga nada: pergunta antes.', "You look after the team's accounts.\nRead the day's expenses and sort them by category.\nAnswer in short bullet points.\nNever pay anything: ask first."), esforco: 'low', web: false, motivo: L('Alguém só pras contas.', 'Someone just for the accounts.') }],
