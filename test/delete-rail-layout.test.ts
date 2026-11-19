@@ -10,10 +10,11 @@ const markup = `
     <div class="msg__body"><div class="msg__anchor"><div class="msg__anchor-pin">
       <button class="icon-btn icon-btn--sm msg__reply">thread</button>
       <button class="icon-btn icon-btn--sm msg__delete">trash</button>
+      <button class="icon-btn icon-btn--sm msg__reply msg__reply--up">up</button>
     </div><div class="steps__list" style="height:180px"></div></div></div>
   </article>`
 
-it.skipIf(!existsSync(chromium.executablePath()))('keeps the thread button and trash in one rail column', async () => {
+it.skipIf(!existsSync(chromium.executablePath()))('keeps thread, trash and way back in one rail column', async () => {
   const browser = await chromium.launch({ headless: true })
   try {
     for (const width of [900, 1280]) {
@@ -23,10 +24,13 @@ it.skipIf(!existsSync(chromium.executablePath()))('keeps the thread button and t
         const r = el.getBoundingClientRect()
         return { left: Math.round(r.left), top: Math.round(r.top) }
       })
-      const thread = await box('.msg__reply')
+      const thread = await box('.msg__reply:not(.msg__reply--up)')
       const trash = await box('.msg__delete')
+      const up = await box('.msg__reply--up')
       expect(trash.top).toBeGreaterThan(thread.top)
+      expect(up.top).toBeGreaterThan(trash.top)
       expect(trash.left).toBe(thread.left)
+      expect(up.left).toBe(thread.left)
       await page.close()
     }
   } finally {

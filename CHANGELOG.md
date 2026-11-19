@@ -27,6 +27,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Delete a session from the reply rail and the thread header.** The trash sits under the thread button in the sticky rail, or beside the summary and close buttons in the thread header. One press arms it; the second deletes the reply, its thread and the work under it. Escape, an outside press or four seconds disarms it. The prompt it answered and its receipts stay. My own prompt can be edited where it stands, and a routine's post can be removed without stopping the routine.
 
+- **Delete a session from the reply rail and the thread header.** The trash sits under the thread button in the sticky rail, or beside the summary and close buttons in the thread header. with the way back to its prompt. One press arms it; the second deletes the reply, its thread and the work under it. Escape, an outside press or four seconds disarms it. The prompt it answered and its receipts stay. My own prompt can be edited where it stands, and a routine's post can be removed without stopping the routine.
+
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
