@@ -5,7 +5,7 @@ import { withMessage } from '../../../shared/attach'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
@@ -52,6 +52,7 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  deleteMessage,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -288,6 +289,8 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
+const JumpTo = createContext<(id: string) => void>(() => {})
+
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
@@ -301,6 +304,17 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   })
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  // The way back from a reply to the prompt it answers. A press lands on that row in this list;
+  // if it is further back than what is loaded, ask for the earlier page and try again there.
+  const jump = useCallback((id: string) => {
+    stick.current = false
+    const el = ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(id)}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('is-flash')
+      setTimeout(() => el.classList.remove('is-flash'), 1800)
+    } else void loadOlder(conversationId)
+  }, [conversationId])
   const [farFromBottom, setFarFromBottom] = useState(false)
   const [loading, setLoading] = useState(false)
   const before = useRef<{ height: number; top: number } | null>(null) // the list as it was, while older messages come
@@ -432,6 +446,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
       {lead}
+      <JumpTo.Provider value={jump}>
       {shown.map((item, i) => {
         if (item.kind === 'no-news') return <NoNewsLine key={item.key} line={item} focus={holder === item ? focus : undefined} replies={replies} />
         const m = item.message
@@ -448,6 +463,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
           m.author.kind !== 'routine'
         return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} ask={item.ask} askReplies={item.ask && replies?.get(item.ask.id)} />
       })}
+      </JumpTo.Provider>
       {farFromBottom && (
         <div className="messages__jump">
           <button className="messages__jump-btn" title={L('Ir para o fim', 'Go to the end')} aria-label={L('Ir para o fim da conversa', 'Go to the end of the conversation')} onClick={() => ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' })}>
@@ -491,6 +507,69 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   // wrote anyway waits behind a link, and the agent speaks when the work comes back.
   const [showSaid, setShowSaid] = useState(false)
   const [showAsk, setShowAsk] = useState(false)
+  const rowEl = useRef<HTMLElement>(null)
+  const [height, setHeight] = useState(0)
+  useLayoutEffect(() => {
+    const el = rowEl.current
+    if (!el) return
+    const read = (): void => setHeight(el.offsetHeight)
+    read()
+    const seen = new ResizeObserver(read)
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [])
+  const leftStack = height >= 74
+  // The way back to this session's start appears only once that start has scrolled out of sight.
+  // A press records where we were and parks the row's first line at the top; the down arrow then
+  // returns to the exact scroll position the person left.
+  const [pastStart, setPastStart] = useState(false)
+  const [returnTop, setReturnTop] = useState<number | null>(null)
+  useEffect(() => {
+    if (!message.run) return
+    const row = rowEl.current
+    const list = row?.closest<HTMLElement>('.messages')
+    if (!row || !list) return
+    const check = (): void => setPastStart(row.getBoundingClientRect().top < list.getBoundingClientRect().top - 6)
+    check()
+    list.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      list.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [message.run, height])
+  const scrollList = (): HTMLElement | undefined => rowEl.current?.closest<HTMLElement>('.messages') ?? undefined
+  const toStart = (): void => {
+    const list = scrollList()
+    const row = rowEl.current
+    if (!list || !row) return
+    setReturnTop(list.scrollTop)
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+    list.scrollTo({ top, behavior: 'smooth' })
+    row.classList.add('is-flash')
+    setTimeout(() => row.classList.remove('is-flash'), 1800)
+  }
+  const back = (): void => {
+    const list = scrollList()
+    if (!list || returnTop === null) return
+    list.scrollTo({ top: returnTop, behavior: 'smooth' })
+    setReturnTop(null)
+  }
+  const ownPrompt = !agent && !other && message.author.kind === 'person' && !message.run
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(message.text)
+  const field = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!editing || !field.current) return
+    field.current.focus()
+    if (typeof field.current.setSelectionRange === 'function') field.current.setSelectionRange(draft.length, draft.length)
+  }, [editing, draft.length])
+  const sendEdit = (): void => {
+    const words = draft.trim()
+    if (!words) return
+    sendMessage(message.conversationId, words, [], message.threadId)
+    setEditing(false)
+  }
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
 
   // The same object between renders, or every link would start over.
@@ -518,7 +597,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const name = agent ? agent.name : ghost ? L('Agente', 'Agent') : (other ?? me.name)
   return (
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
-    <article className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
+    <article ref={rowEl} className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''} ${leftStack ? 'is-left-stack' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
           (agent ? (
@@ -530,6 +609,22 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           ))}
       </div>
       <div className="msg__body">
+        {ownPrompt && !editing && (
+          <>
+            <button
+              className="icon-btn icon-btn--sm msg__edit"
+              title={L('Editar este pedido', 'Edit prompt')}
+              aria-label={L('Editar este pedido', 'Edit prompt')}
+              onClick={() => {
+                setDraft(message.text)
+                setEditing(true)
+              }}
+            >
+              <Icon name="edit" size={13} />
+            </button>
+            <DeleteSession message={message} where="prompt" />
+          </>
+        )}
         {!grouped && (
           <div className="msg__head">
             {agent ? (
@@ -548,18 +643,42 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             top of the run here, in the same block, and leaves with the run's last line. Without threads, or
             without a run, it stays where it was, at the corner of the message (ThreadLink). */}
         {message.run ? (
-          replies ? (
-            <div className="msg__anchor">
-              <div className="msg__anchor-pin">
-                <ThreadButton message={message} />
-              </div>
-              <RunSteps message={message} />
+          <div className="msg__anchor">
+            <div className={`msg__anchor-pin ${replies ? '' : 'msg__anchor-pin--alone'}`}>
+              {replies ? <ThreadButton message={message} /> : null}
+              {agent && <DeleteSession message={message} />}
+              {message.run && (pastStart || returnTop !== null) && <PromptJump back={returnTop !== null} onClick={returnTop !== null ? back : toStart} />}
             </div>
-          ) : (
             <RunSteps message={message} />
-          )
+          </div>
         ) : null}
-        {text && quiet && !showSaid ? (
+        {editing ? (
+          <div className="msg__edit-box">
+            <textarea
+              ref={field}
+              rows={Math.min(10, Math.max(2, 1 + Math.round(draft.length / 90)))}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendEdit()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setEditing(false)
+                }
+              }}
+            />
+            <div className="msg__edit-actions">
+              <button className="btn btn--primary btn--sm" disabled={!draft.trim()} onClick={sendEdit}>
+                {L('Enviar', 'Send')}
+              </button>
+              <button className="btn btn--sm" onClick={() => setEditing(false)}>
+                {L('Cancelar', 'Cancel')}
+              </button>
+            </div>
+          </div>
+        ) : text && quiet && !showSaid ? (
           <button className="link small msg__said" onClick={() => setShowSaid(true)}>
             {L('Ver o que escreveu', 'See what it wrote')}
           </button>
@@ -708,6 +827,7 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
         </div>
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
+      <DeleteSession message={message} where="post" />
     </article>
   )
 }
@@ -1004,6 +1124,78 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
+// A session's reply leaves the room in two presses: the first arms the trash, the second deletes
+// the reply, the thread it started and the work under it. Escape, an outside press or four seconds
+// disarms it. The same control rides the thread header and closes the panel with the session.
+const DELETE_ARM_MS = 4000
+export function DeleteSession({ message, where = 'corner' }: { message: Message; where?: 'corner' | 'head' | 'post' | 'prompt' }): ReactNode {
+  const [armed, setArmed] = useState(false)
+  const head = where === 'head'
+  const routine = where === 'post' || message.author.kind === 'routine'
+  const mine = where === 'prompt'
+  const working = message.run?.status === 'working'
+  useEffect(() => {
+    if (!armed) return
+    const timer = setTimeout(() => setArmed(false), DELETE_ARM_MS)
+    const away = (e: MouseEvent): void => {
+      if (!(e.target instanceof Element && e.target.closest('.msg__delete'))) setArmed(false)
+    }
+    const escape = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setArmed(false)
+    }
+    window.addEventListener('mousedown', away)
+    window.addEventListener('keydown', escape)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('mousedown', away)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [armed])
+  const press = (): void => {
+    if (!armed) return setArmed(true)
+    deleteMessage(message.id)
+    if (head) openPanel(null)
+  }
+  const label = mine ? L('Apagar este pedido', 'Delete prompt') : routine ? L('Apagar esta publicação', 'Delete post') : L('Apagar esta sessão', 'Delete session')
+  const next = mine
+    ? L('Clique de novo para apagar o pedido', 'Click again to delete the prompt')
+    : working
+      ? L('Clique de novo para parar e apagar a sessão', 'Click again to stop and delete the session')
+      : routine
+        ? L('Clique de novo para apagar a publicação', 'Click again to delete the post')
+        : L('Clique de novo para apagar a sessão', 'Click again to delete the session')
+  return (
+    <button
+      className={`icon-btn ${head ? '' : 'icon-btn--sm'} msg__delete ${head ? 'msg__delete--head' : ''} ${routine ? 'msg__delete--post' : ''} ${mine ? 'msg__delete--prompt' : ''} ${armed ? 'is-armed' : ''}`}
+      title={armed ? next : label}
+      aria-label={armed ? L('Confirmar: apagar', 'Confirm: delete') : label}
+      aria-pressed={armed}
+      onClick={press}
+    >
+      <Icon name="trash" size={head ? 14 : 13} />
+    </button>
+  )
+}
+
+// The way back to the start of a long run, and the way home after taking it. The up arrow parks
+// the first line of the run at the top of the list; the down arrow returns to the exact scroll
+// position the person left. The row owns that state so several replies can each hold their place.
+export function PromptJump({ back, onClick }: { back?: boolean; onClick: () => void }): ReactNode {
+  const label = back
+    ? L('Voltar aonde estava', 'Return to where you were')
+    : L('Ir para o começo desta sessão', 'Go to the start of this session')
+  return (
+    <button
+      className={`icon-btn icon-btn--sm msg__reply ${back ? 'msg__reply--down' : 'msg__reply--up'}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+    >
+      <Icon name={back ? 'down' : 'up'} size={12} />
+    </button>
+  )
+}
+
 function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
@@ -1065,6 +1257,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
             <Icon name="book" size={14} />
           </button>
         )}
+        {root && root.author.kind === 'agent' && root.run && <DeleteSession message={root} where="head" />}
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>
