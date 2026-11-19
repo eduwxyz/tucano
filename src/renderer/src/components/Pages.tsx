@@ -3167,7 +3167,7 @@ export function AgentRepliesCard({ settings, update }: { settings: Settings; upd
             value={settings.sendMode ?? 'parallel'}
             onChange={(v) => { if (v) update({ sendMode: v as SendMode }) }}
             options={[
-              { value: 'parallel', label: L('Sessões paralelas em execução', 'Parallel Running Sessions') },
+              { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Parallel Running Sessions') },
               { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') }
             ]}
             placeholder={L('Escolha', 'Pick')}
