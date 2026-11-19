@@ -2,11 +2,11 @@
 // Boletim · Uso e limites). Each is one row in the sidebar; the hub draws a big title and the tabs,
 // and the page below leaves out its own title (hub-context.ts). The view kinds stay what they were,
 // so every link, shortcut and mission that opens one of these pages still lands on it.
-import { useEffect, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import type { SidebarPart } from '../../../shared/onboarding'
 import { amAdmin, navigate, pendingMemories, useStore, type View } from '../store'
-import { InHub } from './hub-context'
+import { HubTools, InHub } from './hub-context'
 import { useSidebarParts } from './Missions'
 
 export type HubId = 'knowledge' | 'operations'
@@ -77,6 +77,9 @@ export function openHub(hub: HubId, tabs: Tab[]): void {
 export function Hub({ tab, children }: { tab: HubTab; children: ReactNode }): ReactNode {
   const hub = hubOf(tab)!
   const tabs = useHubTabs(hub)
+  // The element on the right of the tab row. A page inside portals its controls into it once it is
+  // mounted; until then the page's own head still draws them.
+  const [tools, setTools] = useState<HTMLElement | null>(null)
   const parts = useSidebarParts()
   const fresh = parts.fresh(tab as SidebarPart)
   // Opened, a tab a mission brought stops being new.
@@ -101,7 +104,8 @@ export function Hub({ tab, children }: { tab: HubTab; children: ReactNode }): Re
       <header className="hub__head">
         <h1 className="hub__title">{title}</h1>
         <p className="hub__lede">{hubLede(hub)}</p>
-        <nav className="hub__tabs" role="tablist" aria-label={title} onKeyDown={keys}>
+        <div className="hub__tabs-row">
+          <nav className="hub__tabs" role="tablist" aria-label={title} onKeyDown={keys}>
           {tabs.map((t) => (
             <button
               key={t.tab}
@@ -122,10 +126,14 @@ export function Hub({ tab, children }: { tab: HubTab; children: ReactNode }): Re
               ) : null}
             </button>
           ))}
-        </nav>
+          </nav>
+          <div className="hub__tools" ref={setTools} />
+        </div>
       </header>
       <div className="hub__body" role="tabpanel" aria-label={tabLabel(tab)}>
-        <InHub.Provider value={true}>{children}</InHub.Provider>
+        <HubTools.Provider value={tools}>
+          <InHub.Provider value={true}>{children}</InHub.Provider>
+        </HubTools.Provider>
       </div>
     </section>
   )

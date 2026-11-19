@@ -175,6 +175,7 @@ export function Sheet({
   back,
   fill,
   wide,
+  headless,
   children
 }: {
   title: ReactNode
@@ -183,6 +184,9 @@ export function Sheet({
   back?: { label: string; onClick: () => void } // a page inside the page: the way out, above the title
   fill?: boolean
   wide?: boolean
+  // The page above already draws the title and the tabs, and took this page's controls into its own
+  // row, so the head band would be an empty strip between the tabs and the content.
+  headless?: boolean
   children: ReactNode
 }): ReactNode {
   const hub = useContext(InHub)
@@ -191,10 +195,14 @@ export function Sheet({
     <section className={`page page--head sheet ${fill ? 'sheet--fill' : ''} ${hub ? 'is-in-hub' : ''}`}>
       {!hub && <div className="page__drag" />}
       {fill ? (
-        <>
-          <div className="page-body page-body--fill">{head}</div>
-          {children}
-        </>
+        headless ? (
+          <>{children}</>
+        ) : (
+          <>
+            <div className="page-body page-body--fill">{head}</div>
+            {children}
+          </>
+        )
       ) : (
         <div className="page__scroll">
           <div className={`page-body ${wide ? 'is-wide' : ''}`}>
