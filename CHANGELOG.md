@@ -4,6 +4,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.42] - 2026-11-19
+
+> **Em português:**
+> - **Corrigido:** no **Quadro**, o aviso de agente parado não desenha mais o nome do agente por cima de "parou em …".
+> - **Corrigido:** num **servidor** (Tucano Pro), o **ditado** diz onde o áudio vira texto: no servidor, não "neste computador, sem internet". E avisa que lá o modelo **Leve** é bem mais rápido.
+
 ### Fixed
 
 - **The Quadro's "stopped on" row no longer draws the agent's name over the text.** The row borrowed the chat message's class, a grid with a 34px first column, so a name like "UI Architect" spilled over "parou em …".
