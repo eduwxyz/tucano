@@ -5,7 +5,7 @@ import { withMessage } from '../../../shared/attach'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
@@ -289,6 +289,8 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
+const JumpTo = createContext<(id: string) => void>(() => {})
+
 export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
@@ -302,6 +304,17 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
   })
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  // The way back from a reply to the prompt it answers. A press lands on that row in this list;
+  // if it is further back than what is loaded, ask for the earlier page and try again there.
+  const jump = useCallback((id: string) => {
+    stick.current = false
+    const el = ref.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(id)}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('is-flash')
+      setTimeout(() => el.classList.remove('is-flash'), 1800)
+    } else void loadOlder(conversationId)
+  }, [conversationId])
   const [farFromBottom, setFarFromBottom] = useState(false)
   const [loading, setLoading] = useState(false)
   const before = useRef<{ height: number; top: number } | null>(null) // the list as it was, while older messages come
@@ -433,6 +446,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
       {lead}
+      <JumpTo.Provider value={jump}>
       {shown.map((item, i) => {
         if (item.kind === 'no-news') return <NoNewsLine key={item.key} line={item} focus={holder === item ? focus : undefined} replies={replies} />
         const m = item.message
@@ -449,6 +463,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
           m.author.kind !== 'routine'
         return <MessageRow key={m.id} message={m} grouped={grouped} replies={replies && (replies.get(m.id) ?? NO_REPLIES)} ask={item.ask} askReplies={item.ask && replies?.get(item.ask.id)} />
       })}
+      </JumpTo.Provider>
       {farFromBottom && (
         <div className="messages__jump">
           <button className="messages__jump-btn" title={L('Ir para o fim', 'Go to the end')} aria-label={L('Ir para o fim da conversa', 'Go to the end of the conversation')} onClick={() => ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' })}>
@@ -602,6 +617,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             <div className={`msg__anchor-pin ${replies ? '' : 'msg__anchor-pin--alone'}`}>
               {replies ? <ThreadButton message={message} /> : null}
               {agent && <DeleteSession message={message} />}
+              {message.run?.replyTo && <PromptJump id={message.run.replyTo} />}
             </div>
             <RunSteps message={message} />
           </div>
@@ -1078,6 +1094,22 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
+// The way back to the prompt this reply answers, one row below the trash in the same rail. A run
+// taller than the screen otherwise leaves the question far above the work it started.
+export function PromptJump({ id }: { id: string }): ReactNode {
+  const jump = useContext(JumpTo)
+  return (
+    <button
+      className="icon-btn icon-btn--sm msg__reply msg__reply--up"
+      title={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
+      aria-label={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
+      onClick={() => jump(id)}
+    >
+      <Icon name="up" size={12} />
+    </button>
+  )
+}
+
 // A session's reply leaves the room in two presses: the first arms the trash, the second deletes
 // the reply, the thread it started and the work under it. Escape, an outside press or four seconds
 // disarms it. The same control rides the thread header and closes the panel with the session.

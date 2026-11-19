@@ -3492,9 +3492,31 @@ body.is-resizing webview {
   position: static;
   opacity: 1;
 }
+/* The way back to the prompt sits under the trash in the same rail, never on top of it. */
+.msg__reply--up {
+  top: 28px;
+}
+.msg__anchor-pin .msg__reply--up {
+  top: 52px;
+  right: -24px;
+}
+.msg__anchor-pin--alone .msg__reply--up {
+  top: 28px;
+  right: -24px;
+}
+@media (hover: none) {
+  .msg__edit,
+  .msg__delete--prompt {
+    opacity: 1;
+  }
+}
 .msg__delete--post {
   top: 28px;
   right: -24px;
+}
+/* The prompt's own glyphs measure from the bubble, not from the whole row. */
+.msg--me .msg__body {
+  position: relative;
 }
 .msg__edit {
   position: absolute;

@@ -9,7 +9,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
-- **Delete a session from the reply rail and the thread header.** The trash sits under the thread button in the sticky rail, or beside the summary and close buttons in the thread header. One press arms it; the second deletes the reply, its thread and the work under it. Escape, an outside press or four seconds disarms it. The prompt it answered and its receipts stay. My own prompt can be edited where it stands, and a routine's post can be removed without stopping the routine.
+- **Delete a session from the reply rail and the thread header.** The trash sits under the thread button in the sticky rail, or beside the summary and close buttons in the thread header. with the way back to its prompt. One press arms it; the second deletes the reply, its thread and the work under it. Escape, an outside press or four seconds disarms it. The prompt it answered and its receipts stay. My own prompt can be edited where it stands, and a routine's post can be removed without stopping the routine.
 ## [0.2.40] - 2026-11-18
 
 > **Em português:**
