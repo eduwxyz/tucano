@@ -137,6 +137,7 @@ describe('G. every event reaches only who may see what it is about', () => {
       message: { event: { type: 'message', message }, is: 'hidden' },
       delta: { event: { type: 'delta', id: 'm-dm', text: 'segredo' }, is: 'hidden' },
       agent: { event: { type: 'agent', agent: db.agent('a1')! }, is: 'shown' },
+      agent_removed: { event: { type: 'agent_removed', id: 'a9' }, is: 'shown' },
       conversation: { event: { type: 'conversation', conversation: db.conversation('dm-ana')! }, is: 'hidden' },
       settings: { event: { type: 'settings', settings }, is: 'own' },
       connector: { event: { type: 'connector', connector: { id: 'c1', name: 'Linear', kind: 'remote', status: 'connected', tools: [] } as unknown as Connector }, is: 'shown' },

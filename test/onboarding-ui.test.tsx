@@ -47,6 +47,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     ensureTuca: vi.fn(async () => ({ conversationId: 't1' })),
     saveAgent: vi.fn(async () => {}),
     updateSettings: vi.fn(),
+    toast: vi.fn(),
     navigate: vi.fn(),
     setMyName: vi.fn(async () => {}),
     openExternal: vi.fn(),
@@ -58,6 +59,7 @@ const store = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { Intro, GuestWelcome, foundTitle, continueLabel, leftOut } = await import('../src/renderer/src/components/Intro')
 const { Sidebar } = await import('../src/renderer/src/components/Sidebar')
+const { Hub } = await import('../src/renderer/src/components/Hubs')
 const { MissionsPage } = await import('../src/renderer/src/components/Missions')
 const { Dialogs } = await import('../src/renderer/src/components/Dialogs')
 const { askBody, askTitle } = await import('../src/renderer/src/components/Coach')
@@ -373,29 +375,62 @@ describe('the sidebar and the missions', () => {
   const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: 'Agenda', color: 'violet', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
   const labels = (): string[] => [...document.querySelectorAll('.nav-item__label')].map((x) => x.textContent ?? '')
 
-  it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions, the settings', async () => {
+  // The workspace's name at the top opens its menu; Conectores and Configurações sit at the foot.
+  const openMenu = (): Promise<void> => click(document.querySelector('.workspace-picker__button')!)
+  const menuItems = (): string[] => [...document.querySelectorAll('[role="menu"] .menu__item')].map((x) => x.textContent ?? '')
+  const tabs = (): string[] => [...document.querySelectorAll('.hub__tab')].map((x) => x.textContent ?? '')
+
+  it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions; Conectores and the settings at the foot', async () => {
     fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia', 'Configurações'])
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia'])
     expect(text()).toContain('Missões')
     expect(text()).toContain('Próxima: fale com Lia')
+    expect(document.querySelector('.sidebar__tools .sidebar__tool')?.textContent).toBe('Conectores')
+    await click(document.querySelector('.sidebar__gear')!)
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'settings' })
+    await openMenu()
+    expect(menuItems().join(' | ')).not.toMatch(/Conectores|Configurações/)
+    // Enviar feedback is at the foot from the start, for everyone, always in sight; not in the menu.
+    expect([...document.querySelectorAll('.sidebar__foot .sidebar__tool')].map((x) => x.textContent)).toEqual(['Enviar feedback', 'Conectores'])
+    expect(menuItems()).not.toContain('Enviar feedback')
   })
 
   it('grows as missions bring parts, tagged new until opened', async () => {
     fake = state({ agents: [lia], conversations: [geral], connectors: [{ id: 'c1' } as State['connectors'][number]], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toContain('Conectores')
-    expect(document.querySelector('.nav-item.is-fresh')?.textContent).toContain('NOVO')
     expect(text()).toContain('Você liberou Conectores')
-    await click(document.querySelector('.nav-item.is-fresh')!)
+    const connectors = document.querySelector('.sidebar__tools .sidebar__tool')!
+    expect(connectors.textContent).toContain('NOVO')
+    await click(connectors)
     expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, seen: ['connectors'] } })
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'connectors' })
+  })
+
+  it('shows a hub once one of its tabs is unlocked, and then with all its tabs', async () => {
+    // Something on autopilot: Rotinas is unlocked, so Operação shows whole; nothing of Conhecimento is.
+    const routine = { id: 'r1' } as State['routines'][number]
+    fake = state({ agents: [lia], conversations: [geral], routines: [routine], settings: { onboarding: { done: true, fresh: true } } })
+    await render(<Sidebar />)
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'Operação', 'geral', 'Lia'])
+    expect(document.querySelector('[data-hub="operations"]')?.textContent).toContain('NOVO')
+    await render(<Hub tab="routines">{null}</Hub>)
+    expect(tabs()).toEqual(['RotinasNOVO', 'Boletim', 'Uso e limites'])
+    expect(document.querySelector('.hub__title')?.textContent).toBe('Operação')
+    // Opened, it stops being new.
+    expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, seen: ['routines'] } })
   })
 
   it('is whole for someone who already used Tucano, and after "Mostrar tudo de uma vez"', async () => {
     for (const onboarding of [undefined, { done: true }, { done: true, fresh: true, showAll: true }]) {
       fake = state({ agents: [lia], conversations: [geral], settings: { onboarding } })
       await render(<Sidebar />)
-      expect(labels()).toEqual(expect.arrayContaining(['Memória', 'Wiki', 'Rotinas', 'Skills', 'Boletim', 'Uso e limites', 'Conectores']))
+      expect(labels()).toEqual(expect.arrayContaining(['Conhecimento', 'Operação']))
+      expect(document.querySelector('.sidebar__tools .sidebar__tool')?.textContent).toBe('Conectores')
+      await render(<Hub tab="memory">{null}</Hub>)
+      expect(tabs()).toEqual(['Memória', 'Wiki', 'Skills'])
+      await render(<Hub tab="usage">{null}</Hub>)
+      expect(tabs()).toEqual(['Rotinas', 'Boletim', 'Uso e limites'])
     }
   })
 
@@ -406,5 +441,105 @@ describe('the sidebar and the missions', () => {
     expect(text()).toContain('Libera Conectores')
     await click(/Mostrar tudo de uma vez/)
     expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, showAll: true } })
+  })
+
+  it('brings hidden missions back from the workspace menu', async () => {
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: { done: true, fresh: true, checklistHidden: true } } })
+    await render(<Sidebar />)
+    expect(text()).not.toContain('Próxima:')
+    await openMenu()
+    await click(/Mostrar as missões/)
+    expect(store.updateSettings).toHaveBeenCalledWith({ onboarding: { done: true, fresh: true, checklistHidden: false } })
+  })
+})
+
+describe('taking items out of the top of the sidebar', () => {
+  const geral = { id: 'ch1', kind: 'channel', name: 'geral', members: ['a1'] } as State['conversations'][number]
+  const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: 'Agenda', color: 'violet', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
+  const waiting = { id: 'ap1', state: 'pending', agentId: 'a1' } as State['approvals'][number]
+  const labels = (): string[] => [...document.querySelectorAll('.sidebar__scroll > .top-row .nav-item__label')].map((x) => x.textContent ?? '')
+  const row = (name: string): Element => [...document.querySelectorAll('.top-row')].find((r) => r.querySelector('.nav-item__label')?.textContent === name)!
+  const openMenu = (): Promise<void> => click(document.querySelector('.workspace-picker__button')!)
+  const parts = (): [string, boolean][] => [...document.querySelectorAll('[role="menuitemcheckbox"]')].map((x) => [x.querySelector('.ws-menu__part-text > span')?.textContent ?? '', x.getAttribute('aria-checked') === 'true'])
+  const settled = { done: true }
+
+  it('takes an item out from itself: a right click, or its "•••", then "Tirar da barra"', async () => {
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled } })
+    await render(<Sidebar />)
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'Quadro', 'Conhecimento', 'Operação'])
+    await act(async () => {
+      const e = new window.Event('contextmenu', { bubbles: true, cancelable: true })
+      Object.assign(e, { clientX: 40, clientY: 120 })
+      row('Quadro').dispatchEvent(e)
+    })
+    expect([...document.querySelectorAll('.menu [role="menuitem"]')].map((x) => x.textContent)).toEqual(['Abrir', 'Tirar da barra'])
+    await click(/^Tirar da barra$/)
+    expect(store.updateSettings).toHaveBeenCalledWith({ sidebarHidden: ['board'] })
+    // The toast takes it back at once.
+    expect(store.toast).toHaveBeenCalledWith('Quadro saiu da barra.', expect.objectContaining({ label: 'Desfazer' }))
+    fake = { ...fake, settings: { ...fake.settings, sidebarHidden: ['board'] } }
+    ;(vi.mocked(store.toast).mock.calls[0]![1] as { run: () => void }).run()
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ sidebarHidden: [] })
+    // The "•••" opens the same menu.
+    await click(row('Operação').querySelector('.top-row__more')!)
+    expect(document.querySelector('.menu')?.textContent).toContain('Tirar da barra')
+  })
+
+  it('leaves out what was taken out, and lists everything in the workspace menu to bring it back', async () => {
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled, sidebarHidden: ['board', 'operations'] } })
+    await render(<Sidebar />)
+    expect(labels()).toEqual(['Tuca', 'Aprovações', 'Conhecimento'])
+    await openMenu()
+    expect(parts()).toEqual([['Tuca', true], ['Aprovações', true], ['Quadro', false], ['Conhecimento', true], ['Operação', false]])
+    expect(text()).toContain('Volta quando algo espera por você')
+    // Ticking brings it back; unticking takes it out, without the toast: it's done where it comes back from.
+    await click([...document.querySelectorAll('[role="menuitemcheckbox"]')][2]!)
+    expect(store.updateSettings).toHaveBeenCalledWith({ sidebarHidden: ['operations'] })
+    await click([...document.querySelectorAll('[role="menuitemcheckbox"]')][0]!)
+    expect(store.updateSettings).toHaveBeenCalledWith({ sidebarHidden: ['board', 'operations', 'tuca'] })
+    expect(store.toast).not.toHaveBeenCalled()
+  })
+
+  it('brings Aprovações back by itself while something waits on the person, and says why', async () => {
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled, sidebarHidden: ['approvals'] } })
+    await render(<Sidebar />)
+    expect(labels()).not.toContain('Aprovações')
+    fake = state({ agents: [lia], conversations: [geral], approvals: [waiting], settings: { onboarding: settled, sidebarHidden: ['approvals'] } })
+    await render(<Sidebar />)
+    expect(labels()).toContain('Aprovações')
+    expect(row('Aprovações').className).toContain('is-back')
+    expect(row('Aprovações').textContent).toContain('Você tinha tirado da barra. Some de novo quando nada esperar por você.')
+    expect(row('Aprovações').querySelector('.top-row__more')).toBeNull()
+  })
+
+  it('says under the top items what was taken out, and puts each back where it was on a click', async () => {
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled, sidebarHidden: ['board', 'operations'] } })
+    await render(<Sidebar />)
+    const toggle = document.querySelector('.tucked__toggle')!
+    expect(toggle.textContent).toBe('2 escondidos')
+    expect(document.querySelectorAll('.tucked__item')).toHaveLength(0)
+    await click(toggle)
+    expect([...document.querySelectorAll('.tucked__item .nav-item__label')].map((x) => x.textContent)).toEqual(['Quadro', 'Operação'])
+    await click(document.querySelectorAll('.tucked__item')[1]!)
+    expect(store.updateSettings).toHaveBeenCalledWith({ sidebarHidden: ['board'] })
+    // Nothing taken out, no line.
+    fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: settled } })
+    await render(<Sidebar />)
+    expect(document.querySelector('.tucked')).toBeNull()
+  })
+
+  it('brings Conhecimento back by itself while a memory suggestion waits in it', async () => {
+    const suggested = { id: 'm1', state: 'pending', text: 'Ana prefere reuniões curtas' } as State['memories'][number]
+    fake = state({ agents: [lia], conversations: [geral], memories: [suggested], settings: { onboarding: settled, sidebarHidden: ['knowledge'] } })
+    await render(<Sidebar />)
+    expect(row('Conhecimento').className).toContain('is-back')
+    expect(document.querySelector('.tucked')).toBeNull() // it's in the sidebar, not among those taken out
+  })
+
+  it('keeps only what this sidebar has in the menu: no Quadro before there are agents', async () => {
+    fake = state({ conversations: [geral], settings: { onboarding: settled } })
+    await render(<Sidebar />)
+    await openMenu()
+    expect(parts().map(([name]) => name)).not.toContain('Quadro')
   })
 })

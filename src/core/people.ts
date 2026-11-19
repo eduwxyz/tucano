@@ -85,6 +85,30 @@ export const computerOwner = (db: Db, connectorId: string | undefined): string |
   return n ? (n.owner ?? db.ownerId()) : undefined
 }
 
+// A computer lent to this server (docs/local-node.md), for exactly the agents its person picks, to read and write.
+// Its person decides even without being an admin: an agent reaches it only working for them (runs.ts), and the
+// node's floors stay (a command never below "write"). An admin may too, as with any connector. Returns the
+// agents that changed, saved; throws why not.
+export function shareComputer(db: Db, person: Person, connectorId: string, agentIds: string[]): Agent[] {
+  const owner = computerOwner(db, connectorId)
+  if (!owner) throw new Error(L('Isso não é um computador emprestado.', "That isn't a lent computer."))
+  if (owner !== person.id && !isAdmin(person)) throw new Error(L('Só quem emprestou o computador escolhe os agentes que o usam.', 'Only whoever lent the computer picks the agents that use it.'))
+  const want = new Set(agentIds)
+  const changed: Agent[] = []
+  // Only the agents this person sees: someone who reaches part of the team touches only that part.
+  for (const a of agentsFor(person, db.agents())) {
+    if (a.archived || a.kind === 'tuca') continue
+    const has = (a.grants[connectorId] ?? 'none') !== 'none'
+    if (want.has(a.id) === has) continue
+    const grants = { ...a.grants }
+    if (want.has(a.id)) grants[connectorId] = 'read_write'
+    else delete grants[connectorId]
+    db.saveAgent({ ...a, grants })
+    changed.push(db.agent(a.id)!)
+  }
+  return changed
+}
+
 // The people whose memories ("about me") a reply gets: a DM's person; in a channel, the people who
 // wrote in what it reads (a routine's person for its run), newest first; the requester otherwise.
 export function presentPeople(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], requester: Person): string[] {
@@ -251,7 +275,7 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
+    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, sidebarHidden: _h, onboarding: _o, wikiDir: _w, ...rest } = s
     return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 
@@ -386,6 +410,8 @@ export class People {
       // This computer's lines to the servers it's lent to: its owner's only.
       case 'node':
         return person.role === 'owner' ? event : undefined
+      // An agent taken back right after it was made: its id alone, so whoever had it drops it.
+      case 'agent_removed':
       case 'voice':
       case 'connector_removed':
       case 'skill':

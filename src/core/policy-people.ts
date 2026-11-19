@@ -14,7 +14,7 @@ export const ownerError = (): string => L('Só o dono do Tucano pode fazer isso.
 
 // What a person may change of the settings without being an admin: how the app looks to them.
 // Each person's own (kept on them, see People.settingsFor); the owner's are the settings themselves.
-export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']
+export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']
 export const isPersonalSetting = (k: string): boolean => (PERSONAL_SETTINGS as readonly string[]).includes(k)
 
 export type Action =
@@ -109,6 +109,8 @@ export const NEEDS: Record<Method, Need> = {
   applyProposal: 'target', // agents and teams, admins (a member's card tells them); a routine, its rules; a channel, anyone
   applyProposals: 'target', // each card as applyProposal checks it
   dismissProposals: 'anyone',
+  undoProposal: 'target', // as applying it: agents and teams, admins; a routine, its rules; a channel, whoever made it
+  undoProposals: 'target',
   localPath: 'anyone',
   openLocal: 'anyone',
   openExternal: 'anyone',
@@ -135,7 +137,13 @@ export const NEEDS: Record<Method, Need> = {
   cancelJobRun: 'admin',
   checkDatabricks: 'admin',
   watchRoutine: 'anyone',
+  sendFeedback: 'anyone', // to the people who make Tucano: what anyone here saw go wrong
+  survey: 'owner', // one answer per install: the owner's
+  answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
+  browserLogins: 'admin', // the logins saved for an agent's browser, like a connector's token
+  saveBrowserLogin: 'admin',
+  removeBrowserLogin: 'admin',
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',
   // the team's knowledge: anyone reads and writes pages; the curator's decisions and the wiki's place are the admins'
@@ -230,6 +238,7 @@ export const NEEDS: Record<Method, Need> = {
   harnessMcps: 'admin',
   importHarnessMcp: 'admin',
   updateTool: 'admin',
+  shareComputer: 'target', // a lent computer's person, or an admin (checked in the core)
   checkTrigger: 'admin',
   refreshEngines: 'admin',
   loginEngine: 'admin',

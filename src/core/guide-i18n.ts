@@ -11,6 +11,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Databricks jobs',
     summary: 'An agent follows a run through the Databricks CLI, with a live card, and only spends tokens when something matters.'
   },
+  'tabela-sql': {
+    title: "A SQL query's table",
+    summary: 'What the agent queried shows in a table under the reply, to sort, filter and copy.'
+  },
   agentes: {
     title: 'Agents',
     summary: 'Creating an agent, instructions, model, limits, tools and access, memory, appearance and archiving.'

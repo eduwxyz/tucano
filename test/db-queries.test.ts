@@ -44,11 +44,11 @@ describe('reading just what is asked', () => {
 
   it('a start marks only the working replies as interrupted', () => {
     const db = seeded()
-    expect(db.interruptStaleRuns()).toBe(1)
+    expect(db.interruptStaleRuns()).toHaveLength(1)
     expect(db.message('m1')?.run).toMatchObject({ status: 'interrupted', steps: [{ status: 'error' }] })
     expect(db.message('m2')?.run?.status).toBe('done')
     expect(db.message('m3')?.run?.status).toBe('waiting_approval')
-    expect(db.interruptStaleRuns()).toBe(0)
+    expect(db.interruptStaleRuns()).toHaveLength(0)
   })
 
   it('the pending approvals, counted', () => {

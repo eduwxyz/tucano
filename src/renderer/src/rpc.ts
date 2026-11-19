@@ -25,13 +25,15 @@ declare global {
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
-      onNavigatePage?: (cb: (page: 'skills') => void) => void // desktop only
+      onNavigatePage?: (cb: (page: 'skills' | 'servers' | 'connectors') => void) => void // desktop; on a server's page in the app, Connectors (where its lent computer gets its agents)
+      openLending?: () => void // a server's page in the desktop app: this computer's Tucano, on Settings › Servers
       onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own
       viewing: (conversationId: string | null) => void
       // Settings › General › Notifications: one sent now ('shown'), or why none can come here
       // (a browser: blocked by the person, or a page without HTTPS, where browsers show none).
       testNotify?: () => Promise<NotifyState | 'shown'>
       notifyState?: () => NotifyState // a browser only: where its notifications stand now
+      capture?: () => Promise<{ type: 'image/png' | 'image/jpeg'; data: string } | null> // desktop only: this window's picture, base64
       updateState: () => Promise<UpdateState>
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void
@@ -51,6 +53,7 @@ declare global {
         local: () => void // back to this computer's Tucano
         forget: (id: string) => Promise<boolean>
         setNode: (id: string, on: boolean) => void // lends this computer to that server, or stops
+        openAgents?: (id: string) => void // that server on screen, at Connectors: the agents that use this computer
         onChanged: (cb: () => void) => () => void // returns the unsubscribe
       }
     }

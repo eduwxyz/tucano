@@ -61,7 +61,8 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo
+  type NodeInfo,
+  type SavedLogin
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -135,10 +136,11 @@ export interface State {
 export interface Toast {
   id: number
   text: string
+  action?: { label: string; run: () => void } // one thing to do about it, right there ("Desfazer")
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string }
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string } } // image: the window, taken before it opened
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -569,6 +571,8 @@ function apply(e: CoreEvent): void {
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
+      case 'agent_removed':
+        return { ...s, agents: s.agents.filter((a) => a.id !== e.id) }
       case 'conversation': {
         return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
@@ -645,7 +649,10 @@ export async function start(): Promise<void> {
     navigate({ kind: 'conversation', id })
     if (thread) openThread(thread)
   })
-  window.tucano.onNavigatePage?.((page) => navigate({ kind: page }))
+  window.tucano.onNavigatePage?.((page) => {
+    if (page === 'servers') setTab('settings', 'servidores')
+    navigate({ kind: page === 'servers' ? 'settings' : page })
+  })
   window.tucano.onCoreDown?.(() => {
     disconnect()
     set((s) => ({ ...s, coreDown: true }))
@@ -724,6 +731,16 @@ export const modelById = (s: State, id: string): Model | undefined => s.models.f
 export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a) => a.state === 'pending')
 export const computerOf = (s: State, agentId: string): ComputerInfo | undefined => s.computers.find((c) => c.agentId === agentId)
 export const browserOf = (s: State, agentId: string): BrowserView | undefined => s.browsers.find((b) => b.agentId === agentId)
+// The browser shows big and live on an agent's latest message that used it, while there is something to
+// watch there: that reply still at work (or held on an approval), or a person in control of it. Otherwise,
+// and while it's open on the side, the small card: an idle browser doesn't take half the screen.
+export const liveBrowserOn = (s: State, message: Message): boolean => {
+  const agentId = message.author.kind === 'agent' ? message.author.id : undefined
+  if (!agentId || !message.run?.browser || lastBrowserIn(s, message.conversationId, agentId) !== message.id) return false
+  if (s.panel?.kind === 'browser' && s.panel.agentId === agentId) return false
+  const status = message.run.status
+  return status === 'working' || status === 'waiting_approval' || !!browserOf(s, agentId)?.shown
+}
 export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
 // A message of this window's person (one from before people has no id to compare, and was the owner's: theirs too).
 export const isMine = (s: Pick<State, 'you'>, a: Message['author']): boolean => a.kind === 'person' && (!s.you || a.id === s.you)
@@ -775,9 +792,9 @@ let toastSeq = 0
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let toastsHeld = false
 const toastLater = (id: number): void => void toastTimers.set(id, setTimeout(() => dismissToast(id), TOAST_MS))
-export function toast(text: string): void {
+export function toast(text: string, action?: Toast['action']): void {
   const id = ++toastSeq
-  set((s) => ({ ...s, toasts: [...s.toasts.slice(-2), { id, text }] })) // three at most
+  set((s) => ({ ...s, toasts: [...s.toasts.slice(-2), { id, text, ...(action ? { action } : {}) }] })) // three at most
   if (!toastsHeld) toastLater(id)
 }
 
@@ -926,6 +943,8 @@ export const applyProposal = (messageId: string, index = 0): Promise<{ id: strin
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
 export const applyProposals = (messageId: string, draft: boolean): Promise<ProposalsResult> => call('applyProposals', { messageId, draft })
 export const dismissProposals = (messageId: string, draft: boolean): void => void call('dismissProposals', { messageId, draft }).catch(() => {})
+export const undoProposal = (messageId: string, index?: number, draft?: boolean): Promise<void> => call('undoProposal', { messageId, ...(index !== undefined ? { index } : {}), ...(draft ? { draft } : {}) })
+export const undoProposals = (messageId: string): Promise<ProposalsResult> => call('undoProposals', { messageId })
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {
@@ -949,6 +968,9 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
   void fire(L('Não consegui salvar a ferramenta.', "I couldn't save the tool."), 'updateTool', { connectorId, name, patch })
 
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
+// A computer lent to this server: exactly these agents use it (its person decides, even without being an admin).
+export const shareComputer = (connectorId: string, agentIds: string[]): void =>
+  void fire(L('Não consegui mudar quem usa o computador.', "I couldn't change who uses the computer."), 'shareComputer', { connectorId, agentIds })
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
@@ -1050,9 +1072,13 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
+// The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
+export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
+export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
+export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
-export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
 // A page an agent serves on the server's loopback, from here. Behind https it has an address of its
