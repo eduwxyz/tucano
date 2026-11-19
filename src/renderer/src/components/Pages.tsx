@@ -2541,6 +2541,15 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
         />
       </Row>
       {below.length > 0 && <Row label={L('Respondem a ele', 'Answering to it')} sub={below.map((a) => a.name).join(', ')} />}
+      <Row
+        label={L('Organiza o time', 'Organizes the team')}
+        sub={L(
+          `${draft.name || 'Este agente'} pode propor a quem cada agente responde, e onde ele mesmo fica. Cada mudança vira um cartão na conversa, e nada muda até você aplicar.`,
+          `${draft.name || 'This agent'} can propose whom each agent answers to, and where it sits itself. Each change becomes a card in the conversation, and nothing changes until you apply it.`
+        )}
+      >
+        <Toggle label={L('Organiza o time', 'Organizes the team')} on={!!draft.manager} onChange={(v) => patch({ manager: v || undefined }, true)} />
+      </Row>
     </Section>
   )
 }

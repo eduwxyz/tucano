@@ -57,7 +57,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
-        if (/time de conte[uú]do/i.test(last)) {
+        // "organiza o time": Theo and Nina answer to Lia. "time de dados": a team where one answers to the other.
+        if (/organiza o time|organize the team/i.test(last)) {
+          for (const agente of ['theo', 'nina']) await callTool(turn.mcpUrl, 'propor_ajuste', { agente, responde_a: 'lia', motivo: L('A Lia coordena.', 'Lia coordinates.') })
+          reply = L('Propus a Lia no topo, com o Theo e a Nina abaixo dela.', 'I proposed Lia at the top, with Theo and Nina under her.')
+        } else if (/time de dados|data team/i.test(last)) {
+          const one = (nome: string, funcao: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao, instrucoes: L(`Você é ${nome}, de ${funcao}.\nEntrega em tópicos.`, `You're ${nome}, in ${funcao}.\nDeliver in bullet points.`), ...extra })
+          const r = await callTool(turn.mcpUrl, 'propor_time', { agentes: [one('Duda', L('Dados', 'Data'), { responde_a: 'lia' }), one('Caio', L('Análise', 'Analysis'), { responde_a: 'Duda' })], motivo: L('Um time de dados sob a Lia.', 'A data team under Lia.') })
+          reply = textOf(r)
+        } else if (/time de conte[uú]do/i.test(last)) {
           // A team with a channel, one of them with a connector to write to, and a routine for the other.
           const each = (nome: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao: L('Conteúdo', 'Content'), cor: 'violet', instrucoes: L(`Você é ${nome}.\nCuida do conteúdo do time.\nResponde curto.`, `You are ${nome}.\nLook after the team's content.\nAnswer briefly.`), esforco: 'low', web: false, ...extra })
           await callTool(turn.mcpUrl, 'propor_time', { agentes: [each('Escriba', { conectores: [{ conector: 'Planilha', nivel: 'escrita' }] }), each('Revisora')], canal: { nome: L('redacao', 'writing'), tema: L('Posts da semana', "The week's posts") } })

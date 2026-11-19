@@ -7,6 +7,10 @@
 // still show in Portuguese, so test/guide-i18n.test.ts fails on a slug that exists in one and not the
 // other, in either direction.
 export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
+  'organizar-time': {
+    title: 'An agent that organizes the team',
+    summary: 'Turning on Organizes the team for an agent to propose who answers to whom, with your yes; and the Tuca proposing the org chart when creating agents and teams.'
+  },
   agentes: {
     title: 'Agents',
     summary: 'Creating an agent, instructions, model, limits, tools and access, memory, appearance and archiving.'
