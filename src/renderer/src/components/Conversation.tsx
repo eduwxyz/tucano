@@ -476,6 +476,74 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away }:
   const said = useLiveText(message, message.run?.status === 'working' ? STREAM_MS : 0)
   // A request written before what counts as finished left the conversation still carries that line: not shown.
   const text = message.run?.delegation?.rootId === message.id ? said.replace(/\n\n\*\*(Pronto quando|Done when):\*\* [^\n]*/, '') : said
+  // A reply that only handed work on says what's going on in the line under it, not in words: whatever it
+  // wrote anyway waits behind a link, and the agent speaks when the work comes back.
+  const [showSaid, setShowSaid] = useState(false)
+  const [showAsk, setShowAsk] = useState(false)
+  const rowEl = useRef<HTMLElement>(null)
+  const [height, setHeight] = useState(0)
+  useLayoutEffect(() => {
+    const el = rowEl.current
+    if (!el) return
+    const read = (): void => setHeight(el.offsetHeight)
+    read()
+    const seen = new ResizeObserver(read)
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [])
+  const leftStack = height >= 74
+  // The way back to this session's start appears only once that start has scrolled out of sight.
+  // A press records where we were and parks the row's first line at the top; the down arrow then
+  // returns to the exact scroll position the person left.
+  const [pastStart, setPastStart] = useState(false)
+  const [returnTop, setReturnTop] = useState<number | null>(null)
+  useEffect(() => {
+    if (!message.run) return
+    const row = rowEl.current
+    const list = row?.closest<HTMLElement>('.messages')
+    if (!row || !list) return
+    const check = (): void => setPastStart(row.getBoundingClientRect().top < list.getBoundingClientRect().top - 6)
+    check()
+    list.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      list.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [message.run, height])
+  const scrollList = (): HTMLElement | undefined => rowEl.current?.closest<HTMLElement>('.messages') ?? undefined
+  const toStart = (): void => {
+    const list = scrollList()
+    const row = rowEl.current
+    if (!list || !row) return
+    setReturnTop(list.scrollTop)
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+    list.scrollTo({ top, behavior: 'smooth' })
+    row.classList.add('is-flash')
+    setTimeout(() => row.classList.remove('is-flash'), 1800)
+  }
+  const back = (): void => {
+    const list = scrollList()
+    if (!list || returnTop === null) return
+    list.scrollTo({ top: returnTop, behavior: 'smooth' })
+    setReturnTop(null)
+  }
+  const ownPrompt = !agent && !other && message.author.kind === 'person' && !message.run
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(message.text)
+  const field = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!editing || !field.current) return
+    field.current.focus()
+    if (typeof field.current.setSelectionRange === 'function') field.current.setSelectionRange(draft.length, draft.length)
+  }, [editing, draft.length])
+  const sendEdit = (): void => {
+    const words = draft.trim()
+    if (!words) return
+    sendMessage(message.conversationId, words, [], message.threadId)
+    setEditing(false)
+  }
+  const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
 
   // The same object between renders, or every link would start over.
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
@@ -529,7 +597,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away }:
             <span className="msg__time">{time(saidAt(message))}</span>
           </div>
         )}
-        {message.run && <RunSteps message={message} />}
+        {message.run ? (
+          <div className="msg__anchor">
+            <div className={`msg__anchor-pin ${replies ? '' : 'msg__anchor-pin--alone'}`}>
+              {message.run && (pastStart || returnTop !== null) && <PromptJump back={returnTop !== null} onClick={returnTop !== null ? back : toStart} />}
+            </div>
+            <RunSteps message={message} />
+          </div>
+        ) : null}
         {text ? (
           <div className="md">
             {agent && message.run?.status !== 'working' ? (
@@ -608,7 +683,6 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away }:
             {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
           </div>
         )}
-        {away && message.run?.replyTo && <PromptJump id={message.run.replyTo} />}
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
     </article>
@@ -617,19 +691,22 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away }:
 
 // The glyph under "Reply in thread", on a reply that answers a prompt another message now sits
 // between: it puts that prompt at the top of the list, so a long reply is one click from what was asked.
-export function PromptJump({ id }: { id: string }): ReactNode {
-  const jump = useContext(JumpTo)
+export function PromptJump({ back, onClick }: { back?: boolean; onClick: () => void }): ReactNode {
+  const label = back
+    ? L('Voltar aonde estava', 'Return to where you were')
+    : L('Ir para o começo desta sessão', 'Go to the start of this session')
   return (
     <button
-      className="icon-btn icon-btn--sm msg__reply msg__reply--up"
-      title={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
-      aria-label={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
-      onClick={() => jump(id)}
+      className={`icon-btn icon-btn--sm msg__reply ${back ? 'msg__reply--down' : 'msg__reply--up'}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
     >
-      <Icon name="up" size={12} />
+      <Icon name={back ? 'down' : 'up'} size={12} />
     </button>
   )
 }
+
 
 // What a routine asked, posted at its time; the agent's reply comes next.
 function RoutineMessage({ message, replies }: { message: Message; replies?: Message[] }): ReactNode {
