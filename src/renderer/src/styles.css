@@ -1659,8 +1659,7 @@ h3 {
 /* Steer opens from its pill in that row. Its field sits under the box, starting where the steps'
    text starts and ending where the chain ends. */
 .steps__steer {
-  display: grid;
-  gap: 8px;
+  display: grid;  gap: 8px;
   margin: 2px 0 4px;
   padding-left: 17px;
   max-width: 600px;
