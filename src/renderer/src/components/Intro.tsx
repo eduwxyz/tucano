@@ -509,7 +509,7 @@ function ConnectAi({ name, onBack, onNext }: { name: string; onBack: () => void;
         <aside className="intro-side intro-side--teal">
           <TucaHead />
           <Bubble>{L('Opa, você já tem tudo pronto aqui. Achei o que você usa.', 'Oh, you’re all set up already. I found what you use.')}</Bubble>
-          <Bubble>{auto ? L('Já escolhi os modelos rápidos pros bastidores. Se quiser mexer, é ali embaixo.', 'I already picked the quick models for behind the scenes. To change them, it’s down there.') : L('Só falta escolher os modelos rápidos pros bastidores, ali embaixo.', 'Just pick the quick models for behind the scenes, down there.')}</Bubble>
+          <Bubble>{auto ? L('Já escolhi os modelos rápidos pros bastidores. Se quiser mexer, é ali embaixo.', "Fast models are selected for background tasks. You can change them below.") : L('Só falta escolher os modelos rápidos pros bastidores, ali embaixo.', 'Just pick the quick models for behind the scenes, down there.')}</Bubble>
         </aside>
         <section className="intro__main">
           <Top at={1} onBack={onBack} />
@@ -941,7 +941,7 @@ function BackgroundPickers({ models, setModels }: { models: { router: string; me
     <div className="intro-jobs">
       <JobCard title={L('Escolhe quem responde', 'Picks who replies')} value={m.router} groups={groups} onChange={(v) => setModels({ ...m, router: v })} />
       <JobCard title={L('Cuida da memória', 'Keeps the memory')} value={m.memory} groups={groups} onChange={(v) => setModels({ ...m, memory: v })} />
-      <span className="intro-muted intro-jobs__hint">{L('Quem responde decide, num canal, qual agente fala; a memória resume conversas longas. Um modelo rápido basta. Dá pra trocar depois em Configurações.', 'Who replies decides which agent speaks in a channel; the memory sums up long talks. A quick model is enough. You can change them later in Settings.')}</span>
+      <span className="intro-muted intro-jobs__hint">{L('Quem responde decide, num canal, qual agente fala; a memória resume conversas longas. Um modelo rápido basta. Dá pra trocar depois em Configurações.', "The router chooses who replies in channels. The memory model summarizes long conversations. Use fast models; change them later in Settings.")}</span>
     </div>
   )
 }

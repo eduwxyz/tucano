@@ -4,7 +4,7 @@
 // the sources, what needs care, and the pages by kind) and, beside it, the map of the pages,
 // a page with what links to it, the sources, the review; the editor takes the whole screen.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -157,11 +157,40 @@ export function WikiHeritage({ held, notice }: { held: { title: string; at: numb
   )
 }
 
-function useWikiData(): WikiData | null {
+function useWikiResource(enabled = true) {
   const rev = useStore((s) => s.wikiRev)
   const [data, setData] = useState<WikiData | null>(null)
-  useEffect(() => void call('wiki').then((d) => setData(d as WikiData)), [rev])
-  return data
+  const [error, setError] = useState('')
+  const [attempt, retry] = useState(0)
+  useEffect(() => {
+    if (!enabled) return
+    let live = true
+    setError('')
+    void call('wiki').then(value => { if (live) setData(value as WikiData) }, (reason: Error) => { if (live) setError(reason.message) })
+    return () => { live = false }
+  }, [enabled, rev, attempt])
+  return { data, error, retry: () => retry(n => n + 1) }
+}
+
+function useWikiData(): WikiData | null { return useWikiResource().data }
+
+const WikiSettingsContext = createContext<ReturnType<typeof useWikiResource> | null>(null)
+
+export function WikiSettingsProvider({ active, children }: { active: boolean; children: ReactNode }): ReactNode {
+  const resource = useWikiResource(active)
+  return <WikiSettingsContext.Provider value={resource}>{children}</WikiSettingsContext.Provider>
+}
+
+export function WikiSettingsSection({ part }: { part: WikiSettingsPart }): ReactNode {
+  const resource = useContext(WikiSettingsContext)
+  if (!resource) throw new Error('Wiki settings require their shared provider.')
+  if (part === 'storage' && !resource.data) return (
+    <section className="card">
+      <header className="card__head"><h2>{wikiSettingsTitle(part)}</h2></header>
+      {resource.error ? <><p role="alert" className="field__error">{resource.error}</p><button className="btn btn--sm" onClick={resource.retry}>{L('Tentar novamente', 'Try again')}</button></> : <p role="status" className="muted small">{L('Carregando pasta da wiki…', 'Loading Wiki folder…')}</p>}
+    </section>
+  )
+  return <WikiSettingsContent data={resource.data} part={part} onClose={() => {}} onImport={() => navigate({ kind: 'wiki', import: true })} />
 }
 
 // ---------- links ----------
@@ -721,6 +750,15 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
     })
   }
 
+  const importRequested = useRef(false)
+  useEffect(() => {
+    if (!view.import) { importRequested.current = false; return }
+    if (importRequested.current) return
+    importRequested.current = true
+    navigate({ kind: 'wiki' })
+    startImport()
+  }, [view.import])
+
   // ⌘K or / searches, N writes a new page, E edits the open one, Esc closes the panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -795,7 +833,7 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
             </button>
           )}
           {data?.git?.readOnly && (
-            <span className="wk-ro" title={L('A chave do Tucano só lê o repositório git: a wiki mostra o que está lá e não aceita escrita.', "Tucano's key only reads the git repository: the wiki shows what's there and takes no writes.")}>
+            <span className="wk-ro" title={L('A chave do Tucano só lê o repositório git: a wiki mostra o que está lá e não aceita escrita.', "The repository key is read-only. Wiki editing is disabled.")}>
               <Icon name="lock" size={12} /> {L('Só leitura', 'Read-only')}
             </span>
           )}
@@ -909,11 +947,11 @@ function WikiEmpty({ onImport }: { onImport: () => void }): ReactNode {
           <circle key={i} cx={x} cy={y} r={i === 1 ? 11 : 7} style={{ fill: `var(--c-${c})`, ['--i' as string]: i }} />
         ))}
       </svg>
-      <h2>{L('Tudo o que você sabe, num lugar só', 'Everything you know, in one place')}</h2>
+      <h2>{L('Tudo o que você sabe, num lugar só', "Shared knowledge, linked together")}</h2>
       <p>
         {L(
           'Pessoas, clientes, projetos, decisões. Cada página liga com as outras, e os agentes leem tudo antes de responder. Você escreve, ou deixa o curador escrever pelas conversas e pelos documentos que você traz.',
-          'People, clients, projects, decisions. Each page links to the others, and the agents read it all before replying. You write it, or let the curator write it from the conversations and the documents you bring.'
+          "Link people, projects, and decisions. Write pages yourself or let the curator use your conversations and documents. Agents consult them before replying."
         )}
       </p>
       <div className="wk-empty__actions">
@@ -924,7 +962,7 @@ function WikiEmpty({ onImport }: { onImport: () => void }): ReactNode {
           <Icon name="folder" size={14} /> {L('Importar do Obsidian', 'Import from Obsidian')}
         </button>
       </div>
-      <small className="muted">{L('Já tem um cofre no Obsidian? Ele entra como está, com pastas, links e anexos. O original fica onde está.', 'Already have an Obsidian vault? It comes in as it is, with folders, links and attachments. The original stays where it is.')}</small>
+      <small className="muted">{L('Já tem um cofre no Obsidian? Ele entra como está, com pastas, links e anexos. O original fica onde está.', "Import an Obsidian vault with its folders, links, and attachments. The original stays unchanged.")}</small>
     </div>
   )
 }
@@ -937,7 +975,7 @@ function ImportResult({ result, onClose }: { result: WikiImport | { error: strin
         {result === 'busy' ? (
           <div className="wk-import__busy">
             <span className="wk-spin" />
-            <b>{L('Trazendo as notas…', 'Bringing the notes in…')}</b>
+            <b>{L('Trazendo as notas…', "Importing notes…")}</b>
             <small className="muted">{L('Copiando as pastas e lendo os links.', 'Copying the folders and reading the links.')}</small>
           </div>
         ) : 'error' in result ? (
@@ -982,16 +1020,16 @@ function ImportResult({ result, onClose }: { result: WikiImport | { error: strin
               </div>
             )}
             <small className="muted">
-              {L('Os agentes já leem essas páginas e citam elas nas respostas. O cofre original não mudou.', 'The agents already read these pages and cite them in their replies. The original vault is unchanged.')}
+              {L('Os agentes já leem essas páginas e citam elas nas respostas. O cofre original não mudou.', "Agents can now read and cite these pages. The original vault is unchanged.")}
               {result.missing > 0 && ' ' + L(`${result.missing} ${result.missing === 1 ? 'link aponta' : 'links apontam'} pra notas que ainda não existem: aparecem tracejados no mapa.`, `${result.missing} ${result.missing === 1 ? 'link points' : 'links point'} to notes that don't exist yet: they're dashed on the map.`)}
               {result.skipped.length > 0 && ' ' + L(`${result.skipped.length} ${result.skipped.length === 1 ? 'arquivo já existia e ficou' : 'arquivos já existiam e ficaram'} como estava.`, `${result.skipped.length} ${result.skipped.length === 1 ? 'file was already here and was left' : 'files were already here and were left'} as they were.`)}
             </small>
             <div className="wk-row">
               <button className="btn btn--primary btn--sm" onClick={onClose}>
-                {L('Ver o mapa', 'See the map')}
+                {L('Ver o mapa', "View map")}
               </button>
               <button className="btn btn--ghost btn--sm" onClick={() => (onClose(), navigate({ kind: 'wiki', tab: 'review' }))}>
-                {L('Revisar o que chegou', 'Review what came in')}
+                {L('Revisar o que chegou', "Review imported pages")}
               </button>
             </div>
           </>
@@ -1041,7 +1079,7 @@ function WikiSearch({ pages, onClose }: { pages: WikiPageInfo[]; onClose: () => 
           <kbd>esc</kbd>
         </div>
         <div className="wk-palette__list">
-          {!q.trim() && rows.length > 0 && <div className="wk-palette__label">{L('Mexidas há pouco', 'Recently touched')}</div>}
+          {!q.trim() && rows.length > 0 && <div className="wk-palette__label">{L('Mexidas há pouco', "Recently updated")}</div>}
           {rows.map((r, i) => (
             <button key={r.title} className={`wk-palette__row ${i === at ? 'is-on' : ''}`} style={{ ['--k' as string]: kindColor(r.kind) }} onMouseEnter={() => setAt(i)} onClick={() => open(r.title)}>
               <i />
@@ -1075,7 +1113,15 @@ function WikiSearch({ pages, onClose }: { pages: WikiPageInfo[]; onClose: () => 
 
 // ---------- settings ----------
 
-function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null; onClose: () => void; onImport: () => void }): ReactNode {
+export type WikiSettingsPart = 'curator' | 'storage' | 'import' | 'rules'
+
+const wikiSettingsTitle = (part: WikiSettingsPart): string => ({
+  curator: L('Captura e revisão', 'Capture and review'),
+  storage: L('Pasta e Git', 'Folder and Git'), import: L('Importar notas', 'Import notes'), rules: L('Regras das páginas', 'Page rules')
+})[part]
+
+function WikiSettingsContent({ data, onClose, onImport, part }: { data: WikiData | null; onClose: () => void; onImport: () => void; part?: WikiSettingsPart }): ReactNode {
+
   const s = useStore((st) => st.settings)
   const capture = s.wikiCapture !== false
   const edits = s.wikiEdits ?? 'approve'
@@ -1083,38 +1129,29 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
   const [error, setError] = useState('')
   const pick = (window.tucano as unknown as { pickFolder?: () => Promise<string | null> }).pickFolder
   const move = (to: string | null): void => void call('setWikiDir', { dir: to }).then((d) => (setDir(d), setError('')), (e: Error) => setError(e.message))
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => void (e.key === 'Escape' && onClose())
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
+  useEffect(() => { if (data?.dir) setDir(data.dir) }, [data?.dir])
+  
   return (
-    <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="form-modal wk-settings">
-        <header>
-          <h2>{L('Ajustes da wiki', 'Wiki settings')}</h2>
-          <button className="btn btn--ghost btn--sm wk-icon-btn" onClick={onClose}>
-            <Icon name="x" size={15} />
-          </button>
-        </header>
-
+    <div className={part ? 'wk-settings wk-settings--inline card' : 'wk-settings-content'}>
+      {part && <header><h2>{wikiSettingsTitle(part)}</h2></header>}
+      {(!part || part === 'curator') && (
         <section>
-          <h4>{L('O curador', 'The curator')}</h4>
+          {!part && <h4>{L('O curador', "Curator")}</h4>}
           <div className="wk-setting">
             <span>
-              <b>{L('Guardar das conversas', 'Keep from conversations')}</b>
-              <small>{L('Depois que uma conversa assenta, ele guarda as decisões, os fatos e os resultados nas páginas. Dá pra desligar por canal ou DM, no menu da conversa.', 'Once a conversation settles, it keeps the decisions, facts and results in the pages. It can be turned off per channel or DM, from the conversation menu.')}</small>
+              <b>{L('Guardar das conversas', "Capture conversations")}</b>
+              <small>{L('Depois que uma conversa assenta, ele guarda as decisões, os fatos e os resultados nas páginas. Dá pra desligar por canal ou DM, no menu da conversa.', "Save decisions, facts, and results to wiki pages. Disable per channel or DM in its menu.")}</small>
             </span>
             <Toggle on={capture} onChange={(v) => updateSettings({ wikiCapture: v })} />
           </div>
           <div className="wk-setting">
             <span>
-              <b>{L('Mudar uma página que já existe', 'Changing a page that exists')}</b>
-              <small>{L('Páginas novas sempre entram direto. No automático, o que já estava esperando entra junto. Tudo fica no histórico, com Desfazer.', 'New pages always go in right away. On automatic, what was already waiting goes in too. It all stays in the history, with Undo.')}</small>
+              <b>{L('Mudar uma página que já existe', "Existing page edits")}</b>
+              <small>{L('Páginas novas sempre entram direto. No automático, o que já estava esperando entra junto. Tudo fica no histórico, com Desfazer.', "New pages save immediately. Automatic also applies pending edits. Undo from History.")}</small>
             </span>
             <div className="segmented">
               <button className={edits === 'approve' ? 'is-active' : ''} onClick={() => updateSettings({ wikiEdits: 'approve' })}>
-                {L('Pede aprovação', 'Asks first')}
+                {L('Pede aprovação', "Ask for approval")}
               </button>
               <button className={edits === 'auto' ? 'is-active' : ''} onClick={() => (updateSettings({ wikiEdits: 'auto' }), void call('wikiApplyWaiting').catch((e: Error) => setError(e.message)))}>
                 {L('Automático', 'Automatic')}
@@ -1123,20 +1160,21 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           </div>
           <div className="wk-setting">
             <span>
-              <b>{L('Revisar sozinha toda semana', 'Review on its own every week')}</b>
-              <small>{L('Procura o que não bate, o que ficou velho e o que está repetido. O que achar espera você em Cuidados.', 'Looks for what disagrees, what got old and what repeats. What it finds waits for you in Care.')}</small>
+              <b>{L('Revisar sozinha toda semana', "Weekly review")}</b>
+              <small>{L('Procura o que não bate, o que ficou velho e o que está repetido. O que achar espera você em Cuidados.', "Find conflicts, outdated facts, and duplicates in Care.")}</small>
             </span>
             <Toggle on={s.wikiReview === 'weekly'} onChange={(v) => updateSettings({ wikiReview: v ? 'weekly' : 'off' })} />
           </div>
         </section>
-
+      )}
+      {(!part || part === 'storage') && (
         <section>
-          <h4>{L('A pasta', 'The folder')}</h4>
+          {!part && <h4>{L('A pasta', "Storage folder")}</h4>}
           <code className="wk-folder" title={dir}>
             <Icon name="folder" size={14} />
             {dir.replace(/^\/Users\/[^/]+/, '~')}
           </code>
-          <small className="muted">{L('Markdown puro: abre no Obsidian, vai pro iCloud ou pro git. Pode ser o seu cofre do Obsidian.', 'Plain Markdown: it opens in Obsidian, goes to iCloud or git. It can be your Obsidian vault.')}</small>
+          <small className="muted">{L('Markdown puro: abre no Obsidian, vai pro iCloud ou pro git. Pode ser o seu cofre do Obsidian.', "Markdown files, compatible with Obsidian, iCloud, and Git.")}</small>
           <div className="wk-row">
             {data && !data.server && (
               <button className="btn btn--sm" onClick={() => void call('openWikiFolder')}>
@@ -1164,23 +1202,24 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             )}
             {s.wikiDir && !data?.git && (
               <button className="btn btn--ghost btn--sm" onClick={() => move(null)}>
-                {L('Voltar pra pasta do Tucano', "Back to Tucano's folder")}
+                {L('Voltar pra pasta do Tucano', "Use default folder")}
               </button>
             )}
           </div>
           {error && <small className="field__error">{error}</small>}
           <GitSync dir={dir} onDir={setDir} />
         </section>
-
+      )}
+      {(!part || part === 'import') && (
         <section>
-          <h4>{L('Trazer o que você já tem', 'Bring what you already have')}</h4>
+          {!part && <h4>{L('Trazer o que você já tem', "Import")}</h4>}
           <div className="wk-setting">
             <span>
               <b>{L('Importar um cofre do Obsidian', 'Import an Obsidian vault')}</b>
               <small>
                 {window.tucano.upload
-                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', 'Zip the vault’s folder and send it: the notes come in as they are, with their folders, links and attachments.')
-                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}
+                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', "Upload a zipped vault to copy its notes, folders, links, and attachments.")
+                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', "Copy notes, folders, links, and attachments. The original vault stays unchanged.")}
               </small>
             </span>
             <button className="btn btn--sm" onClick={onImport}>
@@ -1188,19 +1227,39 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             </button>
           </div>
         </section>
-
+      )}
+      {(!part || part === 'rules') && (
         <section>
-          <h4>{L('As regras', 'The rules')}</h4>
+          {!part && <h4>{L('As regras', "Page rules")}</h4>}
           <div className="wk-setting">
             <span>
               <b>{L('Esquema da wiki', 'Wiki schema')}</b>
-              <small>{L('Os tipos de página e como escrever. Os agentes e o curador seguem esta página.', 'The kinds of page and how to write. The agents and the curator follow this page.')}</small>
+              <small>{L('Os tipos de página e como escrever. Os agentes e o curador seguem esta página.', "Page types and writing rules for agents and the curator.")}</small>
             </span>
             <button className="btn btn--sm" onClick={() => (onClose(), navigate({ kind: 'wiki', edit: true }))}>
               {L('Editar', 'Edit')}
             </button>
           </div>
         </section>
+      )}
+    </div>
+  )
+}
+
+export function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null; onClose: () => void; onImport: () => void }): ReactNode {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label={L('Ajustes da wiki', 'Wiki settings')} onMouseDown={event => event.target === event.currentTarget && onClose()}>
+      <div className="form-modal wk-settings">
+        <header>
+          <h2>{L('Ajustes da wiki', 'Wiki settings')}</h2>
+          <button className="btn btn--ghost btn--sm wk-icon-btn" aria-label={L('Fechar ajustes da wiki', 'Close Wiki settings')} onClick={onClose}><Icon name="x" size={15} /></button>
+        </header>
+        <WikiSettingsContent data={data} onClose={onClose} onImport={onImport} />
       </div>
     </div>
   )
@@ -1243,8 +1302,8 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
     return (
       <div className="wk-setting wk-git">
         <span>
-          <b>{L('Sincronizar com git', 'Sync with git')}</b>
-          <small>{L('A wiki vira um clone do seu repositório (o cofre do Obsidian no GitHub, por exemplo): o que muda lá aparece aqui, e o que muda aqui vai pra lá.', 'The wiki becomes a clone of your repository (your Obsidian vault on GitHub, say): what changes there shows up here, and what changes here goes there.')}</small>
+          <b>{L('Sincronizar com git', "Sync with Git")}</b>
+          <small>{L('A wiki vira um clone do seu repositório (o cofre do Obsidian no GitHub, por exemplo): o que muda lá aparece aqui, e o que muda aqui vai pra lá.', "Use a repository as your wiki. Changes sync both ways.")}</small>
         </span>
         <button className="btn btn--sm" onClick={() => setOpen(true)}>
           {L('Configurar…', 'Set up…')}
@@ -1260,7 +1319,7 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
         <div className="wk-git__status">
           <i className={`wk-git__dot wk-git__dot--${st.state === 'error' ? 'bad' : st.state === 'syncing' ? 'busy' : 'ok'}`} />
           <span>
-            <b>{st.state === 'syncing' ? L('Sincronizando…', 'Syncing…') : st.state === 'error' ? L('A sincronização parou', 'Syncing stopped') : L('Sincronizada com git', 'Synced with git')}</b>
+            <b>{st.state === 'syncing' ? L('Sincronizando…', 'Syncing…') : st.state === 'error' ? L('A sincronização parou', 'Syncing stopped') : L('Sincronizada com git', "Synced with Git")}</b>
             <small>
               {setup?.sshUrl ?? ''}
               {st.branch ? ` · ${st.branch}` : ''}
@@ -1301,15 +1360,15 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
           )}
           {setup?.deployKeyUrl && (
             <button className="btn btn--ghost btn--sm" onClick={() => openExternal(setup.deployKeyUrl!)}>
-              {L('Chaves do repositório', "The repository's keys")}
+              {L('Chaves do repositório', "Repository keys")}
             </button>
           )}
           <button
             className="btn btn--ghost btn--sm"
             onClick={() =>
               void confirmDialog({
-                title: L('Desconectar do git?', 'Disconnect from git?'),
-                body: L('A wiki para de sincronizar e o Tucano apaga a chave dele. A pasta continua como está, com as páginas. No repositório, apague também a chave de deploy.', "The wiki stops syncing and Tucano deletes its key. The folder stays as it is, with the pages. In the repository, delete the deploy key too."),
+                title: L('Desconectar do git?', "Disconnect from Git?"),
+                body: L('A wiki para de sincronizar e o Tucano apaga a chave dele. A pasta continua como está, com as páginas. No repositório, apague também a chave de deploy.', "Stop syncing and delete Tucano’s key. Local pages stay. Also remove the deploy key from the repository."),
                 confirm: L('Desconectar', 'Disconnect')
               }).then((ok) => ok && run('sync', call('wikiGitDisconnect'), (v) => (setSt(v), setOpen(false), setTest(null))))
             }
@@ -1331,7 +1390,7 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
     })
   return (
     <div className="wk-git wk-git--setup">
-      <b>{L('Sincronizar com git', 'Sync with git')}</b>
+      <b>{L('Sincronizar com git', "Sync with Git")}</b>
       <label className="wk-git__step">
         <span>{L('1. O endereço SSH do repositório', "1. The repository's SSH address")}</span>
         <div className="wk-row">
@@ -1394,11 +1453,11 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
                   <div className="wk-git__choices">
                     <button className="wk-git__choice" disabled={!!busy} onClick={() => connect('repo')}>
                       <b>{L('Usar o repositório', 'Use the repository')}</b>
-                      <small>{L('A wiki mostra só o que está no repositório. As páginas daqui ficam na pasta antiga, de backup.', 'The wiki shows only what is in the repository. The pages here stay in the old folder, as a backup.')}</small>
+                      <small>{L('A wiki mostra só o que está no repositório. As páginas daqui ficam na pasta antiga, de backup.', "Show repository pages only. Keep local pages in the old folder as a backup.")}</small>
                     </button>
                     <button className="wk-git__choice" disabled={!!busy} onClick={() => connect('merge')}>
-                      <b>{L('Juntar com as daqui', 'Merge with these')}</b>
-                      <small>{L('As páginas daqui entram no repositório. Nada de lá é sobrescrito: uma página com o mesmo nome entra como "(versão do Tucano)".', 'The pages here go into the repository. Nothing there is overwritten: a page with the same name comes in as "(Tucano’s version)".')}</small>
+                      <b>{L('Juntar com as daqui', "Merge local pages")}</b>
+                      <small>{L('As páginas daqui entram no repositório. Nada de lá é sobrescrito: uma página com o mesmo nome entra como "(versão do Tucano)".', "Add local pages without overwriting repository pages. Name conflicts use “(Tucano’s version)”.")}</small>
                     </button>
                   </div>
                 </>
@@ -1459,7 +1518,7 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
   return (
     <div className={`wiki-op wiki-op--${op.op}`}>
       <div className="wiki-op__head">
-        <span className="wiki-op__verb">{op.op === 'create' ? L('Página nova', 'New page') : op.op === 'append' ? L('Acrescenta em', 'Adds to') : L('Troca em', 'Swaps in')}</span>
+        <span className="wiki-op__verb">{op.op === 'create' ? L('Página nova', 'New page') : op.op === 'append' ? L('Acrescenta em', 'Adds to') : L('Troca em', "Replaces text in")}</span>
         <button className="wiki-link" onClick={() => navigate({ kind: 'wiki', title: op.page })}>
           {op.page}
         </button>
@@ -1468,13 +1527,13 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
       <div ref={box} className={`wiki-diff${folded ? ' is-folded' : ''}`} style={folded ? { maxHeight: DIFF_FOLD } : undefined}>
         {op.op === 'replace' && (
           <div className="wiki-diff__old">
-            <span className="wiki-diff__tag">{L('Sai', 'Out')}</span>
+            <span className="wiki-diff__tag">{L('Sai', "Removed")}</span>
             <div className="md">{md(op.old)}</div>
           </div>
         )}
         <div className={`wiki-diff__new${added.trim() ? '' : ' wiki-diff__new--none'}`}>
-          {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', 'In')}</span>}
-          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', 'Nothing in its place: the passage just leaves the page.')}</p>}
+          {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', "Added")}</span>}
+          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', "This passage will be removed without replacement.")}</p>}
         </div>
       </div>
       {long && (
@@ -1488,7 +1547,7 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
 const DIFF_FOLD = 360 // px a long change shows before "Ver tudo"; a bit longer than that shows whole
 
 const STATE_LABEL = (s: WikiChange['state']): string =>
-  s === 'pending' ? L('Esperando você', 'Waiting for you') : s === 'conflict' ? L('A página mudou depois', 'The page changed since') : s === 'applied' ? L('Entrou', 'Went in') : s === 'undone' ? L('Desfeita', 'Undone') : L('Recusada', 'Refused')
+  s === 'pending' ? L('Esperando você', 'Waiting for you') : s === 'conflict' ? L('A página mudou depois', 'The page changed since') : s === 'applied' ? L('Entrou', "Applied") : s === 'undone' ? L('Desfeita', 'Undone') : L('Recusada', "Rejected")
 
 export function ChangeCard({ change, compact, bare }: { change: WikiChange; compact?: boolean; bare?: boolean }): ReactNode {
   const [error, setError] = useState('')
@@ -1506,7 +1565,7 @@ export function ChangeCard({ change, compact, bare }: { change: WikiChange; comp
               <>
                 {' · '}
                 <button className="text-btn" onClick={() => navigate({ kind: 'wiki', source: change.source!.file })}>
-                  {L('de onde veio', 'where it came from')}
+                  {L('de onde veio', "source")}
                 </button>
               </>
             )}
@@ -1519,9 +1578,9 @@ export function ChangeCard({ change, compact, bare }: { change: WikiChange; comp
         <div className="wiki-change__actions">
           {change.state === 'conflict' && (
             <>
-              <small className="muted">{L('A página mudou depois dessa sugestão. O curador refaz a mudança sobre a versão nova, sem perder o que mudou.', 'The page changed after this suggestion. The curator makes the change again on the newer version, keeping what changed.')}</small>
+              <small className="muted">{L('A página mudou depois dessa sugestão. O curador refaz a mudança sobre a versão nova, sem perder o que mudou.', "This page has changed. Regenerate the suggestion against its latest version.")}</small>
               <button className="btn btn--primary btn--sm" onClick={() => act(call('wikiRedoChange', { id: change.id }))}>
-                {L('Refazer sobre a versão nova', 'Redo on the newer version')}
+                {L('Refazer sobre a versão nova', "Regenerate change")}
               </button>
             </>
           )}
@@ -1531,7 +1590,7 @@ export function ChangeCard({ change, compact, bare }: { change: WikiChange; comp
             </button>
           )}
           <button className="btn btn--ghost btn--sm" onClick={() => act(call('wikiRefuseChange', { id: change.id }))}>
-            {L('Recusar', 'Refuse')}
+            {L('Recusar', "Reject")}
           </button>
         </div>
       )}
@@ -1573,7 +1632,7 @@ function WikiPending(): ReactNode {
   if (!list) return null
   return (
     <div className="wk-pane">
-      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', 'What the curator wants to change in pages that already exist. Approve, refuse, or change how it works in the settings.')}>
+      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', "Review proposed edits to existing pages. Approve or reject them, or change approval rules in Wiki settings.")}>
         {list.length > 1 && (
           <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => (setBusy(true), setError(''), void call('wikiApplyWaiting').then((r) => r.left && setError(L(`${r.left} não deu pra aprovar sozinha: a página mudou demais. Refaça cada uma abaixo.`, `${r.left} couldn't be approved on their own: the page changed too much. Redo each one below.`)), (e: Error) => setError(e.message)).finally(() => setBusy(false)))}>
             <Icon name="check" size={13} /> {L(`Aprovar todas (${list.length})`, `Approve all (${list.length})`)}
@@ -1604,14 +1663,14 @@ function WikiPending(): ReactNode {
 // ---------- looking after the wiki ----------
 
 const FINDING_LABEL: Record<WikiFinding['kind'], () => string> = {
-  contradiction: () => L('Não batem', "Don't agree"),
+  contradiction: () => L('Não batem', "Conflicting facts"),
   stale: () => L('Desatualizada', 'Out of date'),
   duplicate: () => L('Repetida', 'Duplicate'),
   link: () => L('Falta ligar', 'Missing link'),
-  broken: () => L('Página por escrever', 'Page to write'),
-  missing: () => L('Sem página', 'No page'),
-  orphan: () => L('Ninguém liga pra elas', 'Nothing links to them'),
-  log: () => L('Parece um registro', 'Reads like a log'),
+  broken: () => L('Página por escrever', "Missing page"),
+  missing: () => L('Sem página', "Missing page"),
+  orphan: () => L('Ninguém liga pra elas', "Unlinked pages"),
+  log: () => L('Parece um registro', "Excessive history"),
   git: () => L('Repositório git', 'Git repository')
 }
 const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm', log: 'warn', git: 'warn' }
@@ -1648,11 +1707,11 @@ function WikiReviewPane(): ReactNode {
         <div className="wk-checks">
           {(
             [
-              ['danger', L('Não batem', "Don't agree"), L('Duas páginas dizendo coisas diferentes sobre o mesmo valor, data ou prazo.', 'Two pages saying different things about the same amount, date or deadline.')],
+              ['danger', L('Não batem', "Conflicting facts"), L('Duas páginas dizendo coisas diferentes sobre o mesmo valor, data ou prazo.', "Pages disagree about an amount, date, or deadline.")],
               ['warn', L('Desatualizada', 'Out of date'), L('"Aguardando resposta" numa página, "contrato assinado" em outra.', '"Waiting for an answer" on one page, "contract signed" on another.')],
-              ['warn', L('Repetida', 'Duplicate'), L('Duas páginas sobre a mesma pessoa ou o mesmo projeto. Ela junta, sem perder nada.', 'Two pages about the same person or project. It merges them, losing nothing.')],
-              ['warn', L('Parece um registro', 'Reads like a log'), L('Um histórico que virou diário do que foi feito. Ela resume no que vale hoje.', 'A history that turned into a diary of what was done. It condenses it into what holds today.')],
-              ['calm', L('Solta', 'Loose'), L('Links pra páginas que não existem, nomes sem página, páginas que ninguém cita.', 'Links to missing pages, names with no page, pages nothing cites.')]
+              ['warn', L('Repetida', 'Duplicate'), L('Duas páginas sobre a mesma pessoa ou o mesmo projeto. Ela junta, sem perder nada.', "Merge duplicate pages about the same person or project, preserving their content.")],
+              ['warn', L('Parece um registro', "Excessive history"), L('Um histórico que virou diário do que foi feito. Ela resume no que vale hoje.', "Condense activity logs into the facts that still apply.")],
+              ['calm', L('Solta', "Unresolved links"), L('Links pra páginas que não existem, nomes sem página, páginas que ninguém cita.', "Missing pages, unresolved names, and unlinked pages.")]
             ] as const
           ).map(([tone, t, d]) => (
             <div key={t} className="wk-check" style={{ ['--tone' as string]: tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--text-3)' }}>
@@ -1668,7 +1727,7 @@ function WikiReviewPane(): ReactNode {
       {r.at && !r.running && sorted.length === 0 && (
         <div className="wk-calm">
           <Icon name="check" size={18} />
-          <span>{L('Tudo em ordem. Nada pra cuidar agora.', 'All in order. Nothing to look after now.')}</span>
+          <span>{L('Tudo em ordem. Nada pra cuidar agora.', "No open findings.")}</span>
         </div>
       )}
       {sorted.map((f) => (
@@ -1687,7 +1746,7 @@ function WikiReviewPane(): ReactNode {
                 </button>
               )}
               <button className="btn btn--ghost btn--sm" onClick={() => void call('wikiDismissFinding', { id: f.id })}>
-                {L('Deixar assim', 'Leave it')}
+                {L('Deixar assim', "Dismiss")}
               </button>
             </div>
           )}
@@ -1788,7 +1847,7 @@ function AddSources({ errors: dropped }: { errors: string[] }): ReactNode {
           <span className="wk-badge-file" style={{ ['--k' as string]: 'var(--c-indigo)' }}>DOC</span>
           <span className="wk-badge-file" style={{ ['--k' as string]: 'var(--c-green)' }}>XLS</span>
         </span>
-        <b>{L('Um arquivo', 'A file')}</b>
+        <b>{L('Um arquivo', "File")}</b>
         <small>{L('Escolha, ou arraste pra qualquer lugar da wiki', 'Choose one, or drag it anywhere in the wiki')}</small>
         <input type="file" multiple accept={ACCEPT} hidden onChange={(e) => (files(e.target.files), (e.target.value = ''))} />
       </label>
@@ -1798,11 +1857,11 @@ function AddSources({ errors: dropped }: { errors: string[] }): ReactNode {
             <Icon name="globe" size={14} />
           </span>
         </span>
-        <b>{L('Um link', 'A link')}</b>
+        <b>{L('Um link', "Link")}</b>
         <div className="wk-add__line">
           <input placeholder="https://…" value={link} onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addLink()} />
           <button className="btn btn--sm" disabled={!link.trim()} onClick={addLink}>
-            {L('Trazer', 'Bring')}
+            {L('Trazer', "Import")}
           </button>
         </div>
       </div>
@@ -1812,11 +1871,11 @@ function AddSources({ errors: dropped }: { errors: string[] }): ReactNode {
             <Icon name="edit" size={14} />
           </span>
         </span>
-        <b>{L('Uma anotação', 'A note')}</b>
+        <b>{L('Uma anotação', "Note")}</b>
         <div className="wk-add__line">
           <input placeholder={L('A Helena prefere WhatsApp…', 'Helen prefers texting…')} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addNote()} />
           <button className="btn btn--sm" disabled={!note.trim()} onClick={addNote}>
-            {L('Guardar', 'Keep')}
+            {L('Guardar', "Save")}
           </button>
         </div>
       </div>
@@ -1840,7 +1899,7 @@ function WikiSources({ errors }: { errors: string[] }): ReactNode {
   useEffect(() => void call('wikiSources').then(setList), [rev])
   return (
     <div className="wk-pane">
-      <PaneHead icon="book" title={L('Fontes', 'Sources')} lede={L('O material de onde a wiki sai. O curador lê cada fonte e escreve nas páginas, citando de onde veio.', 'What the wiki is made from. The curator reads each source and writes in the pages, citing where it came from.')} />
+      <PaneHead icon="book" title={L('Fontes', 'Sources')} lede={L('O material de onde a wiki sai. O curador lê cada fonte e escreve nas páginas, citando de onde veio.', "The curator uses these sources to write pages with citations.")} />
       <AddSources errors={errors} />
       {list && list.length > 0 && (
         <div className="wk-sources">
@@ -1899,7 +1958,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
         <SourceStatus s={src} />
       </div>
       <h1 className="wk-read__title">{src.title}</h1>
-      {src.private && <p className="muted">{L('Veio da conversa privada de alguém: só essa pessoa lê o que ela diz. Dá pra apagar a fonte, junto com as mudanças feitas dela.', "It came from someone's private conversation: only they read what it says. You can delete the source, along with the changes made from it.")}</p>}
+      {src.private && <p className="muted">{L('Veio da conversa privada de alguém: só essa pessoa lê o que ela diz. Dá pra apagar a fonte, junto com as mudanças feitas dela.', "Private to its author. Deleting this source removes its change history; existing pages stay.")}</p>}
       <div className="wk-row">
         {src.origin.conversationId && (
           <button className="btn btn--sm" onClick={() => navigate({ kind: 'conversation', id: src.origin.conversationId! })}>
@@ -1924,7 +1983,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
         {canRemove &&
           (removing ? (
             <button className="btn btn--sm btn--danger" onClick={() => void call('wikiRemoveSource', { id: src.id }).then(() => navigate({ kind: 'wiki', tab: 'sources' }))}>
-              {L('Apagar de vez (as páginas ficam)', 'Delete for good (the pages stay)')}
+              {L('Apagar de vez (as páginas ficam)', "Delete permanently (keep pages)")}
             </button>
           ) : (
             <button className="btn btn--sm" onClick={() => setRemoving(true)}>
@@ -1951,7 +2010,7 @@ export function WikiChip({ id }: { id: string }): ReactNode {
   useEffect(() => void call('wikiChange', { id }).then(setC), [id, rev])
   if (!c || c.state === 'refused') return null
   const pages = [...new Set(c.ops.map((o) => o.page))]
-  const label = c.state === 'applied' ? L('Guardou na wiki', 'Kept in the wiki') : c.state === 'undone' ? L('Desfeito na wiki', 'Undone in the wiki') : c.state === 'conflict' ? L('Mudança na wiki com conflito', 'Wiki change with a conflict') : L('Quer guardar na wiki', 'Wants to keep in the wiki')
+  const label = c.state === 'applied' ? L('Guardou na wiki', "Saved to wiki") : c.state === 'undone' ? L('Desfeito na wiki', 'Undone in the wiki') : c.state === 'conflict' ? L('Mudança na wiki com conflito', 'Wiki change with a conflict') : L('Quer guardar na wiki', "Proposed wiki change")
   return (
     <div className={`memory-chip wiki-chip wiki-chip--${c.state}`}>
       <Icon name="layers" size={13} />
@@ -1971,10 +2030,10 @@ export function WikiChip({ id }: { id: string }): ReactNode {
       {c.state === 'pending' && (
         <>
           <button className="btn btn--xs btn--primary" onClick={() => void call('wikiApplyChange', { id })}>
-            {L('Guardar', 'Keep')}
+            {L('Guardar', "Save")}
           </button>
           <button className="btn btn--xs btn--ghost" onClick={() => navigate({ kind: 'wiki', tab: 'pending' })}>
-            {L('Ver', 'See')}
+            {L('Ver', "View")}
           </button>
         </>
       )}
@@ -2000,7 +2059,7 @@ export function KeepInWiki({ messageId }: { messageId: string }): ReactNode {
           )
         }}
       >
-        {state === 'busy' ? L('Guardando…', 'Keeping…') : state === 'none' ? L('Nada pra guardar', 'Nothing to keep') : L('Guardar na wiki', 'Keep in the wiki')}
+        {state === 'busy' ? L('Guardando…', "Saving…") : state === 'none' ? L('Nada pra guardar', "Nothing to save") : L('Guardar na wiki', "Save to wiki")}
       </button>
       {error && <small className="field__error"> {error}</small>}
     </span>
@@ -2085,7 +2144,7 @@ function WikiPageView({ title, data }: { title: string; data: WikiData | null })
       )}
       {cited.length > 0 && (
         <section className="wk-page__more">
-          <h5>{L('De onde veio', 'Where it came from')}</h5>
+          <h5>{L('De onde veio', "Sources")}</h5>
           {cited.map((c) => {
             const s = sources.find((x) => x.file === c.file)
             return (
@@ -2181,7 +2240,7 @@ function WikiEditor({ title }: { title?: string }): ReactNode {
     <Sheet
       fill
       title={schemaMode ? L('Esquema da wiki', 'Wiki schema') : page ? L('Editando', 'Editing') : L('Nova página', 'New page')}
-      lede={schemaMode ? L('As regras da wiki: os tipos de página e como escrever. Os agentes e o curador seguem esta página.', 'The wiki rules: the kinds of page and how to write. The agents and the curator follow this page.') : L('Markdown. Ligue páginas com [[Título]]; uma que ainda não existe vira um convite pra escrever.', "Markdown. Link pages with [[Title]]; one that doesn't exist yet becomes an invitation to write it.")}
+      lede={schemaMode ? L('As regras da wiki: os tipos de página e como escrever. Os agentes e o curador seguem esta página.', "Page types and writing rules for agents and the curator.") : L('Markdown. Ligue páginas com [[Título]]; uma que ainda não existe vira um convite pra escrever.', "Use Markdown and [[Page title]] links. Missing links let you create a page.")}
       back={{ label: L('Voltar', 'Back'), onClick: back }}
       actions={
         <>
@@ -2205,20 +2264,20 @@ function WikiEditor({ title }: { title?: string }): ReactNode {
                   {k}
                 </button>
               ))}
-              <input className="wiki-editor__kind" placeholder={L('outro tipo…', 'another kind…')} value={kinds.some((k) => fold(k) === fold(kind)) ? '' : kind} onChange={(e) => setKind(e.target.value)} />
+              <input className="wiki-editor__kind" placeholder={L('outro tipo…', "Other type…")} value={kinds.some((k) => fold(k) === fold(kind)) ? '' : kind} onChange={(e) => setKind(e.target.value)} />
             </div>
           </div>
         )}
         {error && <p className="field__error">{error}</p>}
         <div className="wiki-editor__panes">
-          <textarea className="wiki-editor__text" value={body} onChange={(e) => setBody(e.target.value)} spellCheck placeholder={L('Comece com uma frase que diga o que é. Depois, seções com ##.', 'Start with one sentence that says what it is. Then sections with ##.')} />
+          <textarea className="wiki-editor__text" value={body} onChange={(e) => setBody(e.target.value)} spellCheck placeholder={L('Comece com uma frase que diga o que é. Depois, seções com ##.', "Start with a one-sentence summary. Use ## for section headings.")} />
           <div className="wiki-editor__preview wk-doc md">
             {body.trim() ? (
               <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
                 {wikiLinks(body)}
               </Markdown>
             ) : (
-              <p className="muted">{L('A prévia aparece aqui.', 'The preview shows up here.')}</p>
+              <p className="muted">{L('A prévia aparece aqui.', "Preview appears here.")}</p>
             )}
           </div>
         </div>
