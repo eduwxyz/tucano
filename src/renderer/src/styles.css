@@ -2227,6 +2227,17 @@ h3 {
   padding: 6px 10px;
   text-align: center;
 }
+.browser-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.browser-choice .segmented {
+  margin-bottom: 0;
+}
+.browser-choice p {
+  margin: 0;
+}
 .hint--warn {
   color: var(--warn);
   margin: 0 0 12px;
@@ -8365,6 +8376,72 @@ kbd {
   width: calc(100% - 16px);
   margin: 4px 8px;
   font-size: 12px;
+}
+.channel-row.is-picked,
+.top-row.is-picked,
+.agent-row.is-picked,
+.agent-sector__head.is-picked {
+  opacity: 0.55;
+}
+.channel-row.is-over::before,
+.top-row.is-over::before,
+.agent-row.is-over::before,
+.agent-sector__head.is-over::before,
+.nav-drop.is-over::before,
+.agent-sector__drop.is-over::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.channel-row,
+.top-row,
+.agent-row,
+.agent-sector__head,
+.nav-drop,
+.agent-sector__drop {
+  position: relative;
+}
+.nav-drop,
+.agent-sector__drop {
+  height: 8px;
+}
+.channel-row.is-picked,
+.top-row.is-picked,
+.agent-row.is-picked,
+.agent-sector__head.is-picked {
+  opacity: 0.55;
+}
+.channel-row.is-over::before,
+.top-row.is-over::before,
+.agent-row.is-over::before,
+.agent-sector__head.is-over::before,
+.nav-drop.is-over::before,
+.agent-sector__drop.is-over::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.channel-row,
+.top-row,
+.agent-row,
+.agent-sector__head,
+.nav-drop,
+.agent-sector__drop {
+  position: relative;
+}
+.nav-drop,
+.agent-sector__drop {
+  height: 8px;
 }
 .channel-drop {
   height: 6px;
