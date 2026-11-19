@@ -62,6 +62,7 @@ import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
+import { Docs } from './docs'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
 import { applyForeignTeam, readForeignZip } from './agent-import'
@@ -559,7 +560,7 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 // Agents' browsers too (spec §24).
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown; doc?: unknown; v?: unknown } | undefined
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
@@ -638,6 +639,13 @@ process.parentPort.on('message', (e) => {
     const svc = typeof r.port === 'number' ? db.agents().flatMap((x) => computers.info(x).services).find((x) => x.url && Number(new URL(x.url).port) === r.port) : undefined
     const ok = !!who && (a ? people.canSeeFrom(who, a.conversationId) : svc ? people.canSeeFrom(who, svc.conversationId) : false)
     return process.parentPort.postMessage({ type: 'access-result', id: r.id, ok })
+  }
+  // A file of Documentos for a server's page or the desktop's window: where it is, when this person may see it
+  // (the desktop sends no person: the owner). Null for anything else, so a refusal and a missing file look the same.
+  if (r?.type === 'doc-file') {
+    const who = typeof r.person === 'string' ? db.person(r.person) : db.owner()
+    const file = who && typeof r.doc === 'string' ? docs.fileOf(who, r.doc, typeof r.v === 'number' ? r.v : undefined) : null
+    return process.parentPort.postMessage({ type: 'doc-file-result', id: r.id, data: file })
   }
   // A server's invite page: the name of whom a restoring invite brings back, to fill in.
   if (r?.type === 'invite-info') {
@@ -945,6 +953,18 @@ const wiki = new Wiki({ dir: wikiDir(), indexPath: wikiIndex(wikiDir()), onChang
 // The folder is read behind the window: a big Obsidian vault takes a while.
 wiki.init(true, true)
 toMain({ type: 'wiki_dir', path: wiki.dir })
+// Documentos: files in folders that say who sees them (core/docs.ts). The folder is the truth, docs.db its index.
+const docs = new Docs({
+  dir: join(dataDir, 'documents'),
+  indexPath: join(dataDir, 'docs.db'),
+  artifactsDir: join(dataDir, 'artifacts'),
+  agents: () => db.agents(),
+  people: () => db.people(),
+  artifact: (id) => db.artifact(id),
+  canSeeArtifact: (person, a) => people.canSeeConversation(person, db.conversation(a.conversationId)) && people.artifactVisible(person, a),
+  emit: () => emit({ type: 'docs' })
+})
+docs.init() // the folder is read behind: `docs.loaded`
 // What never goes to the wiki's repository: the pages held for someone, the sources that came from a
 // DM (or may have: a conversation gone), and Tucano's own index and log, which name every page.
 const gitPrivate = (): Set<string> => {
@@ -1079,6 +1099,7 @@ const runner = new Runner({
   routines,
   skills,
   wiki,
+  docs,
   wikiCurator: curator,
   models: () => availableModels(settings(), allListed()),
   applyNow: (messageId, personId) => applyNow(messageId, personId),
@@ -1728,6 +1749,7 @@ function purged(all: Purged[]): void {
     }
     for (const r of p.routines) emit({ type: 'routine_removed', id: r.id, for: p.person })
     for (const a of p.artifacts) rmSync(join(dataDir, 'artifacts', a.id), { recursive: true, force: true })
+    docs.purgePerson(p.person) // their personal folder goes for good, and their name leaves every folder's access
     for (const src of wiki.sources(100_000)) if (src.origin?.conversationId && p.dms.includes(src.origin.conversationId)) wiki.removeSource(src.id)
   }
   if (all.some((p) => p.dms.length)) {
@@ -1780,6 +1802,10 @@ const titleUnavailable = (title: string): string => L(`Não dá pra usar o títu
 // How the wiki's history names someone: the owner by the workspace's name, as before.
 const nameOf = (ctx: Ctx): string => (ctx.person.role === 'owner' ? settings().workspaceName : ctx.person.name) || L('Você', 'You')
 const emitPeople = (): void => emit({ type: 'people', people: db.people(), former: db.formerPeople() })
+
+// Documentos errors reach the person as a plain sentence, never a disk path (Docs.cleanError).
+const viaDocs = <T>(run: () => T): T => { try { return run() } catch (e) { throw new Error(docs.cleanError(e)) } }
+const viaDocsAsync = async <T>(run: () => Promise<T>): Promise<T> => { try { return await run() } catch (e) { throw new Error(docs.cleanError(e)) } }
 
 const api: Handlers = {
   markRead: ({ conversationId }, ctx) => {
@@ -2256,7 +2282,7 @@ const api: Handlers = {
     const day = new Date().toISOString().slice(0, 10)
     let out = join(dir, `Tucano-backup-${day}.zip`)
     for (let n = 2; existsSync(out); n++) out = join(dir, `Tucano-backup-${day} (${n}).zip`)
-    const summary = writeBackup({ db, dataDir, wikiDir: wiki.dir, wikiIndex: wikiIndex(wiki.dir), out, app: appVersion })
+    const summary = writeBackup({ db, dataDir, wikiDir: wiki.dir, wikiIndex: wikiIndex(wiki.dir), docsDir: docs.root, docsIndex: join(dataDir, 'docs.db'), out, app: appVersion })
     toMain({ type: 'open_local', path: out, how: 'reveal' })
     return { path: out, ...summary }
   },
@@ -2725,6 +2751,21 @@ const api: Handlers = {
     bg(curator.ingest(src.id), 'wikiIngest')
     return src
   },
+  // Documentos: each call goes on with the person asking; who may do what is the folder's own access (core/docs.ts).
+  docs: (_p, ctx) => viaDocs(() => docs.tree(ctx.person)),
+  docFolderSave: (p, ctx) => viaDocs(() => docs.saveFolder(ctx.person, p)),
+  docFolderRemove: ({ id }, ctx) => viaDocs(() => docs.removeFolder(ctx.person, id)),
+  docAdd: ({ folderId, name, data, summary }, ctx) => viaDocsAsync(() => docs.add(ctx.person, { folderId, name, data: Buffer.from(data, 'base64'), ...(summary ? { summary } : {}) })),
+  docSaveArtifact: ({ artifactId, folderId }, ctx) => viaDocsAsync(() => docs.saveFromArtifact(ctx.person, artifactId, folderId)),
+  docMove: ({ id, folderId, name }, ctx) => viaDocs(() => docs.move(ctx.person, id, folderId, name)),
+  docRename: ({ id, name }, ctx) => viaDocs(() => docs.rename(ctx.person, id, name)),
+  docTrash: ({ id }, ctx) => viaDocs(() => docs.trash(ctx.person, id)),
+  docRestore: ({ id }, ctx) => viaDocs(() => docs.restore(ctx.person, id)),
+  docText: ({ id, version }, ctx) => viaDocsAsync(() => docs.text(ctx.person, id, version)),
+  docHistory: ({ id }, ctx) => viaDocs(() => docs.history(ctx.person, id)),
+  docRestoreVersion: ({ id, n }, ctx) => viaDocsAsync(() => docs.restoreVersion(ctx.person, id, n)),
+  docSearch: ({ q, folderId }, ctx) => viaDocs(() => docs.search(ctx.person, q, folderId)),
+  docByArtifact: (_p, ctx) => viaDocs(() => docs.docByArtifact(ctx.person)),
   wikiAddNote: ({ text, title }, ctx) => {
     if (title && /\u0000/.test(title)) throw new Error(L('Esse título tem caracteres que não valem.', 'That title has characters that are not allowed.'))
     const first = cleanTitle(text.trim().split('\n')[0]!.replace(/^#+\s*/, '')).slice(0, 60)

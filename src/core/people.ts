@@ -415,6 +415,7 @@ export class People {
       case 'skill':
       case 'skill_removed':
       case 'wiki':
+      case 'docs': // a signal only: each page reads docs() again and gets what it may see
         return event
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.

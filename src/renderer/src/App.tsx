@@ -18,6 +18,7 @@ import { Onboarding } from './components/Onboarding'
 import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
 import { MissionsPage } from './components/Missions'
 import { Hub, hubTab } from './components/Hubs'
+import { DocumentsView } from './components/docs/Documents'
 import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
 import { AgentCardLayer } from './components/AgentCard'
@@ -115,6 +116,7 @@ export function App(): ReactNode {
             {tab === 'memory' && <MemoryPage />}
             {tab === 'wiki' && <WikiView />}
             {tab === 'skills' && <SkillsPage />}
+            {tab === 'documents' && <DocumentsView />}
             {tab === 'routines' && <RoutinesPage />}
             {tab === 'report' && <ReportPage />}
             {tab === 'usage' && <UsagePage />}

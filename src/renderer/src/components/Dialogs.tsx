@@ -352,6 +352,7 @@ const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] =>
   { label: 'Wiki', view: { kind: 'wiki' }, icon: 'layers' },
   { label: L('Rotinas', 'Routines'), view: { kind: 'routines' }, icon: 'clock' },
   { label: 'Skills', view: { kind: 'skills' }, icon: 'layers' },
+  { label: L('Documentos', 'Documents'), view: { kind: 'documents' }, icon: 'folder' },
   { label: L('Time', 'Team'), view: { kind: 'org' }, icon: 'users' },
   ...(admin
     ? ([

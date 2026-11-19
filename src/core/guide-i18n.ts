@@ -43,6 +43,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Conversations, channels and threads',
     summary: 'Channels, direct messages, threads, mentions, who answers, passing the turn between agents, stop and try again, images and dictation.'
   },
+  documentos: {
+    title: 'Documents',
+    summary: "The team's files, each in its folder: sending, keeping what an agent made, the folder rule, who sees it (people and agents), versions, the trash and the accepted types."
+  },
   google: {
     title: 'Google: Gmail, Calendar, Drive, Docs and Sheets',
     summary: 'Connecting the Google services: the app the person creates in Google Cloud once, the 6 steps (with the Developer Preview enrolment), the unverified-app warning and what to check when Google refuses.'

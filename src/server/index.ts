@@ -136,6 +136,7 @@ function fromCore(msg: CoreRequest): void {
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'doc-file-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
@@ -575,6 +576,18 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     if (!path.startsWith(dir + sep)) return void res.writeHead(404, BASE_HEADERS).end()
     // Only who sees the conversation it was shown in (someone else's DM: not found).
     void grants.may(who.person ?? ownerId, { artifact: art[1]! }).then((ok) => (ok ? file(res, path, { 'content-security-policy': ARTIFACT_CSP }) : res.writeHead(404, BASE_HEADERS).end()))
+    return
+  }
+
+  // A document (Documentos): the core says where its file is when this person may see it (`v`: an older version).
+  // A refusal and a missing file answer the same, so nothing says a document is there.
+  const docMatch = /^\/doc\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
+  if (docMatch) {
+    const v = Number(url.searchParams.get('v')) || undefined
+    void ask<{ path: string; kind: string } | null>({ type: 'doc-file', person: who.person ?? ownerId ?? '', doc: docMatch[1]!, ...(v ? { v } : {}) }).then((found) => {
+      if (!found || !normalize(found.path).startsWith(resolve(join(dataDir, 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
+      file(res, found.path, { 'content-security-policy': ARTIFACT_CSP, ...(found.kind === 'html' ? { 'content-type': 'text/html; charset=utf-8' } : {}) })
+    })
     return
   }
 

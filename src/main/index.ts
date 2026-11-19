@@ -183,6 +183,7 @@ type CoreRequest =
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
   | { type: 'wiki_dir'; path: string }
+  | { type: 'doc-file-result'; id: string; data: { path: string } | null }
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
@@ -351,6 +352,8 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     else shell.showItemInFolder(msg.path)
   } else if (msg.type === 'wiki_dir') {
     runtime.wikiFolder = normalize(msg.path)
+  } else if (msg.type === 'doc-file-result') {
+    docWaits.get(msg.id)?.(msg.data)
   } else if (msg.type === 'open_path') {
     // Only folders the app keeps (an agent's computer, the backups), never an arbitrary path.
     const path = normalize(msg.path)
@@ -427,8 +430,34 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
   }
 }
 
+// tucano://doc/<id>/<name>[?v=<n>]: a document of Documentos. Only the core knows where it is (the folders' names make its
+// path), so it is asked; it answers null for one that is missing or that the window's person (the owner) may not see.
+const docWaits = new Map<string, (found: { path: string } | null) => void>()
+function serveDoc(u: URL): Promise<Response> {
+  const notFound = (): Response => new Response('not found', { status: 404 })
+  const id = u.pathname.slice(1).split('/')[0] ?? ''
+  const runtime = cores.get(registry.selected().id)
+  if (!/^[0-9a-f-]{36}$/.test(id) || !runtime) return Promise.resolve(notFound())
+  const v = Number(u.searchParams.get('v')) || undefined
+  const reqId = randomBytes(8).toString('hex')
+  return new Promise<{ path: string } | null>((resolveFile) => {
+    const timer = setTimeout(() => (docWaits.delete(reqId), resolveFile(null)), 10_000)
+    docWaits.set(reqId, (found) => (clearTimeout(timer), docWaits.delete(reqId), resolveFile(found)))
+    runtime.child.postMessage({ type: 'doc-file', id: reqId, doc: id, ...(v ? { v } : {}) })
+  }).then((found) => {
+    const file = found ? normalize(found.path) : ''
+    if (!file.startsWith(resolve(join(registry.selected().dataDir, 'documents')) + sep)) return notFound()
+    return net.fetch(pathToFileURL(file).toString()).then((r) => {
+      const headers = new Headers(r.headers)
+      headers.set('Content-Security-Policy', 'sandbox allow-scripts allow-popups') // a web page someone kept runs in a sandbox, as an agent's does
+      return new Response(r.body, { status: r.status, headers })
+    })
+  })
+}
+
 function serveArtifact(req: Request): Promise<Response> | Response {
   const u = new URL(req.url)
+  if (u.host === 'doc') return serveDoc(u)
   if (u.host === 'local') {
     // A file the core checked and signed for the window: see resolveLocal.
     const path = verifyLocalUrl(localKey, u)

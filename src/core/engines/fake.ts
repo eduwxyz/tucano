@@ -143,6 +143,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
         // A thank-you that mentions someone: the hand-off screening lets no one answer it.
         reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
+      } else if (turn.mcpUrl && /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.test(last)) {
+        // Documentos: "guarde em Empresa: ata.md = texto" saves a file; the two below list and read.
+        const [, pasta, nome, texto] = /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.exec(last)!
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_guardar', { pasta: pasta!.trim(), nome: nome!.trim(), texto: texto!, resumo: texto!.slice(0, 80) }))
+      } else if (turn.mcpUrl && /^liste os documentos(?: de (.+))?/i.test(last)) {
+        const pasta = /^liste os documentos(?: de (.+))?/i.exec(last)![1]?.trim()
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_listar', pasta ? { pasta } : {}))
+      } else if (turn.mcpUrl && /^leia o documento (.+)/i.test(last)) {
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_ler', { documento: /^leia o documento (.+)/i.exec(last)![1]!.trim() }))
       } else if (turn.mcpUrl && /^rode no computador: (.+)/i.test(last)) {
         // A command on a computer lent to this server (core/node-link.ts), for trying the line end to end.
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'node_bash'), { command: /^rode no computador: (.+)/i.exec(last)![1]! })

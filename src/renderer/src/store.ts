@@ -81,6 +81,7 @@ export type View =
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
   | { kind: 'skills' }
+  | { kind: 'documents'; folder?: string; doc?: string; q?: string } // Documentos: the home, a folder, or a document (components/docs)
   | { kind: 'report' }
   | { kind: 'org' } // who answers to whom (src/shared/org.ts)
   | { kind: 'board' } // every agent's work as cards (components/Board.tsx)
@@ -119,6 +120,7 @@ export interface State {
   routines: Routine[]
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
+  docsRev: number // goes up when a folder or a document changes: Documentos reads again
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
@@ -168,6 +170,7 @@ let state: State = {
   ready: false,
   threadSeen: loadSeen(),
   wikiRev: 0,
+  docsRev: 0,
   voiceRev: 0,
   navOpen: false,
   view: null,
@@ -620,6 +623,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
       case 'wiki':
         return { ...s, wikiRev: s.wikiRev + 1 }
+      case 'docs':
+        return { ...s, docsRev: s.docsRev + 1 }
       case 'voice':
         return { ...s, voiceRev: s.voiceRev + 1 }
       case 'people':
