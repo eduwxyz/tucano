@@ -288,6 +288,9 @@ export function Sidebar(): ReactNode {
   const asks = useStore((s) => s.inbox.questions.length)
   const onAsks = useStore((s) => s.view?.kind === 'asks')
   const showAsks = !settings.hideEmptyAsks || asks > 0 || onAsks
+  const onApprovals = useStore((s) => s.view?.kind === 'approvals')
+  const inboxWaiting = useStore((s) => (teamMode(s) ? inboxCount(s) : 0))
+  const showApprovals = !settings.hideEmptyApprovals || pending > 0 || inboxWaiting > 0 || onApprovals
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
   const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
@@ -480,7 +483,7 @@ export function Sidebar(): ReactNode {
             <TucaItem />
           </TopRow>
         )}
-        {(shows('approvals') || back('approvals')) && (
+        {(shows('approvals') || back('approvals')) && showApprovals && (
           <TopRow item="approvals" back={back('approvals')} onMenu={menuAt}>
             <NavItem view={{ kind: 'approvals' }} icon="shield" label={topLabel('approvals', team)} badge={pending} />
           </TopRow>
