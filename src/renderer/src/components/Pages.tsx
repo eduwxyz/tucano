@@ -100,7 +100,7 @@ import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
 import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
-import { confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { confirmDeleteAgent, confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
@@ -409,7 +409,20 @@ const TYPED: (keyof Agent)[] = ['name', 'handle', 'role', 'instructions']
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'blocked'
 
-export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; draft?: Agent; fromMessage?: string }): ReactNode {
+type AgentPageProps = { id?: string; draft?: Agent; fromMessage?: string }
+
+export function AgentPage(props: AgentPageProps): ReactNode {
+  const removed = useStore((s) => (props.id ? agentById(s, props.id) : undefined))
+  if (removed?.kind !== 'removed') return <AgentForm {...props} />
+  // Old links still lead here: a message's Tuca card, a report line.
+  return (
+    <Page title={removed.name}>
+      <p className="muted">{L('Este agente foi excluído. As mensagens dele continuam nos canais.', 'This agent was deleted. Its messages stay in the channels.')}</p>
+    </Page>
+  )
+}
+
+function AgentForm({ id, draft: proposed, fromMessage }: AgentPageProps): ReactNode {
   const existing = useStore((s) => (id ? agentById(s, id) : undefined))
   const agents = useStore((s) => s.agents)
   const engines = useStore((s) => s.settings.engines)
@@ -580,7 +593,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     })
   const menuItems: MenuItem[] = [
     ...(!isNew && !archived ? [{ label: L('Abrir DM', 'Open DM'), icon: 'thread' as const, onClick: () => void openDm(draft.id) }] : []),
-    ...(admin && !isNew && !archived ? [{ label: L('Arquivar', 'Archive'), icon: 'archive' as const, onClick: archive }] : [])
+    ...(admin && !isNew && !archived ? [{ label: L('Arquivar', 'Archive'), icon: 'archive' as const, onClick: archive }] : []),
+    ...(admin && !isNew && draft.kind !== 'tuca' ? [{ label: L('Excluir', 'Delete'), icon: 'trash' as const, danger: true, onClick: () => void confirmDeleteAgent(draft) }] : [])
   ]
   const used = existing?.used ?? 0
   const limit = existing?.limit ?? draft.limit

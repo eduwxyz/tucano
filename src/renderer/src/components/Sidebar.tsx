@@ -39,7 +39,7 @@ import type { SidebarPart } from '../../../shared/onboarding'
 import { addGroup, arrange, moveChannel, nudgeChannel, removeGroup, renameGroup, type ChannelLayout } from '../../../shared/channel-layout'
 import { call } from '../rpc'
 import { SurveyLine } from './Feedback'
-import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
+import { ContextMenu, confirmDeleteAgent, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { MissionsCard, useSidebarParts } from './Missions'
 import { UpdateNote } from './Update'
@@ -438,7 +438,8 @@ export function Sidebar(): ReactNode {
         }).then((ok) => {
           if (ok) void archiveAgent(agentId, true)
         })
-    }
+    },
+    { label: L('Excluir…', 'Delete…'), icon: 'trash', danger: true, onClick: () => void confirmDeleteAgent({ id: agentId, name: agentName }) }
   ]
   const agentRow = (a: Agent): ReactNode => {
     const dm = dmOf.get(a.id)
@@ -583,11 +584,11 @@ export function Sidebar(): ReactNode {
               ))
             : teamAgents.map(agentRow)}
           {archivedWithDm.map(agentRow)}
-          {agents.some((a) => a.archived) && (
+          {agents.some((a) => a.archived && a.kind !== 'removed') && (
             <button className="nav-item nav-item--quiet" onClick={() => openDialog({ kind: 'archived' })}>
               <Icon name="layers" />
               <span className="nav-item__label">{L('Arquivados', 'Archived')}</span>
-              <span className="nav-item__meta">{agents.filter((a) => a.archived).length}</span>
+              <span className="nav-item__meta">{agents.filter((a) => a.archived && a.kind !== 'removed').length}</span>
             </button>
           )}
         </Section>

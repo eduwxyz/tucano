@@ -275,4 +275,15 @@ export class Skills {
   remove(id: string): void {
     this.drop(id)
   }
+
+  // A deleted agent leaves the skills it had, and what it proposed goes with it. A skill only it
+  // used is archived with that agent still on it: with no agents, a skill applies to everyone.
+  forgetAgent(agentId: string): void {
+    for (const k of this.deps.db.skills()) {
+      if (k.state === 'pending' && k.proposedBy === agentId) this.drop(k.id)
+      else if (!k.agents.includes(agentId)) continue
+      else if (k.agents.length > 1) this.store({ ...k, agents: k.agents.filter((a) => a !== agentId), updatedAt: this.now() })
+      else if (k.state === 'active') this.store({ ...k, state: 'archived', updatedAt: this.now() })
+    }
+  }
 }

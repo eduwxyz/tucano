@@ -7,6 +7,10 @@
 // still show in Portuguese, so test/guide-i18n.test.ts fails on a slug that exists in one and not the
 // other, in either direction.
 export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
+  'excluir-agente': {
+    title: 'Deleting an agent',
+    summary: 'Deleting an agent for good: what goes with it, what stays, and when to archive instead.'
+  },
   agentes: {
     title: 'Agents',
     summary: 'Creating an agent, instructions, model, limits, tools and access, memory, appearance and archiving.'

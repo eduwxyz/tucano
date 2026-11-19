@@ -155,7 +155,7 @@ The first time Tucano saves a connector password, macOS asks whether it may use 
 On Linux and Windows, use **Ctrl** instead of **⌘**. Closing the window keeps Tucano running in the tray, by the clock (routines and triggers go on); quit it from the tray icon.
 
 - **Connect a tool:** **Connectors → Add**, paste the MCP server's address. OAuth servers open the browser; the others ask for a token. Then, on each agent's page, set its access to each connector.
-- **Archived agents** leave the sidebar and stop answering, but keep their history and receipts. Find them under **Archived** to bring them back.
+- **Archived agents** leave the sidebar and stop answering, but keep their history and receipts. Find them under **Archived** to bring them back. To remove one for good, use **Delete**, on the agent's page or with a right-click: its messages in channels and its receipts stay, the rest goes.
 - **Approve from your phone:** connect the Telegram bot in **Settings → Phone**; approvals and questions arrive with their buttons.
 - **Missions**, in the sidebar, walk you through the rest by doing it: talk to your agent, approve something, connect an account, build a second agent, put something on autopilot, keep something that matters.
 
