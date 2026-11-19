@@ -3986,6 +3986,18 @@ body.is-resizing webview {
 .msg__reply:focus-visible {
   opacity: 1;
 }
+/* Every trash is an overlay on its row: the rail, the prompt bubble's left side or the post's
+   outer rail. The header variant opts back into the row below. */
+.msg__delete {
+  position: absolute;
+  opacity: 0;
+  color: var(--text-2);
+  transition: var(--transition-ui);
+}
+.msg__delete.is-armed {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
 /* The trash rides the same sticky rail, one row under the thread button. */
 .msg__anchor-pin .msg__delete {
   position: absolute;
@@ -4002,10 +4014,6 @@ body.is-resizing webview {
 .msg__delete:focus-visible,
 .msg__delete.is-armed {
   opacity: 1;
-}
-.msg__delete.is-armed {
-  color: var(--danger);
-  background: var(--danger-soft);
 }
 .msg__delete--head {
   position: static;
