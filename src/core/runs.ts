@@ -47,6 +47,7 @@ import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO
 import { askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
+import { CONCLUIR_OBJETIVO, GOAL_MAX_TURNS, goalEnd, goalTask, goalText, sameReply, type Goal } from './goals'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) })
 // The thread a request is worked in: its own, or the one it was asked inside.
@@ -357,7 +358,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; goal?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -396,6 +397,8 @@ export class Runner {
   // Every other reply asked for while the agent replies there (a person's mention or DM, a routine,
   // an approval's outcome, a retry), in the order they came: they wait here, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
+  // Goals under way, by the message that set them (src/core/goals.ts).
+  private goals = new Map<string, Goal>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -574,6 +577,13 @@ export class Runner {
     const reading = docs.map((f) => this.keepFile(mine, f))
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
+    // "/objetivo …" in a channel: the agents work on it by themselves until it's done (src/core/goals.ts).
+    const goalAsked = conv.kind === 'channel' ? goalText(typed) : undefined
+    if (goalAsked === '') return void this.post(conv.id, replyIn, L('Escreva o objetivo depois de /objetivo, por exemplo: /objetivo landing page com lista de espera, revisada e aprovada.', 'Write the goal after /goal, for example: /goal a landing page with a waitlist, reviewed and approved.'))
+    if (goalAsked) {
+      this.goals.set(mine.id, { id: mine.id, text: goalAsked, conversationId: conv.id, ...(replyIn ? { threadId: replyIn } : {}), turns: 0, state: 'running', last: new Map() })
+      this.post(conv.id, replyIn, L(`**Objetivo**: os agentes trabalham nele sozinhos, passando a vez entre si, até alguém marcar como cumprido (no máximo ${GOAL_MAX_TURNS} respostas).`, `**Goal**: the agents work on it by themselves, passing the turn to each other, until someone marks it done (${GOAL_MAX_TURNS} replies at most).`))
+    }
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
@@ -644,8 +654,10 @@ export class Runner {
         return
       }
     }
+    // An answer to a question asked while working on a goal: the work on it goes on.
+    const goalOn = asked?.run?.goal && this.goals.get(asked.run.goal)?.state === 'running' ? asked.run.goal : undefined
     const reply = (agent: Agent, opts: Partial<ReplyOpts> = {}): Promise<Message | undefined> =>
-      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
+      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(goalOn ? { goal: goalOn } : {}), ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
     if (responders.length === 1) return void reply(responders[0]!)
     // Several called by name answer one after another, in the order written: each answers my message
     // and reads what the ones before it answered (routedHistory), like a routed message.
@@ -769,7 +781,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}) }, { urgent: true })
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}), ...(msg.run?.goal ? { goal: msg.run.goal } : {}) }, { urgent: true })
   }
 
   // Whether a reply that paused at its cap goes on by itself: the person didn't turn that off, it hasn't
@@ -1123,7 +1135,7 @@ export class Runner {
     const f = this.followups.take(key)
     if (f && msg.run?.status === 'done' && !this.paused) {
       this.followups.reserve(key)
-      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true }))
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true, ...(f.goal ? { goal: f.goal } : {}) }))
     }
     this.startWaiting(key)
     return msg
@@ -1155,9 +1167,12 @@ export class Runner {
     const autoContinued = opts.autoContinued ?? opts.existing?.run?.autoContinued
     const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}), ...(autoContinued ? { autoContinued } : {}) }
     const replyTo = opts.trigger ?? opts.replyTo ?? opts.existing?.run?.replyTo
+    // The goal this reply works on: handed along the chain, kept on a retry, or the message it answers set one.
+    const goalId = [opts.goal, opts.existing?.run?.goal, replyTo].find((id): id is string => !!id && this.goals.get(id)?.state === 'running')
+    const goal = goalId ? this.goals.get(goalId) : undefined
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), ...(goalId ? { goal: goalId } : {}) }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -1384,7 +1399,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES, CONCLUIR_OBJETIVO.name])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1493,6 +1508,7 @@ ${note}`,
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(team.length ? DELEGATION_TOOLS : []),
+      ...(goal ? [CONCLUIR_OBJETIVO] : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -1618,6 +1634,16 @@ ${note}`,
               `Question sent to ${settings.workspaceName}. End your reply now with one sentence at most, without repeating the question. The answer comes in the next message.`
             )
           )
+        }
+
+        if (name === CONCLUIR_OBJETIVO.name && goal) {
+          const result = typeof args['resultado'] === 'string' ? args['resultado'].trim().slice(0, 2_000) : ''
+          if (!result) return textResult(L('Diga em "resultado" o que ficou pronto e como foi conferido.', 'Say in "resultado" what got done and how it was checked.'), true)
+          goal.state = 'done'
+          goal.result = result
+          goal.by = agent.id
+          addSteps({ id: randomUUID(), label: L('Marcou o objetivo como cumprido', 'Marked the goal done'), detail: result.slice(0, 200), status: 'done' })
+          return textResult(L('Objetivo marcado como cumprido. Encerre agora com o resultado, sem passar a vez a ninguém.', 'Goal marked done. End now with the result, without passing the turn to anyone.'))
         }
 
         if (name === PEDIR.name && team.length) {
@@ -2487,7 +2513,7 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.some((m) => m.id === anchor.id) ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task: goal ? [task, goalTask(goal, settings.workspaceName)].filter(Boolean).join('\n\n') : task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.some((m) => m.id === anchor.id) ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -2727,7 +2753,11 @@ ${note}`,
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
         const next = agentsFor(requester, this.mentions(agent, conv, msg, requester)).filter((a) => a.id !== handedNow?.from)
-        if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
+        // On a goal the team goes on past the usual replies in a row, until it's done or stops (goalTurn).
+        if (goal) {
+          if (this.goalTurn(goal, agent, conv, msg, next.length > 0) && next.length) void this.handOff(conv, msg, agent, next, opts.depth, Number.MAX_SAFE_INTEGER, finished, goal.id)
+          else finished()
+        } else if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
         else finished()
       }
     } else {
@@ -2745,6 +2775,12 @@ ${note}`,
     else if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id])
 
     if (goesOn) void this.continue(msg.id, 'cap')
+    // A reply on a goal that didn't finish, and won't go on by itself: the goal ends there, and says so.
+    if (goal?.state === 'running' && !goesOn && (st === 'failed' || st === 'stopped' || st === 'limit_reached' || st === 'paused')) {
+      goal.state = 'cut'
+      this.goals.delete(goal.id)
+      this.post(conv.id, msg.threadId, goalEnd(goal, agent.name))
+    }
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
@@ -3493,7 +3529,26 @@ ${note}`,
 
   // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
   // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
-  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, limit: number, finished: () => void): Promise<void> {
+  // One more reply on a goal: whether the team goes on. It doesn't when the reply marked it done, when it
+  // reached GOAL_MAX_TURNS, when the agent said the same as its last reply on it (going in circles), or
+  // when it passed the turn to no one. Each of those leaves a line in the channel, and the goal ends.
+  private goalTurn(g: Goal, agent: Agent, conv: Conversation, msg: Message, passing: boolean): boolean {
+    g.turns++
+    if (g.state === 'running') {
+      const before = g.last.get(agent.id)
+      if (before !== undefined && sameReply(before, msg.text)) g.state = 'stuck'
+      else if (g.turns >= GOAL_MAX_TURNS) g.state = 'capped'
+      else if (!passing) g.state = 'dropped'
+      g.last.set(agent.id, msg.text)
+    }
+    if (g.state === 'running') return true
+    this.goals.delete(g.id)
+    this.post(conv.id, msg.threadId, goalEnd(g, g.by ? (this.deps.db.agent(g.by)?.name ?? agent.name) : agent.name))
+    return false
+  }
+
+  // On a goal (`goal`), the turn passed with @ is the work itself: no screening, and the goal goes along.
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, limit: number, finished: () => void, goal?: string): Promise<void> {
     const { db, engines } = this.deps
     const and = L(' e ', ' and ')
     const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
@@ -3507,7 +3562,8 @@ ${note}`,
         console.warn('[handoff]', why)
         step.detail = `${list(next)} · ${L('não consegui avaliar, chamei todos', "couldn't screen it, called everyone")}`
       }
-      try {
+      if (!goal)
+        try {
         const settings = await this.deps.settings()
         // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
         const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
@@ -3551,10 +3607,10 @@ ${note}`,
       }
       // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.
       for (const a of called) {
-        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work })
+        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work, ...(goal ? { goal } : {}) })
         else {
           this.followups.reserve(keyOf(a))
-          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true }))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(goal ? { goal } : {}) }))
         }
       }
     } finally {
