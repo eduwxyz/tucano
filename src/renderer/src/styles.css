@@ -1629,10 +1629,26 @@ h3 {
    fading into the top edge instead of pushing the new ones off the message. */
 .steps--latest .steps__list {
   max-height: 232px;
+  /* Down only: this window is the one the app draws a bar on, and a step is wrapped where it stands
+     rather than pushed sideways (a long path or a URL used to add a sideways bar to a two-line box). */
+  overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: thin;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+}
+
+/* Every part of a step stays inside the window's width: the label wraps, and a token with no spaces
+   (a path, a URL) breaks instead of widening the row. */
+.steps--latest .step {
+  min-width: 0;
+}
+.steps--latest .step__label,
+.steps--latest .step__detail,
+.steps--latest .step__note,
+.steps--latest .step__output {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* The three ways a reply can show its steps (Settings › General, and an agent's own page):
    four buttons on a wide window, two lines of two on a narrow one. */
