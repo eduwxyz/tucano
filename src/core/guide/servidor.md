@@ -1,7 +1,7 @@
 # Tucano num servidor
 > Rodar o Tucano num servidor seu (VPS ou máquina em casa) e usar pelo navegador: instalar, acessar, manter rodando e o que muda.
 
-No servidor, as rotinas continuam rodando quando o seu computador dorme, e você usa o Tucano pelo navegador, em qualquer computador ou celular. Nada passa por um serviço do Tucano: o servidor é seu. É o mesmo que roda nos servidores do Tucano Pro.
+No servidor, as rotinas continuam quando o seu computador dorme, e você usa o Tucano pelo navegador, em qualquer computador ou celular. Nada passa por um serviço do Tucano: o servidor é seu. É o mesmo que roda nos servidores do Tucano Pro.
 
 ## O que precisa
 - Linux (x64 ou ARM64), com 2 GB de RAM ou mais, e Node.js 24 ou mais novo.
