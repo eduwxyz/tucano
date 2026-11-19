@@ -12554,7 +12554,7 @@ button.agent-card__now:hover {
 /* The section rail is the page's second tab row: the width of the SETTINGS_TABS bar above it, the
    same underline for the section in view, and no rounded pill for the current one. */
 .settings-navigation { position: sticky; top: var(--settings-rail-top, 0px); z-index: 4; margin: -18px 0 18px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.settings-sections { position: relative; display: flex; align-items: stretch; gap: 2px; min-width: 0; padding-top: 4px; overflow-x: auto; scrollbar-width: thin; }
+.settings-sections { position: relative; display: flex; flex-wrap: wrap; align-items: stretch; gap: 2px; min-width: 0; padding-top: 4px; overflow: visible; }
 .settings-sections > a { flex: 0 0 auto; padding: 9px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; white-space: nowrap; text-decoration: none; color: var(--text-2); font-size: 13.5px; transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
 .settings-sections > a[aria-current="location"] { color: var(--text); border-color: var(--accent); font-weight: 600; }
 .settings-sections > a:hover { color: var(--text); }
