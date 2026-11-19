@@ -37,6 +37,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   dismissProposal: { messageId: 's', index: 'n?' },
   applyProposals: { messageId: 's', draft: 'b?' },
   dismissProposals: { messageId: 's', draft: 'b?' },
+  undoProposal: { messageId: 's', index: 'n?', draft: 'b?' },
+  undoProposals: { messageId: 's' },
   settleDraft: { messageId: 's', agentId: 's?' },
   updateSettings: { patch: 'o' },
   refreshEngines: {},

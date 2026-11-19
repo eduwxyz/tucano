@@ -1041,6 +1041,27 @@ export class Db {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
   }
 
+  // Whether anything was said there yet, by anyone.
+  hasMessages(conversationId: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1').get(conversationId)
+  }
+
+  // Whether an agent left any trace of work: a message it wrote, a to-do on someone's board, a memory or note.
+  agentUsed(agentId: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 WHERE EXISTS (SELECT 1 FROM messages WHERE author_kind = 'agent' AND author_id = ?) OR EXISTS (SELECT 1 FROM tasks WHERE agent_id = ?) OR EXISTS (SELECT 1 FROM memories WHERE agent_id = ? OR scope = ?)")
+      .get(agentId, agentId, agentId, agentId)
+  }
+
+  // An agent gone for good, with its places in channels: only for one taken back before it did anything
+  // (its DMs go first, through deleteConversation).
+  deleteAgent(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM members WHERE agent_id = ?').run(id)
+      this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    })
+  }
+
   // Puts the agent in exactly these channels (DMs are untouched).
   setAgentChannels(agentId: string, channelIds: string[]): string[] {
     const changed: string[] = []

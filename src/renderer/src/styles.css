@@ -5888,8 +5888,20 @@ kbd {
 }
 .draft-card__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+/* a change the Tuca applied by itself: what was done, above its Desfazer */
+.proposal-receipt {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: var(--ok);
+}
+.proposal-undo-error {
+  flex-basis: 100%;
 }
 /* a change the Tuca proposes: each field, before → after */
 .proposal-rows {
@@ -11393,6 +11405,7 @@ button.agent-card__now:hover {
   border-color: var(--danger);
 }
 .proposal-group__dots button.is-dismissed,
+.proposal-group__dots button.is-undone,
 .proposal-group__dots button.is-replaced {
   opacity: 0.4;
 }

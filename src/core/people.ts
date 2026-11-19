@@ -408,6 +408,8 @@ export class People {
       // This computer's lines to the servers it's lent to: its owner's only.
       case 'node':
         return person.role === 'owner' ? event : undefined
+      // An agent taken back right after it was made: its id alone, so whoever had it drops it.
+      case 'agent_removed':
       case 'voice':
       case 'connector_removed':
       case 'skill':

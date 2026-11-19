@@ -280,15 +280,30 @@ export interface AgentDraft {
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
   reason?: string
-  state?: 'created' | 'dismissed'
+  state?: 'created' | 'dismissed' | 'undone'
   agentId?: string // once created
+  auto?: true // created by itself when the Tuca proposed it (Settings.tucaApplyNow), not by a click
+  undo?: UndoInfo // once created: how to take it back
+}
+
+// How long a change the Tuca applied can be taken back with Desfazer.
+export const UNDO_HOURS = 24
+
+// What taking an applied card back needs: until when, and what to check first, so a later change
+// to the same thing is never thrown away. `prior`: an agent's fields as they were just before;
+// `stamps`: what each thing it made looked like right after (an agent's or a routine's, by id).
+export interface UndoInfo {
+  until: number
+  prior?: AgentChanges
+  stamps?: Record<string, string>
 }
 
 // What the Tuca may propose to change in an agent that exists.
 export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
-// with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
+// with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
+// inside the app (Settings.tucaApplyNow): that applies when his reply ends, and the card offers Desfazer. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
 // A reply may hold several (a group under it, each applied on its own or all at once). `needs`: agents
 // proposed in the same reply (by name: propor_agente's card or a team's) that must exist first; a
@@ -298,7 +313,7 @@ export type Proposal = (
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
   | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
-) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; needs?: string[] }
+) & { reason?: string; state?: 'applied' | 'dismissed' | 'undone'; appliedId?: string; error?: string; needs?: string[]; auto?: true; undo?: UndoInfo } // auto: applied by itself, as the Tuca proposed it; undo: how to take it back
 
 // What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
 // agents and teams); `draft`: the reply's new-agent card, when it went too.
@@ -562,6 +577,7 @@ export interface Settings {
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
+  tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work

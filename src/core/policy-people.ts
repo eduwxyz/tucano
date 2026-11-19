@@ -109,6 +109,8 @@ export const NEEDS: Record<Method, Need> = {
   applyProposal: 'target', // agents and teams, admins (a member's card tells them); a routine, its rules; a channel, anyone
   applyProposals: 'target', // each card as applyProposal checks it
   dismissProposals: 'anyone',
+  undoProposal: 'target', // as applying it: agents and teams, admins; a routine, its rules; a channel, whoever made it
+  undoProposals: 'target',
   localPath: 'anyone',
   openLocal: 'anyone',
   openExternal: 'anyone',

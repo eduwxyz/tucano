@@ -16,6 +16,9 @@ import {
   navigate,
   newAgentDraft,
   openDm,
+  askAgent,
+  amAdmin,
+  undoProposal,
   saveAgent,
   sendMessage,
   slug,
@@ -330,7 +333,7 @@ type TucaStage = 'talk' | 'proposal' | 'done'
 const newestDraft = (messages: Message[]): Message | undefined => messages.findLast((m) => !!m.run?.agentDraft)
 function tucaStage(m: Message | undefined): TucaStage {
   const state = m?.run?.agentDraft?.state
-  return !m || state === 'dismissed' ? 'talk' : state === 'created' ? 'done' : 'proposal'
+  return !m || state === 'dismissed' || state === 'undone' ? 'talk' : state === 'created' ? 'done' : 'proposal'
 }
 
 // The top of the builder screen with the Tuca: where you are, by name. `detail`: which part of the
@@ -411,6 +414,8 @@ function ModelChip({ value, onPick, note, applying }: { value: string; onPick: (
 function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: string; error?: string }; setConv: (id: string) => void; onUse: (d: AgentDraft, messageId: string) => void; onManual: () => void }): ReactNode {
   const conv = session.id
   const tuca = useStore((s) => s.agents.find((a) => a.kind === 'tuca'))
+  // What he proposes inside the app is made when his reply ends (not in the introduction, nor when turned off).
+  const applyNow = useStore((s) => s.settings.tucaApplyNow !== false && s.settings.onboarding?.done !== false && amAdmin(s))
   const [model, setModel] = useState(tuca?.modelId ?? '')
   const [applying, setApplying] = useState(false)
   const [modelError, setModelError] = useState('')
@@ -532,7 +537,7 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
           )}
         </div>
         <div className="onb-tc__foot">
-          <span>{L('Nada é criado sem você.', 'Nothing is created without you.')}</span>
+          <span>{applyNow ? L('O que ele cria entra na hora, e dá pra desfazer.', 'What he makes goes in right away, and can be undone.') : L('Nada é criado sem você.', 'Nothing is created without you.')}</span>
           {modelError && <span className="hint hint--warn">{modelError}</span>}
           <button className="onb-tc__manual" onClick={onManual}>
             {L('Prefiro montar eu mesmo', 'I’d rather build it myself')}
@@ -571,6 +576,20 @@ function ProposalSide({ message, model, onUse }: { message?: Message; model: str
       const { conversationId } = await createFromDraft(message.id)
       // As "Criar e testar" does: the first task goes out, and the screen shows it made.
       if (d.task) sendMessage(conversationId, d.task)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Made by itself when his reply ended: taken back, the card is a conversation again.
+  async function undo(): Promise<void> {
+    if (!message || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await undoProposal(message.id, undefined, true)
     } catch (e) {
       setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
     } finally {
@@ -624,12 +643,27 @@ function ProposalSide({ message, model, onUse }: { message?: Message; model: str
         <div className="onb-tc__actions">
           {created && (
             <>
-              <button className="btn btn--primary onb-tc__go" onClick={() => void openDm(created.id)}>
-                {L(`Abrir conversa com ${created.name}`, `Open conversation with ${created.name}`)}
-              </button>
-              <button className="link" onClick={() => navigate({ kind: 'agent', id: created.id })}>
-                {L('Ver perfil', 'See profile')}
-              </button>
+              {/* Made by itself as he proposed it: its first test waits for this click, as "Criar agente" would send it. */}
+              {d?.auto && d.task ? (
+                <button className="btn btn--primary onb-tc__go" onClick={() => void askAgent(created.id, d.task!).then((id) => navigate({ kind: 'conversation', id }))}>
+                  {L(`Testar ${created.name}`, `Try ${created.name}`)}
+                </button>
+              ) : (
+                <button className="btn btn--primary onb-tc__go" onClick={() => void openDm(created.id)}>
+                  {L(`Abrir conversa com ${created.name}`, `Open conversation with ${created.name}`)}
+                </button>
+              )}
+              {d?.auto && d.task && <p className="hint">“{d.task}”</p>}
+              <div className="onb-tc__more">
+                <button className="link" onClick={() => navigate({ kind: 'agent', id: created.id })}>
+                  {L('Ver perfil', 'See profile')}
+                </button>
+                {d?.undo && Date.now() < d.undo.until && message && (
+                  <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void undo()}>
+                    {L('Desfazer', 'Undo')}
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>

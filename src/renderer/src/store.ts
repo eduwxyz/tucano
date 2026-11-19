@@ -568,6 +568,8 @@ function apply(e: CoreEvent): void {
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
+      case 'agent_removed':
+        return { ...s, agents: s.agents.filter((a) => a.id !== e.id) }
       case 'conversation': {
         return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
@@ -935,6 +937,8 @@ export const applyProposal = (messageId: string, index = 0): Promise<{ id: strin
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
 export const applyProposals = (messageId: string, draft: boolean): Promise<ProposalsResult> => call('applyProposals', { messageId, draft })
 export const dismissProposals = (messageId: string, draft: boolean): void => void call('dismissProposals', { messageId, draft }).catch(() => {})
+export const undoProposal = (messageId: string, index?: number, draft?: boolean): Promise<void> => call('undoProposal', { messageId, ...(index !== undefined ? { index } : {}), ...(draft ? { draft } : {}) })
+export const undoProposals = (messageId: string): Promise<ProposalsResult> => call('undoProposals', { messageId })
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {
