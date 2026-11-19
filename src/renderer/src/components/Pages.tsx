@@ -944,7 +944,6 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                       'Pages held for one person are read and written only in their own DM: anywhere else the agent doesn’t see them.'
                     )}
                   </p>
-                  {!isNew && <p>{L('Muda na hora, sem precisar salvar.', 'Takes effect right away, no need to save.')}</p>}
                 </>
               }
             >
