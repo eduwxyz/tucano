@@ -1364,6 +1364,33 @@ h3 {
 .msg__body {
   min-width: 0;
 }
+/* The reply's own Markdown on the clipboard, at the foot of a finished reply: a dim glyph with no frame
+   of its own, and the check it turns into for a moment after the press. */
+.msg__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.msg__copy:hover,
+.msg__copy:focus-visible,
+.msg__copy.is-copied {
+  background: var(--bubble);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .msg__copy {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
   grid-template-columns: 1fr;
@@ -4051,6 +4078,11 @@ body.is-resizing webview {
   .steps__ask-pill__word {
     display: none;
   }
+}
+/* The glyph belongs to the footer line's own height, not to a 32 px button of its own. */
+.msg__meta .msg__copy {
+  min-width: 0;
+  min-height: 0;
 }
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */

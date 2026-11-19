@@ -65,6 +65,7 @@ import { canEditChannel,
   countedTokens,
   sendMessage,
   updateSettings,
+  toast,
   typing,
   setTab,
   stopRun,
@@ -531,6 +532,30 @@ const NO_ATTACHED: Artifact[] = []
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
+// The reply as it was written, not as the screen drew it: its own Markdown, on the clipboard, for a
+// note, a doc or another window. It sits at the head of a finished reply's footer, before its numbers.
+export function CopyMarkdown({ text }: { text: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true)
+        if (timer.current) window.clearTimeout(timer.current)
+        timer.current = window.setTimeout(() => setCopied(false), 1600)
+      })
+      .catch(() => toast(L('Não deu pra copiar a resposta.', 'Could not copy the reply.')))
+  }
+  const label = L('Copiar como Markdown', 'Copy as Markdown')
+  return (
+    <button type="button" className={`msg__copy${copied ? ' is-copied' : ''}`} title={label} aria-label={label} onPointerDown={(e) => e.preventDefault()} onClick={copy}>
+      <Icon name={copied ? 'check' : 'copy'} size={16} />
+    </button>
+  )
+}
+
 const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
@@ -722,6 +747,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             {retryable && <TryAgain messageId={message.id} />}
             {hasFooter && (
               <>
+                {message.author.kind === 'agent' && message.run?.status === 'done' && message.text.trim() && <CopyMarkdown text={message.text} />}
                 {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
                 {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
               </>
