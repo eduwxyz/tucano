@@ -178,6 +178,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
   const dmAgentId = conv?.kind === 'dm' ? conv.members[0] : undefined
   const routinesHere = useStore((s) => (dmAgentId ? s.routines.filter((r) => r.conversationId === id && r.agentId === dmAgentId && r.enabled).length : 0))
+  // Who opened this team-up: a channel an agent made to work with agents it called in.
+  const teamLead = useStore((s) => (conv?.teamUp ? agentById(s, conv.teamUp.by)?.name : undefined))
 
   if (!conv)
     return (
@@ -235,6 +237,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                   : onMac.length === 1
                     ? L(`${onMac[0]!.name} roda no seu computador`, `${onMac[0]!.name} runs on your computer`)
                     : L(`${onMac.length} rodam no seu computador`, `${onMac.length} run on your computer`)}
+              </span>
+            )}
+            {conv.teamUp && (
+              <span className="tag" title={teamLead ? L(`Equipe montada por ${teamLead}`, `A team ${teamLead} put together`) : L('Equipe montada por um agente', 'A team an agent put together')}>
+                {L('Equipe', 'Team-up')}
               </span>
             )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
