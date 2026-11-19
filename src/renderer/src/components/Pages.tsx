@@ -3511,8 +3511,7 @@ export function BrowserClickCard(): ReactNode {
           <button type="button" role="radio" aria-checked={!jobs.browser} className={jobs.browser ? '' : 'is-active'} onClick={() => choose('')}>
             {L('Só pelo texto da página', 'Only by the page’s text')}
           </button>
-          <button type="button" role="radio" aria-checked={!!jobs.browser} className={jobs.browser ? 'is-active' : ''} onClick={() => choose(jobs.browser || JEV_CLASSIFIER.id)}>
-            {L('Com um classificador', 'With a classifier')}
+          <button type="button" role="radio" aria-checked={!!jobs.browser} className={jobs.browser ? 'is-active' : ''} onClick={() => choose(jobs.browser || JEV_CLASSIFIER.id)}>            {L('Com um classificador', 'With a classifier')}
           </button>
         </div>
         {jobs.browser && (
@@ -3521,8 +3520,7 @@ export function BrowserClickCard(): ReactNode {
             onChange={(v) => choose(v ?? JEV_CLASSIFIER.id)}
             options={[
               { value: JEV_CLASSIFIER.id, label: 'Jev (TypeSafe)', hint: providerSpec(JEV_CLASSIFIER.provider).label },
-              ...list.filter((c) => c.id !== JEV_CLASSIFIER.id).map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))
-            ]}
+              ...list.filter((c) => c.id !== JEV_CLASSIFIER.id).map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))            ]}
           />
         )}
       </div>
@@ -3530,8 +3528,7 @@ export function BrowserClickCard(): ReactNode {
       {chosen && <ClassifierKey key={chosen.id} classifier={chosen} saved={!!settings.classifierKeys?.[chosen.id]} />}
     </Card>
   )
-}function VoiceCard(): ReactNode {
-  const voice = useStore((s) => s.settings.voice)
+}function VoiceCard(): ReactNode {  const voice = useStore((s) => s.settings.voice)
   const status = useVoice()
   const [error, setError] = useState('')
   const [advanced, setAdvanced] = useState(false)
