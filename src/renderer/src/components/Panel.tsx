@@ -51,8 +51,13 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
         <strong>{a.title}</strong>
         <span className="muted small">
           {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
-          {kept && ` · ${L('Guardado em', 'Kept in')} ${(tree && pathText(tree, kept.folderId)) || 'Documentos'}`}
         </span>
+        {kept && (
+          // On its own line: at the end of the line above it was the first thing a narrow chat cut off.
+          <span className="small artifact-card__kept">
+            <Icon name="check" size={12} /> {L('Guardado em', 'Kept in')} {(tree && pathText(tree, kept.folderId)) || 'Documentos'}
+          </span>
+        )}
       </span>
       <span className="artifact-card__open">{L('Abrir', 'Open')}</span>
     </button>
