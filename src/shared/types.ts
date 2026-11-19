@@ -4,6 +4,7 @@ import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
+import type { InboxDoc, InboxDocDate } from './docs'
 import { L, lang, locale, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
@@ -414,6 +415,8 @@ export interface Inbox {
   questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
   answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
+  documents?: InboxDoc[] // documents waiting for this person to approve
+  docDates?: InboxDocDate[] // dates found in documents they look after, coming up
 }
 
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.

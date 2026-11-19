@@ -17,6 +17,10 @@ export function cleanFileName(name: string): string {
   return base ? `${base}${ext.replace(/[^\p{L}\p{N}.]/gu, '').slice(0, 12)}` : ''
 }
 
+// Text that came from a file (a name, a path), cleaned before an agent reads it inside an instruction: no @, quotes,
+// backticks, brackets or braces, no line breaks, single spaces, at most `max` characters.
+export const plain = (s: string, max: number): string => s.replace(/[@"`<>[\]{}]/g, '').replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+
 // What tells two names apart on a disk that ignores case and accents' spelling (macOS).
 export const sameName = (a: string): string => a.normalize('NFC').toLowerCase()
 // A name with the accents and case gone, for finding a folder by what someone typed.

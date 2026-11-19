@@ -72,7 +72,8 @@ export function DocAccessDialog({ folder, tree, onClose }: { folder: DocFolder; 
   const staff = people.filter((p) => p.role !== 'member')
   const everyone = num(draft.everyone)
   const level = (id: string): number => Math.max(everyone, num(draft.people[id]))
-  const agentLevel = (head: Agent | undefined, a: Agent): number => Math.max(num(draft.agents[a.id]), head ? num(draft.sectors[head.id]) : 0)
+  const allAgents = num(draft.allAgents)
+  const agentLevel = (head: Agent | undefined, a: Agent): number => Math.max(allAgents, num(draft.agents[a.id]), head ? num(draft.sectors[head.id]) : 0)
 
   const shown = inherit ? up : draft
   const words = accessInWords(shown, { people, agents: agents.map((a) => ({ id: a.id, name: a.name, sectorName: heads.some((h) => h.id === a.id) ? a.sectorName : undefined })), me: you })
@@ -99,7 +100,7 @@ export function DocAccessDialog({ folder, tree, onClose }: { folder: DocFolder; 
             {sectorName(head, L('Setor de', 'Sector of'))}
             <span>{names.length ? L(`${head.name} e ${names.length === 1 ? names[0] : `mais ${names.length}`}`, `${head.name} and ${names.length === 1 ? names[0] : `${names.length} more`}`) : head.name}</span>
           </span>
-          <Seg label={sectorName(head, L('Setor de', 'Sector of'))} labels={AGENTS()} value={num(draft.sectors[head.id])} onChange={(n) => edit({ sectors: put(draft.sectors, head.id, AL[n]) })} />
+          <Seg label={sectorName(head, L('Setor de', 'Sector of'))} labels={AGENTS()} value={Math.max(allAgents, num(draft.sectors[head.id]))} floor={allAgents} onChange={(n) => edit({ sectors: put(draft.sectors, head.id, AL[n]) })} />
         </div>
         {list.length > 1 && (
           <button type="button" className="text-btn dc-acc__more" aria-expanded={isOpen} onClick={() => setOpen({ ...open, [head.id]: !isOpen })}>
@@ -164,6 +165,16 @@ export function DocAccessDialog({ folder, tree, onClose }: { folder: DocFolder; 
           ))}
 
           <h4 className="dc-eyebrow">{L('Agentes', 'Agents')}</h4>
+          <div className="dc-acc">
+            <span className="dc-acc__ico">
+              <Icon name="zap" size={14} />
+            </span>
+            <span className="dc-acc__who">
+              {L('Todos os agentes', 'All agents')}
+              <span>{L('Vale também para agentes criados depois.', 'Also applies to agents created later.')}</span>
+            </span>
+            <Seg label={L('Todos os agentes', 'All agents')} labels={AGENTS()} value={allAgents} onChange={(n) => edit({ allAgents: AL[n] })} />
+          </div>
           {sectors.length === 0 && loose.length === 0 && <p className="muted small">{L('Ainda não há agentes. Eles aparecem aqui quando você montar o time.', 'There are no agents yet. They show up here once you build the team.')}</p>}
           {sectors.map(({ head, members: list }) => sectorRow(head, list))}
           {loose.length > 0 && (

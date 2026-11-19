@@ -2,6 +2,7 @@
 // one open at a time: where it came from, its versions, who sees it.
 import { useState, type ReactNode } from 'react'
 import { L } from '../../../../shared/lang'
+import { describeSchedule } from '../../../../shared/types'
 import type { Doc, DocAction, DocEvent, DocFolder, DocsTree, DocVersion } from '../../../../shared/docs'
 import { call } from '../../rpc'
 import { amAdmin, navigate, toast, useStore } from '../../store'
@@ -10,7 +11,7 @@ import { confirmDialog } from '../Dialogs'
 import { ago, Icon } from '../ui'
 import { DocAccessDialog } from './DocAccess'
 import { WhoAvatar } from './doc-ui'
-import { useActors, type AccessWords } from './useDocs'
+import { useActors, useRoutineOf, type AccessWords } from './useDocs'
 
 export interface History {
   versions: DocVersion[]
@@ -20,7 +21,8 @@ export interface History {
 // <details name="…"> shuts the others when one opens, in the browsers that know it, and nothing is lost in the ones that don't.
 const group = { name: 'dc-about' } as object
 
-const STEP: Record<DocAction, (who: string) => string> = {
+// `detail` is the event's own words (the note asked, the folder it was put in); the others ignore it.
+const STEP: Record<DocAction, (who: string, detail: string) => string> = {
   created: (w) => L(`${w} guardou o arquivo`, `${w} kept the file`),
   version: (w) => L(`${w} guardou uma versão nova`, `${w} kept a new version`),
   moved: (w) => L(`${w} mudou de pasta`, `${w} moved it to another folder`),
@@ -28,8 +30,15 @@ const STEP: Record<DocAction, (who: string) => string> = {
   trashed: (w) => L(`${w} mandou para a lixeira`, `${w} sent it to the trash`),
   restored: (w) => L(`${w} trouxe de volta da lixeira`, `${w} brought it back from the trash`),
   reverted: (w) => L(`${w} voltou para uma versão antiga`, `${w} went back to an older version`),
-  'saved-from-chat': (w) => L(`${w} guardou da conversa`, `${w} kept it from the chat`)
+  'saved-from-chat': (w) => L(`${w} guardou da conversa`, `${w} kept it from the chat`),
+  approved: (w) => L(`${w} aprovou`, `${w} approved it`),
+  'changes-asked': (w, d) => L(`${w} pediu ajuste${d ? `: ${d}` : ''}`, `${w} asked for changes${d ? `: ${d}` : ''}`),
+  'made-official': (w) => L(`${w} marcou como oficial`, `${w} marked it as official`),
+  filed: (_w, d) => L(`a Tuca guardou em ${d || 'uma pasta'}`, `Tuca kept it in ${d || 'a folder'}`),
+  unfiled: (w) => L(`${w} desfez: voltou para Só meus`, `${w} undid it: back in Only mine`)
 }
+// Events whose detail is already in their sentence.
+const SAID: ReadonlySet<DocAction> = new Set(['approved', 'changes-asked', 'filed'])
 
 function Fold({ title, meta, children, open }: { title: string; meta?: string; children: ReactNode; open?: boolean }): ReactNode {
   return (
@@ -50,6 +59,7 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
   const conversation = useStore((s) => (doc.origin.conversationId ? s.conversations.some((c) => c.id === doc.origin.conversationId) : false))
   const [access, setAccess] = useState(false)
   const [busy, setBusy] = useState<number | null>(null)
+  const routine = useRoutineOf(doc.routineId)
 
   const events = history?.events.slice().sort((a, b) => a.at - b.at) ?? []
   const versions = history?.versions.slice().sort((a, b) => b.n - a.n) ?? []
@@ -57,6 +67,8 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
   const asker = origin.askedBy ? who(`person:${origin.askedBy}`) : null
   const maker = origin.agentId ? who(`agent:${origin.agentId}`) : null
   const sources = origin.sources?.filter(Boolean) ?? []
+  // Only worth saying when the official version is not the one on screen.
+  const official = doc.officialVersion !== null && doc.officialVersion < doc.version
 
   const revert = async (v: DocVersion): Promise<void> => {
     const ok = await confirmDialog({
@@ -91,6 +103,15 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
                   {origin.routineId && <small>{L('Feito por uma rotina automática', 'Made by an automatic routine')}</small>}
                 </li>
               )}
+              {doc.routineId && (
+                <li>
+                  <span className="dc-tl__ico">
+                    <Icon name="clock" size={12} />
+                  </span>
+                  <b>{routine?.enabled ? L(`Atualizado pela rotina ${routine.name}`, `Kept up to date by the routine ${routine.name}`) : L('A rotina que atualizava este arquivo parou.', 'The routine that updated this file stopped.')}</b>
+                  {routine?.enabled && !routine.trigger && <small>{describeSchedule(routine.schedule)}</small>}
+                </li>
+              )}
               {sources.length > 0 && (
                 <li>
                   <span className="dc-tl__ico">
@@ -105,10 +126,10 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
                 return (
                   <li key={`${e.at}-${i}`}>
                     <WhoAvatar who={w} size={22} />
-                    <b>{STEP[e.action](w.name)}</b>
+                    <b>{STEP[e.action](w.name, e.detail)}</b>
                     <small>
                       {ago(e.at)}
-                      {e.detail ? ` · ${e.detail}` : ''}
+                      {e.detail && !SAID.has(e.action) ? ` · ${e.detail}` : ''}
                     </small>
                   </li>
                 )
@@ -132,6 +153,7 @@ export function DocAbout({ doc, folder, tree, words, may, history, historyError,
               <div key={v.n} className={`dc-ver ${now ? 'is-now' : ''} ${seen && !now ? 'is-seen' : ''}`}>
                 <strong>
                   <span>{now ? L(`Versão ${v.n} · atual`, `Version ${v.n} · current`) : L(`Versão ${v.n}`, `Version ${v.n}`)}</span>
+                  {official && v.n === doc.officialVersion && <em className="dc-ver__off">{L('a oficial', 'the official one')}</em>}
                 </strong>
                 <p>{v.note || L('Sem observação.', 'No note.')}</p>
                 <small>

@@ -12,27 +12,23 @@ import { actorOfAgent, actorOfPerson, docKind, folderPathWithin, type Doc, type 
 import { UserError } from '../shared/errors'
 import { L } from '../shared/lang'
 import type { Agent, Person } from '../shared/types'
-import { DocsCore, unsupported } from './docs-core'
+import { gone, noFolder, trashedError as trashed, unsupported } from './docs-core'
 import { DocsIndex } from './docs-db'
+import { DocsFiling } from './docs-filing'
 import { looseName, safeJoin } from './docs-fs'
 import { ensureRoots, scanDocs } from './docs-scan'
 import { ftsQuery } from './wiki'
 
 const isAdmin = (p: Pick<Person, 'role'>): boolean => p.role === 'owner' || p.role === 'admin'
-const gone = (): UserError => new UserError(L('Esse documento não existe, ou você não tem acesso a ele.', "That document doesn't exist, or you don't have access to it."))
-const noFolder = (): UserError => new UserError(L('Essa pasta não existe, ou você não tem acesso a ela.', "That folder doesn't exist, or you don't have access to it."))
-const readOnly = (): UserError => new UserError(L('Você pode ver, mas não mudar o que está nessa pasta.', "You can see what's in this folder, but not change it."))
 const onlyAdmin = (): UserError => new UserError(L('Só o dono ou um admin faz isso.', 'Only the owner or an admin can do that.'))
-const trashed = (): UserError => new UserError(L('Esse documento está na lixeira. Restaure antes de mudar.', 'This document is in the trash. Restore it before changing it.'))
 
 // A folder as agents see it: with its path ("Financeiro/Relatórios").
 export type AgentFolder = DocFolder & { path: string }
 // A document as agents see it: with its path ("Financeiro/Relatórios/maio.pdf").
 export type AgentDoc = Doc & { path: string }
 
-export class Docs extends DocsCore {
+export class Docs extends DocsFiling {
   loaded: Promise<void> = Promise.resolve() // the first scan of the folder
-  ready = true // false when the index could not open: the app runs on, Documentos says so
   failure: unknown = null // why it did not open
   private scanning = false
   private lastScan = 0
@@ -71,11 +67,6 @@ export class Docs extends DocsCore {
     } catch {}
   }
 
-  // Every public call starts here: when Documentos did not open, the people and the agents are told so, plainly.
-  private need(): void {
-    if (!this.ready) throw new Error(L('Os documentos não abriram neste computador. Reinicie o Tucano; se continuar, avise quem cuida dele.', 'Documents did not open on this computer. Restart Tucano; if it goes on, tell whoever looks after it.'))
-  }
-
   // An error's text for a person: no disk paths in it, and a raw file-system error in plain words.
   cleanError(e: unknown): string {
     const msg = e instanceof Error ? e.message : String(e)
@@ -84,31 +75,6 @@ export class Docs extends DocsCore {
     for (const p of [this.root, dirname(this.root)]) if (p && p !== '/') out = out.split(p).join('')
     return out
   }
-
-  // ---------- helpers ----------
-  private docFor(person: Person, id: string, need: DocLevel = 'view'): Doc {
-    const doc = this.index.doc(id)
-    const folders = this.index.folders()
-    if (!doc || !personMay(person, folders, doc.folderId, 'view')) throw gone()
-    if (need === 'edit' && !personMay(person, folders, doc.folderId, 'edit')) throw readOnly()
-    return doc
-  }
-  private folderFor(person: Person, id: string, need: DocLevel): DocFolder {
-    const folders = this.index.folders()
-    const f = folders.find((x) => x.id === id)
-    if (!f || !personMay(person, folders, id, 'view')) throw noFolder()
-    if (need === 'edit' && !personMay(person, folders, id, 'edit')) throw readOnly()
-    return f
-  }
-  private subtree(folders: DocFolder[], id: string): Set<string> {
-    const out = new Set([id])
-    for (let grew = true; grew; ) {
-      grew = false
-      for (const f of folders) if (f.parentId && out.has(f.parentId) && !out.has(f.id)) out.add(f.id), (grew = true)
-    }
-    return out
-  }
-  private personalRoot = (folders: DocFolder[], personId: string): DocFolder | undefined => folders.find((f) => f.privateTo === personId && !f.parentId)
 
   // ---------- people ----------
   // What this person sees. Makes their personal folder the first time (and the folders of new sectors).
@@ -133,12 +99,14 @@ export class Docs extends DocsCore {
     const mine = folders.filter((f) => seen.has(f.id)).map((f) => (f.parentId && !seen.has(f.parentId) ? { ...f, parentId: null } : f))
     const can: Record<string, DocLevel> = {}
     for (const f of mine) can[f.id] = personMay(person, folders, f.id, 'edit') ? 'edit' : 'view'
-    return { folders: mine, docs: this.index.docs().filter((d) => seen.has(d.folderId)), can }
+    const docs = this.index.docs().filter((d) => seen.has(d.folderId))
+    const live = new Set(docs.filter((d) => !d.trashedAt).map((d) => d.id))
+    return { folders: mine, docs, dates: this.index.liveDates().filter((d) => live.has(d.docId)), can }
   }
 
   // Makes a folder (no `id`) or changes one. `access`: left out keeps it; null makes it follow its parent. Only an owner or
   // an admin makes a folder at the top, or changes who sees one; a personal folder is never shared.
-  saveFolder(person: Person, p: { id?: string; parentId: string | null; name: string; rule: string; access?: FolderAccess | null }): DocFolder {
+  saveFolder(person: Person, p: { id?: string; parentId: string | null; name: string; rule: string; access?: FolderAccess | null; needsApproval?: boolean }): DocFolder {
     this.need()
     const folders = this.index.folders()
     const clean = (a: FolderAccess): FolderAccess => cleanFolderAccess(a, this.deps.people().map((x) => x.id), this.deps.agents().map((x) => x.id))
@@ -152,7 +120,8 @@ export class Docs extends DocsCore {
         if (!isAdmin(person)) throw onlyAdmin()
       } else this.folderFor(person, p.parentId, 'edit')
       if (p.access) sharing(p.parentId)
-      const f = this.createFolder({ parentId: p.parentId, name: p.name, rule: p.rule, access: p.access ? clean(p.access) : null, by: actorOfPerson(person.id) })
+      if (p.needsApproval) sharing(p.parentId)
+      const f = this.createFolder({ parentId: p.parentId, name: p.name, rule: p.rule, access: p.access ? clean(p.access) : null, needsApproval: !!p.needsApproval, by: actorOfPerson(person.id) })
       this.deps.emit()
       return f
     }
@@ -171,8 +140,12 @@ export class Docs extends DocsCore {
     const cleaned = p.access ? clean(p.access) : p.access
     const sameAccess = p.access === undefined || JSON.stringify(cleaned ?? null) === JSON.stringify(f.access ? clean(f.access) : null)
     if (!sameAccess) sharing(p.id)
+    // Asking for approval is the owner's or an admin's too, and never for a personal folder.
+    const approval = p.needsApproval !== undefined && p.needsApproval !== f.needsApproval ? p.needsApproval : undefined
+    if (approval !== undefined) sharing(p.id)
     let next = personal ? f : this.changeFolder(f.id, { name: p.name, ...(moving ? { parentId: p.parentId } : {}) })
-    next = this.setFolderInfo(f.id, { rule: p.rule, ...(!sameAccess ? { access: cleaned ?? null } : {}) })
+    next = this.setFolderInfo(f.id, { rule: p.rule, ...(!sameAccess ? { access: cleaned ?? null } : {}), ...(approval !== undefined ? { needsApproval: approval } : {}) })
+    if (approval === false) this.clearApprovalUnder(f.id) // what waited or was approved there is a normal document again
     this.deps.emit()
     return next
   }
@@ -364,6 +337,8 @@ export class Docs extends DocsCore {
   }
   private withPath = (folders: DocFolder[], f: DocFolder, readable: Set<string>): AgentFolder => ({ ...f, path: folderPathWithin(folders, f.id, readable).join('/') })
   private pathIn = (folders: DocFolder[], d: Pick<Doc, 'folderId' | 'name'>, readable: Set<string>): string => [...folderPathWithin(folders, d.folderId, readable), d.name].join('/')
+  // A newest version nobody approved yet (or a draft): its summary and indexed text are the unapproved one's, so an agent is not shown them.
+  private unapproved = (d: Doc): boolean => (d.status === 'review' || d.status === 'draft') && d.officialVersion !== d.version
 
   // A folder by id or path, among `allowedIds` (paths are read through `pathIds`: what the agent may read); undefined when none (or more than one) matches.
   resolveFolder(ref: string, allowedIds: Set<string>, folders?: DocFolder[], pathIds: Set<string> = allowedIds): DocFolder | undefined {
@@ -412,34 +387,57 @@ export class Docs extends DocsCore {
     if (folder && !at) throw noFolder()
     const sub = folders.filter((f) => ids.has(f.id) && (at ? f.parentId === at.id : true)).map((f) => this.withPath(folders, f, readable))
     const docs = this.index.docs().filter((d) => !d.trashedAt && (at ? d.folderId === at.id : ids.has(d.folderId))).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 200)
-    return { folders: sub, docs: docs.map((d) => ({ ...d, path: this.pathIn(folders, d, readable) })) }
+    return { folders: sub, docs: docs.map((d) => ({ ...d, path: this.pathIn(folders, d, readable), ...(this.unapproved(d) ? { summary: '' } : {}) })) }
   }
 
   searchFor(agent: Agent, requester: Requester, q: string, folder?: string, limit = 8): { doc: AgentDoc; snippet: string }[] {
     const { folders, ids, readable } = this.reach(agent, requester, 'read')
     const at = folder ? this.resolveFolder(folder, ids, folders, readable) : undefined
     if (folder && !at) throw noFolder()
-    return this.find(folders, at ? [...this.subtree(folders, at.id)].filter((x) => ids.has(x)) : [...ids], q, limit).map((h) => ({ ...h, doc: { ...h.doc, path: this.pathIn(folders, h.doc, readable) } }))
+    return this.find(folders, at ? [...this.subtree(folders, at.id)].filter((x) => ids.has(x)) : [...ids], q, limit).map((h) => {
+      const hidden = this.unapproved(h.doc)
+      return { doc: { ...h.doc, path: this.pathIn(folders, h.doc, readable), ...(hidden ? { summary: '' } : {}) }, snippet: hidden ? '' : h.snippet }
+    })
   }
 
   // A document and what it says. A scanned PDF or a picture has no text: `text` says so.
-  async readFor(agent: Agent, requester: Requester, ref: string): Promise<{ doc: AgentDoc; text: string }> {
+  // What waits for approval is not what holds: an agent gets the official version's text (with a note saying so), or the newest
+  // with a note that it is not official yet.
+  async readFor(agent: Agent, requester: Requester, ref: string): Promise<{ doc: AgentDoc; text: string; note?: string }> {
     const { folders, ids, readable } = this.reach(agent, requester, 'read')
     const d = this.resolveDoc(ref, ids, folders, readable)
     if (!d) throw gone()
+    let note: string | undefined
+    let version: number | undefined
+    // A newer version that is a draft or waits for approval does not count: the official one is read, whenever there is one.
+    if (typeof d.officialVersion === 'number' && d.officialVersion < d.version && d.status !== 'official') {
+      version = d.officialVersion
+      note = L(`Esta é a versão oficial (${d.officialVersion}). A versão ${d.version} é um rascunho ou está esperando aprovação; ela ainda não vale.`, `This is the official version (${d.officialVersion}). Version ${d.version} is a draft or is waiting for approval; it doesn't count yet.`)
+    } else if (d.status === 'review') note = L('Este documento está esperando aprovação e ainda não é oficial.', 'This document is waiting for approval and is not official yet.')
+    else if (d.status === 'draft') note = L('Este documento é um rascunho.', 'This document is a draft.')
     let text: string
     try {
-      text = await this.textOf(d.name, d.kind, this.bytes(d))
+      const bytes = (() => {
+        try {
+          return this.bytes(d, version)
+        } catch {
+          // The official version's file is gone: the newest, with the note changed to say so.
+          version = undefined
+          note = L('Este documento está esperando aprovação e ainda não é oficial.', 'This document is waiting for approval and is not official yet.')
+          return this.bytes(d)
+        }
+      })()
+      text = await this.textOf(d.name, d.kind, bytes)
     } catch (e) {
       text = e instanceof Error ? e.message : String(e)
     }
-    return { doc: { ...d, path: this.pathIn(folders, d, readable) }, text }
+    return { doc: { ...d, path: this.pathIn(folders, d, readable), ...(this.unapproved(d) ? { summary: '' } : {}) }, text, ...(note ? { note } : {}) }
   }
 
   // Saves a document in a folder the agent may write (`folderId`: id or path), or, with `replaces`, as the next version of
   // that one. Where it came from goes in `origin`: the caller's own fields are kept as they are; the agent is added, and the
   // person it asked for only when it works for exactly one person (a channel has no single one to name).
-  async saveFor(agent: Agent, requester: Requester, p: { folderId: string; name: string; data: Buffer; summary: string; note: string; replaces?: string; origin: DocOrigin }): Promise<AgentDoc> {
+  async saveFor(agent: Agent, requester: Requester, p: { folderId: string; name: string; data: Buffer; summary: string; note: string; replaces?: string; draft?: boolean; origin: DocOrigin }): Promise<AgentDoc> {
     const { folders, ids, readable } = this.reach(agent, requester, 'write')
     const by = actorOfAgent(agent.id)
     const single = requester && !Array.isArray(requester) ? requester : undefined
@@ -447,12 +445,12 @@ export class Docs extends DocsCore {
     if (p.replaces) {
       const d = this.resolveDoc(p.replaces, ids, folders, readable)
       if (!d) throw gone()
-      doc = await this.revise(d, { data: p.data, by, note: p.note, ...(docKind(p.name) && docKind(p.name) !== d.kind ? { name: p.name } : {}), ...(p.summary ? { summary: p.summary } : {}) })
+      doc = await this.revise(d, { data: p.data, by, note: p.note, routineId: p.origin.routineId ?? null, ...(p.draft ? { draft: true } : {}), ...(docKind(p.name) && docKind(p.name) !== d.kind ? { name: p.name } : {}), ...(p.summary ? { summary: p.summary } : {}) })
     } else {
       const f = this.resolveFolder(p.folderId, ids, folders, readable)
       if (!f) throw new UserError(L('Não posso guardar nessa pasta: ela não existe ou o acesso não deixa.', "I can't save in that folder: it doesn't exist or access doesn't allow it."))
       const askedBy = p.origin.askedBy ?? single?.id
-      doc = await this.create({ folderId: f.id, name: p.name, data: p.data, summary: p.summary, note: p.note, origin: { ...p.origin, agentId: agent.id, ...(askedBy ? { askedBy } : {}) }, by })
+      doc = await this.create({ folderId: f.id, name: p.name, data: p.data, summary: p.summary, note: p.note, origin: { ...p.origin, agentId: agent.id, ...(askedBy ? { askedBy } : {}) }, by, ...(p.draft ? { draft: true } : {}) })
     }
     this.deps.emit()
     return { ...doc, path: this.pathIn(folders, doc, readable) }

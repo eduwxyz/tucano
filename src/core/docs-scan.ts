@@ -24,13 +24,24 @@ export function ensureRoots(core: DocsCore): boolean {
       parentId: null,
       name: L('Empresa', 'Company'),
       rule: L('O que vale pra empresa toda: regras, modelos, avisos.', 'What holds for the whole company: rules, templates, notices.'),
-      // Every agent there is today reads it (a team with no sectors yet would otherwise reach no folder at all); an admin changes it under "Quem vê".
-      access: { everyone: 'view', people: {}, agents: Object.fromEntries(deps.agents().map((x) => [x.id, 'read' as const])), sectors: {} },
+      // Every agent reads it, the ones made later too (a team with no sectors yet would otherwise reach no folder at all); an admin changes it under "Quem vê".
+      access: { everyone: 'view', allAgents: 'read', people: {}, agents: {}, sectors: {} },
       by: SYSTEM
     })
     index.setMeta('companyRoot', company.id)
     index.setMeta('seeded', '1')
     made = true
+  }
+  // A company folder made before `allAgents` existed listed the agents of the day: it now also reads for every agent (once; the listed ids stay).
+  // Only while it still gives read to every agent there is: an admin who took one away chose that, and it stays so. The flag is set either way.
+  if (!index.meta('allAgentsMigrated')) {
+    const acc = company?.access
+    if (company && acc && !acc.allAgents && deps.agents().every((a) => !!acc.agents[a.id])) {
+      company = { ...company, access: { ...acc, allAgents: 'read' } }
+      index.putFolder(company)
+      made = true
+    }
+    index.setMeta('allAgentsMigrated', '1')
   }
   let done: string[] = []
   try {
@@ -70,7 +81,7 @@ export async function scanDocs(core: DocsCore): Promise<boolean> {
   // What is on disk: the files of a kind Documentos takes, each with the folder it is in.
   const files: { folder: DocFolder; name: string; path: string }[] = []
   const adopt = (parentId: string | null, name: string): DocFolder => {
-    const f: DocFolder = { id: randomUUID(), parentId, name, rule: '', access: null, privateTo: null, createdBy: OUTSIDE, createdAt: Date.now() }
+    const f: DocFolder = { id: randomUUID(), parentId, name, rule: '', access: null, privateTo: null, needsApproval: false, createdBy: OUTSIDE, createdAt: Date.now() }
     folders.push(f)
     index.putFolder(f)
     changed = true
@@ -131,11 +142,13 @@ export async function scanDocs(core: DocsCore): Promise<boolean> {
       if (!unchanged(d)) continue // someone saved it meanwhile: their version stands
       // The old bytes are already overwritten: this version has no earlier copy to go back to.
       const at = Date.now()
-      const next: Doc = { ...d, size: data.length, hash: sha(data), version: d.version + 1, updatedBy: OUTSIDE, updatedAt: at, summary: d.summary || summaryOf(text) }
+      const next: Doc = { ...d, size: data.length, hash: sha(data), version: d.version + 1, updatedBy: OUTSIDE, updatedAt: at, summary: d.summary || summaryOf(text), ...core.statusOnSave(folders, d.folderId, OUTSIDE, d.version + 1, { prev: d }), routineId: null }
       index.putDoc(next)
+      if (!d.summary) index.setSummaryAuto(d.id, true)
       index.addVersion({ docId: d.id, n: next.version, at, by: OUTSIDE, note: '', size: next.size, hash: next.hash })
       index.addEvent({ docId: d.id, at, by: OUTSIDE, action: 'version', detail: '' })
       core.reindex(next, text)
+      core.saved(next, 'outside', next.status === 'review')
       changed = true
     } catch {}
   }

@@ -56,8 +56,32 @@ export function agentMay(agent: Pick<Agent, 'id'>, agents: AgentNode[], folders:
   const { access, privateTo } = effectiveAccess(folders, folderId)
   if (privateTo) return false
   const head = sectorOf(agents, agent.id)
-  const level = best<AgentLevel>(access.agents[agent.id], head ? access.sectors[head.id] : undefined)
+  const level = best<AgentLevel>(access.allAgents, access.agents[agent.id], head ? access.sectors[head.id] : undefined)
   return !!level && RANK[level] >= RANK[need]
+}
+
+// Whether what an agent saves in this folder waits for approval: the folder or any one above it asks for it
+// (a subfolder cannot switch it off). A personal folder never does.
+export function approvalNeeded(folders: Pick<DocFolder, 'id' | 'parentId' | 'privateTo' | 'needsApproval'>[], folderId: string): boolean {
+  const seen = new Set<string>()
+  for (let id: string | null = folderId; id && !seen.has(id); ) {
+    seen.add(id)
+    const f = folders.find((x) => x.id === id)
+    if (!f) return false
+    if (f.privateTo) return false
+    if (f.needsApproval) return true
+    id = f.parentId
+  }
+  return false
+}
+
+// Who decides what waits for approval in this folder: owners and admins, or whoever may edit it. Never in someone
+// else's personal folder (which never asks for approval anyway).
+export function mayApprove(person: Who, folders: Pick<DocFolder, 'id' | 'parentId' | 'access' | 'privateTo'>[], folderId: string): boolean {
+  if (!folders.some((f) => f.id === folderId)) return false
+  const { privateTo } = effectiveAccess(folders, folderId)
+  if (privateTo) return false
+  return person.role === 'owner' || person.role === 'admin' || personMay(person, folders, folderId, 'edit')
 }
 
 // THE rule the agents' tools go by. An agent working for a person (the requester) gets what the agent
@@ -97,7 +121,8 @@ export function cleanFolderAccess(access: unknown, personIds: string[], agentIds
     return out
   }
   const everyone = a.everyone === 'view' || a.everyone === 'edit' ? a.everyone : undefined
-  return { ...(everyone ? { everyone } : {}), people: rec(a.people, personIds, ['view', 'edit']), sectors: rec(a.sectors, agentIds, ['read', 'write']), agents: rec(a.agents, agentIds, ['read', 'write']) }
+  const allAgents = a.allAgents === 'read' || a.allAgents === 'write' ? a.allAgents : undefined
+  return { ...(everyone ? { everyone } : {}), ...(allAgents ? { allAgents } : {}), people: rec(a.people, personIds, ['view', 'edit']), sectors: rec(a.sectors, agentIds, ['read', 'write']), agents: rec(a.agents, agentIds, ['read', 'write']) }
 }
 
 const list = (xs: string[]): string => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} ${L('e', 'and')} ${xs[xs.length - 1]}`)
@@ -123,13 +148,14 @@ export function accessInWords(
     return [...sectors, ...people, ...(ids.includes(ctx.me ?? '') ? [who(ctx.me!)] : [])]
   }
   const plural = (xs: string[]): boolean => xs.length > 1
-  if (access.everyone === 'edit') return L('Todo o time vê e edita.', 'The whole team sees and edits.')
+  const agentsLine = access.allAgents ? ` ${access.allAgents === 'write' ? L('Todos os agentes leem e escrevem.', 'Every agent reads and writes.') : L('Todos os agentes leem.', 'Every agent reads.')}` : ''
+  if (access.everyone === 'edit') return `${L('Todo o time vê e edita.', 'The whole team sees and edits.')}${agentsLine}`
   const editors = named('edit')
   const editLine = editors.length ? L(`só ${list(editors)} e os admins editam`, `only ${list(editors)} and the admins edit`) : L('só os admins editam', 'only the admins edit')
-  if (access.everyone === 'view') return L(`Todo o time vê; ${editLine}.`, `The whole team sees it; ${editLine}.`)
+  if (access.everyone === 'view') return `${L(`Todo o time vê; ${editLine}.`, `The whole team sees it; ${editLine}.`)}${agentsLine}`
   const seen = named('any')
-  if (!seen.length) return L('Só os admins veem.', 'Only the admins see this.')
+  if (!seen.length) return `${L('Só os admins veem.', 'Only the admins see this.')}${agentsLine}`
   const first = L(`Só ${list(seen)} ${plural(seen) ? 'veem' : 'vê'}.`, `Only ${list(seen)} can see this.`)
   const readers = named('view')
-  return readers.length && editors.length ? `${first} ${L(`Editam: ${list(editors)}.`, `Editing: ${list(editors)}.`)}` : first
+  return `${readers.length && editors.length ? `${first} ${L(`Editam: ${list(editors)}.`, `Editing: ${list(editors)}.`)}` : first}${agentsLine}`
 }

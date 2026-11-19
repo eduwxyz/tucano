@@ -1,20 +1,22 @@
 // Documentos: the team's files in folders that say who sees them. This page picks what to draw (the
 // home with its folders and the search, one folder, or one file) and holds what outlives them: the
 // data and the files on their way up.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../../shared/lang'
-import type { DocFolder, DocHit, DocsTree } from '../../../../shared/docs'
+import type { DocFolder, DocsTree } from '../../../../shared/docs'
 import { call } from '../../rpc'
 import { amAdmin, navigate, toast, useStore, type View } from '../../store'
-import { message } from '../Invite'
 import type { MenuState } from '../Dialogs'
 import { ContextMenu } from '../Dialogs'
 import { Icon } from '../ui'
+import { AskAnswer, SearchBox, useAsk } from './DocAsk'
+import { DocArrivals } from './DocArrivals'
 import { DocFolderView } from './DocFolder'
+import { DocResults } from './DocResults'
 import { DocView } from './DocView'
-import { DocRow, DocsError, DocsLoading, FolderPicker, NameDialog, Sending, menuAt } from './doc-ui'
+import { DocsError, DocsLoading, FolderPicker, NameDialog, Sending, menuAt } from './doc-ui'
 import { useDocActions } from './DocActions'
-import { ACCEPT, useDocUpload } from './upload'
+import { ACCEPT, useDocUpload, useInboxUpload } from './upload'
 import { childFolders, countIn, folderColor, liveDocs, pathText, useAccessWords, useDocs, type AccessWords } from './useDocs'
 
 type Upload = ReturnType<typeof useDocUpload>
@@ -45,6 +47,9 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
   const [menu, setMenu] = useState<MenuState>(null)
   const [naming, setNaming] = useState(false)
   const [picked, setPicked] = useState<File[] | null>(null)
+  const [dropping, setDropping] = useState(0)
+  const arrivals = useInboxUpload()
+  const asking = useAsk()
   const input = useRef<HTMLInputElement>(null)
   const roots = childFolders(tree, null)
   const empty = liveDocs(tree).length === 0
@@ -56,6 +61,18 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
     navigate({ kind: 'documents', folder: f.id })
   }
 
+  // Files dropped on the background go to Chegada; a folder card takes its own (see FolderCard).
+  const drop = {
+    onDragEnter: (e: React.DragEvent) => e.dataTransfer.types.includes('Files') && setDropping((n) => n + 1),
+    onDragLeave: () => setDropping((n) => Math.max(0, n - 1)),
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      setDropping(0)
+      if ((e.target as HTMLElement).closest('.dc-folder')) return
+      void arrivals.send([...e.dataTransfer.files])
+    }
+  }
   const actions = admin ? (
     <button className="btn btn--primary" onClick={(e) => setMenu(menuAt(e, [{ label: L('Nova pasta', 'New folder'), icon: 'folder', onClick: () => setNaming(true) }, { label: L('Enviar arquivo', 'Send a file'), icon: 'clip', onClick: choose }]))}>
       <Icon name="plus" size={14} /> {L('Novo', 'New')}
@@ -67,26 +84,29 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
   )
 
   return (
-    <div className="dc-page">
+    <div className="dc-page dc-dropzone" {...drop}>
       <div className="dc-page__inner">
         <div className="dc-toolbar">
-          <label className="dc-search">
-            <Icon name="search" size={16} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={L('Procure um arquivo pelo nome ou pelo que está escrito nele', 'Find a file by its name or by what is written in it')} aria-label={L('Procurar arquivo', 'Find a file')} maxLength={300} />
-            {query && (
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setQuery('')}>
-                {L('Limpar', 'Clear')}
-              </button>
-            )}
-          </label>
+          <SearchBox
+            value={query}
+            onChange={(v) => (setQuery(v), asking.clear())}
+            onAsk={() => asking.ask(query)}
+            busy={asking.state.status === 'busy'}
+            placeholder={L('Procure um arquivo, ou pergunte algo aos seus documentos', 'Find a file, or ask your documents something')}
+            label={L('Procurar arquivo ou perguntar', 'Find a file or ask')}
+          />
           {actions}
         </div>
         {lost && <p className="dc-notice">{L('Esse arquivo ou pasta não está mais aqui, ou você não tem acesso a ele.', "That file or folder isn't here anymore, or you don't have access to it.")}</p>}
         <Sending upload={upload} />
         {query.trim() ? (
-          <Results tree={tree} query={query.trim()} />
+          <>
+            <AskAnswer asking={asking} tree={tree} />
+            {!asking.answering && <DocResults tree={tree} query={query.trim()} />}
+          </>
         ) : (
           <>
+            <DocArrivals tree={tree} upload={arrivals} dropping={dropping > 0} />
             {empty && (
               <div className="dc-empty">
                 <span className="dc-empty__ico">
@@ -94,16 +114,13 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
                 </span>
                 <h2>{L('Seus arquivos, cada um na sua pasta', 'Your files, each in its folder')}</h2>
                 <p>{L('Nada guardado ainda. Envie um arquivo ou peça a um agente para guardar o que ele fizer.', 'Nothing kept yet. Send a file, or ask an agent to keep what it makes.')}</p>
-                <div className="dc-empty__actions">
-                  <button className="btn btn--primary" onClick={choose}>
-                    <Icon name="clip" size={14} /> {L('Enviar arquivo', 'Send a file')}
-                  </button>
-                  {admin && (
+                {admin && (
+                  <div className="dc-empty__actions">
                     <button className="btn" onClick={() => setNaming(true)}>
                       <Icon name="folder" size={14} /> {L('Nova pasta', 'New folder')}
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )}
             {roots.length > 0 && (
@@ -111,7 +128,7 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
                 <h2 className="dc-eyebrow">{L('Pastas', 'Folders')}</h2>
                 <div className="dc-folders">
                   {roots.map((f) => (
-                    <FolderCard key={f.id} tree={tree} folder={f} words={words} />
+                    <FolderCard key={f.id} tree={tree} folder={f} words={words} upload={upload} />
                   ))}
                 </div>
               </>
@@ -119,6 +136,12 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
           </>
         )}
       </div>
+      {dropping > 0 && (
+        <div className="dc-drop">
+          <Icon name="down" size={22} />
+          <strong>{L('Solte aqui', 'Drop here')}</strong>
+        </div>
+      )}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       <input ref={input} type="file" multiple hidden accept={ACCEPT} onChange={(e) => (setPicked([...(e.target.files ?? [])]), (e.target.value = ''))} />
       {naming && <NameDialog title={L('Nova pasta', 'New folder')} label={L('Nome da pasta', 'Folder name')} confirm={L('Criar pasta', 'Create folder')} onSubmit={newFolder} onClose={() => setNaming(false)} />}
@@ -140,11 +163,22 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
 
 const firstLine = (rule: string): string => rule.trim().split('\n')[0] ?? ''
 
-function FolderCard({ tree, folder, words }: { tree: DocsTree; folder: DocFolder; words: AccessWords }): ReactNode {
+function FolderCard({ tree, folder, words, upload }: { tree: DocsTree; folder: DocFolder; words: AccessWords; upload: Upload }): ReactNode {
   const n = countIn(tree, folder.id)
   const rule = firstLine(folder.rule)
   return (
-    <button className="dc-folder" style={{ ['--c' as string]: folderColor(tree, folder.id) }} onClick={() => navigate({ kind: 'documents', folder: folder.id })}>
+    <button
+      className="dc-folder"
+      style={{ ['--c' as string]: folderColor(tree, folder.id) }}
+      onClick={() => navigate({ kind: 'documents', folder: folder.id })}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        // Dropped right on a folder: it is kept in that one, not sent to Chegada.
+        e.preventDefault()
+        if (tree.can[folder.id] !== 'edit') return toast(L('Você pode ver esta pasta, mas não guardar nela.', 'You can see this folder, but not save to it.'))
+        void upload.send(folder.id, folder.name, [...e.dataTransfer.files])
+      }}
+    >
       <span className="dc-folder__top">
         <span className="dc-folder__ico">
           <Icon name={folder.privateTo ? 'lock' : 'folder'} size={16} />
@@ -161,50 +195,3 @@ function FolderCard({ tree, folder, words }: { tree: DocsTree; folder: DocFolder
     </button>
   )
 }
-
-// ---------- the search ----------
-
-function Results({ tree, query }: { tree: DocsTree; query: string }): ReactNode {
-  const [hits, setHits] = useState<DocHit[] | null>(null)
-  const [error, setError] = useState('')
-  const [again, setAgain] = useState(0)
-  const seq = useRef(0)
-  const rev = useStore((s) => s.docsRev)
-  const actions = useDocActions()
-  const [menu, setMenu] = useState<MenuState>(null)
-  useEffect(() => {
-    const mine = ++seq.current
-    const t = setTimeout(() => {
-      call('docSearch', { q: query }).then(
-        (h) => mine === seq.current && (setHits(h.filter((x) => !x.doc.trashedAt)), setError('')),
-        (e: unknown) => mine === seq.current && (setError(message(e)), setHits(null))
-      )
-    }, 250)
-    return () => clearTimeout(t)
-  }, [query, rev, again])
-  useEffect(() => setHits(null), [query])
-
-  if (error) return <DocsError title={L('Não consegui procurar agora.', "I couldn't search right now.")} text={error} onRetry={() => (setError(''), setAgain((n) => n + 1))} />
-  if (!hits) return <DocsLoading label={L('Procurando…', 'Searching…')} />
-  if (!hits.length)
-    return (
-      <div className="dc-state">
-        <Icon name="search" size={22} />
-        <p className="dc-state__title">{L(`Não achei nenhum arquivo com “${query}”`, `I found no file with “${query}”`)}</p>
-        <p>{L('Tente outra palavra, ou uma parte do nome do arquivo.', 'Try another word, or part of the file name.')}</p>
-      </div>
-    )
-  return (
-    <>
-      <h2 className="dc-eyebrow">{hits.length === 1 ? L('1 arquivo', '1 file') : L(`${hits.length} arquivos`, `${hits.length} files`)}</h2>
-      <div className="dc-list">
-        {hits.map(({ doc, snippet }) => (
-          <DocRow key={doc.id} doc={doc} snippet={snippet} folderPath={pathText(tree, doc.folderId)} onOpen={() => navigate({ kind: 'documents', folder: doc.folderId, doc: doc.id })} onMenu={(e) => setMenu(menuAt(e, actions.items(doc, tree.can[doc.folderId] === 'edit', () => navigate({ kind: 'documents', folder: doc.folderId, doc: doc.id }))))} />
-        ))}
-      </div>
-      <ContextMenu menu={menu} onClose={() => setMenu(null)} />
-      {actions.dialogs}
-    </>
-  )
-}
-

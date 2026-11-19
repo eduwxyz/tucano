@@ -5,6 +5,7 @@ import { memorySystem } from '../memory'
 import { titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
+import { answerSystem, catalogSystem } from '../docs-brain'
 import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
@@ -52,6 +53,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
+      } else if (turn.system === catalogSystem()) {
+        reply = JSON.stringify(fakeCatalog(turn.prompt))
+      } else if (turn.system === answerSystem()) {
+        reply = JSON.stringify(fakeAnswer(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
@@ -350,6 +355,33 @@ export async function callTool(url: string, name: string, args: Record<string, u
   } finally {
     await client.close()
   }
+}
+
+// The cataloguer (core/docs-brain.ts): a summary from the file's first line, the dates after "vence"/"prazo"/"renova", and the first folder named in the file.
+function fakeCatalog(prompt: string): { resumo: string; datas: { data: string; o_que: string }[]; pasta: number | null; nome: null } {
+  const file = /<<<ARQUIVO\n([\s\S]*?)\nARQUIVO>>>/.exec(prompt)?.[1] ?? ''
+  const name = /^(?:Nome do arquivo|File name): (.*)$/m.exec(prompt)?.[1] ?? ''
+  const datas: { data: string; o_que: string }[] = []
+  for (const m of file.matchAll(/(?:venc\w*|prazo|renova\w*)\D{0,20}?(?:(\d{2})\/(\d{2})\/(\d{4})|(\d{4})-(\d{2})-(\d{2}))/gi)) datas.push({ data: m[4] ? `${m[4]}-${m[5]}-${m[6]}` : `${m[3]}-${m[2]}-${m[1]}`, o_que: 'vencimento' })
+  let pasta: number | null = null
+  const list = /(?:Pastas possíveis|Possible folders):\n([\s\S]*)$/.exec(prompt)?.[1]
+  if (list) {
+    const hay = `${name}\n${file}`.toLowerCase()
+    for (const line of list.split('\n')) {
+      const row = /^(\d+)\. (.*?) — /.exec(line)
+      const last = row?.[2]?.split('/').pop()?.toLowerCase()
+      if (row && last && hay.includes(last)) {
+        pasta = Number(row[1])
+        break
+      }
+    }
+  }
+  return { resumo: (file.split('\n').find((l) => l.trim()) ?? '').trim().slice(0, 120), datas, pasta, nome: null }
+}
+
+// A question about the documents: an answer when there is at least one excerpt.
+function fakeAnswer(prompt: string): { achou: boolean; resposta?: string } {
+  return /^\[1\] .*\n<<<TRECHO/m.test(prompt) ? { achou: true, resposta: 'Resposta de teste com base no trecho [1].' } : { achou: false }
 }
 
 // The wiki's curator, for trying it without an engine: a page the stretch names gets a line

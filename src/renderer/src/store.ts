@@ -100,7 +100,7 @@ export interface State {
   you: string // the person this window is (snapshot.you)
   people: Person[]
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
-  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
+  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent, documents to approve and dates coming up
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
   tasks: Task[] | null // my to-dos on the board (Quadro), in order; null until the board first asks
   needsName: boolean // a server's first access: the owner says what the agents call them
@@ -775,7 +775,7 @@ export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<A
   return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))
 }
 // How many things wait on me (approvals I decide, questions, cards members sent).
-export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)
+export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0) + (s.inbox.documents?.length ?? 0) + (s.inbox.docDates?.length ?? 0)
 
 export function conversationTitle(s: State, c: Conversation): string {
   if (c.kind === 'channel') return c.name

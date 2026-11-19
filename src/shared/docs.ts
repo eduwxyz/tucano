@@ -34,6 +34,7 @@ export type AgentLevel = 'read' | 'write' // what an agent may do in a folder
 // Who may do what in a folder. A sector is its head's agent id: every agent of that sector, as the org chart has it now.
 export interface FolderAccess {
   everyone?: DocLevel // the whole team (every person)
+  allAgents?: AgentLevel // every agent, the ones made later too
   people: Record<string, DocLevel> // person id
   sectors: Record<string /* head agent id */, AgentLevel>
   agents: Record<string /* agent id */, AgentLevel>
@@ -48,6 +49,7 @@ export interface DocFolder {
   rule: string // what belongs here, for people and for agents ("contratos assinados dos clientes")
   access: FolderAccess | null // null: inherits from the parent
   privateTo: string | null // person id: a personal folder, no one else's (owners and admins included)
+  needsApproval: boolean // what agents (or the scan) save here waits for an approver; holds for every folder under it
   createdBy: string // an actor
   createdAt: number
 }
@@ -60,7 +62,19 @@ export interface DocOrigin {
   agentId?: string
   askedBy?: string // person id: whom the agent worked for
   routineId?: string
+  threadId?: string // the thread of the conversation it came from
   sources?: string[] // what it was made from (document ids, page titles, links)
+}
+
+// Where a document stands in a folder that asks for approval. `null` on a Doc: no approval asked (or nobody marked it).
+export type DocStatus = 'draft' | 'review' | 'official'
+
+// A file a person dropped for the cataloguer to put away: pending (not yet), filed (it did), kept (stays in their personal folder).
+export interface DocFiling {
+  state: 'pending' | 'filed' | 'kept'
+  by: string // person id who dropped it
+  at: number
+  note?: string
 }
 
 export interface Doc {
@@ -78,6 +92,14 @@ export interface Doc {
   updatedBy: string
   updatedAt: number
   trashedAt: number | null
+  status: DocStatus | null
+  officialVersion: number | null // the last approved version
+  statusBy: string | null // an actor
+  statusAt: number | null
+  statusNote: string // what the approver asked to change
+  routineId: string | null // the routine that keeps it up to date ("living" document)
+  catalogedAt: number | null
+  filing: DocFiling | null
 }
 
 export interface DocVersion {
@@ -91,7 +113,7 @@ export interface DocVersion {
   hash: string
 }
 
-export type DocAction = 'created' | 'version' | 'moved' | 'renamed' | 'trashed' | 'restored' | 'reverted' | 'saved-from-chat'
+export type DocAction = 'created' | 'version' | 'moved' | 'renamed' | 'trashed' | 'restored' | 'reverted' | 'saved-from-chat' | 'approved' | 'changes-asked' | 'made-official' | 'filed' | 'unfiled'
 export interface DocEvent {
   docId: string
   at: number
@@ -102,9 +124,39 @@ export interface DocEvent {
 
 // What one person may see: the folders (one whose parent they can't see comes with parentId null),
 // every document in them (the trashed ones too: trashedAt set), and what they may do in each folder.
+// A date found in a document ("vence em 12/03") that someone may want to be reminded of.
+export interface DocDate {
+  id: string
+  docId: string
+  date: string // YYYY-MM-DD
+  what: string
+  state: 'open' | 'reminded' | 'dismissed'
+  routineId: string | null
+}
+
+// What waits for a person in "Para você": documents to approve, and dates coming up.
+export interface InboxDoc {
+  doc: Doc
+  folderPath: string[]
+}
+export interface InboxDocDate {
+  date: DocDate
+  doc: Pick<Doc, 'id' | 'name' | 'kind' | 'folderId'>
+  folderPath: string[]
+  daysLeft: number
+}
+
+// The answer to a question about the documents, with where it came from.
+export interface DocAnswer {
+  found: boolean
+  answer: string
+  sources: { n: number; doc: Doc; snippet: string }[]
+}
+
 export interface DocsTree {
   folders: DocFolder[]
   docs: Doc[]
+  dates: DocDate[] // open and reminded ones, for the documents this person sees
   can: Record<string /* folder id */, DocLevel>
 }
 

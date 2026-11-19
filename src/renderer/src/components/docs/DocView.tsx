@@ -10,6 +10,8 @@ import { ContextMenu, type MenuState } from '../Dialogs'
 import { FileViewer } from '../FileViewer'
 import { ago, Icon } from '../ui'
 import { DocAbout, type History } from './DocAbout'
+import { DocAskPanel } from './DocAsk'
+import { DocStatusBanner } from './DocStatus'
 import { downloadDoc, useDocActions } from './DocActions'
 import { menuAt, WhoAvatar } from './doc-ui'
 import { kindWords, mayEdit, useActors, type AccessWords } from './useDocs'
@@ -77,6 +79,7 @@ export function DocView({ tree, doc, folder, words }: { tree: DocsTree; doc: Doc
                 </button>
               </div>
             )}
+            <DocStatusBanner doc={doc} tree={tree} />
             <div className="dc-viewer">
               <FileViewer
                 key={`${doc.id}-${doc.version}-${older ?? 'now'}-${doc.name}`}
@@ -99,6 +102,7 @@ export function DocView({ tree, doc, folder, words }: { tree: DocsTree; doc: Doc
                 }
               />
             </div>
+            <DocAskPanel key={doc.id} doc={doc} />
           </article>
         </div>
       </div>

@@ -6,6 +6,7 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
+import { DocInboxSections } from './docs/DocInbox'
 import { BrowserLogins } from './BrowserLogins'
 import {
   agentById,
@@ -1926,10 +1927,12 @@ export function InboxPage(): ReactNode {
   const mine = new Set(inbox.approvals.map((a) => a.id))
   const asked = approvals.filter((a) => a.state === 'pending' && !mine.has(a.id) && a.requestedBy === you)
   const proposals = inbox.proposals ?? []
+  const docsWaiting = inbox.documents ?? []
+  const docDates = inbox.docDates ?? []
   // One answered by someone else while I was typing stays, with what I typed and who answered.
   const gone = (inbox.answered ?? []).filter((q) => questionDrafts.get(q.id)?.trim() && !inbox.questions.some((x) => x.id === q.id))
   const questions = [...inbox.questions.map((q) => ({ q, done: false })), ...gone.map((q) => ({ q, done: true }))]
-  const nothing = inbox.approvals.length + questions.length + proposals.length === 0
+  const nothing = inbox.approvals.length + questions.length + proposals.length + docsWaiting.length + docDates.length === 0
   const where = (conversationId: string | undefined, agentId: string): string => {
     const conv = conversations.find((c) => c.id === conversationId)
     const who = agents.find((x) => x.id === agentId)?.name
@@ -1948,8 +1951,8 @@ export function InboxPage(): ReactNode {
     </div>
   )
   return (
-    <Page title={L('Pra você', 'For you')} subtitle={L('O que espera por você: aprovações que você decide e perguntas dos agentes a você.', 'What waits on you: approvals you decide and the agents’ questions to you.')} actions={<AlwaysRulesLink />}>
-      {nothing && <NothingWaiting why={L('Quando um agente precisar da sua aprovação ou te fizer uma pergunta, aparece aqui e na conversa.', 'When an agent needs your approval or asks you something, it shows up here and in the conversation.')} />}
+    <Page title={L('Pra você', 'For you')} subtitle={L('O que espera por você: aprovações, perguntas, documentos e prazos.', 'What waits on you: approvals, questions, documents and dates.')} actions={<AlwaysRulesLink />}>
+      {nothing && <NothingWaiting why={L('Quando um agente precisar da sua aprovação, te fizer uma pergunta ou guardar um documento para você aprovar, aparece aqui.', 'When an agent needs your approval, asks you something or saves a document for you to approve, it shows up here.')} />}
       {inbox.approvals.length > 0 && (
         <>
           <div className="caps-title">{L(`Aprovações · ${inbox.approvals.length}`, `Approvals · ${inbox.approvals.length}`)}</div>
@@ -1990,6 +1993,7 @@ export function InboxPage(): ReactNode {
           </div>
         </>
       )}
+      <DocInboxSections docs={docsWaiting} dates={docDates} />
       {asked.length > 0 && (
         <>
           <div className="caps-title">{L('Você pediu, esperando outra pessoa', 'You asked, waiting on someone else')}</div>

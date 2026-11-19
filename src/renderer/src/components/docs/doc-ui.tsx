@@ -11,6 +11,7 @@ import type { MenuItem, MenuState } from '../Dialogs'
 import { Modal } from '../Modal'
 import { Field } from '../Pages'
 import { ago, AgentAvatar, Icon, MeAvatar } from '../ui'
+import { StatusChip } from './DocStatus'
 import type { useDocUpload } from './upload'
 import { childFolders, folderColor, kindWords, mayEdit, pathText, useActors, useDocs, type Who } from './useDocs'
 
@@ -90,7 +91,7 @@ export function DocsError({ title = L('Não consegui abrir seus documentos.', "I
 }
 
 // Files on their way up (any folder) and what was refused, as the page's own quiet lines.
-export function Sending({ upload, folderId }: { upload: ReturnType<typeof useDocUpload>; folderId?: string }): ReactNode {
+export function Sending({ upload, folderId }: { upload: Pick<ReturnType<typeof useDocUpload>, 'sending' | 'refused' | 'dismiss'>; folderId?: string }): ReactNode {
   const going = upload.sending.filter((s) => !folderId || s.folderId === folderId)
   if (!going.length && !upload.refused.length) return null
   return (
@@ -129,6 +130,7 @@ export function DocRow({ doc, folderPath, snippet, onOpen, onMenu, trailing }: {
           <span>{snippet ? <Snippet text={snippet} /> : doc.summary || kindWords(doc.kind)}</span>
           {folderPath && <em className="dc-row__where">{folderPath}</em>}
         </span>
+        <StatusChip doc={doc} />
         <span className="dc-row__who" title={who.name}>
           <WhoAvatar who={who} />
         </span>

@@ -2,15 +2,18 @@
 // Drop files anywhere on it to keep them here.
 import { useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../../shared/lang'
+import { approvalNeeded } from '../../../../shared/doc-access'
 import type { DocFolder, DocsTree } from '../../../../shared/docs'
 import { call } from '../../rpc'
 import { amAdmin, navigate, toast, useStore } from '../../store'
 import { message } from '../Invite'
-import { confirmDialog, ContextMenu, type MenuState } from '../Dialogs'
+import { confirmDialog, ContextMenu, type MenuItem, type MenuState } from '../Dialogs'
 import { Modal } from '../Modal'
 import { Icon } from '../ui'
 import { DocAccessDialog } from './DocAccess'
+import { AskAnswer, SearchBox, useAsk } from './DocAsk'
 import { useDocActions } from './DocActions'
+import { DocResults } from './DocResults'
 import { DocTrash } from './DocTrash'
 import { DocRow, NameDialog, Sending, menuAt } from './doc-ui'
 import { ACCEPT, type useDocUpload } from './upload'
@@ -24,11 +27,15 @@ export function DocFolderView({ tree, folder, words, upload }: { tree: DocsTree;
   const [access, setAccess] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [dropping, setDropping] = useState(0)
+  const [query, setQuery] = useState('')
+  const asking = useAsk({ folderId: folder.id })
   const input = useRef<HTMLInputElement>(null)
   const actions = useDocActions()
   const subs = childFolders(tree, folder.id)
   const files = docsIn(tree, folder.id)
   const color = folderColor(tree, folder.id)
+  const asks = approvalNeeded(tree.folders, folder.id)
+  const search = query.trim()
   const path = trail(tree, folder.id)
 
   const keep = (list: File[]): void => {
@@ -59,6 +66,34 @@ export function DocFolderView({ tree, folder, words, upload }: { tree: DocsTree;
     } catch (e) {
       toast(`${L('Não consegui apagar a pasta.', "I couldn't delete the folder.")} ${message(e)}`.trim())
     }
+  }
+  // Owner and admins: a folder asks for approval of what the agents keep in it. When a folder above already asks,
+  // this one follows it (even if it is set here too), so there is nothing to switch here.
+  const fromAbove = (): boolean => {
+    const seen = new Set<string>()
+    for (let id: string | null = folder.parentId; id && !seen.has(id); ) {
+      seen.add(id)
+      const f = tree.folders.find((x) => x.id === id)
+      if (!f || f.privateTo) return false
+      if (f.needsApproval) return true
+      id = f.parentId
+    }
+    return false
+  }
+  const approvalItem = (): MenuItem[] => {
+    if (!admin || folder.privateTo || fromAbove()) return []
+    const on = folder.needsApproval
+    return [
+      {
+        label: on ? L('Não pedir mais aprovação', 'Stop asking for approval') : L('Pedir aprovação nesta pasta', 'Ask for approval in this folder'),
+        icon: 'check' as const,
+        onClick: () =>
+          void call('docFolderSave', { id: folder.id, parentId: folder.parentId, name: folder.name, rule: folder.rule, needsApproval: !on }).then(
+            () => toast(on ? L('Pronto. O que os agentes guardarem aqui não espera mais aprovação.', 'Done. What agents save here no longer waits for approval.') : L('Pronto. O que os agentes guardarem aqui espera o seu sim.', 'Done. What agents save here now waits for a yes.')),
+            (e: unknown) => toast(`${L('Não consegui mudar isso.', "I couldn't change that.")} ${message(e)}`.trim())
+          )
+      }
+    ]
   }
   const open = (id: string): void => navigate({ kind: 'documents', folder: folder.id, doc: id })
   const newFolder = async (name: string): Promise<void> => {
@@ -96,16 +131,38 @@ export function DocFolderView({ tree, folder, words, upload }: { tree: DocsTree;
             <span className="chip dc-chip">{L('Só para ler', 'Read only')}</span>
           )}
           {canMenu && (
-            <button className="icon-btn" title={L('Mais opções da pasta', 'More folder options')} aria-label={L('Mais opções da pasta', 'More folder options')} onClick={(e) => setMenu(menuAt(e, [{ label: L('Renomear pasta', 'Rename folder'), icon: 'edit' as const, onClick: () => setRenaming(true) }, { label: L('Apagar pasta', 'Delete folder'), icon: 'trash' as const, danger: true, onClick: () => void removeFolder() }]))}>
+            <button className="icon-btn" title={L('Mais opções da pasta', 'More folder options')} aria-label={L('Mais opções da pasta', 'More folder options')} onClick={(e) => setMenu(menuAt(e, [{ label: L('Renomear pasta', 'Rename folder'), icon: 'edit' as const, onClick: () => setRenaming(true) }, ...approvalItem(), { label: L('Apagar pasta', 'Delete folder'), icon: 'trash' as const, danger: true, onClick: () => void removeFolder() }]))}>
               <Icon name="more" size={16} />
             </button>
           )}
         </div>
 
         <RuleLine folder={folder} may={may} />
+        {asks && (
+          <p className="dc-approval-line">
+            <Icon name="check" size={13} /> {L('O que os agentes guardam aqui espera o sim de uma pessoa.', "What agents save here waits for a person's yes.")}
+            {!folder.needsApproval && <em> {L('(vem da pasta de cima)', '(comes from the folder above)')}</em>}
+          </p>
+        )}
+        <div className="dc-folder-ask">
+          <SearchBox
+            value={query}
+            onChange={(v) => (setQuery(v), asking.clear())}
+            onAsk={() => asking.ask(query)}
+            busy={asking.state.status === 'busy'}
+            placeholder={L(`Procure ou pergunte algo em ${folder.name}`, `Find or ask something in ${folder.name}`)}
+            label={L('Procurar ou perguntar nesta pasta', 'Find or ask in this folder')}
+          />
+        </div>
         <Sending upload={upload} folderId={folder.id} />
+        {search && (
+          <>
+            <AskAnswer asking={asking} tree={tree} />
+            {!asking.answering && <DocResults tree={tree} query={search} folderId={folder.id} />}
+          </>
+        )}
 
-        {subs.length > 0 && (
+        {!search && subs.length > 0 && (
           <div className="dc-subs">
             {subs.map((f) => {
               const n = countIn(tree, f.id)
@@ -120,7 +177,7 @@ export function DocFolderView({ tree, folder, words, upload }: { tree: DocsTree;
           </div>
         )}
 
-        {files.length > 0 ? (
+        {search ? null : files.length > 0 ? (
           <>
             <h2 className="dc-eyebrow">{files.length === 1 ? L('1 arquivo', '1 file') : L(`${files.length} arquivos`, `${files.length} files`)}</h2>
             <div className="dc-list">
@@ -149,7 +206,7 @@ export function DocFolderView({ tree, folder, words, upload }: { tree: DocsTree;
           )
         )}
 
-        <DocTrash docs={docsIn(tree, folder.id, true)} may={may} />
+        {!search && <DocTrash docs={docsIn(tree, folder.id, true)} may={may} />}
       </div>
 
       {dropping > 0 && (

@@ -209,6 +209,80 @@
 .dc-ver__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .dc-saved { display: inline-flex; align-items: center; gap: 5px; }
 
+/* ---------- where a file stands (one chip a row) ---------- */
+.dc-pill { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-color: transparent; background: var(--active); color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.dc-pill--warn { background: var(--warn-soft); color: var(--warn); }
+.dc-pill--ok { background: var(--ok-soft); color: var(--ok); }
+.dc-pill--accent { background: var(--accent-soft); color: var(--accent); }
+.dc-row__main > .dc-pill { margin-left: 4px; }
+.dc-ver__off { margin-left: 8px; font-style: normal; font-size: 12px; font-weight: 500; color: var(--ok); }
+
+/* the banner on an open file, and the two answers */
+.dc-decide { margin: 0 0 14px; padding: 10px 10px 10px 14px; border-radius: 12px; background: var(--warn-soft); }
+.dc-decide--quiet { background: var(--active); }
+.dc-decide--bare { margin: 10px 0 0; padding: 0; background: none; }
+.dc-decide__row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.dc-decide__row > p { flex: 1; min-width: 180px; margin: 0; color: var(--text); font-size: 13.5px; }
+.dc-decide__row > p b { font-weight: 600; }
+.dc-decide__acts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.dc-ask-changes { display: grid; gap: 8px; margin-top: 10px; }
+.dc-ask-changes textarea { width: 100%; resize: vertical; min-height: 56px; }
+.dc-ask-changes__acts { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* a folder that asks for approval; the box to search or ask inside a folder */
+.dc-approval-line { display: flex; align-items: center; gap: 8px; margin: -4px 0 14px; color: var(--text-2); font-size: 13px; }
+.dc-approval-line .icon { flex: none; color: var(--ok); }
+.dc-approval-line em { font-style: normal; color: var(--text-3); }
+.dc-folder-ask { margin: 0 0 12px; }
+
+/* ---------- asking the documents ---------- */
+.dc-ask-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+.dc-ask-btn:hover:not(:disabled) { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.dc-reading { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 16px 18px; border-radius: 14px; background: var(--bg); box-shadow: 0 0 0 1px var(--border); color: var(--text-2); }
+.dc-answer { margin-top: 16px; padding: 18px 20px; border-radius: 14px; background: var(--bg); box-shadow: 0 0 0 1px var(--border); }
+.dc-answer.is-muted { background: var(--active); box-shadow: none; color: var(--text-2); }
+.dc-answer__q { margin-bottom: 8px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.dc-answer p { margin: 0 0 8px; max-width: 680px; font-size: 15px; line-height: 1.55; color: var(--text); }
+.dc-answer p:last-child { margin-bottom: 0; }
+.dc-answer.is-muted p { font-size: 14px; color: var(--text-2); }
+.dc-cite { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin: 0 2px; padding: 0 5px; border: 0; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 11px; font-weight: 600; vertical-align: 1px; cursor: pointer; }
+.dc-cite:hover { background: var(--accent); color: var(--accent-text); }
+.dc-src { display: flex; align-items: center; gap: 4px; border-radius: 10px; transition: background var(--dur-base); }
+.dc-src > .dc-row { flex: 1; min-width: 0; }
+.dc-src__n { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--active); color: var(--text-2); font-size: 11px; font-weight: 600; }
+.dc-src.is-lit { background: var(--accent-soft); }
+.dc-askdoc { margin-top: 26px; }
+.dc-askdoc .dc-eyebrow { margin-top: 0; }
+.dc-askdoc .dc-search { margin-top: 12px; }
+.dc-askdoc .dc-reading, .dc-askdoc .dc-answer { margin-top: 0; }
+
+/* ---------- Chegada: drop a file, the Tuca keeps it ---------- */
+.dc-arrival { display: flex; align-items: center; gap: 14px; margin: 18px 0 0; padding: 14px 16px; border-radius: var(--radius-lg); border: 1px dashed var(--border-strong); cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.dc-arrival:hover, .dc-arrival:focus-visible { border-color: var(--accent); background: var(--hover); outline: 0; }
+.dc-arrival.is-over { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+.dc-arrival__ico { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); }
+.dc-arrival__text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.dc-arrival__text strong { font-weight: 600; }
+.dc-arrival__text span { color: var(--text-2); font-size: 13px; }
+.dc-arrivals { margin-top: 4px; }
+.dc-arr { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+.dc-arr + .dc-arr { box-shadow: 0 -1px 0 var(--border); }
+.dc-arr__name { flex: 1; min-width: 0; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-arr__name em { font-style: normal; color: var(--text-3); }
+.dc-arr__sub { color: var(--text-3); font-size: 12.5px; }
+.dc-arr__acts { flex: none; display: inline-flex; gap: 6px; }
+
+/* ---------- "Pra você" cards of documents ---------- */
+.dc-ib__file { display: flex; align-items: center; gap: 10px; margin: 2px 0 6px; }
+.dc-ib__file > div { min-width: 0; overflow-wrap: anywhere; }
+.dc-ib .approval__title { margin: 0; }
+.dc-ib__acts { margin-top: 10px; }
+
+/* the delivered file on a finished board card */
+.dc-board-doc { display: flex; align-items: center; gap: 8px; max-width: 100%; margin-top: 8px; padding: 4px 8px 4px 4px; border: 0; border-radius: 8px; background: var(--hover); color: var(--text-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.dc-board-doc:hover { color: var(--text); background: var(--active); }
+.dc-board-doc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- narrow windows ---------- */
 @media (max-width: 900px) {
   .dc-page__inner { padding: 18px 18px 64px; }
@@ -220,6 +294,10 @@
   .dc-viewer { height: 60vh; min-height: 320px; }
   .dc-side { width: auto; border-left: 0; border-top: 1px solid var(--border); }
   .dc-row__when { display: none; }
+  .dc-arrival { flex-wrap: wrap; }
+  .dc-arr { flex-wrap: wrap; }
+  .dc-arr__acts { margin-left: 38px; }
+  .dc-ask-btn { padding-inline: 8px; }
   .dc-acc { flex-wrap: wrap; }
   .dc-seg { margin-left: 36px; }
 }

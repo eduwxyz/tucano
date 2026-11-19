@@ -66,3 +66,34 @@ export function useDocUpload(): { sending: Sending[]; refused: Refusal[]; dismis
   }
   return { sending, refused, dismiss: (key) => setRefused((r) => r.filter((x) => x.key !== key)), send }
 }
+
+// Files dropped for the Tuca to put away ("Chegada"): no folder chosen, she reads each one and picks. They
+// show as sent while they go up; after that the document itself says it is waiting to be put away.
+export function useInboxUpload(): { sending: Sending[]; refused: Refusal[]; dismiss: (key: number) => void; send: (files: File[]) => Promise<void> } {
+  const [sending, setSending] = useState<Sending[]>([])
+  const [refused, setRefused] = useState<Refusal[]>([])
+  const seq = useRef(0)
+  const send = async (files: File[]): Promise<void> => {
+    const ok: { f: File; key: number }[] = []
+    const no: Refusal[] = []
+    for (const f of files) {
+      const why = refusalFor(f)
+      if (why) no.push({ key: ++seq.current, text: why })
+      else ok.push({ f, key: ++seq.current })
+    }
+    if (no.length) setRefused((r) => [...r, ...no])
+    setSending((s) => [...s, ...ok.map(({ f, key }) => ({ key, name: f.name, folderId: '' }))])
+    let sent = 0
+    for (const { f, key } of ok) {
+      try {
+        await call('docInboxAdd', { name: f.name, data: await base64(f) })
+        sent++
+      } catch (e) {
+        setRefused((r) => [...r, { key: ++seq.current, text: `${f.name}: ${message(e)}` }])
+      }
+      setSending((s) => s.filter((x) => x.key !== key))
+    }
+    if (sent) toast(sent === 1 ? L('Recebido. A Tuca já está lendo.', 'Received. Tuca is already reading it.') : L(`${sent} arquivos recebidos. A Tuca já está lendo.`, `${sent} files received. Tuca is already reading them.`))
+  }
+  return { sending, refused, dismiss: (key) => setRefused((r) => r.filter((x) => x.key !== key)), send }
+}

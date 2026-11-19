@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { L } from '../../../../shared/lang'
 import type { Doc, DocFolder, DocKind, DocsTree } from '../../../../shared/docs'
 import { parseActor } from '../../../../shared/docs'
-import { accessInWords, effectiveAccess } from '../../../../shared/doc-access'
+import { accessInWords, effectiveAccess, mayApprove } from '../../../../shared/doc-access'
 import { headsOf } from '../../../../shared/org'
+import type { Routine } from '../../../../shared/types'
 import { call } from '../../rpc'
 import { personName, useStore, type Agent, type State } from '../../store'
 import { message } from '../Invite'
@@ -121,6 +122,18 @@ export function folderColor(tree: DocsTree, folderId: string): string {
 }
 
 export const mayEdit = (tree: DocsTree, folderId: string): boolean => tree.can[folderId] === 'edit'
+
+// The routine that keeps a living document up to date (undefined: none, or it was deleted).
+export function useRoutineOf(id: string | null | undefined): Routine | undefined {
+  return useStore((s) => (id ? s.routines.find((r) => r.id === id) : undefined))
+}
+
+// Whether I am the one who says yes to what waits in this folder. Alone (no people list), I am the owner.
+export function useMayApprove(tree: DocsTree | null, folderId: string): boolean {
+  const you = useStore((s) => s.you)
+  const role = useStore((s) => s.people.find((p) => p.id === you)?.role ?? 'owner')
+  return !!tree && mayApprove({ id: you, role }, tree.folders, folderId)
+}
 
 // ---------- words ----------
 
