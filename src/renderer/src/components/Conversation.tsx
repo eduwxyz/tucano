@@ -62,6 +62,7 @@ import { canEditChannel,
   retryRun,
   continueRun,
   continueJob,
+  deleteMessage,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -560,6 +561,33 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   // wrote anyway waits behind a link, and the agent speaks when the work comes back.
   const [showSaid, setShowSaid] = useState(false)
   const [showAsk, setShowAsk] = useState(false)
+  const rowEl = useRef<HTMLElement>(null)
+  const [height, setHeight] = useState(0)
+  useLayoutEffect(() => {
+    const el = rowEl.current
+    if (!el) return
+    const read = (): void => setHeight(el.offsetHeight)
+    read()
+    const seen = new ResizeObserver(read)
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [])
+  const leftStack = height >= 74
+  const ownPrompt = !agent && !other && message.author.kind === 'person' && !message.run
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(message.text)
+  const field = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!editing || !field.current) return
+    field.current.focus()
+    if (typeof field.current.setSelectionRange === 'function') field.current.setSelectionRange(draft.length, draft.length)
+  }, [editing, draft.length])
+  const sendEdit = (): void => {
+    const words = draft.trim()
+    if (!words) return
+    sendMessage(message.conversationId, words, [], message.threadId)
+    setEditing(false)
+  }
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
 
   // The same object between renders, or every link would start over.
@@ -588,7 +616,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const name = agent ? agent.name : ghost ? L('Agente', 'Agent') : (other ?? me.name)
   return (
     // Someone else's message reads like any other voice in the conversation: on the left, with their name.
-    <article className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
+    <article ref={rowEl} className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''} ${leftStack ? 'is-left-stack' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
           (agent?.deleted ? (
@@ -604,6 +632,22 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           ))}
       </div>
       <div className="msg__body">
+        {ownPrompt && !editing && (
+          <>
+            <button
+              className="icon-btn icon-btn--sm msg__edit"
+              title={L('Editar este pedido', 'Edit prompt')}
+              aria-label={L('Editar este pedido', 'Edit prompt')}
+              onClick={() => {
+                setDraft(message.text)
+                setEditing(true)
+              }}
+            >
+              <Icon name="edit" size={13} />
+            </button>
+            <DeleteSession message={message} where="prompt" />
+          </>
+        )}
         {!grouped && (
           <div className="msg__head">
             {agent?.deleted ? (
@@ -626,18 +670,41 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             top of the run here, in the same block, and leaves with the run's last line. Without threads, or
             without a run, it stays where it was, at the corner of the message (ThreadLink). */}
         {message.run ? (
-          replies ? (
-            <div className="msg__anchor">
-              <div className="msg__anchor-pin">
-                <ThreadButton message={message} />
-              </div>
-              <RunBlock message={message} />
+          <div className="msg__anchor">
+            <div className={`msg__anchor-pin ${replies ? '' : 'msg__anchor-pin--alone'}`}>
+              {replies ? <ThreadButton message={message} /> : null}
+              {agent && <DeleteSession message={message} />}
             </div>
-          ) : (
-            <RunBlock message={message} />
-          )
+            <RunSteps message={message} />
+          </div>
         ) : null}
-        {text && quiet && !showSaid ? (
+        {editing ? (
+          <div className="msg__edit-box">
+            <textarea
+              ref={field}
+              rows={Math.min(10, Math.max(2, 1 + Math.round(draft.length / 90)))}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendEdit()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setEditing(false)
+                }
+              }}
+            />
+            <div className="msg__edit-actions">
+              <button className="btn btn--primary btn--sm" disabled={!draft.trim()} onClick={sendEdit}>
+                {L('Enviar', 'Send')}
+              </button>
+              <button className="btn btn--sm" onClick={() => setEditing(false)}>
+                {L('Cancelar', 'Cancel')}
+              </button>
+            </div>
+          </div>
+        ) : text && quiet && !showSaid ? (
           <button className="link small msg__said" onClick={() => setShowSaid(true)}>
             {L('Ver o que escreveu', 'See what it wrote')}
           </button>
@@ -846,6 +913,7 @@ function RoutineMessage({ message, replies }: { message: Message; replies?: Mess
         </div>
         {replies && <ThreadLink message={message} replies={replies} />}
       </div>
+      <DeleteSession message={message} where="post" />
     </article>
   )
 }
@@ -1160,6 +1228,59 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
+// A session's reply leaves the room in two presses: the first arms the trash, the second deletes
+// the reply, the thread it started and the work under it. Escape, an outside press or four seconds
+// disarms it. The same control rides the thread header and closes the panel with the session.
+const DELETE_ARM_MS = 4000
+export function DeleteSession({ message, where = 'corner' }: { message: Message; where?: 'corner' | 'head' | 'post' | 'prompt' }): ReactNode {
+  const [armed, setArmed] = useState(false)
+  const head = where === 'head'
+  const routine = where === 'post' || message.author.kind === 'routine'
+  const mine = where === 'prompt'
+  const working = message.run?.status === 'working'
+  useEffect(() => {
+    if (!armed) return
+    const timer = setTimeout(() => setArmed(false), DELETE_ARM_MS)
+    const away = (e: MouseEvent): void => {
+      if (!(e.target instanceof Element && e.target.closest('.msg__delete'))) setArmed(false)
+    }
+    const escape = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setArmed(false)
+    }
+    window.addEventListener('mousedown', away)
+    window.addEventListener('keydown', escape)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('mousedown', away)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [armed])
+  const press = (): void => {
+    if (!armed) return setArmed(true)
+    deleteMessage(message.id)
+    if (head) openPanel(null)
+  }
+  const label = mine ? L('Apagar este pedido', 'Delete prompt') : routine ? L('Apagar esta publicação', 'Delete post') : L('Apagar esta sessão', 'Delete session')
+  const next = mine
+    ? L('Clique de novo para apagar o pedido', 'Click again to delete the prompt')
+    : working
+      ? L('Clique de novo para parar e apagar a sessão', 'Click again to stop and delete the session')
+      : routine
+        ? L('Clique de novo para apagar a publicação', 'Click again to delete the post')
+        : L('Clique de novo para apagar a sessão', 'Click again to delete the session')
+  return (
+    <button
+      className={`icon-btn ${head ? '' : 'icon-btn--sm'} msg__delete ${head ? 'msg__delete--head' : ''} ${routine ? 'msg__delete--post' : ''} ${mine ? 'msg__delete--prompt' : ''} ${armed ? 'is-armed' : ''}`}
+      title={armed ? next : label}
+      aria-label={armed ? L('Confirmar: apagar', 'Confirm: delete') : label}
+      aria-pressed={armed}
+      onClick={press}
+    >
+      <Icon name="trash" size={head ? 14 : 13} />
+    </button>
+  )
+}
+
 function ThreadPanel({ rootId, conv, title, members, focusId, focusKey, onJump }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
@@ -1225,6 +1346,7 @@ function ThreadPanel({ rootId, conv, title, members, focusId, focusKey, onJump }
           </button>
         )}
         <WidenButton />
+        {root && root.author.kind === 'agent' && root.run && <DeleteSession message={root} where="head" />}
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>

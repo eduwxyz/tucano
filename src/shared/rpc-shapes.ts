@@ -20,6 +20,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   retryRun: { messageId: 's', note: 's?' },
   continueRun: { messageId: 's' },
   continueJob: { messageId: 's' },
+  deleteMessage: { messageId: 's' },
   setAgentModels: { agentIds: 'S', modelId: 's' },
   saveAgent: { agent: 'o', channelIds: 'S' },
   createChannel: { name: 's', threads: 'b?' },

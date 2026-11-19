@@ -25,6 +25,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
 - **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
 
+- **Delete a session from the reply rail and the thread header.** The trash sits under the thread button in the sticky rail, or beside the summary and close buttons in the thread header. One press arms it; the second deletes the reply, its thread and the work under it. Escape, an outside press or four seconds disarms it. The prompt it answered and its receipts stay. My own prompt can be edited where it stands, and a routine's post can be removed without stopping the routine.
+
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
@@ -163,7 +165,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **A question taken up from a request closes wherever it's answered.** Answering it in the request's thread now also closes the one the agent took to the person, so it no longer stays open for good with a second badge in the sidebar. (#551)
-
+> - **Adicionado:** a lixeira de uma sessão voltou ao rail da resposta e ao cabeçalho da thread. O primeiro clique avisa, o segundo apaga a resposta com a thread e o trabalho nela; o pedido e os recibos ficam. O lápis de editar o próprio pedido voltou junto.
 ## [0.2.40] - 2026-11-18
 
 > **Em português:**

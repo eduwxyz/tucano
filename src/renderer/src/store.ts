@@ -631,6 +631,17 @@ function apply(e: CoreEvent): void {
         const here = s.view?.kind === 'conversation' && s.view.id === id
         return { ...s, messages, ...(here ? { panel: { kind: 'thread' as const, id: m.id } } : {}) }
       }
+      // A deleted session takes its thread off the room and closes the panel if it was open on it.
+      case 'message_removed': {
+        const { [e.id]: _seen, ...seen } = s.threadSeen
+        const list = messagesIn(s, e.conversationId)
+        return {
+          ...s,
+          messages: { ...s.messages, [e.conversationId]: list.filter((m) => m.id !== e.id) },
+          threadSeen: seen,
+          panel: s.panel?.kind === 'thread' && s.panel.id === e.id ? null : s.panel
+        }
+      }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
       case 'agent_removed':
@@ -1091,6 +1102,8 @@ export const retryRun = (messageId: string, note?: string): void =>
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
 // The note where a piece of work stopped on its brakes (message.stop): the work goes on from there.
 export const continueJob = (messageId: string): void => void fire(L('Não consegui continuar o trabalho.', "I couldn't continue the work."), 'continueJob', { messageId })
+// A session's reply goes with the thread it started and the work under it.
+export const deleteMessage = (messageId: string): void => void fire(L('Não consegui apagar a sessão.', "Could not delete the session."), 'deleteMessage', { messageId })
 
 // Returns whether the core acknowledged the decision: the card keeps its controls disabled until it
 // hears one, and when it doesn't hear one it says so instead of pretending the call went through.
