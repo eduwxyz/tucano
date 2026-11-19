@@ -73,7 +73,8 @@ describe("a channel's agent list", () => {
     }
     // An agent out of the channel has no line to set anything on.
     expect(rows[2]).not.toContain('member-row__modes')
-    expect(html.match(/class="mode-help"/g)).toHaveLength(2)
+    // Each agent in the channel now has a help beside both modes, one mention and one listen.
+    expect(html.match(/class="mode-help"/g)).toHaveLength(4)
     expect(html.match(/title="[^"]+" aria-label="O que é o modo menção"/g)).toHaveLength(2)
   })
 
