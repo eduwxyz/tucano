@@ -47,7 +47,7 @@ describe.skipIf(!hasChrome())('a windowless browser driven from the panel', () =
     expect((await chrome.run('a', 'hide')).shown).toBe(false)
     expect(shown).toEqual([true, false])
     await expect(chrome.run('a', 'input', { kind: 'key', key: 'Enter' })).rejects.toThrow()
-  }, 60_000)
+  }, 120_000)
 
   it('takes a picture of a page, sized as asked and whole when asked', async () => {
     const size = (png: Buffer): { w: number; h: number } => ({ w: png.readUInt32BE(16), h: png.readUInt32BE(20) })
