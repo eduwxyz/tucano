@@ -1,3 +1,4 @@
+import { captureThoughtLine, restoreThoughtLine, type ThoughtLine } from '../thought-reading'
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { sectorName } from '../../../shared/org'
@@ -12,6 +13,7 @@ import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
 import { saidAt } from '../../../shared/types'
 import { CUT, canContinue } from '../../../shared/run-progress'
+import { stepsModeFor, stepsWindow } from '../../../shared/steps'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -32,6 +34,7 @@ import { canEditChannel,
   repliesOf,
   timelineOf,
   useLiveText,
+  useLiveThoughtState,
   workingIds,
   openDialog,
   decideApproval,
@@ -1586,86 +1589,190 @@ function useNow(on: boolean): number {
 }
 
 // One quiet line: what the agent is doing now (and for how long), or how many
-// steps it took. The steps themselves open on a click.
+// steps it took. Every mode lets the person open the steps on a click.
 export function RunSteps({ message }: { message: Message }): ReactNode {
   const run = message.run!
+  // Every step (what the app has always done), the latest few, or one line of current activity: the
+  // agent's own setting over the workspace's (src/shared/steps.ts).
+  const mode = useStore((s) => stepsModeFor(s.settings, message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
+  const keep = useStore((s) => s.settings.stepsLatest)
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
+  // A manual choice lasts through completion: finishing must not close what someone is reading.
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  const open = toggled ?? (working && stepsOpen)
+  // One line is what shows while the agent works, but a click always opens the steps: the person
+  // asked. A manual choice beats both the setting and the mode.
+  const open = toggled ?? (working && mode !== 'one-line' && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
+  const { shown, hidden, fade } = stepsWindow(run.steps, mode, keep)
+  // The window keeps itself at the bottom as steps arrive: new ones come in, old ones fade out above.
+  const list = useRef<HTMLOListElement>(null)
+  useEffect(() => {
+    if (!open || mode !== 'latest') return
+    list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' })
+  }, [open, mode, shown.length])
 
   if (run.steps.length === 0 && !working) return null
   const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
   const failed = run.steps.filter((st) => st.status === 'error').length
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
+  const currentTarget = working && !open && current?.kind !== 'thinking' ? (current?.detail || current?.input)?.split(/\r?\n/)[0]?.slice(0, 200) : undefined
+  const count = `${run.steps.length} ${L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}`
+
+  const line = (
+    <>
+      <span className="steps__chev">
+        <Icon name="chevron" size={12} />
+      </span>
+      {working ? (
+        <span className="steps__pulse" />
+      ) : justDone ? (
+        <span className="steps__done">
+          <Icon name="check" size={12} />
+        </span>
+      ) : null}
+      {working ? (
+        <span className="shimmer steps__activity">
+          {current
+            ? `${current.label}…`
+            : now - message.at > 60_000
+              ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+              : run.steps.length === 0
+                ? L('Lendo o pedido…', 'Reading the request…')
+                : L('Pensando…', 'Thinking…')}
+        </span>
+      ) : (
+        <span className="steps__summary">
+          {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
+          {count}
+          {total > 0 && ` · ${duration(total)}`}
+        </span>
+      )}
+      {currentTarget && <code className="steps__now" title={currentTarget}>{currentTarget}</code>}
+      {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
+      {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+    </>
+  )
 
   return (
-    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
-      <button className="steps__toggle" onClick={() => setOpen(!open)}>
-        {working ? (
-          <span className="steps__pulse" />
-        ) : justDone ? (
-          <span className="steps__done">
-            <Icon name="check" size={12} />
-          </span>
-        ) : (
-          <span className="steps__chev">
-            <Icon name="chevron" size={12} />
-          </span>
-        )}
-        {working ? (
-          <span className="shimmer">
-            {current
-              ? `${current.label}…`
-              : now - message.at > 60_000
-                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
-                : run.steps.length === 0
-                  ? L('Lendo o pedido…', 'Reading the request…')
-                  : L('Pensando…', 'Thinking…')}
-          </span>
-        ) : (
-          <span className="steps__summary">
-            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-            {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
-            {total > 0 && ` · ${duration(total)}`}
-          </span>
-        )}
-        {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
-        {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''} steps--${mode}`}>
+      <div className="steps__header">
+        <button type="button" className="steps__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {line}
+        </button>
         {working && (
-          <span
-            className="btn btn--xs btn--ghost steps__stop"
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              stopRun(message.id)
-            }}
-          >
+          <button type="button" className="btn btn--xs btn--ghost steps__stop" onClick={() => stopRun(message.id)}>
             <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
-          </span>
+          </button>
         )}
-      </button>
+      </div>
       {open && (
-        <ol className="steps__list">
-          {run.steps.map((st) => (
-            <StepRow key={st.id} step={st} />
+        <ol ref={list} className="steps__list">
+          {hidden > 0 && (
+            <li className="steps__earlier">
+              {L(`${hidden} ${hidden === 1 ? 'passo' : 'passos'} antes destes`, `${hidden} earlier ${hidden === 1 ? 'step' : 'steps'}`)}
+            </li>
+          )}
+          {shown.map((st, i) => (
+            <StepRow key={st.id} step={st} dim={i < fade ? 0.2 + (0.8 * i) / fade : 0} />
           ))}
         </ol>
+      )}
+      <Thought message={message} working={working} />
+    </div>
+  )
+}
+
+// How close to the end of the block counts as reading its end: a little over one line, so a wheel's
+// fraction of a line and a subpixel scroll still count as the end.
+const THOUGHT_END = 24
+
+// Whether the block sits at the end of what it shows: the place a person is reading, not where the
+// stream stopped. Content arriving below it does not move that place.
+export function followsTheEnd(box: { scrollHeight: number; scrollTop: number; clientHeight: number }): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < THOUGHT_END
+}
+
+// What the model is thinking, dim and small, as it arrives: not what it said, and not a step. It
+// sits under the steps of the run it belongs to, and above whatever the reply offers at its bottom.
+// It follows the reply: open and scrolling while it works, and once that is over, folded to the last
+// line it thought — the whole of it one click away. The window keeps it in memory so it can be read
+// back. Off unless the person turned it on in Settings: a reply's reasoning is its own, and most
+// people want the answer.
+export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
+  const on = useStore((s) => s.settings.showThinking === true)
+  const retained = useLiveThoughtState(message.id, STREAM_MS)
+  const thought = retained?.text
+  // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
+  const [asked, setAsked] = useState<boolean | null>(null)
+  const open = asked ?? working
+  const box = useRef<HTMLDivElement>(null)
+  // The block follows what arrives only while the person is at its end. Someone who scrolled up to
+  // read an earlier passage keeps that place while the rest streams in below it, and the block takes
+  // the stream up again by itself once they are back at the end. Opened by a click, it starts there.
+  const follow = useRef(true)
+  const line = useRef<ThoughtLine | null>(null)
+  const written = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (open) {
+      follow.current = true
+      line.current = null
+    }
+  }, [open])
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || !retained || !open || !on) {
+      line.current = null
+      written.current = null
+      follow.current = true
+      return
+    }
+    if (working && follow.current) el.scrollTop = el.scrollHeight
+    else if (line.current) restoreThoughtLine(el, line.current, retained.start)
+    written.current = el.scrollTop
+  }, [retained, open, working, on])
+  if (!on || !thought) return null
+  // Folded, it carries the line it is on now: what it is thinking, cut to the width of the block.
+  const last = thought.trimEnd().split(/\r?\n/).filter((l) => l.trim() !== '').pop() ?? ''
+  return (
+    <div className={`thought${open ? ' is-open' : ''}${working ? ' is-working' : ''}`} aria-label={L('O que o agente está pensando', 'What the agent is thinking')}>
+      <button
+        type="button"
+        className="thought__head"
+        aria-expanded={open}
+        title={open ? L('Recolher o que ele pensou', 'Fold what it thought') : L('Ler o que ele pensou', 'Read what it thought')}
+        onClick={() => setAsked(!open)}
+      >
+        <Icon name="chevron" size={11} />
+        <span className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</span>
+        {!open && <span className="thought__last">{last}</span>}
+      </button>
+      {open && (
+        <div ref={box} className="thought__text" onScroll={(e) => {
+          const el = e.currentTarget
+          if (written.current !== null && Math.abs(el.scrollTop - written.current) < 0.5) return
+          follow.current = followsTheEnd(el)
+          line.current = !follow.current && retained ? captureThoughtLine(el, retained.start) : null
+          written.current = el.scrollTop
+        }}>
+          {thought}
+          {working && <span className="thought__caret" aria-hidden="true" />}
+        </div>
       )}
     </div>
   )
 }
 
-function StepRow({ step }: { step: Step }): ReactNode {
+// `dim`: how far into the fade this step is (0: not fading) — the oldest ones of a window, on their way out.
+function StepRow({ step, dim = 0 }: { step: Step; dim?: number }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
   return (
-    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
+    <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}${dim > 0 ? ' step--fading' : ''}`} style={dim > 0 ? { opacity: dim } : undefined}>
       <span className="step__icon">
         {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'done' ? 'check' : 'x'} size={12} />}
       </span>

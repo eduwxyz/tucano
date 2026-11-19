@@ -111,6 +111,7 @@ import { hasServers, NodeCard, ServersCard } from './Servers'
 import { HomePhoneCard } from './HomePhone'
 import { useWorkspaceList } from './Workspaces'
 import { workspaceLabel } from '../../../shared/workspaces'
+import { stepsKeep, STEPS_LATEST, STEPS_LATEST_MAX, STEPS_LATEST_MIN, type StepsMode } from '../../../shared/steps'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
@@ -285,6 +286,40 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
 ]
+// How a reply's steps read, in the order they go from "everything" to "nothing": the labels carry
+// the number the person chose, since that is what "the latest few" means on this computer.
+const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: string }[] => [
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Show every step.') },
+  {
+    value: 'latest',
+    label: L(`Últimos ${keep}`, `Last ${keep}`),
+    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'Show recent steps in an auto-scrolling panel. Older steps fade out.')
+  },
+  {
+    value: 'one-line',
+    label: L('Uma linha', 'One line'),
+    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'Show the current step and target on one line. Click to expand.')
+  }
+]
+
+// One choice among the three, or — on an agent's own page — "same as the app" before them.
+function StepsModePick({ value, keep, onChange, follow, label }: { value?: StepsMode; keep: number; onChange: (v: StepsMode | undefined) => void; follow?: boolean; label: string }): ReactNode {
+  return (
+    <div className="segmented segmented--wide steps-pick" role="radiogroup" aria-label={label}>
+      {follow && (
+        <button role="radio" aria-checked={!value} className={!value ? 'is-active' : ''} onClick={() => onChange(undefined)}>
+          {L('Do app', 'App setting')}
+        </button>
+      )}
+      {STEPS_CHOICES(keep).map((c) => (
+        <button key={c.value} role="radio" aria-checked={value === c.value} className={value === c.value ? 'is-active' : ''} onClick={() => onChange(c.value)}>
+          {c.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
   { value: 'read', label: L('Ler', 'Read') },
@@ -420,6 +455,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const globalRules = useStore((s) => s.settings.actionRules)
   const globalAutonomy = useStore((s) => s.settings.autonomy)
   const globalGuard = useStore((s) => s.settings.outsideGuard)
+  // How many steps "the latest few" keeps, so this agent's choice reads with the same number.
+  const stepsLatest = useStore((s) => s.settings.stepsLatest)
 
   const memberOf = (agentId: string): string[] => channels.filter((c) => c.members.includes(agentId)).map((c) => c.id)
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
@@ -877,6 +914,32 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </Row>
                 )
               })}
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
+              title={L('Passos na resposta', 'Steps in a reply')}
+              help={L(
+                'Como as respostas deste agente mostram os passos: todos, só os últimos, ou uma linha com a atividade atual. O padrão é a configuração do app.',
+                'Show all steps, recent steps, or a single activity line. Default follows app settings.'
+              )}
+            >
+              <Row label={L('Passos na resposta', 'Steps in a reply')} className="lrow--wide">
+                <StepsModePick
+                  value={draft.steps}
+                  keep={stepsKeep(stepsLatest)}
+                  follow
+                  label={L(`Como as respostas de ${draft.name || 'o agente'} mostram os passos`, `How ${draft.name || 'the agent'}'s replies show their steps`)}
+                  onChange={(v) => patch({ steps: v }, true)}
+                />
+              </Row>
+              <p className="hint">
+                {L(
+                  'Uma linha não esconde o trabalho: o botão de parar e o tempo continuam ali. Abrir a lista dos passos vale para a resposta, não fica salvo.',
+                  'One line doesn’t hide the work: the stop button and the time stay there. Opening the steps list is per reply, not saved.'
+                )}
+              </p>
             </Section>
           )}
 
@@ -3245,10 +3308,40 @@ export function SettingsPage(): ReactNode {
               </div>
               <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
             </div>
+            {/* What a reply's steps look like, and how many of the latest ones: beside the settings that
+                change how a reply reads, and each person's own. */}
+            {/* The same field, one line down: what a reply's steps look like. Both are about how a
+                reply reads, and nobody turns one on without the other being right there. */}
+            <div className="key-row">
+              <Icon name="menu" />
+              <div className="grow">
+                <strong>{L('Os passos da resposta', 'Reply steps')}</strong>
+                <p className="muted small">{STEPS_CHOICES(stepsKeep(settings.stepsLatest)).find((c) => c.value === (settings.steps ?? 'all'))!.hint}</p>
+                <StepsModePick
+                  value={settings.steps ?? 'all'}
+                  keep={stepsKeep(settings.stepsLatest)}
+                  label={L('Como a resposta mostra os passos', 'Step display')}
+                  onChange={(v) => updateSettings({ steps: v ?? 'all' })}
+                />
+                {settings.steps === 'latest' && (
+                  <label className="row row--center steps-keep">
+                    <span className="muted small">{L('Quantos passos mostrar', 'Visible steps')}</span>
+                    <NumberInput
+                      min={STEPS_LATEST_MIN}
+                      max={STEPS_LATEST_MAX}
+                      value={stepsKeep(settings.stepsLatest)}
+                      aria-label={L('Quantos passos mostrar na janela', 'Number of visible steps')}
+                      onChange={(n) => updateSettings({ stepsLatest: stepsKeep(n) })}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
           </Card>
         )}
 
         {pane('geral') && (
+
           <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>
             {owner && (
               <div className="key-row">
@@ -3269,6 +3362,24 @@ export function SettingsPage(): ReactNode {
               <button className="btn btn--sm" onClick={() => void openFeedback()}>
                 {L('Escrever', 'Write')}
               </button>
+            </div>
+          </Card>
+        )}
+
+        {pane('geral') && (
+          <Card title={L('A conversa', 'The conversation')}>
+            <div className="key-row">
+              <Icon name="spark" />
+              <div className="grow">
+                <strong>{L('O que o modelo pensa', 'What the model is thinking')}</strong>
+                <p className="muted small">
+                  {L(
+                    'Enquanto um agente responde, o raciocínio dele aparece em letra pequena e apagada, embaixo dos passos, e fica ali depois que a resposta acaba. Desligado, você vê só os passos e a resposta. Por enquanto, só os agentes que rodam no Pi mandam o raciocínio.',
+                    'While an agent replies, its reasoning shows in small, dim text under the steps, and it stays there once the reply ends. Off, you see only the steps and the answer. For now only agents running on Pi send their reasoning.'
+                  )}
+                </p>
+              </div>
+              <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
             </div>
           </Card>
         )}
