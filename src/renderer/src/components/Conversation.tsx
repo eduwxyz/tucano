@@ -586,6 +586,51 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away, a
   // wrote anyway waits behind a link, and the agent speaks when the work comes back.
   const [showSaid, setShowSaid] = useState(false)
   const [showAsk, setShowAsk] = useState(false)
+  const rowEl = useRef<HTMLElement>(null)
+  const [height, setHeight] = useState(0)
+  useLayoutEffect(() => {
+    const el = rowEl.current
+    if (!el) return
+    const read = (): void => setHeight(el.offsetHeight)
+    read()
+    const seen = new ResizeObserver(read)
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [])
+  const leftStack = height >= 74
+  const [pastStart, setPastStart] = useState(false)
+  const [returnTop, setReturnTop] = useState<number | null>(null)
+  useEffect(() => {
+    if (!message.run) return
+    const row = rowEl.current
+    const list = row?.closest<HTMLElement>('.messages')
+    if (!row || !list) return
+    const check = (): void => setPastStart(row.getBoundingClientRect().top < list.getBoundingClientRect().top - 6)
+    check()
+    list.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      list.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [message.run, height])
+  const scrollList = (): HTMLElement | undefined => rowEl.current?.closest<HTMLElement>('.messages') ?? undefined
+  const toStart = (): void => {
+    const list = scrollList()
+    const row = rowEl.current
+    if (!list || !row) return
+    setReturnTop(list.scrollTop)
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+    list.scrollTo({ top, behavior: 'smooth' })
+    row.classList.add('is-flash')
+    setTimeout(() => row.classList.remove('is-flash'), 1800)
+  }
+  const back = (): void => {
+    const list = scrollList()
+    if (!list || returnTop === null) return
+    list.scrollTo({ top: returnTop, behavior: 'smooth' })
+    setReturnTop(null)
+  }
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
 
   // The same object between renders, or every link would start over.
@@ -655,12 +700,18 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away, a
           replies ? (
             <div className="msg__anchor">
               <div className="msg__anchor-pin">
+                {message.run && (pastStart || returnTop !== null) && <PromptJump back={returnTop !== null} onClick={returnTop !== null ? back : toStart} />}
                 <ThreadButton message={message} />
               </div>
               <RunBlock message={message} />
             </div>
           ) : (
-            <RunBlock message={message} />
+            <div className="msg__anchor">
+              <div className="msg__anchor-pin msg__anchor-pin--alone">
+                {message.run && (pastStart || returnTop !== null) && <PromptJump back={returnTop !== null} onClick={returnTop !== null ? back : toStart} />}
+              </div>
+              <RunBlock message={message} />
+            </div>
           )
         ) : null}
         {text && quiet && !showSaid ? (
@@ -766,7 +817,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, away, a
           </div>
         )}
         {message.author.kind === 'person' && !message.threadId && <AskedFromHere message={message} />}
-        {away && message.run?.replyTo && <PromptJump id={message.run.replyTo} />}
+        {away && message.run?.replyTo && <PromptJumpAway id={message.run.replyTo} />}
         {replies && <ThreadLink message={message} replies={replies} noReply={!!message.run} />}
         {/* The routine's message had a thread of its own: still there, under the reply that carries it. */}
         {ask && !!askReplies?.length && <ThreadLink message={ask} replies={askReplies} noReply />}
@@ -841,20 +892,26 @@ function TryAgain({ messageId }: { messageId: string }): ReactNode {
 
 // The glyph under "Reply in thread", on a reply that answers a prompt another message now sits
 // between: it puts that prompt at the top of the list, so a long reply is one click from what was asked.
-export function PromptJump({ id }: { id: string }): ReactNode {
-  const jump = useContext(JumpTo)
+export function PromptJump({ back, onClick }: { back?: boolean; onClick: () => void }): ReactNode {
+  const label = back
+    ? L('Voltar aonde estava', 'Return to where you were')
+    : L('Ir para o começo desta sessão', 'Go to the start of this session')
   return (
     <button
-      className="icon-btn icon-btn--sm msg__reply msg__reply--up"
-      title={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
-      aria-label={L('Ir para o pedido que esta resposta responde', 'Go to the prompt this reply answers')}
-      onClick={() => jump(id)}
+      className={`icon-btn icon-btn--sm msg__reply ${back ? 'msg__reply--down' : 'msg__reply--up'}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
     >
-      <Icon name="up" size={12} />
+      <Icon name={back ? 'down' : 'up'} size={12} />
     </button>
   )
 }
-  )
+
+// The away form of PromptJump: jumps to the prompt by id (older message in the list).
+function PromptJumpAway({ id }: { id: string }): ReactNode {
+  const jump = useContext(JumpTo)
+  return <PromptJump onClick={() => jump(id)} />
 }
 
 // What a routine asked, posted at its time; the agent's reply comes next.
