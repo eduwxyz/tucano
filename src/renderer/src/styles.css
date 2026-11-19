@@ -3418,54 +3418,104 @@ h3 {
 /* To read: someone else's question, with its options. */
 .history-questions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
 }
 .history-question {
-  padding: 10px 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 9px 11px 10px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
 }
 .history-question__title {
   margin: 0 0 7px;
+  font-size: 12.5px;
   font-weight: 600;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 .history-question__options {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
+/* One option, as the card draws it: the rounded square with the number the field takes, the label, the
+   note under it, and the tag when the agent pointed at it. */
 .history-question__option {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  max-width: 100%;
   padding: 3px 9px 3px 3px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg);
   color: var(--text-2);
 }
-.history-question__option.is-recommended {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+.history-question__label,
+.history-question__detail {
+  overflow-wrap: anywhere;
+}
+.history-question__detail {
+  color: var(--text-3);
+  font-size: 11.5px;
 }
 .history-question__number {
   display: grid;
   place-items: center;
+  flex: none;
   width: 20px;
   height: 20px;
   border-radius: 6px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text-3);
   font-size: 11px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
-.history-question__option.is-recommended .history-question__number {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+.history-question__option.is-recommended {
+  border-color: var(--border-strong);
 }
+/* The agent's pick in the record: one filled star, no pill and no word. The working card keeps its
+   accent pill; here a single grey mark says which option the agent pointed at. */
+.history-question__star {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-3);
+}
+/* The option the person took: the negative of every other row — filled with the text colour and
+   carrying the background's own text on it, so the answer is the one thing that reads as solid. */
+.history-question__option.is-answered {
+  border-color: transparent;
+  background: var(--text-2);
+  color: var(--bg);
+}
+.history-question__option.is-answered .history-question__number {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--bg) 45%, transparent);
+  color: var(--bg);
+}
+.history-question__option.is-answered .history-question__detail,
+.history-question__option.is-answered .history-question__star {
+  border-color: color-mix(in srgb, var(--bg) 45%, transparent);
+  color: var(--bg);
+  opacity: 0.8;
+}
+/* A typed answer ("Something else", or a text question) is the answer too: its own row, marked so. */
+.history-question__option--said {
+  font-style: italic;
+}
+.history-question__option--none {
+  border-style: dashed;
+  color: var(--text-3);
+}
+
 .ask-option__pill {
   flex: none;
   padding: 0 7px;
