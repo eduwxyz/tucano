@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Temporary reasoning is forgotten when its display is disabled.** Previously cached text could return when the setting was enabled again, and removed conversations left it behind in memory. Disabling the display, removing a conversation or replacing the snapshot now clears the corresponding cache. Retention is limited to the 200 most recently streamed replies, with at most 20,000 characters per reply. (#235)
+
 ## [0.2.41] - 2026-11-19
 
 > **Em português:**

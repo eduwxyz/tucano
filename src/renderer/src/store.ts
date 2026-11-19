@@ -1,6 +1,7 @@
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { ThoughtCache, type RetainedThought } from './thoughts'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
@@ -461,6 +462,7 @@ export async function loadThread(rootId: string): Promise<void> {
 
 const live = new Map<string, string>()
 const liveListeners = new Map<string, Set<() => void>>()
+const thoughtListeners = new Map<string, Set<() => void>>()
 
 function listen(map: Map<string, Set<() => void>>, key: string, l: () => void): () => void {
   let ls = map.get(key)
@@ -479,6 +481,45 @@ function stream(id: string, text: string): void {
 }
 
 export const liveText = (id: string): string | undefined => live.get(id)
+
+// What the model is thinking, streamed apart from the reply: kept here, in memory, because it is
+// something to watch as it goes and not part of what the agent said.
+const thoughts = new ThoughtCache((id) => wake(thoughtListeners, id))
+
+function streamThought(id: string, text: string): void {
+  thoughts.append(id, text)
+}
+
+export const liveThought = (id: string): string | undefined => thoughts.get(id)
+
+// The thinking as it is now, woken as it arrives. `every`: wake at most that often (ms).
+export function useLiveThought(id: string, every = 0): string | undefined {
+  return useLiveThoughtState(id, every)?.text
+}
+
+export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {
+  const subscribe = useCallback(
+    (l: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const off = listen(thoughtListeners, id, () => {
+        if (!every) return l()
+        if (timer) return
+        timer = setTimeout(() => {
+          timer = undefined
+          l()
+        }, every)
+      })
+      return () => {
+        if (timer) clearTimeout(timer)
+        off()
+      }
+    },
+    [id, every]
+  )
+  // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
+  // frame) has none, and asking for them there would throw instead of drawing the steps.
+  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)
+}
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
 export function useLiveText(m: Message, every = 0): string {
@@ -536,6 +577,7 @@ function withMe(s: State): State {
 }
 
 function withSettings(s: State, settings: Settings): State {
+  if (settings.showThinking !== true) thoughts.clear()
   setLang(settings.language)
   return withMe({ ...s, settings })
 }
@@ -543,6 +585,9 @@ function withSettings(s: State, settings: Settings): State {
 function apply(e: CoreEvent): void {
   // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
+  // The model's reasoning is kept only when this person asked for it (Settings › General): off, the
+  // text never lands in memory, so nothing of it can be drawn or read back later.
+  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined
   if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   if (e.type === 'tasks') return void (state.tasks && loadTasks())
   set((s) => {
@@ -550,6 +595,7 @@ function apply(e: CoreEvent): void {
       case 'node':
         return { ...s, node: e.info }
       case 'message': {
+        if (e.attemptStart) thoughts.clear([e.message.id])
         const id = e.message.conversationId
         const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
         // What I just wrote in a conversation that answers in threads opens its thread, where the
@@ -598,6 +644,7 @@ function apply(e: CoreEvent): void {
       case 'routine':
         return { ...s, routines: upsert(s.routines, e.routine) }
       case 'conversation_removed': {
+        thoughts.clear(messagesIn(s, e.id).map((message) => message.id))
         const left = s.conversations.filter((c) => c.id !== e.id)
         const here = s.view?.kind === 'conversation' && s.view.id === e.id
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
@@ -680,6 +727,7 @@ export async function start(): Promise<void> {
   }
   await connect(apply)
   const snap = await call('snapshot')
+  thoughts.clear() // A replacement snapshot may no longer grant access to previously shown replies.
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
