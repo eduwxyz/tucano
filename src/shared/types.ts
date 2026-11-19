@@ -431,6 +431,10 @@ export interface Question {
 }
 
 // What's waiting on a person: approvals they can decide and questions to them.
+// A question as one person's page shows it: without where it was asked when they can't see that
+// conversation (someone else's DM: they get the question only).
+export type AskEntry = Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string }
+
 // A question from someone else's DM comes without where it was asked (they see the question only).
 export interface Inbox {
   approvals: Approval[]
@@ -605,6 +609,9 @@ export interface Settings {
     guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
   }
   folded?: string[] // the ids of what I folded in the sidebar
+  // Asks and Approvals out of the sidebar while nothing is waiting in them; unset: both always there
+  hideEmptyAsks?: boolean
+  hideEmptyApprovals?: boolean
   sidebarHidden?: string[] // what I took out of the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: none
   navOrder?: string[] // my order for the items at the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: as they come
   agentOrder?: string[] // my order for the agents in the sidebar, by agent id, kept within each sector; unset: as they come

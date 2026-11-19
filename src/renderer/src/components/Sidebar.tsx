@@ -298,6 +298,12 @@ export function Sidebar(): ReactNode {
   const parts = useSidebarParts()
   const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
   const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const asks = useStore((s) => s.inbox.questions.length)
+  const onAsks = useStore((s) => s.view?.kind === 'asks')
+  const showAsks = !settings.hideEmptyAsks || asks > 0 || onAsks
+  const onApprovals = useStore((s) => s.view?.kind === 'approvals')
+  const inboxWaiting = useStore((s) => (teamMode(s) ? inboxCount(s) : 0))
+  const showApprovals = !settings.hideEmptyApprovals || pending > 0 || inboxWaiting > 0 || onApprovals
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
   const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
@@ -509,6 +515,7 @@ export function Sidebar(): ReactNode {
         </button>
       )}
       <nav className="sidebar__scroll">
+        {showAsks && <NavItem view={{ kind: 'asks' }} icon="ask" label={L('Perguntas', 'Asks')} badge={asks} />}
         {shows('tuca') && (
           <TopRow item="tuca" onMenu={menuAt}>
             <TucaItem />
