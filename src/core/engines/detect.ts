@@ -1,25 +1,45 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { L } from '../../shared/lang'
-import type { AccountEngine, EngineId, EngineStatus } from '../../shared/types'
-import { executableNames, isWin, pathDirs, spawnable, withInstallDirs } from '../platform'
+import { ENGINES, type AccountEngine, type EngineId, type EngineStatus } from '../../shared/types'
+import { executableNames, isWin, killTree, pathDirs, spawnable, withInstallDirs } from '../platform'
 import { userProvider } from './claude'
 import { codexEnv, userCodexProvider } from './codex'
 import { opencodeMajor } from './opencode-v2'
-import { geminiModels } from './gemini'
+import { parseAntigravityModels } from './antigravity'
 import { cursorSignedIn, parseCursorModels } from './cursor'
 import { grokLogin, parseGrokModels } from './grok'
+import { readClineLogins } from './cline'
+import { hermesAppDir, userHermesProviders, warmHermes } from './hermes'
 
-function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
+// The app waits for these answers before anything can run, so the limit has to hold whatever the
+// command does. execFile's own timeout only sends SIGTERM, which an interactive zsh ignores, and it
+// answers only when the output pipes close, which what the command started can keep open for good.
+export function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const s = spawnable(bin, args)
-    execFile(s.file, s.args, { timeout, env, windowsHide: true, windowsVerbatimArguments: s.verbatim }, (err, stdout, stderr) => {
-      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-    })
+    // Its own process group, so the limit takes its children with it. (On Windows, detached would open a console.)
+    const child = spawn(s.file, s.args, { env, detached: !isWin, windowsHide: true, windowsVerbatimArguments: s.verbatim })
+    let stdout = ''
+    let stderr = ''
+    let giveUp: NodeJS.Timeout | undefined
+    child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d))
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d))
+    const finish = (code: number): void => {
+      clearTimeout(limit)
+      clearTimeout(giveUp)
+      resolve({ code, stdout, stderr })
+    }
+    const limit = setTimeout(() => {
+      if (child.pid) killTree(child.pid, 'SIGKILL')
+      // Something that left the group can still hold the pipes: answer without waiting for them.
+      giveUp = setTimeout(() => finish(1), 1_000)
+    }, timeout)
+    child.on('error', () => finish(1))
+    child.on('close', (code) => finish(code ?? 1))
   })
 }
 
@@ -54,6 +74,18 @@ async function which(cmd: string): Promise<string | undefined> {
 }
 
 const version = (out: string): string | undefined => out.match(/\d+\.\d+\.\d+/)?.[0]
+
+// Whether what is installed is older than what the app needs: 0.21.6 is older than 0.22.0.
+export const olderThan = (found: string, min: string): boolean => {
+  const a = found.split('.').map(Number)
+  const b = min.split('.').map(Number)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    if (x !== y) return x < y
+  }
+  return false
+}
 
 export async function detectClaude(): Promise<EngineStatus> {
   const path = await which('claude')
@@ -92,9 +124,14 @@ const gatewayHost = (url: string | undefined): string | undefined => {
 }
 
 // Checks the app's own Codex login (see codexEnv), not the user's.
-// Whether another login of Claude Code or Codex (Settings › Accounts) is signed in, and on which
-// plan, from the CLI's own status for that folder. The parsing is pure, to test it on their output.
+// Whether another login of a harness (Settings › Accounts) is signed in, and on which plan, from
+// the CLI's own status for that folder. The parsing is pure, to test it on their output.
 export function accountLogin(engine: AccountEngine, out: { code: number; stdout: string; stderr: string }): { loggedIn: boolean; detail?: string } {
+  if (engine === 'antigravity') {
+    // `agy models` in that home: the models its login can run, or "Please sign in".
+    const models = parseAntigravityModels(out.stdout).length
+    return models ? { loggedIn: true, detail: `Google · ${models} ${L('modelos', 'models')}` } : { loggedIn: false }
+  }
   if (engine === 'claude') {
     let status: Record<string, unknown> = {}
     try {
@@ -116,7 +153,12 @@ export function accountLogin(engine: AccountEngine, out: { code: number; stdout:
 export const accountDir = (dataDir: string, id: string): string => join(dataDir, 'accounts', id)
 
 export async function accountStatus(engine: AccountEngine, bin: string, dir: string): Promise<{ loggedIn: boolean; detail?: string }> {
-  const out = engine === 'claude' ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir }) : await run(bin, ['login', 'status'], 15_000, codexEnv(dir))
+  const out =
+    engine === 'claude'
+      ? await run(bin, ['auth', 'status'], 15_000, { ...process.env, CLAUDE_CONFIG_DIR: dir })
+      : engine === 'antigravity'
+        ? await run(bin, ['models'], 30_000, { ...process.env, HOME: dir })
+        : await run(bin, ['login', 'status'], 15_000, codexEnv(dir, bin))
   return accountLogin(engine, out)
 }
 
@@ -125,7 +167,7 @@ export async function detectCodex(home: string): Promise<EngineStatus> {
   if (!path) return { installed: false, loggedIn: false }
   const gateway = gatewayHost(userCodexProvider().baseUrl)
   if (gateway) return { installed: true, path, version: version((await run(path, ['--version'])).stdout), loggedIn: true, route: 'gateway', gateway, account: L(`Gateway ${gateway} · pelo seu config.toml`, `Gateway ${gateway} · from your config.toml`) }
-  const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'], 15_000, codexEnv(home))])
+  const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'], 15_000, codexEnv(home, path))])
   const text = `${auth.stdout}\n${auth.stderr}`
   const loggedIn = auth.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)
   const viaChatGpt = /chatgpt/i.test(text)
@@ -169,7 +211,7 @@ export function parseCodexCatalog(json: string): CodexModel[] {
 }
 
 export async function codexModels(path: string, home: string): Promise<CodexModel[]> {
-  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home))
+  const r = await run(path, ['debug', 'models'], 15_000, codexEnv(home, path))
   const list = r.code === 0 ? parseCodexCatalog(r.stdout) : []
   if (list.length) return list
   try {
@@ -181,7 +223,7 @@ export async function codexModels(path: string, home: string): Promise<CodexMode
 
 // OpenCode and Pi keep their own logins and providers; what they list is what
 // the person can use, so the list is the status. Their models go to `listed`.
-const providerName = (id: string): string => ({ openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter', google: 'Google', opencode: 'OpenCode', 'opencode-go': 'OpenCode Go', 'openai-codex': 'ChatGPT', 'github-copilot': 'Copilot' })[id] ?? id
+const providerName = (id: string): string => ({ openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter', google: 'Google', opencode: 'OpenCode', 'opencode-go': 'OpenCode Go', 'openai-codex': 'ChatGPT', 'github-copilot': 'Copilot', cline: 'Cline', 'openai-compatible': 'OpenAI Compatible', deepseek: 'DeepSeek', bedrock: 'Bedrock', ollama: 'Ollama', lmstudio: 'LM Studio' })[id] ?? id
 
 function listedStatus(path: string, v: string, models: string[], login: string): EngineStatus {
   const providers = [...new Set(models.map((m) => m.split('/')[0]!))]
@@ -226,25 +268,23 @@ export async function detectPi(): Promise<{ status: EngineStatus; models: string
   return { status: listedStatus(path, v.stdout, models, 'pi (e /login)'), models }
 }
 
-// Gemini CLI. Its model list isn't offered by an offline command, so the known
-// current models are used; "signed in" is whether a login is in place — the
-// OAuth credentials in the home, or an API key / Vertex in the environment.
-export async function detectGemini(): Promise<{ status: EngineStatus; models: string[] }> {
-  const path = await which('gemini')
+// Antigravity's CLI. `agy models` lists the models the signed-in account can run, and
+// says to sign in when there's no login (it lives in the keychain, not in a file).
+export async function detectAntigravity(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('agy')
   if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
-  const v = await run(path, ['--version'])
-  const home = join(process.env['GEMINI_CLI_HOME'] || homedir(), '.gemini')
-  const signedIn = existsSync(join(home, 'oauth_creds.json')) || !!(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_GENAI_USE_VERTEXAI'])
-  const models = geminiModels(path)
+  const [v, list] = await Promise.all([run(path, ['--version']), run(path, ['models'], 30_000)])
+  const models = parseAntigravityModels(list.stdout)
+  const signedIn = models.length > 0
   return {
     status: {
       installed: true,
       path,
       version: version(v.stdout),
       loggedIn: signedIn,
-      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com gemini', 'Not signed in: sign in with gemini') })
+      ...(signedIn ? { route: 'providers' as const, account: `Google · ${models.length} ${L('modelos', 'models')}` } : { account: L('Sem login: entre com agy', 'Not signed in: sign in with agy') })
     },
-    models: signedIn ? models : []
+    models
   }
 }
 
@@ -277,6 +317,28 @@ export async function detectGrok(): Promise<{ status: EngineStatus; models: stri
   }
 }
 
+// Cline's CLI, on Tucano's own login (see cline.ts): what it's signed into is in that
+// login's providers.json, read here (there's no status command), with the model each
+// provider last ran. Cline lists no models of its own; the rest go by name.
+export async function detectCline(loginDir: string): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('cline')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  const { providers, models } = readClineLogins(loginDir)
+  const signedIn = providers.length > 0
+  const names = `${providers.slice(0, 3).map(providerName).join(', ')}${providers.length > 3 ? L(` e mais ${providers.length - 3}`, ` and ${providers.length - 3} more`) : ''}`
+  return {
+    status: {
+      installed: true,
+      path,
+      version: version(v.stdout),
+      loggedIn: signedIn,
+      ...(signedIn ? { route: 'providers' as const, account: `${names} · ${L('login próprio do Tucano', "Tucano's own login")}` } : { account: L('Precisa de um login próprio do Tucano: cline auth', "Needs Tucano's own login: cline auth") })
+    },
+    models
+  }
+}
+
 // Cursor's agent CLI, by its unique name (it also installs a plain `agent`).
 // `status` says whether it's signed in; `models` lists what the account can run.
 export async function detectCursor(): Promise<{ status: EngineStatus; models: string[] }> {
@@ -297,17 +359,87 @@ export async function detectCursor(): Promise<{ status: EngineStatus; models: st
   }
 }
 
-export async function detectEngines(codexHome: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
+// Hermes, the CLI the app itself runs on. Its model list comes from its own
+// provider cache: one entry per credential (a provider slug, or
+// `custom:<url>#<fingerprint>` for an endpoint in the person's config), each
+// with the models its catalog lists. A custom endpoint is labelled with the
+// config key it belongs to, not the host: that is the name its --provider takes.
+export function parseHermesModels(
+  file = join(process.env['HERMES_HOME'] || join(homedir(), '.hermes'), 'provider_models_cache.json'),
+  providers: Record<string, string> = {}
+): string[] {
+  let cache: Record<string, unknown>
+  try {
+    cache = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const out: string[] = []
+  for (const [key, entry] of Object.entries(cache)) {
+    const models = ((entry ?? {}) as Record<string, unknown>)['models']
+    if (!Array.isArray(models)) continue
+    const provider = key.startsWith('custom:') ? (providers[normalizeUrl(endpointUrl(key))] ?? hostOf(endpointUrl(key)) ?? key) : key
+    for (const m of models) if (typeof m === 'string' && m) out.push(`${provider}/${m}`)
+  }
+  return out
+}
+
+const endpointUrl = (key: string): string => key.slice(7).split('#')[0]! // "custom:<url>#<fingerprint>" → url
+const normalizeUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase()
+
+// The endpoints of the person's own providers, by config key: a URL with
+// trailing slashes and case differences is still the same endpoint.
+export const hermesEndpointProviders = (providers: Record<string, unknown> | undefined): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(providers ?? {})) {
+    const e = (entry ?? {}) as Record<string, unknown>
+    const url = e['base_url'] ?? e['url'] ?? e['api']
+    if (typeof url === 'string' && url) out[normalizeUrl(url)] = key
+  }
+  return out
+}
+
+const hostOf = (url: string): string | undefined => {
+  try {
+    return new URL(url).host
+  } catch {
+    return undefined
+  }
+}
+
+export async function detectHermes(): Promise<{ status: EngineStatus; models: string[] }> {
+  const path = await which('hermes')
+  if (!path) return { status: { installed: false, loggedIn: false }, models: [] }
+  const v = await run(path, ['--version'])
+  void warmHermes(path, hermesAppDir()) // started early; every run waits for it
+  const models = parseHermesModels(undefined, hermesEndpointProviders(userHermesProviders()['providers'] as Record<string, unknown> | undefined))
+  // What the cache lists is what the person can use; the status is the list.
+  const status = listedStatus(path, v.stdout, models, 'hermes setup')
+  // The options the app runs it with (--format stream-json, --query-file) are
+  // 0.22's; the package on PyPI is older and would fail every single turn, so
+  // the row says it instead of the person finding out mid-conversation.
+  const found = version(v.stdout)
+  const min = ENGINES.hermes.min
+  if (found && min && olderThan(found, min)) {
+    status.warning = L(
+      `O seu Hermes é ${found}: o Tucano roda com a ${min} ou mais nova (o pacote do PyPI é mais antigo e não tem as opções que o app usa). Atualize pelo instalador oficial.`,
+      `Your Hermes is ${found}: Tucano runs with ${min} or newer (the package on PyPI is older and lacks the options the app uses). Update through the official installer.`
+    )
+  }
+  return { status, models }
+}
+
+export async function detectEngines(codexHome: string, clineLogin: string): Promise<{ engines: Record<EngineId, EngineStatus>; listed: Partial<Record<EngineId, string[]>>; codexCatalog: CodexModel[] }> {
   // A CLI installed while the app is open may have created its folder just now.
   process.env['PATH'] = withInstallDirs(process.env['PATH'] ?? '')
   // Codex's catalog is read alongside (it can take a couple of seconds), used once the login is known.
   const catalog = which('codex').then((p) => (p ? codexModels(p, codexHome) : []))
-  const [claude, codex, opencode, pi, gemini, cursor, grok] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectGemini(), detectCursor(), detectGrok()])
+  const [claude, codex, opencode, pi, antigravity, cursor, grok, cline, hermes] = await Promise.all([detectClaude(), detectCodex(codexHome), detectOpenCode(), detectPi(), detectAntigravity(), detectCursor(), detectGrok(), detectCline(clineLogin), detectHermes()])
   // A gateway serves its own list (asked when picking); a plan or an API key gets Codex's catalog.
   const codexCatalog = codex.loggedIn && codex.route !== 'gateway' ? await catalog : []
   return {
-    engines: { claude, codex, opencode: opencode.status, pi: pi.status, gemini: gemini.status, cursor: cursor.status, grok: grok.status },
-    listed: { opencode: opencode.models, pi: pi.models, gemini: gemini.models, cursor: cursor.models, grok: grok.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
+    engines: { claude, codex, opencode: opencode.status, pi: pi.status, antigravity: antigravity.status, cursor: cursor.status, grok: grok.status, cline: cline.status, hermes: hermes.status, endpoint: { installed: false, loggedIn: false } },
+    listed: { opencode: opencode.models, pi: pi.models, antigravity: antigravity.models, cursor: cursor.models, grok: grok.models, cline: cline.models, hermes: hermes.models, ...(codexCatalog.length ? { codex: codexCatalog.map((m) => m.slug) } : {}) },
     codexCatalog
   }
 }

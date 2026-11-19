@@ -63,7 +63,7 @@ describe('a document brought to the wiki', () => {
     const prompts: string[] = []
     const curator = new WikiCurator({
       wiki: w,
-      db: { conversation: () => undefined, messagesAfter: () => [], message: () => undefined, saveMessage: () => {}, agents: () => [] },
+      db: { conversation: () => undefined, messagesAfter: () => [], messagesSaidAfter: () => [], message: () => undefined, saveMessage: () => {}, agents: () => [] },
       settings: () => ({ workspaceName: 'Ana' }) as Settings,
       llm: async (_s, prompt) => {
         prompts.push(prompt)
@@ -83,7 +83,7 @@ describe('a document brought to the wiki', () => {
     expect(w.page('Cláusulas 1')!.body).toMatch(/Fontes: \[\[fontes\/.+\|Contrato Silva\]\]/)
 
     // a note: kept on purpose; a curator that fails marks the source as failed
-    const broken = new WikiCurator({ wiki: w, db: { conversation: () => undefined, messagesAfter: () => [], message: () => undefined, saveMessage: () => {}, agents: () => [] }, settings: () => ({}) as Settings, llm: async () => { throw new Error('sem modelo') }, emitMessage: () => {} })
+    const broken = new WikiCurator({ wiki: w, db: { conversation: () => undefined, messagesAfter: () => [], messagesSaidAfter: () => [], message: () => undefined, saveMessage: () => {}, agents: () => [] }, settings: () => ({}) as Settings, llm: async () => { throw new Error('sem modelo') }, emitMessage: () => {} })
     const note = w.addSource({ title: 'Lembrete', text: 'O Marcos prefere WhatsApp depois das 18h.', kind: 'note', by: 'me', status: 'reading' })
     await broken.ingest(note.id)
     expect(w.source(note.id)).toMatchObject({ status: 'failed', error: 'sem modelo' })

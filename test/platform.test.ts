@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { dockerProblem, ownedBack } from '../src/core/computer'
-import { autostartEntry, autostartFile, chromeCandidates, chromeKeyringFlags, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, openWindowsConsole, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
+import { autostartEntry, autostartFile, chromeCandidates, chromeKeyringFlags, electronPasswordStore, executableNames, fallbackPath, findChrome, gitRoot, loginShell, onPath, openWindowsConsole, osOf, shellCommand, spawnable, systemName, terminalCommand, userAgentPlatform, withInstallDirs } from '../src/core/platform'
 import { shortcut } from '../src/shared/types'
 
 const win = process.platform === 'win32'
@@ -275,5 +275,26 @@ describe("Chrome's keyring on a server", () => {
   it('is a Linux matter only', () => {
     expect(chromeKeyringFlags('mac', { TUCANO_SERVER: '1' })).toEqual([])
     expect(chromeKeyringFlags('windows', { TUCANO_SERVER: '1' })).toEqual([])
+  })
+})
+
+describe('the keyring the app asks Electron to use', () => {
+  it('names the Secret Service on a desktop Electron would leave with no keyring', () => {
+    for (const desktop of ['Hyprland', 'niri', 'sway', 'MATE', 'LXQt']) {
+      expect(electronPasswordStore('linux', { XDG_CURRENT_DESKTOP: desktop })).toBe('gnome-libsecret')
+    }
+    expect(electronPasswordStore('linux', {})).toBe('gnome-libsecret')
+  })
+
+  it('leaves KDE on KWallet, where its saved secrets are', () => {
+    expect(electronPasswordStore('linux', { XDG_CURRENT_DESKTOP: 'KDE' })).toBeUndefined()
+    expect(electronPasswordStore('linux', { XDG_CURRENT_DESKTOP: 'plasma:KDE' })).toBeUndefined()
+    expect(electronPasswordStore('linux', { DESKTOP_SESSION: 'plasma', KDE_FULL_SESSION: 'true' })).toBeUndefined()
+    expect(electronPasswordStore('linux', { DESKTOP_SESSION: 'kde' })).toBeUndefined()
+  })
+
+  it('is a Linux matter only', () => {
+    expect(electronPasswordStore('mac', { XDG_CURRENT_DESKTOP: 'Hyprland' })).toBeUndefined()
+    expect(electronPasswordStore('windows', {})).toBeUndefined()
   })
 })

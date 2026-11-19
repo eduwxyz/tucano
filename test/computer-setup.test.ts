@@ -8,9 +8,11 @@ import { SETUP_PRESETS } from '../src/shared/computer-setup'
 import { baseTag, Computers } from '../src/core/computer'
 import { systemPrompt } from '../src/core/context'
 import { Db } from '../src/core/db'
+import { settingsPatchError } from '../src/core/settings-patch'
+import { isPersonalSetting } from '../src/core/policy-people'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, gemini: ready, cursor: ready, grok: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 // Ids that start apart: a computer's name is the first 8 characters of its agent's id.
 const agent = (id: string, handle: string): Agent => ({ id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: true, archived: false })
 const script = (...markers: string[]): string => SETUP_PRESETS().filter((p) => markers.includes(p.marker)).map((p) => p.script).join('\n\n')
@@ -30,6 +32,12 @@ describe('the agents’ computer setup', () => {
     expect(prompt).toContain('O computador já vem preparado por Edu')
     expect(prompt).toContain('gitlab-org%2Fcli/releases')
     expect(systemPrompt({ agent: lia, settings, conversation: conv, peers: [], hasComputer: true })).not.toContain('já vem preparado')
+  })
+
+  it('is a setting the app takes, and only an admin changes it', () => {
+    expect(settingsPatchError({ computerSetup: 'apt-get update && apt-get install -y jq' })).toBeUndefined()
+    expect(settingsPatchError({ computerSetup: null })).toBeUndefined()
+    expect(isPersonalSetting('computerSetup')).toBe(false)
   })
 })
 

@@ -35,13 +35,14 @@ Copy, don't compose. Whatever you can't read here, leave out and list in the rep
 - `key`: as above.
 - `name`: the agent's name, up to 80 characters. Required.
 - `role`: what it does, in two to five words, up to 80 characters.
-- `instructions`: its standing instructions or system prompt, copied as they are, up to 32,000 characters.
+- `instructions`: its standing instructions or system prompt, copied exactly with no character limit. Aim for at most 32,000 characters as a recommendation, but never truncate a longer prompt; mention if a newly written prompt exceeds the recommendation.
   If a line holds a password, token, API key or any other credential, drop that line and say so in the
   report. Tucano asks for credentials through its own connectors.
 - `picture`: the path of its picture in the zip, when it has one.
 - `skills`: the paths of its skill folders (20 at most per agent). Each `SKILL.md` starts with a
-  frontmatter block holding `name` and `description`, followed by the recipe, up to 20,000 characters.
-  Tucano reads that file alone, so don't copy scripts, data or anything else into the folder.
+  frontmatter block holding `name` and `description`, followed by the recipe. Recipes over 10,000
+  characters are imported whole, with a recommendation to shorten them. Tucano reads that file alone,
+  so don't copy scripts, data or anything else into the folder.
 - `routines`: its scheduled tasks (20 at most per agent), each with `name`, `prompt` (what the task
   asks), `days` (any of `sun mon tue wed thu fri sat`), `time` (`HH:MM`, 24-hour clock) and `timezone`
   (an IANA name, like `Europe/Lisbon`). Add `"once": true` to a task that runs a single time. Tucano runs

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { INSECURE_CONTEXT_SHIM } from '../src/server/web-shim'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from '../src/server/web-shim'
 
 // Runs the page's shim against a stand-in browser that is not a secure context: no
 // crypto.randomUUID, no navigator.clipboard.
@@ -57,5 +59,109 @@ describe('the page shim for a browser outside a secure context', () => {
   it('says so when the browser refuses the copy', async () => {
     const { navigator } = insecure({ ok: false })
     await expect((navigator['clipboard'] as { writeText: (t: string) => Promise<void> }).writeText('x')).rejects.toThrow()
+  })
+})
+
+// A page whose person was removed (or whose key stopped opening anything): the server answers 401.
+// The page says so plainly and stops, instead of keeping what it showed and dropping what's sent.
+type Node = { tag: string; textContent: string; style: { cssText: string }; children: Node[]; append: (...n: Node[]) => void }
+function page(lang: string, answer: () => Promise<{ status: number }>): { access: { gone: boolean; answer: (s: number) => boolean; check: () => Promise<boolean> }; body: Node[]; asked: string[] } {
+  const body: Node[] = []
+  const asked: string[] = []
+  const el = (tag: string): Node => {
+    const n: Node = { tag, textContent: '', style: { cssText: '' }, children: [], append: (...c) => void n.children.push(...c) }
+    return n
+  }
+  const document = { documentElement: { lang }, title: 'Tucano', createElement: el, body: { replaceChildren: (...n: Node[]) => void body.splice(0, body.length, ...n) } }
+  const fetch = (url: string) => (asked.push(url), answer())
+  const access = new Function('document', 'fetch', `${ACCESS_SHIM}; return access`)(document, fetch)
+  return { access, body, asked }
+}
+const text = (n: Node): string => [n.textContent, ...n.children.map(text)].join(' ')
+
+describe('the page when its access ends', () => {
+  it('a 401 replaces the page with "you no longer have access", in the app’s language', () => {
+    const pt = page('pt-BR', async () => ({ status: 200 }))
+    expect(pt.access.answer(200)).toBe(false)
+    expect(pt.body).toEqual([])
+    expect(pt.access.answer(401)).toBe(true)
+    expect(pt.access.gone).toBe(true)
+    expect(text(pt.body[0]!)).toContain('Você não tem mais acesso a este Tucano')
+    const en = page('en', async () => ({ status: 200 }))
+    en.access.answer(401)
+    expect(text(en.body[0]!)).toContain('You no longer have access to this Tucano')
+  })
+
+  it('a dropped line asks the server whether it still gets in; a network error is not a refusal', async () => {
+    const out = page('pt', async () => ({ status: 401 }))
+    expect(await out.access.check()).toBe(true)
+    expect(out.asked).toHaveLength(1)
+    const down = page('pt', () => Promise.reject(new Error('offline')))
+    expect(await down.access.check()).toBe(false)
+    expect(down.body).toEqual([])
+    const fine = page('pt', async () => ({ status: 200 }))
+    expect(await fine.access.check()).toBe(false)
+  })
+
+  it('the bridge uses it: a refused send, a line closed for good, and no reload once access is gone', () => {
+    const server = readFileSync(join(import.meta.dirname, '..', 'src', 'server', 'index.ts'), 'utf8')
+    const web = server.slice(server.indexOf('const WEB = `'))
+    expect(web).toContain('${ACCESS_SHIM}')
+    expect(web).toMatch(/if \(access\.answer\(r\.status\)\) return/)
+    expect(web).toMatch(/es\.onerror = /)
+    expect(web).toMatch(/const restart = \(\) => \{\n\s+if \(access\.gone\) return/)
+  })
+})
+
+describe('the bridge script the server sends', () => {
+  it('is JavaScript a browser can run, with the shims in it', () => {
+    const server = readFileSync(join(import.meta.dirname, '..', 'src', 'server', 'index.ts'), 'utf8')
+    const start = server.indexOf('const WEB = `') + 'const WEB = `'.length
+    // The template as JS reads it (its escapes, its two shims and the server's version), then the script it makes.
+    const web = new Function('INSECURE_CONTEXT_SHIM', 'ACCESS_SHIM', 'version', 'return `' + server.slice(start, server.indexOf('\n`\n', start)) + '`')(INSECURE_CONTEXT_SHIM, ACCESS_SHIM, '0.0.0') as string
+    expect(() => new Function(web)).not.toThrow()
+  })
+
+  // The four update functions of the bridge, as the page gets them, with the desktop app's bridge
+  // (window.tucanoDesktop) there or not.
+  const updates = (desktop: unknown): { updateState: () => Promise<unknown>; onUpdate: (cb: (s: unknown) => void) => void; checkUpdates: () => void; installUpdate: () => void } => {
+    const server = readFileSync(join(import.meta.dirname, '..', 'src', 'server', 'index.ts'), 'utf8')
+    const start = server.indexOf('const WEB = `') + 'const WEB = `'.length
+    const web = new Function('INSECURE_CONTEXT_SHIM', 'ACCESS_SHIM', 'version', 'return `' + server.slice(start, server.indexOf('\n`\n', start)) + '`')('', '', '0.0.0') as string
+    const from = web.indexOf('    updateState:')
+    const lines = web.slice(from, web.indexOf('\n', web.indexOf('    installUpdate:', from)))
+    expect(from).toBeGreaterThan(0)
+    return new Function('desktop', `return {\n${lines}\n}`)(desktop)
+  }
+
+  it("in a browser, says the server's version and that updates aren't its to do", async () => {
+    const u = updates(undefined)
+    expect(await u.updateState()).toEqual({ version: '0.0.0', status: 'off' })
+    expect(() => (u.onUpdate(() => {}), u.checkUpdates(), u.installUpdate())).not.toThrow()
+  })
+
+  it("in the desktop app, shows the app's own updates, so a version that is ready is said with a server on screen", async () => {
+    const asked: string[] = []
+    let heard: ((s: unknown) => void) | undefined
+    const ready = { version: '0.2.29', status: 'ready', next: '0.2.30' }
+    const u = updates({
+      updateState: async () => ready,
+      onUpdate: (cb: (s: unknown) => void) => (heard = cb),
+      checkUpdates: () => asked.push('check'),
+      installUpdate: () => asked.push('install')
+    })
+    expect(await u.updateState()).toEqual(ready)
+    const seen: unknown[] = []
+    u.onUpdate((s) => seen.push(s))
+    heard?.(ready)
+    expect(seen).toEqual([ready])
+    u.checkUpdates()
+    u.installUpdate()
+    expect(asked).toEqual(['check', 'install'])
+  })
+
+  it("with an older desktop app, whose bridge has no updates, or one that answers nothing, falls back to the server's", async () => {
+    expect(await updates({ notify: () => {}, onOpen: () => {} }).updateState()).toEqual({ version: '0.0.0', status: 'off' })
+    expect(await updates({ updateState: async () => null }).updateState()).toEqual({ version: '0.0.0', status: 'off' })
   })
 })
