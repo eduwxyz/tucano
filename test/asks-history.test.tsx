@@ -1,5 +1,5 @@
-// The Asks history: one row per finished ask, in the same table the approvals keep, with the text
-// clipped to a line until the row is opened, then rendered as a bullet per question and per option.
+// The Asks history: one row per finished ask, in the approvals' history-row treatment, with the
+// text on one line until the row is opened, then a bullet per question and per option.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, Person } from '../src/shared/types'
@@ -38,7 +38,15 @@ const row = (open: boolean, q: AskEntry = asked()): string =>
 
 beforeEach(() => {
   vi.stubGlobal('window', {})
-  fake = { ...getState(), ready: true, people: [me], agents: [lia], you: 'ana', inbox: { approvals: [], questions: [] } } as State
+  fake = {
+    ...getState(),
+    ready: true,
+    people: [me],
+    agents: [lia],
+    you: 'ana',
+    conversations: [{ id: 'dm1', kind: 'dm', name: 'Lia', members: ['a1'] }] as State['conversations'],
+    inbox: { approvals: [], questions: [] }
+  } as State
 })
 
 describe('the text an ask was stored as', () => {
@@ -64,31 +72,45 @@ describe('the text an ask was stored as', () => {
 })
 
 describe('a row of the asks history', () => {
-  it('is a table row with the ask on one line while it is closed', () => {
+  it('uses the approvals history row, with the ask on one line while it is closed', () => {
     const html = row(false)
-    expect(html).toContain('class="table__row table__row--btn ask-row__head"')
-    // One line, options nowhere: they are what opening reveals.
+    expect(html).toContain('class="history-row history-row--approved')
+    expect(html).toContain('class="history-row__line"')
+    expect(html).toContain('class="history-row__what"')
+    expect(html).toContain('class="history-row__at"')
+    expect(html).toContain('class="history-row__state"')
+    // Options are what opening reveals: the folded row only carries the question.
     expect(html).toContain('Publico o post hoje?')
-    expect(html).not.toContain('<ul>')
+    expect(html).not.toContain('<ul')
     expect(html).not.toContain('Sim, publico')
     expect(html).toContain('aria-expanded="false"')
-    // The date keeps its own line: wrapped, it made the row three lines tall (styles.css ask-row__when).
-    expect(html).toContain('muted small ask-row__when')
-    // The pill is a reserved cell too, so the date starts at the same place on every row.
-    expect(html).toContain('tag ask-row__state')
   })
 
   it('opens into a bullet per question and a bullet per option under it', () => {
-    const html = row(true)
+    const html = row(true, asked({ conversationId: 'dm1' }))
     expect(html).toContain('aria-expanded="true"')
-    // Two lists: the questions, and the options nested under their question.
-    expect(html.match(/<ul>/g)?.length).toBe(2)
+    expect(html).toContain('<ul class="history-row__more">')
+    // The expanded row, the questions, and the options nested under their question.
+    expect(html.match(/<ul/g)?.length).toBe(3)
     const question = html.indexOf('Publico o post hoje?')
     const firstOption = html.indexOf('Sim, publico')
     expect(question).toBeGreaterThan(-1)
     expect(html.indexOf('<ul', question)).toBeGreaterThan(question) // the options hang off the question
     expect(firstOption).toBeGreaterThan(html.indexOf('<li', question))
     expect(html).toContain('na sua DM com Lia')
+    expect(html).toContain('Ver na conversa')
+  })
+
+  it('draws opened questions as rounded widgets with numbered options and the recommended pill', () => {
+    const q = asked({
+      decisions: [{ question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] }],
+      recommended: [0]
+    } as never)
+    const html = row(true, q)
+    expect(html).toContain('history-question')
+    expect(html).toContain('history-question__number') 
+    expect(html).toContain('>1</span>')
+    expect(html).toContain('Recomendado')
   })
 
   it('says how it ended: by you, by someone else, or with no answer at all', () => {

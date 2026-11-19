@@ -2800,6 +2800,68 @@ h3 {
   font-style: italic;
 }
 /* To read: someone else's question, with its options. */
+.history-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-question {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.history-question__title {
+  margin: 0 0 7px;
+  font-weight: 600;
+}
+.history-question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.history-question__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.history-question__option.is-recommended {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.history-question__number {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+.history-question__option.is-recommended .history-question__number {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.ask-option__pill {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
 .ask-list {
   margin: 0;
   padding-left: 18px;

@@ -97,6 +97,9 @@ import { entryOf } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
 import { perCallTool } from '../../../shared/composio'
 import { ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
+import type { Answer, Decision } from '../../../shared/questions'
+
+type InboxQuestion = AskEntry & { decisions?: Decision[]; answers?: (Answer | null)[]; recommended?: (number | null)[] }
 import { ProposalCard } from './Tuca'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
@@ -1234,7 +1237,7 @@ export function AsksPage(): ReactNode {
   // The one history row whose text is open. One at a time: the list is for scanning, the text for
   // reading the one you picked.
   const [opened, setOpened] = useState<string | null>(null)
-  const [past, setPast] = useState<AskEntry[]>([])
+  const [past, setPast] = useState<InboxQuestion[]>([])
   const questions = inbox.questions
   // What left the list: answered and closed asks, newest first. Reloaded when the open ones change,
   // which is exactly when one of them moved down here.
@@ -1356,7 +1359,7 @@ export function AskedRow({
   open,
   onToggle
 }: {
-  q: AskEntry
+  q: InboxQuestion
   place: string
   open: boolean
   onToggle: () => void
@@ -1365,6 +1368,7 @@ export function AskedRow({
   const you = useStore((s) => s.you)
   const people = useStore((s) => s.people)
   const by = q.answeredBy ? people.find((p) => p.id === q.answeredBy) : undefined
+  const there = useStore((s) => s.conversations.some((c) => c.id === q.conversationId))
   const ended =
     q.state !== 'answered'
       ? L('sem resposta', 'no answer')
@@ -1375,25 +1379,55 @@ export function AskedRow({
           : L('respondida', 'answered')
   const line = askSummary(q.text)
   return (
-    <div className="ask-row">
-      <button type="button" className="table__row table__row--btn ask-row__head" onClick={onToggle} aria-expanded={open}>
-        {agent && <AgentAvatar agent={agent} size={22} />}
-        <span className="ask-row__text" title={line}>
-          {line}
+    <div className={`history-row ${q.state === 'answered' ? 'history-row--approved' : ''} ${open ? 'is-open' : ''}`}>
+      <button type="button" className="history-row__line" onClick={onToggle} aria-expanded={open}>
+        {agent ? <AgentAvatar agent={agent} size={20} /> : <span className="history-row__noone" />}
+        <span className="history-row__what">
+          <span className="grow truncate" title={line}>
+            {line}
+          </span>
+          <span className="history-row__who">{agent?.name ?? L('Agente', 'Agent')}</span>
         </span>
-        <span className={`tag ask-row__state ${q.state === 'answered' ? 'tag--ok' : ''}`}>{ended}</span>
-        <span className="muted small ask-row__when">{time(q.answeredAt ?? q.createdAt)}</span>
-        <span className={`ask-row__chev ${open ? 'is-open' : ''}`}>
-          <Icon name="chevron" size={12} />
-        </span>
+        <span className="history-row__at">{time(q.answeredAt ?? q.createdAt)}</span>
+        <span className="history-row__state">{ended}</span>
       </button>
       {open && (
-        <div className="ask-row__body">
-          <Markdown remarkPlugins={[remarkGfm]}>{askMarkdown(q.text)}</Markdown>
-          <span className="hint">
-            {agent?.name ?? L('O agente', 'The agent')} · {place} · {time(q.createdAt)}
-          </span>
-        </div>
+        <ul className="history-row__more">
+          <li>
+            <div className="grow">
+              {q.decisions?.length ? (
+                <div className="history-questions">
+                  {q.decisions.map((question, i) => (
+                    <div key={i} className="history-question">
+                      <p className="history-question__title">{question.question}</p>
+                      {question.options && (
+                        <div className="history-question__options">
+                          {question.options.map((option, j) => (
+                            <span key={j} className={`history-question__option ${q.recommended?.[i] === j ? 'is-recommended' : ''}`}>
+                              <span className="history-question__number">{j + 1}</span>
+                              <span className="history-question__label">{option.label}</span>
+                              {q.recommended?.[i] === j && <span className="ask-option__pill">{L('Recomendado', 'Recommended')}</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Markdown remarkPlugins={[remarkGfm]}>{askMarkdown(q.text)}</Markdown>
+              )}
+              <span className="hint">
+                {place} · {time(q.createdAt)}
+              </span>
+            </div>
+            {there && (
+              <button className="link link--quiet" onClick={() => navigate({ kind: 'conversation', id: q.conversationId! })}>
+                {L('Ver na conversa', 'See in the conversation')}
+              </button>
+            )}
+          </li>
+        </ul>
       )}
     </div>
   )
