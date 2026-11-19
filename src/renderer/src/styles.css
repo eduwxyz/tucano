@@ -3193,7 +3193,13 @@ h3 {
   object-fit: cover;
   object-position: top;
 }
+.artifact-image__show {
+  display: block;
+}
 .artifact-image__caption {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   padding: 6px 10px;
   font-size: 12px;
   color: var(--text-2);
@@ -3245,6 +3251,19 @@ h3 {
 .artifact-card__open {
   font-size: 12px;
   color: var(--accent);
+  flex-shrink: 0;
+}
+button.artifact-card__open:hover {
+  text-decoration: underline;
+}
+/* The card's body opens it; its actions (Open, Download) sit beside it. */
+.artifact-card__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
 }
 .browser-card__thumb {
   width: 72px;
@@ -8141,8 +8160,12 @@ kbd {
   padding-top: max(10px, env(safe-area-inset-top));
   -webkit-app-region: no-drag;
 }
-.lightbox__bar .icon-btn {
+.lightbox__bar .icon-btn,
+.lightbox__bar .btn {
   color: inherit;
+}
+.lightbox__bar .btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 .lightbox__title {
   min-width: 0;

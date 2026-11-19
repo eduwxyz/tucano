@@ -19,6 +19,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A wiki page in an English workspace no longer opens with "tipo: … criada: … atualizada: …" in bold.** Tucano wrote a page's frontmatter keys in Portuguese whatever the language, and the curator, having seen them, wrote that block into a new page's text, where it rendered as a rule and a heading. The keys now follow the workspace's language (`type`, `created`, `updated` in English; a page that has them in the other language keeps its own), a frontmatter block at the top of a page's text is taken out of the text and into the page's properties, and the curator is told its text is the body only.
 
+- **Files the agents send can be saved, on a server too.** A card for a file in a reply only had Open, and in a browser a .docx (or anything a browser can't show) opened an empty panel, so on Tucano Pro there was no way to get it. Every file and image an agent sends now has **Download** in the browser (on the card, in the panel and in the image viewer), served by the server under the file's real name to whoever can see the conversation; a file a browser can't show downloads on a click. On the desktop, Open stays and **Save…** sits beside it.
+
 ## [0.2.42] - 2026-11-19
 
 > **Em português:**

@@ -88,3 +88,24 @@ describe('revealArtifact', () => {
     expect(opened()).toHaveLength(1)
   })
 })
+
+// Saving a copy on the desktop (a Save dialog the main process shows) goes through the same door.
+describe('saveArtifact', () => {
+  const saved = (): Record<string, unknown>[] => core.toMain.filter((m) => m['type'] === 'save_artifact')
+
+  it('refuses a paired device and a member: the dialog would open on a screen they can’t see', async () => {
+    expect(await err(device.call('saveArtifact', { id: 'art-ok' }))).not.toBe('ok')
+    expect(await err(member.call('saveArtifact', { id: 'art-ok' }))).not.toBe('ok')
+    expect(saved()).toEqual([])
+  })
+
+  it('asks the main process to save the artifact’s own file, for the owner at the computer’s window', async () => {
+    await owner.call('saveArtifact', { id: 'art-ok' })
+    expect(saved()).toEqual([{ type: 'save_artifact', path: join(core.dataDir, 'artifacts', 'art-ok', 'dados.bin') }])
+  })
+
+  it('refuses a name or an id that leaves its folder, and an unknown artifact', async () => {
+    for (const id of ['art-bad-0', 'art-bad-1', 'art-sub', '../', 'nao-existe']) expect(await err(owner.call('saveArtifact', { id })), id).not.toBe('ok')
+    expect(saved()).toHaveLength(1)
+  })
+})

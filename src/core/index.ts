@@ -537,6 +537,7 @@ type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'save_artifact'; path: string } // a copy of an artifact's file, where the person picks
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
   | { type: 'restart' } // a server: start again, to restore a backup (src/server)
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
@@ -1710,6 +1711,20 @@ function reachMessage(ctx: Ctx, messageId: string): void {
   const m = db.message(messageId)
   if (m && !people.visibleAt(ctx.person, m)) throw new Error(L('Essa mensagem não existe mais.', 'That message no longer exists.'))
 }
+// An artifact's file, for what only the computer's own window does with it (show it in Finder, save
+// a copy): a paired device or a member would get a dialog on a screen they can't see.
+function ownArtifactFile(ctx: Ctx, id: string): string {
+  if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
+  const a = db.artifact(id)
+  if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
+  // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
+  const root = resolve(dataDir, 'artifacts')
+  const folder = resolve(root, a.id)
+  const file = resolve(folder, a.name)
+  const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
+  if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
+  return file
+}
 // How a conversation works (threads, the wiki, its summary): a DM's person's; a channel's, whoever
 // made it and the admins, like its name and agents.
 function manage(ctx: Ctx, conversationId: string): void {
@@ -1839,16 +1854,12 @@ const api: Handlers = {
   // Only reveals: opening a file of any other type could run an app or a script.
   // And only on the computer's own window: a paired device (it comes with a device key) or a member would open a Finder on a screen they can't see.
   revealArtifact: ({ id }, ctx) => {
-    if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
-    const a = db.artifact(id)
-    if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
-    // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
-    const root = resolve(dataDir, 'artifacts')
-    const folder = resolve(root, a.id)
-    const file = resolve(folder, a.name)
-    const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
-    if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
-    toMain({ type: 'open_local', path: file, how: 'reveal' })
+    toMain({ type: 'open_local', path: ownArtifactFile(ctx, id), how: 'reveal' })
+  },
+  // A copy where the person picks (the app asks with the system's Save dialog). On a server the
+  // browser saves it instead, from /artifact/…?download (src/server/artifact-http.ts).
+  saveArtifact: ({ id }, ctx) => {
+    toMain({ type: 'save_artifact', path: ownArtifactFile(ctx, id) })
   },
 
   snapshot: (_, ctx) => people.snapshotFor(ctx.person, {
