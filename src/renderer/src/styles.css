@@ -2019,7 +2019,11 @@ h3 {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
-/* Opening the thread a reply lives in, from its row: the glyph alone, so a row stays one line. */
+/* Opening the thread a reply lives in, from its row: the glyph alone, so a row stays one line, and as
+   dim as the steer pill beside it — it opens a view, it doesn't stop anything (the x is the bright one). */
+.work-row__thread-btn {
+  color: var(--text-3);
+}
 .work-row__thread-btn:hover {
   color: var(--accent);
   background: var(--accent-soft);
