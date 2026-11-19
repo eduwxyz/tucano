@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Copy a finished reply as Markdown.** A glyph in the footer of a reply that ended puts the answer on the clipboard as it was written — tables, lists, code and all — instead of the text the screen drew from it. It turns into a check for a moment after the press, and a copy that fails says so.
+
 ## [0.2.41] - 2026-11-19
 
 > **Em português:**
