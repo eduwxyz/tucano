@@ -1,7 +1,7 @@
 import { L } from '../../../shared/lang'
 import { usedShare } from '../../../shared/limits'
 import { headsOf, sectorName, sectorOf } from '../../../shared/org'
-import { isWaiting, mineIn, waitingIn, waitingTitle, type Waiting } from './waiting'
+import { isWaiting, mineIn, notWentUp, waitingIn, waitingTitle, type Waiting } from './waiting'
 import { memo, useCallback, useId, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import {
   agentById,
@@ -143,7 +143,10 @@ function WaitingMark({ title }: { title: string }): ReactNode {
 
 // Who waits on me in a conversation, as the hint says it: a string, so the sidebar redraws only when it changes.
 // With a team, only what waits on me (my inbox), not a question to someone else or an approval for them.
-const waitsIn = (s: State, conversationId: string): Waiting => waitingIn(messagesIn(s, conversationId), conversationId, teamMode(s) ? { key: s.inbox, test: mineIn(s.inbox) } : undefined)
+// Alone, everything but a question on handed work that went up to whoever asked for it: that one answers
+// it, or brings it to me in its own conversation, which is where it waits on me (once, not twice).
+const mineOf = (s: State): { key: unknown; test: (m: Message) => boolean } => (teamMode(s) ? { key: s.inbox, test: mineIn(s.inbox) } : { key: s.delegations, test: notWentUp(s.delegations) })
+const waitsIn = (s: State, conversationId: string): Waiting => waitingIn(messagesIn(s, conversationId), conversationId, mineOf(s))
 const anyWaiting = (s: State, ids: string[]): boolean => ids.some((id) => isWaiting(waitsIn(s, id)))
 const useWaitingTitle = (conversationId: string | undefined): string =>
   useStore((s) => (conversationId ? waitingTitle(waitsIn(s, conversationId), (agentId) => agentById(s, agentId)?.name ?? L('Um agente', 'An agent')) : ''))
@@ -152,12 +155,11 @@ const useWaitingTitle = (conversationId: string | undefined): string =>
 const counted = new WeakMap<Message[], { mine: unknown; n: number }>()
 function waitingCount(s: State, conversationId: string): number {
   const list = messagesIn(s, conversationId)
-  const mine = teamMode(s) ? s.inbox : undefined
+  const { key, test } = mineOf(s)
   const had = counted.get(list)
-  if (had && had.mine === mine) return had.n
-  const test = mine ? mineIn(mine) : undefined
-  const n = list.filter((m) => m.author.kind === 'agent' && (m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval') && (!test || test(m))).length
-  counted.set(list, { mine, n })
+  if (had && had.mine === key) return had.n
+  const n = list.filter((m) => m.author.kind === 'agent' && (m.run?.status === 'waiting_input' || m.run?.status === 'waiting_approval') && test(m)).length
+  counted.set(list, { mine: key, n })
   return n
 }
 const waitingTotal = (s: State, ids: string[]): number => ids.reduce((n, id) => n + (id ? waitingCount(s, id) : 0), 0)

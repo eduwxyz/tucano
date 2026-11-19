@@ -590,7 +590,10 @@ export class Runner {
       this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       // A question on handed work that a person answered right there: whoever asked for the work has nothing left to answer.
       const handed = asked.run?.handed ? db.delegation(asked.run.handed) : asked.threadId ? db.delegationAt(asked.threadId) : undefined
-      if (handed?.asking === asked.id) this.keep({ ...handed, asking: undefined, askingTold: false })
+      if (handed?.asking === asked.id) {
+        this.keep({ ...handed, asking: undefined, askingTold: false })
+        if (handed.askingTold) this.closeRelay(handed, asked)
+      }
       const asker = may.find((a) => asked.author.kind === 'agent' && a.id === asked.author.id)
       if (asker && responders.length === 0) responders = [asker]
       const target = q && q.askedTo !== writer.id ? db.people({ removed: true }).find((p) => p.id === q.askedTo) : undefined
@@ -1544,8 +1547,12 @@ ${note}`,
           const now = agentsFor(requester, reachOf(db.agents(), agent.id)) // as the tree is now: it may have changed mid-turn
           // A follow-up on a request that came back here: the same agent, in the same thread.
           const code = typeof args['continuar'] === 'string' && args['continuar'].trim() ? args['continuar'] : undefined
-          const before = code ? byCode(db.delegationsFrom(agent.id, conv.id, this.originThread(msg)).filter((d) => d.state !== 'open'), code) : undefined
-          if (code && !before) return textResult(L(`Não achei o pedido "${code}" entre os que já voltaram aqui. Sem "continuar", é um pedido novo.`, `I couldn't find request "${code}" among those that came back here. Without "continuar", it's a new request.`), true)
+          const before = code ? byCode(db.delegationsFrom(agent.id, conv.id, this.originThread(msg)), code) : undefined
+          if (code && !before) return textResult(L(`Não achei o pedido "${code}" entre os seus daqui. Sem "continuar", é um pedido novo.`, `I couldn't find request "${code}" among yours from here. Without "continuar", it's a new request.`), true)
+          // One still under way takes the follow-up in its thread, as one more thing to do in it. Not while it
+          // waits on its question (the answer goes with responder_pedido, and the rest with it) or on an approval.
+          if (before?.state === 'open' && before.asking) return textResult(L(`O pedido [${codeOf(before)}] está esperando a resposta de uma pergunta. Responda com responder_pedido e ponha nela também o que mais quer.`, `Request [${codeOf(before)}] is waiting for the answer to a question. Answer with responder_pedido and put in it the rest of what you want too.`), true)
+          if (before?.state === 'open' && this.onApproval(before)) return textResult(L(`O pedido [${codeOf(before)}] está parado numa aprovação de ${settings.workspaceName}. Espere ele voltar e então continue.`, `Request [${codeOf(before)}] is held on ${settings.workspaceName}'s approval. Wait for it to come back, then continue.`), true)
           const to = before ? now.find((a) => a.id === before.to) : teamMember(now, args['para'])
           if (!to) return textResult(before ? L(`Você não alcança mais quem fez o pedido [${codeOf(before)}]. Peça de novo, sem "continuar".`, `You no longer reach whoever did request [${codeOf(before)}]. Ask again, without "continuar".`) : L(`Você não alcança ninguém chamado "${String(args['para'] ?? '')}". Quem você alcança: ${now.map((a) => `@${a.handle}`).join(', ')}.`, `You reach no one called "${String(args['para'] ?? '')}". Whom you reach: ${now.map((a) => `@${a.handle}`).join(', ')}.`), true)
           // This reply is itself a request's work: nothing goes back to whoever is already waiting on it, and it only stacks so far.
@@ -1554,7 +1561,7 @@ ${note}`,
           if (chain.length >= MAX_CHAIN) return textResult(L(`Este trabalho já passou por ${MAX_CHAIN} pedidos seguidos, o máximo. Faça você, ou diga na resposta o que ficou faltando.`, `This work has already gone through ${MAX_CHAIN} requests in a row, the most allowed. Do it yourself, or say in your reply what is left.`), true)
           if (this.paused) return textResult(L('Os agentes estão pausados: nenhum pedido sai agora.', 'The agents are paused: no request goes out now.'), true)
           if (delegated.length >= MAX_DELEGATIONS_PER_REPLY) return textResult(L(`Já são ${MAX_DELEGATIONS_PER_REPLY} pedidos nesta resposta, o máximo. Encerre e espere o que voltar.`, `That's ${MAX_DELEGATIONS_PER_REPLY} requests in this reply, the most allowed. End now and wait for what comes back.`), true)
-          if (db.openDelegations().filter((d) => d.from === agent.id).length >= MAX_OPEN_DELEGATIONS) return textResult(L(`Você já tem ${MAX_OPEN_DELEGATIONS} pedidos em aberto, o máximo. Espere algum voltar, ou cancele um com cancelar_pedido.`, `You already have ${MAX_OPEN_DELEGATIONS} open requests, the most allowed. Wait for one to come back, or cancel one with cancelar_pedido.`), true)
+          if (before?.state !== 'open' && db.openDelegations().filter((d) => d.from === agent.id).length >= MAX_OPEN_DELEGATIONS) return textResult(L(`Você já tem ${MAX_OPEN_DELEGATIONS} pedidos em aberto, o máximo. Espere algum voltar, ou cancele um com cancelar_pedido.`, `You already have ${MAX_OPEN_DELEGATIONS} open requests, the most allowed. Wait for one to come back, or cancel one with cancelar_pedido.`), true)
           let d: Delegation
           let channel: Conversation
           // A request never ends up more visible than where it was asked: from a DM, with other people in
@@ -1568,7 +1575,7 @@ ${note}`,
             // The same rule on a follow-up: one asked before in a channel doesn't take what is said in a DM there.
             if (fromDm && there.kind !== 'dm' && !saidChannel(there)) return textResult(L(`O pedido [${codeOf(before)}] está em ${placeOf(there)}, e esta conversa é uma DM: continuar levaria o que foi dito aqui pra lá. Peça de novo, sem "continuar" (fica numa DM), ou só continue se ${settings.workspaceName} escrever o nome do canal.`, `Request [${codeOf(before)}] is in ${placeOf(there)}, and this conversation is a DM: continuing would take what was said here there. Ask again, without "continuar" (it stays in a DM), or continue only if ${settings.workspaceName} writes the channel's name.`), true)
             channel = there
-            d = this.reopen(before, agent, to, channel, ask, msg, requester, settings.workspaceName)
+            d = before.state === 'open' ? this.addTo(before, agent, to, channel, ask) : this.reopen(before, agent, to, channel, ask, msg, requester, settings.workspaceName)
           } else {
             // Only channels the person this reply is for can see: handing work never reaches further than they do.
             const channels = channelsOf(db.conversations(), to.id).filter((c) => sees.canSeeConversation(requester, c))
@@ -2626,8 +2633,9 @@ ${note}`,
           // Handed work that came to rest: its end goes back to whoever asked, who tells the person.
           const mine = this.handedIn(msg)
           // Someone wrote in the request's thread while this reply worked: the reply to that is still to
-          // come there, and it is the one the request ends with, carrying what they asked for.
-          if (mine && this.parked.get(replyKey(agent.id, conv.id, msg.threadId))?.some((p) => !p.opts.handed && p.opts.replyTo)) return
+          // come there, and it is the one the request ends with, carrying what they asked for. So with more
+          // the asker added to the request meanwhile (pedir with continuar).
+          if (mine && this.parked.get(replyKey(agent.id, conv.id, msg.threadId))?.some((p) => (!p.opts.handed && p.opts.replyTo) || p.opts.handed === mine.id)) return
           // It handed parts of it on and they haven't all come back: it isn't done. It gets the turn again
           // when they do, and the reply it ends with then is the request's end.
           if (mine && db.delegationsFrom(agent.id, conv.id, msg.threadId).some((x) => x.state === 'open')) return
@@ -3179,6 +3187,16 @@ ${note}`,
     return next
   }
 
+  // More for a request still under way: said in its thread, and the one doing it takes it after the reply it
+  // is on (or now, when it is between replies). The request ends with that reply, so what comes back has it too.
+  private addTo(d: Delegation, from: Agent, to: Agent, channel: Conversation, ask: { text: string; done?: string; dueAt?: number }): Delegation {
+    const next: Delegation = { ...d, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt, lateTold: false } : {}) }
+    this.keep(next)
+    this.say(from.id, channel.id, workThread(d), askMessage(to, ask), refOf(next))
+    void this.startReply(to, channel, { depth: 1, threadId: workThread(d), handed: d.id, task: L(`${from.name} acrescentou ao pedido dele a mensagem acima, enquanto você trabalhava nele. Leve em conta e siga com o pedido inteiro; não refaça o que já está pronto.`, `${from.name} added the message above to their request while you were working on it. Take it into account and go on with the whole request; do not redo what is done.`) })
+    return next
+  }
+
   // The one asked starts on it, in the request's thread, told whose it is and where its answer goes.
   private startAsked(d: Delegation, from: Agent, to: Agent, channel: Conversation, done: string | undefined, me: string, again = false): void {
     const threadId = workThread(d)
@@ -3258,6 +3276,25 @@ ${note}`,
     }
     if (this.followups.busy(key)) this.tells.set(key, go)
     else go()
+  }
+
+  // A question that went up and that a person answered right where it was left: the question whoever asked
+  // took to the person, from there, has nothing left to ask, and stops waiting. Not when it took up another
+  // request's question too, still waiting: that one is still to answer there.
+  private closeRelay(d: Delegation, asked: Message): void {
+    const { db, emit } = this.deps
+    const others = db.delegationsFrom(d.from, d.originConversationId, d.originThreadId).some((x) => x.id !== d.id && x.state === 'open' && x.asking && x.askingTold)
+    if (others) return
+    const relay = db
+      .messagesWithRun(['waiting_input'])
+      .find((m) => m.conversationId === d.originConversationId && m.threadId === d.originThreadId && m.author.kind === 'agent' && m.author.id === d.from && m.at >= asked.at)
+    if (!relay) return
+    this.update(relay, { run: { ...relay.run!, status: 'done' } })
+    const q = db.question(relay.id)
+    if (q?.state === 'open') {
+      db.saveQuestion({ ...q, state: 'closed' })
+      emit({ type: 'inbox' })
+    }
   }
 
   // The asker's answer to a question left on its request: it goes in the thread in its name, and the work goes on.
