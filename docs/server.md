@@ -161,6 +161,14 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 
 Once a browser has the cookie, the server answers only its own page: a page of another site (a sibling subdomain included) can't call it, and no site can show it inside a frame. Twenty wrong tokens from one address in ten minutes lock that address out for ten minutes.
 
+## WhatsApp's official API
+
+A number linked by QR code works anywhere. Meta's official API needs Meta to call your server when a message arrives, so it only works with Tucano on a server reachable over HTTPS:
+
+- Set `TUCANO_URL` to the `https://` address people open. Without it, **Settings › Phone** says the official API isn't available.
+- In Meta's app panel (WhatsApp › Configuration), set the webhook's callback URL to `https://<your address>/whatsapp/webhook` and subscribe to `messages`. The same page of Tucano (the number's **Webhook** card) shows the exact address and the **verify token** to paste there, each with a copy button.
+- The reverse proxy must pass `/whatsapp/webhook` through to Tucano without a sign-in in front of it, and without changing the body: each request is signed with the app secret, and Tucano checks the signature before reading anything.
+
 ## How it differs from the desktop app
 
 - **Your computer's terminal, files, browser and apps** stay on your computer. To let the server's agents use them, lend it from the desktop app (**Settings › Servers › Let this server use this computer**): see [Your computer lent to a server](local-node.md).

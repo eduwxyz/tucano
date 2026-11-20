@@ -288,7 +288,18 @@ export const NEEDS: Record<Method, Need> = {
   purgePerson: 'owner',
   leave: 'anyone', // one's own access (the owner is refused in the core)
   setTelegramToken: 'owner', // the phone is the owner's
-  unpairTelegram: 'owner'
+  unpairTelegram: 'owner',
+  // WhatsApp numbers: who links one and which agent reads which conversation is the admins' to say
+  whatsappState: 'admin',
+  whatsappAdd: 'admin',
+  whatsappUpdate: 'admin',
+  whatsappRemove: 'admin',
+  whatsappConnect: 'admin',
+  whatsappDisconnect: 'admin',
+  whatsappChats: 'admin',
+  whatsappSetAccess: 'admin',
+  whatsappTemplates: 'admin',
+  whatsappHistory: 'admin'
 }
 
 // An agent's computer: anyone who sees the agent may look at it again (its page does, opening);
