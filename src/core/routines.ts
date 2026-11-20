@@ -182,8 +182,9 @@ export class Routines {
   }
 
   // `owner`: the person a new one is for (unset: the Tucano's owner). A 'channel' routine is the
-  // team's: it posts in a channel and tells only who watches it.
-  save(input: RoutineInput, owner?: string): Routine {
+  // team's: it posts in a channel and tells only who watches it. `taskId`: the board task it works on, set
+  // only by the board itself (a person can't forge it through RoutineInput); an update keeps the one it had.
+  save(input: RoutineInput, owner?: string, taskId?: string): Routine {
     const { db } = this.deps
     const name = input.name.trim()
     const prompt = input.prompt.trim()
@@ -237,6 +238,7 @@ export class Routines {
       nextAt: input.enabled && !trigger ? nextRun(schedule, this.now()) : undefined,
       createdBy: prev ? prev.createdBy : input.createdBy,
       createdAt: prev?.createdAt ?? this.now(),
+      ...((taskId ?? prev?.taskId) ? { taskId: taskId ?? prev?.taskId } : {}),
       ...(scope === 'channel' ? { scope } : { scope: undefined }),
       ...((prev?.owner ?? owner) ? { owner: prev?.owner ?? owner } : {})
     }
@@ -343,7 +345,8 @@ export class Routines {
     // Changed only for whom it is (mayChange): asked by someone else in a shared channel, the change would run as its person.
     if (prev && !this.mayChange(prev, owner)) return fail(notTheirs(prev))
     const max = routineCap(agent.maxRoutines)
-    if (!prev && this.forAgent(agent.id).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
+    // Routines that work on a board task don't count: the task repeats on its own and is not the agent's to schedule.
+    if (!prev && this.forAgent(agent.id).filter((r) => !r.taskId).length >= max) return fail(L(`Você já tem ${max} rotinas ligadas. Cancele uma antes.`, `You already have ${max} routines on. Cancel one first.`))
 
     const keys = Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map((d) => {
           const k = String(d).toLowerCase().normalize('NFD').replace(/[^a-z]/g, '').slice(0, 3)
@@ -404,6 +407,8 @@ export class Routines {
     const only = c?.kind === 'dm' ? (c.owner ?? db.ownerId()) : undefined
     db.removeRoutine(id)
     this.deps.emit({ type: 'routine_removed', id, ...(only ? { for: only } : {}) })
+    // Whatever routine went (deleted by hand, by its agent, with its conversation), a task it worked on is back on the list.
+    for (const person of db.releaseOrphanTasks()) this.deps.emit({ type: 'tasks', for: person })
   }
 
   runNow(id: string): void {

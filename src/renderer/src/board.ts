@@ -1,10 +1,10 @@
 // The board (Quadro): every agent's work as cards, read off what the conversations already have.
-// A card is one request: what someone asked (a person's message, a routine, an agent handing a part on),
+// A card is one request: what someone asked (a person's message or an agent handing a part on),
 // with every reply that worked on it: the one that asked a question and the one after the answer, the one
 // that split it among the team and the one that put the parts together. Nothing is kept for it: it's
 // the messages, the requests handed on (delegations) and what waits on me (the inbox), as they are now.
 import { L } from '../../shared/lang'
-import { isTeam, type Agent, type Delegation, type Inbox, type Message, type Run } from '../../shared/types'
+import { isTeam, type Agent, type Delegation, type Inbox, type Message, type Run, type Task } from '../../shared/types'
 import { canContinue } from '../../shared/run-progress'
 import { shortTitle } from '../../shared/titles'
 import { mineIn } from './components/waiting'
@@ -357,4 +357,44 @@ export function storyOf(task: BoardTask): Beat[] {
   walk(task, 1)
   if (task.parts.length && task.column === 'done') beats.push({ cardId: task.id, agentId: task.agentId, depth: 0, kind: 'delivered', title: task.title, state: 'done', at: task.endedAt ?? task.at })
   return beats
+}
+
+// ---------- routines and the person's own tasks ----------
+
+// Routines have no cards: a run nobody decides anything about would only move the board by itself and bury
+// what matters (routines live in Rotinas). A task asked by a routine is left out of every column, the stuck
+// strip, the counts and the search. Two things stay: a run of a routine working on one of my board tasks
+// (`linked`) that waits on me, because that is where I answer it, and the newest run of each linked routine,
+// whatever its column, which is what that task's standing card reports.
+// A part a hidden routine run handed on is hidden with it, so it follows `parent` up to the root card (six
+// levels at most, as familyOf does) and drops out when that root is an unlinked routine. Pure: it only reads `tasks`.
+export function withoutRoutines<T extends BoardCard>(tasks: T[], linked: ReadonlySet<string>): { shown: T[]; runs: Map<string, T> } {
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const shown: T[] = []
+  const runs = new Map<string, T>()
+  for (const t of tasks) {
+    let root = t
+    for (let i = 0; i < 6 && root.parent && byId.has(root.parent); i++) root = byId.get(root.parent)!
+    const rootRoutine = root.by.kind === 'routine' ? root.by.id : undefined
+    if (rootRoutine !== undefined && !linked.has(rootRoutine)) continue
+    const id = t.by.kind === 'routine' ? t.by.id : undefined
+    if (t.by.kind !== 'routine') shown.push(t)
+    else if (id !== undefined && linked.has(id)) {
+      if (t.column === 'you') shown.push(t)
+      const newest = runs.get(id)
+      if (!newest || t.at > newest.at) runs.set(id, t)
+    }
+  }
+  return { shown, runs }
+}
+
+// What a task of mine is, to place it: waiting for me to accept it (a suggestion), to do, done by me,
+// worked on by a routine until it's done, or done. A task with a routine stays `repeated` even when that
+// routine is not in the store: its card says so, instead of turning into a to-do whose start would fail.
+export type TaskKind = 'suggestion' | 'todo' | 'own' | 'repeated' | 'done'
+export function taskKind(t: Task): TaskKind {
+  if (t.suggestedBy) return 'suggestion'
+  if (t.state === 'done') return 'done'
+  if (t.routineId) return 'repeated'
+  return t.state === 'doing' ? 'own' : 'todo'
 }

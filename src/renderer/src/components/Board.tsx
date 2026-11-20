@@ -1,19 +1,21 @@
-// The board (Quadro): every agent's work as cards, in four columns — A fazer (my to-dos, and today's
-// routines still to run), Fazendo, Precisa de você, Feito (today) — with what got stuck above them and
-// the team's rings on top. A card opens at the side with everything about it: the decision first, the
-// result, the parts it was split into, each step, and the conversation, where one more word goes.
-// The cards are read off the conversations (../board.ts); only the to-dos are kept for the board.
+// The board (Quadro): tasks, in four columns — A fazer (my to-dos), Fazendo (what agents are doing, and what
+// I do myself or a routine works on until it's done), Precisa de você, Feito (today) — with what got stuck
+// and what agents suggest above them and the team's rings on top. Routines have no cards: they live in Rotinas.
+// A card opens at the side with everything about it: the decision first, the result, the parts it was split
+// into, each step, and the conversation, where one more word goes.
+// The agents' cards are read off the conversations (../board.ts); only the person's tasks are kept for the board.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { L, locale } from '../../../shared/lang'
-import { MAX_TASK_NOTES, MAX_TASK_TITLE, type Approval, type Inbox, type Task } from '../../../shared/types'
+import { MAX_TASK_TITLE, type Approval, type Inbox, type Task } from '../../../shared/types'
 import { headsOf, sectorName, sectorOf } from '../../../shared/org'
 import { canContinue } from '../../../shared/run-progress'
-import { boardCards, costOf, dayStart, liveStep, stepsOf, storyOf, tasksOf, type BoardCard, type BoardTask, type CrewMember } from '../board'
+import { boardCards, costOf, dayStart, liveStep, stepsOf, storyOf, taskKind, tasksOf, withoutRoutines, type BoardCard, type TaskKind, type BoardTask, type CrewMember } from '../board'
 import { call } from '../rpc'
 import { answerDecision, continueRun, isTeam, loadTasks, navigate, openThread, personName, retryRun, sendMessage, stopRun, submitDecisions, toast, useStore, type Agent, type Conversation } from '../store'
 import { ApprovalCard, QuestionCard, ReplyText } from './Conversation'
+import { Check, DoneTaskCard, Face, OwnCard, StandingCard, Suggestions, TaskPanel } from './BoardTasks'
 import { ArtifactCard } from './Panel'
-import { ago, AgentAvatar, tokens as tokenWords } from './ui'
+import { ago, AgentAvatar, MeAvatar, tokens as tokenWords } from './ui'
 
 type Col = 'todo' | 'doing' | 'you' | 'done'
 type Group = 'none' | 'agent' | 'sector'
@@ -34,16 +36,10 @@ function Glyph({ col }: { col: Col }): ReactNode {
   if (col === 'you') return <svg className="bd-glyph wait" viewBox="0 0 16 16" aria-hidden="true"><circle className="p" cx="8" cy="8" r="6" fill="var(--warn)" /><circle cx="8" cy="8" r="4" fill="var(--warn)" /></svg>
   return <svg className="bd-glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--ok)" /><path d="M5 8.2l2 2 4-4.2" fill="none" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
 }
-const Check = (): ReactNode => <svg className="bd-ck" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" /><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 const Hourglass = (): ReactNode => <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2h7M4.5 14h7M5 2c0 3 3 4 3 6s-3 3-3 6M11 2c0 3-3 4-3 6s3 3 3 6" fill="none" stroke="var(--text-3)" strokeWidth="1.4" strokeLinecap="round" /></svg>
-const Clock = (): ReactNode => <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M8 5v3.2l2.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
 const Typing = (): ReactNode => <span className="bd-typing" aria-hidden="true"><i /><i /><i /></span>
 const Send = (): ReactNode => <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 const Search = (): ReactNode => <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M16 16l4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-
-function Face({ agent, size = 22, busy }: { agent: Agent | undefined; size?: number; busy?: boolean }): ReactNode {
-  return agent ? <span className="bd-av"><AgentAvatar agent={agent} size={size} busy={busy} /></span> : <span className={`bd-none ${size > 24 ? 'md' : ''}`} />
-}
 
 // "4:07" since `at`, ticking by itself (only this span redraws each second).
 function Since({ at }: { at: number }): ReactNode {
@@ -114,7 +110,11 @@ export function BoardPage(): ReactNode {
   )
   const byId = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
   // One task, one card: a request split among agents shows once, in every view.
-  const tasksAll = useMemo(() => tasksOf(cards), [cards])
+  const routineById = useMemo(() => new Map(routines.map((r) => [r.id, r])), [routines])
+  // The routines that work on a task of mine: the only ones whose runs the board follows.
+  const linked = useMemo(() => new Set(tasks.flatMap((t) => (t.routineId && !t.suggestedBy ? [t.routineId] : []))), [tasks])
+  const { shown: tasksAll, runs } = useMemo(() => withoutRoutines(tasksOf(cards), linked), [cards, linked])
+  const cardsShown = useMemo(() => withoutRoutines(cards, linked).shown, [cards, linked])
   const taskById = useMemo(() => new Map(tasksAll.map((t) => [t.id, t])), [tasksAll])
   const ctx: Ctx = { agents, convs, cards: byId, tasks: taskById, inbox }
 
@@ -142,8 +142,6 @@ export function BoardPage(): ReactNode {
     return preview ? preview.map((id) => list.find((t) => t.id === id)!).filter(Boolean) : list
   }, [tasks, moved, preview])
   const now = minute * 60_000
-  const end = dayStart(now) + 86_400_000
-  const todayRoutines = useMemo(() => routines.filter((r) => r.enabled && r.nextAt && r.nextAt <= end && agents.has(r.agentId)).sort((a, b) => a.nextAt! - b.nextAt!), [routines, end, agents])
 
   // Fresh in Feito: the check draws itself once.
   const lastCol = useRef(new Map<string, string>())
@@ -166,9 +164,12 @@ export function BoardPage(): ReactNode {
   // A task matches by its title or by anyone on it.
   const visible = (c: BoardTask): boolean => matches(c.title, c.agentId) || (!!only && c.crew.some((m) => m.agentId === only) && matches(c.title))
   const shownCards = tasksAll.filter((c) => c.column !== 'stuck' && visible(c))
-  const shownTasks = sortedTasks.filter((t) => matches(`${t.title} ${t.notes ?? ''}`, t.agentId))
-  const shownRoutines = todayRoutines.filter((r) => matches(r.name, r.agentId))
-  const stuck = cards.filter((c) => c.column === 'stuck' && matches(c.title, c.agentId))
+  // My tasks by what they are; done ones show for today only.
+  const shownTasks = sortedTasks.filter((t) => matches(`${t.title} ${t.notes ?? ''}`, t.suggestedBy ?? t.agentId))
+  const taskOf = (kind: TaskKind): Task[] => shownTasks.filter((t) => taskKind(t) === kind && (kind !== 'done' || (t.doneAt ?? 0) >= dayStart(now)))
+  const taskCol: Record<Col, Task[]> = { todo: taskOf('todo'), doing: [...taskOf('own'), ...taskOf('repeated')], you: [], done: taskOf('done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)) }
+  const openTasks = [...taskCol.todo, ...taskCol.doing]
+  const stuck = cardsShown.filter((c) => c.column === 'stuck' && matches(c.title, c.agentId))
 
   type Lane = { key: string; label?: ReactNode; has: (agentId: string | undefined) => boolean }
   const lanes: Lane[] = useMemo(() => {
@@ -217,6 +218,8 @@ export function BoardPage(): ReactNode {
       return await call('saveTask', { task })
     } catch (e) {
       toast(e instanceof Error ? e.message : L('Não consegui salvar a tarefa.', "I couldn't save the task."))
+      // The save may have failed because the task is gone on the server: reload, so the board stops showing it.
+      void loadTasks()
       return undefined
     }
   }
@@ -250,12 +253,12 @@ export function BoardPage(): ReactNode {
     return !!t
   }
 
-  // ---------- dragging a to-do: to Fazendo starts it, onto an agent gives it, within A fazer moves it ----------
-  const drag = useRef<{ id: string; el: HTMLElement; x0: number; y0: number; on: boolean; dx: number; dy: number; clone?: HTMLElement } | null>(null)
+  // ---------- dragging a to-do: to Fazendo starts it, onto an agent gives it, within A fazer moves it; one of mine goes to Feito or back ----------
+  const drag = useRef<{ id: string; el: HTMLElement; x0: number; y0: number; on: boolean; own: boolean; dx: number; dy: number; clone?: HTMLElement } | null>(null)
   const justDragged = useRef(false)
   const onTaskDown = (e: ReactPointerEvent, t: Task): void => {
     if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return
-    drag.current = { id: t.id, el: e.currentTarget as HTMLElement, x0: e.clientX, y0: e.clientY, on: false, dx: 0, dy: 0 }
+    drag.current = { id: t.id, el: e.currentTarget as HTMLElement, x0: e.clientX, y0: e.clientY, on: false, own: taskKind(t) === 'own', dx: 0, dy: 0 }
   }
   useEffect(() => {
     const target = (x: number, y: number): { who?: string; col?: string; el: Element | null } => {
@@ -284,7 +287,7 @@ export function BoardPage(): ReactNode {
       d.clone!.style.left = `${e.clientX - d.dx}px`
       d.clone!.style.top = `${e.clientY - d.dy}px`
       const { who, col, el } = target(e.clientX, e.clientY)
-      setOver(who ? `who:${who}` : col === 'doing' || col === 'todo' ? col : null)
+      setOver(who ? `who:${who}` : col === 'todo' || (col === 'doing' && !d.own) || (col === 'done' && d.own) ? col : null)
       if (col === 'todo' && !who) {
         const others = [...(el?.closest('[data-col]')?.querySelectorAll<HTMLElement>('[data-card^="t:"]') ?? [])].filter((x) => x.dataset.card !== `t:${d.id}`)
         const after = others.find((o) => {
@@ -317,7 +320,12 @@ export function BoardPage(): ReactNode {
       if (!t) return land()
       if (who) {
         land()
-        void save({ id: t.id, title: t.title, agentId: who }).then((x) => x && toast(L(`Agora é ${agents.get(who)?.name ? `de ${agents.get(who)!.name}` : 'dele'}.`, `It's ${agents.get(who)?.name ?? 'theirs'} now.`)))
+        void save({ id: t.id, title: t.title, agentId: who, ...(d.own ? { state: 'todo' as const } : {}) }).then((x) => x && toast(L(`Agora é ${agents.get(who)?.name ? `de ${agents.get(who)!.name}` : 'dele'}.`, `It's ${agents.get(who)?.name ?? 'theirs'} now.`)))
+        return
+      }
+      if (d.own) {
+        land()
+        if (col === 'done' || col === 'todo') void save({ id: t.id, title: t.title, state: col === 'done' ? 'done' : 'todo' })
         return
       }
       if (col === 'doing') {
@@ -399,10 +407,14 @@ export function BoardPage(): ReactNode {
         return
       }
       if (!focus) return
-      if (e.key === 'Enter') return openCard(focus)
+      if (e.key === 'Enter') {
+        // A button or link keeps its own Enter (Aceitar, Concluir): the card under it doesn't open as well.
+        if (el?.closest?.('button,a')) return
+        return openCard(focus)
+      }
       if (focus.startsWith('t:')) {
         const t = tasks.find((x) => `t:${x.id}` === focus)
-        if (t && e.key.toLowerCase() === 's') void start(t)
+        if (t && e.key.toLowerCase() === 's' && taskKind(t) === 'todo') void start(t)
         return
       }
       const t = taskById.get(focus)
@@ -421,8 +433,9 @@ export function BoardPage(): ReactNode {
   })
 
   // ---------- the team, right now ----------
+  // Routine runs with no card are left out here too, so an agent isn't busy for a run the board doesn't show.
   const mates = team.map((a) => {
-    const mine = cards.filter((c) => c.agentId === a.id)
+    const mine = cardsShown.filter((c) => c.agentId === a.id)
     const waiting = mine.some((c) => c.column === 'you')
     const busy = mine.filter((c) => c.column === 'doing' && c.state === 'working')
     const parts = mine.some((c) => c.column === 'doing' && c.state === 'parts')
@@ -439,7 +452,7 @@ export function BoardPage(): ReactNode {
     )
   })
   // The team in one line: who's on something now, who waits on me, how many are free.
-  const busyIds = new Set(cards.filter((c) => c.column === 'doing' && c.state === 'working' && c.replies.length).map((c) => c.agentId))
+  const busyIds = new Set(cardsShown.filter((c) => c.column === 'doing' && c.state === 'working' && c.replies.length).map((c) => c.agentId))
   const askingIds = new Set(tasksAll.flatMap((t) => (t.asking ? [t.asking.agentId] : [])))
   const busyTeam = team.filter((a) => busyIds.has(a.id) && !askingIds.has(a.id))
   const askingTeam = team.filter((a) => askingIds.has(a.id))
@@ -463,6 +476,12 @@ export function BoardPage(): ReactNode {
   const renderTask = (t: Task): ReactNode => {
     const a = t.agentId ? agents.get(t.agentId) : undefined
     const conv = t.conversationId ? convs.get(t.conversationId) : undefined
+    const routine = t.routineId ? routineById.get(t.routineId) : undefined
+    const kind = taskKind(t)
+    const card = { t, focus: focus === `t:${t.id}`, onOpen: () => !justDragged.current && openCard(`t:${t.id}`) }
+    if (kind === 'own') return <OwnCard key={t.id} {...card} onDown={(e) => onTaskDown(e, t)} save={save} />
+    if (kind === 'repeated') return <StandingCard key={t.id} {...card} routine={routine} run={t.routineId ? runs.get(t.routineId) : undefined} agent={a} now={now} />
+    if (kind === 'done') return <DoneTaskCard key={t.id} {...card} />
     return (
       <div key={t.id} data-card={`t:${t.id}`} tabIndex={0} className={`bd-card task ${focus === `t:${t.id}` ? 'focus' : ''}`} onPointerDown={(e) => onTaskDown(e, t)} onClick={() => !justDragged.current && openCard(`t:${t.id}`)} aria-label={t.title}>
         <div className="bd-c-top"><Face agent={a} /><span className="nm">{a?.name ?? L('Sem agente', 'No agent')}</span><span className="time">{ago(t.createdAt)}</span></div>
@@ -476,28 +495,22 @@ export function BoardPage(): ReactNode {
   const DONE_SHOWN = 5
   const column = (col: Col, lane: Lane, first: boolean): ReactNode => {
     const all = col === 'todo' ? [] : shownCards.filter((c) => c.column === col && lane.has(c.agentId))
-    // Feito shows the latest few; the rest are a click away.
-    const list = col === 'done' && !allDone && group === 'none' ? all.slice(0, DONE_SHOWN) : all
-    const ts = col === 'todo' ? shownTasks.filter((t) => lane.has(t.agentId)) : []
-    const rs = col === 'todo' ? shownRoutines.filter((r) => lane.has(r.agentId)) : []
-    const empty = !list.length && !ts.length && !rs.length
+    const ts = taskCol[col].filter((t) => lane.has(t.agentId))
+    // Feito shows the latest few, done tasks first and then cards; the rest are a click away.
+    const capped = col === 'done' && !allDone && group === 'none'
+    const tasksShown = capped ? ts.slice(0, DONE_SHOWN) : ts
+    const list = capped ? all.slice(0, Math.max(0, DONE_SHOWN - tasksShown.length)) : all
+    // The count in the header is tasks and cards together, so the button says the same total.
+    const total = ts.length + all.length
+    const shownCount = tasksShown.length + list.length
+    const empty = !list.length && !ts.length
     return (
       <div key={`${lane.key}:${col}`} className={`bd-col ${col === 'you' && list.length ? 'wait-col' : ''} ${over === col && first ? 'over' : ''}`} data-col={col}>
         {col === 'todo' && first && <QuickAdd team={team} inputRef={addRef} onCreate={create} />}
-        {ts.map(renderTask)}
-        {rs.map((r) => {
-          const a = agents.get(r.agentId)
-          return (
-            <div key={`r:${r.id}`} data-card={`r:${r.id}`} className="bd-card routine" aria-label={r.name}>
-              <div className="bd-c-top"><Face agent={a} /><span className="nm">{a?.name}</span><span className="time"><Clock /> {new Date(r.nextAt!).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span></div>
-              <div className="bd-c-title">{r.name}</div>
-              <div className="bd-c-foot">{L('Rotina', 'Routine')}<Where conv={convs.get(r.conversationId)} /></div>
-            </div>
-          )
-        })}
+        {tasksShown.map(renderTask)}
         {list.map(renderCard)}
-        {all.length > list.length && <button className="bd-more-done" onClick={() => setAllDone(true)}>{L(`Ver os ${all.length} de hoje`, `See all ${all.length} from today`)} ›</button>}
-        {col === 'done' && allDone && group === 'none' && all.length > DONE_SHOWN && <button className="bd-more-done" onClick={() => setAllDone(false)}>{L('Mostrar menos', 'Show fewer')}</button>}
+        {total > shownCount && <button className="bd-more-done" onClick={() => setAllDone(true)}>{L(`Ver os ${total} de hoje`, `See all ${total} from today`)} ›</button>}
+        {col === 'done' && allDone && group === 'none' && total > DONE_SHOWN && <button className="bd-more-done" onClick={() => setAllDone(false)}>{L('Mostrar menos', 'Show fewer')}</button>}
         {empty && col !== 'todo' && group === 'none' && (
           <div className="bd-empty">
             {col === 'you' ? <><Glyph col="done" />{L('Nada esperando por você', 'Nothing waiting for you')}</> : col === 'doing' ? (over === 'doing' ? L('Solte aqui pra começar', 'Drop here to start') : L('Ninguém trabalhando agora', 'Nobody working right now')) : L('Nada ainda hoje', 'Nothing yet today')}
@@ -582,11 +595,12 @@ export function BoardPage(): ReactNode {
             )}
           </div>
         )}
+        <Suggestions list={shownTasks.filter((t) => t.suggestedBy)} agents={agents} />
       </div>
       <div className="bd-wrap" onPointerDown={(e) => open && !(e.target as HTMLElement).closest('[data-card], button, input, a') && setOpen(null)}>
         <div className={`bd-cols ${hover ? 'hovering' : ''}`} ref={colsRef}>
           {COLS.map((col) => {
-            const n = col.id === 'todo' ? shownTasks.length + shownRoutines.length : shownCards.filter((c) => c.column === col.id).length
+            const n = taskCol[col.id].length + shownCards.filter((c) => c.column === col.id).length
             return (
               <div key={`h:${col.id}`} className={`bd-ch ${col.id === 'you' && n ? 'wait' : ''}`}>
                 <Glyph col={col.id} /><h2>{col.name()}</h2><span className="n">{n}</span>{col.hint && <span className="hint">{col.hint()}</span>}
@@ -595,8 +609,8 @@ export function BoardPage(): ReactNode {
           })}
           {lanes.map((lane, i) => {
             if (group !== 'none') {
-              const count = shownCards.filter((c) => lane.has(c.agentId) && c.column !== 'done').length + shownTasks.filter((t) => lane.has(t.agentId)).length
-              const any = count || shownCards.some((c) => lane.has(c.agentId)) || shownRoutines.some((r) => lane.has(r.agentId))
+              const count = shownCards.filter((c) => lane.has(c.agentId) && c.column !== 'done').length + openTasks.filter((t) => lane.has(t.agentId)).length
+              const any = count || shownCards.some((c) => lane.has(c.agentId)) || taskCol.done.some((t) => lane.has(t.agentId))
               // Nothing open and nothing done today: one line at the end, not a row of empty boxes.
               if (!any) return null
               return [
@@ -607,7 +621,7 @@ export function BoardPage(): ReactNode {
             return COLS.map((col) => column(col.id, lane, true))
           })}
           {group !== 'none' && (() => {
-            const idle = lanes.filter((lane) => lane.key !== '_' && !shownCards.some((c) => lane.has(c.agentId)) && !shownTasks.some((t) => lane.has(t.agentId)) && !shownRoutines.some((r) => lane.has(r.agentId)))
+            const idle = lanes.filter((lane) => lane.key !== '_' && !shownCards.some((c) => lane.has(c.agentId)) && !openTasks.some((t) => lane.has(t.agentId)) && !taskCol.done.some((t) => lane.has(t.agentId)))
             if (!idle.length) return null
             const label = (lane: Lane): string => (group === 'agent' ? (agents.get(lane.key)?.name ?? '') : (() => { const h = agents.get(lane.key); return h ? sectorName(h, L('Setor de', 'Sector of')) : '' })())
             return <div className="bd-idle">{L('Sem nada em aberto: ', 'Nothing open: ')}{idle.map(label).filter(Boolean).join(', ')}</div>
@@ -622,7 +636,7 @@ export function BoardPage(): ReactNode {
           void start(t)
         }
       }} />}
-      {openTask && <TaskPanel key={openTask.id} t={openTask} team={team} conversations={conversations} onClose={() => setOpen(null)} save={save} onStart={(t) => void start(t)} onRemove={async (t) => {
+      {openTask && <TaskPanel key={openTask.id} t={openTask} team={team} conversations={conversations} routine={openTask.routineId ? routineById.get(openTask.routineId) : undefined} run={openTask.routineId ? runs.get(openTask.routineId) : undefined} now={now} onClose={() => setOpen(null)} save={save} onStart={(t) => start(t)} onRemove={async (t) => {
         setOpen(null)
         await call('removeTask', { id: t.id }).catch(() => toast(L('Não consegui apagar a tarefa.', "I couldn't delete the task.")))
       }} />}
@@ -635,11 +649,16 @@ export function BoardPage(): ReactNode {
               {([[L('Navegar', 'Move'), ['←', '↑', '↓', '→']], [L('Abrir o cartão', 'Open the card'), ['Enter']], [L('Aprovar', 'Approve'), ['A']], [L('Responder', 'Answer'), ['1', '2', '3']], [L('Começar', 'Start'), ['S']], [L('Nova tarefa', 'New task'), ['N']], [L('Buscar', 'Search'), ['/']], [L('Fechar', 'Close'), ['Esc']]] as [string, string[]][]).map(([what, keys]) => (
                 <div key={what}><span>{what}</span><span>{keys.map((k) => <kbd key={k}>{k}</kbd>)}</span></div>
               ))}
-              <p style={{ margin: '10px 0 0' }}>{L('Arraste uma tarefa de “A fazer” pra “Fazendo”, ou pra cima de um agente lá no topo. Passe o mouse num pedido dividido pra ver as partes dele.', 'Drag a task from “To do” to “Doing”, or onto an agent at the top. Hover a split request to see its parts.')}</p>
+              <p style={{ margin: '10px 0 0' }}>{L('Arraste uma tarefa de “A fazer” pra “Fazendo” pra começar, ou pra cima de um agente lá no topo. Uma tarefa que você mesmo faz vai pra “Feito” quando você a solta lá. Passe o mouse num pedido dividido pra ver as partes dele.', 'Drag a task from “To do” to “Doing” to start it, or onto an agent at the top. A task you do yourself goes to “Done” when you drop it there. Hover a split request to see its parts.')}</p>
             </div>
           ) : (
             <>
               <p>{L('Quem faz?', 'Who does it?')}</p>
+              <button onClick={async () => {
+                const t = tasks.find((x) => x.id === pop.task)
+                setPop(null)
+                if (t) await save({ id: t.id, title: t.title, state: 'doing' })
+              }}><MeAvatar initials={me.initials} size={26} /><span>{L('Eu mesmo faço', "I'll do it myself")}</span></button>
               {team.map((a) => (
                 <button key={a.id} onClick={async () => {
                   const t = tasks.find((x) => x.id === pop.task)
@@ -1068,72 +1087,3 @@ function CardPanel({ c, ctx, onNav, onClose, onAgain }: { c: BoardCard; ctx: Ctx
     </aside>
   )
 }
-
-// ---------- a to-do, being written ----------
-
-function TaskPanel({ t, team, conversations, onClose, save, onStart, onRemove }: { t: Task; team: Agent[]; conversations: Conversation[]; onClose: () => void; save: (t: Partial<Task> & { title: string }) => Promise<Task | undefined>; onStart: (t: Task) => void; onRemove: (t: Task) => void }): ReactNode {
-  const [title, setTitle] = useState(t.title)
-  const [notes, setNotes] = useState(t.notes ?? '')
-  const a = t.agentId ? team.find((x) => x.id === t.agentId) : undefined
-  const places = conversations.filter((c) => c.kind === 'channel' && (!t.agentId || c.members.includes(t.agentId)))
-  const due = t.dueAt ? new Date(t.dueAt) : undefined
-  const dueValue = due ? `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}` : ''
-  const words = async (): Promise<Task | undefined> => {
-    const tt = title.trim()
-    if (!tt) return t
-    if (tt === t.title && notes === (t.notes ?? '')) return t
-    return save({ id: t.id, title: tt, notes })
-  }
-  return (
-    <aside className="bd-side" role="dialog" aria-label={t.title}>
-      <div className="bd-side-body">
-        <div className="bd-side-top">
-          <Face agent={a} size={44} />
-          <div><b>{a?.name ?? L('Sem agente', 'No agent')}</b><small>{a?.role ?? L('escolha quem faz', 'pick who does it')}</small></div>
-          <span className="bd-grow" />
-          <span className="bd-pill todo">{L('A fazer', 'To do')}</span>
-          <button className="bd-icon-btn" onClick={() => void words().then(onClose)} aria-label={L('Fechar', 'Close')}>✕</button>
-        </div>
-        <div className="bd-form">
-          <input className="title-in" value={title} maxLength={MAX_TASK_TITLE} onChange={(e) => setTitle(e.target.value)} onBlur={() => void words()} aria-label={L('Título', 'Title')} />
-          <label>
-            {L('Detalhes pro agente', 'Details for the agent')}
-            <textarea value={notes} maxLength={MAX_TASK_NOTES} onChange={(e) => setNotes(e.target.value)} onBlur={() => void words()} placeholder={L('O que ele precisa saber: contexto, o que conta como pronto, onde estão as coisas.', 'What it needs to know: context, what counts as done, where things are.')} />
-          </label>
-          <label>
-            {L('Quem faz', 'Who does it')}
-            <span className="bd-pick">
-              {team.map((x) => (
-                <button key={x.id} type="button" aria-pressed={t.agentId === x.id} onClick={() => void save({ id: t.id, title: title.trim() || t.title, agentId: x.id, ...(t.conversationId && !conversations.find((c) => c.id === t.conversationId)?.members.includes(x.id) ? { conversationId: '' } : {}) })}>
-                  <AgentAvatar agent={x} size={22} />{x.name}
-                </button>
-              ))}
-            </span>
-          </label>
-          <div className="bd-row2">
-            <label>
-              {L('Onde', 'Where')}
-              <select value={t.conversationId ?? ''} onChange={(e) => void save({ id: t.id, title: title.trim() || t.title, conversationId: e.target.value })}>
-                <option value="">{a ? L(`DM com ${a.name}`, `DM with ${a.name}`) : 'DM'}</option>
-                {places.map((c) => <option key={c.id} value={c.id}>#{c.name}</option>)}
-              </select>
-            </label>
-            <label>
-              {L('Prazo', 'Due')}
-              <input type="date" value={dueValue} onChange={(e) => {
-                const [y, m, d] = e.target.value.split('-').map(Number)
-                void save({ id: t.id, title: title.trim() || t.title, dueAt: y && m && d ? new Date(y, m - 1, d, 12).getTime() : 0 })
-              }} />
-            </label>
-          </div>
-        </div>
-      </div>
-      <div className="bd-side-foot">
-        <span className="cost">{L(`Criada ${ago(t.createdAt)}`, `Created ${ago(t.createdAt)}`)}</span>
-        <button className="bd-btn quiet danger" onClick={() => onRemove(t)}>{L('Apagar', 'Delete')}</button>
-        <button className="bd-btn ink" onClick={() => void words().then((x) => x && onStart(x))}>{L('Começar', 'Start')}</button>
-      </div>
-    </aside>
-  )
-}
-

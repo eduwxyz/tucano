@@ -30,6 +30,7 @@ export type PromptOpts = {
   browserLogins?: string[] // the sites the person saved a login for in it (never the logins)
   apps?: AgentApp[] // the person's own apps it may use
   routines?: Routine[] // its own, when it can schedule
+  suggests?: boolean // it has sugerir_tarefa: tasks it notices go to the person as suggestions
   skills?: Skill[] // the active ones it follows, when it has skill tools
   builder?: string // the Tuca's view of the workspace: models, connectors, the team (live)
   team?: string // the agents that answer to this one and what it has asked of them (src/core/delegations.ts, live)
@@ -56,7 +57,7 @@ export interface GitHubAccess {
 // session (Claude Code keeps the first system prompt on resume), so whatever changes on its own
 // goes in liveContext instead.
 export function systemPrompt(opts: PromptOpts): string {
-  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, browserLogins, apps, routines, skills, connectors, builderGuide, people } = opts
+  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, browserLogins, apps, routines, suggests, skills, connectors, builderGuide, people } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -137,6 +138,11 @@ export function systemPrompt(opts: PromptOpts): string {
         L(
           `- Quando ${me} pedir algo pra depois ou pra repetir ("daqui a 10 minutos", "toda segunda às 9h", "dia 17 às 9h", "todo dia 5"), agende com agendar_rotina em vez de prometer lembrar: fora de uma rotina, você só roda quando alguém escreve. Uma data específica, mesmo daqui a semanas, vai em data (uma vez só, naquele dia); todo mês num dia, em dia_do_mes. Conte o tempo e as datas a partir da hora da última mensagem.`,
           `- When ${me} asks for something later or on repeat ("in 10 minutes", "every Monday at 9am", "on the 17th at 9am", "on the 5th of every month"), schedule it with agendar_rotina instead of promising to remember: outside a routine, you only run when someone writes. A specific date, even weeks ahead, goes in data (once, on that day); every month on a day, in dia_do_mes. Count the time and dates from the time of the last message.`
+        ),
+      suggests &&
+        L(
+          `- Trabalho que você nota que vale fazer e ninguém pediu (algo quebrado, um próximo passo óbvio) vai pra ${me} como sugestão, com sugerir_tarefa, em vez de você fazer por conta própria. ${me} decide se aceita.`,
+          `- Work you notice that is worth doing and nobody asked for (something broken, an obvious next step) goes to ${me} as a suggestion, with sugerir_tarefa, instead of doing it unasked. ${me} decides whether to accept it.`
         ),
       web &&
         L(

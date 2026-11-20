@@ -12807,8 +12807,6 @@ button.agent-card__now:hover {
 .bd-card:hover { box-shadow: var(--bd-shadow2), inset 0 0 0 1px var(--bd-line2); transform: translateY(-1px); }
 .bd-card.focus, .bd-card:focus-visible { box-shadow: var(--bd-shadow2), inset 0 0 0 1.5px var(--accent); }
 .bd-card.ghost { opacity: 0.25; transform: none; }
-.bd-card.routine { background: transparent; box-shadow: inset 0 0 0 1px var(--bd-line); cursor: default; }
-.bd-card.routine:hover { transform: none; }
 .bd-card.live::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1.5px; pointer-events: none; background: conic-gradient(from var(--bd-ang), transparent 0deg, transparent 285deg, color-mix(in srgb, var(--bd-accent2) 45%, transparent) 325deg, color-mix(in srgb, var(--accent) 85%, transparent) 350deg, transparent 360deg); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: bd-run 2.8s linear infinite; }
 @keyframes bd-run { to { --bd-ang: 360deg; } }
 .bd-card.live .bd-av { animation: bd-bob 1.1s ease-in-out infinite; }
@@ -15514,3 +15512,27 @@ button.agent-card__now:hover {
 .saved-logins .hint {
   margin: 0;
 }
+
+/* ---------- Quadro: suggestions, tasks I do, tasks a routine works on ---------- */
+.bd-sugs { display: flex; flex-direction: column; gap: 8px; padding: 12px 8px 0; }
+.bd-sug { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); animation: bd-drop 0.45s var(--bd-spring); }
+.bd-sug .t { flex: 1 1 220px; min-width: 0; }
+.bd-sug .tag { font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.bd-sug .ti { margin-top: 2px; font-size: 14px; font-weight: 550; overflow-wrap: anywhere; }
+.bd-sug small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.bd .bd-sugs-more { align-self: flex-start; }
+.bd-st { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; color: var(--text-2); min-width: 0; }
+.bd-st span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-st.bad { color: var(--danger); font-weight: 550; }
+.bd-st.wait { color: var(--bd-warn-ink); }
+.bd-form .bd-st { margin: -6px 10px 0; }
+.bd-rt { display: flex; align-items: center; gap: 7px; margin: 12px -14px -12px; padding: 9px 14px 10px; border-top: 1px solid var(--bd-line); font-size: 12.5px; color: var(--text-2); white-space: nowrap; min-width: 0; }
+.bd-rt svg { flex: none; width: 14px; height: 14px; color: var(--text-3); }
+.bd-rt .when { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 550; color: var(--text); }
+.bd-rt .next { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); }
+.bd-rep-box { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--bd-line); }
+.bd-rep-h { font-size: 12px; font-weight: 600; color: var(--text-3); }
+.bd-rep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bd .bd-rep .bd-pick button { padding: 6px 12px; }
+.bd-form .bd-rep input[type='time'] { width: auto; }
+.bd-rep-hint { font-size: 12.5px; color: var(--text-3); }
