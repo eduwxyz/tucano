@@ -5,13 +5,12 @@
 // turned off. He has no connectors, no web and no computer of his own.
 import { createHash, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, UNDO_HOURS, type Proposal, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
+import { channelName, codexValue, EFFORT_IDS, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, UNDO_HOURS, type Proposal, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { guideIndex } from './guide'
 import { SCREENS } from '../shared/screens'
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
-const EFFORTS: Effort[] = ['low', 'medium', 'high']
 
 // In the app's language when the Tuca is made (saved with him, like any agent's; brought up to date on start).
 export const tucaInstructions = (): string =>
@@ -152,7 +151,7 @@ export const PROPOR_AGENTE: ToolDef = {
         cor: { type: 'string', enum: COLORS },
         instrucoes: { type: 'string', description: L('O que ele faz, como entrega, o que evita e quando pergunta. De 4 a 8 linhas, falando com ele.', 'What it does, how it delivers, what it avoids and when it asks. 4 to 8 lines, talking to it.') },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
-        esforco: { type: 'string', enum: EFFORTS },
+        esforco: { type: 'string', enum: EFFORT_IDS },
         web: { type: 'boolean', description: L('Se busca e lê páginas da web.', 'Whether it searches and reads web pages.') },
         conectores: {
           type: 'array',
@@ -290,7 +289,7 @@ export function draftFrom(args: Record<string, unknown>, ctx: { usable: (modelId
     return { error: L(`Não existe conector ${names}. Use só os da lista, ou deixe sem e diga que dá pra conectar depois.`, `There's no connector ${names}. Use only the ones in the list, or leave it out and say it can be connected later.`) }
   }
   const model = text('modelo', 200)
-  const effort = EFFORTS.includes(args['esforco'] as Effort) ? (args['esforco'] as Effort) : 'medium'
+  const effort = EFFORT_IDS.includes(args['esforco'] as Effort) ? (args['esforco'] as Effort) : 'medium'
   return {
     draft: {
       name,

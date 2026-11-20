@@ -7,13 +7,16 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
-import { ENGINES, personScope, scopePerson, usable, modelInfo, splitForPrompt, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Person, type RunStatus, type Settings } from '../shared/types'
+import { ENGINES, personScope, scopePerson, usable, modelInfo, splitForPrompt, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type Effort, type EngineId, type Memory, type MemoryScope, type Message, type Person, type RunStatus, type Settings } from '../shared/types'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import type { ToolDef } from './gateway'
 
 export const WINDOW = SUMMARY_WINDOW
 export const MAX_AFTER = SUMMARY_MAX_AFTER
+// How hard the small model thinks, from Settings → Models: summarizing a conversation, taking memories
+// out of it, and naming a request all run on this. Low unless the person raised it.
+export const memoryEffort = (s: Pick<Settings, 'memoryEffort'>): Effort => s.memoryEffort ?? 'low'
 // A thread is summarized (and its memories extracted) once it's quiet this long...
 export const THREAD_QUIET_MS = 10 * 60_000
 // ...with this many messages since its summary, at least: a question and its answer alone wait.
@@ -465,7 +468,7 @@ export class Memories {
     const started = Date.now()
     let text = ''
     let error: string | undefined
-    for await (const ev of engines[model.engine].run({ model: model.id, effort: 'low', system: memorySystem(), prompt, cwd, signal: AbortSignal.timeout(120_000) })) {
+    for await (const ev of engines[model.engine].run({ model: model.id, effort: memoryEffort(settings), system: memorySystem(), prompt, cwd, signal: AbortSignal.timeout(120_000) })) {
       if (ev.type === 'text') text += ev.delta
       else if (ev.type === 'done') {
         text = ev.text || text
@@ -552,7 +555,7 @@ export class Memories {
     const started = Date.now()
     let text = ''
     let error: string | undefined
-    for await (const ev of engines[model.engine].run({ model: model.id, effort: 'low', system: memorySystem(), prompt, cwd, signal: AbortSignal.timeout(120_000) })) {
+    for await (const ev of engines[model.engine].run({ model: model.id, effort: memoryEffort(settings), system: memorySystem(), prompt, cwd, signal: AbortSignal.timeout(120_000) })) {
       if (ev.type === 'text') text += ev.delta
       else if (ev.type === 'done') {
         text = ev.text || text

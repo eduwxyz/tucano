@@ -7,11 +7,10 @@ import { L } from '../shared/lang'
 import { safeLimit } from '../shared/limits'
 import { usedShare } from '../shared/limits'
 import { RECOMMENDED_INSTRUCTION_LENGTH } from '../shared/instructions'
-import { channelName, cleanTimes, dateAt, ENGINES, MAX_TIMES, modelInfo, nextRun, timesOf, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
+import { channelName, cleanTimes, dateAt, EFFORT_IDS, ENGINES, MAX_TIMES, modelInfo, nextRun, timesOf, validTime, type Schedule, type Agent, type AgentChanges, type Approval, type Connector, type Conversation, type Effort, type GrantLevel, type Routine, type Settings, type Proposal, type AgentDraft, proposalsOf } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { dateArg } from './routines'
 
-const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh']
 const DAY = 24 * 3_600_000
 
 // ---------- ver_estado ----------
@@ -142,7 +141,7 @@ export const PROPOR_AJUSTE: ToolDef = {
         funcao: { type: 'string' },
         instrucoes: { type: 'string', description: L(`As instruções novas, inteiras. Até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres é a recomendação, não um limite.`, `The new instructions, whole. ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters is a recommendation, not a limit.`) },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
-        esforco: { type: 'string', enum: EFFORTS },
+        esforco: { type: 'string', enum: EFFORT_IDS },
         web: { type: 'boolean' },
         conectores: {
           type: 'array',
@@ -266,7 +265,7 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       if (!modelInfo(model) || !ctx.usable(model)) return { error: L(`O modelo "${model}" não dá pra usar agora. Use um da lista.`, `The model "${model}" can't be used now. Use one from the list.`) }
       changes.modelId = model
     }
-    if (EFFORTS.includes(args['esforco'] as Effort) && args['esforco'] !== agent.effort) changes.effort = args['esforco'] as Effort
+    if (EFFORT_IDS.includes(args['esforco'] as Effort) && args['esforco'] !== agent.effort) changes.effort = args['esforco'] as Effort
     if (typeof args['web'] === 'boolean' && args['web'] !== (agent.web !== false)) changes.web = args['web']
     if (args['conectores'] !== undefined) {
       const g = grantsFrom(args['conectores'], ctx.connectors)
