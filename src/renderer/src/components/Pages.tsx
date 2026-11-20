@@ -86,6 +86,7 @@ import {
   type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
+import { WhatsAppPane } from './WhatsApp'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VOICE_WHERE, VoiceSetup } from './VoiceSetup'
@@ -94,6 +95,7 @@ import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onG
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
+import { VoiceSection } from './CallParts'
 import { entryOf } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
 import { ruleTool } from '../../../shared/classify'
@@ -788,6 +790,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               <ReserveModel draft={draft} patch={patch} />
             </Section>
           )}
+
+          {pane('perfil') && admin && existing && <VoiceSection agent={existing} />}
 
           {pane('canais') && (
             <Section title={L('Onde participa', 'Where it takes part')} help={L(`Nos canais ligados, ${name} lê e responde quando é com ele. Fora deles, chame com @${draft.handle || 'handle'} ou mande DM.`, `In the channels turned on, ${name} reads and replies when it’s about it. Outside them, call it with @${draft.handle || 'handle'} or send a DM.`)}>
@@ -3152,6 +3156,7 @@ export function SettingsPage(): ReactNode {
   const tabs = SETTINGS_TABS(team, admin, owner)
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
+  const [numberOpen, setNumberOpen] = useState(false)
   return (
     <Page title={L('Configurações', 'Settings')}>
       <Tabs page="settings" tabs={tabs} />
@@ -3372,9 +3377,11 @@ export function SettingsPage(): ReactNode {
           </Card>
         )}
 
-        {pane('integracoes') && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
-        {pane('integracoes') && window.tucano.phone && <HomePhoneCard />}
-        {pane('integracoes') && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
+        {pane('integracoes') && owner && !numberOpen && work && <OutsideGateway what={L('as aprovações, as perguntas dos agentes e o fim das rotinas vão pro seu Telegram, com o texto de cada uma.', 'approvals, the agents’ questions and routine results go to your Telegram, with the text of each.')} />}
+        {pane('integracoes') && owner && !numberOpen && window.tucano.phone && <HomePhoneCard />}
+        {pane('integracoes') && owner && !numberOpen && (defaultWorkspace ? <PhoneCard info={settings.telegram} /> : <WorkspaceTelegramNotice />)}
+        {/* One number's screen takes the whole tab: the owner's own phone cards step aside while it is open. */}
+        {pane('integracoes') && owner && <WhatsAppPane onOpen={setNumberOpen} />}
 
         {pane('modelos') && (
           <Card title={L('Memória', 'Memory')} lead={L('Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.', 'A small model summarizes what leaves each conversation’s window and, from the same stretch, picks what’s worth remembering about you.')}>

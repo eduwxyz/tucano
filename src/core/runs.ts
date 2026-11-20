@@ -14,6 +14,7 @@ import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories }
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
+import { WHATSAPP, WHATSAPP_TOOL_NAMES, type WhatsApp } from './whatsapp'
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { extractFile } from './wiki-extract'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
@@ -277,6 +278,7 @@ export interface RunnerDeps {
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
   browser?: Pick<Browser, 'call' | 'approved'> & Partial<Pick<Browser, 'loginSites'>> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
+  whatsapp?: Pick<WhatsApp, 'has' | 'tools' | 'call' | 'approved' | 'always' | 'what'> // without it, no agent has WhatsApp
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
@@ -360,7 +362,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; goal?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; goal?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; outside?: boolean; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -846,6 +848,15 @@ export class Runner {
     return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true, routineAsk: ask.id })
   }
 
+  // WhatsApp messages arrived for an agent: a note in its conversation (what people read) and a reply
+  // that starts from `task` (what the agent reads). What was written there is from outside.
+  // Resolves with the reply, or undefined when it can't run.
+  async runInbound(agent: Agent, conv: Conversation, note: string, task: string): Promise<Message | undefined> {
+    if (this.paused || agent.archived) return undefined
+    if (note) this.post(conv.id, undefined, note) // a call's card is already in the conversation: no note
+    return this.startReply(agent, conv, { depth: 1, task, outside: true })
+  }
+
   // A routine's reply that failed, run again in place with the same request.
   async retryRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, messageId: string): Promise<Message | undefined> {
     if (this.paused) return undefined // routines don't run while paused
@@ -1287,7 +1298,7 @@ export class Runner {
     const behalf = routineOf ? routineBehalf(db, routineOf, { workspaceName: ownerName }) : undefined
     // Something from outside read before what goes out (OUTBOUND in src/shared/actions.ts): a trigger's event, or an
     // earlier reply of this agent here that read some (a kept session still holds it), or what this reply reads.
-    let outside = !!routineAsk?.routine?.event || history.some((m) => m.author.kind === 'agent' && m.author.id === agent.id && !!m.run?.outside)
+    let outside = !!opts.outside || !!routineAsk?.routine?.event || history.some((m) => m.author.kind === 'agent' && m.author.id === agent.id && !!m.run?.outside)
     // Who scheduled each routine in the transcript: its person (the owner by the workspace's name); the team's, none.
     const scheduledBy = (id: string): string | undefined => {
       const r = db.routine(id)
@@ -1331,6 +1342,7 @@ export class Runner {
     let computerDown: string | undefined // found off in the middle of the turn: what the person has to do
     const browser = this.deps.gateway && agent.browser ? this.deps.browser : undefined
     const apps = this.deps.gateway && agent.apps?.length ? this.deps.apps : undefined
+    const whatsapp = this.deps.gateway ? this.deps.whatsapp : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
     const skills = this.deps.gateway ? this.deps.skills : undefined
     const mySkills = skills?.forAgent(agent.id) ?? []
@@ -1415,7 +1427,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES, CONCLUIR_OBJETIVO.name])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...WHATSAPP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES, CONCLUIR_OBJETIVO.name])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1528,6 +1540,7 @@ ${note}`,
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
+      ...(whatsapp?.has(agent.id) ? whatsapp.tools(agent.id) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...(wiki ? WIKI_TOOLS : []),
@@ -2282,6 +2295,76 @@ ${note}`,
           return clip(out.result)
         }
 
+        // The team's WhatsApp numbers: reading and sending are steps; a send that asks first is an approval, and nothing leaves until it's decided.
+        if (whatsapp && WHATSAPP_TOOL_NAMES.has(name)) {
+          const t0 = Date.now()
+          // The step shows right away (a send waits a few seconds on purpose); its words come with the outcome.
+          const step: Step = { id: randomUUID(), label: 'WhatsApp', detail: '', status: 'running' }
+          flush()
+          msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
+          save()
+          const close = (status: Step['status'], patch: Partial<Step> = {}): Step[] => msg.run!.steps.map((s) => (s.id === step.id ? { ...s, ...patch, status, ms: Date.now() - t0 } : s))
+          // A file the agent may send: one of this conversation that it showed or a person attached, by its exact name, the newest first.
+          const file = (nome: string): { id: string; path: string; name: string } | undefined => {
+            const found = this.deps.dataDir ? db.artifacts().filter((a) => a.conversationId === conv.id && a.name === nome && (a.agentId === '' || a.agentId === agent.id) && (ids.has(a.messageId) || a.messageId === msg.id)).sort((x, y) => y.createdAt - x.createdAt)[0] : undefined
+            return found ? { id: found.id, path: join(this.deps.dataDir!, 'artifacts', found.id, found.name), name: found.name } : undefined
+          }
+          let out: Awaited<ReturnType<typeof whatsapp.call>>
+          try {
+            out = await whatsapp.call({ id: agent.id, name: agent.name }, name, args, { file })
+          } catch (e) {
+            msg.run = { ...msg.run!, steps: [...close('error'), thinking()] }
+            stepStarted = Date.now()
+            save()
+            return textResult(e instanceof Error && e.message ? e.message : L('O WhatsApp não respondeu agora. Tente de novo em instantes.', "WhatsApp didn't answer just now. Try again in a moment."), true)
+          }
+          if (out.outside) sawOutside() // what people wrote in a chat is someone else's text
+          const shown = { label: out.step.label, detail: out.step.detail }
+          if (out.approval) {
+            if (questions || approval) {
+              msg.run = { ...msg.run!, steps: [...close('error', shown), thinking()] }
+              save()
+              return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+            }
+            approval = {
+              id: randomUUID(),
+              hash: approvalHash(WHATSAPP, name, out.approval.args),
+              agentId: agent.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              connectorId: WHATSAPP,
+              connectorName: 'WhatsApp',
+              tool: name,
+              args: out.approval.args,
+              why: out.approval.why,
+              highRisk: out.approval.highRisk ?? false, // a group change is always marked: its card says so and never offers "always"
+              state: 'pending',
+              createdAt: Date.now(),
+              expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000,
+              requestedBy: requester.id,
+              ...(behalf ? { behalf } : {})
+            }
+            db.createApproval(approval)
+            emit({ type: 'approval', approval })
+            msg.run = { ...msg.run!, approvalId: approval.id, steps: [...close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }), thinking()] }
+            stepStarted = Date.now()
+            save()
+            notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`)
+            return textResult(
+              L(
+                `Pedido de aprovação criado. A ação ainda NÃO aconteceu. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`,
+                `Approval request created. The action has NOT happened yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the result in a new message.`
+              )
+            )
+          }
+          msg.run = { ...msg.run!, steps: [...close(out.isError ? 'error' : 'done', shown), thinking()] }
+          stepStarted = Date.now()
+          save()
+          // An image of a message goes in as an image (like ver_imagem), with its words after it.
+          if (out.image) return clip({ content: [{ type: 'image', data: out.image.data, mimeType: out.image.mimeType }, { type: 'text', text: out.text }] })
+          return clip(textResult(out.text, !!out.isError))
+        }
+
         if (name === ACCESS_REQUEST && accessTool) {
           const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
           const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
@@ -2890,10 +2973,16 @@ ${note}`,
       db.saveAgent({ ...owner, actionRules: { ...owner.actionRules, ...Object.fromEntries(kinds.map((k) => [k, 'auto'])) } })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: kinds.join(', ') } })
-    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR) {
+    } else if (always && decision === 'approved' && owner && fresh.length && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && ap.connectorId !== NAVEGADOR && ap.connectorId !== APPS && ap.connectorId !== COMPUTADOR && ap.connectorId !== WHATSAPP) {
       db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), ...fresh] })
       emit({ type: 'agent', agent: db.agent(owner.id)! })
       db.addActivity({ personId: decider, kind: 'approval.always', target: owner.id, detail: { connector: ap.connectorName, tool: fresh.map((r) => r.slice(r.indexOf(':') + 1)).join(', ') } })
+    }
+    // "Always" on a WhatsApp send: that conversation's sends go alone from now on (the number's page shows it).
+    // Never for a fix or a group change, nor for something marked high risk or a first contact.
+    if (always && decision === 'approved' && ap.connectorId === WHATSAPP && ap.tool === 'whatsapp_enviar' && !ap.highRisk && !ap.args['primeiro_contato'] && this.deps.whatsapp) {
+      this.deps.whatsapp.always(ap.agentId, ap.args)
+      db.addActivity({ personId: decider, kind: 'approval.always', target: ap.agentId, detail: { connector: ap.connectorName, tool: ap.tool } })
     }
     const settings = await this.deps.settings()
     // Who decided, or (expired) who it was waiting on: the requester.
@@ -2983,6 +3072,39 @@ ${note}`,
         task = L(
           `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. Nada foi clicado. Responda considerando isso.`,
           `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. Nothing was clicked. Reply with that in mind.`
+        )
+      }
+    } else if (ap.connectorId === WHATSAPP) {
+      // A WhatsApp message, fix or group change: done exactly as approved, with the limits, the permission and the agent's access checked again.
+      const wa = this.deps.whatsapp
+      const what = wa ? wa.what(ap.args, ap.tool) : L('enviar uma mensagem no WhatsApp', 'sending a WhatsApp message')
+      if (decision === 'approved' && wa) {
+        let r: { ok: boolean; text: string }
+        try {
+          r = await wa.approved(ap.agentId, ap.args, ap.tool)
+        } catch (e) {
+          r = { ok: false, text: e instanceof Error && e.message ? e.message : L('o WhatsApp não respondeu.', "WhatsApp didn't answer.") }
+        }
+        ok = r.ok
+        const sends = ap.tool === 'whatsapp_enviar'
+        const rings = ap.tool === 'whatsapp_ligar' // a call: it starts now and its summary comes when it ends
+        outcome = r.ok ? (sends ? L('Enviada.', 'Sent.') : rings ? L('Ligando.', 'Calling.') : L('Feito.', 'Done.')) : sends ? L(`Não enviou: ${r.text}`, `Didn't send: ${r.text}`) : rings ? L(`Não ligou: ${r.text}`, `Didn't call: ${r.text}`) : L(`Não fez: ${r.text}`, `Didn't do it: ${r.text}`)
+        task = rings
+          ? r.ok
+            ? L(`${me} aprovou ${what}. ${r.text}\n\nConte a ${me} em uma frase que a ligação começou; o resumo chega quando ela terminar.`, `${me} approved ${what}. ${r.text}\n\nTell ${me} in one sentence that the call has started; the summary comes when it ends.`)
+            : L(`${me} aprovou ${what}, mas a ligação não foi feita: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but the call was not made: ${r.text} Tell ${me} in one sentence.`)
+          : r.ok
+          ? L(`${me} aprovou ${what}, e o app ${sends ? 'enviou' : 'fez'}. ${r.text}\n\nSe ainda falta algo, continue; senão, conte a ${me} em uma frase.`, `${me} approved ${what}, and the app ${sends ? 'sent it' : 'did it'}. ${r.text}\n\nIf something is still missing, go on; otherwise tell ${me} in one sentence.`)
+          : L(`${me} aprovou ${what}, mas ${sends ? 'não foi enviada' : 'não foi feito'}: ${r.text} Avise ${me} em uma frase.`, `${me} approved ${what}, but it ${sends ? 'was not sent' : 'was not done'}: ${r.text} Tell ${me} in one sentence.`)
+      } else if (decision === 'approved') {
+        outcome = L('Não enviou: o WhatsApp não está disponível aqui.', "Didn't send: WhatsApp isn't available here.")
+        task = L(`${me} aprovou ${what}, mas o WhatsApp não está disponível agora. Avise ${me} em uma frase.`, `${me} approved ${what}, but WhatsApp isn't available right now. Tell ${me} in one sentence.`)
+      } else {
+        const rings = ap.tool === 'whatsapp_ligar'
+        outcome = decision === 'refused' ? (rings ? L('Ninguém foi ligado.', 'No one was called.') : L('Nada foi enviado.', 'Nothing was sent.')) : expired
+        task = L(
+          `${me} ${decision === 'refused' ? `recusou ${what}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido pra ${what}`}. ${rings ? 'Ninguém foi ligado. Responda considerando isso e não tente ligar de novo pelo mesmo motivo.' : 'Nada foi enviado. Responda considerando isso e não tente enviar de novo o mesmo texto.'}`,
+          `${me} ${decision === 'refused' ? `turned down ${what}${reason ? `: "${reason}"` : ''}` : `didn't answer the request for ${what}`}. ${rings ? "No one was called. Reply with that in mind and don't try to call again for the same reason." : "Nothing was sent. Reply with that in mind and don't try to send the same text again."}`
         )
       }
     } else if (ap.tool === ACCESS_REQUEST) {

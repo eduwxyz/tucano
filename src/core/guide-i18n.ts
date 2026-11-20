@@ -95,6 +95,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Team (several people in one Tucano)',
     summary: 'Using the same Tucano with other people: inviting, roles, what belongs to whom, For you, calling a person, who covers for me, routines, Activity, removing someone and the first invite.'
   },
+  whatsapp: {
+    title: 'WhatsApp',
+    summary: "The team's WhatsApp numbers: linking by QR code or Meta's official API, choosing what each agent reads and answers, approving sends, the limits and what happens when a message arrives."
+  },
   'wiki-git': {
     title: 'Wiki in git',
     summary: 'The wiki folder kept in a git repository (the Obsidian vault on GitHub, for example): connecting with a deploy key, what syncs, conflicts, read only, and Obsidian Git on the Mac.'

@@ -92,6 +92,8 @@ import { canEditChannel,
 } from '../store'
 import { askWay } from './OrgSectors'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { WhatsAppBody, WhatsAppTitle, whatsappCanAlways } from './WhatsAppApproval'
+import { CallMessage } from './CallParts'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -497,6 +499,13 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
+    // A WhatsApp call an agent answered: the live line, then its card, instead of the plain sentence.
+    if (message.call)
+      return (
+        <div className="wa-call-row" data-id={message.id}>
+          <CallMessage call={message.call} />
+        </div>
+      )
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`} data-id={message.id}>
         <Icon name="spark" size={13} />
@@ -1762,8 +1771,12 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const onComputer = approval.connectorId === COMPUTADOR
   const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
-  const alwaysTitle = onComputer
+  // A WhatsApp send: shown as the message itself. "Always" means that conversation's sends go alone, never for a first contact.
+  const whatsapp = approval.connectorId === 'whatsapp'
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0) && !(whatsapp && !whatsappCanAlways(approval))
+  const alwaysTitle = whatsapp
+    ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} envia sozinho nesta conversa, sem pedir. Dá pra mudar em Configurações › Celular.`, `From now on ${agent?.name ?? 'the agent'} sends on its own in this conversation, without asking. You can change it in Settings › Phone.`)
+    : onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking, in any call, even after reading something from outside. You can take it back on its page.`)
 
@@ -1781,6 +1794,8 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
           </>
+        ) : whatsapp ? (
+          <WhatsAppTitle approval={approval} agent={agent?.name ?? L('Agente', 'Agent')} />
         ) : onComputer ? (
           <>
             {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
@@ -1834,10 +1849,11 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         </div>
       )}
       {approval.why && <p className="approval__why">{approval.why}</p>}
+      {whatsapp && <WhatsAppBody approval={approval} />}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
-      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !runner && !onComputer && summary.shown.length > 0 && (
+      {approval.tool !== ACCESS_REQUEST && approval.connectorId !== 'apps' && approval.connectorId !== 'navegador' && !whatsapp && !runner && !onComputer && summary.shown.length > 0 && (
         <div className="approval__args small">
           {summary.shown.map(([k, v], i) => (
             <p key={i}>
@@ -1927,7 +1943,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               </button>
               {canAlways && (
                 <button className="btn approval__always" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
-                  {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                  {whatsapp ? L('Aprovar e sempre enviar nesta conversa', 'Approve and always send in this conversation') : L('Aprovar e sempre permitir', 'Approve and always allow')}
                 </button>
               )}
               {forGood && (

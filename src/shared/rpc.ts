@@ -4,6 +4,8 @@ import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
+import type { CallSettings, CallsState, VoiceChoice, VoiceOption } from './calls'
+import type { WhatsAppAccess, WhatsAppChat, WhatsAppNumber, WhatsAppNumberInput, WhatsAppSettings, WhatsAppState, WhatsAppTemplate } from './whatsapp'
 import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
 
 export interface Snapshot {
@@ -155,6 +157,25 @@ export interface Api {
   checkTrigger(p: { trigger: Trigger }): Promise<string> // what a connector check finds now, for the form
   setTelegramToken(p: { token: string | null }): Promise<void> // checks it with Telegram; throws why it's refused
   unpairTelegram(): void
+  // WhatsApp for agents (src/shared/whatsapp.ts): admins only. Each throws a message for the screen.
+  whatsappState(): Promise<WhatsAppState>
+  whatsappAdd(p: { number: WhatsAppNumberInput }): Promise<WhatsAppNumber> // the official API's keys are checked with Meta first
+  whatsappUpdate(p: { id: string; name?: string; description?: string; settings?: Partial<WhatsAppSettings> }): Promise<WhatsAppNumber>
+  whatsappRemove(p: { id: string }): Promise<void> // unlinks the phone and forgets its conversations
+  whatsappConnect(p: { id: string; phone?: string }): Promise<void> // starts the link: a QR code, or with `phone` a code to type there
+  whatsappDisconnect(p: { id: string }): Promise<void> // unlinks the phone; the number and its rules stay
+  whatsappChats(p: { id: string; q?: string }): Promise<WhatsAppChat[]> // the number's conversations, latest first
+  whatsappSetAccess(p: { id: string; access: WhatsAppAccess[] }): Promise<WhatsAppNumber> // replaces who may use what
+  whatsappTemplates(p: { id: string }): Promise<WhatsAppTemplate[]> // the official API's approved templates
+  // Calls on an official-API number, answered by an agent with a voice service's voice (src/shared/calls.ts).
+  callsState(p: { id: string }): Promise<CallsState>
+  callsEnable(p: { id: string }): Promise<CallsState> // prepares the voice service and Meta; the steps come with the whatsapp event
+  callsDisable(p: { id: string }): Promise<CallsState>
+  callsUpdate(p: { id: string; settings: Partial<CallSettings> }): Promise<CallsState>
+  callsVoices(p: { q?: string }): Promise<VoiceOption[]> // the connected voice service's voices
+  callsVoice(p: { agentId: string }): VoiceChoice | null // the voice an agent answers calls with
+  callsSetVoice(p: { agentId: string; voice: VoiceChoice | null }): void
+  whatsappHistory(p: { id: string; chat: string }): Promise<void> // asks the phone for a conversation's earlier messages (qr); they arrive on their own
   exportTeam(): string // the team as Markdown
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
@@ -291,9 +312,10 @@ export type CoreEvent =
   | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
+  | { type: 'whatsapp' } // a number's state changed (admins read it again: whatsappState)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations', 'whatsapp'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true
