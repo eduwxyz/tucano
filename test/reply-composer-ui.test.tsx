@@ -10,7 +10,7 @@ Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, E
 Object.assign(window, { tucano: {} })
 Object.assign(globalThis, { ResizeObserver: class { observe(): void {} unobserve(): void {} disconnect(): void {} } })
 Object.assign(globalThis, { requestAnimationFrame: (cb: () => void): number => (cb(), 0), cancelAnimationFrame: () => {} })
-const actions = vi.hoisted(() => ({ navigate: vi.fn(), openThread: vi.fn(), loadThread: vi.fn(), toast: vi.fn(), setReplyTo: vi.fn() }))
+const actions = vi.hoisted(() => ({ navigate: vi.fn(), openThread: vi.fn(), loadThread: vi.fn(), toast: vi.fn(), setReplyTo: vi.fn(), sendMessage: vi.fn() }))
 
 let fake: State
 vi.mock('../src/renderer/src/store', async (original) => {
@@ -104,3 +104,21 @@ it('replies to the thread heading through its button and the selection shortcut'
   expect(event.defaultPrevented).toBe(true)
   expect(actions.setReplyTo).toHaveBeenLastCalledWith('root', { messageId: original.id, quote: 'this part' })
 })
+
+it('keeps the draft and its quote when the core refuses the reply', async () => {
+  fake.replyTo = { c1: { messageId: original.id, quote: 'this part' } }
+  actions.sendMessage.mockResolvedValueOnce(false)
+  await renderComposers()
+  // linkedom carries no native `input` into React's onChange, so the field is filled the way the
+  // field itself is: through the handler React put on it, with what the person typed.
+  const area = document.querySelector('#channel textarea') as HTMLTextAreaElement
+  const props = Object.keys(area).find((k) => k.startsWith('__reactProps$'))!
+  const onChange = (area as unknown as Record<string, { onChange: (e: unknown) => void }>)[props]!.onChange
+  await act(async () => onChange({ target: { value: 'Please explain.', selectionStart: 0 } }))
+  await act(async () => (document.querySelector('#channel .btn--primary') as HTMLButtonElement).click())
+  expect(actions.sendMessage).toHaveBeenCalledTimes(1)
+  expect(actions.sendMessage.mock.calls[0]![5]).toEqual({ messageId: original.id, quote: 'this part' })
+  expect((document.querySelector('#channel textarea') as HTMLTextAreaElement).value).toBe('Please explain.')
+  expect(document.querySelector('#channel .composer__reply')?.textContent).toContain('this part')
+})
+
