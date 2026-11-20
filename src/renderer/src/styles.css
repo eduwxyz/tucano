@@ -2371,17 +2371,96 @@ h3 {
   white-space: nowrap;
 }
 .history-row__outcome {
-  flex: 0 1 auto;
+  /* The action's own line ("Delete · Computer"): a reserved column that wraps onto a second line
+     rather than being cut, and gives the width back on a narrow window. */
+  flex: 0 1 160px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 32%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .table > .table__row {
   animation: rise var(--dur-enter) var(--ease-out) backwards;
 }
 .table__row--btn:hover {
   background: var(--hover);
+}
+
+/* The Asks history: a row of the approvals table whose text is one clipped line, and whose click
+   opens the ask itself under it. */
+.ask-row__head {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  cursor: pointer;
+}
+/* Each column keeps its own height and sits on the row's middle line: a wrapping date made the row
+   three lines tall, which read as a table whose cells were not lined up. */
+.ask-row__head > * {
+  flex: 0 0 auto;
+}
+.ask-row__when {
+  white-space: nowrap;
+}
+.ask-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-row__chev {
+  display: inline-flex;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.ask-row__chev.is-open {
+  transform: rotate(90deg);
+}
+.ask-row__body {
+  padding: 2px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ask-row__body > div > :first-child {
+  margin-top: 0;
+}
+.ask-row__body > div > :last-child {
+  margin-bottom: 0;
+}
+.ask-row__body .hint {
+  margin-top: 8px;
+}
+.ask-row:last-child .ask-row__head,
+.ask-row:last-child .ask-row__body {
+  border-bottom: 0;
+}
+
+/* Both history tables give the state pill and the date the same reserved width, centred, so the
+   columns line up from row to row instead of each row drifting by the width of its own label. */
+.history-row,
+.ask-row__head {
+  --history-state: 96px;
+  --history-when: 104px;
+}
+.history-row__state,
+.ask-row__state {
+  flex: 0 0 var(--history-state);
+  width: var(--history-state);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.history-row__when,
+.ask-row__when {
+  flex: 0 0 var(--history-when);
+  width: var(--history-when);
+  text-align: center;
+  white-space: nowrap;
 }
 .connector {
   padding: 0;
@@ -2889,6 +2968,148 @@ h3 {
   font-style: italic;
 }
 /* To read: someone else's question, with its options. */
+.history-questions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.history-question {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  /* The record's own wrapping: its ancestor, the approvals history row, sets white-space: nowrap so a
+     long tool name stays on one line, and that inherited value is why an answer never broke. Here the
+     answer is text again — it wraps at spaces, the longest word breaks, and whatever still cannot fit
+     is clipped at the padding edge instead of running over the card's frame. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+.history-question__title {
+  margin: 0 0 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.history-question__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+/* One option, as the card draws it: the number's square held at the top left, and the answer as
+   running text in the column beside it, so a long label wraps onto as many lines as it needs and the
+   agent's tag lands at the end of the last one. */
+.history-question__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* The answer's text: its own box so the wrap happens here, inside the card, and never outside it. */
+.history-question__body {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.history-question__label,
+.history-question__detail {
+  overflow-wrap: anywhere;
+}
+.history-question__detail {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.history-question__number {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.history-question__option.is-recommended {
+  border-color: var(--border-strong);
+}
+/* The tag of the option the agent pointed at: the record's own grey pill, never the working card's
+   accent one, and inline so it rides the end of the answer's last line rather than a column of its
+   own at the row's right edge. */
+.history-question__pill {
+  display: inline-block;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+/* The option the person took: the negative of every other row — filled with the text colour and
+   carrying the background's own text on it, so the answer is the one thing that reads as solid. */
+.history-question__option.is-answered {
+  border-color: transparent;
+  background: var(--text-2);
+  color: var(--bg);
+}
+.history-question__option.is-answered .history-question__number {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--bg) 45%, transparent);
+  color: var(--bg);
+}
+.history-question__option.is-answered .history-question__detail,
+.history-question__option.is-answered .history-question__pill {
+  border-color: color-mix(in srgb, var(--bg) 45%, transparent);
+  color: var(--bg);
+  opacity: 0.8;
+}
+/* A typed answer ("Something else", or a text question) is the answer too: its own row, marked so. */
+.history-question__option--said {
+  font-style: italic;
+}
+.history-question__option--none {
+  display: block;
+  border-style: dashed;
+  color: var(--text-3);
+}
+
+.ask-option__pill {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
 .ask-list {
   margin: 0;
   padding-left: 18px;

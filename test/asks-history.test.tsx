@@ -1,0 +1,194 @@
+// The Asks history: one row per finished ask, in the approvals' history-row treatment, with the
+// text on one line until the row is opened, then a bullet per question and per option.
+import { renderToStaticMarkup } from 'react-dom/server'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Agent, Person } from '../src/shared/types'
+import type { AskEntry } from '../src/shared/types'
+import type { State } from '../src/renderer/src/store'
+
+let fake: State
+vi.mock('../src/renderer/src/store', async (original) => {
+  const real = await original<typeof import('../src/renderer/src/store')>()
+  return { ...real, useStore: <T,>(select: (s: State) => T): T => select(fake) }
+})
+const { getState } = await import('../src/renderer/src/store')
+const { AskedRow } = await import('../src/renderer/src/components/Pages')
+const { parseQuestionsText } = await import('../src/shared/questions')
+
+const me: Person = { id: 'ana', name: 'Ana', role: 'owner', about: '' }
+const lia: Agent = { id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false }
+
+const asked = (over: Partial<AskEntry> = {}): AskEntry =>
+  ({
+    id: 'q1',
+    agentId: 'a1',
+    text: '1. Publico o post hoje? (Sim, publico | Não, espero)',
+    askedTo: 'ana',
+    requestedBy: 'ana',
+    state: 'answered',
+    deadlineAt: 0,
+    answeredBy: 'ana',
+    answeredAt: 1794422327652,
+    createdAt: 1794422099188,
+    ...over
+  }) as AskEntry
+
+const row = (open: boolean, q: AskEntry = asked()): string =>
+  renderToStaticMarkup(<AskedRow q={q} place="na sua DM com Lia" open={open} onToggle={() => {}} />)
+
+beforeEach(() => {
+  vi.stubGlobal('window', {})
+  fake = {
+    ...getState(),
+    ready: true,
+    people: [me],
+    agents: [lia],
+    you: 'ana',
+    conversations: [{ id: 'dm1', kind: 'dm', name: 'Lia', members: ['a1'] }] as State['conversations'],
+    inbox: { approvals: [], questions: [] }
+  } as State
+})
+
+describe('the text an ask was stored as', () => {
+  it('reads numbered lines with piped options back into a question and its options', () => {
+    const [q] = parseQuestionsText('1. Re-render the three pages? (Yes, re-render those three | Leave them)')
+    expect(q!.question).toBe('Re-render the three pages?')
+    expect(q!.options?.map((o) => o.label)).toEqual(['Yes, re-render those three', 'Leave them'])
+  })
+
+  it('keeps every question of a multi-line ask, in order', () => {
+    const qs = parseQuestionsText(
+      '1. Keep page 6 as it is? (Keep | Split: page 6 figures only, page 7 objects)\n2. Try the axe again? (Axe-first frame | Leave it, it reads fine)'
+    )
+    expect(qs.map((q) => q.question)).toEqual(['Keep page 6 as it is?', 'Try the axe again?'])
+    expect(qs[1]!.options?.map((o) => o.label)).toEqual(['Axe-first frame', 'Leave it, it reads fine'])
+  })
+
+  it('leaves a plain question as one free-text decision, brackets and all', () => {
+    const [q] = parseQuestionsText('Publico o post hoje (com a foto)?')
+    expect(q!.question).toBe('Publico o post hoje (com a foto)?')
+    expect(q!.options).toBeUndefined()
+  })
+})
+
+describe('a row of the asks history', () => {
+  it('uses the approvals history row, with the ask on one line while it is closed', () => {
+    const html = row(false)
+    expect(html).toContain('class="history-row history-row--approved')
+    expect(html).toContain('class="history-row__line"')
+    expect(html).toContain('class="history-row__what"')
+    expect(html).toContain('class="history-row__at"')
+    expect(html).toContain('class="history-row__state"')
+    // Options are what opening reveals: the folded row only carries the question.
+    expect(html).toContain('Publico o post hoje?')
+    expect(html).not.toContain('<ul')
+    expect(html).not.toContain('Sim, publico')
+    expect(html).toContain('aria-expanded="false"')
+  })
+
+  it('opens into a bullet per question and a bullet per option under it', () => {
+    const html = row(true, asked({ conversationId: 'dm1' }))
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('<ul class="history-row__more">')
+    // The expanded row, the questions, and the options nested under their question.
+    expect(html.match(/<ul/g)?.length).toBe(3)
+    const question = html.indexOf('Publico o post hoje?')
+    const firstOption = html.indexOf('Sim, publico')
+    expect(question).toBeGreaterThan(-1)
+    expect(html.indexOf('<ul', question)).toBeGreaterThan(question) // the options hang off the question
+    expect(firstOption).toBeGreaterThan(html.indexOf('<li', question))
+    expect(html).toContain('na sua DM com Lia')
+    expect(html).toContain('Ver na conversa')
+  })
+
+  it('draws opened questions as rounded widgets, with the record\'s own grey pill on the option the agent pointed at', () => {
+    const q = asked({
+      decisions: [{ question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] }],
+      recommended: [0]
+    } as never)
+    const html = row(true, q)
+    expect(html).toContain('history-question')
+    expect(html).toContain('history-question__number') 
+    expect(html).toContain('>1</span>')
+    // The pick is the word in the record's grey pill again, and it belongs to the answer's own text:
+    // the label, the note and the pill share one box so a long answer wraps with the colour on it.
+    expect(html).toContain('history-question__pill')
+    expect(html).toContain('>Recomendado<')
+    const body = html.slice(html.indexOf('history-question__body'), html.indexOf('</span></span>', html.indexOf('history-question__body')))
+    expect(body).toContain('Sim, publico')
+    expect(body).toContain('Recomendado')
+    // Never the star it replaced, and never the working card's accent pill.
+    expect(html).not.toContain('history-question__star')
+    expect(html).not.toContain('ask-option__pill')
+  })
+
+  it('keeps the whole answer of a long option inside one wrapping box', () => {
+    const q = asked({
+      decisions: [
+        {
+          question: 'Publico o post hoje?',
+          options: [{ label: 'Sim, publico', description: 'com a foto que a Lia revisou ontem à noite' }]
+        }
+      ],
+      recommended: [0]
+    } as never)
+    const html = row(true, q)
+    // Label, note and pill are children of the answer's box — not siblings of the number, which is
+    // what pinned the pill to the right of a one-line row instead of the end of a wrapped answer.
+    const start = html.indexOf('history-question__body')
+    const open = html.lastIndexOf('<span', start)
+    const body = html.slice(open, html.indexOf('</span></span>', start) + 14)
+    expect(body).toContain('history-question__label')
+    expect(body).toContain('history-question__detail')
+    expect(body).toContain('history-question__pill')
+    // One number square, before the box, out of it.
+    expect(html.slice(html.indexOf('history-question__number'), start)).not.toContain('history-question__pill')
+  })
+
+  it('keeps the questions the agent asked one after another on one row of widgets', () => {
+    const q = asked({
+      decisions: [
+        { question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] },
+        { question: 'Reviso o texto?', options: [{ label: 'Reviso agora' }, { label: 'Depois' }] }
+      ]
+    } as never)
+    const html = row(true, q)
+    // One container, two widgets: the row is what puts them side by side (styles.css, .history-questions).
+    expect(html.split('history-questions').length - 1).toBe(1)
+    expect(html.split('class="history-question"').length - 1).toBe(2)
+    const first = html.indexOf('Publico o post hoje?')
+    const second = html.indexOf('Reviso o texto?')
+    expect(first).toBeGreaterThan(-1)
+    expect(second).toBeGreaterThan(first)
+    expect(html.lastIndexOf('history-questions')).toBeLessThan(second)
+  })
+
+  it('marks the option the person took, and only that one, as the answered row', () => {
+    const q = asked({
+      decisions: [
+        { question: 'Publico o post hoje?', options: [{ label: 'Sim, publico' }, { label: 'Não, espero' }] },
+        { question: 'Quando reviso?', kind: 'text' }
+      ],
+      answers: [{ chosen: [1] }, { text: 'sexta de manhã' }]
+    } as never)
+    const html = row(true, q)
+    // The taken option and the typed answer, not the option left behind.
+    expect(html.split('is-answered').length - 1).toBe(2)
+    expect(html).toContain('sexta de manhã')
+    const taken = html.slice(html.indexOf('is-answered'), html.indexOf('history-question__option', html.indexOf('is-answered') + 12))
+    expect(taken).toContain('Não, espero')
+    expect(taken).not.toContain('Sim, publico')
+  })
+
+  it('says a decision was left unanswered rather than drawing an empty widget', () => {
+    const q = asked({ decisions: [{ question: 'Quando reviso?', kind: 'text' }], answers: [{ skipped: true }] } as never)
+    const html = row(true, q)
+    expect(html).toContain('history-question__option--none')
+    expect(html).toContain('sem resposta')
+  })
+
+  it('says how it ended: by you, by someone else, or with no answer at all', () => {
+    expect(row(false)).toContain('por você')
+    expect(row(false, asked({ answeredBy: undefined, state: 'closed' }))).toContain('sem resposta')
+  })
+})

@@ -155,3 +155,33 @@ function numberedQuestions(questions: Decision[], separator: string): string {
   if (questions.length === 1 && !questions[0]!.options) return questions[0]!.question
   return questions.map((q, i) => `${i + 1}. ${q.question}${q.options ? ` (${q.options.map((o) => o.label).join(' | ')})` : ''}`).join(separator)
 }
+
+// The inverse of numberedQuestions: the text an ask was stored as, read back as decisions, so a
+// history can show one question per line with its options under it instead of one numbered block.
+// Anything that is not that shape (a plain question, a note an older build wrote) comes back as a
+// single free-text decision rather than being dropped or truncated.
+export function parseQuestionsText(text: string): Decision[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const asked = lines
+    .map((line): Decision => {
+      const bare = line.replace(/^\d+[.)]\s*/, '')
+      // "Question (a | b)": the options are the last parenthesised run, so a question that itself
+      // has brackets keeps them.
+      const open = bare.lastIndexOf(' (')
+      if (open > 0 && bare.endsWith(')')) {
+        const question = bare.slice(0, open).trim()
+        const options = bare
+          .slice(open + 2, -1)
+          .split('|')
+          .map((o) => o.trim())
+          .filter(Boolean)
+        if (question && options.length > 0) return { question, kind: 'single', options: options.map((label) => ({ label })) }
+      }
+      return { question: bare, kind: 'text' }
+    })
+    .filter((q) => q.question.length > 0)
+  return asked.length > 0 ? asked : [{ question: text.trim(), kind: 'text' }]
+}
