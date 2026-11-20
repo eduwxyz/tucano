@@ -50,6 +50,10 @@ contextBridge.exposeInMainWorld('tucano', {
   },
   // Linux with Omarchy: the desktop's theme, and whether the window follows it (src/main/omarchy.ts).
   omarchy: {
+    // Before the page's first frame: the window opens in the theme's colours, not Tucano's for a moment.
+    initial: ((): unknown => {
+      try { return ipcRenderer.sendSync('omarchy:initial') } catch { return null }
+    })(),
     state: (): Promise<unknown> => ipcRenderer.invoke('omarchy:state'),
     set: (on: boolean): Promise<unknown> => ipcRenderer.invoke('omarchy:set', on),
     onChanged: (cb: (state: unknown) => void): (() => void) => {

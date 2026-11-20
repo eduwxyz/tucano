@@ -150,7 +150,7 @@ export function WorkspaceMenu(): ReactNode {
           <button className="menu__item ws-menu__part" role="menuitemcheckbox" aria-checked={omarchy.on} onClick={() => followOmarchy(!omarchy.on)}>
             <span className={`ws-menu__box ${omarchy.on ? 'is-on' : ''}`} aria-hidden="true">{omarchy.on && <Icon name="check" size={11} />}</span>
             <span className="grow ws-menu__part-text">
-              <span>{L('Cores do Omarchy', 'Omarchy colours')}</span>
+              <span>{L('Cores do Omarchy', 'Omarchy colors')}</span>
               <span className="ws-menu__sub">{L('Segue o tema do desktop', 'Follows the desktop theme')}</span>
             </span>
           </button>

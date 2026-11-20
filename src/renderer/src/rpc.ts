@@ -40,6 +40,7 @@ declare global {
       checkUpdates: () => void
       omarchy?: {
         // desktop only: the Omarchy desktop's theme (null off Omarchy) and whether the window follows it
+        initial: OmarchyState | null // as main had it when the page loaded
         state: () => Promise<OmarchyState | null>
         set: (on: boolean) => Promise<OmarchyState | null>
         onChanged: (cb: (state: OmarchyState | null) => void) => () => void

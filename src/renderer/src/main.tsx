@@ -4,10 +4,12 @@ import type { ReactNode } from 'react'
 import { App } from './App'
 import { ServerBar } from './components/Servers'
 import { start, useStore } from './store'
+import { paintOmarchyEarly } from './omarchy'
 import '@fontsource-variable/inter/opsz.css'
 import '@fontsource-variable/nunito/wght.css' // the first run's headings
 import './styles.css'
 
+paintOmarchyEarly()
 void start()
 
 // Switching the language draws everything again, in the new one.

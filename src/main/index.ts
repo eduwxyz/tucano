@@ -700,6 +700,10 @@ function publishOmarchy(): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('omarchy', omarchyState())
 }
 ipcMain.handle('omarchy:state', (e) => (fromApp(e) ? omarchyState() : null))
+// Asked once by the preload, before the page draws, so it starts in the theme's colours.
+ipcMain.on('omarchy:initial', (e) => {
+  e.returnValue = fromApp(e) ? omarchyState() : null
+})
 ipcMain.handle('omarchy:set', (e, on: unknown) => {
   if (!fromApp(e) || typeof on !== 'boolean' || !omarchy) return null
   registry.setOmarchy(on)

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { omarchyPalette, type OmarchyPalette } from '../shared/omarchy'
 
 // Where Omarchy keeps the theme it's showing: current/theme/colors.toml and current/theme.name.
-// Omarchy 4 moved it into the state folder; the config one is where older installs have it.
+// Omarchy moved it into the state folder (its migrations relink what pointed at the config
+// one), and the config folder is where an install from before that still has it.
 export function omarchyCurrentDirs(home = homedir()): string[] {
   return [join(home, '.local', 'state', 'omarchy', 'current'), join(home, '.config', 'omarchy', 'current')]
 }

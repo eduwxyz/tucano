@@ -39,7 +39,8 @@ it('keeps a light theme light, and its text and buttons readable', () => {
     const p = omarchyPalette(fixture(name))!
     expect(p.mode).toBe(name === 'tokyo-night' ? 'dark' : 'light')
     expect(contrast(p.vars['--text']!, p.vars['--panel']!), name).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(p.vars['--text-2']!, p.vars['--panel']!), name).toBeGreaterThanOrEqual(3)
+    expect(contrast(p.vars['--text-2']!, p.vars['--panel']!), name).toBeGreaterThanOrEqual(4.5)
+    for (const token of ['--text-3', '--accent', '--ok', '--warn', '--danger'] as const) expect(contrast(p.vars[token]!, p.vars['--panel']!), `${name} ${token}`).toBeGreaterThanOrEqual(3)
     expect(contrast(p.vars['--primary-text']!, p.vars['--primary']!), name).toBeGreaterThanOrEqual(4.5)
     expect(contrast(p.vars['--accent-text']!, p.vars['--accent']!), name).toBeGreaterThanOrEqual(4.5)
   }

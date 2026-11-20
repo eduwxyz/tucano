@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react'
 import type { OmarchyState } from '../../shared/omarchy'
 
-// The Omarchy desktop's theme as main last told it (src/main/omarchy.ts): null off Omarchy,
-// in a browser, and until main answers.
-let state: OmarchyState | null = null
+// The Omarchy desktop's theme as main last told it (src/main/omarchy.ts): null off Omarchy
+// and in a browser.
+let state: OmarchyState | null = (typeof window === 'undefined' ? undefined : window.tucano?.omarchy?.initial) ?? null
 const listeners = new Set<() => void>()
 const publish = (next: OmarchyState | null): void => {
   state = next
@@ -35,6 +35,12 @@ export function followOmarchy(on: boolean): void {
 // The tokens go on the page's own style, over both of styles.css's blocks, and data-theme
 // says which side they are so the rules written per side (color-scheme, images) agree.
 let applied: string[] = []
+// Before React's first frame: the tokens only, since the light/dark side is already Electron's
+// (main sets it to the theme's) and the person's own choice isn't loaded yet.
+export function paintOmarchyEarly(): void {
+  if (state?.on) paintOmarchy(state, 'system')
+}
+
 export function paintOmarchy(theme: OmarchyState | null, fallback: 'system' | 'light' | 'dark'): void {
   const root = document.documentElement
   for (const key of applied) root.style.removeProperty(key)

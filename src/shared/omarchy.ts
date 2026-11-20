@@ -68,6 +68,16 @@ export const contrast = (a: string, b: string): number => {
 const readable = (bg: string, ...candidates: string[]): string =>
   candidates.find((c) => contrast(bg, c) >= 4.5) ?? candidates.reduce((best, c) => (contrast(bg, c) > contrast(bg, best) ? c : best))
 
+// `color`, moved toward `ink` until it reads on `bg` at `min`: a theme's yellow is a fine
+// terminal colour on a light background and unreadable as a warning's text.
+const legible = (color: string, ink: string, bg: string, min: number): string => {
+  for (let step = 0; step <= 20; step++) {
+    const c = mix(color, ink, step / 20)
+    if (contrast(c, bg) >= min) return c
+  }
+  return ink
+}
+
 // The Select component's caret is an SVG in a url(), so its stroke is written into it.
 const caret = (color: string): string =>
   `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23${color.slice(1)}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`
@@ -82,13 +92,16 @@ export function omarchyPalette(text: string): OmarchyPalette | null {
   if (!bg || !fg) return null
   const mode: OmarchyMode = raw['mode'] === 'light' || raw['mode'] === 'dark' ? raw['mode'] : luminance(bg) < luminance(fg) ? 'dark' : 'light'
   const dark = mode === 'dark'
-  const accent = color('accent', 'blue', 'color4') ?? fg
-  const ok = color('green', 'color2') ?? (dark ? '#4bd08a' : '#1f9d55')
-  const warn = color('yellow', 'color3') ?? (dark ? '#f0b23e' : '#c27c0e')
-  const danger = color('red', 'color1') ?? (dark ? '#ff6b6b' : '#d23b3b')
+  // Text and status colours used as text: at least what Tucano's own reach on a panel
+  // (secondary text AA, hints and status 3:1).
+  const accent = legible(color('accent', 'blue', 'color4') ?? fg, fg, bg, 3)
+  const ok = legible(color('green', 'color2') ?? (dark ? '#4bd08a' : '#1f9d55'), fg, bg, 3)
+  const warn = legible(color('yellow', 'color3') ?? (dark ? '#f0b23e' : '#c27c0e'), fg, bg, 3)
+  const danger = legible(color('red', 'color1') ?? (dark ? '#ff6b6b' : '#d23b3b'), fg, bg, 3)
   // The canvas around the panels is a step darker than them, in both modes, as in Tucano's own.
   const canvas = color('dark_background') ?? mix(bg, '#000000', dark ? 0.25 : 0.04)
-  const text3 = mix(fg, bg, 0.45)
+  const text2 = legible(mix(fg, bg, 0.28), fg, bg, 4.5)
+  const text3 = legible(mix(fg, bg, 0.45), fg, bg, 3)
   const shadow = dark ? '0, 0, 0' : rgb(mix(fg, '#000000', 0.5)).join(', ')
   return {
     mode,
@@ -102,7 +115,7 @@ export function omarchyPalette(text: string): OmarchyPalette | null {
       '--border': mix(bg, fg, dark ? 0.12 : 0.1),
       '--border-strong': mix(bg, fg, dark ? 0.2 : 0.17),
       '--text': fg,
-      '--text-2': mix(fg, bg, 0.28),
+      '--text-2': text2,
       '--text-3': text3,
       '--select-caret': caret(text3),
       '--accent': accent,
