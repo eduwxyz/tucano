@@ -2,6 +2,7 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { voiceRefusal } from '../shared/voice'
+import { CLIENT_METADATA_PATH } from '../shared/oauth-client'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
@@ -846,7 +847,9 @@ const connectors = new ConnectorManager({
   // A provider that takes only a loopback address back (Canva's): on that server, the address the person pastes.
   localCallbackUrl: () => gateway.url('/oauth/callback'),
   // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
-  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
+  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`),
+  // Served by src/server at that address, for services that read an app's description instead of registering it.
+  clientMetadataUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}${CLIENT_METADATA_PATH}` : undefined)
 })
 const oauthCallback = async (url: URL): Promise<string> => {
   const code = url.searchParams.get('code')

@@ -9,8 +9,8 @@ Um conector é um servidor MCP: ele dá aos agentes ferramentas de um serviço (
 3. **Conectar**: o login abre no navegador. O acesso fica neste computador. Alguns perguntam antes o endereço da sua instância ou um token (GitHub, Dynatrace, Snowflake, Metabase), e o Azure DevOps e o AWS CloudWatch rodam o servidor oficial no seu computador (precisam do Node.js ou do uv).
 4. Dê acesso aos agentes: na página de cada um, **Ferramentas** › **Ferramentas e acesso**.
 
-## Google e Slack
-Gmail, Calendar, Drive, Docs e Sheets pedem um app seu no Google Cloud, criado uma vez: veja **google**. O Slack também pede um app seu, interno do seu workspace: veja **slack**.
+## Com passos próprios
+Gmail, Calendar, Drive, Docs e Sheets pedem um app seu no Google Cloud, criado uma vez: veja **google**. O Slack pede um app seu, interno do seu workspace: veja **slack**. ElevenLabs: veja **elevenlabs**.
 
 ## Composio
 A Composio liga centenas de apps sem configurar nada, mas seus dados passam por ela, e o acesso às suas contas fica com ela: veja **composio**.

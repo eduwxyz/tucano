@@ -13,6 +13,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Corrigido:** numa **wiki** em inglês, uma página nova não abre mais com uma linha em negrito "tipo: … criada: … atualizada: …". As propriedades da página ficam no idioma do Tucano (`type`, `created`, `updated` em inglês), e um bloco de propriedades que o curador escreva no texto vira propriedade, não texto.
 > - **Corrigido:** os **arquivos** que os agentes mandam podem ser baixados, também num servidor (Tucano Pro), e salvos com **Salvar…** no desktop.
 
+- **ElevenLabs in the connector store.** Agents get speech, transcription, music and the account's voice agents through ElevenLabs' official server. Its line in the store says that it spends credits; the guide has its own page, **elevenlabs**, with the rest: an audio link lasts about 2 hours, and accounts in other regions use their own address.
+
+- **A Tucano on a server signs in to services that take no app registration.** Some authorization servers (ElevenLabs') don't let an app register itself. Instead they read its description from an https address, a "client ID metadata document". A server with an https `TUCANO_URL` now serves one at `/oauth/client.json`, holding only its name and where sign-ins come back, and signs in with it. A server that offers both ways now gets this one when it registers again. The desktop app has no public address, so it says plainly that such a service connects only from a server, instead of the generic registration error.
+
 ### Fixed
 
 - **A reply's steps show one "Thinking" row, not two.** Engines run tool calls side by side (Pi, Codex and Claude Code all do). The second call to start closed the first one's row as "Thought", hiding the command it was running, and each call added its own "Thinking" row when it ended, so two rows spun and stopped together. A tool starting now closes only the "Thinking" row, and the row comes back once the last call running beside it ends.

@@ -43,6 +43,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Conversations, channels and threads',
     summary: 'Channels, direct messages, threads, mentions, who answers, passing the turn between agents, stop and try again, images and dictation.'
   },
+  elevenlabs: {
+    title: 'ElevenLabs',
+    summary: 'Connecting ElevenLabs: what it gives the agents, why it connects only on a Tucano on a server, the credits it spends and accounts in other regions.'
+  },
   google: {
     title: 'Google: Gmail, Calendar, Drive, Docs and Sheets',
     summary: 'Connecting the Google services: the app the person creates in Google Cloud once, the 6 steps (with the Developer Preview enrolment), the unverified-app warning and what to check when Google refuses.'
