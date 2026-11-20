@@ -1,6 +1,7 @@
 import { L } from '../../shared/lang'
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
+import type { OmarchyState } from '../../shared/omarchy'
 import type { WorkspaceList, WorkspaceParts } from '../../shared/workspaces'
 
 // Seu iPhone: on, where the phone finds this computer, and how many are on the line now.
@@ -37,6 +38,12 @@ declare global {
       updateState: () => Promise<UpdateState>
       onUpdate: (cb: (state: UpdateState) => void) => void
       checkUpdates: () => void
+      omarchy?: {
+        // desktop only: the Omarchy desktop's theme (null off Omarchy) and whether the window follows it
+        state: () => Promise<OmarchyState | null>
+        set: (on: boolean) => Promise<OmarchyState | null>
+        onChanged: (cb: (state: OmarchyState | null) => void) => () => void
+      }
       installUpdate: () => void
       phone?: {
         // desktop only: the iPhone app over the home Wi-Fi (src/main/home-phone.ts)

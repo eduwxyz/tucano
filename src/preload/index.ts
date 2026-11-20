@@ -48,6 +48,16 @@ contextBridge.exposeInMainWorld('tucano', {
   onUpdate: (cb: (state: unknown) => void): void => {
     ipcRenderer.on('update', (_e, state: unknown) => cb(state))
   },
+  // Linux with Omarchy: the desktop's theme, and whether the window follows it (src/main/omarchy.ts).
+  omarchy: {
+    state: (): Promise<unknown> => ipcRenderer.invoke('omarchy:state'),
+    set: (on: boolean): Promise<unknown> => ipcRenderer.invoke('omarchy:set', on),
+    onChanged: (cb: (state: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on('omarchy', listener)
+      return () => ipcRenderer.removeListener('omarchy', listener)
+    }
+  },
   checkUpdates: (): void => ipcRenderer.send('update:check'),
   installUpdate: (): void => ipcRenderer.send('update:install'),
   // Seu iPhone: the app on the phone, over the home Wi-Fi (src/main/home-phone.ts).

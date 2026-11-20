@@ -21,6 +21,8 @@ import { Updates } from './updates'
 import { Workspaces } from './workspaces'
 import { backgroundOptions } from './background-qa'
 import { homePhone } from './home-phone'
+import { readOmarchy, watchOmarchy, type OmarchyTheme } from './omarchy'
+import type { OmarchyState } from '../shared/omarchy'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
 import { proxyFromPac } from '../core/network'
@@ -309,7 +311,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     // and stale workspace snapshots must never overwrite the app preference.
     if (msg.initial && (!workspace.isDefault || registry.theme() !== undefined)) return
     registry.setTheme(msg.theme)
-    if (nativeTheme.themeSource !== msg.theme) nativeTheme.themeSource = msg.theme
+    applyTheme()
     for (const core of cores.values()) if (core.summary.status !== 'failed') core.child.postMessage({ type: 'workspace-theme', theme: msg.theme })
   } else if (msg.type === 'secret') {
     try {
@@ -675,6 +677,35 @@ ipcMain.handle('window:capture', async (e) => {
   }
 })
 ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
+
+// Omarchy: the window may follow the desktop's colours (src/main/omarchy.ts). It's this
+// computer's choice, kept in workspaces.json beside light/dark, so every workspace shows it
+// and a server's page, which is someone else's computer, never does.
+let omarchy: OmarchyTheme | null = null
+const followedOmarchy = (): OmarchyTheme | null => (omarchy && registry.omarchy() ? omarchy : null)
+const omarchyState = (): OmarchyState | null => (omarchy ? { ...omarchy, on: registry.omarchy() } : null)
+// What the window shows before the page draws, so a dark desktop doesn't flash cream.
+function windowBackground(): string {
+  return followedOmarchy()?.background ?? (nativeTheme.shouldUseDarkColors ? '#121110' : '#f3f0ea')
+}
+// Electron's light/dark (scrollbars, menus, the page's prefers-color-scheme): the Omarchy
+// theme's own side while following it, the person's choice otherwise.
+function applyTheme(): void {
+  const source = followedOmarchy()?.mode ?? registry.theme() ?? 'system'
+  if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowBackground())
+}
+function publishOmarchy(): void {
+  applyTheme()
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('omarchy', omarchyState())
+}
+ipcMain.handle('omarchy:state', (e) => (fromApp(e) ? omarchyState() : null))
+ipcMain.handle('omarchy:set', (e, on: unknown) => {
+  if (!fromApp(e) || typeof on !== 'boolean' || !omarchy) return null
+  registry.setOmarchy(on)
+  publishOmarchy()
+  return omarchyState()
+})
 ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
 ipcMain.on('update:install', (e) => {
   if (!fromApp(e)) return
@@ -748,7 +779,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: process.platform !== 'darwin',
     ...(process.platform === 'linux' ? { icon: resource('icon.png') } : {}),
     trafficLightPosition: { x: 16, y: 18 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121110' : '#f3f0ea',
+    backgroundColor: windowBackground(),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
       sandbox: true,
@@ -969,7 +1000,12 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   // install; a folder with a Tucano in it is one from before the file existed.
   readInstall(dataDir(), app.getVersion(), !existsSync(join(dataDir(), 'tucano.db')))
   registry = new Workspaces(dataDir(), launch.ports)
-  nativeTheme.themeSource = registry.theme() ?? 'system'
+  omarchy = readOmarchy()
+  applyTheme()
+  watchOmarchy((theme) => {
+    omarchy = theme
+    publishOmarchy()
+  })
   systemProxyRead = readSystemProxy()
   void systemProxyRead.then(startWorkspaces)
   phone = homePhone({

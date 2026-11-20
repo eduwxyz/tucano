@@ -7,6 +7,7 @@ import { useServers } from './Servers'
 import { useSidebarParts } from './Missions'
 import { openFeedback } from './Feedback'
 import { topLabel, setHidden, useAvailable, useHidden } from './sidebar-top'
+import { followOmarchy, useOmarchy } from '../omarchy'
 
 export function useWorkspaceList(): { list: WorkspaceList | null; error: string } {
   const [list, setList] = useState<WorkspaceList | null>(null)
@@ -42,6 +43,7 @@ export function WorkspaceMenu(): ReactNode {
   const platform = useStore((s) => s.platform)
   const paused = useStore((s) => !!s.settings.paused)
   const theme = useStore((s) => s.settings.theme)
+  const omarchy = useOmarchy()
   const admin = useStore(amAdmin)
   const missionsHidden = useStore((s) => amOwner(s) && !!s.settings.onboarding?.done && !!s.settings.onboarding.checklistHidden)
   // What the top of the sidebar has, each with whether it's in it: unticking takes it out, ticking brings it back.
@@ -137,10 +139,22 @@ export function WorkspaceMenu(): ReactNode {
             <span className="grow">{paused ? L('Retomar o time', 'Resume the team') : L('Pausar o time', 'Pause the team')}</span>
           </button>
         )}
-        <button className="menu__item" role="menuitem" onClick={pick(() => updateSettings({ theme: isDark ? 'light' : 'dark' }))}>
-          <Icon name={isDark ? 'sun' : 'moon'} size={15} />
-          <span className="grow">{isDark ? L('Tema claro', 'Light theme') : L('Tema escuro', 'Dark theme')}</span>
-        </button>
+        {/* Following Omarchy, light or dark is the desktop theme's: the switch would do nothing. */}
+        {!omarchy?.on && (
+          <button className="menu__item" role="menuitem" onClick={pick(() => updateSettings({ theme: isDark ? 'light' : 'dark' }))}>
+            <Icon name={isDark ? 'sun' : 'moon'} size={15} />
+            <span className="grow">{isDark ? L('Tema claro', 'Light theme') : L('Tema escuro', 'Dark theme')}</span>
+          </button>
+        )}
+        {omarchy && (
+          <button className="menu__item ws-menu__part" role="menuitemcheckbox" aria-checked={omarchy.on} onClick={() => followOmarchy(!omarchy.on)}>
+            <span className={`ws-menu__box ${omarchy.on ? 'is-on' : ''}`} aria-hidden="true">{omarchy.on && <Icon name="check" size={11} />}</span>
+            <span className="grow ws-menu__part-text">
+              <span>{L('Cores do Omarchy', 'Omarchy colours')}</span>
+              <span className="ws-menu__sub">{L('Segue o tema do desktop', 'Follows the desktop theme')}</span>
+            </span>
+          </button>
+        )}
         {missionsHidden && (
           <button className="menu__item" role="menuitem" onClick={pick(() => updateSettings({ onboarding: { ...getState().settings.onboarding, done: true, checklistHidden: false } }))}>
             <Icon name="spark" size={15} />
