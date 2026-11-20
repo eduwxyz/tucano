@@ -1,5 +1,6 @@
 // Who may do what in Documentos: the pure rules (shared/doc-access.ts), the small helpers of shared/docs.ts,
 // and the name and path guards of core/docs-fs.ts.
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { agentFolderIds, agentMay, agentMayFor, approvalNeeded, cleanFolderAccess, effectiveAccess, mayApprove, personMay, visibleFolderIds, type Who } from '../src/shared/doc-access'
 import { acceptsDoc, DOC_EXTENSIONS, docKind, folderPath, folderPathWithin, noAccess, parseActor, type DocFolder, type FolderAccess } from '../src/shared/docs'
@@ -354,12 +355,14 @@ describe('names and paths on disk', () => {
   })
 
   it('refuses a path that leads out of the root, or is the root itself', () => {
-    expect(safeJoin('/data/docs', 'Financeiro', 'a.md')).toBe('/data/docs/Financeiro/a.md')
-    expect(() => safeJoin('/data/docs', '..', 'x.md')).toThrow()
-    expect(() => safeJoin('/data/docs', 'a', '..', '..', 'x')).toThrow()
-    expect(() => safeJoin('/data/docs')).toThrow()
-    expect(isInside('/data/docs', '/data/docs-other/x')).toBe(false)
-    expect(isInside('/data/docs', '/data/docs/a/b')).toBe(true)
+    // Built with the system's own separators: on Windows the root is D:\data\docs, not /data/docs.
+    const root = resolve('/data/docs')
+    expect(safeJoin(root, 'Financeiro', 'a.md')).toBe(join(root, 'Financeiro', 'a.md'))
+    expect(() => safeJoin(root, '..', 'x.md')).toThrow()
+    expect(() => safeJoin(root, 'a', '..', '..', 'x')).toThrow()
+    expect(() => safeJoin(root)).toThrow()
+    expect(isInside(root, resolve('/data/docs-other/x'))).toBe(false)
+    expect(isInside(root, join(root, 'a', 'b'))).toBe(true)
   })
 
   it('finds a folder by what someone typed: no case, no accents', () => {
