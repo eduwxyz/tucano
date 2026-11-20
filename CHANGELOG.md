@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **A routine that's off keeps its place in the week.** Turning a routine off made it leave the timetable, so the week stopped showing when it would run and there was nothing there to turn back on. It now stays at its times, dimmed and in monochrome, and its own panel still turns it back on; only a routine that was deleted leaves the timetable.
+
 ## [0.2.43] - 2026-11-19
 
 > **Em português:**
