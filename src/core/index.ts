@@ -1919,27 +1919,31 @@ const api: Handlers = {
 
   setAgentModels: ({ agentIds, modelId, effort }, ctx) => {
     const value = modelId.trim()
-    const model = modelInfo(value)
-    if (!model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
     // The thinking level travels with the model when one is sent ("high", or null for the default).
     const level = effort === undefined || effort === null || effort === 'default' ? undefined : effort
+    // No model with a level is a bulk change of the level alone: every agent keeps its own model and
+    // only its level moves, which is what picking a level and no model means.
+    const only = value === ''
+    if (only && level === undefined) throw new Error(L('Escolha um modelo ou um esforço.', 'Choose a model or a thinking level.'))
     if (level !== undefined && !isEffort(level)) throw new Error(L('Escolha um esforço válido.', 'Choose a valid effort.'))
+    const model = value ? modelInfo(value) : undefined
+    if (!only && !model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
     const agents = [...new Set(agentIds)].map((id) => {
       const agent = db.agent(id)
       if (!agent) throw new Error(L('Um dos agentes não existe mais. Atualize a lista.', 'An agent no longer exists. Refresh the list.'))
       return agent
     })
-    const changes = (a: Agent): boolean => a.modelId !== value || (level !== undefined && a.effort !== level)
+    const changes = (a: Agent): boolean => (!only && a.modelId !== value) || (level !== undefined && a.effort !== level)
     const changed = agents.filter(changes).map((a): Agent => ({
       ...a,
-      modelId: value,
+      ...(only ? {} : { modelId: value }),
       ...(level !== undefined ? { effort: level } : {}),
-      ...(modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
+      ...(model && modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
     }))
     db.tx(() => {
       for (const agent of changed) {
         db.saveAgent(agent)
-        record(ctx, 'agent.updated', agent.id, { name: agent.name, modelId: value, ...(level !== undefined ? { effort: level } : {}) })
+        record(ctx, 'agent.updated', agent.id, { name: agent.name, ...(only ? {} : { modelId: value }), ...(level !== undefined ? { effort: level } : {}) })
       }
     })
     for (const agent of changed) emit({ type: 'agent', agent: db.agent(agent.id)! })

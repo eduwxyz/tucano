@@ -70,6 +70,19 @@ describe('setting an agent model carries its thinking level', () => {
     expect(await owner.call('setAgentModels', { agentIds: ['level-b'], modelId: 'sonnet', effort: 'default' })).toBe(1)
     expect(db.agent('level-b')).toMatchObject({ modelId: 'sonnet', effort: 'medium' })
   })
+  it('moves only the level when no model is sent, each agent keeping its own', async () => {
+    db.saveAgent(agent('level-e', { modelId: 'sonnet', effort: 'high' }))
+    db.saveAgent(agent('level-f', { modelId: 'opus', effort: 'low' }))
+    // The bulk change with a level and no model: the two agents run different models and both take the level.
+    expect(await owner.call('setAgentModels', { agentIds: ['level-e', 'level-f'], modelId: '', effort: 'xhigh' })).toBe(2)
+    expect(db.agent('level-e')).toMatchObject({ modelId: 'sonnet', effort: 'xhigh' })
+    expect(db.agent('level-f')).toMatchObject({ modelId: 'opus', effort: 'xhigh' })
+    expect(await owner.call('setAgentModels', { agentIds: ['level-e', 'level-f'], modelId: '', effort: 'xhigh' })).toBe(0)
+    // Neither a model nor a level is nothing to do, and a level off the list is refused before any agent moves.
+    await expect(owner.call('setAgentModels', { agentIds: ['level-e'], modelId: '' })).rejects.toThrow(/model/i)
+    await expect(owner.call('setAgentModels', { agentIds: ['level-e'], modelId: '', effort: 'max' })).rejects.toThrow(/esfor|effort/i)
+    expect(db.agent('level-e')).toMatchObject({ modelId: 'sonnet', effort: 'xhigh' })
+  })
   it('refuses a level it does not know, before touching any agent', async () => {
     db.saveAgent(agent('level-c'))
     await expect(owner.call('setAgentModels', { agentIds: ['level-c'], modelId: 'opus', effort: 'max' })).rejects.toThrow(/esfor/i)

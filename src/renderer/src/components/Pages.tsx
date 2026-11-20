@@ -3306,7 +3306,7 @@ export function SettingsPage(): ReactNode {
               className="effort-select--inline"
               label={L('Esforço de raciocínio', 'Reasoning effort')}
               value={settings.routerEffort ?? 'low'}
-              onChange={(routerEffort) => updateSettings({ routerEffort })}
+              onChange={(routerEffort) => { if (routerEffort) updateSettings({ routerEffort }) }}
             />
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
             {settings.routerModel === 'jev' && work && <OutsideGateway what={L('cada mensagem sem @menção vai pra TypeSafe escolher quem responde.', 'every message without an @mention goes to TypeSafe to pick who replies.')} />}
@@ -3381,7 +3381,7 @@ export function SettingsPage(): ReactNode {
                   className="effort-select--inline"
                   label={L('Esforço de raciocínio', 'Reasoning effort')}
                   value={settings.memoryEffort ?? 'low'}
-                  onChange={(memoryEffort) => updateSettings({ memoryEffort })}
+                  onChange={(memoryEffort) => { if (memoryEffort) updateSettings({ memoryEffort }) }}
                 />
               </div>
               <Field label={L('O que ele aprende sobre você', 'What it learns about you')} hint={L('Só conta o que você disse, nunca o que um agente supôs.', 'Only what you said counts, never what an agent assumed.')}>
