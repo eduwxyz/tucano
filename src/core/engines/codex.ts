@@ -367,11 +367,11 @@ export function codexEngine(
     clean(workDir, accountDirs = []) {
       app.clean(bin(), workDir, [home, ...accountDirs].map((h) => codexHome(h)), (h) => ({ key: JSON.stringify(['clean', h]), home: h, args: codexAppArgs(), env: codexEnv(join(h, '..'), bin()), cwd: join(h, '..') }))
     },
-    // A short-lived app-server of the usual login, asked once: the turns' own processes may be busy or gone.
-    async planUsage() {
+    // A short-lived app-server of a login (the usual one without `account`), asked once: the turns' own processes may be busy or gone.
+    async planUsage(account) {
       const path = bin()
       if (!path || !app.supports(path)) return undefined
-      const { launch: l } = await launch({})
+      const { launch: l } = await launch({ account })
       const server = new AppServer({ bin: path, args: l.args, cwd: l.cwd, env: l.env })
       try {
         await server.ready
