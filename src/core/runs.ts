@@ -639,11 +639,11 @@ export class Runner {
     // What this message answers, with the quote it showed. Checked here, before anything is saved: a
     // reply to a message that is gone, elsewhere, still being written, or that this writer never saw
     // is refused.
-    const { reply } = opts
-    const original = reply ? db.message(reply.messageId) : undefined
-    if (reply && (!original || original.conversationId !== conv.id || !new People(db).visibleAt(writer, original) || (original.author.kind !== 'person' && original.author.kind !== 'agent') || original.run?.status === 'working'))
+    const { reply: answering } = opts
+    const original = answering ? db.message(answering.messageId) : undefined
+    if (answering && (!original || original.conversationId !== conv.id || !new People(db).visibleAt(writer, original) || (original.author.kind !== 'person' && original.author.kind !== 'agent') || original.run?.status === 'working'))
       throw new Error(L('Escolha uma mensagem desta conversa para responder.', 'Choose a message in this conversation to reply to.'))
-    if (reply?.quote !== undefined && (typeof reply.quote !== 'string' || !reply.quote.trim() || reply.quote.length > MAX_QUOTE_CHARS))
+    if (answering?.quote !== undefined && (typeof answering.quote !== 'string' || !answering.quote.trim() || answering.quote.length > MAX_QUOTE_CHARS))
       throw new Error(L('Selecione um trecho de até 32.000 caracteres para citar.', 'Select an excerpt of up to 32,000 characters to quote.'))
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
@@ -689,9 +689,9 @@ export class Runner {
     if (original) {
       mine.reply = {
         messageId: original.id,
-        text: reply?.quote ?? original.text,
+        text: answering?.quote ?? original.text,
         at: original.at,
-        ...(reply?.quote !== undefined ? { excerpt: true } : {}),
+        ...(answering?.quote !== undefined ? { excerpt: true } : {}),
         author: this.quotedAuthor(original),
         ...(original.author.kind === 'agent' ? { agentId: original.author.id } : {})
       }
