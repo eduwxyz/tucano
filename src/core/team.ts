@@ -1,9 +1,7 @@
-// A team as a Markdown file (spec §21): the agents, skills, channels and
-// routines, readable by a person and importable on another Mac. No credentials,
-// no memories, no conversations; grants and triggers point at connectors by
-// name, and imported routines come in turned off.
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+// The team's file from before teams had ids (spec §21): team-files.ts still reads it, and
+// exportTeam/importTeam still write and read it whole. And the daily copies of the database.
 import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { L, locale } from '../shared/lang'
 import { overlongSkillNote } from '../shared/skills'
@@ -17,7 +15,7 @@ const OLD_FENCE = 'agent-desk-team' // teams exported before the rename
 const KEEP_BACKUPS = 7
 const DAY = 86_400_000
 
-interface TeamFile {
+export interface TeamFile {
   version: 1
   agents: {
     handle: string
@@ -41,6 +39,20 @@ interface TeamFile {
   skills: { name: string; description: string; body: string; agents: string[] }[] // agents by handle
   channels: { name: string; topic?: string; members: string[] }[]
   routines: { name: string; agent: string; where: string; prompt: string; schedule: Schedule; trigger?: { kind: 'poll'; connector: string; tool: string; args: Record<string, unknown>; everyMinutes: number } | { kind: 'webhook' } }[]
+}
+
+// The JSON block of a team file (this name, or the one from before the rename); throws when there's none.
+export function parseTeamFile(text: string): TeamFile {
+  const m = new RegExp('```json (?:' + FENCE + '|' + OLD_FENCE + ')\\n([\\s\\S]*?)\\n```').exec(text)
+  if (!m) throw new Error(L('Esse arquivo não é um time exportado pelo Tucano.', "That file isn't a team exported by Tucano."))
+  let data: TeamFile
+  try {
+    data = JSON.parse(m[1]!) as TeamFile
+  } catch {
+    throw new Error(L('O bloco do time está corrompido.', "The team's block is corrupted."))
+  }
+  if (data.version !== 1) throw new Error(L('Versão de time desconhecida.', 'Unknown team version.'))
+  return data
 }
 
 // `by`: who exports (the owner when left out). A routine in a DM goes only when the DM is theirs:
@@ -129,15 +141,7 @@ export function exportTeam(db: Db, by = db.ownerId()): string {
 // `by`: who imports (the owner when left out): a routine for a DM goes into their DM with that
 // agent, never into someone else's; what comes in is theirs.
 export function importTeam(db: Db, text: string, defaultLimit: number, by = db.ownerId()): string {
-  const m = new RegExp('```json (?:' + FENCE + '|' + OLD_FENCE + ')\\n([\\s\\S]*?)\\n```').exec(text)
-  if (!m) throw new Error(L('Esse arquivo não é um time exportado pelo Tucano.', "That file isn't a team exported by Tucano."))
-  let data: TeamFile
-  try {
-    data = JSON.parse(m[1]!) as TeamFile
-  } catch {
-    throw new Error(L('O bloco do time está corrompido.', "The team's block is corrupted."))
-  }
-  if (data.version !== 1) throw new Error(L('Versão de time desconhecida.', 'Unknown team version.'))
+  const data = parseTeamFile(text)
   const connectors = db.connectors()
   const connectorId = (name: string): string | undefined => connectors.find((c) => c.name === name)?.id
   const added = { agents: 0, skills: 0, channels: 0, routines: 0, skipped: [] as string[] }

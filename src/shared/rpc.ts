@@ -4,7 +4,7 @@ import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, TeamChoice, TeamPackageInfo, TeamUpdate, SavedLogin } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -155,8 +155,11 @@ export interface Api {
   checkTrigger(p: { trigger: Trigger }): Promise<string> // what a connector check finds now, for the form
   setTelegramToken(p: { token: string | null }): Promise<void> // checks it with Telegram; throws why it's refused
   unpairTelegram(): void
-  exportTeam(): string // the team as Markdown
-  importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
+  exportTeam(): string // the team as Markdown, under this team's id
+  previewTeam(p: { text: string }): TeamUpdate // what importing the file would change; throws if it isn't a team file
+  importTeam(p: { text: string; choices: Record<string, TeamChoice> }): string // applies the chosen changes; what was done
+  teams(): TeamPackageInfo[] // the teams imported or exported here
+  forgetTeam(p: { id: string }): void // its next file comes in as a new team, matched by handle and name
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
   // Hermes Agent's folder, read where it is (no path: $HERMES_HOME or ~/.hermes): what would come in,
   // adding nothing. Throws, in the person's words, when the folder isn't Hermes's or has nothing to bring.
