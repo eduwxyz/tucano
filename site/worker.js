@@ -1,6 +1,6 @@
 // tucano.sh: the static pages (dist/, served as assets), the push relay for the iPhone app (push.js,
 // /api/push/*), the app's feedback and surveys (feedback.js, /api/feedback and /api/surveys*) and
-// /api/empresa (the company form, below) and /api/lista, where
+// /api/empresa (the company form, below), /api/stripe (payments, to the owner: stripe.js) and /api/lista, where
 // the Tucano Pro beta's waitlist form (pro.html) lands. It checks the anti-robot token (Cloudflare
 // Turnstile), then saves the sign-up in Supabase (supabase/migrations/0001_waitlist.sql) with the
 // project's secret key, which only this worker holds:
@@ -11,6 +11,8 @@
 
 import { answer as surveyAnswer, feedback, surveys, sweep } from './feedback.js'
 import { register as pushRegister, send as pushSend } from './push.js'
+import { tell } from './notify.js'
+import { stripe } from './stripe.js'
 
 const MAX_BODY = 8 * 1024
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
@@ -96,6 +98,7 @@ export async function lista(request, env) {
 // to whoever answers them:
 //   npx wrangler secret put RESEND_API_KEY
 //   npx wrangler secret put LEADS_TO
+// (and PHONE_HOOK, for a push on the phone too: notify.js)
 const SIZES = ['2-15', '16-25', '26-50', '51+']
 
 async function saveLead(row, env) {
@@ -109,20 +112,11 @@ async function saveLead(row, env) {
   if (!r.ok) throw new Error(`supabase ${r.status}: ${(await r.text()).slice(0, 200)}`)
 }
 
-// A short note to the team; the lead is already saved, so a failed email only gets logged.
+// A short note to the team (notify.js: email, and a push on the owner's phone); the lead is already
+// saved, so a failed note only gets logged.
 async function tellTeam(row, env) {
-  if (!env.RESEND_API_KEY || !env.LEADS_TO) return
   const text = [`${row.name} <${row.email}>`, `Empresa: ${row.company}`, `Pessoas: ${row.size}`, `Pra quê: ${row.use_case || '—'}`, `Página: ${row.source || '—'} (${row.lang})`].join('\n')
-  try {
-    const r = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: 'Tucano <contato@tucano.sh>', to: [env.LEADS_TO], reply_to: row.email, subject: `Empresa: ${row.company} (${row.size} pessoas)`, text }),
-    })
-    if (!r.ok) console.error('lead email:', r.status, (await r.text()).slice(0, 200))
-  } catch (e) {
-    console.error('lead email:', e instanceof Error ? e.message : e)
-  }
+  await tell(env, { uid: `lead-${row.email}-${Date.now()}`, subject: `Empresa: ${row.company} (${row.size} pessoas)`, text, replyTo: row.email })
 }
 
 export async function empresa(request, env) {
@@ -166,6 +160,8 @@ export default {
     const url = new URL(request.url)
     if (url.pathname === '/api/lista') return lista(request, env)
     if (url.pathname === '/api/empresa') return empresa(request, env)
+    // Stripe's webhook: new payments, failed ones and cancellations, to the owner (stripe.js).
+    if (url.pathname === '/api/stripe') return stripe(request, env)
     // The push relay for the iPhone app (push.js).
     if (url.pathname === '/api/push/register') return pushRegister(request, env)
     if (url.pathname === '/api/push/send') return pushSend(request, env)
