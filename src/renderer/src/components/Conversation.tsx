@@ -539,6 +539,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             ) : (
               <span className="msg__author">{name}</span>
             )}
+            {message.run?.sessionName && (
+              <span className="msg__session" title={L('Nome desta sessão', 'This session’s name')}>
+                · {message.run.sessionName}
+              </span>
+            )}
             {ask && <RoutineTag ask={ask} open={showAsk} onToggle={() => setShowAsk(!showAsk)} />}
             <span className="msg__time">{time(saidAt(message))}</span>
           </div>
@@ -1051,7 +1056,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       <PanelResize />
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
-        <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
+        <strong className="side-panel__title">{root?.run?.sessionName ?? L('Thread', 'Thread')}</strong>
         <span className="side-panel__where">{L(`em ${title}`, `in ${title}`)}</span>
         <span className="grow" />
         {root && (
