@@ -235,6 +235,14 @@ export function friendly(e: unknown, ctx: FriendlyContext = {}): Friendly {
   if (e instanceof UserError) return { text: raw };
   const who = ctx.engine;
   const mapped = (text: string): Friendly => ({ text, detail: raw });
+  // An endpoint has no login to sign into again: it's the key, in Settings.
+  if (AUTH.test(raw) && who === "Endpoint")
+    return mapped(
+      L(
+        "O endpoint recusou a chave. Confira a chave dele em Configurações › Modelos.",
+        "The endpoint refused the key. Check its key in Settings › Models."
+      )
+    );
   if (AUTH.test(raw))
     return mapped(
       who

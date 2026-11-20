@@ -223,6 +223,43 @@ it('moves a card with its branch, and keeps the board as I left it', async () =>
   expect(settings.mock.calls[1]![0].orgLayout).toMatchObject({ bento: { x: before.bento!.x + 30, y: before.bento!.y }, nico: before.nico })
 })
 
+it('moves and zooms the board straight on the page, and keeps the view once the move ends', async () => {
+  vi.useFakeTimers()
+  try {
+    const board = document.querySelector('.orgb')!
+    const stage = document.querySelector<HTMLElement>('.orgb__stage')!
+    const label = document.querySelector('.org-tools__k')!
+    const wheel = async (extra: Record<string, unknown>) =>
+      act(async () => {
+        const e = new window.Event('wheel', { bubbles: true, cancelable: true })
+        Object.assign(e, { clientX: 0, clientY: 0, deltaX: 0, deltaY: 0, ...extra })
+        board.dispatchEvent(e)
+      })
+    // Two fingers: the board slides at once, and only while it moves is it a layer of its own.
+    await wheel({ deltaX: 30, deltaY: 10 })
+    expect(stage.style.transform).toBe('translate(-30px, -10px) scale(1)')
+    expect(board.classList.contains('is-panning')).toBe(true)
+    // A pinch zooms where the pointer is, and the zoom reads right away.
+    await wheel({ deltaY: -20, ctrlKey: true })
+    expect(label.textContent).toBe(`${Math.round(Math.exp(0.2) * 100)}%`)
+    // A moment without the wheel ends the move: the view is kept, and the layer goes.
+    await act(async () => void vi.advanceTimersByTime(200))
+    expect(board.classList.contains('is-panning')).toBe(false)
+    expect(stage.getAttribute('style')).toContain(`scale(${Math.exp(0.2)})`)
+    // A drag on the board goes on from there.
+    await ptr(board, 'pointerdown', 100, 100)
+    await ptr(document, 'pointermove', 140, 100)
+    // (the zoom kept the corner under the pointer where it was: the board's origin moved with it)
+    const f = Math.exp(0.2)
+    expect(stage.style.transform).toBe(`translate(${-30 * f + 40}px, ${-10 * f}px) scale(${f})`)
+    await ptr(document, 'pointerup', 140, 100)
+    expect(board.classList.contains('is-panning')).toBe(false)
+    expect(stage.getAttribute('style')).toContain(`translate(${-30 * f + 40}px, ${-10 * f}px)`)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 it('draws the board as it was left, and tidies it up when asked', async () => {
   expect([...document.querySelectorAll('button')].some((b) => b.textContent === 'Organizar')).toBe(false)
   fake = { ...fake, settings: { orgLayout: { me: { x: 0, y: 0 }, orion: { x: 500, y: 40 }, clara: { x: 10, y: 300 }, gone: { x: 9, y: 9 } } } }

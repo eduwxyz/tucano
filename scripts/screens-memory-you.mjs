@@ -49,7 +49,7 @@ const shot = (name) => win.screenshot({ path: `${out}/${name}.png` })
 
 const measure = (label) =>
   win.evaluate((wanted) => {
-    const buttons = [...document.querySelectorAll('.tabs-line > button')]
+    const buttons = [...document.querySelectorAll('.tabs-line__strip > button')]
     const b = buttons.find((x) => x.textContent.trim() === wanted)
     if (!b) return { found: false, labels: buttons.map((x) => x.textContent.trim()) }
     const range = document.createRange()
@@ -79,7 +79,7 @@ console.log('tab at 1280:', JSON.stringify(await measure(tabLabel)))
 await shot('01-memory-tabs-1280')
 
 // The tab itself, and the group heading inside it (both carried the old name).
-await win.locator('.tabs-line > button', { hasText: new RegExp(`^${tabLabel}$`) }).click()
+await win.locator('.tabs-line__strip > button', { hasText: new RegExp(`^${tabLabel}$`) }).click()
 await win.waitForTimeout(300)
 const heading = await win.evaluate(() => document.querySelector('.read-group h2')?.textContent.trim() ?? null)
 console.log('group heading:', JSON.stringify(heading))

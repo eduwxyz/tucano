@@ -27,6 +27,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   language: { kind: ['pt', 'en'], max: 10 },
   openAtLogin: { kind: 'boolean', max: 10, nullable: true },
   runBudgetPct: { kind: 'number', max: 30, nullable: true },
+  autoContinue: { kind: 'boolean', max: 10, nullable: true },
   runStallMinutes: { kind: 'number', max: 30, nullable: true },
   chainDepth: { kind: 'number', max: 30, nullable: true },
   actionRules: { kind: 'object', max: 2_000, nullable: true },
@@ -37,9 +38,12 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   harnesses: { kind: 'array', max: 1_000, nullable: true },
   onboarding: { kind: 'object', max: 2_000, nullable: true },
   folded: { kind: 'array', max: 200_000, nullable: true },
+  sidebarHidden: { kind: 'array', max: 500, nullable: true },
   sounds: { kind: 'boolean', max: 10, nullable: true },
   stepsOpen: { kind: 'boolean', max: 10, nullable: true },
-  seenVersion: { kind: 'string', max: 100, nullable: true }
+  seenVersion: { kind: 'string', max: 100, nullable: true },
+  surveys: { kind: 'boolean', max: 10, nullable: true },
+  tucaApplyNow: { kind: 'boolean', max: 10, nullable: true }
 }
 
 const fits = (kind: Kind, v: unknown): boolean =>

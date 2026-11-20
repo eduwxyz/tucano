@@ -9,6 +9,9 @@
 // still Portuguese (23 pages, a decision for the person who owns the words), and the tool argument
 // names the agents must emit are Portuguese (habilitado, pedido, dias…). Both are real leaks of the
 // same family; neither is a string this test can fix by itself.
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import { SCREEN_ALIASES, SCREENS } from '../src/shared/screens'
@@ -18,6 +21,7 @@ import { PROPOR_AGENTE, PROPOR_TIME, helperSection, tucaInstructions } from '../
 import { PROPOR_AJUSTE, PROPOR_CANAL, PROPOR_ROTINA, VER_ESTADO } from '../src/core/tuca-help'
 import { LER_SKILL, PROPOR_SKILL } from '../src/core/skills'
 import type { ToolDef } from '../src/core/gateway'
+import { parsePage, Wiki } from '../src/core/wiki'
 
 // Words that are Portuguese and not English, distinctive enough not to hit a real English sentence.
 // Word-bounded, so "para" inside "paragraph" and "com" inside ".com" are left alone — "com" is not in
@@ -100,5 +104,38 @@ describe('an English workspace, and what a model reads in it', () => {
     setLang('en')
     leak("the Tuca's instructions", tucaInstructions())
     expect(tucaInstructions()).toMatch(/Tucano/)
+  })
+
+  // 0.2.41, an English workspace: the curator's page "Shipper" opened with a bold line "tipo: Agent
+  // criada: 2026-11-19 atualizada: 2026-11-19". Tucano wrote a page's frontmatter keys in Portuguese
+  // whatever the language, and the model wrote that block into the page's text, where it rendered
+  // as a rule and a heading. The keys follow the workspace now, and a block the text brings is
+  // taken out of the text.
+  it("writes a wiki page's frontmatter in English, and keeps a block the text brought out of the page", () => {
+    setLang('en')
+    const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
+    const w = new Wiki({ dir: join(root, 'wiki'), indexPath: join(root, 'wiki.db') })
+    w.init(false)
+    const file = (t: string): string => readFileSync(join(w.dir, 'pages', `${t}.md`), 'utf8')
+    const PT_KEYS = /^(tipo|criada|atualizada|origem|adicionada|arquivo):/m
+
+    w.save({ title: 'Critic', kind: 'Agent', body: 'Critic reviews every change.', by: 'me', byName: 'Ana' })
+    expect(Object.keys(parsePage(file('Critic')).meta).sort()).toEqual(['created', 'type', 'updated'])
+    expect(parsePage(file('Critic')).meta['type']).toBe('Agent')
+    expect(file('Critic')).not.toMatch(PT_KEYS)
+
+    // The curator's new page, its text opening with the block it copied.
+    const c = w.addChange({ ops: [{ op: 'create', page: 'Shipper', kind: 'Agent', text: '---\ntipo: Agent\ncriada: 2026-11-19\natualizada: 2026-11-19\n---\n\n# Shipper\n\nShipper is the install agent.' }], by: 'auto' })
+    w.applyChange(c.id, 'Wiki curator')
+    const page = w.page('Shipper')!
+    expect(page.kind).toBe('Agent')
+    expect(page.body.trimStart().startsWith('# Shipper')).toBe(true)
+    expect(page.body).not.toMatch(/tipo|criada|atualizada|^---/m)
+    expect(file('Shipper')).not.toMatch(PT_KEYS)
+    expect(file('Shipper').match(/^---$/gm)).toHaveLength(2) // one frontmatter, not two
+
+    // A source kept for the curator, with the same keys.
+    const s = w.addSource({ title: 'Install notes', text: 'Shipper holds the lock.', kind: 'message', by: 'auto' })
+    expect(readFileSync(join(w.dir, `${s.file}.md`), 'utf8')).not.toMatch(PT_KEYS)
   })
 })
