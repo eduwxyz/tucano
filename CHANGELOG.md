@@ -4,6 +4,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Adicionado:** o **esforço de raciocínio** aparece onde o modelo é escolhido. Onde o harness e o modelo dividem a linha, o nível fica no fim dela, e o harness cede a largura que o nome curto dele não precisa (Claude, Codex, OpenCode, Pi); onde as escolhas ficam uma embaixo da outra, o nível vai embaixo do modelo. Isso vale em Configurações → Modelos (o modelo do roteador, o da memória e cada agente em Modelos dos agentes, inclusive na alteração em lote) e na página do agente. O esforço do roteador e o do modelo de memória são configurações novas, e o da memória também nomeia cada pedido; o do agente agora vai junto com o modelo, numa chamada só. Os modelos do Cursor já trazem o nível no nome (`…-high`, `…-xhigh`), então ali ele não aparece. Todos leem os mesmos quatro nomes de uma lista só — Baixo, Médio, Alto e Máximo —, a que os cards do Tuca já ofereciam.
+
+### Added
+
+- **A thinking level wherever a model is picked.** Where the harness and the model share a row, the level sits at the end of it, and the harness gives up the width its short name (Claude, Codex, OpenCode, Pi) doesn't need; where the picks are one under the other, the level goes under the model. That is Settings → Models (the router's model, the memory model, and each agent in Agent models, bulk change included) and an agent's own page. The router's level and the memory model's are new settings, and the memory model's also names each request; an agent's level is now set together with its model, in one call. Cursor's models carry the level in their name (`…-high`, `…-xhigh`), so there it stays out. All of them read the same four names from one list — Low, Medium, High, Max — the one the Tuca's cards already offered.
+
 ## [0.2.43] - 2026-11-19
 
 > **Em português:**
