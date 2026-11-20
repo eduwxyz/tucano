@@ -103,6 +103,7 @@ import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
+import { RequestRow, isRequestRow, requestState } from './RequestRows'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
 export function Details({ label, initiallyOpen = false, children }: { label: string; initiallyOpen?: boolean; children: ReactNode }): ReactNode {
@@ -470,13 +471,16 @@ const NO_ATTACHED: Artifact[] = []
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
-const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[] }): ReactNode {
+// `plain`: as a thread's own heading, where a request reads whole.
+const MessageRow = memo(function MessageRow({ message, grouped, replies, plain, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; plain?: boolean; ask?: Message; askReplies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
   const threadOpen = useStore((s) => !!replies && s.panel?.kind === 'thread' && s.panel.id === message.id)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
   const team = useStore(teamMode)
+  // In a DM, a request another agent made to this one: a folded line, not that agent's voice.
+  const folded = useStore((s) => !plain && isRequestRow(s, message))
   // Someone else's message reads with their name and initials; mine, as always.
   const other = useStore((s) => (message.author.kind === 'person' && !isMine(s, message.author) ? personName(s, message.author.id) : undefined))
   const attached = useStore((s) => (message.author.kind === 'person' ? attachedTo(s, message.id) : NO_ATTACHED))
@@ -512,6 +516,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   // its own channel; here only whoever I asked does.
   const from = message.run?.delegation
   if (message.author.kind === 'agent' && from && from.to === message.author.id && message.conversationId !== from.conversationId) return <ReturnedLine message={message} at={from} agent={agent} text={text} components={agentMarkdown} />
+
+  if (folded) return <RequestRow message={message} replies={replies ?? NO_REPLIES} />
 
   // An agent the server hides from this member (restricted view): a neutral voice, never my own name.
   const ghost = message.author.kind === 'agent' && !agent
@@ -1034,7 +1040,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   }, [])
   const lead = root && (
     <div className="thread__lead">
-      <MessageRow message={root} grouped={false} />
+      <MessageRow message={root} grouped={false} plain />
       <div className="thread__divider">
         {replying.length > 0 ? (
           <span key="replying" className="shimmer">
@@ -1242,17 +1248,7 @@ function MemoryChip({ id }: { id: string }): ReactNode {
 // Under a request, where it was delivered: how it stands, and where its answer goes. One quiet line.
 function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactNode {
   const d = useStore((s) => s.delegations.find((x) => x.id === at.id))
-  const state = !d
-    ? null
-    : d.state === 'open'
-      ? d.asking
-        ? { tone: 'is-warn', text: L('esperando uma resposta', 'waiting on an answer') }
-        : { tone: 'is-live', text: L('em andamento', 'under way') }
-      : d.state === 'done'
-        ? { tone: 'is-done', text: L('terminado', 'done') }
-        : d.state === 'cancelled'
-          ? { tone: '', text: L('cancelado', 'cancelled') }
-          : { tone: 'is-warn', text: L('não terminou', 'did not finish') }
+  const state = requestState(d)
   return (
     <div className="request-note">
       <Icon name="users" size={12} />

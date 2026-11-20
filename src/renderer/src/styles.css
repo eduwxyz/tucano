@@ -12538,6 +12538,155 @@ button.agent-card__now:hover {
   content: '·';
   margin-right: 6px;
 }
+/* Requests other agents made to a DM's agent: a strip at the top of the DM, outside the scroll, and the same
+   folded row for an older one in the timeline. */
+/* In the conversation it keeps the messages' column: their width and their side padding. */
+.messages > .request-row {
+  width: calc(100% - 56px);
+  max-width: 804px;
+  margin: 6px auto;
+}
+.request-row__who .msg__time {
+  flex: none;
+}
+.request-row {
+  container-type: inline-size;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  transition: var(--transition-ui);
+}
+.request-row:hover,
+.request-row.is-open {
+  border-color: var(--border-strong);
+}
+.request-row__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: inherit;
+  text-align: left;
+  color: var(--text-2);
+}
+.request-row__head:hover {
+  background: var(--hover);
+}
+.request-row__faces {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  color: var(--text-3);
+}
+.request-row__faces .avatar {
+  flex: none;
+}
+.request-row__arrow {
+  display: inline-flex;
+}
+.request-row__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.request-row__who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.request-row__who b {
+  flex: 0 1 auto;
+  min-width: 4ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text);
+}
+.request-row__who .request-note__state {
+  flex: 0 2 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.request-row__sum {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.request-row__side {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.request-row__new {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-weight: 600;
+  color: var(--accent);
+}
+.request-row__chev {
+  display: inline-flex;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.request-row.is-open .request-row__chev {
+  transform: rotate(90deg);
+}
+.request-row__body {
+  padding: 2px 14px 12px 40px;
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+  --rise: 3px;
+}
+.request-row__text {
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 14px;
+  color: var(--text);
+}
+.request-row__acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+.request-row__hint {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+/* By the row's own width, not the window's: a thread open beside the conversation narrows it too. */
+@container (max-width: 460px) {
+  .request-row__when {
+    display: none;
+  }
+  .request-row__body {
+    padding-left: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .request-row__body {
+    animation: none;
+  }
+  .request-row,
+  .request-row__chev {
+    transition: none;
+  }
+}
 .orgb:has(.org-undo) .org-hint {
   visibility: hidden;
 }
