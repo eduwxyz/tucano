@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Usage and limits no longer shows a subscription window that already reset as full.** Claude Code and Codex report their windows only when a reply runs, so a report of 100% taken just before the five hours ended stayed on the page as "100% used, resets now" until the next reply, while claude.ai already showed 0%. A window whose reset time has passed now shows 0% and when it reset, and a page left open redraws when the window resets.
+
 ## [0.2.43] - 2026-11-19
 
 > **Em português:**
