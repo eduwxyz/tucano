@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type ReplyTarget, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -96,6 +96,8 @@ const cutOf = (status: RunStatus): string =>
 // or 25k tokens): past it the CLI saves the result to a file and tells the model to read it, which it
 // can't here (no file tools), so it calls again and again and answers without the data.
 export const MAX_RESULT_BYTES = 40_000
+// The longest excerpt of a message a reply may quote (the composer's selection, in characters).
+export const MAX_QUOTE_CHARS = 32_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const RESUME_WINDOW_MS = 12 * 3_600_000 // a reply the app cut longer ago than this, when it reopens, is left for the person
@@ -297,6 +299,7 @@ export interface Connectors {
 }
 
 type Exposed = { connector: Connector; tool: ConnectorTool & { inputSchema: Record<string, unknown> } }
+type SendOptions = { answers?: string; files?: FileUpload[]; reply?: ReplyTarget }
 
 // Tool names the CLI sees: "<connector>__<tool>", unique per turn.
 function exposedName(connector: Connector, tool: string, taken: Set<string>): string {
@@ -531,14 +534,15 @@ export class Runner {
   }
 
   // Saves the human message and decides who answers it: mentioned agents
-  // first, then whoever asked a pending question, then the DM agent or the
+  // first, then the quoted agent or whoever asked a pending question, then the DM agent or the
   // only agent in the channel, and otherwise the router. The answers, and
   // everything else it sets off, go in its thread (`threadId`, or its own when
   // the conversation answers in threads) or else in the conversation.
   // `by`: the person writing (the Tucano's owner when left out: the phone, older callers).
-  // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
-  // wherever the person writes from). The caller checked that they may answer it.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[] } = {}): Promise<void> {
+  // `opts.answers`: the question this answers, from the inbox or the decisions card (its asker
+  // answers, wherever the person writes from). The caller checked that they may answer it.
+  // `opts.reply`: the message (or its excerpt) this one answers, which chooses its agent.
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: SendOptions = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     const typed = text.trim()
@@ -546,6 +550,15 @@ export class Runner {
     const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
     const writer = (by ? db.person(by) : undefined) ?? db.owner()
+    // What this message answers, with the quote it showed. Checked here, before anything is saved: a
+    // reply to a message that is gone, elsewhere, still being written, or that this writer never saw
+    // is refused.
+    const { reply: answering } = opts
+    const original = answering ? db.message(answering.messageId) : undefined
+    if (answering && (!original || original.conversationId !== conv.id || !new People(db).visibleAt(writer, original) || (original.author.kind !== 'person' && original.author.kind !== 'agent') || original.run?.status === 'working'))
+      throw new Error(L('Escolha uma mensagem desta conversa para responder.', 'Choose a message in this conversation to reply to.'))
+    if (answering?.quote !== undefined && (typeof answering.quote !== 'string' || !answering.quote.trim() || answering.quote.length > MAX_QUOTE_CHARS))
+      throw new Error(L('Selecione um trecho de até 32.000 caracteres para citar.', 'Select an excerpt of up to 32,000 characters to quote.'))
     // Threads are one level deep: replying to a reply goes in its thread. A root that isn't
     // in this conversation (or is gone) doesn't make one: the message goes to the conversation.
     const root = threadId ? db.message(threadId) : undefined
@@ -557,6 +570,9 @@ export class Runner {
     const named = opts.answers ? db.message(opts.answers) : undefined
     let asked = opts.answers ? (named?.conversationId === conv.id ? named : undefined) : this.pendingQuestion(conv.id, thread)
     if (asked?.run?.status !== 'waiting_input') asked = undefined
+    // A reply is about what the agent it answers wrote: another agent's pending question stays open
+    // in its thread, waiting for its own answer.
+    if (asked && original?.author.kind === 'agent' && asked.author.kind === 'agent' && asked.author.id !== original.author.id) asked = undefined
     const q = asked ? db.question(asked.id) : undefined
     let confirmed: boolean | undefined
     if (q && !named) {
@@ -572,6 +588,17 @@ export class Runner {
     if (!body && pictures.length === 0 && docs.length === 0) return
 
     const mine: Message = { id: randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}) }
+    // What it answers as it read there, so the quote stands on its own; the excerpt when I selected one.
+    if (original) {
+      mine.reply = {
+        messageId: original.id,
+        text: answering?.quote ?? original.text,
+        at: original.at,
+        ...(answering?.quote !== undefined ? { excerpt: true } : {}),
+        author: this.quotedAuthor(original),
+        ...(original.author.kind === 'agent' ? { agentId: original.author.id } : {})
+      }
+    }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -587,11 +614,17 @@ export class Runner {
       this.post(conv.id, replyIn, L(`**Objetivo**: os agentes trabalham nele sozinhos, passando a vez entre si, até alguém marcar como cumprido (no máximo ${GOAL_MAX_TURNS} respostas).`, `**Goal**: the agents work on it by themselves, passing the turn to each other, until someone marks it done (${GOAL_MAX_TURNS} replies at most).`))
     }
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
+    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(typed, db.people({ removed: true }), db.agents()))
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
     const members = this.members(conv)
     const may = agentsFor(writer, members) // a restricted member never calls an agent they can't see, by name or through the router
+    // What I wrote calls whoever it names (a restricted member never calls one they can't see).
     let responders = mentioned(typed, may).slice(0, MAX_MENTIONS) // what I wrote: an option's label never calls anyone
+    // A reply calls the agent it answers, ahead of the router: they wrote what is being answered,
+    // so the decision is not left to the router guessing from the text. To a person, it calls no one.
+    const replyAgent = mine.reply?.agentId
+    if (!responders.length && !toPeople && replyAgent) responders = may.filter((a) => a.id === replyAgent)
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
     // the deadline): the agent is told so in so many words.
@@ -637,7 +670,6 @@ export class Runner {
     }
     // Written to a person (@Ana) and to no agent: it's for them, not the agents. No router, no
     // reply; a line says who heard about it. So with one who left, or yourself: no one to tell.
-    const toPeople = calledPeople.length > 0 || (db.people().length > 1 && toPeopleOnly(typed, db.people({ removed: true }), db.agents()))
     if (responders.length === 0 && toPeople && conv.kind !== 'dm') {
       const names = calledPeople.map((p) => `**${p.name}**`).join(L(' e ', ' and '))
       // Someone who left, yourself, or a name two people share: whoever wrote it learns no one heard.
@@ -668,6 +700,15 @@ export class Runner {
       const go = (): Promise<Message | undefined> => reply(agent, { trigger: mine.id })
       before = before ? before.then(go, go) : go()
     }
+  }
+
+  // Who wrote the message a reply quotes, as the quote reads it: the agent's name, the person's, or
+  // what a routine or the Tucano itself is called.
+  private quotedAuthor(message: Message): string {
+    const { db } = this.deps
+    if (message.author.kind === 'agent') return db.agent(message.author.id)?.name ?? L('Agente removido', 'Removed agent')
+    if (message.author.kind === 'person') return db.person(message.author.id)?.name ?? db.formerPeople().find((p) => message.author.kind === 'person' && p.id === message.author.id)?.name ?? L('Alguém', 'Someone')
+    return message.author.kind === 'routine' ? L('Rotina', 'Routine') : L('Tucano', 'Tucano')
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).

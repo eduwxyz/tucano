@@ -5,11 +5,15 @@ import type { Message } from '../src/shared/types'
 // The store against a fake core: what it asks for, and the events it gets back.
 let emit: (e: CoreEvent) => void = () => {}
 const sent: unknown[] = []
+let rejectSend = false
 vi.mock('../src/renderer/src/rpc', () => ({
   connect: async (apply: (e: CoreEvent) => void) => void (emit = apply),
   disconnect: () => {},
   call: async (method: string, params?: unknown) => {
-    if (method === 'sendMessage') sent.push(params)
+    if (method === 'sendMessage') {
+      sent.push(params)
+      if (rejectSend) throw new Error('Choose a message in this conversation to reply to.')
+    }
     if (method !== 'snapshot') return undefined
     return {
       you: 'me', people: [], settings: { language: 'en', theme: 'system', onboarding: { done: true } }, agents: [], messages: [], connectors: [], approvals: [], memories: [], artifacts: [], computers: [], browsers: [], routines: [], skills: [],
@@ -30,6 +34,7 @@ const back = (m: Partial<Message> & { id: string; conversationId: string }): voi
 beforeEach(() => {
   store.openPanel(null)
   sent.length = 0
+  rejectSend = false
 })
 
 it('opens the thread of what I wrote in a conversation that answers in threads', () => {
@@ -69,4 +74,13 @@ it("doesn't pull me back if I moved to another conversation before it came back"
   back({ id: 'm4', conversationId: 'threads' })
   expect(store.getState().panel).toBeNull()
   expect(store.getState().view).toEqual({ kind: 'conversation', id: 'chat' })
+})
+
+it('reports a rejected send and does not open a thread for a later unrelated message', async () => {
+  store.navigate({ kind: 'conversation', id: 'threads' })
+  rejectSend = true
+  expect(await store.sendMessage('threads', 'Keep my draft.', [], undefined, [], { messageId: 'missing' })).toBe(false)
+  expect(store.getState().toasts.at(-1)?.text).toContain('Choose a message')
+  back({ id: 'another-device', conversationId: 'threads' })
+  expect(store.getState().panel).toBeNull()
 })

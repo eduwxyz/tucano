@@ -589,7 +589,9 @@ const COLUMNS: [string, string, string][] = [
   ['connector_tools', 'cls_floor', 'TEXT'],
   ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
-  ['messages', 'title', 'TEXT']
+  ['messages', 'title', 'TEXT'],
+  // The message a reply answers, with the quote it showed (src/shared/types.ts: Message.reply).
+  ['messages', 'reply', 'TEXT']
 ]
 
 
@@ -1148,7 +1150,8 @@ export class Db {
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
-      ...(r['title'] ? { title: str(r['title']) } : {})
+      ...(r['title'] ? { title: str(r['title']) } : {}),
+      reply: r['reply'] ? (JSON.parse(str(r['reply'])) as Message['reply']) : undefined
     }
   }
 
@@ -1293,7 +1296,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -1305,7 +1308,8 @@ export class Db {
         m.at,
         m.run ? JSON.stringify(m.run) : null,
         m.routine ? JSON.stringify(m.routine) : null,
-        m.threadId ?? null
+        m.threadId ?? null,
+        m.reply ? JSON.stringify(m.reply) : null
       )
   }
 
