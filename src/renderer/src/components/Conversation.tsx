@@ -15,6 +15,7 @@ import { CUT, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
+import { WorkDrawer } from './WorkDrawer'
 import { canEditChannel,
   agentById,
   askerIn,
@@ -173,6 +174,13 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     if (focus && !focusHere) void loadOlder(id, focus)
   }, [id, focus, focusHere])
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
+  // The drawer's row pressed: go to that reply, and open its thread first when it lives in one.
+  // The count is what makes pressing the same row again move again.
+  const [jump, setJump] = useState<{ id: string; rootId?: string; n: number } | null>(null)
+  const onJump = (messageId: string, threadId?: string): void => {
+    if (threadId) openThread(threadId)
+    setJump((j) => ({ id: messageId, ...(threadId ? { rootId: threadId } : {}), n: (j?.n ?? 0) + 1 }))
+  }
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
   // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
@@ -273,10 +281,10 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={jump?.rootId ? focus : jump?.id ?? focus} focusKey={jump?.n} />
+        <Composer conversationId={id} members={members} onJump={onJump} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} {...(jump && jump.rootId === thread ? { focusId: jump.id, focusKey: jump.n } : {})} /> : <SidePanel />}
     </div>
   )
 }
@@ -288,7 +296,9 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+// `focus` / `focusKey`: bring one message into view and flash it, and again every time the key changes
+// (pressing the same drawer row twice moves again instead of doing nothing).
+export function MessageList({ messages: all, replies, older, conversationId, empty, focus, focusKey, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; focusKey?: number; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
@@ -323,7 +333,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, conversationId, focusAt])
+  }, [focus, conversationId, focusAt, focusKey])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -1004,7 +1014,7 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+function ThreadPanel({ rootId, conv, title, members, focusId, focusKey }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -1072,7 +1082,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       {root?.conversationId === conv.id ? (
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
-          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} {...(focusId ? { focus: focusId } : {})} {...(focusKey ? { focusKey } : {})} />
           <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
@@ -2304,7 +2314,7 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
 // `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
-export function Composer({ conversationId, threadId, members, placeholder, tools }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode }): ReactNode {
+export function Composer({ conversationId, threadId, members, placeholder, tools, onJump }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2550,6 +2560,16 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
 
   return (
     <div className="composer-wrap">
+      {/* The work this conversation is carrying, attached to the field it belongs to. A thread has
+          no drawer of its own: what runs inside one is a row of its conversation's. */}
+      {!threadId && (
+        <WorkDrawer
+          key={conversationId}
+          conversationId={conversationId}
+          {...(onJump ? { onJump } : {})}
+          onThread={(rootId) => openThread(rootId)}
+        />
+      )}
       {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">
