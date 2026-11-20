@@ -41,6 +41,7 @@ export interface Api {
   threadMessages(p: { rootId: string }): Message[] // a thread whole: the message that started it and its replies
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   revealArtifact(p: { id: string }): void // shows an artifact's file in the file manager; never opens it
+  saveArtifact(p: { id: string }): void // saves a copy of an artifact's file where the person picks (the desktop's Save dialog)
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void

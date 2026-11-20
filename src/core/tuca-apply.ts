@@ -5,7 +5,7 @@
 // connector's reach, the month's limit) still waits on a card for the person to confirm.
 // This holds the rules for both halves and for taking a change back safely; index.ts applies them.
 import { L } from '../shared/lang'
-import { UNDO_HOURS, type Agent, type AgentChanges, type AgentDraft, type Proposal, type Routine, type Settings } from '../shared/types'
+import { UNDO_HOURS, proposalsOf, type Agent, type AgentChanges, type AgentDraft, type Proposal, type Routine, type Run, type Settings } from '../shared/types'
 
 export const UNDO_MS = UNDO_HOURS * 3_600_000
 
@@ -81,4 +81,27 @@ export const undoErrors = {
   routine: (name: string, routine: string): string => L(`${name} já tem a rotina “${routine}”, criada depois. Apague ela em Rotinas antes.`, `${name} already has the routine “${routine}”, made since. Delete it in Routines first.`),
   routineChanged: (routine: string): string => L(`A rotina “${routine}” mudou depois disso. Desfazer agora apagaria essa mudança: apague em Rotinas, se quiser.`, `The routine “${routine}” changed since. Undoing now would throw that away: delete it in Routines if you want.`),
   talked: (channel: string): string => L(`Já tem conversa em #${channel}. Desfazer apagaria o que foi dito: se quiser, apague o canal à mão.`, `There's already talk in #${channel}. Undoing would delete what was said: delete the channel by hand if you want.`)
+}
+
+// ---------- a card is settled once ----------
+
+// A reply's cards as the stored message has them, put back on the running reply's own copy before
+// that copy is saved again. A reply saves its whole message on every step from what it holds, so a
+// card the person applied or discarded while it was still working (the core settles it on the stored
+// message) went back to "Create" with the next step, and a second click made the same agents twice.
+// Cards are matched by id: the core is the only one that changes a card the reply already saved, and
+// one the reply proposed since is only in its copy.
+export function keepDecided(run: Run, stored: Run | undefined): Run {
+  if (!stored) return run
+  const saved = new Map(proposalsOf(stored).flatMap((p) => (p.id ? [[p.id, p] as const] : [])))
+  const proposals = run.proposals?.map((p) => (p.id && saved.get(p.id)) || p)
+  const draft = run.agentDraft?.id && stored.agentDraft?.id === run.agentDraft.id ? stored.agentDraft : run.agentDraft
+  return { ...run, ...(proposals ? { proposals } : {}), ...(draft ? { agentDraft: draft } : {}) }
+}
+
+// The cards of a reply that were settled (applied, discarded, undone), kept when it's tried again:
+// what they made exists, and a card back at "Create" would make it twice.
+export function decidedCards(run: Run | undefined): Pick<Run, 'proposals' | 'agentDraft'> {
+  const proposals = proposalsOf(run).filter((p) => p.state)
+  return { ...(proposals.length ? { proposals } : {}), ...(run?.agentDraft?.state ? { agentDraft: run.agentDraft } : {}) }
 }

@@ -537,6 +537,7 @@ type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'save_artifact'; path: string } // a copy of an artifact's file, where the person picks
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
   | { type: 'restart' } // a server: start again, to restore a backup (src/server)
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
@@ -1286,6 +1287,7 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
 // dismissed), or told why applying it didn't work. A reply from before (one `proposal`) gets the list.
 type ProposalPatch = { state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; agentIds?: string[]; auto?: true; undo?: UndoInfo }
 function patchProposal(messageId: string, index: number, patch: ProposalPatch): void {
+  restoreCards(messageId)
   const m = db.message(messageId)
   const list = proposalsOf(m?.run)
   const p = list[index]
@@ -1297,6 +1299,7 @@ function patchProposal(messageId: string, index: number, patch: ProposalPatch): 
 }
 // A reply's cards as they are now (a reply from before, with one `proposal`, gets the list).
 function saveProposals(m: Message, proposals: Proposal[]): void {
+  proposals.forEach((p, i) => remember(m.id, i, p))
   const { proposal: _old, ...run } = m.run!
   const updated: Message = { ...m, run: { ...run, proposals } }
   db.saveMessage(updated)
@@ -1335,19 +1338,52 @@ function neededAgents(messageId: string, p: Proposal): string[] {
 
 // A Tuca's card is settled once: created (with the agent) or dismissed.
 function settleDraft(messageId: string, agentId?: string, extra: Pick<AgentDraft, 'auto' | 'undo'> = {}): void {
+  restoreCards(messageId)
   const m = db.message(messageId)
   if (!m?.run?.agentDraft || m.run.agentDraft.state) return
   saveDraft(m, { ...m.run.agentDraft, state: agentId ? 'created' : 'dismissed', ...(agentId ? { agentId, ...extra } : {}) })
   emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
 }
 function saveDraft(m: Message, agentDraft: AgentDraft): void {
+  remember(m.id, 'draft', agentDraft)
   const updated: Message = { ...m, run: { ...m.run!, agentDraft } }
   db.saveMessage(updated)
   emit({ type: 'message', message: updated })
 }
 
+// What each card became once settled (applied, discarded, undone), kept by the core apart from the
+// message, by the card's id (one from before ids: its message and place). The message is what the
+// screens show, and a copy of it from before a click once overwrote it (see keepDecided): this still
+// says "applied" then, so the card is put back as it was and applying it again makes nothing twice.
+const cardKey = (messageId: string, at: number | 'draft', id?: string): string => `card:${id ?? `${messageId}#${at}`}`
+function remember(messageId: string, at: number | 'draft', card: Proposal | AgentDraft): void {
+  if (card.state) db.setMeta(cardKey(messageId, at, card.id), JSON.stringify(card))
+}
+function remembered<T extends Proposal | AgentDraft>(messageId: string, at: number | 'draft', card: T): T | undefined {
+  const saved = db.meta(cardKey(messageId, at, card.id))
+  return saved ? (JSON.parse(saved) as T) : undefined
+}
+// A reply's cards that lost what was done with them, back as they were settled.
+function restoreCards(messageId: string): void {
+  const m = db.message(messageId)
+  if (!m?.run) return
+  let lost = false
+  const list = proposalsOf(m.run).map((p, i) => {
+    const was = p.state ? undefined : remembered(messageId, i, p)
+    if (!was?.state || was.kind !== p.kind) return p
+    lost = true
+    return was
+  })
+  if (lost) saveProposals(m, list)
+  const now = db.message(messageId)!
+  const d = now.run?.agentDraft
+  const was = d && !d.state ? remembered(messageId, 'draft', d) : undefined
+  if (was?.state) saveDraft(now, was)
+}
+
 // The agent a new-agent card proposes, made the way "Criar" makes it, with how to take it back.
 function createDraft(ctx: Ctx, messageId: string, auto = false): { agentId: string; conversationId: string } {
+  restoreCards(messageId)
   const d = db.message(messageId)?.run?.agentDraft
   if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
   if (d.state === 'created' && d.agentId) throw new Error(L('Esse agente já foi criado.', 'That agent was already created.'))
@@ -1374,6 +1410,7 @@ class Skipped extends Error {}
 // "apply all", which tells the admins once for everything a member sent them. `auto`: applied by
 // itself as the Tuca proposed it (applyNow), where a member's card for agents stays a card instead.
 function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, auto = false): { id: string } {
+  restoreCards(messageId)
   const p = proposalsOf(db.message(messageId)?.run)[index]
   if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
   if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : p.state === 'undone' ? L('Essa proposta foi desfeita.', 'That proposal was undone.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
@@ -1446,6 +1483,7 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, aut
 function applyNow(messageId: string, personId: string): void {
   if (!appliesNow(settings())) return
   const person = db.person(personId)
+  restoreCards(messageId)
   const m = db.message(messageId)
   if (!person || !m?.run) return
   const ctx: Ctx = { person }
@@ -1504,7 +1542,7 @@ function applyNow(messageId: string, personId: string): void {
   }
   if (later.length) {
     const now = db.message(messageId)!
-    saveProposals(now, [...proposalsOf(now.run), ...later])
+    saveProposals(now, [...proposalsOf(now.run), ...later.map((card) => ({ ...card, id: randomUUID() }))])
   }
   if (applied) record(ctx, 'proposals.applied', messageId, { applied, auto: true })
 }
@@ -1673,6 +1711,20 @@ function reachMessage(ctx: Ctx, messageId: string): void {
   const m = db.message(messageId)
   if (m && !people.visibleAt(ctx.person, m)) throw new Error(L('Essa mensagem não existe mais.', 'That message no longer exists.'))
 }
+// An artifact's file, for what only the computer's own window does with it (show it in Finder, save
+// a copy): a paired device or a member would get a dialog on a screen they can't see.
+function ownArtifactFile(ctx: Ctx, id: string): string {
+  if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
+  const a = db.artifact(id)
+  if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
+  // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
+  const root = resolve(dataDir, 'artifacts')
+  const folder = resolve(root, a.id)
+  const file = resolve(folder, a.name)
+  const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
+  if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
+  return file
+}
 // How a conversation works (threads, the wiki, its summary): a DM's person's; a channel's, whoever
 // made it and the admins, like its name and agents.
 function manage(ctx: Ctx, conversationId: string): void {
@@ -1802,16 +1854,12 @@ const api: Handlers = {
   // Only reveals: opening a file of any other type could run an app or a script.
   // And only on the computer's own window: a paired device (it comes with a device key) or a member would open a Finder on a screen they can't see.
   revealArtifact: ({ id }, ctx) => {
-    if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
-    const a = db.artifact(id)
-    if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
-    // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
-    const root = resolve(dataDir, 'artifacts')
-    const folder = resolve(root, a.id)
-    const file = resolve(folder, a.name)
-    const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
-    if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
-    toMain({ type: 'open_local', path: file, how: 'reveal' })
+    toMain({ type: 'open_local', path: ownArtifactFile(ctx, id), how: 'reveal' })
+  },
+  // A copy where the person picks (the app asks with the system's Save dialog). On a server the
+  // browser saves it instead, from /artifact/…?download (src/server/artifact-http.ts).
+  saveArtifact: ({ id }, ctx) => {
+    toMain({ type: 'save_artifact', path: ownArtifactFile(ctx, id) })
   },
 
   snapshot: (_, ctx) => people.snapshotFor(ctx.person, {
@@ -2049,6 +2097,7 @@ const api: Handlers = {
   // the admins) doesn't stop the others; the admins hear once about what a member sent them.
   applyProposals: ({ messageId, draft }, ctx) => {
     reachMessage(ctx, messageId)
+    restoreCards(messageId)
     const m = db.message(messageId)
     const list = proposalsOf(m?.run)
     if (!m?.run || (!list.length && !m.run.agentDraft)) throw new Error(L('Essas propostas não existem mais.', 'Those proposals no longer exist.'))
@@ -2087,6 +2136,7 @@ const api: Handlers = {
   dismissProposal: ({ messageId, index = 0 }, ctx) => (people.forwarded(ctx.person, messageId, index) || reachMessage(ctx, messageId), settleProposal(messageId, index)),
   dismissProposals: ({ messageId, draft }, ctx) => {
     reachMessage(ctx, messageId)
+    restoreCards(messageId)
     const m = db.message(messageId)
     proposalsOf(m?.run).forEach((p, i) => p.state || settleProposal(messageId, i))
     if (draft && m?.run?.agentDraft && !m.run.agentDraft.state) settleDraft(messageId)

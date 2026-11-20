@@ -3193,7 +3193,13 @@ h3 {
   object-fit: cover;
   object-position: top;
 }
+.artifact-image__show {
+  display: block;
+}
 .artifact-image__caption {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   padding: 6px 10px;
   font-size: 12px;
   color: var(--text-2);
@@ -3245,6 +3251,19 @@ h3 {
 .artifact-card__open {
   font-size: 12px;
   color: var(--accent);
+  flex-shrink: 0;
+}
+button.artifact-card__open:hover {
+  text-decoration: underline;
+}
+/* The card's body opens it; its actions (Open, Download) sit beside it. */
+.artifact-card__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
 }
 .browser-card__thumb {
   width: 72px;
@@ -8141,8 +8160,12 @@ kbd {
   padding-top: max(10px, env(safe-area-inset-top));
   -webkit-app-region: no-drag;
 }
-.lightbox__bar .icon-btn {
+.lightbox__bar .icon-btn,
+.lightbox__bar .btn {
   color: inherit;
+}
+.lightbox__bar .btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 .lightbox__title {
   min-width: 0;
@@ -13570,6 +13593,9 @@ button.agent-card__now:hover {
 .is-folded .agent-row:not(:has(> .nav-item.is-active)) {
   display: none;
 }
+.is-folded .agent-sector__more {
+  display: none;
+}
 
 /* An agent's row: the name, and on the right only what changed. The role and the gear come on hover or focus. */
 .agent-row {
@@ -13594,8 +13620,10 @@ button.agent-card__now:hover {
   background: var(--hover);
   color: var(--text);
 }
+/* Room for the gear on hover. A row with the laptop (last in it) keeps that room always, so the gear coming doesn't push the laptop. */
 .agent-row:hover > .nav-item,
-.agent-row:focus-within > .nav-item {
+.agent-row:focus-within > .nav-item,
+.agent-row:has(.nav-item__mac) > .nav-item {
   padding-right: 32px;
 }
 .agent-row__gear {

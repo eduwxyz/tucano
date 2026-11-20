@@ -16,8 +16,9 @@ import type { Socket } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { serveArtifact } from './artifact-http'
 import { Forwarder, isPrivate } from './forward'
-import { ARTIFACT_CSP, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
+import { attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
 import { NodeLinkHttp } from './node-link-http'
@@ -561,22 +562,14 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
       'content-type': saving ? 'application/octet-stream' : (TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'),
       'content-length': String(size),
       'content-security-policy': 'sandbox',
-      ...(saving ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}` } : {})
+      ...(saving ? { 'content-disposition': attachment(basename(path)) } : {})
     })
     return void createReadStream(path).on('error', () => res.destroy()).pipe(res)
   }
 
-  // What the agents showed in the chat, sandboxed as on the desktop.
-  const art = /^\/artifact\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
-  if (art) {
-    const dir = join(dataDir, 'artifacts', art[1]!)
-    const name = decodedPath(art[2]!)
-    const path = name === undefined ? '' : normalize(join(dir, name))
-    if (!path.startsWith(dir + sep)) return void res.writeHead(404, BASE_HEADERS).end()
-    // Only who sees the conversation it was shown in (someone else's DM: not found).
-    void grants.may(who.person ?? ownerId, { artifact: art[1]! }).then((ok) => (ok ? file(res, path, { 'content-security-policy': ARTIFACT_CSP }) : res.writeHead(404, BASE_HEADERS).end()))
-    return
-  }
+  // What the agents showed in the chat, sandboxed as on the desktop, or saved (?download).
+  // Only who sees the conversation it was shown in (someone else's DM: not found).
+  if (serveArtifact(res, url, { dataDir, may: (id) => grants.may(who.person ?? ownerId, { artifact: id }), type: (path) => TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream' })) return
 
   if (url.pathname === '/tucano-web.js') return void res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES['.js']! }).end(WEB)
   if (url.pathname === '/' || url.pathname === '/index.html') return void res.writeHead(200, { ...PAGE_HEADERS, 'content-type': TYPES['.html']!, 'cache-control': 'no-cache' }).end(index())
