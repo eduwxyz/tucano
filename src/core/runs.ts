@@ -3241,6 +3241,20 @@ ${note}`,
     await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
   }
 
+  // Dismissed with the card's Cancelar button: the question closes and the agent isn't woken. Its next turn reads that it
+  // was cancelled (context.ts). Work handed down the tree is answered, not dropped: someone waits on it.
+  cancelQuestion(messageId: string, by: Person): void {
+    const { db, emit } = this.deps
+    const asked = this.decidable(messageId, by)
+    if (asked.run?.handed || (asked.threadId && db.delegationAt(asked.threadId))) throw new Error(L('Essa pergunta é de um trabalho pedido por outro agente: responda ou pule.', "That question is from work another agent asked for: answer it or skip it."))
+    const q = db.question(messageId)
+    if (q?.state === 'open') {
+      db.saveQuestion({ ...q, state: 'closed' })
+      emit({ type: 'inbox' })
+    }
+    this.update(asked, { run: { ...asked.run!, status: 'done', cancelled: true } })
+  }
+
   // The user took over the agent's browser ("Assumir") and handed it back
   // ("Devolver" or closing the window) — exactly what the agent asked for with
   // ask_user, so it goes on by itself instead of waiting for a message.

@@ -241,6 +241,7 @@ export interface Api {
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
+  cancelQuestion(p: { messageId: string }): void // dismisses the question on its card: it closes, and the agent isn't woken
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
   // To the people who make Tucano, through tucano.sh (core/feedback.ts). image: the window's picture, base64 PNG or JPEG.
   // Throws, in the person's words, when it didn't go.
