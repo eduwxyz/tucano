@@ -10,7 +10,7 @@ Live at **[tucano.sh](https://tucano.sh)**. One page to edit: `index.html` (CSS 
 - **Analytics:** PostHog, the snippet in `index.html`'s `<head>`, which `build.mjs` copies into every other page. Only on tucano.sh, with no cookies.
 - **Look:** the shapes of the app icon (the round body, the eye, the two-orange beak) in cream, black and orange. The toucan in the hero, the one in the footer and the agents follow the pointer with their eyes.
 - **App screens:** drawn in HTML, not screenshots. The #checkout channel in the "Live" section plays by itself and waits for the visitor to approve.
-- **Fonts:** Bricolage Grotesque (headings) and Inter (text), from Google Fonts.
+- **Fonts:** Bricolage Grotesque (headings) and Inter (text), served from `assets/fonts/` (the Latin and Latin Extended variable files from Google Fonts, SIL Open Font License), so the first paint waits on no other host.
 - **Logos:** `assets/logos/` come from [Simple Icons](https://simpleicons.org) (CC0).
 - **Publishing:** served by Cloudflare as static files on `tucano.sh` (`wrangler.jsonc`, which runs `build.mjs` and publishes `dist/`; `_headers` adds the security headers):
 

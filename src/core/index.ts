@@ -5,24 +5,24 @@ import { voiceRefusal } from '../shared/voice'
 import { ModelDownload, Transcriber, VOICE_MODELS, voiceStatus, warmUp } from './transcribe'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { isLimited, localUrl, resolveLocal, type LocalReach } from './local-paths'
 import { basename, join, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
-import { L, langOf, locale, setLang, type Lang } from '../shared/lang'
+import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, applyOrder, wikiAccess, proposalsOf, type Proposal, type ProposalsResult, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type Routine, type Settings, type WikiChange, type WikiSource } from '../shared/types'
-import { agentOwner, channelEditError, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { ACCOUNT_ENGINES, accountsOn, applyOrder, wikiAccess, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
-import { listModels, quietClaude, quietCodex, withChoice } from './harness'
+import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
 import { claudeEngine, userProvider } from './engines/claude'
@@ -34,6 +34,7 @@ import { cursorAppDir, cursorEngine } from './engines/cursor'
 import { grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
 import { hermesAppDir, hermesEngine } from './engines/hermes'
+import { endpointEngine, type EndpointTarget } from './engines/endpoint'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
@@ -41,9 +42,10 @@ import { asdfEnv, codexEnv } from './engines/codex'
 import { CATALOG, CATEGORIES, catalogInput, catalogView, entryOf, ownAppGuide } from '../shared/connector-catalog'
 import { LoginTerminal, type LoginKey } from './login-terminal'
 import { Push, pushUrl } from './push'
+import { Feedback, feedbackUrl } from './feedback'
 import { fakeEngine } from './engines/fake'
 import { relocating } from './engines/relocate'
-import { DesktopApps, macApps, SELF } from './apps'
+import { appTools, DesktopApps, macApps, SELF } from './apps'
 import { linuxApps, windowsApps, type SystemApp } from './apps-os'
 import type { Engine } from './engines/types'
 import { ConnectorManager, notAuthorized } from './connectors'
@@ -63,6 +65,7 @@ import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
 import { applyForeignTeam, readForeignZip } from './agent-import'
+import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { lineOf, WhatsApp, type Inbound } from './whatsapp'
@@ -71,16 +74,23 @@ import { callLine, callTask, toolValue } from './calls/text'
 import { defaultCallSettings, VOICE_PROVIDERS, type CallCard } from '../shared/calls'
 import { accessFor } from '../shared/whatsapp'
 import { mainCipher, plainCipher, Secrets } from './secrets'
-import { Browser, type BrowserHost } from './browser'
+import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
+import { BrowserLogins } from './browser-logins'
+import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
-import { loginEnv } from './mac'
+import { Titles } from './titles'
+import { loginEnv, MacComputer } from './mac'
+import { NodeLog, NodeServer } from './node-server'
+import { NodeLinks, NodeUplink, type LinkPort } from './node-link'
+import { nodeOf } from '../shared/node-link'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
+import { accessCard, agentStamp, appliesNow, changedSince, routineStamp, splitChange, UNDO_MS, undoErrors } from './tuca-apply'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
@@ -126,7 +136,7 @@ if (!serverMode && isTheme(appTheme)) db.setSettings({ theme: appTheme })
 // A new install has nothing new to show: the news start with the next update.
 if (db.created && process.env['TUCANO_VERSION']) db.setSettings({ seenVersion: process.env['TUCANO_VERSION'] })
 const interrupted = db.interruptStaleRuns()
-if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
+if (interrupted.length) console.log(`[core] ${interrupted.length} run(s) marked as interrupted`)
 
 const user = userInfo().username
 const DEFAULTS: Omit<Settings, 'engines'> = {
@@ -158,7 +168,7 @@ const fakeBrokenOpencode = fake && process.env['TUCANO_FAKE_BROKEN_OPENCODE'] ==
 const OPENCODE_CRASH = "TypeError: Cannot read properties of undefined (reading 'providers')\n    at loadConfig (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/config.js:212:30)\n    at async main (file:///opt/homebrew/lib/node_modules/opencode-ai/dist/index.js:18:3)"
 const PI_EXPIRED = 'OAuth refresh failed for anthropic: 400 {"type":"error","error":{"type":"invalid_grant","message":"Refresh token expired"}}\n    at postJson (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/oauth.js:88:11)\n    at async refreshAnthropic (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/anthropic.js:41:5)\n    at async getAuth (file:///opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/auth/index.js:23:12)'
 const fakeFindings = (): Omit<EngineFindings, 'accounts'> => ({
-  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } },
+  engines: { claude: fakeOne('claude', fakeStatus('0.0.0')), codex: fakeOne('codex', fakeStatus('0.0.0')), opencode: fakeOne('opencode', { ...fakeStatus('0.0.0'), route: 'providers', account: 'OpenAI, OpenCode · 3 modelos' }), pi: fakeBrokenPi ? { ...fakeStatus('0.0.0'), route: 'providers', account: 'Anthropic · 1 modelo' } : { installed: false, loggedIn: false }, antigravity: { installed: false, loggedIn: false }, cursor: { installed: false, loggedIn: false }, grok: { installed: false, loggedIn: false }, cline: { installed: false, loggedIn: false }, hermes: { installed: false, loggedIn: false } , endpoint: { installed: false, loggedIn: false } },
   listed: { opencode: ['openai/gpt-5.5', 'opencode/big-pickle', 'opencode-go/qwen3.8-max'], ...(fakeBrokenPi ? { pi: ['anthropic/claude-haiku-4-5'] } : {}) },
   codexCatalog: []
 })
@@ -264,7 +274,7 @@ const loginTerminal = new LoginTerminal({
   env: (e, account) => {
     if (account) {
       const dir = accountDir(dataDir, account)
-      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : codexEnv(dir, engines.codex.path)
+      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : e === 'antigravity' ? { ...process.env, HOME: dir } : codexEnv(dir, engines.codex.path)
     }
     return e === 'codex' ? codexEnv(codexHome, engines.codex.path) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
   },
@@ -306,10 +316,10 @@ const ready = gateway.start()
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice(engines, s.harnesses), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
 }
 
-// More logins of Claude Code and Codex (Settings › Accounts): each in its own folder, checked with
+// More logins of Claude Code, Codex and Antigravity (Settings › Accounts): each in its own folder, checked with
 // the CLI's own status when the harnesses are, and every few seconds after a sign-in.
 const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>(Object.entries(engineCheck.current.accounts ?? {}))
 const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
@@ -360,7 +370,7 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
 }
 
 const engineImpls: Record<EngineId, Engine> = fake
-  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+  ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
       codex: relocating(codexEngine(() => engines.codex.path, codexHome, loginEnv, async () => quietCodex(userCodexProvider())), moved('codex')),
@@ -370,7 +380,8 @@ const engineImpls: Record<EngineId, Engine> = fake
       cursor: relocating(cursorEngine(() => engines.cursor.path, cursorAppDir(dataDir), loginEnv), moved('cursor')),
       grok: relocating(grokEngine(() => engines.grok.path, loginEnv), moved('grok')),
       cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline')),
-      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes'))
+      hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes')),
+      endpoint: endpointEngine(endpointTarget)
     }
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
@@ -388,6 +399,35 @@ async function foundMcps(): Promise<FoundMcp[]> {
 }
 
 // Where a harness on a gateway sends its requests, and with which key, as its own config says.
+// The address in OpenAI's format the agents run on with no harness, and its key (a secret: it never
+// reaches the window). Unset until someone saves one in Settings › Models.
+const ENDPOINT_SECRET = 'endpoint:key'
+// An endpoint has no program to install and no login: what a phone from before it asks of it.
+const NOTHING_TO_INSTALL = (): string => L('O endpoint não se instala nem tem login: é um endereço e uma chave, em Configurações › Modelos, no computador ou no navegador.', 'The endpoint has nothing to install and no sign-in: it’s an address and a key, in Settings › Models, on the computer or in the browser.')
+async function endpointTarget(): Promise<EndpointTarget | undefined> {
+  const e = db.getSettings(DEFAULTS).endpoint
+  if (!e?.baseUrl) return undefined
+  const key = await secrets.get(ENDPOINT_SECRET)
+  return { baseUrl: e.baseUrl, ...(key ? { key } : {}) }
+}
+// How it shows among the harnesses: there once it has an address, usable once a model is picked.
+function endpointStatus(e: Settings['endpoint']): EngineStatus {
+  if (!e?.baseUrl) return { installed: false, loggedIn: false }
+  let host = e.baseUrl
+  try {
+    host = new URL(e.baseUrl).host
+  } catch {
+    // shown as typed
+  }
+  const n = e.models.length
+  return { installed: true, loggedIn: n > 0, route: 'endpoint', gateway: host, account: `${host} · ${n === 1 ? L('1 modelo', '1 model') : L(`${n} modelos`, `${n} models`)}` }
+}
+// What each harness lists, the endpoint's picked models with them.
+const allListed = (): Partial<Record<EngineId, string[]>> => {
+  const e = db.getSettings(DEFAULTS).endpoint
+  return e?.models.length ? { ...listed, endpoint: e.models } : listed
+}
+
 async function gatewayTarget(engine: EngineId): Promise<{ baseUrl: string; key?: string } | undefined> {
   if (engine === 'claude') {
     const c = userProvider()
@@ -429,9 +469,12 @@ function workspaceSummary(): void {
     lastSummary = wire
   }, 250)
 }
+// The requests' short titles (the board's cards), made once a reply starts on them.
+let titles: Titles | undefined
 function emit(event: CoreEvent): void {
   const more = event.type === 'message' && db.recordActivity(event.message, viewing)
   hub.emit(event)
+  if (event.type === 'message') titles?.forReply(event.message)
   // An approval asked or decided changes what waits on its deciders.
   if (event.type === 'approval') hub.emit({ type: 'inbox' })
   toPhone(event)
@@ -472,6 +515,11 @@ const push = new Push({
   gone: (hash) => db.dropKeyPush(hash)
 })
 
+// "Enviar feedback" and the sidebar's surveys, through tucano.sh (core/feedback.ts). install.json lives in
+// the desktop's data folder, for every workspace (TUCANO_INSTALL_DIR, set by src/main); a server keeps its own.
+const installDir = process.env['TUCANO_INSTALL_DIR'] || dataDir
+const feedback = new Feedback({ url: feedbackUrl(), dir: installDir, version: appVersion, fresh: db.created && installDir === dataDir, os: osOf() })
+
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
 // `to`: the people it's for; unset, everyone (but a DM's news only ever reaches its person).
@@ -494,6 +542,7 @@ type ToMain =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'save_artifact'; path: string } // a copy of an artifact's file, where the person picks
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
   | { type: 'restart' } // a server: start again, to restore a backup (src/server)
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
@@ -619,7 +668,11 @@ process.parentPort.on('message', (e) => {
     if (out) emitPeople()
     return toMain({ type: 'device-key-result', id: r.id, data: out ?? {} })
   }
-  if (r?.type === 'power') return routines.setAwake(r.awake === true)
+  if (r?.type === 'power') {
+    // Awake again: a line to a server that dropped while it slept calls back now, not at the end of its wait.
+    if (r.awake === true) for (const u of uplinks.values()) u.link.nudge()
+    return routines.setAwake(r.awake === true)
+  }
   // A server's /oauth/callback: the code the provider sent back, checked against the state only this core made.
   if (r?.type === 'oauth-callback') {
     const { state = '', code = '', error = '' } = (r.data ?? {}) as { state?: string; code?: string; error?: string }
@@ -652,6 +705,12 @@ process.parentPort.on('message', (e) => {
     const raw = typeof q.body === 'string' ? q.body : ''
     void (r.type === 'calls-start' ? calls.start(secret, raw) : calls.tool(secret, typeof q.name === 'string' ? q.name : '', raw)).then(reply, () => reply({ status: 503, body: '' }))
     return
+  }
+  // The main process: the servers this computer is lent to now, with their keys (Settings › Servers).
+  if (r?.type === 'node-uplinks') {
+    const m = e.data as { name?: unknown; links?: unknown }
+    const links = Array.isArray(m.links) ? (m.links as { serverId?: unknown; origin?: unknown; token?: unknown }[]).filter((l): l is { serverId: string; origin: string; token: string } => typeof l?.serverId === 'string' && typeof l.origin === 'string' && typeof l.token === 'string') : []
+    return setUplinks(typeof m.name === 'string' ? m.name : '', links)
   }
   if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
   if (r?.type === 'browser-result') {
@@ -756,7 +815,8 @@ const chrome =
         undefined,
         (agentId, jpeg) => browser.frame(agentId, jpeg),
         serverMode,
-        serverMode ? 10 * 60_000 : undefined // on a server, an idle agent's Chrome gives its memory back
+        serverMode ? 10 * 60_000 : undefined, // on a server, an idle agent's Chrome gives its memory back
+        (agentId) => downloadsFolder(dataDir, agentId)
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -793,11 +853,13 @@ const desktopApps = new DesktopApps(undefined, {
   installed: async () => (await shelfNow()).map(({ bundleId, ...a }) => ({ ...a, ...(bundleId ? { id: bundleId } : {}) }))
 })
 
+const browserLogins = new BrowserLogins(db, secrets)
 const browser = new Browser({
   host,
   db,
   dataDir,
   emit,
+  logins: browserLogins,
   me: () => settings().workspaceName,
   jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
   onHandback: (agentId) => void runner.handedBack(agentId)
@@ -811,6 +873,8 @@ const connectors = new ConnectorManager({
   // On a server behind https (TUCANO_URL), the provider sends the person back to the server's own
   // address, which src/server hands over here; on a desktop, to the gateway on this computer.
   oauthCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : gateway.url('/oauth/callback')),
+  // A provider that takes only a loopback address back (Canva's): on that server, the address the person pastes.
+  localCallbackUrl: () => gateway.url('/oauth/callback'),
   // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
   fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
 })
@@ -825,8 +889,61 @@ const oauthCallback = async (url: URL): Promise<string> => {
 gateway.route('/oauth/callback', oauthCallback)
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
+titles = new Titles({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
+
+// This computer lent to servers' Tucanos (core/node-server.ts, core/node-link.ts): the app calls each server it
+// was paired with and lends it (Settings › Servers), and that server's agents use this computer's terminal, files,
+// browser, apps and local connectors under the server's approvals. The main process says which servers, with
+// their keys (it keeps them in the keychain): only the default workspace lends, and never a server's own core.
+const nodeLog = new NodeLog(join(dataDir, 'node', 'log.jsonl'))
+const nodeServer = new NodeServer(new MacComputer({ db, dataDir, emit, shoot }), {
+  connectors: { list: () => connectors.list().filter((c) => !nodeOf(c.url)), tools: (id) => db.tools(id), call: (id, name, args) => connectors.call(id, name, args) },
+  // Not the tools that hand files to this app's chat or type the logins saved here: the server's agents have neither.
+  browser: { tools: () => browserTools().filter((t) => !CHAT_ONLY_BROWSER_TOOLS.has(t.name)), call: (agent, name, args, ctx) => browser.call(agent, name, args, ctx), approved: (agent, args) => browser.approved(agent, args) },
+  apps: { tools: appTools, call: (agent, name, args) => desktopApps.call(agent, name, args), approved: (agent, args) => desktopApps.approved(agent, args), lent: () => settings().node?.apps ?? [] },
+  folders: () => settings().node?.folders ?? [],
+  dataDir,
+  log: nodeLog
+})
+const uplinks = new Map<string, { origin: string; token: string; link: NodeUplink }>()
+// This computer's id on the servers it's lent to: made once, kept in its settings.
+function nodeDevice(): string {
+  const had = settings().node?.device
+  if (had) return had
+  const device = randomBytes(12).toString('base64url')
+  db.setSettings({ node: { ...(settings().node ?? {}), device } })
+  return device
+}
+function nodeInfo(): NodeInfo {
+  const n = settings().node ?? {}
+  return { apps: n.apps ?? [], folders: n.folders ?? [], links: [...uplinks.values()].map((u) => u.link.state) }
+}
+// After a change to what it lends: every screen showing it hears (Settings › Servers and the card under it).
+function lentNow(): NodeInfo {
+  const info = nodeInfo()
+  emit({ type: 'node', info })
+  return info
+}
+// The servers to lend this computer to now: a new one calls, one no longer there (or with another key) hangs up.
+function setUplinks(name: string, links: { serverId: string; origin: string; token: string }[]): void {
+  if (serverMode || !defaultWorkspace) return
+  const wanted = new Map(links.map((l) => [l.serverId, l]))
+  for (const [id, u] of uplinks) {
+    const w = wanted.get(id)
+    if (!w || w.origin !== u.origin || w.token !== u.token) (u.link.stop(), uplinks.delete(id))
+  }
+  for (const l of links) {
+    if (uplinks.has(l.serverId)) continue
+    const link = new NodeUplink({ serverId: l.serverId, origin: l.origin, token: l.token, device: nodeDevice(), name, server: () => nodeServer.mcp(), onStatus: () => emit({ type: 'node', info: nodeInfo() }) })
+    uplinks.set(l.serverId, { origin: l.origin, token: l.token, link })
+    link.start()
+  }
+  emit({ type: 'node', info: nodeInfo() })
+}
+// A server's side: a computer that called in (src/server/node-link-http.ts) becomes its person's connector.
+const nodeLinks = new NodeLinks({ db, attach: (id, transport) => connectors.attachNode(id, transport), connected: (id) => connectors.get(id)?.status === 'connected', remove: (id) => connectors.remove(id) })
 const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
@@ -1141,7 +1258,8 @@ const runner = new Runner({
   skills,
   wiki,
   wikiCurator: curator,
-  models: () => availableModels(settings(), listed),
+  models: () => availableModels(settings(), allListed()),
+  applyNow: (messageId, personId) => applyNow(messageId, personId),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
   notify: (title, body, conversationId, kind, threadId, to) => {
     if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
@@ -1157,6 +1275,8 @@ const runner = new Runner({
   }
 })
 runner.setPaused(!!settings().paused)
+// What the app cut when it closed goes on by itself once the agents' engines are found (see resumeInterrupted).
+if (interrupted.length) void enginesReady.then(() => runner.resumeInterrupted(interrupted))
 // Installs from before the Tuca get him at the first start after the introduction.
 void enginesReady.then(() => {
   if (settings().onboarding?.done) ensureTuca()
@@ -1294,7 +1414,7 @@ function worksWith(s: Settings): (id: string) => boolean {
 // The first that runs: the one given, a plan's, the router's or the memory's, or any a harness lists.
 function readyModel(s: Settings, first?: string): string | undefined {
   const works = worksWith(s)
-  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, listed)[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
+  return [first, 'sonnet', 'gpt-5.6-luna', s.routerModel, s.memoryModel, availableModels(s, allListed())[0]?.id].find((id): id is string => !!id && id !== 'jev' && works(id))
 }
 
 // `person`: whose builder screen it is: each person has their own DM with him.
@@ -1343,19 +1463,25 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
 
 // One of a reply's proposals changed: settled once (applied, with what it made or changed, or
 // dismissed), or told why applying it didn't work. A reply from before (one `proposal`) gets the list.
-type ProposalPatch = { state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; agentIds?: string[] }
+type ProposalPatch = { state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; agentIds?: string[]; auto?: true; undo?: UndoInfo }
 function patchProposal(messageId: string, index: number, patch: ProposalPatch): void {
+  restoreCards(messageId)
   const m = db.message(messageId)
   const list = proposalsOf(m?.run)
   const p = list[index]
   if (!m?.run || !p || p.state) return
   const proposals = list.map((x, i) => (i === index ? ({ ...x, ...patch } as Proposal) : x))
   if (patch.state || !patch.error) delete proposals[index]!.error
-  const { proposal: _old, ...run } = m.run
+  saveProposals(m, proposals)
+  if (patch.state) emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
+}
+// A reply's cards as they are now (a reply from before, with one `proposal`, gets the list).
+function saveProposals(m: Message, proposals: Proposal[]): void {
+  proposals.forEach((p, i) => remember(m.id, i, p))
+  const { proposal: _old, ...run } = m.run!
   const updated: Message = { ...m, run: { ...run, proposals } }
   db.saveMessage(updated)
   emit({ type: 'message', message: updated })
-  if (patch.state) emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
 }
 function settleProposal(messageId: string, index: number, appliedId?: string, extra: ProposalPatch = {}): void {
   patchProposal(messageId, index, { ...extra, state: appliedId ? 'applied' : 'dismissed', ...(appliedId ? { appliedId } : {}) })
@@ -1374,32 +1500,101 @@ function neededAgents(messageId: string, p: Proposal): string[] {
       const id = at >= 0 ? t.agentIds?.[at] : undefined
       if (id && db.agent(id)) return id
     }
-    throw new Error(L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`))
+    // Still to make from a card of this reply: that card first.
+    const here = (d && !d.state && same(d.name)) || proposalsOf(run).some((t) => t.kind === 'team' && !t.state && t.agents.some((a) => same(a.name)))
+    // In no card of this reply (another took its place, or it was never proposed), but there is one by
+    // that name, made from another card or by hand: that one.
+    const named = here ? [] : db.agents().filter((a) => !a.archived && a.kind !== 'tuca' && same(a.name))
+    if (named.length === 1) return named[0]!.id
+    throw new Error(
+      here
+        ? L(`Antes, crie ${name}: está num card desta mesma resposta.`, `Create ${name} first: it's in a card of this same reply.`)
+        : L(`Antes, crie ${name}: não está em nenhum card desta resposta. Peça ao Tuca pra propor ${name}, crie, e aplique esta de novo.`, `Create ${name} first: it isn't in any card of this reply. Ask Tuca to propose ${name}, create it, and apply this one again.`)
+    )
   })
 }
 
 // A Tuca's card is settled once: created (with the agent) or dismissed.
-function settleDraft(messageId: string, agentId?: string): void {
+function settleDraft(messageId: string, agentId?: string, extra: Pick<AgentDraft, 'auto' | 'undo'> = {}): void {
+  restoreCards(messageId)
   const m = db.message(messageId)
   if (!m?.run?.agentDraft || m.run.agentDraft.state) return
-  const updated: Message = { ...m, run: { ...m.run, agentDraft: { ...m.run.agentDraft, state: agentId ? 'created' : 'dismissed', ...(agentId ? { agentId } : {}) } } }
+  saveDraft(m, { ...m.run.agentDraft, state: agentId ? 'created' : 'dismissed', ...(agentId ? { agentId, ...extra } : {}) })
+  emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
+}
+function saveDraft(m: Message, agentDraft: AgentDraft): void {
+  remember(m.id, 'draft', agentDraft)
+  const updated: Message = { ...m, run: { ...m.run!, agentDraft } }
   db.saveMessage(updated)
   emit({ type: 'message', message: updated })
-  emit({ type: 'inbox' }) // one a member had sent the admins leaves their inbox
+}
+
+// What each card became once settled (applied, discarded, undone), kept by the core apart from the
+// message, by the card's id (one from before ids: its message and place). The message is what the
+// screens show, and a copy of it from before a click once overwrote it (see keepDecided): this still
+// says "applied" then, so the card is put back as it was and applying it again makes nothing twice.
+const cardKey = (messageId: string, at: number | 'draft', id?: string): string => `card:${id ?? `${messageId}#${at}`}`
+function remember(messageId: string, at: number | 'draft', card: Proposal | AgentDraft): void {
+  if (card.state) db.setMeta(cardKey(messageId, at, card.id), JSON.stringify(card))
+}
+function remembered<T extends Proposal | AgentDraft>(messageId: string, at: number | 'draft', card: T): T | undefined {
+  const saved = db.meta(cardKey(messageId, at, card.id))
+  return saved ? (JSON.parse(saved) as T) : undefined
+}
+// A reply's cards that lost what was done with them, back as they were settled.
+function restoreCards(messageId: string): void {
+  const m = db.message(messageId)
+  if (!m?.run) return
+  let lost = false
+  const list = proposalsOf(m.run).map((p, i) => {
+    const was = p.state ? undefined : remembered(messageId, i, p)
+    if (!was?.state || was.kind !== p.kind) return p
+    lost = true
+    return was
+  })
+  if (lost) saveProposals(m, list)
+  const now = db.message(messageId)!
+  const d = now.run?.agentDraft
+  const was = d && !d.state ? remembered(messageId, 'draft', d) : undefined
+  if (was?.state) saveDraft(now, was)
+}
+
+// The agent a new-agent card proposes, made the way "Criar" makes it, with how to take it back.
+function createDraft(ctx: Ctx, messageId: string, auto = false): { agentId: string; conversationId: string } {
+  restoreCards(messageId)
+  const d = db.message(messageId)?.run?.agentDraft
+  if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
+  if (d.state === 'created' && d.agentId) throw new Error(L('Esse agente já foi criado.', 'That agent was already created.'))
+  if (d.state === 'undone') throw new Error(L('Essa proposta foi desfeita.', 'That proposal was undone.'))
+  const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
+  db.saveAgent(agent)
+  emit({ type: 'agent', agent })
+  record(ctx, 'agent.created', agent.id, { name: agent.name })
+  settleDraft(messageId, agent.id, { ...(auto ? { auto: true as const } : {}), undo: { until: Date.now() + UNDO_MS, stamps: { [agent.id]: agentStamp(db.agent(agent.id)!) } } })
+  const conversationId = randomUUID()
+  db.createConversation({ id: conversationId, kind: 'dm', name: agent.id, members: [agent.id], owner: ctx.person.id })
+  emitConversations([conversationId])
+  return { agentId: agent.id, conversationId }
 }
 
 
 // A member's card for agents or a team: it went to the admins instead of being applied.
 class Forwarded extends Error {}
+// A card the Tuca's reply would have applied by itself, left for the person to click: what they
+// couldn't apply by clicking, they can't have applied for them either.
+class Skipped extends Error {}
 
 // One card of a reply, done the way the screens do it (and checked the same way). `batch`: part of
-// "apply all", which tells the admins once for everything a member sent them.
-function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { id: string } {
+// "apply all", which tells the admins once for everything a member sent them. `auto`: applied by
+// itself as the Tuca proposed it (applyNow), where a member's card for agents stays a card instead.
+function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, auto = false): { id: string } {
+  restoreCards(messageId)
   const p = proposalsOf(db.message(messageId)?.run)[index]
   if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
-  if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
+  if (p.state) throw new Error(p.state === 'applied' ? L('Essa proposta já foi aplicada.', 'That proposal was already applied.') : p.state === 'undone' ? L('Essa proposta foi desfeita.', 'That proposal was undone.') : L('Essa proposta foi descartada.', 'That proposal was discarded.'))
   // Agents are the admins': a member's card goes to them instead (they get what it proposes).
   if ((p.kind === 'agent' || p.kind === 'team') && !isAdmin(ctx.person)) {
+    if (auto) throw new Skipped()
     const what = p.kind === 'agent' ? L(`mudar ${db.agent(p.agentId)?.name ?? 'um agente'}`, `change ${db.agent(p.agentId)?.name ?? 'an agent'}`) : L(`criar ${p.agents.map((a) => a.name).join(', ')}`, `create ${p.agents.map((a) => a.name).join(', ')}`)
     if (!batch) notifyAll(L(`${ctx.person.name} pede pra ${what}`, `${ctx.person.name} asks to ${what}`), p.reason ?? L('Uma proposta do Tuca que só um admin aplica.', 'A Tuca proposal only an admin can apply.'), undefined, undefined, { to: db.people().filter(isAdmin).map((x) => x.id) })
     record(ctx, 'proposal.forwarded', messageId, { kind: p.kind, index })
@@ -1409,13 +1604,17 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { 
   if (p.kind === 'routine') mayRoutine(ctx, { scope: p.routine.scope, owner: ctx.person.id })
   const needed = neededAgents(messageId, p)
   let id: string
-  const extra: ProposalPatch = {}
+  // How to take it back, kept with the card: what it changed, as it was, and what it made, as made.
+  const until = Date.now() + UNDO_MS
+  const extra: ProposalPatch = auto ? { auto: true } : {}
   if (p.kind === 'agent') {
     const agent = db.agent(p.agentId)
     if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
     const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
+    const prior = Object.fromEntries(Object.keys(p.changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
     api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
     id = agent.id
+    extra.undo = { until, prior }
   } else if (p.kind === 'routine') {
     if (p.routine.conversationId) reach(ctx, p.routine.conversationId)
     const agentId = needed[0] ?? p.routine.agentId
@@ -1424,10 +1623,12 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { 
     const made = routines.save({ ...p.routine, agentId, conversationId }, ctx.person.id)
     id = made.id
     record(ctx, 'routine.created', id, routineDetail(db, made))
+    extra.undo = { until, stamps: { [id]: routineStamp(db.routine(id) ?? made) } }
   } else if (p.kind === 'channel') {
     id = api.createChannel({ name: p.name, ...(p.threads ? { threads: true } : {}) }, ctx)
     api.setChannelMembers({ id, agentIds: [...new Set([...p.members, ...needed])] }, ctx)
     if (p.topic) api.setTopic({ id, topic: p.topic }, ctx)
+    extra.undo = { until }
   } else {
     // A team: its agents, each with a DM, and the channel they share when there is one.
     if (p.channel && db.conversations().some((c) => c.kind === 'channel' && c.name === p.channel!.name)) throw new Error(L(`Já existe o canal #${p.channel.name}.`, `There's already a #${p.channel.name} channel.`))
@@ -1446,9 +1647,217 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false): { 
       api.setChannelMembers({ id, agentIds: made }, ctx)
       if (p.channel.topic) api.setTopic({ id, topic: p.channel.topic }, ctx)
     } else id = made[0]!
+    extra.undo = { until, stamps: Object.fromEntries(made.map((a) => [a, agentStamp(db.agent(a)!)])) }
   }
   settleProposal(messageId, index, id, extra)
   return { id }
+}
+
+// The end of a Tuca reply: what it proposed inside the app is applied now, as the person would by
+// clicking, with the same checks for the person he worked for. What grants access stays a card (a
+// change to an agent's connectors or limit is split off into one of its own; a new agent is made
+// without its connectors, which come as a card to confirm); what they couldn't apply by clicking stays
+// a card as before. Nothing is forwarded to the admins on its own: the member does that from the card.
+function applyNow(messageId: string, personId: string): void {
+  if (!appliesNow(settings())) return
+  const person = db.person(personId)
+  restoreCards(messageId)
+  const m = db.message(messageId)
+  if (!person || !m?.run) return
+  const ctx: Ctx = { person }
+  try {
+    reachMessage(ctx, messageId)
+  } catch {
+    return
+  }
+  const admin = isAdmin(person)
+  const later: Proposal[] = [] // access cards for the agents made now: added once the rest is applied
+  let applied = 0
+  // The new-agent card first: the cards that need that agent find it made.
+  const d = m.run.agentDraft
+  if (d && !d.state && admin) {
+    try {
+      if (Object.keys(d.grants).length) saveDraft(db.message(messageId)!, { ...d, grants: {} })
+      const { agentId } = createDraft(ctx, messageId, true)
+      const card = accessCard(agentId, d)
+      if (card) later.push(card)
+      applied++
+    } catch {
+      // Stays a card, with its connectors back: "Criar" says why.
+      const now = db.message(messageId)
+      if (now?.run?.agentDraft && !now.run.agentDraft.state) saveDraft(now, d)
+    }
+  }
+  for (const index of applyOrder(proposalsOf(m.run))) {
+    const before = proposalsOf(db.message(messageId)?.run)
+    const p = before[index]
+    if (!p || p.state) continue
+    if ((p.kind === 'agent' || p.kind === 'team') && !admin) continue
+    // What applies now, and the access it carried, set apart for a card of its own.
+    let now: Proposal = p
+    const access: Proposal[] = []
+    if (p.kind === 'agent') {
+      const split = splitChange(p)
+      if (!split.inside) continue
+      now = split.inside
+      if (split.access) access.push(split.access)
+    } else if (p.kind === 'team') now = { ...p, agents: p.agents.map((a) => ({ ...a, grants: {} })) }
+    if (now !== p) saveProposals(db.message(messageId)!, before.map((x, i) => (i === index ? now : x)))
+    try {
+      applyOne(ctx, messageId, index, true, true)
+      applied++
+      const made = proposalsOf(db.message(messageId)?.run)[index]
+      if (p.kind === 'team' && made?.kind === 'team')
+        p.agents.forEach((a, i) => {
+          const card = made.agentIds?.[i] ? accessCard(made.agentIds[i]!, a) : undefined
+          if (card) access.push(card)
+        })
+      later.push(...access)
+    } catch {
+      // Stays a card, as it was: clicking it gives the same answer, with why.
+      if (now !== p) saveProposals(db.message(messageId)!, proposalsOf(db.message(messageId)?.run).map((x, i) => (i === index ? p : x)))
+    }
+  }
+  if (later.length) {
+    const now = db.message(messageId)!
+    saveProposals(now, [...proposalsOf(now.run), ...later.map((card) => ({ ...card, id: randomUUID() }))])
+  }
+  if (applied) record(ctx, 'proposals.applied', messageId, { applied, auto: true })
+}
+
+// ---------- Desfazer: taking back what an applied card did ----------
+
+// A conversation gone, with everything that only made sense there: replies still running stop, its
+// routines and its pending approvals go.
+function dropConversation(ctx: Ctx, c: Conversation): void {
+  const id = c.id
+  record(ctx, c.kind === 'channel' ? 'channel.deleted' : 'dm.deleted', id, c.kind === 'channel' ? { name: c.name } : undefined)
+  for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
+  for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
+  for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+  runner.forgetSessions({ conversationId: id })
+  db.deleteConversation(id)
+  emit({ type: 'conversation_removed', id, ...(c.kind === 'dm' ? { for: dmOwner(c, db.ownerId()) } : {}) })
+}
+
+// A card taken back: its state, and nothing else changes on it.
+function markUndone(messageId: string, index: number): void {
+  const m = db.message(messageId)
+  const list = proposalsOf(m?.run)
+  if (!m?.run || !list[index] || list[index]!.state === 'undone') return
+  saveProposals(m, list.map((x, i) => (i === index ? ({ ...x, state: 'undone' } as Proposal) : x)))
+}
+
+// Agents a card made, deleted, with what this reply made only for them (their routines, a channel
+// that needed them) and their access cards. Everything is checked before anything goes: refused,
+// with why, when one of them worked, was adjusted or is used since.
+function unmake(ctx: Ctx, messageId: string, ids: string[], stamps: Record<string, string>, channelId?: string): void {
+  const agents = ids.map((id) => db.agent(id)).filter((a): a is Agent => !!a)
+  const list = proposalsOf(db.message(messageId)?.run)
+  const mine = (q: Proposal): boolean =>
+    q.state === 'applied' && !!q.appliedId && ((q.kind === 'routine' && ids.includes(db.routine(q.appliedId)?.agentId ?? '')) || (q.kind === 'channel' && !!q.needs?.length && !!db.conversation(q.appliedId)?.members.some((a) => ids.includes(a))))
+  const deps = list.flatMap((q, i) => (mine(q) ? [i] : []))
+  const depRoutines = new Set(deps.map((i) => list[i]!).filter((q) => q.kind === 'routine').map((q) => q.appliedId!))
+  for (const a of agents) {
+    if (a.archived) throw new Error(undoErrors.archived(a.name))
+    if (stamps[a.id] && stamps[a.id] !== agentStamp(a)) throw new Error(undoErrors.edited(a.name))
+    if (db.agentUsed(a.id) || db.conversations().some((c) => c.kind === 'dm' && c.name === a.id && db.hasMessages(c.id))) throw new Error(undoErrors.worked(a.name))
+    if (db.agents().some((x) => x.reportsTo === a.id)) throw new Error(undoErrors.boss(a.name))
+    const other = db.routines().find((r) => r.agentId === a.id && !depRoutines.has(r.id))
+    if (other) throw new Error(undoErrors.routine(a.name, other.name))
+  }
+  for (const i of deps) checkUndo(ctx, list[i]!)
+  const team = channelId ? db.conversation(channelId) : undefined
+  if (team && db.hasMessages(team.id)) throw new Error(undoErrors.talked(team.name))
+  for (const i of deps) {
+    takeBack(ctx, list[i]!)
+    markUndone(messageId, i)
+  }
+  // Their access cards: one still open goes, one confirmed goes with the agent.
+  proposalsOf(db.message(messageId)?.run).forEach((q, i) => {
+    if (q.kind !== 'agent' || !ids.includes(q.agentId)) return
+    if (!q.state) settleProposal(messageId, i)
+    else if (q.state === 'applied') markUndone(messageId, i)
+  })
+  for (const a of agents) {
+    for (const c of db.conversations().filter((c) => c.kind === 'dm' && c.name === a.id)) dropConversation(ctx, c)
+    const channels = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(a.id)).map((c) => c.id)
+    runner.forgetSessions({ agentId: a.id })
+    db.deleteAgent(a.id)
+    record(ctx, 'agent.removed', a.id, { name: a.name })
+    emit({ type: 'agent_removed', id: a.id })
+    emitConversations(channels)
+  }
+  if (team) dropConversation(ctx, team)
+  refreshRestricted()
+}
+
+// Whether a routine's or a channel's card can be taken back by this person, as it stands now.
+function checkUndo(ctx: Ctx, p: Proposal): void {
+  if (p.kind === 'routine') {
+    const r = p.appliedId ? db.routine(p.appliedId) : undefined
+    if (!r) return
+    reach(ctx, r.conversationId)
+    mayRoutine(ctx, r)
+    if (p.undo?.stamps?.[r.id] && p.undo.stamps[r.id] !== routineStamp(r)) throw new Error(undoErrors.routineChanged(r.name))
+  } else if (p.kind === 'channel') {
+    const c = p.appliedId ? db.conversation(p.appliedId) : undefined
+    if (!c) return
+    if (!mayEditChannel(ctx.person, c, db.ownerId())) throw new Error(channelEditError())
+    if (db.hasMessages(c.id)) throw new Error(undoErrors.talked(c.name))
+  }
+}
+// …and taking it back, once checked: what it made goes (gone already: nothing to do).
+function takeBack(ctx: Ctx, p: Proposal): void {
+  if (p.kind === 'routine') {
+    const r = p.appliedId ? db.routine(p.appliedId) : undefined
+    if (!r) return
+    record(ctx, 'routine.removed', r.id, routineDetail(db, r))
+    routines.remove(r.id)
+  } else if (p.kind === 'channel') {
+    const c = p.appliedId ? db.conversation(p.appliedId) : undefined
+    if (c) dropConversation(ctx, c)
+  }
+}
+
+// One card taken back: refused, saying why, when its time is up or what it touched changed since.
+// The same person may take it back who may apply it: agents and teams, the admins; a routine, by
+// its rules; a channel, whoever made it (or an admin).
+function undoOne(ctx: Ctx, messageId: string, index: number): void {
+  const p = proposalsOf(db.message(messageId)?.run)[index]
+  if (!p) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
+  if (p.state === 'undone') return
+  if (p.state !== 'applied' || !p.undo) throw new Error(undoErrors.nothing())
+  if (Date.now() > p.undo.until) throw new Error(undoErrors.expired())
+  if ((p.kind === 'agent' || p.kind === 'team') && !isAdmin(ctx.person)) throw new Error(adminError())
+  if (p.kind === 'agent') {
+    const agent = db.agent(p.agentId)
+    if (agent) {
+      if (agent.archived) throw new Error(undoErrors.archived(agent.name))
+      const moved = changedSince(agent, p.changes)
+      if (moved.length) throw new Error(undoErrors.changed(agent.name, moved))
+      const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
+      api.saveAgent({ agent: { ...agent, ...p.undo.prior }, channelIds }, ctx)
+    }
+  } else if (p.kind === 'team') unmake(ctx, messageId, p.agentIds ?? [], p.undo.stamps ?? {}, p.channel ? p.appliedId : undefined)
+  else {
+    checkUndo(ctx, p)
+    takeBack(ctx, p)
+  }
+  markUndone(messageId, index)
+}
+
+// The new-agent card taken back: the agent goes, as a team's would.
+function undoDraft(ctx: Ctx, messageId: string): void {
+  const d = db.message(messageId)?.run?.agentDraft
+  if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
+  if (d.state === 'undone') return
+  if (d.state !== 'created' || !d.undo || !d.agentId) throw new Error(undoErrors.nothing())
+  if (Date.now() > d.undo.until) throw new Error(undoErrors.expired())
+  if (!isAdmin(ctx.person)) throw new Error(adminError())
+  unmake(ctx, messageId, [d.agentId], d.undo.stamps ?? {})
+  const m = db.message(messageId)!
+  saveDraft(m, { ...m.run!.agentDraft!, state: 'undone' })
 }
 
 const PAGE = 100 // messages outside threads per conversation, per page sent to the window
@@ -1462,10 +1871,32 @@ function reach(ctx: Ctx, conversationId: string | undefined): void {
   if (why) throw new Error(why)
 }
 // A message from a channel's heritage (People.visibleAt) is, to a member, as if it weren't there.
+// The person's DM with an agent: the one there is, or a new one.
+function dmFor(ctx: Ctx, agentId: string): string {
+  assertAgentVisible(db, ctx.person, agentId)
+  return dmWith(agentId, ctx.person.id)
+}
+// A to-do's text as kept: no control characters but newlines, no longer than `max`.
+const cleanTaskText = (s: unknown, max: number): string => (typeof s === 'string' ? s.replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim().slice(0, max) : '')
+
 function reachMessage(ctx: Ctx, messageId: string): void {
   reach(ctx, db.messageConversation(messageId))
   const m = db.message(messageId)
   if (m && !people.visibleAt(ctx.person, m)) throw new Error(L('Essa mensagem não existe mais.', 'That message no longer exists.'))
+}
+// An artifact's file, for what only the computer's own window does with it (show it in Finder, save
+// a copy): a paired device or a member would get a dialog on a screen they can't see.
+function ownArtifactFile(ctx: Ctx, id: string): string {
+  if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
+  const a = db.artifact(id)
+  if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
+  // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
+  const root = resolve(dataDir, 'artifacts')
+  const folder = resolve(root, a.id)
+  const file = resolve(folder, a.name)
+  const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
+  if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
+  return file
 }
 // How a conversation works (threads, the wiki, its summary): a DM's person's; a channel's, whoever
 // made it and the admins, like its name and agents.
@@ -1605,16 +2036,12 @@ const api: Handlers = {
   // Only reveals: opening a file of any other type could run an app or a script.
   // And only on the computer's own window: a paired device (it comes with a device key) or a member would open a Finder on a screen they can't see.
   revealArtifact: ({ id }, ctx) => {
-    if (serverMode || ctx.device || ctx.person.role !== 'owner') throw new Error(L('Só na janela do próprio computador.', "Only in this computer's own window."))
-    const a = db.artifact(id)
-    if (!a || !people.canSeeConversation(ctx.person, db.conversation(a.conversationId)) || !people.artifactVisible(ctx.person, a)) throw new Error(L('Esse arquivo não existe mais.', 'This file no longer exists.'))
-    // Neither the id nor the name may climb out: no `..` anywhere, the folder inside artifacts/, the file inside its folder.
-    const root = resolve(dataDir, 'artifacts')
-    const folder = resolve(root, a.id)
-    const file = resolve(folder, a.name)
-    const climbs = (s: string): boolean => s.split(/[\\/]/).includes('..')
-    if (climbs(a.id) || climbs(a.name) || !folder.startsWith(root + sep) || !file.startsWith(folder + sep) || !existsSync(file)) throw new Error(L('O arquivo não está mais aqui.', 'The file is no longer here.'))
-    toMain({ type: 'open_local', path: file, how: 'reveal' })
+    toMain({ type: 'open_local', path: ownArtifactFile(ctx, id), how: 'reveal' })
+  },
+  // A copy where the person picks (the app asks with the system's Save dialog). On a server the
+  // browser saves it instead, from /artifact/…?download (src/server/artifact-http.ts).
+  saveArtifact: ({ id }, ctx) => {
+    toMain({ type: 'save_artifact', path: ownArtifactFile(ctx, id) })
   },
 
   snapshot: (_, ctx) => people.snapshotFor(ctx.person, {
@@ -1819,13 +2246,7 @@ const api: Handlers = {
     if (!c) return
     reach(ctx, id)
     if (c.kind === 'channel') must(ctx.person, { kind: 'admin' })
-    record(ctx, c.kind === 'channel' ? 'channel.deleted' : 'dm.deleted', id, c.kind === 'channel' ? { name: c.name } : undefined)
-    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
-    for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
-    for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
-    runner.forgetSessions({ conversationId: id })
-    db.deleteConversation(id)
-    emit({ type: 'conversation_removed', id, ...(c.kind === 'dm' ? { for: dmOwner(c, db.ownerId()) } : {}) })
+    dropConversation(ctx, c)
   },
 
   createChannel: ({ name, threads }, ctx) => {
@@ -1843,18 +2264,7 @@ const api: Handlers = {
   ensureTuca: ({ modelId, fresh }, ctx) => ensureTuca(modelId, fresh, ctx.person.id),
   createFromDraft: ({ messageId }, ctx) => {
     reachMessage(ctx, messageId)
-    const d = db.message(messageId)?.run?.agentDraft
-    if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
-    if (d.state === 'created' && d.agentId) throw new Error(L('Esse agente já foi criado.', 'That agent was already created.'))
-    const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
-    db.saveAgent(agent)
-    emit({ type: 'agent', agent })
-    record(ctx, 'agent.created', agent.id, { name: agent.name })
-    settleDraft(messageId, agent.id)
-    const conversationId = randomUUID()
-    db.createConversation({ id: conversationId, kind: 'dm', name: agent.id, members: [agent.id], owner: ctx.person.id })
-    emitConversations([conversationId])
-    return { agentId: agent.id, conversationId }
+    return createDraft(ctx, messageId)
   },
   settleDraft: ({ messageId, agentId }, ctx) => (reachMessage(ctx, messageId), settleDraft(messageId, agentId)),
   // What a Tuca's card proposed, done the way the screens do it (and checked the same way).
@@ -1871,6 +2281,7 @@ const api: Handlers = {
   // the admins) doesn't stop the others; the admins hear once about what a member sent them.
   applyProposals: ({ messageId, draft }, ctx) => {
     reachMessage(ctx, messageId)
+    restoreCards(messageId)
     const m = db.message(messageId)
     const list = proposalsOf(m?.run)
     if (!m?.run || (!list.length && !m.run.agentDraft)) throw new Error(L('Essas propostas não existem mais.', 'Those proposals no longer exist.'))
@@ -1909,14 +2320,100 @@ const api: Handlers = {
   dismissProposal: ({ messageId, index = 0 }, ctx) => (people.forwarded(ctx.person, messageId, index) || reachMessage(ctx, messageId), settleProposal(messageId, index)),
   dismissProposals: ({ messageId, draft }, ctx) => {
     reachMessage(ctx, messageId)
+    restoreCards(messageId)
     const m = db.message(messageId)
     proposalsOf(m?.run).forEach((p, i) => p.state || settleProposal(messageId, i))
     if (draft && m?.run?.agentDraft && !m.run.agentDraft.state) settleDraft(messageId)
   },
+  undoProposal: ({ messageId, index = 0, draft }, ctx) => {
+    if (draft || !people.forwarded(ctx.person, messageId, index)) reachMessage(ctx, messageId)
+    if (draft) undoDraft(ctx, messageId)
+    else undoOne(ctx, messageId, index)
+  },
+  // Every applied card of the reply taken back, the last made first (a routine before its agent); the
+  // new-agent card last. One refused doesn't stop the others, and says why.
+  undoProposals: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
+    const m = db.message(messageId)
+    const list = proposalsOf(m?.run)
+    if (!m?.run) throw new Error(L('Essas propostas não existem mais.', 'Those proposals no longer exist.'))
+    const out: ProposalsResult = { applied: [], failed: [], forwarded: [] }
+    for (const index of applyOrder(list).reverse()) {
+      const p = proposalsOf(db.message(messageId)?.run)[index]
+      if (p?.state !== 'applied' || !p.undo) continue
+      try {
+        undoOne(ctx, messageId, index)
+        out.applied.push({ index, id: p.appliedId ?? '' })
+      } catch (e) {
+        out.failed.push({ index, error: e instanceof Error ? e.message : String(e) })
+      }
+    }
+    const d = db.message(messageId)?.run?.agentDraft
+    if (d?.state === 'created' && d.undo) {
+      try {
+        undoDraft(ctx, messageId)
+        out.draft = { ...(d.agentId ? { agentId: d.agentId } : {}) }
+      } catch (e) {
+        out.draft = { error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+    record(ctx, 'proposals.undone', messageId, { undone: out.applied.length + (out.draft?.agentId ? 1 : 0), failed: out.failed.length + (out.draft?.error ? 1 : 0) })
+    return out
+  },
   // One DM per agent and person.
-  openDm: ({ agentId }, ctx) => {
-    assertAgentVisible(db, ctx.person, agentId)
-    return dmWith(agentId, ctx.person.id)
+  openDm: ({ agentId }, ctx) => dmFor(ctx, agentId),
+
+  // ---------- the board's to-dos (Quadro) ----------
+  tasks: (_p, ctx) => db.tasks(ctx.person.id),
+  saveTask: ({ task }, ctx) => {
+    const prev = task.id ? db.task(task.id) : undefined
+    if (task.id && prev?.owner !== ctx.person.id) throw new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
+    const title = cleanTaskText(task.title, MAX_TASK_TITLE).replace(/\s+/g, ' ')
+    if (!title) throw new UserError(L('Escreva o que é pra fazer.', 'Write what is to be done.'))
+    const notes = task.notes === undefined ? prev?.notes : cleanTaskText(task.notes, MAX_TASK_NOTES) || undefined
+    const agentId = task.agentId === undefined ? prev?.agentId : task.agentId || undefined
+    if (agentId) {
+      assertAgentVisible(db, ctx.person, agentId)
+      const a = db.agent(agentId)
+      if (!a || !isTeam(a)) throw new UserError(L('Escolha um agente do time.', 'Pick one of the team’s agents.'))
+    }
+    const conversationId = task.conversationId === undefined ? prev?.conversationId : task.conversationId || undefined
+    if (conversationId) {
+      reach(ctx, conversationId)
+      const conv = db.conversation(conversationId)
+      if (conv?.kind !== 'channel') throw new UserError(L('Escolha um canal, ou deixe na DM do agente.', 'Pick a channel, or leave it in the agent’s DM.'))
+      if (agentId && !conv.members.includes(agentId)) throw new UserError(L('Esse agente não está nesse canal.', 'That agent isn’t in that channel.'))
+    }
+    const mine = db.tasks(ctx.person.id)
+    const position = Number.isFinite(task.position) ? Number(task.position) : (prev?.position ?? (mine.length ? Math.min(...mine.map((t) => t.position)) - 1 : 0))
+    const dueAt = task.dueAt === undefined ? prev?.dueAt : Number.isFinite(task.dueAt) && task.dueAt! > 0 ? Math.round(task.dueAt!) : undefined
+    const saved: Task = { id: prev?.id ?? randomUUID(), owner: ctx.person.id, title, position, createdAt: prev?.createdAt ?? Date.now(), ...(notes ? { notes } : {}), ...(agentId ? { agentId } : {}), ...(conversationId ? { conversationId } : {}), ...(dueAt ? { dueAt } : {}) }
+    db.saveTask(saved)
+    emit({ type: 'tasks', for: ctx.person.id })
+    return saved
+  },
+  removeTask: ({ id }, ctx) => {
+    if (db.task(id)?.owner !== ctx.person.id) return
+    db.removeTask(id)
+    emit({ type: 'tasks', for: ctx.person.id })
+  },
+  // Posted as the person's own message: in the agent's DM, or in the channel set, addressed to it.
+  startTask: ({ id }, ctx) => {
+    const t = db.task(id)
+    if (t?.owner !== ctx.person.id) throw new UserError(L('Essa tarefa não existe mais.', 'That task no longer exists.'))
+    if (!t.agentId) throw new UserError(L('Escolha quem faz antes de começar.', 'Pick who does it before starting.'))
+    assertAgentVisible(db, ctx.person, t.agentId)
+    const agent = db.agent(t.agentId)
+    if (!agent || !isTeam(agent)) throw new UserError(L('Esse agente não está mais no time.', 'That agent is no longer on the team.'))
+    const channel = t.conversationId ? db.conversation(t.conversationId) : undefined
+    if (t.conversationId) reach(ctx, t.conversationId)
+    const conversationId = channel?.kind === 'channel' && channel.members.includes(agent.id) ? channel.id : dmFor(ctx, agent.id)
+    const body = `${t.title}${t.notes ? `\n\n${t.notes}` : ''}${t.dueAt ? `\n\n${L('Prazo', 'Due')}: ${new Date(t.dueAt).toLocaleDateString(locale(), { day: 'numeric', month: 'long' })}` : ''}`
+    const text = conversationId === channel?.id ? `@${agent.handle} ${body}` : body
+    db.removeTask(id)
+    emit({ type: 'tasks', for: ctx.person.id })
+    bg(runner.send(conversationId, text, [], undefined, ctx.person.id), 'startTask')
+    return { conversationId }
   },
 
   saveSkill: ({ skill }, ctx) => {
@@ -2057,6 +2554,20 @@ const api: Handlers = {
       zip.close()
     }
   },
+  // Hermes Agent (spec §26): its folder, read where it is (src/core/hermes-import.ts). The preview adds
+  // nothing; the import adds the chosen profiles the same way as an OpenBot export.
+  hermesPreview: ({ path }) => hermesPreview(readHermes(path?.trim() || hermesRoot())),
+  importHermes: ({ path, profiles }, ctx) => {
+    record(ctx, 'team.imported')
+    const s = settings()
+    const r = applyForeignTeam(db, hermesTeam(readHermes(path), profiles), { defaultLimit: s.defaultLimit, defaultModel: readyModel(s) ?? 'sonnet', works: worksWith(s), personId: ctx.person.id })
+    for (const id of r.agents) emit({ type: 'agent', agent: db.agent(id)! })
+    emitConversations()
+    for (const k of db.skills()) emit({ type: 'skill', skill: k })
+    for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
+    for (const m of r.memories) emit({ type: 'memory', memory: m })
+    return r.summary
+  },
   backupNow: () => backup(db, backups, workspaceLabel(db.getSettings(DEFAULTS))),
   // Everything in one .zip in Downloads, shown in the Finder: to take to a server, which restores it.
   exportBackup: () => {
@@ -2099,11 +2610,62 @@ const api: Handlers = {
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
   // Checked with TypeSafe before it's saved; null removes it.
+  nodeInfo: async () => nodeInfo(),
+  setNode: async ({ apps }) => {
+    db.setSettings({ node: { ...(settings().node ?? {}), apps } })
+    return nodeInfo()
+  },
+  // A folder lent to the servers' agents: inside home, not Library, a dot folder or Tucano's data (checkFolder).
+  addNodeFolder: async ({ path }) => {
+    const why = checkFolder(path, { dataDir, named: true })
+    if (why) throw new UserError(why)
+    const real = realpathSync(path)
+    const prev = settings().node ?? {}
+    const folders = prev.folders ?? []
+    if (!folders.includes(real)) db.setSettings({ node: { ...prev, folders: [...folders, real] } })
+    return lentNow()
+  },
+  removeNodeFolder: async ({ path }) => {
+    const prev = settings().node ?? {}
+    db.setSettings({ node: { ...prev, folders: (prev.folders ?? []).filter((f) => f !== path) } })
+    return lentNow()
+  },
+  nodeLog: async ({ limit }) => nodeLog.read(limit ?? 100),
   setJevKey: async ({ key }) => {
     const k = key?.trim()
     if (k) await checkJevKey(k)
     await secrets.set(JEV_SECRET, k || undefined)
     if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
+    emit({ type: 'settings', settings: settings() })
+  },
+
+  // An address in OpenAI's format and its key, tried before anything is saved: the models it lists, or
+  // why it can't be used. With no key given, the one saved goes (trying it again after a change of URL).
+  probeEndpoint: async ({ baseUrl, key }) => {
+    const base = cleanEndpoint(baseUrl)
+    try {
+      const models = await listModels('endpoint', base, key?.trim() || (await secrets.get(ENDPOINT_SECRET)))
+      if (!models.length) return { models: [], error: L('O endpoint respondeu, mas não listou nenhum modelo.', 'The endpoint answered, but listed no models.') }
+      return { models }
+    } catch (e) {
+      return { models: [], error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+  // Saved as the person left it: the address, the models the agents may use and the key (undefined
+  // keeps the saved one, null removes it). An empty address takes the endpoint away.
+  setEndpoint: async ({ baseUrl, models, key }) => {
+    const base = baseUrl.trim() ? cleanEndpoint(baseUrl) : ''
+    if (key !== undefined) await secrets.set(ENDPOINT_SECRET, key?.trim() || undefined)
+    if (!base) {
+      db.deleteSetting('endpoint')
+      await secrets.set(ENDPOINT_SECRET, undefined)
+    } else {
+      const picked = [...new Set(models.map((m) => m.trim()).filter(Boolean))].slice(0, 200)
+      db.setSettings({ endpoint: { baseUrl: base, models: picked } })
+      // Someone who chose which harnesses to use has picked this one too, by setting it up.
+      const chosen = db.getSettings(DEFAULTS).harnesses
+      if (chosen && !chosen.includes('endpoint')) db.setSettings({ harnesses: [...chosen, 'endpoint'] })
+    }
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2113,7 +2675,7 @@ const api: Handlers = {
     if (!engineCheck.known) await enginesReady
     if (engine === 'codex' && codexCatalog.length)
       return { models: codexCatalog.map((m) => m.slug), labels: Object.fromEntries(codexCatalog.map((m) => [m.slug, { label: m.label, ...(m.description ? { hint: m.description } : {}) }])) }
-    if (listed[engine]) return { models: listed[engine]! }
+    if (allListed()[engine]) return { models: allListed()[engine]! }
     if (engines[engine].route !== 'gateway') return { models: [] }
     if (!gatewayLists.has(engine))
       gatewayLists.set(
@@ -2162,7 +2724,7 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)
@@ -2245,12 +2807,18 @@ const api: Handlers = {
     return id
   },
   updateTool: ({ connectorId, name, patch }, ctx) => (record(ctx, 'connector.updated', connectorId, { tool: name, ...patch }), connectors.updateTool(connectorId, name, patch)),
+  // A lent computer, for exactly the agents its person (or an admin) picks: people.ts says who may.
+  shareComputer: ({ connectorId, agentIds }, ctx) => {
+    for (const agent of shareComputerFor(db, ctx.person, connectorId, agentIds)) emit({ type: 'agent', agent })
+    record(ctx, 'computer.shared', connectorId, { agents: agentIds.length })
+  },
   // The agent's person, admins, and whoever covers for that person now.
   decideApproval: ({ id, decision, reason, always }, ctx) => {
     const a = db.approval(id)
     if (!a) return
     if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
     must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
+    if (!people.canDecide(ctx.person, a)) throw new UserError(L('Isso roda no computador de outra pessoa: só ela decide.', "That runs on someone else's computer: only they decide."))
     bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
   },
 
@@ -2301,6 +2869,20 @@ const api: Handlers = {
     await chrome.run(agentId, 'input', input)
   },
 
+  // The logins the person saves for an agent's browser (browser-logins.ts): the page lists sites and
+  // usernames, never a password, and nothing here goes to a log.
+  browserLogins: async ({ agentId }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    return browserLogins.list(agentId)
+  },
+  saveBrowserLogin: async ({ agentId, site, username, password }) => {
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    await browserLogins.save(agentId, site, username, password)
+  },
+  removeBrowserLogin: async ({ agentId, origin }) => {
+    await browserLogins.remove(agentId, origin)
+  },
+
   browserAction: ({ agentId, action }, ctx) => {
     if (action === 'clear') must(ctx.person, { kind: 'admin' })
     else mayBrowser(ctx, agentId)
@@ -2342,6 +2924,10 @@ const api: Handlers = {
     routines.remove(id)
   },
   // "Me avise": told of a channel routine's runs (one's own routine always tells its person).
+  sendFeedback: ({ kind, message, image, lang: l }) => feedback.send({ kind, message, ...(image ? { image } : {}), lang: l ?? lang() }),
+  // Off in the settings: no survey, and nothing asked of tucano.sh.
+  survey: ({ lang: l }) => (settings().surveys === false ? Promise.resolve(null) : feedback.survey({ lang: l ?? lang() })),
+  answerSurvey: ({ survey, choice, comment, dismiss, lang: l }) => feedback.answer({ survey, ...(choice ? { choice } : {}), ...(comment ? { comment } : {}), ...(dismiss ? { dismiss } : {}), lang: l ?? lang() }),
   watchRoutine: ({ id, on }, ctx) => {
     people.watch(ctx.person, id)
     db.watchRoutine(id, ctx.person.id, on)
@@ -2670,6 +3256,7 @@ const api: Handlers = {
   // Login always happens in the CLI's own flow; the app never sees credentials.
   // Codex and Cline log into the app's own folders (see codexEnv, clineLoginEnv), separate from the user's.
   loginEngine: ({ engine, screen }) => {
+    if (engine === 'endpoint') throw new UserError(NOTHING_TO_INSTALL())
     // On a server, for a page or a phone that can show it: the sign-in in a terminal of the server's.
     const shown = screen && engines[engine].installed ? loginTerminal.start(engine) : undefined
     if (shown) return { opened: true, command: ENGINES[engine].login, screen: shown }
@@ -2695,9 +3282,10 @@ const api: Handlers = {
     engineSetup.cancel()
   },
 
-  // Another login of Claude Code or Codex: a folder of its own, signed into in a terminal like the first.
+  // Another login of Claude Code, Codex or Antigravity: a folder of its own, signed into in a terminal like the first.
   addAccount: ({ engine, name }) => {
-    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code ou do Codex.', 'Only Claude Code or Codex can have another account.'))
+    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code, do Codex ou do Antigravity.', 'Only Claude Code, Codex or Antigravity can have another account.'))
+    if (!accountsOn(engine, osOf())) throw new Error(L('Outra conta do Antigravity, por enquanto, só no Mac: no Linux e no Windows o login dele fica no cofre do sistema, um só pra todas.', 'Another Antigravity account is Mac-only for now: on Linux and Windows its login lives in the system store, one for all.'))
     const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
     mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
     db.setSettings({ accounts: [...savedAccounts(), account] })
@@ -2718,7 +3306,7 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
-    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
+    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : a.engine === 'antigravity' ? { HOME: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
   removeAccount: ({ id }) => {
@@ -2738,6 +3326,7 @@ const api: Handlers = {
   // The harness's own installer, in a terminal the person sees: its progress, its
   // questions and its errors stay theirs. Detection picks the CLI up once it lands.
   installEngine: ({ engine }) => {
+    if (engine === 'endpoint') throw new UserError(NOTHING_TO_INSTALL())
     const r = installer((isWin && ENGINES[engine].windows) || ENGINES[engine].install)
     // It installs in a terminal: check again until it lands, wherever the person is.
     if (r.opened) watchEngine(engine, (st) => st.installed)
@@ -2810,6 +3399,13 @@ function handle(port: MessagePortMain, req: Request): void {
 process.parentPort.on('message', (e) => {
   const port = e.ports[0]
   if (!port) return
+  // A computer lent to this server, calling in (src/server/node-link-http.ts): a connector of its person's.
+  const link = e.data as { type?: unknown; person?: unknown; device?: unknown; name?: unknown } | null
+  if (link?.type === 'node-link') {
+    if (!serverMode) return port.close()
+    nodeLinks.attach(port as unknown as LinkPort, { person: typeof link.person === 'string' ? link.person : undefined, device: link.device, name: link.name })
+    return
+  }
   if (!hub.add(port, e.data)) return
   port.on('message', (m) => handle(port, m.data as Request))
   port.on('close', () => hub.delete(port))

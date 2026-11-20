@@ -29,7 +29,16 @@ const MAX_SHOW_BYTES = 50 * 1024 * 1024
 
 // Why a folder can't be lent, or null. Only folders inside the home folder,
 // never the home itself, Library, hidden folders (~/.ssh, ~/.config…) or the app's own data.
-export function checkFolder(path: string, opts: { home?: string; dataDir: string }): string | null {
+// named: the refusal starts with the folder, as ~/… (~\… on Windows) (the node's lent folders, where a wrong pick is easy).
+export function checkFolder(path: string, opts: { home?: string; dataDir: string; named?: boolean }): string | null {
+  const why = folderRefusal(path, opts)
+  if (!why || !opts.named) return why
+  const home = opts.home ?? homedir()
+  const shown = path === home ? '~' : path.startsWith(home + sep) ? '~' + path.slice(home.length) : path
+  return `${shown}: ${why}`
+}
+
+function folderRefusal(path: string, opts: { home?: string; dataDir: string }): string | null {
   let real: string
   try {
     real = realpathSync(path)
@@ -187,8 +196,12 @@ export const noDocker = (): string =>
 export const noDockerAccess = (): string =>
   L('Seu usuário não tem acesso ao Docker. Rode sudo usermod -aG docker $USER, saia e entre de novo na sessão.', "Your user has no access to Docker. Run sudo usermod -aG docker $USER, then log out and back in.")
 // No docker command at all: spawn fails before Docker can say anything.
-export const dockerMissing = (): string =>
-  L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
+// On a server, "this computer" is the server, which a person often didn't set up (Tucano Pro's): the Docker
+// on their own computer isn't reachable from there, but the computer is, lent from the app on it.
+export const dockerMissing = (server = process.env['TUCANO_SERVER'] === '1'): string =>
+  server
+    ? L('Este Tucano roda num servidor sem Docker, então o Linux isolado não funciona aqui. Pra os agentes usarem o seu computador (terminal, pastas e navegador), ligue no app do Tucano nele Configurações › Servidores › Deixar este servidor usar este computador.', "This Tucano runs on a server without Docker, so the isolated Linux doesn't work here. For the agents to use your computer (terminal, folders and browser), turn on Settings › Servers › Let this server use this computer in the Tucano app there.")
+    : L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
 // A quick docker call that never answered (`late`): the daemon is stuck (on Linux, a service that fails to
 // start behind its socket leaves every docker command waiting).
 export const dockerStuck = (): string =>
