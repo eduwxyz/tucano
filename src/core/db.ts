@@ -23,6 +23,7 @@ import {
   type ConnectorTool,
   type Conversation,
   type Delegation,
+  type Task,
   type Effort,
   type Invite,
   type LentFolder,
@@ -46,6 +47,7 @@ import {
   type ToolClass,
   type Trigger
 } from '../shared/types'
+import { stricter } from '../shared/classify'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
@@ -532,6 +534,21 @@ export const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS delegations_by_root ON delegations (root_id);
   CREATE INDEX IF NOT EXISTS delegations_open ON delegations (state) WHERE state = 'open';
+  `,
+  // The board's to-dos (Quadro): each person's own list, until it's started (then it's that reply's card).
+  `
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    title TEXT NOT NULL,
+    notes TEXT,
+    agent_id TEXT,
+    conversation_id TEXT,
+    due_at INTEGER,
+    position REAL NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS tasks_by_owner ON tasks (owner, position);
   `
 ]
 
@@ -548,6 +565,7 @@ const COLUMNS: [string, string, string][] = [
   // A routine on a date ("2026-11-17", once) or on a day of every month (1–31).
   ['routines', 'date', 'TEXT'],
   ['routines', 'month_day', 'INTEGER'],
+  ['routines', 'times', 'TEXT'],
   // The agent an agent answers to (src/shared/org.ts); empty: no one.
   ['agents', 'reports_to', 'TEXT'],
   // A sector head's name for its sector and what it solves, in a line (src/shared/org.ts).
@@ -565,7 +583,13 @@ const COLUMNS: [string, string, string][] = [
   // The approval a request's work stopped on, shown with the request where it was asked from.
   ['delegations', 'approval', 'TEXT'],
   // The thread a request is worked in, when it was asked inside another's in the same channel.
-  ['delegations', 'thread_id', 'TEXT']
+  ['delegations', 'thread_id', 'TEXT'],
+  // What a connector's server says can't be loosened here (META_FLOOR, META_HIGH_RISK in shared/classify.ts):
+  // the class a tool can't go below, and that it's high risk. A node says both for the person's computer.
+  ['connector_tools', 'cls_floor', 'TEXT'],
+  ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
+  // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
+  ['messages', 'title', 'TEXT']
 ]
 
 
@@ -580,8 +604,8 @@ function parseAccess(v: unknown): PersonAccess | undefined {
   } catch { return undefined }
 }
 
-// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
-const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
+// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT, and more of them than input came apart from it.
+const COUNTED = `(CASE WHEN cache_read_tokens > input_tokens THEN input_tokens + cache_read_tokens * ${CACHE_READ_WEIGHT} ELSE input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} END) + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
@@ -664,6 +688,7 @@ export class Db {
           DELETE FROM routine_watchers;
           DELETE FROM questions;
           DELETE FROM delegations;
+          DELETE FROM tasks;
           DELETE FROM activity;
         `)
         target.keepOnly(parts)
@@ -813,6 +838,11 @@ export class Db {
     const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
     const stored = Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value) as unknown]))
     return { ...defaults, ...stored }
+  }
+
+  // A setting gone, back to its default (setSettings skips what is undefined).
+  deleteSetting(key: keyof Omit<Settings, 'engines'>): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
   }
 
   setSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
@@ -1011,6 +1041,27 @@ export class Db {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
   }
 
+  // Whether anything was said there yet, by anyone.
+  hasMessages(conversationId: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1').get(conversationId)
+  }
+
+  // Whether an agent left any trace of work: a message it wrote, a to-do on someone's board, a memory or note.
+  agentUsed(agentId: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 WHERE EXISTS (SELECT 1 FROM messages WHERE author_kind = 'agent' AND author_id = ?) OR EXISTS (SELECT 1 FROM tasks WHERE agent_id = ?) OR EXISTS (SELECT 1 FROM memories WHERE agent_id = ? OR scope = ?)")
+      .get(agentId, agentId, agentId, agentId)
+  }
+
+  // An agent gone for good, with its places in channels: only for one taken back before it did anything
+  // (its DMs go first, through deleteConversation).
+  deleteAgent(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM members WHERE agent_id = ?').run(id)
+      this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    })
+  }
+
   // Puts the agent in exactly these channels (DMs are untouched).
   setAgentChannels(agentId: string, channelIds: string[]): string[] {
     const changed: string[] = []
@@ -1096,8 +1147,14 @@ export class Db {
       run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
-      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {})
+      ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
+      ...(r['title'] ? { title: str(r['title']) } : {})
     }
+  }
+
+  // A request's short title (src/core/titles.ts).
+  setMessageTitle(id: string, title: string): void {
+    this.db.prepare('UPDATE messages SET title = ? WHERE id = ?').run(title, id)
   }
 
   messages(): Message[] {
@@ -1268,18 +1325,19 @@ export class Db {
     return r ? this.toApproval(r) : undefined
   }
 
-  // Runs that were working when the app closed can't continue: their CLI process is gone.
-  interruptStaleRuns(): number {
-    let n = 0
+  // Runs that were working when the app closed can't continue: their CLI process is gone. Returns
+  // their messages, so the work can go on in new replies (Runner.resumeInterrupted).
+  interruptStaleRuns(): string[] {
+    const ids: string[] = []
     for (const m of this.messagesWithRun(['working'])) {
       if (m.run?.status !== 'working') continue
-      n++
+      ids.push(m.id)
       this.saveMessage({
         ...m,
         run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
-    return n
+    return ids
   }
 
   // ---------- receipts ----------
@@ -1368,15 +1426,22 @@ export class Db {
 
   tools(connectorId: string): (ConnectorTool & { inputSchema: Record<string, unknown> })[] {
     const rows = this.db.prepare('SELECT * FROM connector_tools WHERE connector_id = ? ORDER BY rowid').all(connectorId) as Row[]
-    return rows.map((r) => ({
-      name: str(r['name']),
-      description: str(r['description']),
-      inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
-      cls: str(r['cls']) as ToolClass,
-      enabled: r['enabled'] === 1,
-      highRisk: r['high_risk'] === 1,
-      isNew: r['is_new'] === 1
-    }))
+    return rows.map((r) => {
+      // What the server said can't be loosened: a class under its floor reads as the floor, its high-risk mark holds.
+      const floor = r['cls_floor'] ? (str(r['cls_floor']) as ToolClass) : undefined
+      const locked = r['remote_high_risk'] === 1
+      return {
+        name: str(r['name']),
+        description: str(r['description']),
+        inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
+        cls: stricter(str(r['cls']) as ToolClass, floor),
+        enabled: r['enabled'] === 1,
+        highRisk: r['high_risk'] === 1 || locked,
+        isNew: r['is_new'] === 1,
+        ...(floor ? { floor } : {}),
+        ...(locked ? { lockedHighRisk: true } : {})
+      }
+    })
   }
 
   // Applies the server's current tool list. On the first sync every tool comes
@@ -1384,7 +1449,8 @@ export class Db {
   // `cls`: the class the rules give the tool now; `legacyCls`, the one the rules before outbound verbs
   // gave it, which tells an automatic class from a hand-picked one on a tool synced before cls_auto.
   // A class still automatic follows the rules; one chosen by hand stays.
-  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass }[]): void {
+  // `floor` and `highRisk`: what the server says can't be loosened here (a node's command, its owner's mark).
+  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass; legacyCls?: ToolClass; floor?: ToolClass; highRisk?: boolean }[]): void {
     this.tx(() => {
       const first = !(this.db.prepare('SELECT synced FROM connectors WHERE id = ?').get(connectorId) as { synced: number } | undefined)?.synced
       const stored = new Map((this.db.prepare('SELECT name, cls, cls_auto FROM connector_tools WHERE connector_id = ?').all(connectorId) as Row[]).map((r) => [str(r['name']), { cls: str(r['cls']), auto: r['cls_auto'] == null ? undefined : str(r['cls_auto']) }]))
@@ -1393,12 +1459,12 @@ export class Db {
         if (was) {
           const automatic = was.cls === (was.auto ?? t.legacyCls ?? t.cls)
           this.db
-            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ? WHERE connector_id = ? AND name = ?')
-            .run(t.description, JSON.stringify(t.inputSchema), automatic ? t.cls : was.cls, t.cls, connectorId, t.name)
+            .prepare('UPDATE connector_tools SET description = ?, input_schema = ?, cls = ?, cls_auto = ?, cls_floor = ?, remote_high_risk = ? WHERE connector_id = ? AND name = ?')
+            .run(t.description, JSON.stringify(t.inputSchema), stricter(automatic ? t.cls : (was.cls as ToolClass), t.floor), t.cls, t.floor ?? null, t.highRisk ? 1 : 0, connectorId, t.name)
         } else {
           this.db
-            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)')
-            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), t.cls, t.cls, first ? 1 : 0, first ? 0 : 1)
+            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, cls_auto, cls_floor, remote_high_risk, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
+            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), stricter(t.cls, t.floor), t.cls, t.floor ?? null, t.highRisk ? 1 : 0, first ? 1 : 0, first ? 0 : 1)
         }
       }
       const known = stored.keys()
@@ -1412,16 +1478,23 @@ export class Db {
   updateTool(connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void {
     const t = this.tools(connectorId).find((x) => x.name === name)
     if (!t) return
-    const next = { ...t, ...patch }
+    // A class under the server's floor is kept at the floor; the mark the server set holds (tools() reads it back).
+    const next = { ...t, ...patch, cls: stricter(patch.cls ?? t.cls, t.floor) }
+    const stored = this.db.prepare('SELECT high_risk FROM connector_tools WHERE connector_id = ? AND name = ?').get(connectorId, name) as { high_risk: number }
     this.db
       .prepare('UPDATE connector_tools SET cls = ?, enabled = ?, high_risk = ?, is_new = 0 WHERE connector_id = ? AND name = ?')
-      .run(next.cls, next.enabled ? 1 : 0, next.highRisk ? 1 : 0, connectorId, name)
+      .run(next.cls, next.enabled ? 1 : 0, (patch.highRisk ?? stored.high_risk === 1) ? 1 : 0, connectorId, name)
   }
 
   // ---------- secrets (already encrypted by the caller) ----------
 
   getSecret(key: string): string | undefined {
     return (this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: string } | undefined)?.value
+  }
+
+  // The keys that start with a prefix: what's saved, without opening any of it.
+  secretKeys(prefix: string): string[] {
+    return (this.db.prepare('SELECT key FROM secrets WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key)
   }
 
   setSecret(key: string, value: string | undefined): void {
@@ -1641,7 +1714,8 @@ export class Db {
         time: str(r['time']),
         ...(r['once'] === 1 ? { once: true } : {}),
         ...(r['date'] ? { date: str(r['date']) } : {}),
-        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {})
+        ...(r['month_day'] != null ? { monthDay: Number(r['month_day']) } : {}),
+        ...(r['times'] ? { times: JSON.parse(str(r['times'])) as string[] } : {})
       },
       enabled: r['enabled'] === 1,
       nextAt: r['next_at'] == null ? undefined : Number(r['next_at']),
@@ -1669,10 +1743,10 @@ export class Db {
   saveRoutine(r: Routine): void {
     this.db
       .prepare(
-        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, date, month_day, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger, times)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
-           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
+           days = excluded.days, time = excluded.time, once = excluded.once, date = excluded.date, month_day = excluded.month_day, times = excluded.times, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
            last_message_id = excluded.last_message_id, trigger = excluded.trigger`
       )
       .run(
@@ -1692,7 +1766,8 @@ export class Db {
         r.lastMessageId ?? null,
         r.createdBy ?? null,
         r.createdAt,
-        r.trigger ? JSON.stringify(r.trigger) : null
+        r.trigger ? JSON.stringify(r.trigger) : null,
+        r.schedule.times && r.schedule.times.length > 1 ? JSON.stringify(r.schedule.times) : null
       )
     // A routine nobody says is the team's is a person's own: the Tucano owner's when no one is named.
     this.db.prepare('UPDATE routines SET scope = ?, owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(r.scope === 'channel' ? 'channel' : 'me', r.owner ?? null, 'owner', r.id)
@@ -1857,6 +1932,7 @@ export class Db {
       // Only the hashes stay, to tell their browsers "you no longer have access" instead of counting a guess.
       this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(Date.now(), id)
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
+      this.db.prepare('DELETE FROM tasks WHERE owner = ?').run(id) // their to-dos: never started, only theirs
     })
   }
 
@@ -2137,6 +2213,40 @@ export class Db {
   delegationAt(rootId: string): Delegation | undefined {
     const r = this.db.prepare('SELECT * FROM delegations WHERE root_id = ?').get(rootId) as Row | undefined
     return r && this.toDelegation(r)
+  }
+
+  // ---------- the board's to-dos ----------
+
+  tasks(owner: string): Task[] {
+    return (this.db.prepare('SELECT * FROM tasks WHERE owner = ? ORDER BY position, created_at').all(owner) as Row[]).map((r) => ({
+      id: str(r['id']),
+      owner: str(r['owner']),
+      title: str(r['title']),
+      ...(r['notes'] ? { notes: str(r['notes']) } : {}),
+      ...(r['agent_id'] ? { agentId: str(r['agent_id']) } : {}),
+      ...(r['conversation_id'] ? { conversationId: str(r['conversation_id']) } : {}),
+      ...(r['due_at'] ? { dueAt: Number(r['due_at']) } : {}),
+      position: Number(r['position']),
+      createdAt: Number(r['created_at'])
+    }))
+  }
+
+  task(id: string): Task | undefined {
+    const r = this.db.prepare('SELECT owner FROM tasks WHERE id = ?').get(id) as Row | undefined
+    return r ? this.tasks(str(r['owner'])).find((t) => t.id === id) : undefined
+  }
+
+  saveTask(t: Task): void {
+    this.db
+      .prepare(
+        `INSERT INTO tasks (id, owner, title, notes, agent_id, conversation_id, due_at, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET title = excluded.title, notes = excluded.notes, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, due_at = excluded.due_at, position = excluded.position`
+      )
+      .run(t.id, t.owner, t.title, t.notes ?? null, t.agentId ?? null, t.conversationId ?? null, t.dueAt ?? null, t.position, t.createdAt)
+  }
+
+  removeTask(id: string): void {
+    this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
   }
 
   // Open, or ended since `since`: what a screen shows as going on, newest first.

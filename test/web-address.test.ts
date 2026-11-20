@@ -9,6 +9,7 @@ describe('the screen in a browser page address', () => {
     { kind: 'new-agent' },
     { kind: 'settings' },
     { kind: 'approvals' },
+    { kind: 'board' },
     { kind: 'missions' },
     { kind: 'wiki' },
     { kind: 'wiki', tab: 'sources' },

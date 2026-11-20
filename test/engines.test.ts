@@ -1,11 +1,11 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { antigravityArgs, antigravityHomeEnv, antigravityInput, antigravityModel, antigravityParser, antigravityPrompt, antigravitySettings, antigravityTurnDirs, parseAntigravityModels, RULES_MAX } from '../src/core/engines/antigravity'
+import { ANTIGRAVITY_TOKEN, antigravityArgs, antigravityHomeEnv, antigravityInput, antigravityModel, antigravityParser, antigravityPrompt, antigravitySettings, antigravityTurnDirs, parseAntigravityModels, RULES_MAX } from '../src/core/engines/antigravity'
 import { cursorArgs, cursorCleanup, cursorConfig, cursorEngine, cursorHomeEnv, cursorParser, cursorSignedIn, cursorSlug, cursorWorkerSocket, cursorTurnDirs, imageRefused, parseCursorModels } from '../src/core/engines/cursor'
 import { grokArgs, grokCleanup, grokConfig, grokEngine, grokLogin, grokParser, grokPrompt, grokTurnDirs, grokTurnEnv, parseGrokModels, userGrokHome } from '../src/core/engines/grok'
 import { CLINE_OFF, clineArgs, clineEngine, clineLead, clineLogins, clineMcp, clineModel, clineParser, clinePrompt, clineSettings, clineTurnDirs, clineTurnEnv, clineCleanup, clineLoginEnv, clineProvidersFile } from '../src/core/engines/cline'
@@ -269,6 +269,11 @@ describe('Antigravity stream', () => {
     expect(events.find((e) => e.type === 'done')).toMatchObject({ type: 'done', text: result.result.response, usage: { inputTokens: 38055, cacheReadTokens: 4036, outputTokens: 336 } })
   })
 
+  it('adds the cache reads to the input when they came apart from it', () => {
+    const done = JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'ok', usage: { input_tokens: 88353, output_tokens: 2602, thinking_tokens: 0, cache_read_tokens: 734883 } } })
+    expect(feed(antigravityParser(), [done]).find((e) => e.type === 'done')).toMatchObject({ usage: { inputTokens: 88353 + 734883, cacheReadTokens: 734883, outputTokens: 2602 } })
+  })
+
   it('gives a running total after each model call, for the limits', () => {
     const progress = feed(antigravityParser(), lines).filter((e) => e.type === 'progress')
     expect(progress.length).toBe(5)
@@ -349,6 +354,21 @@ describe('Antigravity config', () => {
     expect(linux.root).not.toBe(dirs.root)
   })
 
+  it("runs another account's turn on its login file, with no keychain (or agy would take the person's own login)", () => {
+    const real = mkdtempSync(join(tmpdir(), 'ag-real-'))
+    mkdirSync(join(real, 'Library', 'Keychains'), { recursive: true })
+    const account = mkdtempSync(join(tmpdir(), 'ag-account-'))
+    mkdirSync(join(account, '.gemini', 'antigravity-cli'), { recursive: true })
+    writeFileSync(join(account, ANTIGRAVITY_TOKEN), '{"token":"x"}')
+    const dirs = antigravityTurnDirs(mkdtempSync(join(tmpdir(), 'ag-app-')), { system: 'x', mcpUrl: undefined, web: false, account }, 'mac', real)
+    expect(existsSync(join(dirs.home, 'Library'))).toBe(false)
+    expect(readlinkSync(join(dirs.home, ANTIGRAVITY_TOKEN))).toBe(join(account, ANTIGRAVITY_TOKEN))
+    expect(readFileSync(join(dirs.home, ANTIGRAVITY_TOKEN), 'utf8')).toBe('{"token":"x"}')
+    // The turn's settings still go in its own home, beside the link, never in the account's.
+    expect(existsSync(join(dirs.home, '.gemini', 'antigravity-cli', 'settings.json'))).toBe(true)
+    expect(existsSync(join(account, '.gemini', 'antigravity-cli', 'settings.json'))).toBe(false)
+  })
+
   it('puts instructions too long for a rules file at the top of the prompt instead', () => {
     const long = 'x'.repeat(RULES_MAX + 1)
     const dirs = antigravityTurnDirs(mkdtempSync(join(tmpdir(), 'ag-long-')), { system: long, mcpUrl: undefined, web: false }, 'linux')
@@ -357,10 +377,16 @@ describe('Antigravity config', () => {
     expect(antigravityPrompt({ system: 'curto', prompt: 'oi' })).toBe('oi')
   })
 
-  it('tells the agent when images could not go along', () => {
+  it('sends the agent to ver_imagem for an attached image (the CLI passes a tool\'s image on), or says it can\'t see it with no tools', () => {
     const img = join(mkdtempSync(join(tmpdir(), 'ag-img-')), 'a.png')
     writeFileSync(img, 'png')
-    expect(antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }] })).toMatch(/^oi\n\n\(.*(imagens|images)/s)
+    const withTools = antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }], mcpUrl: 'http://127.0.0.1:1/mcp' })
+    expect(withTools).toMatch(/^oi\n\n\(/)
+    expect(withTools).toContain('ver_imagem')
+    expect(withTools).not.toMatch(/não conseguiu vê-la|couldn't see it/)
+    const without = antigravityPrompt({ system: 's', prompt: 'oi', images: [{ block: 0, path: img, mime: 'image/png' }] })
+    expect(without).toMatch(/não conseguiu vê-la|couldn't see it/)
+    expect(antigravityPrompt({ system: 's', prompt: 'oi', mcpUrl: 'http://127.0.0.1:1/mcp' })).toBe('oi')
   })
 
   it('moves the home on Linux and Windows but keeps their app-data folders', () => {
