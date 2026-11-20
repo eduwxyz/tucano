@@ -50,7 +50,7 @@ export interface Api {
   retryRun(p: { messageId: string; note?: string }): void // note: a direction for the new try
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   continueJob(p: { messageId: string }): void // the note where a job stopped on its brakes: its work goes on (src/core/jobs.ts)
-  setAgentModels(p: { agentIds: string[]; modelId: string; effort?: string }): number
+  setAgentModels(p: { agentIds: string[]; modelId: string; effort?: string }): number // an empty modelId moves only the level, each agent keeping its own model
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken

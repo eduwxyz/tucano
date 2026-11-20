@@ -4063,6 +4063,13 @@ export function SettingsPage(): ReactNode {
                     placeholder={L('Escolha', 'Pick')}
                   />
                 </Field>
+                {/* It also names each request: the same level serves both small calls. */}
+                <EffortSelect
+                  className="effort-select--inline"
+                  label={L('Esforço de raciocínio', 'Reasoning effort')}
+                  value={settings.memoryEffort ?? 'low'}
+                  onChange={(memoryEffort) => { if (memoryEffort) updateSettings({ memoryEffort }) }}
+                />
               </div>
             </Card>
           </SectionAnchor>
