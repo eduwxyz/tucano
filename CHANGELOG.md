@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **A channel's menu shows an arrow on Move up and on Move down.** The two steps were the only items in the menu without a glyph, sitting under a separator beside a gear and a trash; each now wears the icon set's own arrow, and up points up.
+
 ## [0.2.43] - 2026-11-19
 
 > **Em português:**

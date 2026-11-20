@@ -373,8 +373,8 @@ export function Sidebar(): ReactNode {
   ]
   const channelMenuRest = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
-    { label: L('Mover para cima', 'Move up'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
-    { label: L('Mover para baixo', 'Move down'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
+    { label: L('Mover para cima', 'Move up'), icon: 'up', onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), icon: 'down', onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
     ...arranged.groups.filter((g) => !g.channels.includes(c)).map((g): MenuItem => ({ label: L(`Mover para ${g.name}`, `Move to ${g.name}`), onClick: () => saveLayout(moveChannel(channels, layout, c.id, { group: g.id })) })),
     ...(arranged.groups.some((g) => g.channels.includes(c)) ? [{ label: L('Tirar do grupo', 'Take out of the group'), onClick: () => saveLayout(moveChannel(channels, layout, c.id, {})) }] : []),
     { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
