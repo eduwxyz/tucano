@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.43] - 2026-11-19
+
 > **Em português:**
 > - **Corrigido:** numa resposta, os passos mostram uma linha **Pensando**, não duas, quando o agente roda ferramentas ao mesmo tempo.
 > - **Corrigido:** um **card** que um agente propõe (time, agente, canal, rotina) é aplicado uma vez só: não volta pra **Criar** enquanto a resposta continua, e um segundo clique não cria os agentes de novo.
