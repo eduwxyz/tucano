@@ -1,7 +1,7 @@
 # Time (quem responde a quem)
 > Um agente acima dos outros passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta. Como montar, o que acontece num pedido, perguntas, cancelar, prazos e limites.
 
-Por padrão os agentes só se falam no mesmo canal. Quando um **responde a** outro, o de cima passa trabalho ao de baixo, e a resposta volta pra ele. Você fala com um só, que divide o pedido.
+Sem ninguém ligado, qualquer agente pede trabalho a outro, e a resposta volta pra quem pediu. Quando um **responde a** outro, vale o desenho: o de cima passa trabalho ao de baixo. Você fala com um só, que divide o pedido.
 
 ## Montar
 Em **Time**, na barra lateral. Cada agente é um cartão num quadro: arraste o fundo pra andar, ⌘ e rolar (ou pinça) pro zoom. Sem ninguém ligado, escolha **Quem fica no topo**.
@@ -23,7 +23,7 @@ Clicar num agente mostra canais, time e pedidos; **Agora** lista os abertos.
 
 Você pode escrever na thread de um pedido: quem faz te responde ali, e isso entra no resultado.
 
-Onde fica: no canal cujo **Tema** cobre o assunto; o que não é de canal nenhum, ou um agente sem canal, vai pra DM dele com você. Lá ele aparece como uma linha dobrada na conversa. Com mais pessoas no Tucano, um pedido feito numa DM fica numa DM, a não ser que você escreva o canal (**#engenharia**).
+Onde fica: no canal cujo **Tema** cobre o assunto; o que não é de canal nenhum, ou um agente sem canal, vai pra DM dele com você. Lá ele vira uma linha dobrada. Com mais pessoas no Tucano, um pedido feito numa DM fica numa DM, a não ser que você escreva o canal (**#engenharia**).
 
 ## Perguntas
 A dúvida de quem recebeu vai pra quem pediu. Ele responde o que sabe sem te escrever; o que for decisão sua ele pergunta na thread da sua mensagem, e repassa. Ou responda na thread do pedido.

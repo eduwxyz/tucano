@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { askKind, bossOf, entriesOf, entryOf, channelsOf, depthBelow, directReports, headsOf, loops, orgTree, peersOf, possibleBosses, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
+import { askKind, bossOf, entriesOf, entryOf, channelsOf, depthBelow, directReports, headsOf, looseColleaguesOf, loops, orgTree, peersOf, possibleBosses, reachOf, reportsOf, sectorName, sectorOf, type OrgNode } from '../src/shared/org'
 
 const a = (id: string, reportsTo?: string, extra: { archived?: boolean; kind?: 'tuca'; entry?: boolean } = {}): { id: string; reportsTo?: string; archived?: boolean; kind?: 'tuca'; entry?: boolean } => ({ id, ...(reportsTo ? { reportsTo } : {}), ...extra })
 const ids = (list: { id: string }[]): string[] => list.map((x) => x.id)
@@ -78,6 +78,28 @@ describe('who answers to whom', () => {
     expect(ids(reachOf(team, 'otto'))).toEqual(['clara', 'orion'])
     expect(ids(reachOf(team, 'orion'))).toEqual(['atlas', 'bento', 'clara', 'nico', 'vera', 'otto'])
     expect(reachOf(team, 'solo')).toEqual([])
+  })
+})
+
+describe('a team nobody drew', () => {
+  it('makes colleagues of the agents in no tree, who may ask each other', () => {
+    const flat = [a('lia'), a('theo'), a('nina'), a('tuca', undefined, { kind: 'tuca' }), a('old', undefined, { archived: true }), a('porta', undefined, { entry: true })]
+    expect(ids(reachOf(flat, 'lia'))).toEqual(['theo', 'nina'])
+    expect(ids(reachOf(flat, 'nina'))).toEqual(['lia', 'theo'])
+    expect(askKind(flat, 'lia', 'theo')).toBe('peer')
+    // The Tuca builds the others, the archived are away, and an entry point the person chose keeps its own ways.
+    expect(reachOf(flat, 'tuca')).toEqual([])
+    expect(reachOf(flat, 'porta')).toEqual([])
+    expect(ids(looseColleaguesOf(flat, 'lia'))).not.toContain('porta')
+  })
+
+  it('keeps those in a tree to the tree, and the ones outside it among themselves', () => {
+    expect(looseColleaguesOf(team, 'nico')).toEqual([])
+    expect(looseColleaguesOf(team, 'orion')).toEqual([])
+    expect(reachOf(team, 'solo')).toEqual([]) // the only one outside
+    const more = [...team, a('lia')]
+    expect(ids(reachOf(more, 'solo'))).toEqual(['lia'])
+    expect(ids(reachOf(more, 'orion'))).toEqual(['atlas', 'bento', 'clara', 'nico', 'vera', 'otto'])
   })
 })
 

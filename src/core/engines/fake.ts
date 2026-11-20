@@ -2,6 +2,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { L, locale } from '../../shared/lang'
 import { memorySystem } from '../memory'
+import { titleSystem } from '../titles'
+import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
 import { handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
@@ -45,6 +47,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeHandoff(turn.prompt))
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
+      } else if (turn.system === titleSystem()) {
+        // A request's title: its own words, short (the real one is a cheap model's).
+        reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
       } else if (opts.reply) {
@@ -52,7 +57,31 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
-        if (/migra/i.test(last)) {
+        if (/time de conte[uú]do/i.test(last)) {
+          // A team with a channel, one of them with a connector to write to, and a routine for the other.
+          const each = (nome: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao: L('Conteúdo', 'Content'), cor: 'violet', instrucoes: L(`Você é ${nome}.\nCuida do conteúdo do time.\nResponde curto.`, `You are ${nome}.\nLook after the team's content.\nAnswer briefly.`), esforco: 'low', web: false, ...extra })
+          await callTool(turn.mcpUrl, 'propor_time', { agentes: [each('Escriba', { conectores: [{ conector: 'Planilha', nivel: 'escrita' }] }), each('Revisora')], canal: { nome: L('redacao', 'writing'), tema: L('Posts da semana', "The week's posts") } })
+          await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'Revisora', nome: L('Revisão da manhã', 'Morning review'), pedido: L('Revise os posts do dia.', "Review the day's posts."), dias: [1, 2, 3, 4, 5], hora: '09:00' })
+          reply = L('Criei o time de conteúdo. Dá pra desfazer no card.', 'I made the content team. It can be undone on the card.')
+        } else if (/mais esperta/i.test(last)) {
+          // A change with a part inside the app (effort) and a part that spends money (the month's limit).
+          await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'nina', esforco: 'high', limite: 500_000, motivo: L('Tarefas mais difíceis.', 'Harder tasks.') })
+          reply = L('Subi o esforço da Nina; o limite novo espera você confirmar.', "I raised Nina's effort; the new limit waits for you to confirm.")
+        } else if (/resumo di[aá]rio/i.test(last)) {
+          await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'nina', nome: L('Resumo diário', 'Daily summary'), pedido: L('Resuma o dia.', 'Sum up the day.'), dias: [1, 2, 3, 4, 5], hora: '18:00' })
+          reply = L('Criei a rotina.', 'I made the routine.')
+        } else if (/importa os bots/i.test(last)) {
+          // Two new agents, each with a routine: a second propor_agente is refused and says to use a team,
+          // and the team with both takes the first one's place. What it was told is kept in the reply.
+          const agent = (nome: string): Record<string, unknown> => ({ nome, funcao: 'Bot', cor: 'rose', instrucoes: L(`Você é o ${nome}.\nFaz o que o bot antigo fazia.\nResponde curto.`, `You are ${nome}.\nDo what the old bot did.\nAnswer briefly.`), esforco: 'low', web: false })
+          const told: string[] = []
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_agente', agent('Sustinho'))))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'Sustinho', nome: 'Preparo do susto', pedido: 'Prepare o susto do dia.', dias: [0, 1, 2, 3, 4, 5, 6], hora: '08:00' })))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_agente', agent('Faro'))))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_time', { agentes: [agent('Sustinho'), agent('Faro')] })))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'Faro', nome: 'Faro da manhã', pedido: 'Fareje as novidades.', dias: [1, 2, 3, 4, 5], hora: '09:00' })))
+          reply = told.join('\n---\n')
+        } else if (/migra/i.test(last)) {
           const calls: [string, Record<string, unknown>][] = [
             ['propor_agente', { nome: 'Léo', funcao: L('Financeiro', 'Finance'), cor: 'amber', instrucoes: L('Você cuida das contas do time.\nLê os gastos do dia e separa por categoria.\nResponde em tópicos curtos.\nNunca paga nada: pergunta antes.', "You look after the team's accounts.\nRead the day's expenses and sort them by category.\nAnswer in short bullet points.\nNever pay anything: ask first."), esforco: 'low', web: false, motivo: L('Alguém só pras contas.', 'Someone just for the accounts.') }],
             ...['lia', 'theo', 'nina'].map((agente): [string, Record<string, unknown>] => ['propor_ajuste', { agente, limite: 345_000, motivo: L('Migração: o limite novo do time.', "Migration: the team's new limit.") }]),
@@ -77,6 +106,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           })
           reply = textOf(r).includes('card') ? L('Montei o Rafa. Dá pra criar, editar antes ou me pedir ajustes.', 'I put Rafa together. You can create it, edit it first or ask me for changes.') : textOf(r)
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
+      } else if (turn.mcpUrl && /proponha o time (\p{L}+) e (\p{L}+)/iu.test(last)) {
+        // Any agent proposing a team (not only the Tuca). "de novo em N s": proposes the same team again
+        // that much later, in the same reply, to see what it's told once the first card was applied.
+        const [, a, b] = /proponha o time (\p{L}+) e (\p{L}+)/iu.exec(last)!
+        const team = { agentes: [a!, b!].map((nome) => ({ nome, funcao: 'Ops', cor: 'amber', instrucoes: `Você é ${nome}.\nCuida da entrega.\nResponde curto.`, esforco: 'low', web: false })) }
+        const told = [textOf(await callTool(turn.mcpUrl, 'propor_time', team))]
+        const again = /de novo em (\d+) ?s/i.exec(last)
+        if (again) {
+          await new Promise((r) => setTimeout(r, Number(again[1]) * 1000))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_time', team)))
+        }
+        reply = told.join('\n---\n')
       } else if (turn.mcpUrl && back) {
         // What came back from its team: a question left there is answered ("responda a dúvida com `x`", in
         // what the person wrote first) or taken to the person; an end is told in a line.
@@ -114,6 +155,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
         // A thank-you that mentions someone: the hand-off screening lets no one answer it.
         reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
+      } else if (turn.mcpUrl && /^rode no computador: (.+)/i.test(last)) {
+        // A command on a computer lent to this server (core/node-link.ts), for trying the line end to end.
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'node_bash'), { command: /^rode no computador: (.+)/i.exec(last)![1]! })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'list_tasks'), {})
         reply = `Suas tarefas:\n\n${textOf(r)}`

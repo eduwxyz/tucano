@@ -237,7 +237,7 @@ export const MISSION_IDS = ['talk', 'approve', 'connect', 'second', 'auto', 'rem
 export type MissionId = (typeof MISSION_IDS)[number]
 
 // The parts of the sidebar a new install starts without, each brought by a mission or by having something in it.
-export type SidebarPart = 'memory' | 'wiki' | 'routines' | 'skills' | 'report' | 'usage' | 'connectors' | 'channels'
+export type SidebarPart = 'board' | 'memory' | 'wiki' | 'routines' | 'skills' | 'report' | 'usage' | 'connectors' | 'channels'
 
 // What the missions look at, from the app's state (the renderer works it out).
 export interface MissionFacts {
@@ -259,7 +259,7 @@ export interface Mission {
 }
 
 export const MISSIONS = (): Mission[] => [
-  { id: 'talk', title: (a) => L(`Fale com ${a}`, `Talk to ${a}`), how: L('Mande uma mensagem e veja a resposta chegar.', 'Send a message and watch the reply come in.'), unlocks: ['usage', 'report'], unlockName: L('Uso e limites', 'Usage and limits'), done: (f) => f.replied },
+  { id: 'talk', title: (a) => L(`Fale com ${a}`, `Talk to ${a}`), how: L('Mande uma mensagem e veja a resposta chegar.', 'Send a message and watch the reply come in.'), unlocks: ['board', 'usage', 'report'], unlockName: L('Quadro e Uso', 'Board and Usage'), done: (f) => f.replied },
   { id: 'approve', title: () => L('Aprove algo', 'Approve something'), how: L('Quando um agente quer fazer algo por conta própria, ele pede. Responda um pedido.', 'When an agent wants to do something on its own, it asks. Answer one request.'), unlocks: [], unlockName: '', done: (f) => f.decided },
   { id: 'connect', title: () => L('Conecte uma conta', 'Connect an account'), how: L('Sua agenda, seu e-mail ou outra ferramenta, pros agentes lerem por você.', 'Your calendar, email or another tool, for the agents to read for you.'), unlocks: ['connectors'], unlockName: L('Conectores', 'Connectors'), done: (f) => f.connectors > 0 },
   { id: 'second', title: () => L('Monte um segundo agente', 'Build a second agent'), how: L('Dois agentes num canal trabalham juntos.', 'Two agents in a channel work together.'), unlocks: ['channels', 'skills'], unlockName: L('Canais', 'Channels'), done: (f) => f.agents >= 2 },
