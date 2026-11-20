@@ -40,9 +40,9 @@
 <meta name="theme-color" content="#F3EFE6">
 <link rel="icon" type="image/png" href="assets/brand/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/brand/favicon-180.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="preload" href="assets/fonts/bricolage-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
 <style>
 :root {
   --cream: #F3EFE6;
@@ -50,7 +50,7 @@
   --paper: #FFFDF8;
   --ink: #141210;
   --ink-2: #4E4840;
-  --ink-3: #8C8478;
+  --ink-3: #706A60;
   --line: #E2DBCC;
   --beak: #FF8C24;
   --beak-2: #E5531F;
@@ -327,8 +327,8 @@ header .btn--icon { width: 40px; padding: 0; justify-content: center; }
 .rules .glow { position: absolute; right: -180px; top: -220px; width: 620px; height: 620px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 140, 36, .22), transparent 65%); pointer-events: none; }
 .panel { position: relative; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 20px; margin-top: 60px; }
 .box { padding: 28px; border-radius: 26px; background: var(--night-2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
-.box h4 { display: flex; align-items: center; gap: 12px; font-size: 17px; }
-.box h4 small { font-weight: 500; color: #8C8478; font-size: 13.5px; }
+.box h3 { display: flex; align-items: center; gap: 12px; font-size: 17px; }
+.box h3 small { font-weight: 500; color: #8C8478; font-size: 13.5px; }
 .tools { margin-top: 20px; display: grid; gap: 8px; }
 .tool { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border-radius: 14px; background: rgba(255,255,255,.035); }
 .tool img { width: 20px; height: 20px; filter: invert(1) brightness(.92); }
@@ -445,6 +445,11 @@ footer a:hover { color: #EDE7DA; }
 .rv { opacity: 0; transform: translateY(24px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
 .rv.in { opacity: 1; transform: none; }
 .still .rv { opacity: 1; transform: none; transition: none; }
+/* The hero shows from the first paint (an invisible hero only counts once it fades in, which pushed
+   the largest paint past 3 s on phones): it only lifts into place. */
+@keyframes lift { from { transform: translateY(16px); } }
+.lift { animation: lift .8s var(--ease) both; }
+.still .lift { animation: none; }
 
 @media (max-width: 1080px) {
   nav.links { display: none; }
@@ -583,6 +588,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
     person_profiles: 'identified_only',
     capture_pageview: true,
     capture_pageleave: true,
+    disable_surveys: true,
     session_recording: { maskAllInputs: true }
   })
 }
@@ -633,11 +639,11 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
 <section class="hero">
   <div class="wrap hero__grid">
     <div>
-      <a class="news rv" href="#pro" data-pro-where="pill"><span class="beta">BETA</span><span lang="pt-BR">Tucano Pro: seu time na nuvem</span><span lang="en">Tucano Pro: your team in the cloud</span><span class="go"><span lang="pt-BR">Entrar na lista →</span><span lang="en">Join the waitlist →</span></span></a>
-      <div class="eyebrow rv"><span lang="pt-BR">Grátis, open source, no Mac, no Linux e no Windows</span><span lang="en">Free, open source, on Mac, Linux and Windows</span></div>
-      <h1 class="display rv"><span lang="pt-BR">Seu time de agentes de IA. </span><span lang="en">Your AI agent team. </span><span class="swoosh"><span lang="pt-BR">Suas regras.</span><span lang="en">Your rules.</span><svg viewBox="0 0 300 30" preserveAspectRatio="none"><path pathLength="1" d="M4 22 C 80 6, 200 4, 296 14" stroke="#FF8C24" stroke-width="9" stroke-linecap="round" fill="none"/></svg></span></h1>
-      <p class="lead rv"><span lang="pt-BR">Agentes que conversam em canais, programam, revisam um ao outro e usam as ferramentas do seu time. Eles fazem o trabalho; o que mexe no mundo espera o seu sim.</span><span lang="en">Agents that talk in channels, write code, review each other and use your team’s tools. They do the work; anything that touches the real world waits for your yes.</span></p>
-      <div class="actions rv">
+      <a class="news lift" href="#pro" data-pro-where="pill"><span class="beta">BETA</span><span lang="pt-BR">Tucano Pro: seu time na nuvem</span><span lang="en">Tucano Pro: your team in the cloud</span><span class="go"><span lang="pt-BR">Entrar na lista →</span><span lang="en">Join the waitlist →</span></span></a>
+      <div class="eyebrow lift"><span lang="pt-BR">Grátis, open source, no Mac, no Linux e no Windows</span><span lang="en">Free, open source, on Mac, Linux and Windows</span></div>
+      <h1 class="display lift"><span lang="pt-BR">Seu time de agentes de IA. </span><span lang="en">Your AI agent team. </span><span class="swoosh"><span lang="pt-BR">Suas regras.</span><span lang="en">Your rules.</span><svg viewBox="0 0 300 30" preserveAspectRatio="none"><path pathLength="1" d="M4 22 C 80 6, 200 4, 296 14" stroke="#FF8C24" stroke-width="9" stroke-linecap="round" fill="none"/></svg></span></h1>
+      <p class="lead lift"><span lang="pt-BR">Agentes que conversam em canais, programam, revisam um ao outro e usam as ferramentas do seu time. Eles fazem o trabalho; o que mexe no mundo espera o seu sim.</span><span lang="en">Agents that talk in channels, write code, review each other and use your team’s tools. They do the work; anything that touches the real world waits for your yes.</span></p>
+      <div class="actions lift">
         <a class="btn btn--beak" data-dl href="https://github.com/eduwxyz/tucano/releases/latest/download/tucano-mac-arm64.dmg"><span lang="pt-BR">Baixar pro Mac</span><span lang="en">Download for Mac</span></a>
         <button type="button" class="btn pro-btn" data-pro-open aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 9.5 4.75 4.75 0 0 0 6.75 19z"/></svg><span lang="pt-BR">Tucano Pro, na nuvem</span><span lang="en">Tucano Pro, in the cloud</span><span class="beta">BETA</span></button>
         <p class="also"><span lang="pt-BR">Também pra </span><span lang="en">Also for </span><a data-dl data-os="windows" href="https://github.com/eduwxyz/tucano/releases/latest/download/tucano-win-x64.exe">Windows</a><span lang="pt-BR"> e </span><span lang="en"> and </span><a data-dl data-os="linux" href="https://github.com/eduwxyz/tucano/releases/latest/download/tucano-linux-amd64.deb">Linux</a></p>
@@ -653,9 +659,9 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
         <div class="cmd"><code><b>curl</b> -fsSL <span>…/releases/latest/download/</span>install.sh | sh</code><button class="copy" data-copy="curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh | sh">Copiar</button></div>
         <a class="btn btn--ghost" href="#ao-vivo"><span lang="pt-BR">Ver ao vivo ↓</span><span lang="en">Watch it live ↓</span></a>
       </div>
-      <p class="fine rv"><span lang="pt-BR">Na <b>assinatura que você já tem</b> (Claude, ChatGPT) ou no <b>gateway da sua empresa</b>. Mac (chip Apple ou Intel), Linux ou Windows.</span><span lang="en">On the <b>subscription you already have</b> (Claude, ChatGPT) or your <b>company’s gateway</b>. Mac (Apple silicon or Intel), Linux or Windows.</span></p>
+      <p class="fine lift"><span lang="pt-BR">Na <b>assinatura que você já tem</b> (Claude, ChatGPT) ou no <b>gateway da sua empresa</b>. Mac (chip Apple ou Intel), Linux ou Windows.</span><span lang="en">On the <b>subscription you already have</b> (Claude, ChatGPT) or your <b>company’s gateway</b>. Mac (Apple silicon or Intel), Linux or Windows.</span></p>
     </div>
-    <div class="hero__art rv" aria-hidden="true">
+    <div class="hero__art lift" aria-hidden="true">
       <div class="halo"></div>
       <div class="ring"></div>
       <div class="icon">
@@ -807,7 +813,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
     </div>
     <div class="panel">
       <div class="box rv">
-        <h4><span class="agent violet" style="--s:32px"><span class="eyes"><i></i><i></i></span></span>Leo <small>Dev · Claude Code</small></h4>
+        <h3><span class="agent violet" style="--s:32px"><span class="eyes"><i></i><i></i></span></span>Leo <small>Dev · Claude Code</small></h3>
         <div class="tools" id="tools">
           <div class="tool" data-tool="linear"><img src="assets/logos/linear.svg" alt=""><span>Linear</span><div class="seg"><button data-v="n"><span lang="pt-BR">Sem acesso</span><span lang="en">No access</span></button><button data-v="r" class="on"><span lang="pt-BR">Ler</span><span lang="en">Read</span></button><button data-v="w"><span lang="pt-BR">Ler e escrever</span><span lang="en">Read &amp; write</span></button></div></div>
           <div class="tool" data-tool="github"><img src="assets/logos/github.svg" alt=""><span>GitHub</span><div class="seg"><button data-v="n"><span lang="pt-BR">Sem acesso</span><span lang="en">No access</span></button><button data-v="r"><span lang="pt-BR">Ler</span><span lang="en">Read</span></button><button data-v="w" class="on w"><span lang="pt-BR">Ler e escrever</span><span lang="en">Read &amp; write</span></button></div></div>
@@ -817,7 +823,7 @@ if (/(^|\.)tucano\.sh$/.test(location.hostname)) {
         <div class="limits"><div class="lim"><span lang="pt-BR">Limite do mês</span><span lang="en">Monthly limit</span> <b><span lang="pt-BR">2 mi tokens · avisa em 80%</span><span lang="en">2M tokens · warns at 80%</span></b></div><div class="lim"><span lang="pt-BR">Teto por resposta</span><span lang="en">Cap per reply</span> <b><span lang="pt-BR">10% do limite</span><span lang="en">10% of the limit</span></b></div></div>
       </div>
       <div class="box rv">
-        <h4><span lang="pt-BR">O que o Leo pode fazer agora</span><span lang="en">What Leo can do right now</span></h4>
+        <h3><span lang="pt-BR">O que o Leo pode fazer agora</span><span lang="en">What Leo can do right now</span></h3>
         <div class="can" id="can"></div>
       </div>
     </div>
@@ -1322,21 +1328,31 @@ setLang(LANG)
   document.querySelectorAll('main > section, section.end').forEach((s) => io.observe(s))
 })()
 </script>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
 // ---------- Tucano Pro: the waitlist (only the email) and the phone at 3 a.m. ----------
 ;(() => {
   const T = (pt, en) => (document.documentElement.lang === 'en' ? en : pt)
   // The anti-robot check (Cloudflare Turnstile), only when a form is sent: invisible unless Cloudflare asks.
+  // Its script loads once someone reaches for a form, not with the page.
   const SITEKEY = '__TURNSTILE_SITE_KEY__'
+  let turnstileJs
+  const loadTurnstile = () =>
+    (turnstileJs ||= new Promise((resolve) => {
+      const s = document.createElement('script')
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      s.async = true
+      s.onload = s.onerror = () => resolve()
+      document.head.append(s)
+    }))
+  document.querySelectorAll('form.join').forEach((f) => ['focusin', 'pointerdown'].forEach((e) => f.addEventListener(e, loadTurnstile, { once: true })))
   const humanToken = (form) =>
-    new Promise((resolve) => {
+    loadTurnstile().then(() => new Promise((resolve) => {
       const box = form.querySelector('.ts')
       if (!window.turnstile || !box) return resolve('')
       box.innerHTML = ''
       const done = setTimeout(() => resolve(''), 20000)
       window.turnstile.render(box, { sitekey: SITEKEY, appearance: 'interaction-only', callback: (t) => (clearTimeout(done), resolve(t)), 'error-callback': () => (clearTimeout(done), resolve('')) })
-    })
+    }))
   document.querySelectorAll('form.join input[type=email]').forEach((i) => (i.placeholder = T('seu@email.com', 'you@email.com')))
   // The Pro where the page opens: the pill goes to the section; the button opens the email right there.
   document.querySelectorAll('[data-pro-where]').forEach((a) => a.addEventListener('click', () => window.posthog?.capture?.('pro_hero_click', { where: a.dataset.proWhere })))
