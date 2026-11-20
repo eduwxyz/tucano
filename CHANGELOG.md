@@ -4,6 +4,35 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.43] - 2026-11-19
+
+> **Em português:**
+> - **Corrigido:** numa resposta, os passos mostram uma linha **Pensando**, não duas, quando o agente roda ferramentas ao mesmo tempo.
+> - **Corrigido:** um **card** que um agente propõe (time, agente, canal, rotina) é aplicado uma vez só: não volta pra **Criar** enquanto a resposta continua, e um segundo clique não cria os agentes de novo.
+> - **Corrigido:** na barra lateral, os agentes **arquivados** ficam num grupo que começa fechado, e o notebook na linha de um agente não pula mais.
+> - **Corrigido:** numa **wiki** em inglês, uma página nova não abre mais com uma linha em negrito "tipo: … criada: … atualizada: …". As propriedades da página ficam no idioma do Tucano (`type`, `created`, `updated` em inglês), e um bloco de propriedades que o curador escreva no texto vira propriedade, não texto.
+> - **Corrigido:** os **arquivos** que os agentes mandam podem ser baixados, também num servidor (Tucano Pro), e salvos com **Salvar…** no desktop.
+
+### Fixed
+
+- **A reply's steps show one "Thinking" row, not two.** Engines run tool calls side by side (Pi, Codex and Claude Code all do). The second call to start closed the first one's row as "Thought", hiding the command it was running, and each call added its own "Thinking" row when it ended, so two rows spun and stopped together. A tool starting now closes only the "Thinking" row, and the row comes back once the last call running beside it ends.
+- **A card an agent proposes is applied once.** A team, agent, channel or routine card applied while the agent's reply was still working went back to **Create team** (or **Create**, **Apply**) as the reply went on, because the reply saved its own copy of the message over the card; a second click made the same agents again. The reply now keeps what was done with its cards, an agent proposing the same team again in that reply is told it already exists, and the core refuses to apply a card twice even if its message lost that it was applied (and puts the card back as it was). A reply tried again keeps the cards that were already applied.
+- **Archived agents fold away under "Archived" in the sidebar.** An archived agent with a DM was drawn above the "Archived" entry, mixed with the last sector's agents, and couldn't be hidden. "Archived" is now a group like a sector: closed until you open it, remembered when you do, with its agents below it (each opens its DM, or its page when there's none) and "Reactivate…" at the end.
+- **The laptop on an agent's row stays in one place.** It sat before the working dots, the unread count and the gear, so it jumped left whenever the agent started working or you hovered the row. It's now the row's last item, with the gear's room kept, and what comes and goes shows before it.
+- **A wiki page in an English workspace no longer opens with "tipo: … criada: … atualizada: …" in bold.** Tucano wrote a page's frontmatter keys in Portuguese whatever the language, and the curator, having seen them, wrote that block into a new page's text, where it rendered as a rule and a heading. The keys now follow the workspace's language (`type`, `created`, `updated` in English; a page that has them in the other language keeps its own), a frontmatter block at the top of a page's text is taken out of the text and into the page's properties, and the curator is told its text is the body only.
+- **Files the agents send can be saved, on a server too.** A card for a file in a reply only had Open, and in a browser a .docx (or anything a browser can't show) opened an empty panel, so on Tucano Pro there was no way to get it. Every file and image an agent sends now has **Download** in the browser (on the card, in the panel and in the image viewer), served by the server under the file's real name to whoever can see the conversation; a file a browser can't show downloads on a click. On the desktop, Open stays and **Save…** sits beside it.
+
+## [0.2.42] - 2026-11-19
+
+> **Em português:**
+> - **Corrigido:** no **Quadro**, o aviso de agente parado não desenha mais o nome do agente por cima de "parou em …".
+> - **Corrigido:** num **servidor** (Tucano Pro), o **ditado** diz onde o áudio vira texto: no servidor, não "neste computador, sem internet". E avisa que lá o modelo **Leve** é bem mais rápido.
+
+### Fixed
+
+- **The Quadro's "stopped on" row no longer draws the agent's name over the text.** The row borrowed the chat message's class, a grid with a 34px first column, so a name like "UI Architect" spilled over "parou em …".
+- **Dictation on a server says where the audio becomes text.** Settings and the microphone's balloon said "on this computer, offline" on Tucano Pro too, where it's the server, on shared processors: the Recommended model took 47 s for 8 s of speech there and the Light one 9 s, so a person waiting gave up. On a server they now say it runs on the server, and that the Light model is much faster there.
+
 ## [0.2.41] - 2026-11-19
 
 > **Em português:**

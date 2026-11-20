@@ -5,7 +5,8 @@ import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, normalize, resolve, sep } from 'node:path'
+import { copyFile } from 'node:fs/promises'
+import { basename, dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
@@ -182,6 +183,7 @@ type CoreRequest =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'save_artifact'; path: string }
   | { type: 'wiki_dir'; path: string }
   | { type: 'doc-file-result'; id: string; data: { path: string } | null }
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
@@ -350,6 +352,14 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     // Never openPath on what isn't a folder or a PDF: that would run an app or a script.
     if (msg.how === 'open') void shell.openPath(msg.path)
     else shell.showItemInFolder(msg.path)
+  } else if (msg.type === 'save_artifact') {
+    // Only a file of what the agents showed, copied to where the person picks (Downloads to start).
+    const path = normalize(msg.path)
+    if (!path.startsWith(join(workspace.dataDir, 'artifacts') + sep)) return
+    const ask = { defaultPath: join(app.getPath('downloads'), basename(path)) }
+    void (mainWindow ? dialog.showSaveDialog(mainWindow, ask) : dialog.showSaveDialog(ask))
+      .then((r) => (r.canceled || !r.filePath ? undefined : copyFile(path, r.filePath)))
+      .catch((e) => console.error('[main] save artifact', e))
   } else if (msg.type === 'wiki_dir') {
     runtime.wikiFolder = normalize(msg.path)
   } else if (msg.type === 'doc-file-result') {

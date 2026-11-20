@@ -7,6 +7,7 @@ import type { HermesPreview } from '../../shared/hermes-import'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
+  artifactUrl,
   asSaid,
   type Account,
   type AccountEngine,
@@ -108,7 +109,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
-  lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
+  lightbox: { items: LightboxItem[]; index: number } | null
   conversations: Conversation[]
   messages: Record<string, Message[]> // per conversation, oldest first; read through messagesIn and the indexes below
   history: Record<string, number> // per conversation with older messages still in the core: from when it's here whole
@@ -1051,6 +1052,18 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
 export const revealArtifact = (id: string): void => void fire(L('Não consegui mostrar o arquivo.', "I couldn't show the file."), 'revealArtifact', { id })
+// A copy of what an agent sent, on this computer. In a browser (Tucano as a server) the file is on
+// the server: it comes down under its own name (src/server/artifact-http.ts). On the desktop the
+// app asks where to put it; that's the owner's, at the computer's own window, like revealArtifact.
+export const canSaveArtifact = (s: Pick<State, 'people' | 'you'>): boolean => windowless() || amOwner(s)
+export const saveLabel = (): string => (windowless() ? L('Baixar', 'Download') : L('Salvar…', 'Save…'))
+export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
+  if (!windowless()) return void fire(L('Não consegui salvar o arquivo.', "I couldn't save the file."), 'saveArtifact', { id: a.id })
+  const link = document.createElement('a')
+  link.href = `${artifactUrl(a)}?download=1`
+  link.download = a.name
+  link.click()
+}
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
@@ -1063,7 +1076,9 @@ export const seeThread = (rootId: string): void =>
     } catch {}
     return { ...s, threadSeen }
   })
-export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+// `artifact`: an image an agent sent, which can be saved from there.
+export type LightboxItem = { url: string; title: string; video?: boolean; artifact?: Pick<Artifact, 'id' | 'name'> }
+export const openLightbox = (items: LightboxItem[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))

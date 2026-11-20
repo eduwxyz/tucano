@@ -270,6 +270,7 @@ export interface Delegation {
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
 export interface AgentDraft {
+  id?: string // given when proposed: the core applies a card once by it (unset on cards from before)
   name: string
   role: string
   color: AgentColor
@@ -314,7 +315,7 @@ export type Proposal = (
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
   | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
-) & { reason?: string; state?: 'applied' | 'dismissed' | 'undone'; appliedId?: string; error?: string; needs?: string[]; auto?: true; undo?: UndoInfo } // auto: applied by itself, as the Tuca proposed it; undo: how to take it back
+) & { id?: string; reason?: string; state?: 'applied' | 'dismissed' | 'undone'; appliedId?: string; error?: string; needs?: string[]; auto?: true; undo?: UndoInfo } // id: given when proposed, the core applies a card once by it (unset on cards from before); auto: applied by itself, as the Tuca proposed it; undo: how to take it back
 
 // What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
 // agents and teams); `draft`: the reply's new-agent card, when it went too.

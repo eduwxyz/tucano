@@ -2,7 +2,7 @@
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
 import { useState, type ReactNode } from 'react'
-import { agentById, amAdmin, amOwner, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
@@ -26,41 +26,62 @@ export { bytes, parseCsv }
 // The window's size, with the conversation's other images a key away.
 function showImages(a: Artifact): void {
   const images = getState().artifacts.filter((x) => x.kind === 'image' && x.conversationId === a.conversationId)
-  openLightbox(images.map((x) => ({ url: artifactUrl(x), title: x.title })), Math.max(0, images.findIndex((x) => x.id === a.id)))
+  openLightbox(images.map((x) => ({ url: artifactUrl(x), title: x.title, artifact: { id: x.id, name: x.name } })), Math.max(0, images.findIndex((x) => x.id === a.id)))
 }
 
 export function ArtifactCard({ id }: { id: string }): ReactNode {
   const a = useStore((s) => s.artifacts.find((x) => x.id === id))
   const open = useStore((s) => s.panel?.kind === 'artifact' && s.panel.id === id)
+  const canSave = useStore(canSaveArtifact)
   const kept = useSavedArtifacts()[id]
   const { tree } = useDocs()
   if (!a) return null
+  const save = canSave && (
+    <button className="artifact-card__open" title={a.name} onClick={() => saveArtifact(a)}>
+      {saveLabel()}
+    </button>
+  )
   if (a.kind === 'image')
     return (
-      <button className="artifact-image" onClick={() => showImages(a)} title={a.title}>
-        <img src={artifactUrl(a)} alt={a.title} />
-        <span className="artifact-image__caption">{a.title}</span>
-      </button>
-    )
-  return (
-    <button className={`artifact-card ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'artifact', id })}>
-      <span className="artifact-card__icon">
-        <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
-      </span>
-      <span className="artifact-card__text">
-        <strong>{a.title}</strong>
-        <span className="muted small">
-          {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
+      <div className="artifact-image">
+        <button className="artifact-image__show" onClick={() => showImages(a)} title={a.title}>
+          <img src={artifactUrl(a)} alt={a.title} />
+        </button>
+        <span className="artifact-image__caption">
+          <span className="grow">{a.title}</span>
+          {save}
         </span>
-        {kept && (
-          // On its own line: at the end of the line above it was the first thing a narrow chat cut off.
-          <span className="small artifact-card__kept">
-            <Icon name="check" size={12} /> {L('Guardado em', 'Kept in')} {(tree && pathText(tree, kept.folderId)) || 'Documentos'}
+      </div>
+    )
+  // On a server, a file no browser shows (a .docx, a .zip) is only good downloaded: the panel would be empty.
+  const onlySave = windowless() && a.kind === 'file'
+  const show = (): void => (onlySave ? saveArtifact(a) : openPanel({ kind: 'artifact', id }))
+  return (
+    <div className={`artifact-card ${open ? 'is-open' : ''}`}>
+      <button className="artifact-card__main" onClick={show}>
+        <span className="artifact-card__icon">
+          <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
+        </span>
+        <span className="artifact-card__text">
+          <strong>{a.title}</strong>
+          <span className="muted small">
+            {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
           </span>
-        )}
-      </span>
-      <span className="artifact-card__open">{L('Abrir', 'Open')}</span>
-    </button>
+          {kept && (
+            // On its own line: at the end of the line above it was the first thing a narrow chat cut off.
+            <span className="small artifact-card__kept">
+              <Icon name="check" size={12} /> {L('Guardado em', 'Kept in')} {(tree && pathText(tree, kept.folderId)) || 'Documentos'}
+            </span>
+          )}
+        </span>
+      </button>
+      {!onlySave && (
+        <button className="artifact-card__open" onClick={show}>
+          {L('Abrir', 'Open')}
+        </button>
+      )}
+      {save}
+    </div>
   )
 }
 
@@ -382,6 +403,7 @@ export function SidePanel(): ReactNode {
   )
   const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
+  const canSave = useStore(canSaveArtifact)
   const [reload, setReload] = useState(0)
   if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
@@ -397,6 +419,11 @@ export function SidePanel(): ReactNode {
         <span className="grow" />
         {artifact && <SaveToDocs artifact={artifact} />}
         {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
+        {artifact && canSave && (
+          <button className="btn btn--sm btn--ghost" title={artifact.name} onClick={() => saveArtifact(artifact)}>
+            <Icon name="down" size={14} /> {saveLabel()}
+          </button>
+        )}
         {service?.url && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
@@ -436,7 +463,16 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
       title={artifact.title}
       size={artifact.size}
       loadText={() => call('artifactText', { id: artifact.id })}
-      fallback={<RevealArtifact artifactId={artifact.id} />}
+      fallback={
+        // On a server the file isn't on this computer: it comes down instead of showing in a folder.
+        windowless() ? (
+          <button className="btn btn--sm btn--primary side-panel__reveal" onClick={() => saveArtifact(artifact)}>
+            <Icon name="down" size={14} /> {L('Baixar', 'Download')}
+          </button>
+        ) : (
+          <RevealArtifact artifactId={artifact.id} />
+        )
+      }
     />
   )
 }

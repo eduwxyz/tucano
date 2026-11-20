@@ -569,7 +569,7 @@ export function BoardPage(): ReactNode {
                 <div key={c.id} className={`bd-stuck-row ${paused ? 'paused' : ''}`}>
                   <span className="bd-bang">{paused ? '‖' : '!'}</span>
                   <Face agent={a} />
-                  <span className="msg"><b>{a?.name}</b> {paused ? L('pausou em', 'paused on') : L('parou em', 'stopped on')} “{c.title}” {c.last?.run?.error && <em>· {firstLine(c.last.run.error)}</em>}</span>
+                  <span className="bd-stuck-msg"><b>{a?.name}</b> {paused ? L('pausou em', 'paused on') : L('parou em', 'stopped on')} “{c.title}” {c.last?.run?.error && <em>· {firstLine(c.last.run.error)}</em>}</span>
                   <span className="bd-grow" />
                   <button className="bd-btn quiet sm" onClick={() => openCard(c.id)}>{L('Ver', 'See')}</button>
                   {c.last && (paused || canContinue(c.last.run!) ? <button className="bd-btn ink sm" onClick={() => continueRun(c.last!.id)}>{L('Continuar', 'Continue')}</button> : RETRYABLE.has(c.last.run!.status) && <button className="bd-btn ink sm" onClick={() => retryRun(c.last!.id)}>{L('Tentar de novo', 'Try again')}</button>)}

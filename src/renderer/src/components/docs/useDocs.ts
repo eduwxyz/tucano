@@ -58,7 +58,7 @@ export function useSavedArtifacts(): Record<string, { docId: string; folderId: s
   const [saved, setSaved] = useState<Record<string, { docId: string; folderId: string }>>({})
   useEffect(() => {
     let alive = true
-    void once(links, rev, () => call('docByArtifact')).then((m) => alive && setSaved(m), () => {})
+    void once(links, rev, () => call('docByArtifact')).then((m) => alive && setSaved(m ?? {}), () => {})
     return () => {
       alive = false
     }

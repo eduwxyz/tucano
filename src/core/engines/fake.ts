@@ -111,6 +111,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           })
           reply = textOf(r).includes('card') ? L('Montei o Rafa. Dá pra criar, editar antes ou me pedir ajustes.', 'I put Rafa together. You can create it, edit it first or ask me for changes.') : textOf(r)
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
+      } else if (turn.mcpUrl && /proponha o time (\p{L}+) e (\p{L}+)/iu.test(last)) {
+        // Any agent proposing a team (not only the Tuca). "de novo em N s": proposes the same team again
+        // that much later, in the same reply, to see what it's told once the first card was applied.
+        const [, a, b] = /proponha o time (\p{L}+) e (\p{L}+)/iu.exec(last)!
+        const team = { agentes: [a!, b!].map((nome) => ({ nome, funcao: 'Ops', cor: 'amber', instrucoes: `Você é ${nome}.\nCuida da entrega.\nResponde curto.`, esforco: 'low', web: false })) }
+        const told = [textOf(await callTool(turn.mcpUrl, 'propor_time', team))]
+        const again = /de novo em (\d+) ?s/i.exec(last)
+        if (again) {
+          await new Promise((r) => setTimeout(r, Number(again[1]) * 1000))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_time', team)))
+        }
+        reply = told.join('\n---\n')
       } else if (turn.mcpUrl && back) {
         // What came back from its team: a question left there is answered ("responda a dúvida com `x`", in
         // what the person wrote first) or taken to the person; an end is told in a line.

@@ -113,10 +113,13 @@ describe("an agent's row in the sidebar", () => {
     expect(row('Lia').querySelector('.nav-item__role')!.getAttribute('title')).toBe('Pesquisadora')
   })
 
-  it('keeps a DM with an archived agent reachable, and the archived entry', async () => {
-    await render({ agents: [agent({}), agent({ id: 'a2', name: 'Duda', handle: 'duda', archived: true })], conversations: [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })] })
-    expect(row('Duda').parentElement!.className).toContain('is-archived')
-    expect(section('Agentes').textContent).toContain('Arquivados')
+  it('puts the laptop last, so the working dots and the unread count come before it and it stays put', async () => {
+    const mac = agent({ computer: true, computerKind: 'mac' })
+    await render({ agents: [mac], conversations: [dm({ unread: 2 })], messages: { d1: [msg('m1', 'd1', 'a1', 'working')] } })
+    const parts = [...row('Lia').children].map((x) => x.className)
+    expect(parts.at(-1)).toBe('nav-item__mac')
+    expect(parts.findIndex((c) => c.includes('working-dots'))).toBeLessThan(parts.indexOf('nav-item__mac'))
+    expect(parts.findIndex((c) => c.includes('badge'))).toBeLessThan(parts.indexOf('nav-item__mac'))
   })
 
   it('has the org chart behind an icon in the header, where "Time" was', async () => {
@@ -124,6 +127,48 @@ describe("an agent's row in the sidebar", () => {
     expect([...document.querySelectorAll('.nav-item__label')].map((x) => x.textContent)).not.toContain('Time')
     await click(section('Agentes').querySelector('.section__head [aria-label="Organograma"]')!)
     expect(store.navigate).toHaveBeenCalledWith({ kind: 'org' })
+  })
+})
+
+describe('the archived agents', () => {
+  // Lia is active; Duda (with a DM) and Rui (without) are archived.
+  const agents = [agent({}), agent({ id: 'a2', name: 'Duda', handle: 'duda', archived: true }), agent({ id: 'a3', name: 'Rui', handle: 'rui', archived: true })]
+  const conversations = [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })]
+  const group = (): Element => [...document.querySelectorAll('.agent-sector')].find((g) => g.querySelector('.agent-sector__head')?.textContent?.includes('Arquivados'))!
+
+  it('are a group at the end, its head first and its agents below it, never among the active ones', async () => {
+    await render({ agents, conversations })
+    const all = [...section('Agentes').querySelectorAll('.agent-sector__head, .agent-row')]
+    expect(all.map((x) => x.querySelector('.fold-toggle, .nav-item__label')!.textContent)).toEqual(['Lia', 'Arquivados', 'Duda', 'Rui'])
+    expect([...group().querySelectorAll('.agent-row')].map((r) => r.className)).toEqual(['agent-row is-archived', 'agent-row is-archived'])
+  })
+
+  it('start folded, with how many; opening is remembered like a sector', async () => {
+    await render({ agents, conversations })
+    expect(group().className).toContain('is-folded')
+    expect(group().querySelector('.agent-sector__count')!.textContent).toBe('2')
+    await click(group().querySelector('.fold-toggle')!)
+    expect(store.updateSettings).toHaveBeenCalledWith({ folded: ['+sector:archived'] })
+    await render({ agents, conversations, settings: { folded: ['+sector:archived'] } as State['settings'] })
+    expect(group().className).not.toContain('is-folded')
+    expect(group().querySelector('.agent-sector__count')).toBeNull()
+    await click(group().querySelector('.fold-toggle')!)
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ folded: [] })
+  })
+
+  it('open the DM, or the page when there is none, and still lead to reactivating', async () => {
+    await render({ agents, conversations, settings: { folded: ['+sector:archived'] } as State['settings'] })
+    await click(row('Duda'))
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'conversation', id: 'd2' })
+    await click(row('Rui'))
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'agent', id: 'a3' })
+    expect(store.openDm).not.toHaveBeenCalled()
+    expect(group().querySelector('.agent-sector__more')!.textContent).toBe('Reativar…')
+  })
+
+  it('no archived agent, no group', async () => {
+    await render({ agents: [agent({})], conversations: [dm({})] })
+    expect(section('Agentes').textContent).not.toContain('Arquivados')
   })
 })
 

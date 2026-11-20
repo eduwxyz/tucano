@@ -85,6 +85,7 @@ export const NEEDS: Record<Method, Need> = {
   snapshot: 'anyone',
   artifactText: 'anyone',
   revealArtifact: 'anyone',
+  saveArtifact: 'anyone', // the computer's own window only: see ownArtifactFile
   sendMessage: 'anyone',
   typing: 'anyone',
   olderMessages: 'anyone',
