@@ -4,11 +4,434 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.43] - 2026-11-19
+
 > **Em português:**
+> - **Corrigido:** numa resposta, os passos mostram uma linha **Pensando**, não duas, quando o agente roda ferramentas ao mesmo tempo.
+> - **Corrigido:** um **card** que um agente propõe (time, agente, canal, rotina) é aplicado uma vez só: não volta pra **Criar** enquanto a resposta continua, e um segundo clique não cria os agentes de novo.
+> - **Corrigido:** na barra lateral, os agentes **arquivados** ficam num grupo que começa fechado, e o notebook na linha de um agente não pula mais.
+> - **Corrigido:** numa **wiki** em inglês, uma página nova não abre mais com uma linha em negrito "tipo: … criada: … atualizada: …". As propriedades da página ficam no idioma do Tucano (`type`, `created`, `updated` em inglês), e um bloco de propriedades que o curador escreva no texto vira propriedade, não texto.
+> - **Corrigido:** os **arquivos** que os agentes mandam podem ser baixados, também num servidor (Tucano Pro), e salvos com **Salvar…** no desktop.
+
+### Fixed
+
+- **A reply's steps show one "Thinking" row, not two.** Engines run tool calls side by side (Pi, Codex and Claude Code all do). The second call to start closed the first one's row as "Thought", hiding the command it was running, and each call added its own "Thinking" row when it ended, so two rows spun and stopped together. A tool starting now closes only the "Thinking" row, and the row comes back once the last call running beside it ends.
+- **A card an agent proposes is applied once.** A team, agent, channel or routine card applied while the agent's reply was still working went back to **Create team** (or **Create**, **Apply**) as the reply went on, because the reply saved its own copy of the message over the card; a second click made the same agents again. The reply now keeps what was done with its cards, an agent proposing the same team again in that reply is told it already exists, and the core refuses to apply a card twice even if its message lost that it was applied (and puts the card back as it was). A reply tried again keeps the cards that were already applied.
+- **Archived agents fold away under "Archived" in the sidebar.** An archived agent with a DM was drawn above the "Archived" entry, mixed with the last sector's agents, and couldn't be hidden. "Archived" is now a group like a sector: closed until you open it, remembered when you do, with its agents below it (each opens its DM, or its page when there's none) and "Reactivate…" at the end.
+- **The laptop on an agent's row stays in one place.** It sat before the working dots, the unread count and the gear, so it jumped left whenever the agent started working or you hovered the row. It's now the row's last item, with the gear's room kept, and what comes and goes shows before it.
+- **A wiki page in an English workspace no longer opens with "tipo: … criada: … atualizada: …" in bold.** Tucano wrote a page's frontmatter keys in Portuguese whatever the language, and the curator, having seen them, wrote that block into a new page's text, where it rendered as a rule and a heading. The keys now follow the workspace's language (`type`, `created`, `updated` in English; a page that has them in the other language keeps its own), a frontmatter block at the top of a page's text is taken out of the text and into the page's properties, and the curator is told its text is the body only.
+- **Files the agents send can be saved, on a server too.** A card for a file in a reply only had Open, and in a browser a .docx (or anything a browser can't show) opened an empty panel, so on Tucano Pro there was no way to get it. Every file and image an agent sends now has **Download** in the browser (on the card, in the panel and in the image viewer), served by the server under the file's real name to whoever can see the conversation; a file a browser can't show downloads on a click. On the desktop, Open stays and **Save…** sits beside it.
+
+## [0.2.42] - 2026-11-19
+
+> **Em português:**
+> - **Corrigido:** no **Quadro**, o aviso de agente parado não desenha mais o nome do agente por cima de "parou em …".
+> - **Corrigido:** num **servidor** (Tucano Pro), o **ditado** diz onde o áudio vira texto: no servidor, não "neste computador, sem internet". E avisa que lá o modelo **Leve** é bem mais rápido.
+
+### Fixed
+
+- **The Quadro's "stopped on" row no longer draws the agent's name over the text.** The row borrowed the chat message's class, a grid with a 34px first column, so a name like "UI Architect" spilled over "parou em …".
+- **Dictation on a server says where the audio becomes text.** Settings and the microphone's balloon said "on this computer, offline" on Tucano Pro too, where it's the server, on shared processors: the Recommended model took 47 s for 8 s of speech there and the Light one 9 s, so a person waiting gave up. On a server they now say it runs on the server, and that the Light model is much faster there.
+
+## [0.2.41] - 2026-11-19
+
+> **Em português:**
+> - **Novo:** **modo objetivo**. Escreva `/objetivo …` num canal e os agentes trabalham nele sozinhos, passando a vez entre si (faz, revisa, corrige, revisa de novo), até um deles marcar como cumprido. Para sozinho, com um aviso no canal, em 12 respostas, se o time andar em círculos, se ninguém passar a vez ou se uma resposta falhar.
+> - **Novo:** **Continuar sozinho**. Uma resposta que pausa no limite por resposta e estava avançando segue sozinha, até 2 vezes seguidas, se o mês ainda comporta. Quando o app reabre, as respostas cortadas pelo fechamento continuam sozinhas. A chave fica em Configurações › Agentes › Limites.
+> - **Novo:** o navegador do agente **baixa arquivos** e **manda no chat**, e entra em sites com **logins salvos** (na página do agente, só admin), sem o modelo ver a senha. Códigos de verificação ele lê no e-mail conectado ou pergunta pra você.
+> - **Mudou:** o que o **Tuca** propõe e só mexe dentro do app (agentes, times, canais, rotinas) **entra na hora, com Desfazer** por 24 horas. Acesso a conectores e limite do mês continuam esperando você confirmar.
+> - **Mudou:** agentes fora de qualquer time e sem chefe **trabalham juntos** sem organograma, e vários chamados na mesma mensagem **respondem um depois do outro**, cada um lendo o que os anteriores disseram. Eles também perguntam menos: fazem o que dá pra decidir e, quando perguntam, é uma pergunta só, com a recomendação deles.
+> - **Mudou:** o navegador do agente só aparece grande no chat enquanto tem algo pra ver.
+> - **Corrigido:** uma pergunta de um pedido que chegou até você fecha onde quer que você responda, e dá pra acrescentar algo a um pedido ainda em andamento.
+
+### Added
+
+- **Goals: `/objetivo …` (or `/goal …`) in a channel.** The agents there work on it by themselves, passing the turn to each other with @ (build, review, fix, review again), past the usual replies in a row, until one of them calls `concluir_objetivo` with the result. Each reply is told the goal and how many replies are left. It stops by itself, with a line in the channel saying why, at 12 replies, when an agent says the same as before, when a reply neither passes the turn nor ends it, or when a reply fails, is stopped or hits its limit. A goal lives in memory: if the app closes, it ends there. (#556)
+- **Keep going on its own.** A reply that pauses at its per-reply limit while getting somewhere (a tool call went through) goes on by itself, up to 2 times in a row, when the month still has room for another reply that size; after that it waits for **Continue**. When the app opens again, replies cut off by it closing go on by themselves, unless the workspace is paused (they wait for it to resume) or it was more than 12 hours ago. Settings › Agents › Limits › **Keep going on its own**, on by default. (#556, part of #389)
+- **An agent's browser downloads files, posts them in the chat and signs in.** Downloads go to a folder of the agent's own, up to 20 MB each; `navegador_anexar` posts one in the conversation. An admin saves **Saved logins** on the agent's page, kept in the system keychain (or as a 1Password reference): `navegador_login` fills them in without the model ever seeing the password, only on the exact address saved and only over HTTPS (http just on localhost), and the password is masked in snapshots and screenshots. For a verification code, the agent reads the connected email or asks you. (#556)
+
+### Changed
+
+- **Tuca's changes inside the app go in at once, with Undo.** What Tuca proposes for agents, teams, channels and routines, or an agent's name, role, instructions, model, effort and web access, applies as soon as Tuca finishes replying, with the same checks as before, and its card gets **Undo** for 24 hours. Undo says why when it's no longer safe (the agent already worked, it was edited since, the channel has messages). Connector access, the monthly limit and anything the person couldn't apply themselves still wait for **Apply**. Settings › Agents › Tuca turns it off. (#556)
+- **Agents work together without an org chart.** Agents in no team and with no lead know each other as colleagues and can ask each other with `pedir`, with no setup. Several agents called in one message, or routed to one, answer one after another, each reading what the ones before said. Agents are told to do what they can decide instead of asking, and to ask one question, with their recommendation, when they must. (#554)
+- **An agent's browser is big in the chat only while there's something to watch:** while the reply using it is working or waiting on an approval, or while a person has taken over. Otherwise it's the small card, which opens the browser on the side. (#552)
+- **More for a request still under way.** `pedir` with `continuar` adds to a request that's still being worked, in its thread, instead of opening a second one. (#551)
+
+### Fixed
+
+- **A question taken up from a request closes wherever it's answered.** Answering it in the request's thread now also closes the one the agent took to the person, so it no longer stays open for good with a second badge in the sidebar. (#551)
+
+## [0.2.40] - 2026-11-18
+
+> **Em português:**
+> - **Mudou:** emprestar o seu computador a um **Tucano num servidor** (como o do Tucano Pro) ficou em dois cliques. Ao ligar **Deixar este servidor usar este computador**, o app já pede a primeira pasta, e logo abaixo da chave aparece **Escolher os agentes**, que abre o servidor em **Conectores**. Lá, **Seu computador** vem primeiro: cada agente com a sua chave, e **Dar acesso a todos**.
+> - **Mudou:** quem emprestou o computador escolhe os agentes que o usam mesmo sem ser admin do servidor, já que um agente só alcança esse computador quando trabalha pra essa pessoa.
+> - **Mudou:** no servidor, o cartão **Computador** de um agente chama de **O servidor** o que antes dizia "Este computador", mostra o seu computador emprestado com **Dar acesso** e **Tirar o acesso**, e um **Linux isolado** sem Docker oferece **Trocar pra Nenhum** em vez de "verificar de novo".
+
+### Changed
+
+- **Lending your computer to a server takes two clicks.** Turning on Settings › Servers › Let this server use this computer asks for the first folder when none is lent, and the row under the switch shows the folders lent and **Pick the agents**, which brings the server on screen at Connectors. There, **Your computer** comes first: each computer you lent, whether it's connected, every agent on its own switch and **Give all of them access**. The computer's window in Connectors has the same switches. In a browser with nothing lent, it says what to open on the computer. (#549)
+- **Whoever lent a computer picks its agents, admin or not.** An agent reaches a lent computer only when it works for that person, so they may give it to the agents they see, or take it away, without being an admin of the server. An admin still may too. Other connectors stay an admin's. (#549)
+- **An agent's Computer card, on a server, says what is the server's and what is yours.** "This computer" reads "The server", and its confirmation says the commands run on the server. **Your computer** shows the computer you lent, whether it's connected and whether this agent uses it, with **Give access** and **Take access away**. An isolated Linux on a server without Docker says it can't run there and offers **Switch to None**, instead of asking to check again. (#549)
+
+## [0.2.39] - 2026-11-18
+
+> **Em português:**
+> - **Corrigido:** o uso do mês de um agente no **Antigravity** não fica mais negativo (como "−2003590 de 2 mi"), e o limite mensal dele volta a valer. Algumas respostas do Antigravity contam o cache à parte da entrada, e a conta subtraía o cache como se estivesse dentro. Os recibos antigos também passam a contar certo.
+
+### Fixed
+
+- **An Antigravity agent's month no longer goes negative.** Tokens count as input − 90% of cache reads + output, which assumes the input counts the cache reads in. Some Antigravity runs report more cache reads than input, so the month showed as "−2003590 of 2M" and the agent's monthly limit never fired. More cache reads than input now means they came apart: the input counts whole and the cache a tenth, in every total, so receipts already saved read right too; new ones from Antigravity add the cache reads to the input. Agents that were past their limit without it showing now stop at it, and say it can be raised on their page. (#547)
+
+## [0.2.38] - 2026-11-18
+
+> **Em português:**
+> - **Corrigido:** no **Tucano num servidor** (como o do Tucano Pro), o **Canva** conecta. Ele só aceita voltar pra um endereço local, então o Tucano percebe e passa pro jeito de colar o endereço em que a página terminou.
+> - **Mudou:** no servidor, escolher uma pasta diz que essas são as pastas do servidor, e um **Linux isolado** sem Docker diz que o Docker precisa estar no servidor. Os dois apontam pra **Configurações › Servidores › Deixar este servidor usar este computador**, no app do computador, pra usar as pastas e o terminal dele.
+
+### Fixed
+
+- **Canva connects on a server.** Canva's MCP registers any return address, but its authorization page takes only a loopback one and answered a server's https address with "Invalid redirect URI.", so it never connected on a server such as Tucano Pro's. When a provider turns the server's own address away, the sign-in starts again with the loopback one and the step where you paste the address the page ended on; it then renews by itself after a restart. (#544)
+
+### Changed
+
+- **On a server, folders and the isolated Linux say where they live.** The folder picker says these are the server's folders, and a missing Docker says the isolated Linux needs Docker on the server, instead of asking to install it on "this computer". Both point to Settings › Servers › Let this server use this computer, in the app on your computer, to use its folders and terminal. (#544)
+
+## [0.2.37] - 2026-11-17
+
+> **Em português:**
+> - **Novo:** um **Tucano mais leve, com a mesma cara**. Agentes numa lista só, agrupada por setor; **Conhecimento** (Memória · Wiki · Skills) e **Operação** (Rotinas · Boletim · Uso) com abas; **Enviar feedback**, **Conectores** e a engrenagem no pé da barra. A página de rotinas abre na semana, as aprovações se agrupam por dia, a página do agente salva sozinha e o Tuca começa direto na conversa, com a proposta preenchendo ao lado.
+> - **Novo:** **tire da barra** o que você não usa (Tuca, Aprovações, Quadro, Conhecimento, Operação): clique com o botão direito ou no **•••** e escolha **Tirar da barra**. O que saiu fica numa linha **N escondidos** logo abaixo, de onde volta num clique, e o aviso tem **Desfazer**. Aprovações e Conhecimento voltam sozinhos enquanto algo espera por você.
+> - **Novo:** o **Quadro**, com o trabalho de todos os agentes em cartões, um por tarefa: A fazer, Fazendo, Precisa de você e Feito.
+> - **Novo:** **Enviar feedback** de dentro do app, com um print da janela se você quiser, e pesquisas rápidas numa linha discreta no pé da barra (dá pra desligar em Configurações).
+> - **Novo:** **outra conta do Antigravity**, no Mac, como já dava com o Claude Code e o Codex: em **Configurações › Modelos › Contas**, e cada agente escolhe a sua.
+> - **Mudou:** na conversa, uma rotina não repete mais o pedido inteiro a cada vez: ele vira um chip com o nome dela, e as execuções seguidas sem novidade se dobram numa linha só.
+> - **Corrigido:** o **Time** com muitos setores não vira mais uma faixa ilegível: **Organizar** quebra os setores em linhas, e arrastar e dar zoom ficou leve.
+> - **Corrigido:** quando o Tuca propunha dois agentes novos na mesma resposta, o segundo tomava o lugar do primeiro, e as rotinas do primeiro não aplicavam. Agora ele propõe os dois num time, e uma resposta antiga assim destrava quando o agente já existe.
+
+### Added
+
+- **A lighter desktop app, same identity.** Fewer things side by side, nothing said twice, what needs you in sight, and what you set up now and then one click away; no feature goes away. "Direct messages" and "Agents" are one list, grouped by sector when there are sectors, each sector folding and still showing what waits in it. **Knowledge** (Memory · Wiki · Skills) and **Operations** (Routines · Report · Usage) are hubs with tabs, each opening on its last tab. The foot of the sidebar is **Send feedback**, then **Connectors** and the settings gear; pausing the team and the theme moved to the menu on the workspace's name. The routines page opens on the week, with routines that run several times a day in an "all day" strip; Approvals puts pending ones first and groups the history by day, folding repeated actions; the agent page saves by itself, with its facts in a header; Tuca starts in the conversation with four suggestions and fills the proposal beside it. Every page has its title in the same place, with its actions on the same line. (#525)
+- **Take items out of the top of the sidebar.** Tuca, Approvals, Board, Knowledge and Operations each leave it from a right click or their "•••" ("Take out of the sidebar"), with Undo on the toast. What was taken out shows as one quiet line under them, "2 hidden", which opens to those items, dimmed, each going back to its place on a click; the workspace's menu also lists them under "In the sidebar". Approvals and Knowledge come back by themselves while something waits on you in them (an approval; a suggested memory or a proposed skill). It's each person's own setting. (#525)
+- **The Board.** Every agent's work as cards in To do, Doing, Needs you and Done (today's). A request split among agents is one card in every view, saying who has it now; anything in it waiting on you brings the whole card to Needs you. Long requests get a short title from the memory's model. The card's panel puts the decision first, then the task's story by agent. (#524)
+- **Send feedback from the app, and small surveys.** "Send feedback" (at the foot of the sidebar and in Settings › General) sends a kind, your text and, if you keep it ticked, a picture of the Tucano window, with a line saying what goes along. Now and then the owner sees a survey as one quiet line above the foot; it can be turned off in Settings, and "Não quero responder" hides it for good. (#534)
+- **Another Antigravity account, on a Mac.** Antigravity kept its Google login in one keychain entry, so a second account replaced the first. Settings › Models › Accounts now takes Antigravity too: its login lives in a file in the account's own folder, and an agent on that account runs with that login and no keychain. On Linux and Windows its login lives in the system store, so it isn't offered there yet. (#538)
+
+### Changed
+
+- **A routine's run in the conversation is lighter.** Its prompt no longer sits above every reply: the reply gets a chip with the routine's name, which opens what it asked. Consecutive runs with nothing new fold into one line ("Vigia do GitHub · 3 execuções sem novidade"), and an approval already decided is one line. "On your computer" shows once, in the conversation's header. (#525)
+
+### Fixed
+
+- **The Team board with many sectors.** Tidy up put every sector in one row, so a team of 17 in 5 sectors was a strip over 4,000 px wide that only fit at the 30% zoom floor. Sectors now wrap into rows to about a screen's shape, with each line to a lower row going down a gap between sectors; panning and zooming no longer redraw every card on each step. (#535)
+- **Tuca proposing two new agents in one reply.** The second new agent's card replaced the first one's, and the first one's routines couldn't be applied ("Create Sustinho first: it's in a card of this same reply", with no such card). Tuca now proposes several new agents as one team, and a card whose agent is in no card of its reply applies to an agent of that name already on the team. (#537)
+
+## [0.2.36] - 2026-11-16
+
+> **Em português:**
+> - **Novo:** **empreste o seu computador a um Tucano num servidor** (o seu ou o Tucano Pro). Em **Configurações › Servidores**, ligue **Deixar este servidor usar este computador** e empreste as pastas dos seus projetos: os agentes de lá passam a usar o terminal, os arquivos, o navegador, os apps e os conectores deste computador, com as aprovações do servidor. Não precisa abrir porta nem configurar rede: o app liga para o servidor. Num servidor com várias pessoas, um agente só alcança o seu computador quando trabalha pra você. Ideia e primeira versão do @pedrojaques99.
+> - **Novo:** uma rotina roda em **vários horários no mesmo dia**. Em **Às**, cada horário é uma pílula: **+ horário** põe outro (ex.: 9h, 13h e 17h), em vez de duplicar a rotina pra cada um, e o × tira. Os dias valem pra todos, o resumo embaixo diz quantas vezes por semana, o calendário mostra cada vez, e editar ou apagar mexe em todos. Os agentes também marcam assim quando você pede "todo dia às 9h e às 15h".
+> - **Novo:** uma **imagem Docker oficial** do Tucano para servidor, a mesma que roda no Tucano Pro: `ghcr.io/eduwxyz/tucano`, para x64 e ARM64, já com os harnesses e o Chromium. Um `docker run` e um `docker exec … link` e ele está no ar. O passo a passo está em `docs/server.md`.
+> - **Corrigido:** agentes com modelos do **Antigravity** (Gemini Argon, Hydrogen, Flash) agora veem as imagens que você anexa. Antes eles respondiam que não conseguiam ver o print.
+> - **Corrigido:** uma rotina "quando aparece algo novo" cujo conector devolve mais de 500 itens não roda mais sem parar, achando que os antigos eram novos.
+> - **Corrigido:** uma rotina que perdeu horários com o Mac dormindo roda o mais recente (até 12 h), e uma "uma vez" em vários dias espera o próximo dia em vez de desligar sem rodar.
+> - **Corrigido:** ligar uma rotina com data vencida diz por que não ligou, e um horário apagado no formulário avisa em vez de sumir.
+> - **Corrigido:** o cartão de uma rotina no calendário abria deslocado, cortado no canto da tela, sem os botões de editar. Agora abre ao lado da rotina.
+
+### Added
+
+- **Lend your computer to a Tucano on a server** (yours, or Tucano Pro). Agents on a server lose what only exists on your computer: the terminal, your projects, the browser with your sign-ins, your apps and local connectors. Now **Settings › Servers › Let this server use this computer** lends them: the desktop app calls the server with the key it was paired with (a live stream at `/node/link`, answered by POST), and the computer becomes a connector there, reached under the server's approvals. Nothing listens on the computer and nothing needs a private network, so it works from behind any router and with Tucano Pro. It holds the same locks as an agent on this computer: a command is judged as a command and never below a write; the file tools reach only the folders you lend, never a credentials folder or Tucano's data, and never write what runs later (`.git`, a shell profile); a risky click goes by the browser's or apps' rule and is never allowed for good; a class or high-risk mark set on the computer can't be loosened on the server. On a server with several people, a computer is its person's: an agent reaches it only working for someone named as that person (a team routine reaches no one's), only they approve what waits on it, it can't be a routine's trigger, and removing the person, or the device's key, cuts it off at once. The app never follows a redirect, and pairing the same server again turns lending off. A person lends up to 5 computers. The computer keeps a log of what the server ran there. Designed and first built by @pedrojaques99 (#494); see `docs/local-node.md`.
+- **One routine at several times a day.** A routine had one time, so "weekdays at 9, 1 and 5" took three copies of the same routine, each edited on its own. Now the times are pills in one row: **+ time** adds another (an hour after the last), **×** takes one off, and the days go for every time; repeats, days and times sit in one block whose last line says them all and how often ("Seg a sex às 9h, 13h e 17h · 15 vezes por semana"), the week shows each run, and editing or deleting changes them all. It goes with a week's days and a day of the month (up to 12 times); once and a date keep one. Agents ask for it with `horarios` in `agendar_rotina` and Tuca with `horas`, a team file carries the times, and a phone app that knows of one time keeps the others as long as it keeps the first.
+- **An official Docker image for the server.** Running Tucano on a VPS meant cloning, building with Node and installing each harness over SSH, and nothing said a container was a supported way. Now each release publishes `ghcr.io/eduwxyz/tucano` (the version and `latest`, x64 and ARM64), the image the Tucano Pro servers run: Tucano, Chromium for the agents' browsers and the harnesses, with everything a person makes in one volume. `docs/server.md` has the `docker run`, a Compose file with the Pro servers' restrictions (no privileges, a read-only system), updating, and why the container gets no Docker socket. The server is no longer called experimental there.
+
+### Fixed
+
+- **Agents on Antigravity models see attached images.** Antigravity CLI takes text only in the prompt, so Tucano left images out and told the agent to say it couldn't see them, and it did ("Não consegui ver o print que você anexou"). The CLI does pass on an image a tool returns, though: the agent is now told to open an attached image with `ver_imagem`, which the gateway already offered. Checked with gemini-4-argon-high on agy 1.5.9: it calls the tool on its own and reads the picture. With no tools (no gateway) it still says it can't see it.
+- **A "when something new shows up" routine no longer runs forever on a long list.** It remembered the last 500 ids it had seen, so a read tool that returned more than that (or a filter whose old items outlived 500 new ones) made forgotten items look new again, and each one became a full agent reply. Now every id still in the answer stays remembered, and the room left goes to the latest ones that left it.
+- **After a long sleep, a routine runs the latest time it missed.** It only looked at the first missed time, so with 9:00 and 21:30, a Mac asleep until 22:00 skipped both (9:00 was past the 12 h) and a run at 10:05 said it was due at 9:00. A "once" routine on several days that missed one by more than 12 h now waits for the next of its days instead of turning off without running.
+- **An agent that changes a routine with `substitui` can take times off.** Sending one time kept the others, because the server kept them for older clients; the tool now always sends the whole list.
+- **Tuca sees every time of a routine**, not only the first, in `ver_estado`.
+- **The week view puts each routine on its day when the clock changes** (US and Europe): a day there is 23 or 25 hours, and a 23:30 run vanished or a 0:30 one showed twice.
+- **Turning on a date routine that has passed says why** (in the off list and the card), instead of doing nothing.
+- **A late run tells the agent it is late, not that the app was closed**: quiet hours, a pause or the Mac asleep make it late too.
+- **A time cleared in the form says so and holds the save**, instead of being dropped.
+- **A routine's card opens beside it again.** Pages rise in when they open, and the animation kept its (empty) transform after ending, which made the page the box that fixed things inside it are placed in. The card was placed by the window's measures inside the page's box, so it opened off to the side, was cut by the page, and its Edit and Delete were out of reach. The animation now ends with nothing left on the page.
+
+## [0.2.35] - 2026-11-16
+
+> **Em português:**
+> - **Novo:** quem vem do **Hermes Agent** (Nous Research) traz o que construiu lá. Em **Configurações › Geral › Time › Importar do Hermes…**, o Tucano lê a pasta do Hermes neste computador, mostra o que entra antes de adicionar qualquer coisa e, com vários perfis, deixa escolher quais. Cada perfil vira um agente: o SOUL.md vira as instruções (o texto padrão que o Hermes escreve sozinho não conta), as memórias chegam esperando o seu sim, e entram as skills que você criou ou instalou (e as do Hermes que você editou) e as tarefas agendadas, como rotinas desligadas. Servidores MCP, os canais onde o Hermes conversava (Telegram, Discord…) e o modelo vêm só pelo nome. O `.env`, o `auth.json`, as conversas e os logs nunca são abertos.
+> - **Correção:** num servidor, o botão **Instalar** que um app de celular anterior ao endpoint mostrava para ele não roda mais um instalador vazio: o Tucano explica que o endpoint é só um endereço e uma chave, em Configurações › Modelos.
+
+### Added
+
+- **Bring your Hermes Agent over.** Someone who has used Hermes (Nous Research) for a long time had no way to bring what they built there. **Settings › General › Team › Import from Hermes…** reads the Hermes folder where it is, on this computer (`$HERMES_HOME`, `~/.hermes`, or one you pick), and shows what comes in before adding anything; with profiles, you choose which. Each profile becomes an agent: its `SOUL.md` as instructions, its memories, what it knew about you (as your memories), the skills you made or installed (and the ones that came with Hermes that you edited), and the scheduled jobs that fit a routine here. As with OpenBot and Grok Bot, the agents come with no connector, web search off and no computer, the routines off and every memory waiting for your yes; MCP servers, messaging gateways (Telegram, Discord…), jobs whose schedule has no match here and the model are only named in the summary. Only a list of files is opened, by name: never `.env`, `auth.json`, the sessions or the logs, and no link inside the folder is followed. The `SOUL.md` Hermes writes by itself on first run ("You are Hermes Agent…", and the templates before it) counts as no instructions, and the preview says so; one you edited comes in. A gateway is named only where Hermes would turn it on (its `config.yaml`, with `enabled`, or the platform names in `gateway_state.json`, never its error text), so one set up only in `.env` shows once its gateway has run; MCP servers turned off in Hermes get a note instead of vanishing. (#493, #502, #503)
+
+### Fixed
+
+- **A phone app can't start an empty install for the endpoint.** A phone app from before the endpoint listed it among the harnesses, with an **Install** button; on a server, that ran the installer with an empty command. Installing or signing in to the endpoint is now refused with what to do instead: it's an address and a key, in **Settings › Models**, on the computer or in the browser. (#492)
+
+## [0.2.34] - 2026-11-15
+
+> **Em português:**
+> - **Novo:** um **endpoint próprio**, sem instalar nada. Em **Configurações › Modelos**, cole o endereço de um endpoint no padrão da OpenAI (OpenRouter, OmniRoute, Ollama, LM Studio, vLLM) e a chave, busque os modelos e marque os que os agentes podem usar. O Tucano conversa direto com ele, sem Claude Code nem Codex, com todas as ferramentas dos agentes. Com **Web** ligada, eles também buscam na web e leem páginas.
+> - **Mudou:** pedir algo a um agente que passa adiante agora parece uma thread de trabalho. O pedido acontece numa thread no canal de quem faz, embaixo da sua mensagem aparece uma linha com quem está fazendo e como está (com a aprovação ali mesmo, quando houver), e você recebe uma resposta só, na thread da sua mensagem, quando tudo voltar. Responder nessa thread continua o mesmo assunto, na mesma thread de quem fez.
+> - **Correção:** "Aprovar e sempre permitir" vale sempre, mesmo depois de o agente ler algo de fora (um e-mail, uma issue). O botão de responder em thread não some numa resposta longa, a seta das listas fica dentro do campo e as abas da Memória não fogem da tela com muitos agentes.
+
+### Added
+
+- **Your own endpoint, with nothing to install.** Agents could only run on a program installed on the computer (Claude Code, Codex, OpenCode…), so a fresh PC or a bare VPS had to install and set one up first. Now **Settings › Models › Your own endpoint** takes an address in OpenAI's format and its key: OpenRouter, OmniRoute, Ollama, LM Studio, vLLM or a company's proxy, with shortcuts for the first ones. **Fetch the models** lists what it offers, you tick the ones the agents may use, and each agent picks one like any other model. There's no harness in between: the app calls `/chat/completions` itself, with the app's own tools (asking another agent, asking you, connectors, memory, the wiki, the computer), runs the ones the model asks for, and calls again until it answers. The key is kept encrypted in the app and never reaches the window. The model must handle tool calls. Billed per token, on the endpoint.
+- **Web search and page reading for agents on an endpoint.** A harness brings its own web search; an endpoint doesn't. An agent on one, with Web on, gets the app's own: **buscar_na_web** searches through Exa's public search (the one OpenCode uses by default, no key needed), and **ler_pagina** reads a page or a PDF the way the wiki reads a link, its main text only, through the guard that keeps the inside of the network out of reach.
+- **The Memory page's bot tabs stay in the bar, however many bots there are.** The strip of tabs (All, You, one per bot with notes, Forgotten) was a plain row that ran past the 720 px column as soon as a few bots had notes, so the tabs after the first few, and the search control with them, could not be reached at all. The strip now scrolls inside the bar, the tab you pick slides to the middle of it, and two borderless arrows page it a screenful at a time, each offered only while there is strip in that direction. Thanks, apoapostolov! (#397)
+
+### Changed
+
+- **A request to the team reads like a thread at work.** Asking the agent on top for something it passes on used to fill your conversation with it: a line from it right away saying whom it asked, the answer in the name of whoever did the work, a question from them, and then the agent's summary. Now each piece of work happens in a thread in the channel of whoever does it, and nothing reaches you until it's done.
+  - **While it works,** there's no new message. The agent's reply that passed it on goes into the thread of your message, and under your message a line per request says whom it asked, where, and how it stands: working, has a question, waiting for your approval, done. An approval shows right there, and you approve it from there.
+  - **When it's done,** the agent answers once, in the thread of your message, and the line offers **See the answer**. What came back from the team goes to the agent, not to your conversation, and the whole answer stays in the request's thread.
+  - **A question** from whoever is doing it goes to the agent that asked, which answers it without writing to you; if it's yours to decide, it asks you in your message's thread.
+  - **A follow-up** written in that thread goes on in the same thread where the work was done, so whoever did it sees what it already did, instead of a new thread starting from nothing.
+  - **What you write in a request's thread** goes to whoever is doing it, and the request ends with their answer to it.
+  - **Work passed on inside the same channel stays in the same thread.** When whoever does a request asks someone else in that channel, the request is a message in its thread, not a new thread loose in the channel, and the answer comes back there.
+  - **A request isn't done while its parts are out.** Whoever does it may ask others and end its turn; the request stays open until what it asked comes back and it answers again, and only that answer goes back.
+  - **What an agent writes after only handing work on** is folded behind **See what it wrote**, and it no longer tells you it's done.
+  - **A request asked in a DM stays in a DM** when other people use the workspace, unless you write the channel's name yourself: it never ends up more visible than where you asked.
+
+### Fixed
+
+- **A dropdown's arrow sits inside the field.** Every native dropdown (a member's role, the invite's role, who covers for you, the activity filters) drew the system's arrow flush against its right border, whatever the padding. It now draws the same caret as the app's other dropdowns, 10 px in from the edge, in the theme's color, light or dark. Thanks, eialanjones! (#477)
+- **"Approve and always allow" holds after the agent reads something from outside.** Allowing a tool for good already saved it for that agent, with no expiry and for any arguments. But at the **No guardrails** level, or under a "does it alone" rule, the guard against outside content was checked before that: once the agent had read an issue, an email or a connector's result, a tool you had allowed for good asked again on every call. It now runs, as it already did at the Normal level. Thanks, FernandoBolzan, for pinning it down! (#489)
+- **The way into a thread stays on screen in a long run.** In a reply with a run taller than the window, **Reply in thread** sat at the top corner of the message and scrolled away with the first steps. It now rides the top of the run as you scroll through it. Thanks, apoapostolov! (#275)
+
+## [0.2.33] - 2026-11-15
+
+> **Em português:**
+> - **Novo:** em **Configurações › Pessoas**, você escolhe o que cada membro vê: tudo, ou só os setores, agentes e canais que marcar. Quem entra por um convite já chega com essa escolha. O agente que trabalha para essa pessoa só enxerga o que ela enxerga, e a wiki dela deixa de fora o que veio de conversas que ela não vê.
+> - **Novo:** uma resposta cortada no meio (o app fechou, travou ou foi parado) que já tinha feito trabalho oferece **Continuar**: segue de onde parou, sem refazer o que já estava pronto. **Tentar de novo** continua começando do zero.
+> - **Novo:** um arquivo que o Tucano não sabe mostrar pode ser aberto no Finder (no Explorer, no Windows).
+> - **Correção:** a resposta de um pedido passado a outro agente volta mesmo quando ele para numa pergunta ou numa aprovação. Um pedido que ninguém pegou termina como falha, e quem pediu fica sabendo.
+> - **Correção:** o cartão de um agente não fecha mais sozinho enquanto o chat rola; os avisos ficam alinhados com as mensagens em janelas largas; a revisão da wiki parou de achar que uma data é uma página; comparar versões grandes de uma skill não trava mais; e tentar de novo uma resposta antiga usa a conversa como ela estava naquele momento.
+
+### Added
+
+- **Choose what each member sees.** In **Settings › People**, the owner or an admin sets each member to **sees everything** (the default, and what everyone had until now) or **only what I pick**: whole sectors, single agents and channels. A sector is kept by its head, so whoever joins it later is in. The server enforces it: a restricted member gets only those agents, their DMs and those channels, with their messages, threads, approvals, routines and artifacts, and can't open, retry or run anything outside them. An agent working for that member uses only the agents the member sees, and work it hands on runs for that member at every level. An invite can carry the same choice. Owners and admins always see everything, and Tuca is visible to all. Thanks, eialanjones! (#461)
+- **Show in Finder for a file with no preview.** An artifact the panel can't show used to say "No preview for this kind of file" and stop there. It now has **Show in Finder** (Show in Explorer on Windows, Show in folder on Linux), which reveals the file without opening it. It is only for the owner at the computer's own window. Thanks, stefanosandes! (#388)
+- **A reply the app cut offers Continue, before Try again.** A reply killed by a restart, a crash or a stop, having already read files, written, edited or run commands, offered one way back: **Try again**, which starts the whole thing over. **Continue** now comes first: it opens a new reply in the same thread carrying a proceed message with what it was asked, how it was cut, every step it took (what it read, what it wrote, what it ran, what failed) and the instruction to go on from where it stopped without redoing what is already done. **Try again** stays a full start from the beginning. A reply killed before any tool call came back has nothing to go on with and keeps **Try again** alone. Once it is continued, the killed reply stops offering either button: the session carries on in the new reply under it. What counts as work and what counts as cut is one reading in `src/shared/run-progress.ts`, which both the core and the window use, so the button the person sees is the one the core will take. Thanks, apoapostolov! (#412)
+- **For contributors: two checks that run the real app out of sight.** `node scripts/qa-background.mjs` starts Tucano with `--qa-background` on a fresh scratch workspace, fake engines and ports of its own, keeps every window hidden and unfocusable, walks the main screens and saves what it saw, so it runs beside the app you use. `node scripts/e2e-kill-restart.mjs` kills the app in the middle of a reply, opens it again and checks that the work done survived and that Continue and Try again are offered when they should be. `docs/background-qa.md` explains both. Thanks, apoapostolov! (#372, #402)
+
+### Changed
+
+- **The Skills screen is split into components.** Its page, people picker, terminal import, history, proposals, form and comparison each live in their own file under `components/skills/`, with the same behavior and copy. Thanks, apoapostolov! (#472)
+
+### Fixed
+
+- **An agent's card stays open while the chat scrolls itself.** A card opened from the name in a DM's header closed after a moment while the agent worked, because the list scrolling to each new step counted as a scroll under it. It now closes only when what scrolled holds the card's anchor. Thanks, stefanosandes! (#400)
+- **Notices line up with the messages on a wide window.** A notice such as a limit warning started at the pane's left edge while the messages sat in the centred column. It now sits in the same column, and so do the router's note and the returned-work line. Thanks, stefanosandes! (#429)
+- **Retrying an older reply uses its original conversation context.** History is bounded by the reply timestamp before applying the SQL limit, and a summary written after that reply is excluded. Thanks, apoapostolov! (#471)
+- **Large skill comparisons keep both complete versions available.** Detailed comparisons use a bounded matrix; larger changes show the complete Before and After text in scrolling panels instead of allocating an unbounded comparison. Thanks, apoapostolov! (#468)
+- **The wiki review stops reading a date as a page.** It took any two capitalised words in a row as a proper name, so a sentence that opens with a date offered "On Nov" as a page the wiki should have (26 hits across 24 pages) and "The Foundry" the same way; both had to be dismissed by hand, and the dismissal was carried forever to keep them quiet. A candidate is now dropped when its first word is a function word or when any word of it is a month, in either language, and dismissals reset after resolution only for missing pages and broken links. Other dismissed alert types remain hidden permanently. Thanks, apoapostolov! (#392)
+- **An answer to a hand-off comes back however the other agent's reply ends.** It used to come back only when that reply ended well: a reply that stopped at a question brought the question alone, one stopped at an approval brought nothing until the person decided, and a request whose turn never started stayed open for good. Now what the other agent wrote so far comes back before its question, and once when it stops at an approval. A request nobody picked up gets one more try after a few minutes and, if that also comes to nothing, ends as failed and whoever asked hears it. A request already more than an hour old when the app checks it is not run again out of the blue: it ends as failed and whoever asked hears it. A question that comes back arrives open. Thanks, apoapostolov! (#377)
+- **An answer back runs for whoever asked, within what they see.** When work handed on came back, the reply that brought it ran for whoever wrote last where it was asked, not for the person who asked: in a channel, a member who sees only part of the team (#461) could get an answer that named agents outside their access, if someone who sees more had written there since. Now it runs for the person who asked. When answers asked by several people come back together, it runs within what all of them see. (#479)
+- **A member who sees only part of the team no longer reads the wiki pages from the rest.** With a member's access limited to some sectors, agents and channels (#461), the wiki stayed whole: they read what the curator summed up from channels and DMs they don't see, and so did an agent answering them. Now a page that took anything from a conversation outside their access is out of their wiki, its search, its index, its map and its log, and out of the wiki of an agent replying to them. A part whose source is gone, or that the curator wrote before sources said where they came from, counts as outside. Owners, admins and members who see everything read the wiki as before. (#478)
+
+## [0.2.32] - 2026-11-14
+
+> **Em português:**
+> - **Novo:** uma **porta de entrada** no quadro do **Time**, se você quiser. Clique num agente que não responde a ninguém e marque **Porta de entrada**: ele fica acima dos setores, você fala com ele, e ele passa cada parte ao chefe do setor certo. Os times abaixo dele viram os setores, e o pedido dele a um setor aparece na linha como "Pedido para" o setor. Você continua podendo falar direto com qualquer chefe, e nada disso é obrigatório: dá pra ter só setores lado a lado, ou só agentes soltos.
+
+### Added
+
+- **An entry point on Team, if you want one.** With every sector's head answering only to you, nothing on the board said which agent you talk to: the box at the bottom asked whichever head was made first. Now an agent that answers to no one can be marked **Porta de entrada** (click its card on the board). It sits over the sectors and in none: its card says so, the teams below it become the sectors, each with its head, and the box at the bottom asks it. It is told which sectors there are and what each solves, and to ask a sector's head instead of someone below the head. Its request to a sector lights the line between them and reads "Pedido para" the sector. You can still talk to any head directly. Nothing asks for an entry point: a board of sectors side by side, or of agents on their own, works as before. The choice travels in a team file.
+
+## [0.2.31] - 2026-11-14
+
+> **Em português:**
+> - **Correção:** um arquivo anexado pelo clipe no **navegador** (Tucano num servidor) agora vai junto da mensagem, como no app do computador: aparece embaixo dela e os agentes leem o que está escrito. Antes só ia o texto "Arquivo enviado:" com o caminho. Um arquivo acima de 20 MB ainda sobe pro servidor, com o caminho na mensagem.
+> - **Correção:** no quadro do **Time**, as zonas de dois setores lado a lado não se sobrepõem mais. Num quadro arrumado à mão, clique em **Organizar** uma vez.
+
+### Fixed
+
+- **A file attached in the browser goes with the message, and the agents read it.** On a Tucano on a server, a file that wasn't an image (a PDF, a spreadsheet) went up to `~/Enviados` and the message only said "Arquivo enviado:" and its path: nothing showed as an attachment, and an agent with no computer couldn't read it. It now goes with the message, as in the desktop app: it shows under the message and what it says reaches the agents as text. Only a file over 20 MB, or one that no longer fits beside those already attached (40 MB a message from a browser), still goes up to the server with its path in the message.
+
+- **Sector zones stay apart on a tidy Team board.** Two sectors side by side were laid out so close that their zones overlapped, tints and borders running into each other, and the person's card sat on top of the zones. A tidy board now leaves room between sectors and above them. A board placed by hand keeps its places: **Organizar** lays it out again.
+
+## [0.2.30] - 2026-11-14
+
+> **Em português:**
+> - **Novo:** cada time do quadro **Time** agora é um **setor**, com um chefe no topo. Dê um nome ao setor e diga o que ele resolve (clique no nome dele no quadro). Quando o assunto é de outra área, o agente passa ao chefe do setor, o chefe pede ao chefe do outro setor, e esse decide quem faz: a resposta volta pelo mesmo caminho, e o pedido aparece no quadro como uma linha tracejada entre os dois chefes. Um agente também pode passar ao próprio chefe o que não consegue fazer. O guia tem a página "Setores".
+> - **Mudou:** uma linha do Time não tem mais limite de três agentes: pode ter quantos níveis você quiser.
+> - **Novo:** com duas contas ligadas no mesmo app do **Composio**, o agente diz por qual conta cada ação roda, e "Aprovar e sempre permitir" vale por conta.
+> - **Correção:** um limite mensal digitado como um número enorme não impede mais o workspace de abrir. Um agente sem limite mensal ganha um teto de verdade por resposta. O app avisa que há versão nova mesmo mostrando um Tucano num servidor. O quadro do Time parado não gasta mais processador animando os avatares.
+
+### Added
+
+- **Sectors on Team: heads ask other heads.** Each tree on the board is now a sector, headed by the agent at its top. A team with two areas couldn't pass a technical problem from finance to the technical people: the branches didn't reach each other, and an `@mention` isn't tracked and doesn't bring the answer back. Now an agent passes what isn't its sector's job to its sector's head, that head asks the other sector's head, and that one decides who in its sector does it. The answer comes back the same way. Only heads ask another sector, and only its head; an agent reaches its own sector's head directly from any depth, so crossing sectors is always three requests. An agent may also pass to its own boss what it can't do. A click on a sector's name on the board opens a panel where an admin names it and writes what it solves, which is what the other heads read to know when to send something there. The board tints each sector behind its branch, marks the head, draws a request between sectors as a dashed line between the two heads, and counts both in the header. The chip in a conversation reads "Passou ao chefe" or "Pediu para" the sector. A sector's name and what it solves travel in a team file. The guide has a "Setores" page.
+
+- **A Composio item can name its account, and "always allow" goes per account.** With two accounts connected on one Composio app, each action has to say which account it runs as. Tucano didn't know that field, so every such call asked for approval, reads included, with no "Approve and always allow". An item with an account is now classed like the same item without one: a read runs, a send asks. Allowing a send from one account doesn't allow it from another, the card shows the account on each action, and rules saved before keep working.
+
+### Changed
+
+- **A line on Team can be as long as you draw it.** A line held at most three agents from top to bottom. That limit is gone: an agent may answer to any other that isn't below it. A piece of work still stacks at most three requests in a row.
+
+### Fixed
+
+- **Composio's remote code tools never get "always allow".** `COMPOSIO_REMOTE_BASH_TOOL` and `COMPOSIO_REMOTE_WORKBENCH` called on their own showed the button, and a saved rule let them run without asking. They now always ask, as they already did inside a batch, and an old rule is ignored.
+
+- **An idle Team board no longer animates every avatar.** The drawn avatars on the cards were one pixel past the size that stays still, so every card animated forever: about 550 style writes a second on an idle board, enough to slow an iPad down. A card's avatar now moves only while its agent works or has just finished.
+
+- **A monthly limit typed as a huge number no longer stops the workspace from opening.** An agent's limit was written as given, with no top. A number too large to read back (someone typing a very large one to mean "no limit") made every read of the agents fail: the app showed "Tucano stopped working" and reopening did nothing, until the row was fixed by hand in the database. A limit that large is now kept as what was meant, 0 (no limit), wherever it is written: the agent's page, Settings, the Tuca's proposal and an import. A workspace that already has one is put right when it opens.
+
+- **An agent with no monthly limit gets a real ceiling per reply, and the pause says where it is set.** The ceiling per reply is a share of the monthly limit (10% by default). With no monthly limit there is no month to take it from, and the base used in its place gave 100 thousand tokens a reply: less than an agent with the default limit gets, so setting "no limit" made replies pause sooner. The base is now 10 million tokens (a million a reply at 10%). The note on a paused reply also says that this ceiling is set in **Settings › Agents › Limits** and isn't the agent's monthly limit.
+
+- **The desktop app says a new version is ready with a server on screen too.** With the app showing a Tucano on a server, what's on screen is the server's page, and its Settings showed the server's update state: always off, with the button to look for one disabled. The app still downloaded new versions behind it, but the note that one was ready lived only in the local screen, hidden under the server's, so a person who leaves the app on a server never saw it; the version went in only when they quit the app. The server's page now shows the app's own updates when it is in the desktop app: the version it is on, the look for a new one, the download and the note with **Restart**. Restarting from there is always confirmed in a dialog of the app's own, so a server can't restart the app by itself. Both sides need this version: the app, and the server it shows.
+
+## [0.2.29] - 2026-11-13
+
+> **Em português:**
+> - **Novo:** o **Supabase** entra na loja de conectores. Na aba de skills de um agente, dá pra **buscar**, filtrar por grupo e marcar ou desmarcar todas as mostradas de uma vez. Em Configurações, **Mostrar os passos enquanto o agente trabalha** pode ser desligado, só pra você. O Tucano no navegador mostra a versão do servidor em Configurações.
+> - **Correção:** um agente no **Codex** não falha mais uma resposta sim, outra não, com "o Codex não tem mais essa conversa". Um conector como o da **Vercel** para de pedir autorização de novo todo dia (autorize mais uma vez pra valer). Um agente que perdeu o acesso à wiki, ou uma página que virou privada, deixa de ser lido na hora, mesmo no meio de uma resposta longa. O mapa da wiki aparece ao abrir e se ajusta quando a janela muda de tamanho. O aviso (toast) fica legível no tema escuro. Num workspace em inglês, o Tuca não aprende mais palavras em português pros links de telas e pro guia.
+
+### Added
+
+- **Supabase in the connector store.** Your Supabase projects from [Supabase](https://supabase.com/docs/guides/getting-started/mcp)'s official server, in Development next to Neon: tables, SQL, migrations, logs and Edge Functions. One click opens Supabase's sign-in in the browser, where you choose the organization the agents may reach. Its tools that write (running SQL, applying a migration, deploying a function) come in under the same classes and approvals as any connector's.
+
+- **Find, group and bulk-tick skills in an agent's tab.** The skills tab of an agent was one flat list of every active skill in the library, with no search. It now has a search box (name, description and group), group chips with counts (a skill's group is the folder it lives in), "Only this agent's", and **Tick / Untick the shown ones**, which applies to what the filter shows. The line above the list says how many tokens the agent's skills add to each message.
+
+- **Keep a reply's steps closed while the agent works.** A reply opens the list of its steps while the agent works, which fills the screen when several agents answer at once. **Settings › General › Show the steps while the agent works** turns that off: the line with what the agent is doing now stays, and a click on it opens the steps. It changes only for you.
+
+- **The server's version in a browser's Settings.** Tucano on a server showed no version in Settings when opened in a browser. It now shows the version of the build the server runs.
+
+### Fixed
+
+- **A connector whose sign-in server offers to stay signed in is asked for it, so it stops asking to authorize again every day.** Vercel's MCP server lists only its own scope (`openid`), while its authorization server also offers `offline_access`, the one that comes with a refresh token. The sign-in asked for the first list alone, got no refresh token, and lasted as long as the access token: the connector showed "needs authorization" again the next day. The app now reads what the authorization server offers and asks for `offline_access` when it is there, in the registration and in the authorization page. A connector signed in before this has to be authorized once more to get a sign-in that renews itself.
+
+- **A Codex agent no longer fails every other reply with "Codex no longer has this conversation".** Codex keeps a conversation between replies only while its app-server can take every turn; when it can't (the app-server didn't start once, or the Codex home the app uses got a config of its own), replies go through `codex exec`, which keeps nothing. Whether the engine keeps sessions was read once, when the app opened, and stayed true: the app went on asking Codex to resume conversations it had answered through exec, and the reply failed at once, in about 50 ms, each time a conversation was picked up again. It is now asked before every reply.
+
+- **A long reply no longer keeps wiki access that changed after it started.** A reply read the wiki with the access it had when its prompt was built: an agent whose wiki access was removed, or a page that became one person's while the reply was still working, could still be read until the reply ended. Each wiki call now checks the agent's access and the held pages again.
+
+- **The wiki map is there in its first frame, and fits again when the window changes size.** The map was laid out at no size and resized a frame later, which on some machines left an empty map on screen until something else redrew it; and a window that took its real size after the screen mounted (a restart restoring its bounds) left the whole map small in a corner. The first frame is now drawn with the camera the fit would give, the map fits again while you haven't moved it yourself, and a big map arrives in one fade instead of one animation per page.
+
+- **The toast reads in the dark theme.** The toast used the primary color, which inverts with the theme and left a white pill in the dark app. It is now the app's orange as text on a surface that lifts off the page, in both themes.
+
+- **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
+
+- **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
+
+## [0.2.28] - 2026-11-12
+
+> **Em português:**
+> - **Novo:** a tela **Time**, com o organograma dos seus agentes. Um agente pode **responder a** outro: você fala com um só, ele divide o pedido entre quem está abaixo dele e fecha o assunto com você. Cada pedido vira uma thread no canal de quem faz (ou na DM dele, quando o assunto não é de canal nenhum); onde você pediu aparece um aviso de que ele respondeu, com a resposta a um clique. Quem responde ao mesmo agente também pode pedir um ao outro. A tela é um quadro: puxe uma linha de um cartão a outro pra ligar, arraste pra arrumar, e veja a linha acender enquanto um pedido anda. Uma linha tem no máximo três agentes, e toda mudança tem **Desfazer**. O guia tem a página "Time".
+> - **Novo:** o **Hermes** entra como motor, ao lado de Claude Code, Codex e os outros.
+> - **Novo:** os limites da sua assinatura do Codex aparecem em **Uso e limites**; uma rotina ganha o botão **Duplicar**; o **Keenable** (busca na web) entra na loja de conectores.
+> - **Correção:** um agente responde uma mensagem por vez numa conversa ou thread, venha ela de onde vier. Instruções longas de um agente não são mais cortadas. Limite mensal 0 aparece como "sem limite" em todas as telas. O mapa da wiki não desmonta quando a wiki cresce. Um agente que só lê pelo Composio consegue ligar uma conta. O Tucano no navegador reabre onde você estava, e no celular o teclado não sobe sozinho ao abrir uma conversa. No Linux, o agente lê e usa o Chrome dado em Apps.
+> - **Mudou:** num canal que responde em threads, a mensagem que você manda já abre a thread dela. Na página Memória, as suas memórias se chamam "Você".
+
+### Added
+
+- **An org chart: agents that answer to other agents.** Agents only talked to each other inside a channel they shared, so a person with several agents had to carry each piece of a job to the right one and bring the answers together. Now an agent can **answer to** another. The one above hands work to anyone below it: each request becomes a thread in the channel of whoever does it, in the asker's name, and when that thread ends the conversation where it was asked gets a line saying who answered, with the whole answer one click away; the asker then replies once, when everything has come back, saying what came of it. Agents that answer to the same agent can ask each other too; nobody asks upward, across branches, or back to whoever is waiting on the same work. A request goes to the channel whose topic covers the subject, or to the agent's DM with you when it belongs to no channel (or the agent is in none). Questions from whoever does the work go to the asker, not to you; approvals stay each agent's own, and a request held on one of yours does not hold the others back. Requests can be cancelled, have deadlines, and report failures to whoever asked. Limits: a line holds three agents, a reply makes five requests, an agent keeps twelve open, and one piece of work stacks three.
+- **The Time screen** (Team, in English), in the sidebar with two or more agents: a board that pans and zooms, one card per agent. Pull a line from one card to another to say who answers to whom, click a line to remove it, drag cards where you want them (**Organizar** tidies them again), and ask an agent from the box at the bottom. Open requests are listed under **Agora** and light the line they travel. Every change shows **Desfazer** (⌘Z). The same setting is on each agent's page, under **Responde a**, and travels in a team file.
+
+- **Hermes as a harness.** [Hermes](https://hermes-agent.nousresearch.com) (0.22.0 or later) joins Claude Code, Codex and the others: install it, run `hermes setup`, and pick one of its models for an agent.
+
+- **Your Codex subscription's limits on Usage and limits.** The page showed the Claude subscription's 5-hour and weekly windows, and said Codex doesn't report its own. Codex's app-server does (`account/rateLimits/read`): when Codex is signed in with a ChatGPT plan, the page now asks it, at most once a minute, while it's open and after each reply, and shows each window the plan has (Plus has only the week) with how much is used and when it resets, plus the plan's name.
+
+- **Duplicate a routine.** A routine's card has a copy button next to Edit: it opens the form with the same agent, place, schedule and instructions, named "(copy)", to change what differs and save as a new routine of your own. The copy starts off, so it doesn't run next to the original until you turn it on, and a webhook routine's copy gets its own address. Thanks, jonatas-caram-ifood! (#362)
+
+- **Keenable in the connector store.** Web search and pages read as Markdown, from [Keenable](https://docs.keenable.ai/mcp-server)'s official server, in Research next to Exa. It needs no account or key, so one click connects it; the searches and the pages an agent asks for go to Keenable. Thanks, ilya-bogin-keenable! (#291)
+
+### Fixed
+
+- **An agent's page opens in the first seconds after the app starts.** The list of harnesses the app starts from, before its first check ends, was written out by hand and left Hermes out: a screen that read each harness's status found none for it, and the agent's page (or the harness list) came up blank until the check finished. The list is now every harness the app knows, also over a check kept by an older version.
+
+- **The wiki map holds together as the wiki grows.** The map settles its pages by a little physics: pages push each other away, links pull. The pull of a link grows with how far its pages are, with no ceiling, and two pages that come too close keep swinging through each other — so past a hundred pages or so the forces fed on themselves, positions ran past any number and turned into NaN, and the SVG drew every page on the same spot: the map came up empty with one page stuck in the corner, no matter how many pages and links it said it had. A step of the physics now caps how fast a page may move, and a wiki of any size settles spread out. (A wiki of 358 pages was the one that showed it; the same change tested from 10 to 358 pages.) Thanks, brunolellis! (#357)
+
+- **A monthly limit of 0 reads as no limit on every screen.** The runner already treated 0 as no ceiling, but the screens didn't: every agent without a limit had a red *Hit the monthly limit* dot in the sidebar, a reply stopped at the limit offered to raise a limit that doesn't exist instead of *Try again*, the agent page said "of 0 tokens", and the Tuca's change card and workspace summary printed 0 and 0%. They now say there is no monthly limit, and the dots and *Raise the limit* only come for an agent with a real one. Thanks, apoapostolov! (#351)
+
+- **Long agent instructions are kept whole.** An agent's instructions were cut without a word when the Tuca proposed a new agent (at 4,000 characters), proposed a change to one (at 8,000, so proposing any change could shorten a long prompt that was already there), or when a team was imported (at 32,000). They now come through whole, and a prompt over 32,000 characters gets a warning instead. Thanks, GianCdM! (#364)
+
+- **An agent answers one message at a time in a conversation or thread, whatever started it.** Only routed messages and hand-offs waited for the agent's reply in progress in the same place; an @mention, a DM, a routine, a retry or an approval's outcome started a second reply next to it, so the same agent could answer twice at once and the two replies stepped on each other. Every reply now waits its turn in that place. Thanks, eialanjones! (#358)
+
+- **An agent that only reads through Composio can link an account.** The first time an agent needs an app on Composio (Google Calendar, Gmail…), it calls `COMPOSIO_MANAGE_CONNECTIONS` for the sign-in link. That tool is sensitive, so an agent with read access never saw it: it found the app's actions, then failed because no account was linked, though reading was all it wanted. A read grant now sees that tool too, and every call to it asks for approval, at every level and whatever the rules; read-and-write is unchanged.
+
+- **Tucano in a browser opens where you left it.** On a phone, putting the tab away and coming back reloads the page, and it always opened on the first channel. Now the screen you're on rides in the page's address (`#/c/<conversation>`, `#/settings`, `#/wiki/page/<title>`…), so a reload, a bookmark or a pasted link opens that screen; a conversation or agent that's gone falls back to the first channel. The desktop app is unchanged.
+
+- **On Linux, an agent given Chrome in Apps can read and use it.** Chrome only joins the accessibility bus when started with `ACCESSIBILITY_ENABLED=1` (GNOME keeps `org.a11y.Status IsEnabled` off without a screen reader), so its window was invisible; Chromium apps are now started with it. A launcher script under another name (Arch's `google-chrome-stable` starts `chrome`) is followed to the program it runs, so the app is found and an open one is brought forward instead of opened again. The agents' own headless Chrome, which sits on the bus under the same name, is left out, so reads, keys and focus go to the person's window.
+
+- **Big web pages in Apps read whole on Linux.** A snapshot gets 15 seconds instead of agent-desktop's 3, so a page with a thousand elements is read before its elements are judged unique; a list longer than one screen has pages (`pagina`) with the same numbers; an area is numbered after the list it came from, which stays good; and an area that repeats in the window (a table row) is read from the last whole read instead of failing.
+
+- **Keys on Wayland say what to do.** No program can bring a window forward there: a key now goes only when the app's window is in front, and otherwise the agent is told to ask the person to click it.
+
+- **The keyboard stays down when you open a conversation on a phone.** Opening a conversation or a thread, attaching a file or dictating put the focus in the message field, and on a touch screen that raised the keyboard over the messages you came to read. On a phone or tablet the field now takes the focus only when you tap it. On a computer it still does, as before.
+
+### Changed
+
+- **A message in a channel that answers in threads opens its thread.** There, each message you write in the channel starts a thread of its own, where the answers go, and you had to find its link under the message to follow them. Now the thread opens on the side as soon as your message is sent (full screen on a phone). A reply written in a thread, a channel that answers in the conversation, or a message from another of your devices leaves the panel as it was. Thanks, b7s! (#347)
+
+- **Your own memories are named "You" on the Memory page.** The tab read "About you" ("Sobre você"), which wrapped to two lines once a few agents had notes of their own and the tab strip got crowded. It now reads "You" ("Você"), and so does the heading inside it. Only the name changed: the memories and where they're kept are the same. Thanks, apoapostolov! (#296)
+
+## [0.2.27] - 2026-11-10
+
+> **Em português:**
+> - **Novo:** a barra lateral e o painel da direita têm largura ajustável. Arraste a borda entre a barra lateral e a página, ou a borda esquerda do painel (thread, imagem, documento, página, navegador do agente), pra alargar ou estreitar; dois cliques na borda voltam ao padrão. A largura fica guardada no computador.
+> - **Correção:** o navegador de um agente tem 90 segundos pra abrir na primeira vez, não 30: numa máquina lenta ou ocupada ele abria, mas o Tucano já tinha desistido.
+
+### Added
+
+- **Drag the sidebar and the right-hand panel to the width you want.** The sidebar was 248 px wide and a panel on the right took a fixed share of the window, so long channel and agent names were cut and a document or an agent's browser couldn't be given more room. The edge between the sidebar and the page, and the left edge of a panel (a thread, an image, a document, a page, an agent's browser), can now be dragged; a double click goes back to the default, and with the edge focused the arrow keys change it and Home resets it. The sidebar goes from 200 to 480 px and never past half the window; a panel keeps at least 360 px and leaves at least 320 px for the conversation. Each width is remembered on that computer (one for the sidebar, one for every kind of panel). A drag goes on while a reply streams into the thread and over a page inside a panel. On a phone nothing changes: the sidebar is a drawer and a panel takes the screen.
+
+### Fixed
+
+- **An agent's Chrome gets 90 seconds to open the first time.** A cold Chrome with a new profile took more than 30 seconds on a slow or busy machine (a small server, CI), and the app called it failed while it was still starting; the next open on the same machine took a few seconds. Thanks, apoapostolov! (#316)
+
+## [0.2.26] - 2026-11-10
+
+> **Em português:**
+> - **Novo:** o Tucano do computador vai inteiro pra um servidor. **Configurações › Geral › Exportar tudo** gera um .zip com agentes, conversas, memórias, wiki e arquivos; no Tucano do servidor (como o Tucano Pro), **Restaurar um backup**, já na primeira tela, põe tudo no lugar, e você continua conectado.
+> - **Correção:** responder no canal a uma pergunta que um agente deixou no fim da mensagem dele ("posso disparar agora?") chama esse agente, não outro. Quem escolhe quem responde agora vê como terminam as mensagens longas e as outras threads, e o agente que responde numa thread que você abriu escrevendo no canal lê as últimas mensagens do canal antes dela, o que estava na sua tela. Obrigado, braxT!
+> - **Correção:** os modelos grátis do OpenCode (os `opencode/…-free`) funcionam no Tucano. O OpenCode recusava esses modelos e a resposta ficava "Pensando" pra sempre. Agora eles respondem, e aparecem marcados como **grátis** na lista de modelos. O agente no OpenCode ganha a ferramenta de leitura do próprio OpenCode, só dentro da pasta de trabalho dele: os seus arquivos continuam fora do alcance. Se o OpenCode recusar mesmo assim (o limite do uso grátis), ou se outro erro do modelo só aparecer no log, a resposta para com o motivo e o que fazer, em vez de ficar pensando.
+
+### Added
+
+- **Take a computer's Tucano to a server, whole.** Starting on the desktop and moving to a Tucano on a server (Tucano Pro, or your own) meant starting over: Export team carries agents, skills, channels and routines, but no conversations, memories or wiki. Now **Settings › General › Export everything** writes one .zip to Downloads with the database, the wiki's folder and index, and the agents' files (as many as fit in one upload, about 950 MB; what's left out is said). On the server, the owner sends it from **Settings › General › Full backup**, or from the first screen of a new server (**I already use Tucano on my computer**); a daily backup's `.db` works too, with the database alone. The server checks the file (a backup, readable, not from a newer Tucano than itself), shows what's in it, and after a confirmation restarts with it: what was there is kept in `restore/before-…`, and the person stays signed in. What only worked on the other computer goes (its sealed secrets, its devices and invites, its extra logins, agents' use of that computer's desktop, apps and folders), the server's own logins, secrets, harnesses and Telegram stay, and routines come in off, so they don't run twice; the card then says what's left to do.
+
+### Fixed
+
+- **An answer written in the channel goes to the agent that asked.** In a channel that answers in threads, a person's message in the channel opens a thread of its own. The router read the other threads and messages only by their first 200 characters, so a question at the end of an agent's long reply (a routine's report ending "can I run it now?") never reached it, and "go ahead" was routed by role to someone else; the agent that answered read only the new thread, so it couldn't find what to run either. Now the router reads a long message as its opening and its end, sees how an agent last ended each other thread, and has a rule: a short answer to an agent's question goes to that agent. And a reply in a thread a person opened by writing in the conversation also reads the last 3 messages outside threads before it (from the 12 hours before), what that person had on screen.
+- **OpenCode's free models work.** OpenCode's free tier (`opencode/…-free`) refuses a call that doesn't offer OpenCode's built-in `read` tool ("Free usage limit reached. Free models work in OpenCode"), and the app turned every built-in tool off; `opencode run` only logs that error and waits without exiting, so the reply showed "Thinking" with no end. OpenCode 1.x turns now keep `read`, allowed only inside the agent's work folder (`external_directory: deny`; the folder comes from `PWD`, which OpenCode reads instead of the process's cwd, so the app now sets it to the turn's folder), and the person's files stay out of reach as before. Tested against OpenCode 1.19.5 with five free models, a read inside the folder, reads outside it and in the home folder (refused, the agent says so), and an attached image. The free models show as **free** in the model list.
+- **A model call that fails in OpenCode stops the reply.** The app runs `opencode run` with `--print-logs --log-level ERROR` and reads its stderr: a free model refused (past the free usage limit) stops the turn at once with the reason and what to do (a paid model, OpenCode Go or Zen, or a provider with your key); any other failed model call stops it after 30 seconds without output (a retry that works goes on).
+
+## [0.2.25] - 2026-11-10
+
+> **Em português:**
+> - **Correção:** na wiki, trocar **Mudar uma página que já existe** pra **Automático** agora aprova também o que já estava em **Esperando você**, e a lista ganhou **Aprovar todas**.
+> - **Correção:** o botão **Segure pra aprovar** das ações de alto risco não perde mais o clique com o mouse antes de encher.
+> - **Correção:** uma resposta não fica mais presa em "esperando você" depois que a aprovação foi decidida; as que já estavam presas se fecham ao abrir o app.
+> - **Correção:** um limite mensal de 0 tokens num agente quer dizer sem limite, não limite já gasto.
+> - **Correção:** o Codex instalado pelo asdf consegue entrar e rodar no Tucano.
+> - **Correção:** no Linux, senhas ficam no chaveiro também no Hyprland, niri, sway e outros desktops que o Electron não conhece.
+> - **Correção:** o português do guia do app não vaza mais no que os agentes escrevem num workspace em inglês.
+> - **Melhoria:** o modo servidor tem ícone na aba do navegador, e o aviso de soltar arquivo diz "conteúdo", não só imagem.
+
+### Fixed
+
+- **Passwords can be saved on Hyprland, niri, sway and other desktops Electron doesn't know.** Electron only tries the keyring on the desktops it knows; elsewhere it fell back to a fixed key even with a keyring open, so Tucano said "This Linux has no keyring open". The workaround, `--password-store=gnome-libsecret` in the menu entry, was lost whenever an update restarted the app. Tucano now asks for the Secret Service itself on every Linux desktop except KDE, which stays on KWallet. A `--password-store` of your own still wins. (#218, thanks @SchonsWeb)
+- **The wiki's waiting list empties.** Switching **Changing a page that exists** to **Automatic** only applied to the curator's next changes: what was already in **Waiting for you** stayed there, one card at a time to approve. Now switching to Automatic puts in what was waiting too, and the list has **Approve all** when there's more than one. Oldest first; a change that ran into a newer page (often the one approved just before it) is made again on that page and goes in; one whose passage is gone stays, to redo by hand. The weekly review's fixes stay in Care.
+- **The high-risk hold button keeps the press.** Swapping its label to "Hold…" shrank the button under the cursor, so the browser ended the hold 15 ms in and the approval never went. It keeps one label, takes pointer capture and approves on its own 1.5 s timer instead of a transitionend. (#232, thanks @apoapostolov)
+- **A reply no longer stays stuck waiting for an approval that was decided.** The reply is closed at the decision, before the approved call runs, and replies an earlier quit left behind are closed at start. (#246, thanks @apoapostolov)
+- **An agent's monthly limit of 0 means no ceiling,** not already spent; a reply still has its own cap. (#243, thanks @apoapostolov)
+- **Codex installed through asdf signs in and runs** with Tucano's own home: the shim's data folder and tool version go with it. (#265, thanks @andrelramos)
+- **The guide's Portuguese doesn't leak into what agents write** in an English workspace, and the wiki's prompts date things in the workspace's language. (#251, thanks @apoapostolov)
+- **Smaller things:** a favicon for server mode in the browser (#233, thanks @b7s), the drop overlay says content instead of image (#254, thanks @GianCdM), and the site's labels and phone layout (#213, thanks @pedrosatin).
+
+## [0.2.24] - 2026-11-09
+
+> **Em português:**
+> - **Correção:** dá pra anexar qualquer arquivo numa mensagem no app (antes só imagem: um PDF era recusado). Pelo clipe, arrastando ou colando, até 5 por mensagem. O que um PDF, um Word, uma planilha ou um texto diz vai pro agente junto com a mensagem, em qualquer motor e mesmo sem computador; depois ele relê quando precisar.
 > - **Correção:** um conector que não conecta numa rede de empresa diz por quê, em vez de "Sem conexão com a internet" pra tudo: o certificado não foi aceito (um proxy ou antivírus que inspeciona HTTPS), o proxy recusou ou pede login, o DNS não achou o endereço, a conexão foi recusada ou caiu no meio. **Ver detalhes** mostra o que o sistema respondeu. E o Tucano agora confia nos certificados do sistema (Chaves no Mac, o repositório do Windows) e usa o proxy das configurações de rede do sistema ou de `HTTPS_PROXY`, então o certificado raiz que a empresa ou o antivírus instalou passa a valer pros conectores.
 
 ### Fixed
 
+- **Any file attached to a message, and its text to the agents.** In the app the composer took only images: a PDF was refused as "not an image". Now the paperclip, a drop or a paste takes any file (up to 5 per message, 20 MB each), kept with the message like an attached image. What a PDF, Word doc, spreadsheet, CSV or plain text file says goes to the agent as text with that message, in every engine and with or without a computer (the wiki's reader). As with images, only in the reply to that message: later turns name it, and the new `ler_anexo` tool reads it again or goes on where a long text was cut. A file that can't be read (a scanned PDF) reaches the agent with the reason, so it can say so.
 - **Connectors on company networks: the real reason, and the system's certificates and proxy.** A connector that couldn't connect said "No internet connection, or the service didn't answer" whatever the cause, because Node throws `fetch failed` for every network failure and keeps the reason in `cause`. Now Tucano reads the causes (an `AggregateError` of each address included) and says which it was: a certificate that wasn't accepted (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`, `SELF_SIGNED_CERT_IN_CHAIN`: a proxy or antivirus that inspects HTTPS, with what to do), an expired one (check the clock), a proxy that refused or wants a login (407), a name the DNS didn't find, a refused or cut connection (a firewall), real offline, or a timeout; the connector's page shows what the system said under **See details**, and an agent's failed call carries it too. And the core now trusts the system's root certificates (the macOS Keychain, the Windows certificate store, `/etc/ssl`) as well as Node's bundled ones, so a company's or an antivirus's root that the system trusts works for connectors; certificates are still always checked (`TUCANO_SYSTEM_CA=0` turns it off). Its requests also go through the proxy in `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`, or else the one in the system's network settings (or PAC), which the app resolves at launch; `localhost` never goes through it, and the wiki's link reader still goes straight to the address it checked.
 
 ## [0.2.23] - 2026-11-09
@@ -547,6 +970,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - Receipts and a monthly token limit per agent, reviewed memory, skills, routines on a calendar, and a computer and browser of its own for each agent.
 - The app in Portuguese and English.
 
+[0.2.29]: https://github.com/eduwxyz/tucano/compare/v0.2.28...v0.2.29
+[0.2.28]: https://github.com/eduwxyz/tucano/compare/v0.2.27...v0.2.28
+[0.2.27]: https://github.com/eduwxyz/tucano/compare/v0.2.26...v0.2.27
+[0.2.26]: https://github.com/eduwxyz/tucano/compare/v0.2.25...v0.2.26
+[0.2.25]: https://github.com/eduwxyz/tucano/compare/v0.2.24...v0.2.25
+[0.2.24]: https://github.com/eduwxyz/tucano/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/eduwxyz/tucano/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/eduwxyz/tucano/compare/v0.2.21...v0.2.22
 [0.2.21]: https://github.com/eduwxyz/tucano/compare/v0.2.20...v0.2.21

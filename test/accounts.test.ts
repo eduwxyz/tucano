@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Account, Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { ACCOUNT_ENGINES, accountsOn, type Account, type Agent, type EngineId, type Message, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { accountDir, accountLogin } from '../src/core/engines/detect'
 import { claudeEngine } from '../src/core/engines/claude'
@@ -25,7 +25,7 @@ const work: Account = { id: 'w1', engine: 'claude', name: 'Trabalho', loggedIn: 
 
 function runner(): Runner {
   claude = counted(fakeEngine('claude', { delayMs: 1 }))
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), dataDir: data })
 }
 const reply = (): Message => db.messages().find((m) => m.author.kind === 'agent')!
@@ -33,7 +33,7 @@ const reply = (): Message => db.messages().find((m) => m.author.kind === 'agent'
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'ad-data-'))
   db = new Db(join(data, 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', accounts: [work] }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', accounts: [work] }
   db.saveAgent(agent({ accountId: 'w1' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
 })
@@ -84,6 +84,17 @@ describe('accounts', () => {
     expect(accountLogin('claude', { code: 0, stdout: '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max", "email": "a@b.co"}', stderr: '' })).toEqual({ loggedIn: true, detail: 'Plano Claude Max · a@b.co' })
     expect(accountLogin('codex', { code: 0, stdout: 'Logged in using ChatGPT', stderr: '' })).toEqual({ loggedIn: true, detail: 'Plano ChatGPT' })
     expect(accountLogin('codex', { code: 1, stdout: 'Not logged in', stderr: '' })).toEqual({ loggedIn: false })
+    // Antigravity: `agy models` in that home lists what its login can run, or asks to sign in.
+    expect(accountLogin('antigravity', { code: 0, stdout: 'Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n', stderr: '' })).toEqual({ loggedIn: true, detail: 'Google · 2 modelos' })
+    expect(accountLogin('antigravity', { code: 1, stdout: 'Fetching available models...\nError: Please sign in to view available models.', stderr: '' })).toEqual({ loggedIn: false })
+  })
+
+  it('has Antigravity accounts only on a Mac, where its login can live in a file of the account’s home', () => {
+    expect(ACCOUNT_ENGINES).toContain('antigravity')
+    expect(accountsOn('antigravity', 'mac')).toBe(true)
+    expect(accountsOn('antigravity', 'linux')).toBe(false)
+    expect(accountsOn('antigravity', 'windows')).toBe(false)
+    expect(accountsOn('codex', 'windows')).toBe(true)
   })
 
   // The stand-in CLI is a shell script, which Windows can't run.

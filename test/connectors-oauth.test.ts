@@ -26,6 +26,9 @@ let rotate: boolean
 let tokenDelayMs: number
 let tokenDown: number // the next refreshes answer 503
 let calls: number
+let offline: boolean // the authorization server offers offline_access, the MCP server lists only "openid" (Vercel's)
+let registered: { scope?: string }[]
+let loopbackOnly: boolean // the authorization page takes only a loopback address back (Canva's): it says "Invalid redirect URI."
 
 const body = async (req: import('node:http').IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -43,6 +46,9 @@ beforeEach(async () => {
   tokenDelayMs = 0
   tokenDown = 0
   calls = 0
+  offline = false
+  registered = []
+  loopbackOnly = false
   let current = '' // only the newest access token works, as if the older one had expired
   expireAccessToken = () => {
     current = ''
@@ -56,7 +62,7 @@ beforeEach(async () => {
         void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
       const url = new URL(req.url ?? '/', base)
       if (req.method === 'GET' && url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
-        return json(200, { resource: `${base}/mcp`, authorization_servers: [base] })
+        return json(200, { resource: `${base}/mcp`, authorization_servers: [base], ...(offline ? { scopes_supported: ['openid'] } : {}) })
       }
       if (req.method === 'GET' && url.pathname.startsWith('/.well-known/oauth-authorization-server')) {
         return json(200, {
@@ -67,12 +73,20 @@ beforeEach(async () => {
           response_types_supported: ['code'],
           grant_types_supported: ['authorization_code', 'refresh_token'],
           code_challenge_methods_supported: ['S256'],
-          token_endpoint_auth_methods_supported: ['none']
+          token_endpoint_auth_methods_supported: ['none'],
+          ...(offline ? { scopes_supported: ['openid', 'email', 'offline_access', 'profile'] } : {})
         })
       }
       if (req.method === 'POST' && url.pathname === '/register') {
         registrations += 1
-        return json(201, { ...JSON.parse(await body(req)), client_id: `client-${registrations}` })
+        const asked = JSON.parse(await body(req)) as { scope?: string }
+        registered.push(asked)
+        return json(201, { ...asked, client_id: `client-${registrations}` })
+      }
+      if (req.method === 'GET' && url.pathname === '/authorize') {
+        const back = url.searchParams.get('redirect_uri') ?? ''
+        if (loopbackOnly && !back.startsWith('http://127.0.0.1:')) return void res.writeHead(400, { 'content-type': 'text/plain' }).end('Invalid redirect URI.')
+        return void res.writeHead(302, { location: `${base}/login` }).end()
       }
       if (req.method === 'POST' && url.pathname === '/token') {
         const form = new URLSearchParams(await body(req))
@@ -205,6 +219,31 @@ const signedIn = async (): Promise<string> => {
 }
 
 describe('renewing the sign-in', () => {
+  it('asks to stay signed in when the authorization server offers it, though the server lists only its own scopes', async () => {
+    offline = true
+    const m = launch(51001)
+    const id = await m.add({ name: 'Vercel', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await m.connect(id)
+    const page = new URL((await m.authorize(id))!)
+    // Without it the sign-in has no refresh token and asks again when the access token expires, every day.
+    expect(page.searchParams.get('scope')?.split(' ').sort()).toEqual(['offline_access', 'openid'])
+    expect(page.searchParams.get('prompt')).toBe('consent')
+    expect(registered.at(-1)?.scope?.split(' ')).toContain('offline_access')
+    expect(await m.finishOAuth(page.searchParams.get('state')!, 'code-1')).toBe(true)
+    expect(m.get(id)!.status).toBe('connected')
+    await m.closeAll()
+  })
+
+  it('asks for nothing more of a server that does not offer it', async () => {
+    const m = launch(51001)
+    const id = await m.add({ name: 'Atlassian', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await m.connect(id)
+    const page = new URL((await m.authorize(id))!)
+    expect(page.searchParams.get('scope') ?? '').not.toContain('offline_access')
+    expect(registered.at(-1)?.scope ?? '').not.toContain('offline_access')
+    await m.closeAll()
+  })
+
   it('renews once when two calls find the access token expired together, and keeps the new refresh token', async () => {
     rotate = true
     tokenDelayMs = 50
@@ -284,6 +323,44 @@ describe("a saved sign-in the system key won't open", () => {
     expect(page).toBeTruthy()
     expect(opened).toHaveLength(2)
     await locked.closeAll()
+  })
+})
+
+// A server on its https address: the provider sends the browser back to it, unless it takes only a loopback
+// address. Then the sign-in goes to the loopback one, and the person pastes where the page ended.
+const onServer = (): ConnectorManager =>
+  new ConnectorManager({ db, secrets, emit: () => {}, openUrl: (u) => opened.push(u), oauthCallbackUrl: () => 'https://ana.pro.example/oauth/callback', localCallbackUrl: () => 'http://127.0.0.1:51009/oauth/callback' })
+
+describe('signing in on a server', () => {
+  it("comes back to the server's own address where the provider takes it", async () => {
+    const app = onServer()
+    const id = await app.add({ name: 'Linear', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await app.connect(id)
+    const page = new URL((await app.authorize(id))!)
+    expect(page.searchParams.get('redirect_uri')).toBe('https://ana.pro.example/oauth/callback')
+    expect(registrations).toBe(1)
+    await app.closeAll()
+  })
+
+  it('goes to the loopback address, to paste, where the provider takes only that one, and renews from it later', async () => {
+    loopbackOnly = true
+    const app = onServer()
+    const id = await app.add({ name: 'Canva', kind: 'remote', url: `${base}/mcp`, auth: 'oauth' })
+    await app.connect(id)
+    const page = new URL((await app.authorize(id))!)
+    expect(page.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:51009/oauth/callback')
+    expect(page.searchParams.get('client_id')).toBe('client-2') // registered again, with the loopback address
+    expect(await app.finishOAuthFromUrl(`http://127.0.0.1:51009/oauth/callback?code=code-1&state=${page.searchParams.get('state')}`)).toBe(true)
+    expect(app.get(id)!.status).toBe('connected')
+    await app.closeAll()
+    expireAccessToken()
+
+    const next = onServer() // a restart: the sign-in it got renews, with no browser and no new registration
+    await next.connect(id)
+    expect(next.get(id)!.status).toBe('connected')
+    expect(registrations).toBe(2)
+    expect(refreshes).toEqual(['client-2 (issued to client-2)'])
+    await next.closeAll()
   })
 })
 

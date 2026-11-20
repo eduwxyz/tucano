@@ -22,6 +22,17 @@ export function Toasts(): ReactNode {
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.leaving ? "is-leaving" : ""}`}>
           <span className="toast__text">{t.text}</span>
+          {t.action && (
+            <button
+              className="toast__action"
+              onClick={() => {
+                t.action!.run();
+                dismissToast(t.id);
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
           <button
             className="icon-btn toast__close"
             aria-label={L("Fechar", "Close")}

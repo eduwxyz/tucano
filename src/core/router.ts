@@ -21,6 +21,7 @@ export const routerSystem = (): string =>
       '- "todos": true quando a mensagem é pro grupo todo (um cumprimento, "pessoal", uma pergunta pra todos, uma apresentação): aí todos os agentes respondem.',
       '- "reason": um motivo de até 12 palavras, em português.',
       'Se a mensagem depende de um sistema externo (ex.: Linear, GitHub), prefira quem tem acesso a ele; se ninguém tem, escolha pelo papel.',
+      'Uma resposta curta a uma pergunta ou pedido de um agente ("pode", "sim", "pode disparar", "manda ver") vai pra esse agente, mesmo quando a pergunta está numa mensagem anterior do canal ou em outra thread: é ele quem está esperando.',
       'Um cumprimento nunca fica sem resposta. Lista vazia (e "todos" falso) só quando ninguém precisa responder: agradecimento, recado, conversa já encerrada.'
     ].join('\n'),
     [
@@ -30,6 +31,7 @@ export const routerSystem = (): string =>
       '- "everyone": true when the message is for the whole group (a greeting, "everyone", a question for all, an introduction): then every agent answers.',
       '- "reason": a reason of up to 12 words, in English.',
       'If the message depends on an external system (e.g. Linear, GitHub), prefer whoever has access to it; if no one does, choose by role.',
+      'A short answer to an agent\'s question or request ("yes", "go ahead", "you can run it", "do it") goes to that agent, even when the question is in an earlier message of the channel or in another thread: that agent is the one waiting.',
       "A greeting never goes unanswered. An empty list (and \"everyone\" false) only when no one needs to answer: a thank-you, a note, a conversation that's already over."
     ].join('\n')
   )
@@ -49,6 +51,15 @@ export function describeAgent(a: Agent, connectors: Connector[] = []): string {
 export const REPLY_JSON = (): string => L('Responda só com o JSON.', 'Reply with the JSON only.')
 
 const said = (m: Message): boolean => !!m.text.trim() && m.author.kind !== 'system'
+
+// A long message as its opening and its end: a question or a request is usually at the end of a
+// long reply ("…posso disparar agora?"), and the router needs it to know who is waiting for an answer.
+export const opensAndEnds = (text: string, max: number): string => {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (t.length <= max) return t
+  const half = Math.floor((max - 5) / 2)
+  return `${t.slice(0, half).trimEnd()} […] ${t.slice(-half).trimStart()}`
+}
 
 // Who wrote a message, as the router reads it.
 // A person's message reads with their name (one not in `people`, as `me`).
@@ -70,19 +81,21 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
   const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
   const name = speaker(agents, me, people)
   const recent = messages.filter((m) => said(m) && m.id !== thread?.id).slice(-ROUTER_HISTORY)
-  const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${m.text.trim().slice(0, 600)}`)
-  // Who answered what elsewhere, so a follow-up goes to whoever handled the subject.
+  const lines = [...(thread && said(thread) ? [thread] : []), ...recent].map((m) => `[${name(m)}] ${opensAndEnds(m.text, 800)}`)
+  // Who answered what elsewhere, so a follow-up goes to whoever handled the subject, and how an
+  // agent's last word there ended: a question there may be what this message answers.
   const others = threads
     .filter((t) => t.root && said(t.root))
     .map((t) => {
       const who = t.agents.map((id) => agents.find((a) => a.id === id)?.name ?? L('agente', 'agent')).join(', ')
-      return `- [${name(t.root!)}] ${t.root!.text.replace(/\s+/g, ' ').trim().slice(0, 200)} → ${who || L('sem resposta', 'no reply')}`
+      const last = t.last && t.last.id !== t.root!.id && t.last.author.kind === 'agent' ? ` · ${L('por último', 'last')} [${name(t.last)}] ${opensAndEnds(t.last.text, 300)}` : ''
+      return `- [${name(t.root!)}] ${opensAndEnds(t.root!.text, 300)} → ${who || L('sem resposta', 'no reply')}${last}`
     })
   return [
     L('Agentes no canal:', 'Agents in the channel:'),
     ...roster,
     '',
-    ...(others.length ? [L('Outras threads recentes (outros assuntos, só contexto: quem respondeu cada uma):', 'Other recent threads (other subjects, context only: who answered each):'), ...others, ''] : []),
+    ...(others.length ? [L('Antes, no canal (outras threads e mensagens, das mais antigas pras mais novas: quem respondeu cada uma e como terminou):', 'Earlier in the channel (other threads and messages, oldest to newest: who answered each and how it ended):'), ...others, ''] : []),
     thread
       ? L('Thread (a primeira mensagem abriu a thread; a última é a que precisa de resposta):', 'Thread (the first message started it; the last one is the one that needs an answer):')
       : L('Conversa (a última é a que precisa de resposta):', 'Conversation (the last one is the one that needs an answer):'),

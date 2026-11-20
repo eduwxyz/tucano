@@ -1,8 +1,10 @@
 // The contract between the renderer and the core, carried over a MessagePort.
 import type { Answer } from './questions'
-import type { WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion } from './types'
+import type { HermesPreview } from './hermes-import'
+import type { Lang } from './lang'
+import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Os, Account, AccountEngine, ActivityEntry, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult } from './types'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
 
 export interface Snapshot {
   webhookPort?: number
@@ -29,6 +31,7 @@ export interface Snapshot {
   you: string // the person this connection is
   needsName?: boolean // a server's first access: the owner hasn't said their name yet (setMyName)
   inbox: Inbox // what waits on this person: approvals they can decide, questions to them
+  delegations?: Delegation[] // work handed down the tree (src/shared/org.ts) that is open, or ended in the last day, in channels this person sees
 }
 
 export interface Api {
@@ -37,7 +40,9 @@ export interface Api {
   olderMessages(p: { conversationId: string; before: number; through?: string }): { messages: Message[]; since: number } // a page from before `before` (or back to `through`, a message to show), with their threads; since: from when it's whole now, 0 once all of it is
   threadMessages(p: { rootId: string }): Message[] // a thread whole: the message that started it and its replies
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
-  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
+  revealArtifact(p: { id: string }): void // shows an artifact's file in the file manager; never opens it
+  saveArtifact(p: { id: string }): void // saves a copy of an artifact's file where the person picks (the desktop's Save dialog)
+  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
@@ -51,12 +56,18 @@ export interface Api {
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
+  tasks(): Task[] // my to-dos on the board (Quadro), in order
+  saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
+  removeTask(p: { id: string }): void
+  startTask(p: { id: string }): { conversationId: string } // posts it as my message to its agent (its DM, or the channel set) and takes it off the list
   ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)
   dismissProposal(p: { messageId: string; index?: number }): void
   applyProposals(p: { messageId: string; draft?: boolean }): ProposalsResult // every card of the reply still open, in an order that makes agents first; one failing doesn't stop the rest. draft: its new-agent card too
   dismissProposals(p: { messageId: string; draft?: boolean }): void
+  undoProposal(p: { messageId: string; index?: number; draft?: boolean }): void // takes back what an applied card did (draft: the new-agent card), unless it changed since or its time is up
+  undoProposals(p: { messageId: string }): ProposalsResult // every applied card of the reply taken back, last first; `applied` lists the ones undone
   settleDraft(p: { messageId: string; agentId?: string }): void // the card is done: created elsewhere (the introduction), or dismissed
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
@@ -100,6 +111,7 @@ export interface Api {
   harnessMcps(): Promise<HarnessMcp[]> // the MCP servers set up in Claude Code, Codex and OpenCode
   importHarnessMcp(p: { key: string }): Promise<string> // adds one as a connector; its secrets never pass through the screen
   updateTool(p: { connectorId: string; name: string; patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>> }): void
+  shareComputer(p: { connectorId: string; agentIds: string[] }): void // a computer lent to this server: exactly these agents may use it (its person or an admin)
   decideApproval(p: { id: string; decision: 'approved' | 'refused'; reason?: string; always?: boolean }): void // always: the agent may use that tool without asking again
   addMemory(p: { scope: MemoryScope; text: string }): void
   editMemory(p: { id: string; text: string }): void
@@ -113,6 +125,9 @@ export interface Api {
   summarizeThreadNow(p: { rootId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
+  browserLogins(p: { agentId: string }): Promise<SavedLogin[]> // the logins saved for an agent's browser: sites and usernames, never a password
+  saveBrowserLogin(p: { agentId: string; site: string; username: string; password: string }): Promise<void> // password: the value or an op:// reference
+  removeBrowserLogin(p: { agentId: string; origin: string }): Promise<void>
   browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void
   browserInput(p: { agentId: string; input: BrowserInput }): Promise<void> // a server's taken-over browser, driven from the panel // show: I take over the agent's browser; clear: logins and history go
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
@@ -120,6 +135,13 @@ export interface Api {
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
+  probeEndpoint(p: { baseUrl: string; key?: string }): Promise<{ models: string[]; error?: string }> // an OpenAI-format address tried: what it lists, or why not
+  setEndpoint(p: { baseUrl: string; models: string[]; key?: string | null }): Promise<void> // saved; key undefined keeps the saved one, null removes it
+  nodeInfo(): Promise<NodeInfo> // this computer lent to servers (core/node-server.ts, core/node-link.ts)
+  setNode(p: { apps: AgentApp[] }): Promise<NodeInfo> // the apps this computer lends the servers it's lent to
+  addNodeFolder(p: { path: string }): Promise<NodeInfo> // lends a folder to the server's agents; throws why not (outside home, Library, a dot folder, Tucano's data)
+  removeNodeFolder(p: { path: string }): Promise<NodeInfo>
+  nodeLog(p: { limit?: number }): Promise<NodeLogEntry[]> // what the server ran here, newest first (up to 500)
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
@@ -136,7 +158,18 @@ export interface Api {
   exportTeam(): string // the team as Markdown
   importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
   importAgents(p: { path?: string; data?: string }): string // agents from another app's .zip (a path on this computer, or base64); what was added
+  // Hermes Agent's folder, read where it is (no path: $HERMES_HOME or ~/.hermes): what would come in,
+  // adding nothing. Throws, in the person's words, when the folder isn't Hermes's or has nothing to bring.
+  hermesPreview(p: { path?: string }): HermesPreview
+  importHermes(p: { path: string; profiles: string[] }): string // the chosen profiles (by key) as agents; what was added
   backupNow(): string // where the copy went
+  // Everything in one .zip, to take this Tucano to a server (desktop): where it went, and what's in it.
+  exportBackup(): { path: string } & BackupSummary
+  // On a server, the owner: a backup sent up (/upload) checked and set apart; nothing changes yet.
+  restoreCheck(p: { path: string }): BackupSummary
+  restoreApply(): void // the checked backup replaces everything: the server restarts with it
+  restoreCancel(): void
+  restoreInfo(): { at: number; routines: number } | null // the last restore, for what to redo after it
   openBackups(): void
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default
   usage(): UsageReport
@@ -159,6 +192,7 @@ export interface Api {
   wikiChange(p: { id: string }): WikiChange | null
   wikiApplyChange(p: { id: string }): WikiChange // a pending one; a conflict comes back as such
   wikiRefuseChange(p: { id: string }): void
+  wikiApplyWaiting(): { applied: number; left: number } // all that waits, at once
   wikiUndoChange(p: { id: string }): void
   wikiSources(): WikiSource[]
   wikiSource(p: { id: string }): (WikiSource & { text: string }) | null
@@ -189,7 +223,7 @@ export interface Api {
   // People: who I am, and (admins) who comes in. The link is the page's origin with ?invite=<code>.
   setMyName(p: { name: string; about?: string }): void // about: what I do, for the agents
   setDelegation(p: { to: string | null; until?: number }): void // someone answers and approves for me until then; null ends it
-  createInvite(p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string }): { code: string; expiresAt: number }
+  createInvite(p: { role: Exclude<Role, 'owner'>; about?: string; restore?: string; access?: PersonAccess }): { code: string; expiresAt: number }
   revokeInvite(p: { id: string }): void
   listInvites(): Invite[]
   removedPeople(): (Person & { removedAt: number })[] // admins: who left in the last 30 days (still restorable)
@@ -198,6 +232,7 @@ export interface Api {
   removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
+  setPersonAccess(p: { id: string; access: PersonAccess }): void // what a member sees; admins and the owner always see everything
   purgePerson(p: { id: string }): void // the owner, before the 30 days: a removed person's DMs and memories go now
   leave(): void // someone (not the owner) leaves on their own: access ends, and their DMs, memories and own routines go now
   activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)
@@ -207,6 +242,21 @@ export interface Api {
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
+  // To the people who make Tucano, through tucano.sh (core/feedback.ts). image: the window's picture, base64 PNG or JPEG.
+  // Throws, in the person's words, when it didn't go.
+  sendFeedback(p: { kind: 'bug' | 'idea' | 'other'; message: string; image?: string; lang?: Lang }): Promise<void>
+  // The owner's: the survey to show in the sidebar's foot now, or none (off, answered, nothing running).
+  survey(p: { lang?: Lang }): Promise<SurveyView | null>
+  // A choice (kept the moment it's clicked), the same choice with its comment, or dismiss: "Não quero responder".
+  answerSurvey(p: { survey: string; choice?: string; comment?: string; dismiss?: boolean; lang?: Lang }): Promise<void>
+}
+
+// A survey as the app shows it, already in the person's language (core/feedback.ts).
+export interface SurveyView {
+  id: string
+  question: string
+  options: { id: string; label: string }[]
+  followUp?: string
 }
 
 export type Method = keyof Api
@@ -215,9 +265,12 @@ export type Result<M extends Method> = Awaited<ReturnType<Api[M]>>
 
 export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
+  | { type: 'tasks'; for: string } // someone's to-dos changed: they read them again
+  | { type: 'node'; info: NodeInfo } // this computer's lines to the servers it's lent to, as they change
   | { type: 'message'; message: Message }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
   | { type: 'agent'; agent: Agent }
+  | { type: 'agent_removed'; id: string } // one just made and taken back with Desfazer before it did anything
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'settings'; settings: Settings }
   | { type: 'connector'; connector: Connector }
@@ -237,9 +290,10 @@ export type CoreEvent =
   | { type: 'wiki' } // a page changed: here, by an agent or in another app
   | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
+  | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'message', 'delta', 'agent', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

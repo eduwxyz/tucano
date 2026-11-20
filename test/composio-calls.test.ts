@@ -8,7 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { innerActions, isComposio, MULTI_EXECUTE, perCallTool, PROXY_EXECUTE } from '../src/shared/composio'
+import { innerActions, isComposio, MANAGE_CONNECTIONS, MULTI_EXECUTE, perCallTool, PROXY_EXECUTE } from '../src/shared/composio'
 import type { Agent, Connector, GrantLevel, Settings } from '../src/shared/types'
 import { callClass, classify, classifyAction, runnerAllowed, runnerRules } from '../src/core/policy'
 import { Db } from '../src/core/db'
@@ -20,6 +20,7 @@ import { Runner } from '../src/core/runs'
 const URL_ = 'https://connect.composio.dev/mcp'
 const multi = { name: MULTI_EXECUTE, cls: classify({ name: MULTI_EXECUTE }) }
 const batch = (...slugs: string[]): Record<string, unknown> => ({ tools: slugs.map((tool_slug) => ({ tool_slug, arguments: {} })), sync_response_to_workbench: false })
+const withAccount = (slug: string, account: unknown): Record<string, unknown> => ({ tools: [{ tool_slug: slug, arguments: {}, account }] })
 const proxy = (method: string, endpoint = '/user/repos', more: Record<string, unknown> = {}): Record<string, unknown> => ({ toolkit_slug: 'github', endpoint, method, ...more })
 const of = (args: unknown, name = MULTI_EXECUTE): string => callClass({ name, cls: 'sensitive' }, URL_, args as Record<string, unknown>)
 
@@ -65,10 +66,19 @@ describe('what a Composio call runs, and its class', () => {
       { tools: [{ tool_slug: 'GMAIL__FETCH_EMAILS', arguments: {} }] },
       { tools: [{ tool_slug: 'GMAIL_FETCH_EMAILS,GMAIL_SEND_EMAIL', arguments: {} }] },
       { tools: [{ tool_slug: 42, arguments: {} }] },
+      ...['', '   ', 42, null, true, {}, ['work']].map((account) => withAccount('GMAIL_FETCH_EMAILS', account)), // an account that isn't a name
       { tools: Array.from({ length: 51 }, () => ({ tool_slug: 'GMAIL_FETCH_EMAILS', arguments: {} })) }
     ])
       expect(of(bad), JSON.stringify(bad)).toBe('sensitive')
     expect(innerActions(MULTI_EXECUTE, { tools: [{ tool_slug: 'X_GET_Y', arguments: {} }], thought: 'why', current_step: 'FETCHING', session_id: 's1' })).toEqual([{ kind: 'tool', slug: 'X_GET_Y' }])
+  })
+
+  it('knows which account an item runs as, and a read runs the same with or without it', () => {
+    expect(innerActions(MULTI_EXECUTE, withAccount('GMAIL_FETCH_EMAILS', 'work'))).toEqual([{ kind: 'tool', slug: 'GMAIL_FETCH_EMAILS', account: 'work' }])
+    expect(of(withAccount('GMAIL_FETCH_EMAILS', 'work'))).toBe('read')
+    expect(innerActions(MULTI_EXECUTE, withAccount('GMAIL_FETCH_EMAILS', ' work '))).toEqual([{ kind: 'tool', slug: 'GMAIL_FETCH_EMAILS', account: ' work ' }]) // verbatim, as it runs
+    expect(of(withAccount('GMAIL_CREATE_EMAIL_DRAFT', 'work'))).toBe('write')
+    expect(of(withAccount('GMAIL_SEND_EMAIL', 'work'))).toBe('sensitive')
   })
 
   it('judges the older single runner the same way', () => {
@@ -154,7 +164,7 @@ function scripted(plan: (prompt: string, tools: string[]) => Plan): Engine {
 function runner(plan: (prompt: string, tools: string[]) => Plan): Runner {
   return new Runner({
     db,
-    engines: { claude: scripted(plan), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline') },
+    engines: { claude: scripted(plan), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
     settings: async () => settings,
     emit: () => {},
     workDir: join(dir, 'work'),
@@ -175,7 +185,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   calls = []
   seen = { prompts: [], tools: [], results: [] }
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
   db.saveConnector({ id: CID, name: 'Composio', kind: 'remote', url: URL_, auth: 'oauth' })
@@ -183,7 +193,8 @@ beforeEach(async () => {
   db.syncTools(CID, [
     { name: MULTI_EXECUTE, description: 'Runs tools.', inputSchema: schema, cls: classify({ name: MULTI_EXECUTE, annotations: { destructiveHint: true } }) },
     { name: 'COMPOSIO_SEARCH_TOOLS', description: 'Finds tools.', inputSchema: schema, cls: classify({ name: 'COMPOSIO_SEARCH_TOOLS', annotations: { readOnlyHint: true } }) },
-    { name: 'COMPOSIO_REMOTE_BASH_TOOL', description: 'Runs bash.', inputSchema: schema, cls: classify({ name: 'COMPOSIO_REMOTE_BASH_TOOL' }) }
+    { name: 'COMPOSIO_REMOTE_BASH_TOOL', description: 'Runs bash.', inputSchema: schema, cls: classify({ name: 'COMPOSIO_REMOTE_BASH_TOOL' }) },
+    { name: MANAGE_CONNECTIONS, description: 'Links accounts.', inputSchema: schema, cls: 'sensitive' }
   ])
   db.saveConnector({ id: SID, name: 'Slack', kind: 'remote', url: 'https://mcp.slack.com/mcp', auth: 'oauth' })
   db.syncTools(SID, ['chat_post_message', 'conversations_history'].map((name) => ({ name, description: name, inputSchema: schema, cls: classify({ name }) })))
@@ -206,6 +217,30 @@ describe('a Composio call through the runner', () => {
     expect(calls).toEqual([{ name: MULTI_EXECUTE, args: batch('GMAIL_FETCH_EMAILS', 'GOOGLESHEETS_GET_SPREADSHEET_INFO') }])
     expect(db.approvals()).toHaveLength(0)
     expect(db.messages().find((m) => m.author.kind === 'agent')?.run?.steps.map((s) => s.label)).toContain('Consultou')
+  })
+
+  it('a read grant sees the account linking, which asks every time and runs once approved', async () => {
+    // Even with a rule for it and the agent let loose, a reader asks.
+    db.saveAgent({ ...agent('read', [`${CID}:${MANAGE_CONNECTIONS}`]), autonomy: 'free' })
+    const link = { toolkits: ['googlecalendar'] }
+    const r = runner((prompt, tools) => (prompt.includes('aprovou') ? null : { tool: tools.find((t) => t.endsWith(`__${MANAGE_CONNECTIONS}`))!, args: link }))
+    await r.send('d1', 'liga minha agenda')
+    await r.idle()
+    expect(seen.tools[0]).toContain(`composio__${MANAGE_CONNECTIONS}`)
+    expect(calls).toHaveLength(0)
+    const [ap] = db.approvals()
+    expect(ap).toMatchObject({ state: 'pending', tool: MANAGE_CONNECTIONS, args: link })
+    await r.decide(ap!.id, 'approved')
+    await r.idle()
+    expect(calls).toEqual([{ name: MANAGE_CONNECTIONS, args: link }])
+  })
+
+  it('a reader still sees no other sensitive Composio tool', async () => {
+    db.saveAgent(agent('read'))
+    const r = runner(() => null)
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(seen.tools[0]!.some((t) => t.includes('BASH'))).toBe(false)
   })
 
   it('a read grant is refused a write inside the batch, and nothing runs', async () => {
@@ -279,6 +314,62 @@ describe('a Composio call through the runner', () => {
     await r.idle()
     expect(calls).toHaveLength(2)
     expect(db.approvals().filter((a) => a.state === 'pending')).toHaveLength(1)
+  })
+
+  it('"always allow" for an item that names an account is for that account only', () => {
+    const work = withAccount('GMAIL_SEND_EMAIL', 'work')
+    expect(runnerRules(CID, MULTI_EXECUTE, work)).toEqual([`${CID}:GMAIL_SEND_EMAIL@work`])
+    expect(runnerRules(CID, MULTI_EXECUTE, withAccount('GMAIL_FETCH_EMAILS', 'work'))).toBeUndefined() // a read has nothing to allow
+    expect(runnerAllowed(CID, MULTI_EXECUTE, work, [`${CID}:GMAIL_SEND_EMAIL@work`])).toBe(true)
+    expect(runnerAllowed(CID, MULTI_EXECUTE, work, [`${CID}:GMAIL_SEND_EMAIL@personal`])).toBe(false)
+    expect(runnerAllowed(CID, MULTI_EXECUTE, withAccount('GMAIL_SEND_EMAIL', ' work '), [`${CID}:GMAIL_SEND_EMAIL@work`])).toBe(false) // no trimming to match
+    expect(runnerAllowed(CID, MULTI_EXECUTE, work, [`${CID}:GMAIL_SEND_EMAIL`])).toBe(false) // a rule without account doesn't cover an account
+    expect(runnerAllowed(CID, MULTI_EXECUTE, batch('GMAIL_SEND_EMAIL'), [`${CID}:GMAIL_SEND_EMAIL@work`])).toBe(false) // nor the other way round
+    expect(runnerAllowed(CID, MULTI_EXECUTE, batch('GMAIL_SEND_EMAIL'), [`${CID}:GMAIL_SEND_EMAIL`])).toBe(true) // saved before accounts existed
+  })
+
+  it('a read with an account runs at once; a send with one asks, and "always" is saved for that account', async () => {
+    db.saveAgent(agent('read_write'))
+    const plans = [withAccount('GMAIL_FETCH_EMAILS', 'work'), withAccount('GMAIL_SEND_EMAIL', 'work'), withAccount('GMAIL_SEND_EMAIL', 'work'), withAccount('GMAIL_SEND_EMAIL', 'personal')]
+    const r = runner((prompt, tools) => (prompt.includes('aprovou') ? null : { tool: tools.find((t) => t.endsWith(`__${MULTI_EXECUTE}`))!, args: plans.shift()! }))
+    await r.send('d1', 'le')
+    await r.idle()
+    expect(calls).toHaveLength(1)
+    expect(db.approvals()).toHaveLength(0)
+
+    await r.send('d1', 'manda')
+    await r.idle()
+    const ap = db.approvals()[0]!
+    expect(ap.state).toBe('pending')
+    await r.decide(ap.id, 'approved', undefined, true)
+    await r.idle()
+    expect(db.agent('a1')?.autoApprove).toEqual([`${CID}:GMAIL_SEND_EMAIL@work`])
+    expect(calls).toHaveLength(2)
+
+    await r.send('d1', 'de novo') // same account: runs alone
+    await r.idle()
+    expect(calls).toHaveLength(3)
+
+    await r.send('d1', 'outra conta') // another account: asks
+    await r.idle()
+    expect(calls).toHaveLength(3)
+    expect(db.approvals().filter((a) => a.state === 'pending')).toHaveLength(1)
+  })
+
+  it('a code tool called directly is never allowed for good, even with a rule saved for it', async () => {
+    const rule = `${CID}:COMPOSIO_REMOTE_BASH_TOOL`
+    db.saveAgent(agent('read_write', [rule]))
+    const bash = (prompt: string, tools: string[]): Plan => (prompt.includes('aprovou') ? null : { tool: tools.find((t) => t.endsWith('__COMPOSIO_REMOTE_BASH_TOOL'))!, args: { command: 'ls' } })
+    const r = runner(bash)
+    await r.send('d1', 'roda')
+    await r.idle()
+    expect(calls).toHaveLength(0) // the saved rule isn't honoured
+    const ap = db.approvals()[0]!
+    expect(ap.state).toBe('pending')
+    await r.decide(ap.id, 'approved', undefined, true)
+    await r.idle()
+    expect(calls).toHaveLength(1)
+    expect(db.agent('a1')?.autoApprove).toEqual([rule]) // and "always" adds nothing
   })
 
   it('a raw request, a call not understood, code and a high-risk runner are never allowed for good', async () => {
