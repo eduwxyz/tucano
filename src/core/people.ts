@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
+import type { InboxDoc, InboxDocDate } from '../shared/docs'
 import { CODE_SPANS, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type PersonAccess, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
@@ -253,6 +254,9 @@ export function personNamed(name: string, people: Person[]): Person | undefined 
 }
 
 export class People {
+  // Documentos' part of the inbox, set by the core once Documentos is open (a People made elsewhere, to check access, has none).
+  docsInbox?: (person: Person) => { documents: InboxDoc[]; docDates: InboxDocDate[] }
+
   constructor(private db: Db) {}
 
   owner(): Person {
@@ -415,6 +419,7 @@ export class People {
       case 'skill':
       case 'skill_removed':
       case 'wiki':
+      case 'docs': // a signal only: each page reads docs() again and gets what it may see
         return event
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.
@@ -539,7 +544,12 @@ export class People {
     // Asked to them and answered a moment ago by someone else (an admin, whoever covers for them).
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)
     const proposals = isAdmin(person) ? this.forwardedProposals() : []
-    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}) }
+    // Documents never break the inbox: if Documentos can't say, they are left out.
+    let docs: { documents: InboxDoc[]; docDates: InboxDocDate[] } | undefined
+    try {
+      docs = this.docsInbox?.(person)
+    } catch {}
+    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}), ...(docs?.documents.length ? { documents: docs.documents } : {}), ...(docs?.docDates.length ? { docDates: docs.docDates } : {}) }
   }
 
   // The cards members sent to the admins that no one has applied or dismissed yet (a reply's cards

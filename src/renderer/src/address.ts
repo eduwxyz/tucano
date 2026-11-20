@@ -23,6 +23,9 @@ export function viewToHash(view: View): string | undefined {
       if (view.title) return `#/wiki/page/${part(view.title)}`
       if (view.tab) return `#/wiki/tab/${view.tab}`
       return '#/wiki'
+    case 'documents':
+      if (view.folder && view.doc) return `#/documents/${part(view.folder)}/${part(view.doc)}`
+      return view.folder ? `#/documents/${part(view.folder)}` : '#/documents'
     case 'tuca':
       return undefined
     default:
@@ -51,6 +54,10 @@ export function hashToView(hash: string): View | undefined {
     if (a === 'page' && value) return { kind: 'wiki', title: value }
     if (a === 'tab' && (WIKI_TABS as readonly string[]).includes(value)) return { kind: 'wiki', tab: value as (typeof WIKI_TABS)[number] }
     return { kind: 'wiki' }
+  }
+  if (kind === 'documents') {
+    if (!a) return { kind: 'documents' }
+    return rest[0] ? { kind: 'documents', folder: a, doc: rest[0] } : { kind: 'documents', folder: a }
   }
   if ((SIMPLE as readonly string[]).includes(kind ?? '') && !tail) return { kind: kind as Simple }
   return undefined

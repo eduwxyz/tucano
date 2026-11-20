@@ -3,6 +3,7 @@ import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
+import type { Doc, DocAnswer, DocEvent, DocFolder, DocHit, DocsTree, DocVersion, FolderAccess } from './docs'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
 
@@ -204,6 +205,28 @@ export interface Api {
   wikiAddLink(p: { url: string }): Promise<WikiSource>
   wikiAddNote(p: { text: string; title?: string }): WikiSource
   wikiOpenOriginal(p: { id: string }): { name: string; data: string } | null // on a server: the file itself (base64), to download
+  // Documentos: files in folders that say who sees them. Access is checked inside the core (core/docs.ts), per person.
+  docs(): DocsTree // what I see: folders, documents (the trashed too), and what I may do in each folder
+  docFolderSave(p: { id?: string; parentId: string | null; name: string; rule: string; access?: FolderAccess | null; needsApproval?: boolean }): DocFolder // no id: makes one; access left out keeps it, null follows the parent; needsApproval left out keeps it (access and approval: owner and admins only)
+  docFolderRemove(p: { id: string }): void // an empty one
+  docAdd(p: { folderId: string; name: string; data: string; summary?: string }): Promise<Doc> // data: base64
+  docSaveArtifact(p: { artifactId: string; folderId: string }): Promise<Doc> // keeps a file an agent showed in the chat; one kept already comes back as is
+  docMove(p: { id: string; folderId: string; name?: string }): Doc
+  docRename(p: { id: string; name: string }): Doc
+  docTrash(p: { id: string }): Doc
+  docRestore(p: { id: string }): Doc
+  docText(p: { id: string; version?: number }): Promise<{ text: string }> // what the file says, for the viewer (the file itself is served at docUrl)
+  docHistory(p: { id: string }): { versions: DocVersion[]; events: DocEvent[] }
+  docRestoreVersion(p: { id: string; n: number }): Promise<Doc> // an older version's bytes become a new version
+  docSearch(p: { q: string; folderId?: string }): DocHit[]
+  docByArtifact(): Record<string, { docId: string; folderId: string }> // artifacts kept as documents, for "Guardado em…" in the chat
+  docDecide(p: { id: string; ok: boolean; note?: string; version?: number }): Promise<Doc> // approves what waits, or asks for changes (note required); the agent that made it is told
+  docMakeOfficial(p: { id: string }): Doc // a draft (or one waiting) that counts as it is
+  docInboxAdd(p: { name: string; data: string }): Promise<Doc> // a file dropped for the cataloguer to put away; data: base64
+  docUnfile(p: { id: string }): Doc // takes back what was put away: back to my personal folder
+  docDateDismiss(p: { id: string }): void // a date found in a document that I don't want to hear about
+  docRemind(p: { id: string }): Promise<{ routineId: string }> // a reminder routine for a date found in a document
+  docAsk(p: { q: string; folderId?: string; docId?: string }): Promise<DocAnswer> // an answer from the documents I see, with its sources
   wikiIngestAgain(p: { id: string }): void
   wikiReview(): WikiReview // the last review and what it found that's still open
   wikiRunReview(): void // reviews now, in the background; a 'wiki' event when done
@@ -288,12 +311,13 @@ export type CoreEvent =
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }
   | { type: 'wiki' } // a page changed: here, by an agent or in another app
+  | { type: 'docs' } // a folder or a document changed: each page reads docs() again (it gets only what it may see)
   | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'docs', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

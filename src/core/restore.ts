@@ -27,12 +27,13 @@ const incomingDir = (dataDir: string): string => join(restoreDir(dataDir), 'inco
 
 // Every file under a folder, with its path inside it ('/' between parts); a repository's .git and
 // Obsidian's trash stay out.
-function walk(dir: string): { rel: string; path: string; size: number }[] {
+// `all`: Documentos' own folders (.trash, .versions, .private) come along: they hold files that matter.
+function walk(dir: string, all = false): { rel: string; path: string; size: number }[] {
   const out: { rel: string; path: string; size: number }[] = []
   if (!existsSync(dir)) return out
   const go = (d: string): void => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
-      if (e.name === '.git' || e.name === '.trash' || e.name === '.DS_Store') continue
+      if (e.name === '.DS_Store' || (!all && (e.name === '.git' || e.name === '.trash'))) continue
       const p = join(d, e.name)
       if (e.isDirectory()) go(p)
       else if (e.isFile()) out.push({ rel: relative(dir, p).split(sep).join('/'), path: p, size: statSync(p).size })
@@ -82,11 +83,12 @@ function snapshot(file: string, to: string): void {
 }
 
 // The backup: Settings › Geral › Exportar tudo. `out` is the .zip to write.
-export function writeBackup(p: { db: Db; dataDir: string; wikiDir: string; wikiIndex: string; out: string; app: string }): BackupSummary {
+export function writeBackup(p: { db: Db; dataDir: string; wikiDir: string; wikiIndex: string; docsDir?: string; docsIndex?: string; out: string; app: string }): BackupSummary {
   const staging = join(p.dataDir, 'backups')
   mkdirSync(staging, { recursive: true, mode: 0o700 })
   const dbCopy = join(staging, `.export-${randomUUID()}.db`)
   const wikiCopy = join(staging, `.export-${randomUUID()}-wiki.db`)
+  const docsCopy = join(staging, `.export-${randomUUID()}-docs.db`)
   const zip = new ZipWriter(p.out)
   try {
     p.db.backupTo(dbCopy)
@@ -104,6 +106,23 @@ export function writeBackup(p: { db: Db; dataDir: string; wikiDir: string; wikiI
       zip.addFile('wiki.db', wikiCopy)
       entries++
     }
+    // Documentos: its index and its folder (versions and trash too), as many files as fit; a bigger one is left out like an agent's file.
+    let docsLeft = 0
+    if (p.docsIndex && existsSync(p.docsIndex)) {
+      snapshot(p.docsIndex, docsCopy)
+      zip.addFile('docs.db', docsCopy)
+      entries++
+    }
+    if (p.docsDir) {
+      for (const f of walk(p.docsDir, true)) {
+        if (entries >= MAX_ENTRIES || zip.size + f.size + 1024 > BUDGET) {
+          docsLeft++
+          continue
+        }
+        zip.addFile(`documents/${f.rel}`, f.path)
+        entries++
+      }
+    }
     // The agents' files, newest first, as many as fit in one upload (a big one that doesn't fit is skipped, smaller ones still go).
     const files = walk(join(p.dataDir, 'artifacts')).sort((a, b) => statSync(b.path).mtimeMs - statSync(a.path).mtimeMs)
     let kept = 0
@@ -117,7 +136,7 @@ export function writeBackup(p: { db: Db; dataDir: string; wikiDir: string; wikiI
       entries++
       kept++
     }
-    const summary: BackupSummary = { version: 1, madeAt: Date.now(), app: p.app, ...c, wikiPages: pages.filter((f) => f.rel.endsWith('.md')).length, files: kept, filesLeftOut: left }
+    const summary: BackupSummary = { version: 1, madeAt: Date.now(), app: p.app, ...c, wikiPages: pages.filter((f) => f.rel.endsWith('.md')).length, files: kept, filesLeftOut: left + docsLeft }
     zip.add(MANIFEST, Buffer.from(JSON.stringify(summary, null, 2)))
     zip.close()
     return summary
@@ -128,6 +147,7 @@ export function writeBackup(p: { db: Db; dataDir: string; wikiDir: string; wikiI
   } finally {
     rmSync(dbCopy, { force: true })
     rmSync(wikiCopy, { force: true })
+    rmSync(docsCopy, { force: true })
   }
 }
 
@@ -215,7 +235,7 @@ export function cancelRestore(dataDir: string): void {
   rmSync(join(restoreDir(dataDir), 'ready.json'), { force: true })
 }
 
-const PARTS = ['tucano.db', 'tucano.db-wal', 'tucano.db-shm', 'wiki.db', 'wiki.db-wal', 'wiki.db-shm', 'wiki', 'artifacts']
+const PARTS = ['tucano.db', 'tucano.db-wal', 'tucano.db-shm', 'wiki.db', 'wiki.db-wal', 'wiki.db-shm', 'wiki', 'artifacts', 'docs.db', 'docs.db-wal', 'docs.db-shm', 'documents']
 
 // Step 2, at the server's start, before the core: what was here goes to restore/before-<time>
 // (the newest one kept, to undo by hand), and the backup takes its place. Only file moves.

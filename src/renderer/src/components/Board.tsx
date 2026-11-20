@@ -14,6 +14,7 @@ import { answerDecision, continueRun, isTeam, loadTasks, navigate, openThread, p
 import { ApprovalCard, QuestionCard, ReplyText } from './Conversation'
 import { ArtifactCard } from './Panel'
 import { ago, AgentAvatar, tokens as tokenWords } from './ui'
+import { DocBoardLine } from './docs/DocBoardLine'
 
 type Col = 'todo' | 'doing' | 'you' | 'done'
 type Group = 'none' | 'agent' | 'sector'
@@ -802,6 +803,7 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTas
       <>
         <div className="bd-done-row"><Face agent={a} /><div className="bd-c-title">{c.title}</div><span className="time">{c.endedAt ? new Date(c.endedAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
         <div className={`bd-res ${c.state === 'stopped' ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
+        <DocBoardLine artifactIds={c.replies.flatMap((r) => r.run?.artifactIds ?? [])} />
       </>
     )
   } else if (c.column === 'you') {
