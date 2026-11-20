@@ -5,6 +5,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+<<<<<<< HEAD
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
 > - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
 > - **Novo:** quando um site só deixa passar um navegador de verdade, o agente reabre a página **uma vez por site** numa janela real do Chrome, fora da tela e no mesmo perfil. **Assumir** traz essa mesma janela, sem recarregar a página. No Mac isso fica desligado por enquanto, porque a janela vem para a frente e tira o foco do que você está fazendo: lá o agente só avisa do bloqueio.
@@ -106,6 +107,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **Usage and limits no longer shows a subscription window that already reset as full.** Claude Code and Codex report their windows only when a reply runs, so a report of 100% taken just before the five hours ended stayed on the page as "100% used, resets now" until the next reply, while claude.ai already showed 0%. A window whose reset time has passed now shows 0% and when it reset, and a page left open redraws when the window resets.
+=======
+> - **Adicionado:** o **esforço de raciocínio** aparece onde o modelo é escolhido. Onde o harness e o modelo dividem a linha, o nível fica no fim dela, e o harness cede a largura que o nome curto dele não precisa (Claude, Codex, OpenCode, Pi); onde as escolhas ficam uma embaixo da outra, o nível vai embaixo do modelo. Isso vale em Configurações → Modelos (o modelo do roteador, o da memória e cada agente em Modelos dos agentes, inclusive na alteração em lote) e na página do agente. O esforço do roteador e o do modelo de memória são configurações novas, e o da memória também nomeia cada pedido; o do agente agora vai junto com o modelo, numa chamada só. Os modelos do Cursor já trazem o nível no nome (`…-high`, `…-xhigh`), então ali ele não aparece. Todos leem os mesmos quatro nomes de uma lista só — Baixo, Médio, Alto e Máximo —, a que os cards do Tuca já ofereciam.
+
+### Added
+
+- **A thinking level wherever a model is picked.** Where the harness and the model share a row, the level sits at the end of it, and the harness gives up the width its short name (Claude, Codex, OpenCode, Pi) doesn't need; where the picks are one under the other, the level goes under the model. That is Settings → Models (the router's model, the memory model, and each agent in Agent models, bulk change included) and an agent's own page. The router's level and the memory model's are new settings, and the memory model's also names each request; an agent's level is now set together with its model, in one call. Cursor's models carry the level in their name (`…-high`, `…-xhigh`), so there it stays out. All of them read the same four names from one list — Low, Medium, High, Max — the one the Tuca's cards already offered.
+>>>>>>> 7c2519ab (Offer a thinking level wherever a model is picked)
 
 ## [0.2.43] - 2026-11-19
 

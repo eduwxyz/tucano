@@ -5828,6 +5828,32 @@ table.csv th {
 .model-picker .hint {
   flex-basis: 100%;
 }
+/* The thinking level on the model's own row: the harness keeps only its name's width (Claude, Codex,
+   OpenCode, Pi), the model takes what's left, and the level closes the row. */
+.model-picker .select.model-picker__engine,
+.lrow--wide .model-picker .select.model-picker__engine {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 104px;
+}
+.model-picker .select.model-picker__effort,
+.lrow--wide .model-picker .select.model-picker__effort {
+  flex: 0 0 auto;
+  width: 128px;
+}
+/* Under a model select, where the picks are one below the other (Settings → Models). */
+.select.effort-select--inline {
+  max-width: 220px;
+}
+/* A model and its thinking level in one spot of a card: one under the other, like the agent's page. */
+.field-stack {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.field-stack > .field {
+  margin-bottom: 0;
+}
 .note--ok {
   color: var(--ok, #1f9d55);
 }

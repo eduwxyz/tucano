@@ -554,6 +554,7 @@ export interface Settings {
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
+  routerEffort?: Effort // how hard the router thinks: who answers a message in a channel; unset: low
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
   classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
   classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
@@ -566,6 +567,7 @@ export interface Settings {
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
+  memoryEffort?: Effort // how hard that small model thinks, and the one that names a request; unset: low
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
@@ -844,7 +846,11 @@ const effort = (id: Effort, pt: string, en: string): { id: Effort; label: string
   }
 })
 
+// The thinking levels, in one list everywhere they're picked (an agent's page, Settings → Models,
+// what the Tuca proposes): the same four names, the same order.
 export const EFFORTS: { id: Effort; label: string }[] = [effort('low', 'Baixo', 'Low'), effort('medium', 'Médio', 'Medium'), effort('high', 'Alto', 'High'), effort('xhigh', 'Máximo', 'Max')]
+export const EFFORT_IDS: Effort[] = EFFORTS.map((e) => e.id)
+export const isEffort = (v: unknown): v is Effort => EFFORTS.some((e) => e.id === v)
 
 // A model the app doesn't list, by the name a company gateway gives it: kept as "<engine>:<name>".
 export const customModel = (engine: EngineId, name: string): string => `${engine}:${name.trim()}`
