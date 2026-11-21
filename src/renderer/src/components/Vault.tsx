@@ -469,13 +469,29 @@ function ImportCsv({ have, mine, onClose, onSaved }: { have: VaultLogin[]; mine:
     const same = already(r)
     return !same || replace.includes(r.row)
   })
-  const why: Record<NonNullable<CsvLogin['skip']>, string> = {
-    address: L('endereço que o Cofre não aceita', 'an address the Vault can’t take'),
-    protocol: L('não é um site (android://, chrome-extension://)', 'not a site (android://, chrome-extension://)'),
-    realm: L('entrada do próprio navegador (httpRealm)', 'the browser’s own entry (httpRealm)'),
-    username: L('sem usuário', 'no username'),
-    password: L('sem senha', 'no password'),
-    again: L('repetida no arquivo', 'repeated in the file')
+  const saved = good.filter((r) => already(r)).length // rows already in this drawer
+  const out = parsed.logins.length - good.length
+  const counts = L(
+    `${going.length} pra entrar${saved ? `, ${saved} já ${saved === 1 ? 'salvo' : 'salvos'}` : ''}${out ? `, ${out} fora` : ''}.`,
+    `${going.length} to go in${saved ? `, ${saved} already saved` : ''}${out ? `, ${out} left out` : ''}.`
+  )
+  // A tag short enough for the row, and the whole reason as its tooltip.
+  const why: Record<NonNullable<CsvLogin['skip']>, { tag: string; hint: string }> = {
+    address: {
+      tag: L('endereço não aceito', 'address not accepted'),
+      hint: L('Só https (http só neste computador): o app não digita senha num site sem cifra.', 'Only https (http only on this computer): the app doesn’t type a password into a site without it.')
+    },
+    protocol: {
+      tag: L('não é um site', 'not a site'),
+      hint: L('Um endereço android://, chrome-extension:// ou de outro protocolo não tem site pra digitar.', 'An android://, chrome-extension:// or other protocol address has no site to type into.')
+    },
+    realm: {
+      tag: L('entrada do navegador', 'the browser’s entry'),
+      hint: L('O Firefox guarda entradas de autenticação HTTP que não são um login de site.', 'Firefox keeps HTTP-authentication entries that are not a site login.')
+    },
+    username: { tag: L('sem usuário', 'no username'), hint: L('O Cofre precisa do usuário e da senha.', 'The Vault needs both the username and the password.') },
+    password: { tag: L('sem senha', 'no password'), hint: L('O Cofre precisa do usuário e da senha.', 'The Vault needs both the username and the password.') },
+    again: { tag: L('repetida no arquivo', 'repeated in the file'), hint: L('O mesmo site e usuário já apareceu antes neste arquivo.', 'The same site and username appeared earlier in this file.') }
   }
   const save = (): void => {
     setBusy(true)
@@ -512,8 +528,7 @@ function ImportCsv({ have, mine, onClose, onSaved }: { have: VaultLogin[]; mine:
       {parsed.logins.length > 0 && (
         <>
           <p className="muted small">
-            {parsed.browser === 'firefox' ? L('Exportação do Firefox.', 'Firefox’s export.') : L('Exportação do Chrome.', 'Chrome’s export.')}{' '}
-            {L(`${good.length} pra entrar, ${parsed.logins.length - good.length} fora.`, `${good.length} to go in, ${parsed.logins.length - good.length} left out.`)}
+            {parsed.browser === 'firefox' ? L('Exportação do Firefox.', 'Firefox’s export.') : L('Exportação do Chrome.', 'Chrome’s export.')} {counts}
           </p>
           <div className="table vault-import__lines">
             {parsed.logins.map((r) => (
@@ -521,11 +536,11 @@ function ImportCsv({ have, mine, onClose, onSaved }: { have: VaultLogin[]; mine:
                 <code className="grow">{r.origin ? host(r.origin) : r.site}</code>
                 <span className="muted small">{r.username}</span>
                 {r.skip ? (
-                  <span className="tag tag--danger" title={why[r.skip]}>
-                    {why[r.skip]}
+                  <span className="tag tag--danger vault-import__state" title={why[r.skip].hint}>
+                    {why[r.skip].tag}
                   </span>
                 ) : already(r) ? (
-                  <label className="row small">
+                  <label className="row small vault-import__state">
                     <input
                       type="checkbox"
                       checked={replace.includes(r.row)}
