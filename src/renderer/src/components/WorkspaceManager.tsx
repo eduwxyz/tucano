@@ -8,8 +8,8 @@ import { useWorkspaceList } from './Workspaces'
 
 const PARTS = (): Record<WorkspacePart, { label: string; about: string }> => ({
   general: { label: L('Configurações gerais', 'General settings'), about: L('Seu nome, o idioma, os modelos do roteador e da memória, limites, horário de silêncio e voz.', 'Your name, the language, the router and memory models, limits, quiet hours and voice.') },
-  context: { label: L('Contexto', 'Context'), about: L('O texto que entra em toda conversa: quem você é, o que faz, o que importa.', 'The text that goes in every conversation: who you are, what you do, what matters.') },
-  wiki: { label: L('Wiki', 'Wiki'), about: L('A mesma wiki, não uma cópia: o que um workspace guarda o outro lê. Sem ela, começa com uma wiki vazia.', 'The same wiki, not a copy: what one workspace keeps the other reads. Without it, it starts with an empty wiki.') },
+  context: { label: L('Contexto', 'Context'), about: L('O texto que entra em toda conversa: quem você é, o que faz, o que importa.', "Shared instructions included in every conversation.") },
+  wiki: { label: L('Wiki', 'Wiki'), about: L('A mesma wiki, não uma cópia: o que um workspace guarda o outro lê. Sem ela, começa com uma wiki vazia.', "Share the same wiki folder across both workspaces. Otherwise, start with an empty wiki.") },
   agents: { label: L('Agentes', 'Agents'), about: L('Instruções, modelos, computadores e pastas emprestadas, sem as memórias nem os arquivos.', 'Instructions, models, computers and lent folders, without their memories or files.') },
   channels: { label: L('Canais', 'Channels'), about: L('Nomes, temas e quem está em cada um, sem as mensagens.', 'Names, topics and who is in each, without the messages.') },
   skills: { label: L('Skills', 'Skills'), about: L('Sem os agentes, as de agentes específicos vêm arquivadas.', 'Without the agents, those of specific agents come archived.') },

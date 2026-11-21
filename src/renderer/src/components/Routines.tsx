@@ -263,7 +263,7 @@ export function RoutinesPage(): ReactNode {
         {people.length > 1 && (
           <div className="rt-agent">
             <Select
-              aria-label={L('Mostrar só as de um agente', 'Show only one agent’s')}
+              aria-label={L('Mostrar só as de um agente', "Filter routines by agent")}
               value={only ?? ''}
               onChange={(v) => setOnly(v || null)}
               options={[{ value: '', label: L('Todos os agentes', 'All agents') }, ...people.map((a) => ({ value: a.id, label: a.name }))]}
@@ -276,7 +276,7 @@ export function RoutinesPage(): ReactNode {
         <>
           {watching.length > 0 && (
             <div className="cal-watch">
-              <span className="cal-watch__label">{L('De olho, sem horário', 'Watching, no set time')}</span>
+              <span className="cal-watch__label">{L('De olho, sem horário', "Event-triggered routines")}</span>
               {watching.map((r) => {
                 const a = agents.find((x) => x.id === r.agentId)
                 return (
