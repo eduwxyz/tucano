@@ -5687,6 +5687,47 @@ table.csv th {
   border-color: var(--accent);
 }
 
+/* The strip under a settings tab: the same line as the tabs, parking right below them. It is links
+   and not tabs — every section of the pane stays visible together — and it wraps instead of running
+   past the panel, because at 900 px its sections measure wider than the box they sit in. */
+.page-body > .tabs.tabs--sections {
+  /* The page body pulls its tabs 4 px up; the strip still meets the tab bar's own 18 px gap. */
+  margin-top: -18px;
+}
+/* Room under the last card, so the strip can take it to the same line as every other section. */
+.settings-sections + .agent-form {
+  padding-bottom: var(--settings-tail, 0px);
+}
+.tabs--sections {
+  position: sticky;
+  top: var(--settings-nav-top, 0px);
+  z-index: 2;
+  flex-wrap: wrap;
+  margin: -18px 0 18px;
+  padding-top: 0;
+}
+.tabs--sections > a {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 14px;
+  margin-bottom: -1px;
+  font-size: 13.5px;
+  line-height: 1.2;
+  color: var(--text-2);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.tabs--sections > a:hover {
+  color: var(--text);
+}
+.tabs--sections > a[aria-current='location'] {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
 /* archived agents */
 .archived-banner {
   display: flex;
@@ -8880,6 +8921,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
 .voice-setup { display: grid; gap: 10px; justify-items: start; }
 .voice-setup__choices, .choices { display: grid; gap: 6px; width: 100%; }
+/* The two dictation model choices sit side by side until the card gets narrow. */
+.voice-setup__choices { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+/* The workspace's name and the name the agents use share one line, each with its own label. */
+.settings-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.settings-pair > .field { min-width: 0; margin-bottom: 0; }
 .voice-choice, .choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
 .voice-choice small, .choice small { color: var(--text-2); font-size: 12px; }
 .voice-choice:hover, .choice:hover { border-color: var(--border-strong); }
@@ -8891,9 +8937,13 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
 /* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
 .voice-prefs { display: grid; gap: 14px; }
-/* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
-.voice-advanced[open] { display: grid; gap: 10px; }
-.voice-advanced summary { cursor: pointer; }
+.voice-setup__actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; width: 100%; }
+.voice-setup__actions > .row { margin: 0; }
+/* The microphone switch and Avançado share the line under the model choices. */
+.voice-prefs__row { display: flex; align-items: center; gap: 14px; }
+.voice-advanced__toggle { margin-left: auto; border: 0; background: none; padding: 0; cursor: pointer; }
+.voice-advanced__toggle::before { content: "› "; }
+.voice-advanced__body { display: grid; gap: 10px; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
