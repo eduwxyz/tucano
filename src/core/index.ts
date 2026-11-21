@@ -22,6 +22,7 @@ import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnC
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
+import { defaultRouting, normalizeRouting, validateRouting } from '../shared/routing'
 import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
@@ -52,7 +53,10 @@ import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
+import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
+import { LISTEN_STUB_KEY, listenStub } from './jev-fake'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
@@ -104,6 +108,10 @@ companyNetwork()
 const deletedError = (name: string): string => L(`${name} foi excluído e não volta.`, `${name} was deleted and can’t come back.`)
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
+// Who Jev brings in when there is no TypeSafe key to ask with: a stand-in for the listen question
+// and the router's, so the built app and a test can drive a listening channel on a machine that
+// has no key. Off unless asked for: TUCANO_FAKE_LISTEN=<handle> brings that agent in, `none` never.
+const fakeListen = fake ? process.env['TUCANO_FAKE_LISTEN'] : undefined
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
 const serverMode = process.env['TUCANO_SERVER'] === '1'
 const publicUrl = process.env['TUCANO_URL']?.replace(/\/+$/, '')
@@ -315,10 +323,28 @@ const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
 
+// A classifier's key, as the page sees it: saved or not. An install from before Settings ›
+// Classifiers kept Jev's under the old name, and that one still counts.
+const classifierKeySaved = (c: ClassifierConfig): boolean =>
+  db.getSecret(classifierSecret(c.id)) !== undefined || (c.id === JEV_CLASSIFIER.id && db.getSecret(JEV_SECRET) !== undefined)
+const classifierKeyOf = async (c: ClassifierConfig): Promise<string | undefined> =>
+  (await secrets.get(classifierSecret(c.id))) ?? (c.id === JEV_CLASSIFIER.id ? await secrets.get(JEV_SECRET) : undefined)
+
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  const classifiers = classifierList(s)
+  return {
+    ...s,
+    classifiers,
+    classifierJobs: classifierJobsOf(s),
+    classifierKeys: Object.fromEntries(classifiers.map((c) => [c.id, classifierKeySaved(c)])),
+    engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses),
+    ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}),
+    jevKey: classifiers.some((c) => c.provider === 'typesafe' && classifierKeySaved(c)),
+    telegram: telegram?.info(),
+    accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) }))
+  }
 }
 
 // More logins of Claude Code, Codex and Antigravity (Settings › Accounts): each in its own folder, checked with
@@ -854,7 +880,11 @@ const browser = new Browser({
   emit,
   logins: vault,
   me: () => settings().workspaceName,
-  jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
+  jev: {
+    key: () => classifierKeyOf(classifierFor(settings(), 'browser') ?? JEV_CLASSIFIER),
+    on: () => !!classifierFor(settings(), 'browser'),
+    target: () => classifierFor(settings(), 'browser')
+  },
   onHandback: (agentId) => void runner.handedBack(agentId)
 })
 const connectors = new ConnectorManager({
@@ -1115,7 +1145,17 @@ const runner = new Runner({
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
     void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
-  jev: { key: () => secrets.get(JEV_SECRET) },
+  jev: fakeListen
+    ? { key: async () => LISTEN_STUB_KEY, target: () => JEV_CLASSIFIER, fetch: listenStub(fakeListen) }
+    : {
+        key: (job) => {
+          // A job reads the classifier chosen for it; with no job, Jev's own classifier, which is also
+          // what an install from before the classifiers keeps using.
+          const c = job ? classifierFor(settings(), job) : JEV_CLASSIFIER
+          return c ? classifierKeyOf(c) : Promise.resolve(undefined)
+        },
+        target: (job) => classifierFor(settings(), job ?? 'routing')
+      },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
@@ -2009,6 +2049,9 @@ const api: Handlers = {
     const doesNext = typeof sectorDoes === 'string' ? sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
     if (doesNext) clean.sectorDoes = doesNext
     else delete clean.sectorDoes
+    // On, off, or inherit (absent): anything else, a cleared switch included, goes back to following the
+    // global one instead of turning into an off that reads as a choice.
+    if (clean.smartRouting !== true && clean.smartRouting !== false) delete clean.smartRouting
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -2090,13 +2133,20 @@ const api: Handlers = {
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
-  setChannelMembers: ({ id, agentIds }, ctx) => {
+  setChannelMembers: ({ id, agentIds, mentionOnly, listen }, ctx) => {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     assertChannelVisible(db, ctx.person, conv)
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    db.setMembers(id, membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a))))
+    const roster = membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a)))
+    // A mode is only for whoever is in the channel: an agent taken out can't stay in one.
+    db.setMembers(
+      id,
+      roster,
+      mentionOnly === undefined ? undefined : mentionOnly.filter((a) => roster.includes(a)),
+      listen === undefined ? undefined : listen.filter((a) => roster.includes(a))
+    )
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
@@ -2402,7 +2452,6 @@ const api: Handlers = {
   },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
-  // Checked with TypeSafe before it's saved; null removes it.
   nodeInfo: async () => nodeInfo(),
   setNode: async ({ apps }) => {
     db.setSettings({ node: { ...(settings().node ?? {}), apps } })
@@ -2424,10 +2473,13 @@ const api: Handlers = {
     return lentNow()
   },
   nodeLog: async ({ limit }) => nodeLog.read(limit ?? 100),
+  // Checked with TypeSafe before it's saved; null removes it. Jev's own row, for the pages that
+  // still ask for it; Settings › Classifiers uses setClassifierKey, which takes the id.
   setJevKey: async ({ key }) => {
     const k = key?.trim()
     if (k) await checkJevKey(k)
-    await secrets.set(JEV_SECRET, k || undefined)
+    await secrets.set(classifierSecret(JEV_CLASSIFIER.id), k || undefined)
+    await secrets.set(JEV_SECRET, undefined) // the old name is retired the first time the key is saved here
     if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
     emit({ type: 'settings', settings: settings() })
   },
@@ -2459,6 +2511,18 @@ const api: Handlers = {
       const chosen = db.getSettings(DEFAULTS).harnesses
       if (chosen && !chosen.includes('endpoint')) db.setSettings({ harnesses: [...chosen, 'endpoint'] })
     }
+    emit({ type: 'settings', settings: settings() })
+  },
+
+  // A classifier's key, checked with its own provider before it's saved; null removes it. Each
+  // classifier keeps its own key, so two accounts of one provider never share one.
+  setClassifierKey: async ({ id, key }) => {
+    const c = classifierList(db.getSettings(DEFAULTS)).find((x) => x.id === id)
+    if (!c) throw new Error(L('Esse classificador não existe mais.', 'That classifier no longer exists.'))
+    const k = key?.trim()
+    if (k) await checkClassifierKey(c, k)
+    await secrets.set(classifierSecret(c.id), k || undefined)
+    if (c.id === JEV_CLASSIFIER.id) await secrets.set(JEV_SECRET, undefined) // one home for the key
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2541,6 +2605,23 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    // A routing setup is judged, not cleaned: an entry this build can't run (a harness it doesn't have,
+    // a thinking level it doesn't support) is refused with where it is, so nothing is quietly turned
+    // into something else. Reading an old or hand-edited setup stays tolerant, inside normalizeRouting.
+    if (patch.routing !== undefined) {
+      if (patch.routing === null) patch.routing = defaultRouting()
+      else {
+        const checked = validateRouting(patch.routing)
+        if (!checked.ok) {
+          const where = checked.problems
+            .slice(0, 4)
+            .map((p) => `${p.path || 'routing'}: ${p.message}`)
+            .join(' · ')
+          throw new Error(L(`Rotas não salvas — ${where}`, `Routing not saved — ${where}`))
+        }
+        patch.routing = checked.value
+      }
+    }
     db.setSettings(patch)
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {

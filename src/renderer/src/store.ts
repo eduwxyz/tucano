@@ -989,7 +989,10 @@ export const deleteAgent = (id: string): Promise<void> => call('deleteAgent', { 
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 // Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
-export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
+// `mentionOnly`: the agents in the channel that answer only when mentioned. `listen`: those Jev
+// brings in when the message is about what they do.
+export const setChannelMembers = (id: string, agentIds: string[], mentionOnly?: string[], listen?: string[]): Promise<void> =>
+  call('setChannelMembers', { id, agentIds, ...(mentionOnly ? { mentionOnly } : {}), ...(listen ? { listen } : {}) })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
 export const markRead = (id: string): void => { void call('markRead', { conversationId: id }) }
 
@@ -1123,6 +1126,7 @@ export const setJevKey = (key: string | null): Promise<void> => call('setJevKey'
 // An address in OpenAI's format the agents run on with no harness: tried (what it lists), then saved.
 export const probeEndpoint = (baseUrl: string, key?: string): Promise<{ models: string[]; error?: string }> => call('probeEndpoint', { baseUrl, ...(key ? { key } : {}) })
 export const setEndpoint = (baseUrl: string, models: string[], key?: string | null): Promise<void> => call('setEndpoint', { baseUrl, models, ...(key !== undefined ? { key } : {}) })
+export const setClassifierKey = (id: string, key: string | null): Promise<void> => call('setClassifierKey', { id, key })
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })

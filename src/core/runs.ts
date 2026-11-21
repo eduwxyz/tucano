@@ -11,6 +11,8 @@ import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
+import { decideRoute, readPrompt, unavailableTrace } from './model-routing'
+import { POOLS, targetId, type RouteTarget, type RouteTrace, type RoutingConfig } from '../shared/routing'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
@@ -34,7 +36,8 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
-import { JEV_MODEL, routeJev } from './jev'
+import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
+import { JEV_MODEL, listenJev, recommendOptions, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -284,7 +287,10 @@ export interface RunnerDeps {
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
-  jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
+  // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
+  // `target` are asked per job, so the same seam serves the jobs Apo's own branches add (listening,
+  // the recommended option, the next steps): a job with no classifier is off.
+  jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
@@ -390,6 +396,12 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
   return [...before, ...since, anchor, ...alongside]
 }
 
+// The name an engine is given for a model. Settings hold a model as `<harness>:<name>` (an agent's own
+// pick, and a chain entry built from the same picker); the engine takes `<name>`.
+const bareModelFor = (engine: EngineId, model: string): string => {
+  const info = modelInfo(model)
+  return info && info.engine === engine ? info.id : model
+}
 export class Runner {
   private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
   private active = 0
@@ -534,7 +546,7 @@ export class Runner {
       const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
     }
-    if (opened || settings.routerModel === JEV_MODEL) return
+    if (opened || settings.routerModel === JEV_MODEL || classifierFor(settings, 'routing')) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -657,11 +669,23 @@ export class Runner {
     const doer = doing ? may.find((a) => a.id === doing.to) : undefined
     if (doer) responders = [doer]
     if (responders.length === 0) {
-      if (conv.kind === 'dm' || may.length === 1) responders = may
-      else if (may.length > 1) {
-        void this.routeAndRun(conv, may, replyIn, mine.id)
+      // Mention mode (a channel only): those agents read the room but are never picked for it, so
+      // they're neither offered to the router nor the one agent a channel answers through. A
+      // mention, mine or another agent's, still wakes them: that's the whole point of the mode.
+      // The roster here is already what the writer may see, so both modes filter on that.
+      const asked = this.answering(conv, may)
+      // Listen mode: Jev reads this one message and says whether it needs one of them, and whether
+      // the room already handles it. They join the roster only when it says yes.
+      const heard = await this.heard(conv, mine, may, asked)
+      const roster = [...asked, ...heard.agents]
+      // It answers alone: say why an agent nobody mentioned is the one answering.
+      if (roster.length === 1 && heard.agents.length === 1)
+        this.post(conv.id, replyIn, L(`O Jev ouviu esta mensagem e trouxe **${heard.agents[0]!.name}** (${heard.reason}).`, `Jev heard this message and brought in **${heard.agents[0]!.name}** (${heard.reason}).`))
+      if (conv.kind === 'dm' || roster.length === 1) responders = roster
+      else if (roster.length > 1) {
+        void this.routeAndRun(conv, roster, replyIn, mine.id, heard.reason)
         return
-      }
+      } else if (may.length > 0) return this.nobodyAsked(conv.id, replyIn, heard.problem)
     }
     // An answer to a question asked on a job: the same job goes on (its brakes count from where they were).
     const jobOn = asked?.run?.job && this.jobOf(asked.run.job)?.state === 'running' ? asked.run.job : undefined
@@ -921,6 +945,91 @@ export class Runner {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
   }
 
+  // Who in the room answers a message nobody was mentioned in: in a channel, mention mode leaves
+  // an agent out of it (it still reads everything, and still answers a mention), and so does
+  // listen mode, which gets an agent back in only when Jev says the message is theirs.
+  private answering(conv: Conversation, members: Agent[]): Agent[] {
+    if (conv.kind !== 'channel') return members
+    const quiet = new Set([...(conv.mentionOnly ?? []), ...(conv.listen ?? [])])
+    if (quiet.size === 0) return members
+    return members.filter((a) => !quiet.has(a.id))
+  }
+
+  // The agents of a channel in listen mode, in the order they were added.
+  private listening(conv: Conversation, members: Agent[]): Agent[] {
+    if (conv.kind !== 'channel' || !conv.listen?.length) return []
+    const hears = new Set(conv.listen)
+    return members.filter((a) => hears.has(a.id))
+  }
+
+  // One cheap Jev question per message, and only when the channel has agents listening: does this
+  // message need one of them, and can the room do without it? A failure never keeps the message
+  // from being answered — the listeners simply stay out, and the note says why.
+  private async heard(conv: Conversation, trigger: Message, members: Agent[], answering: Agent[]): Promise<{ agents: Agent[]; reason: string; problem: string }> {
+    const listeners = this.listening(conv, members)
+    if (listeners.length === 0) return { agents: [], reason: '', problem: '' }
+    const key = await this.deps.jev?.key('listen')
+    if (!key) return { agents: [], reason: '', problem: L('os agentes que escutam ficaram de fora: falta a chave do TypeSafe', 'the listening agents stayed out: the TypeSafe key is missing') }
+    try {
+      const settings = await this.deps.settings()
+      const { messages } = contextWindow(this.deps.db, trigger, ROUTER_HISTORY)
+      const j = await listenJev({
+        key,
+        ...(this.deps.jev?.target?.('listen') ? { target: this.deps.jev.target('listen') } : {}),
+        messages,
+        trigger,
+        listeners,
+        answering,
+        me: settings.workspaceName,
+        people: promptPeople(this.deps.db, settings, true),
+        connectors: this.deps.connectors?.list(),
+        fetch: this.deps.jev?.fetch
+      })
+      if ('error' in j) return { agents: [], reason: '', problem: L(`o Jev não conseguiu ouvir (${j.error})`, `Jev couldn't listen (${j.error})`) }
+      // `j.reason` is empty when it picked no one, and explains a no when the room could do without it.
+      return { agents: j.agents, reason: j.agents.length ? j.reason : '', problem: j.agents.length ? '' : j.reason }
+    } catch (e) {
+      return { agents: [], reason: '', problem: L(`o Jev não conseguiu ouvir (${e instanceof Error ? e.message : String(e)})`, `Jev couldn't listen (${e instanceof Error ? e.message : String(e)})`) }
+    }
+  }
+
+  // A channel where every agent is in mention mode: nobody is picked, and it says why instead of
+  // leaving the message unanswered. Once per thread: the second message in a row doesn't repeat it.
+  private nobodyAsked(conversationId: string, threadId: string | undefined, heard = ''): void {
+    const conv = this.deps.db.conversation(conversationId)
+    const hint = conv?.listen?.length
+      ? L(
+          `Ninguém respondeu: os agentes deste canal estão em **modo menção** ou **modo escuta**, e o Jev não viu nesta mensagem nada que peça um deles${heard ? ` (${heard})` : ''}. Chame com **@nome**.`,
+          `Nobody answered: the agents in this channel are in **mention mode** or **listen mode**, and Jev saw nothing in this message that needs one of them${heard ? ` (${heard})` : ''}. Call one with **@name**.`
+        )
+      : L(
+          'Ninguém responde aqui sem ser chamado: todos os agentes deste canal estão em **modo menção**. Chame com **@nome** ou peça a outro agente.',
+          'Nobody here answers unless mentioned: every agent in this channel is in **mention mode**. Call one with **@name**, or ask another agent.'
+        )
+    const seen = this.deps.db.recentMessages(conversationId, 3, threadId ?? null)
+    if (seen.some((m) => m.text === hint)) return
+    this.post(conversationId, threadId, hint)
+  }
+
+  // Assigned in Settings › Classifier Uses: one cheap Jev question per decision with options, and the
+  // pick is written on the reply after the card is already on screen — so asking never waits on TypeSafe.
+  // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
+  private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
+    if (!classifierFor(settings, 'recommend') || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
+    const key = await this.deps.jev?.key('recommend')
+    if (!key) return
+    try {
+      const r = await recommendOptions({ key, questions, context: msg.text, fetch: this.deps.jev?.fetch })
+      if ('error' in r || !r.picks.some((p) => p !== null)) return
+      // Answered while TypeSafe thought: the pill has nowhere to go, and the card is closed.
+      const now = this.deps.db.message(msg.id)
+      if (!now || now.run?.status !== 'waiting_input' || now.run.answers) return
+      this.update(now, { run: { ...now.run, recommended: r.picks } })
+    } catch {
+      // the card works without a suggestion
+    }
+  }
+
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
   private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
     return this.deps.db.waitingQuestion(conversationId, threadId ?? null)
@@ -942,11 +1051,14 @@ export class Runner {
   }
 
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
-  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string): Promise<void> {
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, heard = ''): Promise<void> {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
     this.routing++
     const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
+    // What Jev heard, when it brought a listening agent in: it reads better in the note than as a
+    // separate line, and the person sees why an agent they weren't talking to answered.
+    const heardWhy = heard ? L(` · o Jev trouxe ${heard}`, ` · Jev brought in ${heard}`) : ''
     const fail = (why: string): void => {
       const reason = why.trim().replace(/[.\s]+$/, '') // one sentence: the reason may carry parentheses of its own
       this.update(note, { text: L(`Não consegui escolher quem responde: ${reason}. Mencione um agente com **@nome**.`, `I couldn't pick who answers: ${reason}. Mention an agent with **@name**.`), run: undefined })
@@ -965,13 +1077,16 @@ export class Runner {
         team: db.people().length > 1
       }
 
-      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+      // A classifier first when one is chosen for this job; if it fails, Haiku decides, so the
+      // channel never goes quiet.
       let fellBack = ''
-      if (settings.routerModel === JEV_MODEL) {
-        const key = await this.deps.jev?.key()
-        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
-        fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
+      const routing = classifierFor(settings, 'routing')
+      if (routing) {
+        const key = await this.deps.jev?.key('routing')
+        const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
+        const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
+        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s${heardWhy}`)
+        fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
@@ -984,7 +1099,7 @@ export class Runner {
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}${heardWhy}`)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1121,6 +1236,56 @@ export class Runner {
     return { model, account }
   }
 
+  // Smart routing: Jev reads what the person asked, the config turns it into a tier, and the person's
+  // chains give the model this reply runs on. It never throws. Two different things can go wrong: no
+  // reading at all (no key, no answer, a malformed one) leaves the agent's own model running and the
+  // trace saying why, which is the documented fail-open; a good reading with nothing eligible leaves
+  // the reply unsent, and `blocked` says so.
+  private async routeModel(
+    agent: Agent,
+    settings: Settings,
+    config: RoutingConfig,
+    baseline: RouteTarget,
+    asked: { trigger?: string; replyTo?: string; task?: string }
+  ): Promise<{ trace: RouteTrace; blocked: boolean }> {
+    const { db } = this.deps
+    const anchorId = asked.trigger ?? asked.replyTo
+    const anchor = anchorId ? db.message(anchorId) : undefined
+    const prompt = (asked.task ?? anchor?.text ?? '').trim()
+    if (!prompt) return { trace: unavailableTrace(undefined, config, L('não havia pedido pra ler', 'there was no request to read'), baseline), blocked: false }
+    const key = await this.deps.jev?.key('smart')
+    if (!key) return { trace: unavailableTrace(undefined, config, L('falta a chave do TypeSafe', 'the TypeSafe key is missing'), baseline), blocked: false }
+    // The last few messages, so a short follow-up ("e o teste?") is read in its context.
+    const before = anchor ? contextWindow(db, anchor, 6).messages : []
+    const who = (m: Message): string =>
+      m.author.kind === 'agent' ? (db.agent(m.author.id)?.name ?? 'agent') : m.author.kind === 'person' ? (db.person(m.author.id)?.name ?? 'person') : m.author.kind
+    const history = before.map((m) => `${who(m)}: ${m.text}`).join('\n')
+    const read = await readPrompt({
+      key,
+      ...(this.deps.jev?.target?.('smart') ? { target: this.deps.jev.target('smart') } : {}),
+      prompt,
+      ...(history ? { history } : {}),
+      roles: config.roles,
+      ...(this.deps.jev?.fetch ? { fetch: this.deps.jev.fetch } : {})
+    })
+    if ('error' in read) return { trace: unavailableTrace(undefined, config, read.error, baseline), blocked: false }
+    const decided = decideRoute(read, config, (t) => this.whyNot(t, settings), baseline)
+    return decided.kind === 'exhausted' ? { trace: decided.trace, blocked: true } : { trace: decided.trace, blocked: false }
+  }
+
+  // Why a candidate can't run this reply, in the person's language; undefined when it can. A
+  // candidate names its own login: a chain entry may run on an account the agent itself doesn't use.
+  private whyNot(t: RouteTarget, settings: Settings): string | undefined {
+    const label = ENGINES[t.engine].label
+    const status = settings.engines[t.engine]
+    if (!status?.installed) return L(`${label} não está instalado aqui`, `${label} isn't installed here`)
+    if (settings.harnesses && !settings.harnesses.includes(t.engine)) return L(`${label} está desligado`, `${label} is turned off`)
+    const own = t.accountId ? settings.accounts?.find((a) => a.id === t.accountId && a.engine === t.engine) : undefined
+    if (t.accountId && !own) return L(`a conta ${t.accountId} não existe mais`, `the account ${t.accountId} is gone`)
+    if (!status.loggedIn && !own?.loggedIn) return L(`${label} não está logado`, `${label} isn't signed in`)
+    return undefined
+  }
+
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
@@ -1229,8 +1394,63 @@ export class Runner {
       return msg
     }
 
+    // Smart routing (Settings › Routing): Jev reads what was asked and the person's pools pick the model
+    // for this reply. The switch is in two places: the global one (Settings › Models › Router) and, on each
+    // agent's page, On · Off · Follow the global one. A bot set to On routes even with the global switch
+    // off; one set to Off never routes; the rest follow the switch. An agent that decides nothing keeps
+    // its own model, which is also the baseline the trace compares against.
+    let effort = agent.effort
+    // A routed reply may run on another login than the agent's own, when the chain entry names one.
+    let routedAccountId: string | undefined
+    const routing = settings.routing
+    const wantsRouting = agent.smartRouting === true || (agent.smartRouting === undefined && routing?.enabled === true)
+    // Switched on before any pool has a model is a setup half done, not a route with nothing eligible:
+    // the tab says replies run on the agent's own model until one is added, and that has to hold.
+    const anyModel = !!routing && (POOLS.some((p) => (routing.pools[p]?.chain.length ?? 0) > 0) || Object.values(routing.roles).some((r) => (r.chain?.length ?? 0) > 0))
+    if (routing && wantsRouting && anyModel) {
+      const baseline: RouteTarget = {
+        id: targetId({ engine: engineId, ...(agent.accountId ? { accountId: agent.accountId } : {}), model: modelName, effort }),
+        engine: engineId,
+        ...(agent.accountId ? { accountId: agent.accountId } : {}),
+        model: modelName,
+        effort
+      }
+      const routed = await this.routeModel(agent, settings, routing, baseline, { ...(opts.trigger ? { trigger: opts.trigger } : {}), ...(replyTo ? { replyTo } : {}), ...(task ? { task } : {}) })
+      msg.run = { ...msg.run!, route: routed.trace }
+      if (routed.blocked) {
+        // A good reading and nothing eligible: sending it on some dearer model anyway is exactly what
+        // the person's pools said not to do. The reply is not sent, and it says why.
+        save({
+          run: {
+            status: 'failed',
+            endedAt: Date.now(),
+            depth: opts.depth,
+            steps: [],
+            ...again,
+            route: routed.trace,
+            error: routed.trace.error ?? L('Nenhum modelo elegível nas rotas: a resposta não foi enviada.', 'No eligible model in the routes: the reply was not sent.')
+          }
+        })
+        return msg
+      }
+      const picked = routed.trace.selected
+      if (picked && routed.trace.state !== 'unavailable') {
+        modelId = agent.modelId // the baseline stays the agent's own: what the trace compares against
+        // A chain entry may name a model the way an agent's page does, with its harness in front
+        // ("pi:opencode-go/deepseek-v4.1-flash"). The engines take the bare name: with the prefix left
+        // on, pi answered `Model "pi:opencode-go/deepseek-v4.1-flash" not found` and the reply died.
+        modelName = bareModelFor(picked.engine, picked.model)
+        engineId = picked.engine
+        effort = picked.effort
+        routedAccountId = picked.accountId
+        engineLabel = `${ENGINES[engineId].label} · ${modelName}`
+        msg.run.steps = msg.run.steps.map((st) => (st.status === 'running' ? { ...st, detail: engineLabel } : st))
+      }
+    }
+
     // Another login of this harness (Settings › Accounts), when the agent has one.
-    let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    const accountId = routedAccountId ?? agent.accountId
+    let account = accountId ? settings.accounts?.find((a) => a.id === accountId && a.engine === engineId) : undefined
     if (account && !account.loggedIn) {
       save({
         run: {
@@ -2724,7 +2944,7 @@ ${note}`,
     // reply would see half of: that one goes the usual way, and the session takes it all next time.
     const sessionKey = replyKey(agent.id, conv.id, msg.threadId)
     // Which tools come loaded (_meta) stays out: a tool used for the first time in this reply mustn't end the session.
-    const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
+    const config = sessionConfig({ engine: engineId, model: modelName, effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
     let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
@@ -2755,7 +2975,7 @@ ${note}`,
         try {
           const events = engines[engineId].run({
             model: modelName,
-            effort: agent.effort,
+            effort,
             system,
             ...input,
             session: plan && { id: plan.id, resume: plan.resume, keep: true },
@@ -2856,7 +3076,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, route: msg.run?.route, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -2924,6 +3144,8 @@ ${note}`,
         this.keep({ ...handedNow, approval: approval.id })
         this.tellAsker(handedNow.from, handedNow.originConversationId, handedNow.originThreadId)
       }
+      // Turned on in the settings: Jev's pick lands on the card afterwards, so asking never waits on it.
+      if (questions) void this.recommend(msg, questions, settings)
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
         const finished = (): void => {

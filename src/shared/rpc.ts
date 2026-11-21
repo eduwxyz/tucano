@@ -57,7 +57,7 @@ export interface Api {
   archiveAgent(p: { id: string; archived: boolean }): void // out of the sidebar, its replies stopped and routines off; back with archived: false
   deleteAgent(p: { id: string }): void // an archived agent, for good: its messages stay under its name, struck out; the rest goes
   setTopic(p: { id: string; topic: string }): void
-  setChannelMembers(p: { id: string; agentIds: string[] }): void
+  setChannelMembers(p: { id: string; agentIds: string[]; mentionOnly?: string[]; listen?: string[] }): void // mentionOnly: those answering only when mentioned; listen: those Jev decides when to bring in
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
   openDm(p: { agentId: string }): string
   tasks(): Task[] // my to-dos on the board (Quadro), in order
@@ -154,6 +154,7 @@ export interface Api {
   addNodeFolder(p: { path: string }): Promise<NodeInfo> // lends a folder to the server's agents; throws why not (outside home, Library, a dot folder, Tucano's data)
   removeNodeFolder(p: { path: string }): Promise<NodeInfo>
   nodeLog(p: { limit?: number }): Promise<NodeLogEntry[]> // what the server ran here, newest first (up to 500)
+  setClassifierKey(p: { id: string; key: string | null }): Promise<void> // checks the key with that classifier's provider before saving; null removes it
   engineModels(p: { engine: EngineId }): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> // a harness's own list (OpenCode, Pi, a gateway)
   testEngine(p: { model: string }): Promise<{ ok: boolean; message: string; seconds?: number }> // one real reply through that model
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
