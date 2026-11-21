@@ -330,7 +330,7 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
                   <span className="ask-option__line">
                     <span className="ask-option__label">{o.label}</span>
                     {o.recommended && <Recommended />}
-                    {recommended === i && <JevPick />}
+                    {(recommended === i || (steps && !!question.ticked?.includes(i))) && <JevPick />}
                   </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
