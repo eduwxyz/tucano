@@ -155,6 +155,31 @@ function until(at: number): string {
   return L(`Vale até ${day}, às ${hm}.`, `Good until ${day}, ${hm}.`)
 }
 
+// Every agent in the channel in mention mode or listen mode: nothing here is answered unless it is
+// called, or unless Jev hears that the message is one of the listening agents'.
+export const allMentionOnly = (conv: Conversation, members: Agent[]): boolean =>
+  conv.kind === 'channel' &&
+  members.length > 0 &&
+  members.every((a) => conv.mentionOnly?.includes(a.id) === true || conv.listen?.includes(a.id) === true)
+
+// Some agent in the channel is in listen mode: it may join a message nobody was mentioned in.
+export const anyListening = (conv: Conversation, members: Agent[]): boolean =>
+  conv.kind === 'channel' && members.some((a) => conv.listen?.includes(a.id) === true)
+
+// The line under the field: what a message there sets off, in the fewest words.
+export function composerNote(opts: { note?: string; members: Agent[]; thread?: boolean; dm?: boolean; mentionOnly?: boolean; listening?: boolean; tools?: boolean }): string {
+  const { note, members, thread, dm, mentionOnly, listening, tools } = opts
+  if (note) return note
+  if (tools) return ''
+  if (members[0]?.kind === 'tuca') return L('Nada é criado sem você', 'Nothing is created without you')
+  if (thread) return L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone')
+  if (dm) return L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`)
+  if (mentionOnly && listening) return L('Todos em modo menção ou escuta: só respondem com @nome', 'Everyone is in mention or listen mode: they answer only with @name')
+  if (mentionOnly) return L('Todos aqui em modo menção: só respondem com @nome', 'Everyone here is in mention mode: they answer only with @name')
+  if (listening) return L('Quem escuta entra quando a mensagem é do assunto dele · @ chama direto', 'Whoever listens joins when the message is about what they do · @ calls them right away')
+  return L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @')
+}
+
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
   const editsChannel = useStore((s) => !!conv && canEditChannel(s, conv))
@@ -286,7 +311,13 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {gone ? (
           <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
         ) : (
-          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+          <Composer
+            conversationId={id}
+            members={members}
+            mentionOnly={allMentionOnly(conv, members)}
+            listening={anyListening(conv, members)}
+            placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)}
+          />
         )}
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
@@ -1112,7 +1143,14 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
           <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
-          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+          <Composer
+            conversationId={conv.id}
+            threadId={rootId}
+            members={members}
+            mentionOnly={allMentionOnly(conv, members)}
+            listening={anyListening(conv, members)}
+            placeholder={L('Responder na thread…', 'Reply in thread…')}
+          />
         </>
       ) : looked === rootId || root ? (
         <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
@@ -2357,7 +2395,17 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
 // `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
-export function Composer({ conversationId, threadId, members, placeholder, tools }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode }): ReactNode {
+// `mentionOnly`: a channel that keeps its agent in the room, answering only when mentioned.
+// `listening`: a channel where Jev hears each message and brings the agent in when the work needs it.
+export function Composer({ conversationId, threadId, members, mentionOnly, listening, placeholder, tools }: {
+  conversationId: string
+  threadId?: string
+  members: Agent[]
+  mentionOnly?: boolean
+  listening?: boolean
+  placeholder: string
+  tools?: ReactNode
+}): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2721,7 +2769,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           />
           {tools}
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
+            {composerNote({ note, members, thread: !!threadId, dm: isDm, mentionOnly, listening, tools: !!tools })}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
