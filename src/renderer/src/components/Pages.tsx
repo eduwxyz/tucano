@@ -46,8 +46,6 @@ import {
   EFFORTS,
   ENGINES,
   MAX_AGENT_ROUTINES,
-  MAX_CHAIN_DEPTH,
-  chainDepthCap,
   RUN_BUDGET_PCT,
   AUTO_CONTINUES,
   routineCap,
@@ -806,6 +804,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   <Toggle label={`#${c.name}`} on={chosen.includes(c.id)} onChange={(on) => pickChannels(on ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))} />
                 </Row>
               ))}
+              {/* Off: the router never calls it in on its own (src/core/router.ts chimeIn); stored only when off. */}
+              {draft.kind !== 'tuca' && (
+                <Row
+                  label={L('Entra sozinho quando algo é da área dele', 'Joins on its own when something is in its area')}
+                  sub={L('Num canal, depois da resposta de outro agente, ele pode entrar pra fazer a parte dele, com o motivo na conversa.', 'In a channel, after another agent’s reply, it may join to do its part, with the reason shown in the conversation.')}
+                >
+                  <Toggle label={L('Entra sozinho quando algo é da área dele', 'Joins on its own when something is in its area')} on={draft.proactive !== false} onChange={(v) => patch({ proactive: v ? undefined : false }, true)} />
+                </Row>
+              )}
             </Section>
           )}
 
@@ -2550,8 +2557,8 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
     <Section
       title={L('Time', 'Team')}
       help={L(
-        'Quem está acima passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta de volta. Sem ninguém marcado, tudo funciona como sempre.',
-        'Whoever is above hands work to those below, in each one’s channel, and gets the answer back. With no one set, everything works as it always did.'
+        'Quem está acima divide o trabalho com quem está abaixo e recebe a resposta de volta. O desenho organiza, mas não cerca: qualquer agente pode perguntar ou pedir uma parte pequena a qualquer outro.',
+        'Whoever is above splits the work with those below and gets the answer back. The chart organizes but doesn’t fence: any agent may ask any other a question or a small part.'
       )}
     >
       <Row
@@ -2559,8 +2566,8 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
         sub={
           boss
             ? L(
-                `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}. O pedido vira uma thread no primeiro canal ligado acima, e a resposta volta pra ${boss.name}.`,
-                `${boss.name} can ask ${draft.name || 'this agent'} for work. The request becomes a thread in the first channel turned on above, and the answer goes back to ${boss.name}.`
+                `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}: na mesma conversa, se os dois estão nela, ou numa conversa privada dele. A resposta volta pra ${boss.name}.`,
+                `${boss.name} can ask ${draft.name || 'this agent'} for work: in the same conversation, when both are in it, or in a private conversation of its own. The answer goes back to ${boss.name}.`
               )
             : undefined
         }
@@ -3492,14 +3499,6 @@ export function SettingsPage(): ReactNode {
                   min={5}
                   value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
                   onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
-                />
-              </Field>
-              <Field label={L('Respostas seguidas entre agentes', 'Agent replies in a row')} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', 'How many replies agents can give in a row, passing the turn between them, before they stop and wait for you. From 1 to 10.')}>
-                <NumberInput
-                  min={1}
-                  max={MAX_CHAIN_DEPTH}
-                  value={chainDepthCap(settings.chainDepth)}
-                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
                 />
               </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>

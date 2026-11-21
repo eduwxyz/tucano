@@ -48,6 +48,7 @@ import {
   type Trigger
 } from '../shared/types'
 import { stricter } from '../shared/classify'
+import type { Job } from './jobs'
 import { isHarnessLevel, type HarnessKey, type HarnessLevel } from '../shared/harness-keys'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
@@ -570,6 +571,20 @@ export const MIGRATIONS = [
     at INTEGER NOT NULL,
     PRIMARY KEY (key_hash, idem)
   );
+  `,
+  // What a message sets off, from its first reply to its last (src/core/jobs.ts): kept, so a job the app
+  // closed on goes on, and its brakes count from where they were.
+  `
+  CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS jobs_running ON jobs (state) WHERE state = 'running';
+  -- The replies waiting to try again (retriesDue, every minute): found without reading every message.
+  CREATE INDEX IF NOT EXISTS messages_retry ON messages (json_extract(run, '$.retryAt')) WHERE json_extract(run, '$.retryAt') IS NOT NULL;
   `
 ]
 
@@ -605,6 +620,9 @@ const COLUMNS: [string, string, string][] = [
   ['delegations', 'approval', 'TEXT'],
   // The thread a request is worked in, when it was asked inside another's in the same channel.
   ['delegations', 'thread_id', 'TEXT'],
+  // Off (0): the router doesn't call this agent in on its own, or no one in this conversation (src/core/router.ts chimeIn).
+  ['agents', 'proactive', 'INTEGER'],
+  ['conversations', 'proactive', 'INTEGER'],
   // What a connector's server says can't be loosened here (META_FLOOR, META_HIGH_RISK in shared/classify.ts):
   // the class a tool can't go below, and that it's high risk. A node says both for the person's computer.
   ['connector_tools', 'cls_floor', 'TEXT'],
@@ -612,7 +630,9 @@ const COLUMNS: [string, string, string][] = [
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
   ['messages', 'title', 'TEXT'],
   // A person's message sent by a harness over MCP (src/core/mcp.ts): the key's name, for the agent to read; the screens don't show it.
-  ['messages', 'via', 'TEXT']
+  ['messages', 'via', 'TEXT'],
+  // The note a job left where it stopped on its brakes (src/core/jobs.ts): the job it carries Continuar for.
+  ['messages', 'stop_job', 'TEXT']
 ]
 
 
@@ -713,6 +733,7 @@ export class Db {
           DELETE FROM routine_watchers;
           DELETE FROM questions;
           DELETE FROM delegations;
+          DELETE FROM jobs;
           DELETE FROM tasks;
           DELETE FROM activity;
         `)
@@ -926,7 +947,8 @@ export class Db {
       ...(r['reports_to'] ? { reportsTo: str(r['reports_to']) } : {}),
       ...(r['sector_name'] ? { sectorName: str(r['sector_name']) } : {}),
       ...(r['sector_does'] ? { sectorDoes: str(r['sector_does']) } : {}),
-      ...(r['entry'] ? { entry: true as const } : {})
+      ...(r['entry'] ? { entry: true as const } : {}),
+      ...(r['proactive'] === 0 ? { proactive: false } : {})
     }
   }
 
@@ -952,7 +974,7 @@ export class Db {
       .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
-    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.id)
+    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ?, proactive = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.proactive === false ? 0 : null, a.id)
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -997,6 +1019,7 @@ export class Db {
       ...(r['threads'] === 1 ? { threads: true } : {}),
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
+      ...(r['proactive'] === 0 ? { proactive: false } : {}),
       unread: Number(r['unread'])
     }
   }
@@ -1050,6 +1073,11 @@ export class Db {
   // Off: the wiki's curator leaves the conversation out. On is the default (stored as null).
   setWikiCapture(id: string, on: boolean): void {
     this.db.prepare('UPDATE conversations SET wiki_capture = ? WHERE id = ?').run(on ? null : 0, id)
+  }
+
+  // Off: no agent is called in here on its own. On is the default (stored as null).
+  setProactive(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET proactive = ? WHERE id = ?').run(on ? null : 0, id)
   }
 
   // On: answers go in threads. Off, in the conversation, is the default (stored as null).
@@ -1182,7 +1210,8 @@ export class Db {
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
       ...(r['title'] ? { title: str(r['title']) } : {}),
-      ...(r['via'] ? { via: str(r['via']) } : {})
+      ...(r['via'] ? { via: str(r['via']) } : {}),
+      ...(r['stop_job'] ? { stop: { job: str(r['stop_job']) } } : {})
     }
   }
 
@@ -1334,8 +1363,8 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, via, stop_job) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run, stop_job = excluded.stop_job`
       )
       .run(
         m.id,
@@ -1347,8 +1376,16 @@ export class Db {
         m.run ? JSON.stringify(m.run) : null,
         m.routine ? JSON.stringify(m.routine) : null,
         m.threadId ?? null,
-        m.via ?? null
+        m.via ?? null,
+        m.stop?.job ?? null
       )
+  }
+
+  // Replies that failed on something that passes, whose time to try again has come (src/core/runs.ts).
+  // Found through messages_retry: every minute, without reading every message.
+  retriesDue(now: number): Message[] {
+    const rows = this.db.prepare("SELECT * FROM messages WHERE run IS NOT NULL AND json_extract(run, '$.status') = 'failed' AND json_extract(run, '$.retryAt') <= ? ORDER BY at").all(now) as Row[]
+    return rows.map((r) => this.toMessage(r))
   }
 
   // The replies whose run is in one of these states, oldest first. Found in SQL: the rest of
@@ -2255,6 +2292,23 @@ export class Db {
 
   openQuestions(): Question[] {
     return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toQuestion(r))
+  }
+
+  // ---------- jobs (src/core/jobs.ts) ----------
+
+  saveJob(j: Job): void {
+    if (!this.conversation(j.conversationId)) return
+    this.db.prepare('INSERT INTO jobs (id, conversation_id, state, data, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, data = excluded.data').run(j.id, j.conversationId, j.state, JSON.stringify(j), j.createdAt)
+  }
+
+  job(id: string): Job | undefined {
+    const r = this.db.prepare('SELECT data FROM jobs WHERE id = ?').get(id) as { data: string } | undefined
+    if (!r) return undefined
+    try {
+      return JSON.parse(r.data) as Job
+    } catch {
+      return undefined
+    }
   }
 
   // ---------- delegations ----------

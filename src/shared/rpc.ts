@@ -48,6 +48,7 @@ export interface Api {
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
+  continueJob(p: { messageId: string }): void // the note where a job stopped on its brakes: its work goes on (src/core/jobs.ts)
   setAgentModels(p: { agentIds: string[]; modelId: string }): number
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
@@ -212,6 +213,7 @@ export interface Api {
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
   wikiImportZip(p: { path: string }): WikiImport // the same, from a .zip sent to a server (src/server's /upload)
   setWikiCapture(p: { conversationId: string; on: boolean }): void
+  setProactive(p: { conversationId: string; on: boolean }): void // off: no agent is called in here on its own
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
   // The wiki's folder kept in a git repository (owner and admins): a deploy key, a test, then the folder becomes the clone.
