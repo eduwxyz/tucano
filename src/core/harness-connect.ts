@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { L } from '../shared/lang'
 import type { Connectable, HarnessConnect } from '../shared/harness-keys'
 import { stripJsonComments } from './engines/opencode'
@@ -21,6 +21,8 @@ export interface ConnectOpts {
 }
 
 type Obj = Record<string, unknown>
+// A path as the screen shows it: from the home folder, with / on every system.
+const shown = (path: string, home: string): string => path.replace(home, '~').split(sep).join('/')
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 
 // A file written whole, never half: a temp file next to it, then renamed over it.
@@ -45,7 +47,7 @@ function readJsonFile(path: string): { data: Obj; comments: boolean } | undefine
 
 // A JSON config with the servers under `field`: { [field]: { [name]: entry } }.
 function jsonEntry(path: string, field: string, o: ConnectOpts, entry: Obj): HarnessConnect {
-  const where = path.replace(o.home ?? homedir(), '~')
+  const where = shown(path, o.home ?? homedir())
   const file = readJsonFile(path)
   if (!file) return { done: false, where, name: o.name, error: L(`Não consegui ler ${where} (o JSON está quebrado). Cole a configuração à mão.`, `Couldn't read ${where} (the JSON is broken). Paste the configuration by hand.`) }
   const servers = isObj(file.data[field]) ? (file.data[field] as Obj) : {}
@@ -79,7 +81,7 @@ async function claude(o: ConnectOpts): Promise<HarnessConnect> {
 function codex(o: ConnectOpts): HarnessConnect {
   const dir = o.env?.['CODEX_HOME'] || join(o.home ?? homedir(), '.codex')
   const path = join(dir, 'config.toml')
-  const where = path.replace(o.home ?? homedir(), '~')
+  const where = shown(path, o.home ?? homedir())
   const raw = existsSync(path) ? readFileSync(path, 'utf8') : ''
   const header = new RegExp(`^\\[mcp_servers\\.(?:${o.name}|"${o.name}")\\]\\s*$`, 'm')
   const block = `[mcp_servers.${o.name}]\nurl = ${JSON.stringify(o.url)}\nhttp_headers = { Authorization = ${JSON.stringify(`Bearer ${o.key}`)} }\n`
