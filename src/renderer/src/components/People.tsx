@@ -579,6 +579,8 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return L('apagou uma conversa privada', 'deleted a private conversation')
     case 'vault_key.imported':
       return L(`importou ${String(d['count'] ?? '')} chaves pro Cofre`, `imported ${String(d['count'] ?? '')} keys into the Vault`)
+    case 'vault_login.imported':
+      return L(`importou ${String(d['count'] ?? '')} logins pro Cofre`, `imported ${String(d['count'] ?? '')} logins into the Vault`)
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
   }

@@ -2786,6 +2786,14 @@ const api: Handlers = {
     if (saved && !(who.team && (mine || !who.admin))) record(ctx, 'vault_key.imported', undefined, { count: saved })
     return { saved }
   },
+  // A browser's exported passwords, read on the page (parseLoginCsv): the rows to save, and no login
+  // given to an agent.
+  importVaultLogins: async ({ logins, mine }, ctx) => {
+    const who = asker(ctx)
+    const saved = await vault.importLogins(who, logins, mine)
+    if (saved && !(who.team && (mine || !who.admin))) record(ctx, 'vault_login.imported', undefined, { count: saved })
+    return { saved }
+  },
   // The Cofre's site logins: as its keys, the team's (an admin's) and each person's own.
   vaultLogins: (_, ctx) => vault.logins(ctx.person),
   saveVaultLogin: async ({ login }, ctx) => {

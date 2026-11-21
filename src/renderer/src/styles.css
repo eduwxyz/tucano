@@ -16658,6 +16658,9 @@ button.agent-card__now:hover {
   width: 100%;
   font: 12.5px/1.5 var(--mono);
 }
+.vault-import__lines .table__row {
+  flex-wrap: wrap;
+}
 .vault-agent .hint {
   margin-top: 8px;
 }

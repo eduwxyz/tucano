@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { Secrets, plainCipher } from '../src/core/secrets'
 import { maskKeys, Vault } from '../src/core/vault'
-import { keyHint, keyNameError, parseEnv } from '../src/shared/vault'
+import { keyHint, keyNameError, parseEnv, parseLoginCsv } from '../src/shared/vault'
 import type { Agent } from '../src/shared/types'
 
 const agent = (id: string): Agent => ({ id, name: id, handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: true, archived: false })
@@ -240,5 +240,64 @@ describe('pedir_chave’s card', () => {
     const r = await vault.answer(alone, 'fin', { site: 'https://conta.luz.com.br' }, { username: 'edu@x.com', password: 'senha-123' })
     expect(r).toMatchObject({ kind: 'login', item: { origin: 'https://conta.luz.com.br', agents: ['fin'] } })
     expect(vault.loginSites('fin')).toEqual(['https://conta.luz.com.br'])
+  })
+})
+
+describe('a browser’s exported passwords', () => {
+  it('reads Chrome’s file: a BOM, CRLF, a quoted comma and newline, and the rows that can’t be logins', () => {
+    const chrome =
+      '\uFEFFname,url,username,password,note\r\n' +
+      'Luz,https://conta.luz.com.br/entrar,edu@x.com,"sen,ha\nlinha 2",\r\n' +
+      'App,android://abcd@app.exemplo/,a@x.com,senha,\r\n' +
+      'Http,http://arquivos.exemplo,a@x.com,senha,\r\n' +
+      'Curto,https://x.exemplo,b@x.com,,\r\n'
+    const { browser, logins, error } = parseLoginCsv(chrome)
+    expect(error).toBeUndefined()
+    expect(browser).toBe('chrome')
+    expect(logins.map((l) => [l.origin, l.username, l.password, l.skip])).toEqual([
+      ['https://conta.luz.com.br', 'edu@x.com', 'sen,ha\nlinha 2', undefined],
+      [undefined, 'a@x.com', 'senha', 'protocol'],
+      [undefined, 'a@x.com', 'senha', 'address'],
+      [undefined, 'b@x.com', '', 'password']
+    ])
+  })
+
+  it('reads Firefox’s: its own entries (httpRealm) stay out, and one site and username goes in once', () => {
+    const firefox = [
+      '"url","username","password","httpRealm","formActionOrigin","guid","timeCreated","timeLastUsed","timePasswordChanged"',
+      '"https://app.banco.com","ana@x.com","senha-1","","https://app.banco.com","g1","","",""',
+      '"https://app.banco.com","ana@x.com","senha-1","","https://app.banco.com","g2","","",""',
+      '"https://intranet.exemplo","a@x.com","b","Intranet","","g3","","",""'
+    ].join('\n')
+    const { browser, logins } = parseLoginCsv(firefox)
+    expect(browser).toBe('firefox')
+    expect(logins.map((l) => [l.origin, l.skip])).toEqual([
+      ['https://app.banco.com', undefined],
+      ['https://app.banco.com', 'again'],
+      [undefined, 'realm']
+    ])
+  })
+
+  it('refuses a file that is not a browser’s export', () => {
+    expect(parseLoginCsv('a,b,c\n1,2,3').error).toBeDefined()
+    expect(parseLoginCsv('').error).toBeDefined()
+  })
+
+  it('saves each row, and replacing one already saved keeps its agents and its new password', async () => {
+    const { db, vault } = setup()
+    const kept = await vault.saveLogin(admin, { site: 'conta.luz.com.br', username: 'edu@x.com', password: 'velha', agents: ['fin'] })
+    const saved = await vault.importLogins(admin, [
+      { id: kept.id, site: 'https://conta.luz.com.br/entrar', username: 'edu@x.com', password: 'nova' },
+      { site: 'https://app.banco.com', username: 'ana@x.com', password: 'senha-2' }
+    ])
+    expect(saved).toBe(2)
+    expect(db.vaultLogins().map((l) => [l.origin, l.username, l.agents].join(' ')).sort()).toEqual([
+      'https://app.banco.com ana@x.com ',
+      'https://conta.luz.com.br edu@x.com fin'
+    ])
+    expect(await vault.loginFor('fin', 'https://conta.luz.com.br', {})).toEqual({ username: 'edu@x.com', password: 'nova' })
+    const own = await vault.importLogins(ana, [{ site: 'https://app.banco.com', username: 'ana@x.com', password: 'senha-3' }])
+    expect(own).toBe(1)
+    expect(db.vaultLogins().filter((l) => l.owner === 'ana').map((l) => l.origin)).toEqual(['https://app.banco.com'])
   })
 })

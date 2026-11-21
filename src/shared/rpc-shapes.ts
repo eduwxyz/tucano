@@ -103,6 +103,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   removeVaultKey: { id: 's' },
   setVaultKeyAgent: { id: 's', agentId: 's', on: 'b' },
   importVaultKeys: { lines: 'a', mine: 'b?', replace: 'S' },
+  importVaultLogins: { logins: 'a', mine: 'b?' },
   vaultLogins: {},
   saveVaultLogin: { login: 'o' },
   removeVaultLogin: { id: 's' },

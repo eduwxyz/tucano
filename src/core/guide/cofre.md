@@ -28,6 +28,9 @@ Num Tucano com pessoas, o Cofre tem duas gavetas:
 ## Importar um .env
 **Importar .env** mostra cada linha antes de guardar: nova, já existe (só troca o valor se você marcar) ou não entra. Nenhuma chave importada é liberada pra agente nenhum.
 
+## Importar as senhas que o navegador guardou
+**Importar CSV** pega o arquivo que o Chrome ou o Firefox exportam. O Chrome (Configurações › Senhas › Exportar) grava um `Chrome Passwords.csv`; o Firefox (about:logins › ⋯ › Exportar logins) grava um `logins.csv`. O app abre o seletor de arquivos do sistema, lê as colunas pelo nome e mostra cada linha antes de guardar: nova, já salva (mesmo site e usuário; a senha só troca se você marcar) ou fora, com o motivo, como um endereço `android://` ou uma entrada que o próprio navegador guarda. Cada linha vira um login no endereço exato do site, e nenhum login é liberado pra agente até você liberar. O CSV é lido onde está e não é copiado: ele continua sendo uma cópia sem cifra de todas as senhas, então apague depois da importação.
+
 ## Nos conectores
 Uma variável de conector pode apontar pra uma chave do time: `cofre:STRIPE_KEY`. Trocou no Cofre, troca no conector na próxima conexão.
 

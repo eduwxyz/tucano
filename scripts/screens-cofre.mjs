@@ -2,7 +2,7 @@
 // (on Approvals). Fresh data, fake engines; the card's request is put straight into the database.
 // Run after `npm run build`: node scripts/screens-cofre.mjs [out-dir]
 import { _electron as electron } from 'playwright'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -58,16 +58,43 @@ await win.click('button:has-text("Guardar no Cofre")')
 await win.waitForTimeout(400)
 await shot('4-logins')
 
+// The browser's export, read through the system's file dialog: the main process answers with a
+// fixture, so the modal is drawn as someone sees it after choosing a Chrome export.
+const csv = join(mkdtempSync(join(tmpdir(), 'tucano-csv-')), 'Chrome Passwords.csv')
+writeFileSync(
+  csv,
+  [
+    'name,url,username,password,note',
+    'Luz,https://conta.luz.com.br/entrar,edu@exemplo.com,senha-trocada,',
+    'Banco,"https://app.banco.com/login","ana@exemplo.com","sen,ha nova",',
+    'App,android://abcd@app.exemplo/,app@exemplo.com,senha-do-app,',
+    'Portal,http://portal.exemplo,edu@exemplo.com,senha-http,'
+  ].join('\n')
+)
+await app.evaluate(async ({ dialog }, file) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] })
+}, csv)
+await win.click('.sidebar__tool:has-text("Cofre")')
+await win.click('.tabs button:has-text("Logins")')
+await win.click('button:has-text("Importar CSV")')
+await win.waitForSelector('.vault-import__lines')
+await win.waitForTimeout(300)
+await shot('5-import-csv')
+const rows = await win.locator('.vault-import__lines .table__row').count()
+const skipped = await win.locator('.vault-import__lines .tag--danger').count()
+const already = await win.locator('.vault-import__lines label').count()
+console.log('csv import, rows:', rows, 'already saved:', already, 'skipped:', skipped)
+
 await win.locator('.nav-item', { hasText: /Aprovações|Approvals/ }).first().click()
 await win.waitForSelector('.key-request')
 await win.locator('.key-request input[type="password"]').first().fill('sk_test_123456789')
 await win.click('.key-request button:has-text("Guardar no Cofre e liberar")')
 await win.waitForTimeout(800)
-await shot('5-depois-de-colar')
+await shot('6-depois-de-colar')
 
 await win.click('.sidebar__tool:has-text("Cofre")')
 await win.click('.tabs button:has-text("Chaves")')
 await win.waitForTimeout(300)
-await shot('6-chaves')
+await shot('7-chaves')
 console.log('agente:', agent.name, 'erros:', errors)
 await app.close()
