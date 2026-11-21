@@ -148,9 +148,11 @@ export const NEEDS: Record<Method, Need> = {
   removeVaultKey: 'anyone',
   setVaultKeyAgent: 'anyone',
   importVaultKeys: 'anyone',
-  browserLogins: 'admin', // the logins saved for an agent's browser, like a connector's token
-  saveBrowserLogin: 'admin',
-  removeBrowserLogin: 'admin',
+  vaultLogins: 'anyone',
+  saveVaultLogin: 'anyone',
+  removeVaultLogin: 'anyone',
+  setVaultLoginAgent: 'anyone',
+  answerKeyRequest: 'anyone', // anyone who sees the card's conversation (checked inside)
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',
   // the team's knowledge: anyone reads and writes pages; the curator's decisions and the wiki's place are the admins'

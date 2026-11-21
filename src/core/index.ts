@@ -70,8 +70,8 @@ import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Vault } from './vault'
+import { COFRE } from '../shared/vault'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
-import { BrowserLogins } from './browser-logins'
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
@@ -844,18 +844,19 @@ const desktopApps = new DesktopApps(undefined, {
   installed: async () => (await shelfNow()).map(({ bundleId, ...a }) => ({ ...a, ...(bundleId ? { id: bundleId } : {}) }))
 })
 
-const browserLogins = new BrowserLogins(db, secrets)
+const vault = new Vault({ db, secrets })
+// The logins saved on an agent's page before the Cofre: moved into it once, as the team's.
+bg(vault.moveOldLogins(), 'moveOldLogins')
 const browser = new Browser({
   host,
   db,
   dataDir,
   emit,
-  logins: browserLogins,
+  logins: vault,
   me: () => settings().workspaceName,
   jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
   onHandback: (agentId) => void runner.handedBack(agentId)
 })
-const vault = new Vault({ db, secrets })
 const connectors = new ConnectorManager({
   db,
   secrets,
@@ -2611,6 +2612,7 @@ const api: Handlers = {
     if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
     must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
     if (!people.canDecide(ctx.person, a)) throw new UserError(L('Isso roda no computador de outra pessoa: só ela decide.', "That runs on someone else's computer: only they decide."))
+    if (a.connectorId === COFRE && decision === 'approved') throw new UserError(L('Cole a chave no card, ou libere uma do Cofre.', 'Paste the key in the card, or give one from the Cofre.'))
     bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
   },
 
@@ -2668,8 +2670,8 @@ const api: Handlers = {
   // keys stay out of the activity log, which the admins read.
   vaultKeys: (_, ctx) => vault.list(ctx.person),
   vaultUses: (_, ctx) => {
-    const mine = new Set(vault.list(ctx.person).map((k) => k.id))
-    const team = new Set(db.vaultKeys().filter((k) => k.owner).map((k) => k.id)) // anyone's own: never someone else's to see
+    const mine = new Set([...vault.list(ctx.person), ...vault.logins(ctx.person)].map((k) => k.id))
+    const team = new Set([...db.vaultKeys(), ...db.vaultLogins()].filter((k) => k.owner).map((k) => k.id)) // anyone's own: never someone else's to see
     return db.vaultUses().filter((u) => mine.has(u.keyId) || (isAdmin(ctx.person) && !team.has(u.keyId)))
   },
   saveVaultKey: async ({ key }, ctx) => {
@@ -2701,16 +2703,31 @@ const api: Handlers = {
     if (saved && !(who.team && (mine || !who.admin))) record(ctx, 'vault_key.imported', undefined, { count: saved })
     return { saved }
   },
-  browserLogins: async ({ agentId }) => {
-    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
-    return browserLogins.list(agentId)
+  // The Cofre's site logins: as its keys, the team's (an admin's) and each person's own.
+  vaultLogins: (_, ctx) => vault.logins(ctx.person),
+  saveVaultLogin: async ({ login }, ctx) => {
+    const saved = await vault.saveLogin(asker(ctx), login)
+    if (!saved.owner) record(ctx, login.id ? 'vault_login.updated' : 'vault_login.created', saved.id, { name: saved.origin })
+    return saved
   },
-  saveBrowserLogin: async ({ agentId, site, username, password }) => {
-    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
-    await browserLogins.save(agentId, site, username, password)
+  removeVaultLogin: async ({ id }, ctx) => {
+    const gone = await vault.removeLogin(asker(ctx), id)
+    if (gone && !gone.owner) record(ctx, 'vault_login.removed', id, { name: gone.origin })
   },
-  removeBrowserLogin: async ({ agentId, origin }) => {
-    await browserLogins.remove(agentId, origin)
+  setVaultLoginAgent: ({ id, agentId, on }, ctx) => {
+    const l = vault.setLoginAgent(asker(ctx), id, agentId, on)
+    if (!l.owner) record(ctx, 'vault_login.updated', id, { name: l.origin })
+    return l
+  },
+  // The card of pedir_chave: anyone in the conversation pastes the key or the login (it goes to their own,
+  // or the team's when an admin says so), or gives one already in the Cofre (the team's: an admin). Then
+  // the agent goes on, as after any approval.
+  answerKeyRequest: async ({ answer }, ctx) => {
+    const a = db.approval(answer.id)
+    if (!a || a.connectorId !== COFRE || a.state !== 'pending' || !people.canSeeApproval(ctx.person, a)) throw new UserError(L('Esse pedido não existe mais.', 'That request no longer exists.'))
+    const done = await vault.answer(asker(ctx), a.agentId, a.args, answer)
+    if (!done.item.owner) record(ctx, `vault_${done.kind}.${done.created ? 'created' : 'updated'}`, done.item.id, { name: 'name' in done.item ? done.item.name : done.item.origin })
+    await runner.decide(a.id, 'approved', undefined, false, ctx.person.id)
   },
 
   browserAction: ({ agentId, action }, ctx) => {

@@ -125,4 +125,27 @@ describe('a key of the Cofre in a command', () => {
     expect(ran).toEqual([])
     expect(seen.results[0]).toContain('use essa chave com bash')
   })
+
+  it('without the key, pedir_chave leaves a card; saved there, the agent is told to use it by name', async () => {
+    const seen = await turn([{ tool: 'pedir_chave', args: { nome: 'STRIPE_KEY', motivo: 'puxar as cobranças' } }])
+    expect(seen.tools.some((t) => t.name === 'pedir_chave')).toBe(true)
+    expect(seen.results[0]).toContain('Encerre')
+    const ap = db.approvals().find((a) => a.state === 'pending')!
+    expect(ap).toMatchObject({ connectorId: 'cofre', tool: 'pedir_chave', args: { nome: 'STRIPE_KEY' }, why: 'puxar as cobranças', requestedBy: db.ownerId() })
+    expect(JSON.stringify(ap)).not.toContain('sk_live')
+
+    await vault.answer(owner, 'lia', ap.args, { value: 'sk_live_abcdef123456' })
+    const runner = new Runner({ db, engines: withFakes(scripted({ tools: [], results: [] }, [])), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'v-w-')), gateway, computers: computers as never, vault })
+    await runner.decide(ap.id, 'approved', undefined, false, 'owner')
+    await runner.idle()
+    expect(db.approval(ap.id)).toMatchObject({ state: 'approved', outcome: 'Salvo no Cofre e liberado.' })
+    expect(vault.usable('lia', 'owner').map((k) => k.name)).toEqual(['STRIPE_KEY'])
+  })
+
+  it('pedir_chave for a key it already has says so, and leaves no card', async () => {
+    await vault.save(owner, { name: 'STRIPE_KEY', value: 'sk_live_abcdef123456', agents: ['lia'], approve: false })
+    const seen = await turn([{ tool: 'pedir_chave', args: { nome: 'STRIPE_KEY', motivo: 'x' } }])
+    expect(seen.results[0]).toContain('já tem')
+    expect(db.approvals()).toEqual([])
+  })
 })

@@ -648,13 +648,6 @@ export interface BrowserReply {
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
 }
 
-// A login the person saved for an agent's browser, as their page lists it: never the password.
-export interface SavedLogin {
-  origin: string // https://conta.example.com: the only place it's typed
-  username: string
-  onePassword?: boolean // the password is a 1Password reference, read when it's typed
-}
-
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.
 export interface BrowserView {
   agentId: string

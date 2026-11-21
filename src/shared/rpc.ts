@@ -5,8 +5,8 @@ import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
-import type { EnvPair, VaultKey, VaultKeyInput, VaultUse } from './vault'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
+import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from './vault'
 
 export interface Snapshot {
   webhookPort?: number
@@ -135,9 +135,11 @@ export interface Api {
   removeVaultKey(p: { id: string }): Promise<void>
   setVaultKeyAgent(p: { id: string; agentId: string; on: boolean }): VaultKey // gives a key to an agent, or takes it back
   importVaultKeys(p: { lines: EnvPair[]; mine?: boolean; replace: string[] }): Promise<{ saved: number }> // an .env read on the page; replace: names to put over keys already saved
-  browserLogins(p: { agentId: string }): Promise<SavedLogin[]> // the logins saved for an agent's browser: sites and usernames, never a password
-  saveBrowserLogin(p: { agentId: string; site: string; username: string; password: string }): Promise<void> // password: the value or an op:// reference
-  removeBrowserLogin(p: { agentId: string; origin: string }): Promise<void>
+  vaultLogins(): VaultLogin[] // the Cofre's site logins this person sees: sites and usernames, never a password
+  saveVaultLogin(p: { login: VaultLoginInput }): Promise<VaultLogin> // password: the value or an op:// reference; left out keeps the saved one
+  removeVaultLogin(p: { id: string }): Promise<void>
+  setVaultLoginAgent(p: { id: string; agentId: string; on: boolean }): VaultLogin // one per site per agent: giving this one takes it off the others
+  answerKeyRequest(p: { answer: KeyRequestAnswer }): Promise<void> // pedir_chave's card: the key or login pasted, or one in the Cofre given
   browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void
   browserInput(p: { agentId: string; input: BrowserInput }): Promise<void> // a server's taken-over browser, driven from the panel // show: I take over the agent's browser; clear: logins and history go
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
