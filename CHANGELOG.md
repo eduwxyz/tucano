@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Sort the whole sidebar by hand: hold a row, see where it lands, or move it with the keyboard.** Press and hold a row for a moment to pick it up: it dims, and an orange line shows where it will land as you move. Let go there and the order is saved; let go where it was and it just opens, like a click. It works for the items at the top (Aprovações, Quadro, Conhecimento, Operação; the Tuca stays first), the channels (let go on a group's name to put a channel in that group), the agents, and the sectors. An agent moves only within its sector. With the keyboard, **Alt+↑** and **Alt+↓** move the row you're on. Before, only channels could be moved, by dragging. An item you took out of the sidebar stays out, and keeps its place for when it comes back. In a team, the order is yours alone, like the channel groups. Thanks to Apostol Apostolov.
+
 ## [0.2.44] - 2026-11-21
 
 > **Em português:**

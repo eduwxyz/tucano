@@ -581,6 +581,9 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sidebarHidden?: string[] // what I took out of the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: none
+  navOrder?: string[] // my order for the items at the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: as they come
+  agentOrder?: string[] // my order for the agents in the sidebar, by agent id, kept within each sector; unset: as they come
+  sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
