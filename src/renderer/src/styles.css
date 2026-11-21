@@ -15514,3 +15514,17 @@ button.agent-card__now:hover {
 .saved-logins .hint {
   margin: 0;
 }
+
+/* Configurações › Harnesses: the snippet to paste into a harness, and a row of buttons that wraps. */
+.row--wrap {
+  flex-wrap: wrap;
+}
+.harness-snippet {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--code-bg);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}

@@ -415,6 +415,7 @@ export interface Inbox {
   questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
   answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
+  harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
 }
 
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
@@ -466,6 +467,7 @@ export interface Message {
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
   title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
+  via?: string // a person's message a harness sent over MCP: the harness key's name ("Claude Code"). The agent reads it; the screens don't show it
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it

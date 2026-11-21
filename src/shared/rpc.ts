@@ -4,6 +4,7 @@ import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
+import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
 import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
 
 export interface Snapshot {
@@ -230,6 +231,13 @@ export interface Api {
   myDevices(): Device[] // my own keys: the browsers and phones signed in as me
   setPush(p: { handle: string | null; tag?: string }): { on: boolean } // this phone's push handle (the relay's), or none; on: this Tucano sends pushes
   removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
+  // Harnesses connected over MCP (src/core/mcp.ts): my keys, a new one (the key is shown once), one gone.
+  harnessKeys(): HarnessKey[]
+  createHarnessKey(p: { name: string; level: HarnessLevel }): { key: string; harness: HarnessKey }
+  removeHarnessKey(p: { id: string }): void
+  mcpInfo(): McpInfo // where this Tucano answers MCP
+  connectHarness(p: { harness: Connectable; replace?: boolean }): Promise<HarnessConnect> // the desktop: a new key, written into that harness's config
+  harnessNoticeSeen(): void // the inbox's "Claude Code criou…" read
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
   setPersonAccess(p: { id: string; access: PersonAccess }): void // what a member sees; admins and the owner always see everything

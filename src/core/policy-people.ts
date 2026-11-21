@@ -281,6 +281,12 @@ export const NEEDS: Record<Method, Need> = {
   myDevices: 'anyone', // one's own
   setPush: 'anyone', // one's own device's (ctx.device)
   removeDevice: 'anyone', // one's own (the core looks only among theirs)
+  harnessKeys: 'anyone', // one's own harness keys (src/core/mcp.ts): each acts as its person
+  createHarnessKey: 'anyone',
+  removeHarnessKey: 'anyone',
+  mcpInfo: 'anyone',
+  connectHarness: 'owner', // the desktop's: its config files are the owner's
+  harnessNoticeSeen: 'anyone',
   removePerson: 'target',
   setRole: 'target',
   setPersonAccess: 'target', // the admins change members' (the owner, admins' too: always everything)

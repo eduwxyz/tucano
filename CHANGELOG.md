@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Your own harness can now set Tucano up and talk to its agents, over MCP.** Tucano is now an MCP server too: connect Claude Code, Codex, Cursor, OpenCode or any MCP client, and from there it sees the team, sends a message to an agent and waits for the answer, and creates or changes agents, channels, routines, skills, connectors and memories, as you would on the screens. A common first use: "create in Tucano the equivalent of the agents and skills you have". On the desktop, **Settings › Harnesses › Connect in one click** writes the connection into the harness's own configuration; anywhere, **Make a key** gives a key, shown once, with what to paste into each harness. Each key acts as the person who made it and goes only as far as its level (read, talk or configure). Nothing over MCP deletes anything, decides an approval, touches people, logins or secrets, or loosens a tool's approval. A memory a harness sends waits for you to accept it, and what a harness created or changed shows in **Approvals**. On the desktop it answers only programs on the same computer; on a server, at `/mcp` on its address.
+
 ### Fixed
 
 - **Usage and limits no longer shows a subscription window that already reset as full.** Claude Code and Codex report their windows only when a reply runs, so a report of 100% taken just before the five hours ended stayed on the page as "100% used, resets now" until the next reply, while claude.ai already showed 0%. A window whose reset time has passed now shows 0% and when it reset, and a page left open redraws when the window resets.

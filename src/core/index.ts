@@ -16,7 +16,7 @@ import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
 import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
-import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
@@ -84,7 +84,12 @@ import { nodeOf } from '../shared/node-link'
 import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
-import { agentFromDraft, availableModels, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
+import { agentFromDraft, availableModels, freeHandle, tucaAgent, tucaHello, tucaUpToDate } from './tuca'
+import { guideIndex, readGuide } from './guide'
+import { McpDoor, type McpCaller, type McpHttpOut, type RunLine } from './mcp'
+import { startMcpHttp } from './mcp-http'
+import { connectHarness as writeHarnessConfig } from './harness-connect'
+import { CONNECTABLE_LABEL, HARNESS_KEY, MAX_HARNESS_KEYS, MAX_HARNESS_NAME, mcpEntryName, type HarnessKey, type HarnessLevel, type McpInfo } from '../shared/harness-keys'
 import { accessCard, agentStamp, appliesNow, changedSince, routineStamp, splitChange, UNDO_MS, undoErrors } from './tuca-apply'
 import { initializeWorkspace } from './seed'
 import { workspacePorts } from './ports'
@@ -390,7 +395,11 @@ const runHelper = (cmd: string): Promise<string | undefined> => {
 async function foundMcps(): Promise<FoundMcp[]> {
   const env = { ...process.env, ...(await loginEnv()) }
   const have = new Set(connectors.list().map((c) => (c.kind === 'remote' ? `url:${(c.url ?? '').replace(/\/+$/, '')}` : `cmd:${[c.command, ...(c.args ?? [])].join(' ')}`)))
-  return harnessMcps({}, env).map((m) => ({ ...m, added: have.has(m.key) }))
+  // This Tucano's own MCP entry (Configurações › Harnesses) is no connector for itself.
+  const own = mcpInfo().url
+  return harnessMcps({}, env)
+    .filter((m) => !own || m.address.replace(/\/+$/, '') !== own)
+    .map((m) => ({ ...m, added: have.has(m.key) }))
 }
 
 // Where a harness on a gateway sends its requests, and with which key, as its own config says.
@@ -445,7 +454,7 @@ const hub = new Hub<MessagePortMain>(people, db)
 // The conversation each person has open: what arrives there is read already.
 const viewing = new Map<string, string | null>()
 let closing = false
-type Ctx = { person: Person; device?: string } // device: the hash of the key a server's page signed in with
+type Ctx = { person: Person; device?: string; via?: string } // device: the hash of the key a server's page signed in with; via: a harness key's name (src/core/mcp.ts)
 const ownerCtx = (): Ctx => ({ person: db.owner() })
 // What the workspace switcher shows of this workspace: its name, whether it's paused, and two
 // counts. Coalesced: a reply streaming updates its message many times a second.
@@ -544,6 +553,7 @@ type ToMain =
   | { type: 'auth-result'; id: string; person?: Person; removed?: true } // removed: a key of someone removed since
   | { type: 'join-result'; id: string; data: { key?: string; person?: Person; error?: string } }
   | { type: 'device-key-result'; id: string; data: { key?: string; person?: Person } }
+  | { type: 'mcp-result'; id: string; data: McpHttpOut }
   | { type: 'person-removed'; id: string }
   | { type: 'person-changed'; id: string } // a role changed: the server forgets what it remembered of them
   | { type: 'login_item'; open: boolean }
@@ -624,6 +634,15 @@ process.parentPort.on('message', (e) => {
     viewing.set(who.id, open)
     if (open) { db.markRead(open, who.id); emitConversations([open]) }
     workspaceSummary()
+    return
+  }
+  // A server's /mcp (src/server): a harness's request, answered by the same door as the desktop's.
+  if (r?.type === 'mcp') {
+    const q = e.data as { method?: unknown; auth?: unknown; body?: unknown }
+    void mcpDoor
+      .http({ method: typeof q.method === 'string' ? q.method : 'GET', auth: typeof q.auth === 'string' ? q.auth : undefined, body: typeof q.body === 'string' ? q.body : '' })
+      .catch((err: unknown): McpHttpOut => (console.error('[mcp]', err), { status: 500, headers: {}, body: '' }))
+      .then((data) => toMain({ type: 'mcp-result', id: r.id, data }))
     return
   }
   // A server's sign-in: the person a key opens (src/server keeps the answer a few seconds).
@@ -1757,8 +1776,12 @@ const privateSource = (s: WikiSource): WikiSource => ({ id: s.id, file: s.id, ti
 const wikiSourcesFor = (ctx: Ctx, limit = 100): WikiSource[] =>
   wiki.sources(limit).flatMap((s) => (people.canSeeFrom(ctx.person, s.origin.conversationId) ? [s] : isAdmin(ctx.person) ? [privateSource(s)] : []))
 // The team's log (owners and admins read it): who did what, never what a DM said.
-const record = (ctx: Ctx | undefined, kind: string, target?: string, detail?: Record<string, unknown>): void =>
-  void db.addActivity({ ...(ctx ? { personId: ctx.person.id } : {}), kind, ...(target ? { target } : {}), ...(detail ? { detail } : {}) })
+// Done by a harness over MCP: the key's name goes with it (the Activity shows it, the inbox counts it).
+const record = (ctx: Ctx | undefined, kind: string, target?: string, detail?: Record<string, unknown>): void => {
+  const all = ctx?.via ? { ...detail, via: ctx.via } : detail
+  void db.addActivity({ ...(ctx ? { personId: ctx.person.id } : {}), kind, ...(target ? { target } : {}), ...(all ? { detail: all } : {}) })
+  if (ctx?.via) emit({ type: 'inbox' }) // its line in the person's inbox ("Claude Code criou…") changed
+}
 // A routine's rules: the team's are the admins'; a person's, theirs (and the admins').
 const mayRoutine = (ctx: Ctx, r: Pick<Routine, 'scope' | 'owner'> | undefined): void => must(ctx.person, { kind: 'routine', routine: r ?? { scope: 'channel' } })
 // The open pages of the people whose view is cut down read it again (a moment after the answer) when what they see changes.
@@ -2916,6 +2939,34 @@ const api: Handlers = {
     emitPeople()
     setTimeout(() => hub.closeDevice(id), 200)
   },
+  // Harnesses over MCP (src/core/mcp.ts): each person's own keys.
+  harnessKeys: (_, ctx) => db.harnessKeys(ctx.person.id),
+  createHarnessKey: ({ name, level }, ctx) => newHarnessKey(ctx, name, level),
+  removeHarnessKey: ({ id }, ctx) => {
+    if (!db.removeHarnessKey(ctx.person.id, id)) throw new Error(L('Essa chave já foi tirada.', 'That key was already removed.'))
+    record(ctx, 'harness.removed', id)
+  },
+  mcpInfo: () => mcpInfo(),
+  connectHarness: async ({ harness, replace }, ctx) => {
+    if (serverMode) throw new Error(L('Isso é só no app do computador. Aqui, cole a configuração no seu harness.', 'This is only in the desktop app. Here, paste the configuration into your harness.'))
+    const url = mcpInfo().url
+    if (!url) throw new Error(mcpInfo().error ?? L('O MCP do Tucano não está no ar.', "Tucano's MCP isn't up."))
+    const name = `${CONNECTABLE_LABEL[harness]} ${L('neste computador', 'on this computer')}`
+    const made = newHarnessKey(ctx, name, 'configure')
+    const env = { ...process.env, ...(await loginEnv()) }
+    const claudeBin = harness === 'claude' ? settings().engines.claude?.path : undefined
+    const out = await writeHarnessConfig(harness, { url, key: made.key, name: mcpEntryName(defaultWorkspace ? undefined : process.env['TUCANO_WORKSPACE_LABEL']), ...(replace ? { replace } : {}), env, ...(claudeBin ? { claudeBin } : {}) }).catch(
+      (e: unknown) => ({ done: false, where: harness, name: 'tucano', error: e instanceof Error ? e.message : String(e) })
+    )
+    if (!out.done) db.removeHarnessKey(ctx.person.id, made.harness.id)
+    // Connected again: the key the harness had before stops (it's no longer in its config).
+    else for (const k of db.harnessKeys(ctx.person.id)) if (k.name === name && k.id !== made.harness.id) db.removeHarnessKey(ctx.person.id, k.id)
+    return out
+  },
+  harnessNoticeSeen: (_, ctx) => {
+    people.harnessNoticeSeen(ctx.person)
+    emit({ type: 'inbox' })
+  },
   // Access ends now: keys, open connections, the server's remembered sign-ins. Their agents and
   // routines go to the owner; their DMs and memories wait 30 days for a re-invite (the daily sweep).
   removePerson: ({ id }, ctx) => {
@@ -3099,6 +3150,105 @@ function bg(p: Promise<unknown>, what: string): void {
 }
 // The last line of defense, for one that slipped through: logged, the core goes on.
 process.on('unhandledRejection', (e) => console.error('[core] unhandled rejection', e))
+
+// ---------- MCP for the person's harnesses (src/core/mcp.ts) ----------
+
+// A new key of this person's, shown once: the hash is all that's kept.
+function newHarnessKey(ctx: Ctx, name: string, level: HarnessLevel): { key: string; harness: HarnessKey } {
+  const clean = cleanName(name)
+  if (!clean) throw new Error(L('Dê um nome à chave (o harness e onde ele roda, por exemplo).', 'Name the key (the harness and where it runs, say).'))
+  if (clean.length > MAX_HARNESS_NAME) throw new Error(L(`Use um nome de até ${MAX_HARNESS_NAME} letras.`, `Use a name of up to ${MAX_HARNESS_NAME} characters.`))
+  if (db.harnessKeys(ctx.person.id).length >= MAX_HARNESS_KEYS) throw new Error(L(`Você já tem ${MAX_HARNESS_KEYS} chaves. Tire alguma que não usa mais.`, `You already have ${MAX_HARNESS_KEYS} keys. Remove one you no longer use.`))
+  const key = `tk_${randomBytes(32).toString('base64url')}`
+  const hash = hashSecret(key)
+  db.addHarnessKey(hash, ctx.person.id, clean, level)
+  record(ctx, 'harness.created', hash, { name: clean, level })
+  return { key, harness: db.harnessKeys(ctx.person.id).find((k) => k.id === hash)! }
+}
+
+let mcpListening: { ok: boolean; error?: string } = { ok: serverMode }
+function mcpInfo(): McpInfo {
+  if (serverMode) return { local: false, ...(publicUrl ? { url: `${publicUrl}/mcp` } : {}) }
+  return mcpListening.ok ? { local: true, url: `http://127.0.0.1:${runtimePorts.mcp}/mcp` } : { local: true, ...(mcpListening.error ? { error: mcpListening.error } : {}) }
+}
+
+// A harness call as its person: re-read now (removed since: no one), the contract's shape, the policy, the handler.
+const asCtx = (who: McpCaller): Ctx => {
+  const person = db.person(who.person.id)
+  if (!person) throw new Error(L('Seu acesso a este Tucano terminou.', 'Your access to this Tucano has ended.'))
+  return { person, via: who.key.name }
+}
+
+const mcpDoor = new McpDoor({
+  authenticate: (token) => {
+    if (!HARNESS_KEY.test(token)) return undefined
+    const found = db.harnessByKey(hashSecret(token))
+    return found ? { person: found.person, key: found.key } : undefined
+  },
+  call: async (who, method, params) => {
+    const ctx = asCtx(who)
+    const wrong = paramsError(method, params) ?? limitError(method, params)
+    if (wrong) throw new Error(wrong)
+    admit(ctx.person, method)
+    const fn = api[method] as unknown as (p: unknown, c: Ctx) => unknown
+    return (await fn(params ?? {}, ctx)) as never
+  },
+  send: async (who, conversationId, text, threadId, id) => {
+    const ctx = asCtx(who)
+    reach(ctx, conversationId)
+    record(ctx, 'mcp.sent', conversationId)
+    await runner.send(conversationId, text, [], threadId, ctx.person.id, { id, via: who.key.name })
+  },
+  message: (id) => db.message(id),
+  messagesAfter: (conversationId, at) => db.messagesAfter(conversationId, at),
+  runs: (who, f) => {
+    const ctx = asCtx(who)
+    const out: RunLine[] = []
+    for (const m of db.recentReplies({ ...f, limit: f.limit * 3 })) {
+      if (out.length >= f.limit) break
+      if (!people.canSeeConversation(ctx.person, db.conversation(m.conversationId)) || !people.visibleAt(ctx.person, m) || m.author.kind !== 'agent') continue
+      const conv = db.conversation(m.conversationId)
+      const r = m.run!.receipt
+      out.push({
+        message: m.id,
+        agent: db.agent(m.author.id)?.name ?? m.author.id,
+        conversation: conv?.kind === 'channel' ? `#${conv.name}` : `DM ${db.agent(conv?.name ?? '')?.name ?? ''}`.trim(),
+        at: m.at,
+        status: m.run!.status,
+        ...(m.run!.endedAt ? { seconds: Math.round((m.run!.endedAt - m.at) / 1000) } : {}),
+        ...(r ? { tokens: r.inputTokens + r.outputTokens } : {}),
+        ...(r?.apiCostUsd !== undefined ? { costUsd: Math.round(r.apiCostUsd * 10_000) / 10_000 } : {}),
+        ...(m.run!.error ? { error: m.run!.error } : {})
+      })
+    }
+    return out
+  },
+  addPendingMemory: (who, agentId, text) => {
+    const ctx = asCtx(who)
+    if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
+    must(ctx.person, { kind: 'memory', scope: agentId })
+    memory.suggest(agentId, text)
+    record(ctx, 'memory.proposed', agentId)
+  },
+  newAgent: () => ({ modelId: readyModel(settings()) ?? 'sonnet', limit: settings().defaultLimit }),
+  models: () => availableModels(settings(), allListed()),
+  freeHandle,
+  creation: (keyId, idem) => db.mcpCreation(keyId, idem),
+  saveCreation: (keyId, idem, result) => db.saveMcpCreation(keyId, idem, result),
+  guideIndex: () => guideIndex(),
+  readGuide: (topic) => readGuide(topic),
+  version: appVersion
+})
+
+// The desktop answers MCP on 127.0.0.1 (a server takes /mcp on its own address: src/server).
+if (!serverMode) {
+  const mcpServer = startMcpHttp(mcpDoor, runtimePorts.mcp, (err) => {
+    mcpListening = { ok: false, error: L(`A porta ${runtimePorts.mcp} já está em uso por outro programa: o MCP do Tucano não está no ar.`, `Port ${runtimePorts.mcp} is taken by another program: Tucano's MCP isn't up.`) }
+    console.warn('[mcp]', err.message)
+  })
+  mcpServer.on('listening', () => (mcpListening = { ok: true }))
+  process.on('exit', () => mcpServer.close())
+}
 
 function handle(port: MessagePortMain, req: Request): void {
   const reply = (r: Omit<Extract<Wire, { id: number }>, 'id'>): void => port.postMessage({ id: req.id, ...r } satisfies Wire)
