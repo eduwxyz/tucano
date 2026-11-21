@@ -100,7 +100,7 @@ import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
 import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
-import { confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { confirmDeleteAgent, confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
@@ -666,12 +666,24 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     >
       <span ref={below} aria-hidden />
       {!isNew && <Tabs page="agent" tabs={AGENT_TABS()} aside={admin && headAway ? saveLine : undefined} />}
-      {archived && (
+      {existing?.deleted ? (
+        <div className="archived-banner">
+          <Icon name="trash" size={15} />
+          <span className="grow">
+            <strong>{L(`${draft.name} foi excluído.`, `${draft.name} was deleted.`)}</strong> {L('As mensagens que escreveu continuam nas conversas; o resto foi embora.', 'The messages it wrote stay in the conversations; everything else is gone.')}
+          </span>
+        </div>
+      ) : archived && (
         <div className="archived-banner">
           <Icon name="archive" size={15} />
           <span className="grow">
             <strong>{L(`${draft.name} está arquivado.`, `${draft.name} is archived.`)}</strong> {L('Não responde, não roda rotinas e não é escolhido pra responder nos canais.', 'It doesn’t reply, doesn’t run routines and isn’t picked to answer in channels.')}
           </span>
+          {admin && existing?.kind !== 'tuca' && (
+            <button className="btn btn--sm btn--ghost" onClick={() => void confirmDeleteAgent(draft)}>
+              {L('Excluir para sempre', 'Delete for good')}
+            </button>
+          )}
           {admin && (
             <button className="btn btn--sm btn--primary" onClick={() => void archiveAgent(draft.id, false)}>
               {L('Reativar', 'Reactivate')}
@@ -680,7 +692,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
         </div>
       )}
       {!admin && <div className="admin-only--lead"><AdminOnly>{L('Só um admin muda os agentes. Você pode conversar com eles e ver como estão configurados.', 'Only an admin changes the agents. You can chat with them and see how they’re set up.')}</AdminOnly></div>}
-      <fieldset className="member-lock" disabled={!admin}>
+      <fieldset className="member-lock" disabled={!admin || !!existing?.deleted}>
         <div className="agent-sections">
           {pane('perfil') && (
             <Section title={L('Identidade', 'Identity')} help={L('Como você chama e reconhece o agente no chat. O papel, numa linha, ajuda a decidir quem responde nos canais.', 'How you call and recognize the agent in chat. The role, in one line, helps decide who replies in channels.')}>

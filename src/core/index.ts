@@ -100,6 +100,7 @@ import { companyNetwork } from './network'
 // Before any request: the system's certificates and proxy, for networks that inspect HTTPS (src/core/network.ts).
 companyNetwork()
 
+const deletedError = (name: string): string => L(`${name} foi excluído e não volta.`, `${name} was deleted and can’t come back.`)
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
@@ -1973,6 +1974,7 @@ const api: Handlers = {
 
   saveAgent: ({ agent, channelIds }, ctx) => {
     const before = db.agent(agent.id)
+    if (before?.deleted) throw new Error(deletedError(before.name))
     // Archived changes only through archiveAgent, which also stops what the agent was doing.
     // Its owner changes only with the removal hand-over, never by an edit (one with none is the
     // Tucano owner's, as db.agent reads it): a new one is whoever made it.
@@ -2026,6 +2028,7 @@ const api: Handlers = {
   archiveAgent: ({ id, archived }, ctx) => {
     const agent = db.agent(id)
     if (!agent || agent.archived === archived) return
+    if (agent.deleted) throw new Error(deletedError(agent.name))
     record(ctx, archived ? 'agent.archived' : 'agent.restored', id, { name: agent.name })
     if (archived) {
       for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.author.kind === 'agent' && m.author.id === id) runner.stop(m.id)
@@ -2037,6 +2040,29 @@ const api: Handlers = {
     refreshRestricted()
     emit({ type: 'agent', agent: db.agent(id)! })
     emitConversations()
+  },
+  // For good, and only once archived (so nothing of it is still running). What it wrote stays,
+  // signed by its name the way Slack keeps a deactivated person's messages, and so do its receipts
+  // (Usage keeps adding up) and its DMs' history; everything else goes (db.retireAgent), with its
+  // computer, its browser's logins and its folder on disk.
+  deleteAgent: ({ id }, ctx) => {
+    const agent = db.agent(id)
+    if (!agent || agent.deleted) return
+    if (agent.kind === 'tuca') throw new Error(L('O Tuca faz parte do app e não pode ser excluído.', 'Tuca is part of the app and can’t be deleted.'))
+    if (!agent.archived) throw new Error(L(`Arquive ${agent.name} antes de excluir.`, `Archive ${agent.name} before deleting it.`))
+    record(ctx, 'agent.deleted', id, { name: agent.name })
+    for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.author.kind === 'agent' && m.author.id === id) runner.stop(m.id)
+    for (const r of db.routines()) if (r.agentId === id) routines.remove(r.id)
+    runner.forgetSessions({ agentId: id })
+    if (agent.computer) bg(computers.erase(id), 'deleteAgent')
+    bg(browser.action(agent, 'clear'), 'deleteAgent')
+    rmSync(join(dataDir, 'agents', id), { recursive: true, force: true })
+    const channels = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(id)).map((c) => c.id)
+    const reports = db.agents().filter((a) => a.reportsTo === id).map((a) => a.id)
+    db.retireAgent(id)
+    refreshRestricted()
+    for (const a of [id, ...reports]) emit({ type: 'agent', agent: db.agent(a)! })
+    emitConversations(channels)
   },
   renameChannel: ({ id, name }, ctx) => {
     const conv = db.conversation(id)

@@ -313,8 +313,9 @@ export class McpDoor {
       .join(' ')
   }
 
+  // An agent deleted for good is only a name left on old messages: a harness never sees it.
   private snap(who: McpCaller): Promise<Snapshot> {
-    return this.deps.call(who, 'snapshot', undefined)
+    return this.deps.call(who, 'snapshot', undefined).then((s) => ({ ...s, agents: s.agents.filter((a) => !a.deleted) }))
   }
 
   // A creation: counted against the key's limits, made once per idempotency key.

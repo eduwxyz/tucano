@@ -16,7 +16,7 @@ export function AgentModelsPanel(): ReactNode {
   const saving = useRef(false)
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
-  const scope = agents.filter((a) => archived || !a.archived)
+  const scope = agents.filter((a) => !a.deleted && (archived || !a.archived))
   const visible = scope.filter((a) => `${a.name} ${a.handle}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   const targets = scope.filter((a) => selected.includes(a.id))
   const allVisible = visible.length > 0 && visible.every((a) => selected.includes(a.id))

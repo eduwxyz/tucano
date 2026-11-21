@@ -582,7 +582,7 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
   }
   const [thing, verb] = e.kind.split('.')
   const noun = ({ agent: L('o agente', 'agent'), connector: L('o conector', 'connector'), skill: L('a skill', 'skill'), routine: L('a rotina', 'routine'), channel: L('o canal', 'channel') } as Record<string, string>)[thing ?? ''] ?? thing
-  const did = ({ created: L('criou', 'created'), updated: L('mudou', 'changed'), removed: L('removeu', 'removed'), archived: L('arquivou', 'archived'), restored: L('reativou', 'restored'), decided: L('decidiu', 'decided') } as Record<string, string>)[verb ?? ''] ?? verb
+  const did = ({ created: L('criou', 'created'), updated: L('mudou', 'changed'), removed: L('removeu', 'removed'), archived: L('arquivou', 'archived'), deleted: L('excluiu', 'deleted'), restored: L('reativou', 'restored'), decided: L('decidiu', 'decided') } as Record<string, string>)[verb ?? ''] ?? verb
   return `${did} ${noun}${named ? ` ${thing === 'channel' ? '#' : ''}${named}` : ''}`
 }
 

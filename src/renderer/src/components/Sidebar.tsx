@@ -294,7 +294,8 @@ export function Sidebar(): ReactNode {
   const teamAgents = agents.filter(isTeam)
   // An archived agent leaves the list for a group at its end, folded until opened: its row opens the DM
   // with it, or its page when there's none.
-  const archived = agents.filter((a) => a.archived && a.kind !== 'tuca')
+  // A deleted one stays only while there's a DM with it to read (like Slack), its name struck out.
+  const archived = agents.filter((a) => a.archived && a.kind !== 'tuca' && (!a.deleted || dmOf.has(a.id)))
   const groups = useMemo(() => groupAgents(agents), [agents])
   const [menu, setMenu] = useState<MenuState>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
@@ -405,7 +406,7 @@ export function Sidebar(): ReactNode {
     }
   ]
   // One menu for an agent's row: what the DM's menu had and what the agent's had.
-  const agentMenu = (agent: Agent, dm: Conversation | undefined): MenuItem[] => [
+  const agentMenu = (agent: Agent, dm: Conversation | undefined): MenuItem[] => agent.deleted ? (dm ? dmMenu(dm, agent.name) : []) : [
     { label: L('Mandar mensagem', 'Send a message'), icon: 'send', onClick: () => void openDm(agent.id) },
     admin && !agent.archived
       ? { label: L('Editar', 'Edit'), icon: 'edit', onClick: () => navigate({ kind: 'agent', id: agent.id }) }
@@ -451,7 +452,7 @@ export function Sidebar(): ReactNode {
   const agentRow = (a: Agent): ReactNode => {
     const dm = dmOf.get(a.id)
     return (
-      <div key={a.id} className={`agent-row ${a.archived ? 'is-archived' : ''}`} onContextMenu={(e) => open(e, agentMenu(a, dm))}>
+      <div key={a.id} className={`agent-row ${a.archived ? 'is-archived' : ''} ${a.deleted ? 'is-deleted' : ''}`} onContextMenu={(e) => open(e, agentMenu(a, dm))}>
         <AgentRow id={a.id} dm={dm?.id} unread={dm?.unread} owner={team && a.owner !== you ? personById({ people }, a.owner)?.name : undefined} />
       </div>
     )
@@ -724,9 +725,11 @@ const AgentRow = memo(function AgentRow({ id, dm, unread, owner }: { id: string;
           </span>
         )}
       </button>
-      <button className="icon-btn icon-btn--sm agent-row__gear" title={settingsLabel} aria-label={settingsLabel} onClick={() => navigate({ kind: 'agent', id })}>
-        <Glyph name="sliders" size={14} />
-      </button>
+      {!agent.deleted && (
+        <button className="icon-btn icon-btn--sm agent-row__gear" title={settingsLabel} aria-label={settingsLabel} onClick={() => navigate({ kind: 'agent', id })}>
+          <Glyph name="sliders" size={14} />
+        </button>
+      )}
     </>
   )
 })
