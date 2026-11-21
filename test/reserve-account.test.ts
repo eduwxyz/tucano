@@ -7,6 +7,7 @@ import { Db } from '../src/core/db'
 import { accountDir } from '../src/core/engines/detect'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
+import { handoffSystem, routerSystem } from '../src/core/router'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -142,5 +143,80 @@ describe('the reserve on another account', () => {
     await r.idle()
     expect(reply().run?.status).toBe('done')
     expect(codexTurns.map((t) => t.account)).toEqual([undefined])
+  })
+})
+
+describe('the router on another account', () => {
+  const routerAccounts = (claude: { turns: Turn[] }): (string | undefined)[] => claude.turns.filter((t) => t.system === routerSystem()).map((t) => t.account)
+  const note = (): string => db.messages().find((m) => m.author.kind === 'system')!.text
+
+  // The agents answer on Pessoal, so only the router meets the usual login's limit.
+  beforeEach(() => {
+    db.saveAgent(agent({ accountId: 'p1' }))
+    db.saveAgent(agent({ id: 'a2', name: 'bia', handle: 'bia', accountId: 'p1' }))
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1', 'a2'] })
+  })
+
+  it('moves to another account when the usual login is out of quota', async () => {
+    const claude = claudeOutOn([undefined])
+    const r = runner(claude)
+    await r.send('c1', 'oi')
+    await r.idle()
+    expect(routerAccounts(claude)).toEqual([undefined, accountDir(data, 'w1')])
+    expect(note()).toMatch(/^Chamei/)
+    expect(note()).toContain('o limite do Claude Code acabou, decidi pela conta “Trabalho”')
+  })
+
+  it('says it could not pick when every login is out of quota', async () => {
+    const claude = claudeOutOn([undefined, accountDir(data, 'w1'), accountDir(data, 'p1')])
+    const r = runner(claude)
+    await r.send('c1', 'oi')
+    await r.idle()
+    expect(routerAccounts(claude)).toHaveLength(3)
+    expect(note()).toContain('Não consegui escolher quem responde')
+    expect(db.messages().some((m) => m.author.kind === 'agent')).toBe(false)
+  })
+
+  it('runs straight on an account when the usual login is signed out', async () => {
+    settings.engines.claude = { installed: true, loggedIn: false }
+    const claude = claudeOutOn([])
+    const r = runner(claude)
+    await r.send('c1', 'oi')
+    await r.idle()
+    expect(routerAccounts(claude)).toEqual([accountDir(data, 'w1')])
+    expect(note()).toMatch(/^Chamei/)
+    expect(note()).toContain('decidi pela conta “Trabalho” do Claude Code')
+    expect(note()).not.toContain('limite')
+  })
+
+  it('does not retry on another account for an error that is not the limit', async () => {
+    const base = claudeOutOn([undefined])
+    const claude: Engine & { turns: Turn[] } = {
+      id: 'claude',
+      turns: base.turns,
+      run: (t) =>
+        t.system === routerSystem()
+          ? (base.turns.push(t),
+            (async function* (): AsyncIterable<EngineEvent> {
+              yield { type: 'error', message: 'boom' }
+            })())
+          : base.run(t)
+    }
+    const r = runner(claude)
+    await r.send('c1', 'oi')
+    await r.idle()
+    expect(routerAccounts(claude)).toHaveLength(1)
+    expect(note()).toContain('Não consegui escolher quem responde')
+  })
+
+  it('screens a hand-off on another account too', async () => {
+    const claude = claudeOutOn([undefined])
+    const r = runner(claude)
+    await r.send('c1', '@lia peça pra bia ver isso')
+    await r.idle()
+    expect(claude.turns.filter((t) => t.system === handoffSystem()).map((t) => t.account)).toEqual([undefined, accountDir(data, 'w1')])
+    const steps = db.messages().flatMap((m) => m.run?.steps ?? [])
+    expect(steps.some((x) => x.label === 'Chamou' && !!x.detail?.includes('bia') && !!x.detail?.includes('o limite do Claude Code acabou, decidi pela conta “Trabalho”'))).toBe(true)
+    expect(db.messages().some((m) => m.author.kind === 'agent' && m.author.id === 'a2')).toBe(true)
   })
 })
