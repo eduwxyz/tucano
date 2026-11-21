@@ -1,5 +1,6 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierLabel, jobAbout, jobLabel, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
 import { L, lang, locale, type Lang } from '../../../shared/lang'
+import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
