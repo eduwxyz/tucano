@@ -192,6 +192,12 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   myDevices: {},
   setPush: { handle: 's|null', tag: 's?' },
   removeDevice: { id: 's' },
+  harnessKeys: {},
+  createHarnessKey: { name: 's', level: '[read,talk,configure]' },
+  removeHarnessKey: { id: 's' },
+  mcpInfo: {},
+  connectHarness: { harness: '[claude,codex,cursor,opencode]', replace: 'b?' },
+  harnessNoticeSeen: {},
   removePerson: { id: 's' },
   setRole: { id: 's', role: 's' },
   setPersonAccess: { id: 's', access: 'o' },
@@ -247,6 +253,7 @@ const MB = 1_000_000
 export const MAX_WIKI_FILE = 20 * 1024 * 1024
 const MAX_WIKI_FILE_B64 = Math.ceil(MAX_WIKI_FILE / 3) * 4
 export const LIMITS: Partial<Record<Method, Record<string, number>>> = {
+  createHarnessKey: { name: 200 },
   sendMessage: { text: MB },
   answerQuestion: { text: MB },
   setTopic: { topic: 500 },

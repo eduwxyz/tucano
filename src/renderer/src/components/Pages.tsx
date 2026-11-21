@@ -9,6 +9,7 @@ import { InHub } from './hub-context'
 import { BrowserLogins } from './BrowserLogins'
 import {
   agentById,
+  harnessNoticeSeen,
   getState,
   navigate,
   newAgentDraft,
@@ -86,6 +87,7 @@ import {
   type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
+import { HarnessesPane } from './HarnessKeys'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VOICE_WHERE, VoiceSetup } from './VoiceSetup'
@@ -1884,6 +1886,34 @@ function ApprovalHistory({ approvals }: { approvals: Approval[] }): ReactNode {
   )
 }
 
+// What the person's harnesses did over MCP since they last looked (src/core/mcp.ts), one line each.
+function HarnessNotices(): ReactNode {
+  const harness = useStore((s) => s.inbox.harness) ?? []
+  if (!harness.length) return null
+  return (
+    <>
+      <div className="caps-title">{L('Feito pelos seus harnesses', 'Done by your harnesses')}</div>
+      <div className="stack-list">
+        {harness.map((h) => (
+          <div key={h.name} className="card row row--between">
+            <span>
+              {h.text} <span className="muted small">· {time(h.at)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="row">
+        <button className="btn btn--ghost btn--sm" onClick={() => void harnessNoticeSeen()}>
+          {L('Visto', 'Seen')}
+        </button>
+        <button className="link small" onClick={() => (setTab('settings', 'harnesses'), navigate({ kind: 'settings' }))}>
+          {L('Ver as chaves', 'See the keys')}
+        </button>
+      </div>
+    </>
+  )
+}
+
 function MyApprovals(): ReactNode {
   const approvals = useStore((s) => s.approvals)
   const pending = approvals.filter((a) => a.state === 'pending')
@@ -1897,6 +1927,7 @@ function MyApprovals(): ReactNode {
 
   return (
     <Page title={L('Aprovações', 'Approvals')} subtitle={L('Nada sensível acontece sem você. Cada aprovação cobre uma ação exata.', 'Nothing sensitive happens without you. Each approval covers one exact action.')} actions={<AlwaysRulesLink />}>
+      <HarnessNotices />
       {pending.length === 0 ? (
         <NothingWaiting why={L('Quando um agente quiser publicar, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.', 'When an agent wants to publish, delete or send something out, the request shows up here and in the conversation.')} />
       ) : (
@@ -1929,7 +1960,7 @@ export function InboxPage(): ReactNode {
   // One answered by someone else while I was typing stays, with what I typed and who answered.
   const gone = (inbox.answered ?? []).filter((q) => questionDrafts.get(q.id)?.trim() && !inbox.questions.some((x) => x.id === q.id))
   const questions = [...inbox.questions.map((q) => ({ q, done: false })), ...gone.map((q) => ({ q, done: true }))]
-  const nothing = inbox.approvals.length + questions.length + proposals.length === 0
+  const nothing = inbox.approvals.length + questions.length + proposals.length + (inbox.harness?.length ?? 0) === 0
   const where = (conversationId: string | undefined, agentId: string): string => {
     const conv = conversations.find((c) => c.id === conversationId)
     const who = agents.find((x) => x.id === agentId)?.name
@@ -1950,6 +1981,7 @@ export function InboxPage(): ReactNode {
   return (
     <Page title={L('Pra você', 'For you')} subtitle={L('O que espera por você: aprovações que você decide e perguntas dos agentes a você.', 'What waits on you: approvals you decide and the agents’ questions to you.')} actions={<AlwaysRulesLink />}>
       {nothing && <NothingWaiting why={L('Quando um agente precisar da sua aprovação ou te fizer uma pergunta, aparece aqui e na conversa.', 'When an agent needs your approval or asks you something, it shows up here and in the conversation.')} />}
+      <HarnessNotices />
       {inbox.approvals.length > 0 && (
         <>
           <div className="caps-title">{L(`Aprovações · ${inbox.approvals.length}`, `Approvals · ${inbox.approvals.length}`)}</div>
@@ -2475,7 +2507,8 @@ export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList
     : []),
   ...(team ? [['pessoas', L('Pessoas', 'People')] as [string, string]] : []),
   ...(team && admin ? [['atividade', L('Atividade', 'Activity')] as [string, string]] : []),
-  ...(admin && hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
+  ...(admin && hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : []),
+  ['harnesses', 'Harnesses']
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
@@ -3157,6 +3190,7 @@ export function SettingsPage(): ReactNode {
       <Tabs page="settings" tabs={tabs} />
       <div className="agent-form">
         {pane('pessoas') && <PeoplePane />}
+        {pane('harnesses') && <HarnessesPane />}
         {pane('atividade') && admin && <ActivityPane />}
         {/* A member's own: the language, the theme and the sounds (their name is in Pessoas). */}
         {pane('geral') && !admin && (

@@ -48,6 +48,7 @@ import {
   type Trigger
 } from '../shared/types'
 import { stricter } from '../shared/classify'
+import { isHarnessLevel, type HarnessKey, type HarnessLevel } from '../shared/harness-keys'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
@@ -549,6 +550,26 @@ export const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS tasks_by_owner ON tasks (owner, position);
+  `,
+  // The keys of the harnesses a person connected over MCP (src/core/mcp.ts): each acts as that person, up to
+  // its level. Only the hash is kept. And what each key created with an idempotency key, so a retry makes nothing twice.
+  `
+  CREATE TABLE IF NOT EXISTS harness_keys (
+    hash TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    level TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS harness_keys_by_person ON harness_keys (person_id);
+  CREATE TABLE IF NOT EXISTS mcp_creations (
+    key_hash TEXT NOT NULL,
+    idem TEXT NOT NULL,
+    result TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (key_hash, idem)
+  );
   `
 ]
 
@@ -589,7 +610,9 @@ const COLUMNS: [string, string, string][] = [
   ['connector_tools', 'cls_floor', 'TEXT'],
   ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
-  ['messages', 'title', 'TEXT']
+  ['messages', 'title', 'TEXT'],
+  // A person's message sent by a harness over MCP (src/core/mcp.ts): the key's name, for the agent to read; the screens don't show it.
+  ['messages', 'via', 'TEXT']
 ]
 
 
@@ -677,6 +700,8 @@ export class Db {
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
           DELETE FROM person_keys;
+          DELETE FROM harness_keys;
+          DELETE FROM mcp_creations;
           DELETE FROM removed_keys;
           DELETE FROM invites;
           DELETE FROM read_state;
@@ -788,6 +813,8 @@ export class Db {
       this.db.exec(`
         DELETE FROM secrets;
         DELETE FROM person_keys;
+        DELETE FROM harness_keys;
+        DELETE FROM mcp_creations;
         DELETE FROM removed_keys;
         DELETE FROM invites;
         DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
@@ -812,6 +839,12 @@ export class Db {
           this.db
             .prepare("INSERT OR IGNORE INTO person_keys (hash, person_id, label, created_at, last_seen) SELECT hash, ?, label, created_at, last_seen FROM old.person_keys WHERE person_id = (SELECT id FROM old.people WHERE role = 'owner')")
             .run(owner)
+          // The owner's harnesses keep working, as their devices do (a server from before had none).
+          try {
+            this.db.prepare("INSERT OR IGNORE INTO harness_keys (hash, person_id, name, level, created_at, last_seen) SELECT hash, ?, name, level, created_at, last_seen FROM old.harness_keys WHERE person_id = (SELECT id FROM old.people WHERE role = 'owner')").run(owner)
+          } catch (e) {
+            console.warn('[restore] kept no harness keys:', e instanceof Error ? e.message : e)
+          }
           was("INSERT OR REPLACE INTO settings (key, value) SELECT key, value FROM old.settings WHERE key IN ('harnesses', 'telegram')")
         })
       } finally {
@@ -1148,7 +1181,8 @@ export class Db {
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
-      ...(r['title'] ? { title: str(r['title']) } : {})
+      ...(r['title'] ? { title: str(r['title']) } : {}),
+      ...(r['via'] ? { via: str(r['via']) } : {})
     }
   }
 
@@ -1207,6 +1241,13 @@ export class Db {
       )
       .all(before, since) as Row[]
     return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), last: Number(r['last']) }))
+  }
+
+  // The agents' replies, newest first (what ran: src/core/mcp.ts's list_runs). `agentId`: only its; `since`: after then.
+  recentReplies(f: { agentId?: string; since?: number; limit: number }): Message[] {
+    const where = ["author_kind = 'agent'", 'run IS NOT NULL', ...(f.agentId ? ['author_id = ?'] : []), ...(f.since !== undefined ? ['at > ?'] : [])]
+    const args = [...(f.agentId ? [f.agentId] : []), ...(f.since !== undefined ? [f.since] : []), Math.min(Math.max(1, Math.floor(f.limit)), 500)]
+    return (this.db.prepare(`SELECT * FROM messages WHERE ${where.join(' AND ')} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]).map((r) => this.toMessage(r))
   }
 
   // Oldest first.
@@ -1293,7 +1334,7 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
       .run(
@@ -1305,7 +1346,8 @@ export class Db {
         m.at,
         m.run ? JSON.stringify(m.run) : null,
         m.routine ? JSON.stringify(m.routine) : null,
-        m.threadId ?? null
+        m.threadId ?? null,
+        m.via ?? null
       )
   }
 
@@ -1932,6 +1974,7 @@ export class Db {
       // Only the hashes stay, to tell their browsers "you no longer have access" instead of counting a guess.
       this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(Date.now(), id)
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
+      this.db.prepare('DELETE FROM harness_keys WHERE person_id = ?').run(id) // their harnesses stop at once too
       this.db.prepare('DELETE FROM tasks WHERE owner = ?').run(id) // their to-dos: never started, only theirs
     })
   }
@@ -1995,6 +2038,57 @@ export class Db {
     const r = this.db.prepare('SELECT p.* FROM person_keys k JOIN people p ON p.id = k.person_id WHERE k.hash = ? AND p.removed_at IS NULL').get(hash) as Row | undefined
     if (r) this.db.prepare('UPDATE person_keys SET last_seen = ? WHERE hash = ?').run(Date.now(), hash)
     return r && this.toPerson(r)
+  }
+
+  // ---------- harness keys (src/core/mcp.ts) ----------
+
+  addHarnessKey(hash: string, personId: string, name: string, level: HarnessLevel): void {
+    this.db.prepare('INSERT INTO harness_keys (hash, person_id, name, level, created_at) VALUES (?, ?, ?, ?, ?)').run(hash, personId, name, level, Date.now())
+  }
+
+  // A person's harness keys, newest first. The id is the key's hash: it opens nothing.
+  harnessKeys(personId: string): HarnessKey[] {
+    return (this.db.prepare('SELECT * FROM harness_keys WHERE person_id = ? ORDER BY created_at DESC').all(personId) as Row[]).map((r) => this.toHarnessKey(r))
+  }
+
+  removeHarnessKey(personId: string, id: string): boolean {
+    return this.tx(() => {
+      const gone = this.db.prepare('DELETE FROM harness_keys WHERE hash = ? AND person_id = ?').run(id, personId).changes > 0
+      if (gone) this.db.prepare('DELETE FROM mcp_creations WHERE key_hash = ?').run(id)
+      return gone
+    })
+  }
+
+  // The person a harness key acts as, if they still have access, with the key; seen now.
+  harnessByKey(hash: string): { person: Person; key: HarnessKey } | undefined {
+    const r = this.db.prepare('SELECT k.* FROM harness_keys k JOIN people p ON p.id = k.person_id WHERE k.hash = ? AND p.removed_at IS NULL').get(hash) as Row | undefined
+    const person = r ? this.person(str(r['person_id'])) : undefined
+    if (!r || !person) return undefined
+    const now = Date.now()
+    // Seen at most once a minute: a harness calls many times in a row.
+    if (!r['last_seen'] || now - Number(r['last_seen']) > 60_000) this.db.prepare('UPDATE harness_keys SET last_seen = ? WHERE hash = ?').run(now, hash)
+    return { person, key: this.toHarnessKey({ ...r, last_seen: now }) }
+  }
+
+  private toHarnessKey(r: Row): HarnessKey {
+    const level = str(r['level'])
+    return { id: str(r['hash']), name: str(r['name']), level: isHarnessLevel(level) ? level : 'read', createdAt: Number(r['created_at']), ...(r['last_seen'] ? { seenAt: Number(r['last_seen']) } : {}) }
+  }
+
+  // What a key made with an idempotency key (a JSON result), if it did, in the last 7 days.
+  mcpCreation(keyHash: string, idem: string): unknown {
+    const r = this.db.prepare('SELECT result FROM mcp_creations WHERE key_hash = ? AND idem = ? AND at > ?').get(keyHash, idem, Date.now() - 7 * 86_400_000) as Row | undefined
+    if (!r) return undefined
+    try {
+      return JSON.parse(str(r['result']))
+    } catch {
+      return undefined
+    }
+  }
+
+  saveMcpCreation(keyHash: string, idem: string, result: unknown): void {
+    this.db.prepare('INSERT OR REPLACE INTO mcp_creations (key_hash, idem, result, at) VALUES (?, ?, ?, ?)').run(keyHash, idem, JSON.stringify(result), Date.now())
+    this.db.prepare('DELETE FROM mcp_creations WHERE at < ?').run(Date.now() - 7 * 86_400_000)
   }
 
   // ---------- invites ----------

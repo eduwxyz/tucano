@@ -1,6 +1,7 @@
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from '../../shared/harness-keys'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
@@ -1150,6 +1151,13 @@ export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => 
 export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
 export const myDevices = (): Promise<Device[]> => call('myDevices')
 export const removeDevice = (id: string): Promise<void> => call('removeDevice', { id })
+// Harnesses over MCP (Configurações › Harnesses).
+export const harnessKeys = (): Promise<HarnessKey[]> => call('harnessKeys')
+export const createHarnessKey = (name: string, level: HarnessLevel): Promise<{ key: string; harness: HarnessKey }> => call('createHarnessKey', { name, level })
+export const removeHarnessKey = (id: string): Promise<void> => call('removeHarnessKey', { id })
+export const mcpInfo = (): Promise<McpInfo> => call('mcpInfo')
+export const connectHarness = (harness: Connectable, replace?: boolean): Promise<HarnessConnect> => call('connectHarness', { harness, ...(replace ? { replace } : {}) })
+export const harnessNoticeSeen = (): Promise<void> => call('harnessNoticeSeen')
 export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)

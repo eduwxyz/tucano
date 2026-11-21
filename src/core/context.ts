@@ -474,7 +474,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
   const scheduler = (id: string): string | undefined => (typeof opts.routineOwner === 'function' ? opts.routineOwner(id) : (opts.routineOwner ?? me))
   const personName = (id: string): string => people?.find((p) => p.id === id)?.name || me
   const name = (m: Message): string | null => {
-    if (m.author.kind === 'person') return personName(m.author.id)
+    // Sent by a harness over MCP: the answer is read there (src/core/mcp.ts).
+    if (m.author.kind === 'person') return m.via ? L(`${personName(m.author.id)}, pelo ${m.via}`, `${personName(m.author.id)}, through ${m.via}`) : personName(m.author.id)
     if (m.author.kind === 'system') return null
     if (m.author.kind === 'routine') {
       const by = scheduler(m.author.id)
