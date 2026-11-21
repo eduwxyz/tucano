@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
-import { agentById, amAdmin, archiveAgent, canEditChannel, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Conversation, type State, type View } from '../store'
+import { agentById, amAdmin, archiveAgent, canEditChannel, deleteAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Agent, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
@@ -27,7 +27,8 @@ export function Dialogs(): ReactNode {
 // resolves true when the person clicks the confirm button (named with the verb and the
 // thing: “Excluir #lancamento”), false on Cancelar, Esc or a click outside. danger is for
 // what can't be undone: red button, and Cancelar holds the focus so Enter doesn't destroy.
-type Ask = { title: string; body?: string; confirm: string; danger?: boolean; resolve: (ok: boolean) => void }
+// typeToConfirm: what has to be typed before the confirm button works (an agent's name, for a deletion for good).
+type Ask = { title: string; body?: string; confirm: string; danger?: boolean; typeToConfirm?: string; resolve: (ok: boolean) => void }
 let asking: Ask | null = null
 const askListeners = new Set<() => void>()
 const setAsking = (a: Ask | null): void => {
@@ -35,7 +36,7 @@ const setAsking = (a: Ask | null): void => {
   askListeners.forEach((l) => l())
 }
 
-export function confirmDialog(o: { title: string; body?: string; confirm: string; danger?: boolean }): Promise<boolean> {
+export function confirmDialog(o: { title: string; body?: string; confirm: string; danger?: boolean; typeToConfirm?: string }): Promise<boolean> {
   asking?.resolve(false)
   return new Promise((resolve) => setAsking({ ...o, resolve }))
 }
@@ -49,6 +50,12 @@ function ConfirmHost(): ReactNode {
     () => asking
   )
   if (!ask) return null
+  return <ConfirmBody key={ask.title} ask={ask} />
+}
+
+function ConfirmBody({ ask }: { ask: Ask }): ReactNode {
+  const [typed, setTyped] = useState('')
+  const blocked = !!ask.typeToConfirm && typed.trim().toLowerCase() !== ask.typeToConfirm.trim().toLowerCase()
   const answer = (ok: boolean): void => {
     if (asking !== ask) return
     setAsking(null)
@@ -61,12 +68,18 @@ function ConfirmHost(): ReactNode {
           {p}
         </p>
       ))}
+      {ask.typeToConfirm && (
+        <label className="field">
+          <span className="small">{L(`Digite ${ask.typeToConfirm} pra confirmar`, `Type ${ask.typeToConfirm} to confirm`)}</span>
+          <input autoFocus value={typed} spellCheck={false} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !blocked && answer(true)} />
+        </label>
+      )}
       <footer className="modal__foot">
         <span className="grow" />
-        <button className="btn btn--ghost btn--sm" autoFocus={ask.danger} onClick={() => answer(false)}>
+        <button className="btn btn--ghost btn--sm" autoFocus={ask.danger && !ask.typeToConfirm} onClick={() => answer(false)}>
           {L('Cancelar', 'Cancel')}
         </button>
-        <button className={`btn btn--sm ${ask.danger ? 'btn--danger' : 'btn--primary'}`} autoFocus={!ask.danger} onClick={() => answer(true)}>
+        <button className={`btn btn--sm ${ask.danger ? 'btn--danger' : 'btn--primary'}`} autoFocus={!ask.danger} disabled={blocked} onClick={() => answer(true)}>
           {ask.confirm}
         </button>
       </footer>
@@ -294,9 +307,27 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
   )
 }
 
-// The agents taken out of the sidebar, to see or bring back.
+// Deleting an archived agent for good, asked with its name typed in: the agents page and the archived list both ask this.
+export function confirmDeleteAgent(agent: Pick<Agent, 'id' | 'name'>): Promise<boolean> {
+  return confirmDialog({
+    title: L(`Excluir ${agent.name} para sempre?`, `Delete ${agent.name} for good?`),
+    body: L(
+      `As mensagens que ${agent.name} escreveu continuam nas conversas, com o nome riscado, e os recibos continuam em Uso e limites. Vão embora as instruções, as permissões, as memórias dele, as rotinas, o computador, os logins do navegador e os arquivos da pasta dele.\n\nNão dá pra desfazer.`,
+      `The messages ${agent.name} wrote stay in the conversations, with the name struck out, and its receipts stay in Usage and limits. Its instructions, permissions, memories, routines, computer, browser logins and folder go.\n\nThis can’t be undone.`
+    ),
+    confirm: L(`Excluir ${agent.name}`, `Delete ${agent.name}`),
+    danger: true,
+    typeToConfirm: agent.name
+  }).then((ok) => {
+    if (ok) void deleteAgent(agent.id)
+    return ok
+  })
+}
+
+// The agents taken out of the sidebar, to see, bring back or delete for good.
 function Archived({ onClose }: { onClose: () => void }): ReactNode {
-  const agents = useStore((s) => s.agents.filter((a) => a.archived))
+  const agents = useStore((s) => s.agents.filter((a) => a.archived && !a.deleted))
+  const admin = useStore(amAdmin)
   return (
     <Modal title={L('Agentes arquivados', 'Archived agents')} onClose={onClose}>
       <p className="muted small modal__lead">{L('Não respondem, não rodam rotinas e não são escolhidos pra responder nos canais. O histórico e os recibos continuam. Reativado, o agente volta aos canais em que estava; as rotinas dele você liga de novo em Rotinas.', 'They don’t reply, don’t run routines and aren’t picked to answer in channels. History and receipts stay. Once reactivated, an agent returns to the channels it was in; you turn its routines back on in Routines.')}</p>
@@ -326,6 +357,11 @@ function Archived({ onClose }: { onClose: () => void }): ReactNode {
               <button className="btn btn--sm" onClick={() => void archiveAgent(a.id, false)}>
                 {L('Reativar', 'Reactivate')}
               </button>
+              {admin && a.kind !== 'tuca' && (
+                <button className="btn btn--sm btn--ghost member__delete" title={L('Excluir para sempre', 'Delete for good')} aria-label={L(`Excluir ${a.name} para sempre`, `Delete ${a.name} for good`)} onClick={() => void confirmDeleteAgent(a)}>
+                  <Icon name="trash" size={14} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -360,6 +396,7 @@ const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] =>
       ] as const)
     : []),
   { label: L('Conectores', 'Connectors'), view: { kind: 'connectors' }, icon: 'plug' },
+  { label: L('Cofre', 'Vault'), view: { kind: 'vault' }, icon: 'key' },
   { label: L('Configurações', 'Settings'), view: { kind: 'settings' }, icon: 'gear' }
 ]
 
@@ -437,7 +474,8 @@ function Search({ onClose }: { onClose: () => void }): ReactNode {
 
 // ---------- the right-click menu ----------
 
-export type MenuItem = { label: string; icon?: IconName; danger?: boolean; onClick: () => void } | 'separator'
+// `checked`: an on/off item, ticked while on.
+export type MenuItem = { label: string; icon?: IconName; danger?: boolean; checked?: boolean; onClick: () => void } | 'separator'
 export type MenuState = { x: number; y: number; items: MenuItem[] } | null
 
 export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }): ReactNode {
@@ -470,7 +508,8 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
         ) : (
           <button
             key={i}
-            role="menuitem"
+            role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-checked={it.checked}
             className={`menu__item ${it.danger ? 'is-danger' : ''}`}
             onClick={() => {
               onClose()
@@ -479,6 +518,11 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
           >
             {it.icon && <Icon name={it.icon} size={14} />}
             {it.label}
+            {it.checked && (
+              <span className="menu__check">
+                <Icon name="check" size={13} />
+              </span>
+            )}
           </button>
         )
       )}

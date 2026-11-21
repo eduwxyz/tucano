@@ -91,7 +91,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     out.push(`## ${L('Conectores', 'Connectors')}\n${lines.join('\n') || L('nenhum adicionado', 'none added')}`)
   }
   if (show('agents')) {
-    const lines = x.agents.map((a) => {
+    const lines = x.agents.filter((a) => !a.deleted).map((a) => {
       const m = modelInfo(a.modelId)
       const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
       // With no monthly limit (0) there is no month to be a percentage of: say so, rather than "0%".

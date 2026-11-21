@@ -8,6 +8,7 @@ import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { checkJevKey, routeJev } from '../src/core/jev'
 import { Runner } from '../src/core/runs'
+import { chimeSystem } from '../src/core/router'
 
 const agent = (id: string, handle: string, role: string): Agent => ({
   id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role, color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false
@@ -67,9 +68,10 @@ describe('in a channel', () => {
   let routerTurns: number
   let seen: Turn[] // the agents' turns, in the order they started
   let settings: Settings
+  // The router's turn that may call someone in after a reply (chimeSystem) isn't the routing: left out.
   const engines = (): Record<EngineId, Engine> => {
     const base = fakeEngine('claude', { delayMs: 1 })
-    return { claude: { id: 'claude', run: (t) => (t.model === 'haiku' ? routerTurns++ : seen.push(t), base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
+    return { claude: { id: 'claude', run: (t) => (t.system === chimeSystem() ? 0 : t.model === 'haiku' ? routerTurns++ : seen.push(t), base.run(t)) }, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   }
   const runner = (f: typeof fetch, key: string | undefined): Runner =>
     new Runner({ db, engines: engines(), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), jev: { key: async () => key, fetch: f } })

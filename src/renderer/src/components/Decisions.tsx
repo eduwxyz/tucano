@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { answerDecision, submitDecisions, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
@@ -22,6 +22,8 @@ const Prose = ({ text, className }: { text: string; className: string }): ReactN
   </div>
 )
 const Title = ({ q }: { q: Decision }): ReactNode => (isLong(q) ? <Prose className="ask__prose" text={q.question} /> : <div className="ask__title">{q.question}</div>)
+// The option the agent recommends, marked where it's listed.
+const Recommended = (): ReactNode => <span className="tag tag--agent ask-option__tag">{L('recomendada', 'recommended')}</span>
 
 // What's ticked or typed but not confirmed, by message and decision, so moving around or
 // scrolling away keeps it (like the message box's drafts). In memory: closing the app drops them.
@@ -89,6 +91,7 @@ function Asked({ questions }: { questions: Decision[] }): ReactNode {
               {q.options.map((o, j) => (
                 <span key={j} className="ask-chip">
                   {o.label}
+                  {o.recommended && <Recommended />}
                 </span>
               ))}
             </span>
@@ -139,6 +142,18 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
     if (sending) return
     setSending(true)
     void submitDecisions(id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
+  }
+
+  // Every decision with the option the agent recommends, sent at once. Only when each one has such an option.
+  const recommended = recommendedAnswers(questions)
+  const goRecommended = (): void => {
+    if (!recommended || sending) return
+    recommended.forEach((a, i) => {
+      drafts.delete(draftKey(id, i))
+      answerDecision(id, i, a)
+    })
+    setAnswers(recommended)
+    send()
   }
 
   const commit = (index: number, answer: Answer | null): void => {
@@ -202,6 +217,13 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
         <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} sending={sending} />
       ) : (
         <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} />
+      )}
+      {recommended && (
+        <div className="ask__recommend">
+          <button className="btn btn--sm" disabled={sending} onClick={goRecommended}>
+            <Icon name="check" size={12} /> {L('Pode seguir com a recomendação', 'Go with the recommendation')}
+          </button>
+        </div>
       )}
       {extra}
     </section>
@@ -287,7 +309,10 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer }: 
               <button key={i} role={multiple ? 'checkbox' : 'radio'} aria-checked={on} className={`ask-option ${on ? 'is-on' : ''} ${focus === i ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(i)} onClick={() => pick(i)}>
                 <span className="ask-option__key">{i + 1}</span>
                 <span className="ask-option__text">
-                  <span className="ask-option__label">{o.label}</span>
+                  <span className="ask-option__label">
+                    {o.label}
+                    {o.recommended && <Recommended />}
+                  </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
                 <span className={`ask-option__mark ${multiple ? 'is-box' : ''}`} aria-hidden>

@@ -1,6 +1,8 @@
+import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from '../../shared/vault'
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from '../../shared/harness-keys'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
@@ -61,8 +63,7 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo,
-  type SavedLogin
+  type NodeInfo
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -78,6 +79,7 @@ export type View =
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
+  | { kind: 'vault'; tab?: 'keys' | 'logins' | 'log' } // the Cofre (components/Vault.tsx)
   | { kind: 'memory' }
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
@@ -983,6 +985,7 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
+export const deleteAgent = (id: string): Promise<void> => call('deleteAgent', { id })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 // Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
@@ -1019,6 +1022,8 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+// The note where a piece of work stopped on its brakes (message.stop): the work goes on from there.
+export const continueJob = (messageId: string): void => void fire(L('Não consegui continuar o trabalho.', "I couldn't continue the work."), 'continueJob', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })
@@ -1081,10 +1086,20 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
-// The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
-export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
-export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
-export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
+// The Cofre (src/core/vault.ts): keys by name, never their values.
+export const vaultKeys = (): Promise<VaultKey[]> => call('vaultKeys')
+export const vaultUses = (): Promise<VaultUse[]> => call('vaultUses')
+export const saveVaultKey = (key: VaultKeyInput): Promise<VaultKey> => call('saveVaultKey', { key })
+export const removeVaultKey = (id: string): Promise<void> => call('removeVaultKey', { id })
+export const setVaultKeyAgent = (id: string, agentId: string, on: boolean): Promise<VaultKey> => call('setVaultKeyAgent', { id, agentId, on })
+export const importVaultKeys = (lines: EnvPair[], replace: string[], mine?: boolean): Promise<{ saved: number }> => call('importVaultKeys', { lines, replace, ...(mine ? { mine } : {}) })
+// Its site logins: sites and usernames, never a password.
+export const vaultLogins = (): Promise<VaultLogin[]> => call('vaultLogins')
+export const saveVaultLogin = (login: VaultLoginInput): Promise<VaultLogin> => call('saveVaultLogin', { login })
+export const removeVaultLogin = (id: string): Promise<void> => call('removeVaultLogin', { id })
+export const setVaultLoginAgent = (id: string, agentId: string, on: boolean): Promise<VaultLogin> => call('setVaultLoginAgent', { id, agentId, on })
+// pedir_chave's card in the chat: the key or the login pasted, or one in the Cofre given to the agent.
+export const answerKeyRequest = (answer: KeyRequestAnswer): Promise<void> => call('answerKeyRequest', { answer })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)
@@ -1150,6 +1165,13 @@ export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => 
 export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
 export const myDevices = (): Promise<Device[]> => call('myDevices')
 export const removeDevice = (id: string): Promise<void> => call('removeDevice', { id })
+// Harnesses over MCP (Configurações › Harnesses).
+export const harnessKeys = (): Promise<HarnessKey[]> => call('harnessKeys')
+export const createHarnessKey = (name: string, level: HarnessLevel): Promise<{ key: string; harness: HarnessKey }> => call('createHarnessKey', { name, level })
+export const removeHarnessKey = (id: string): Promise<void> => call('removeHarnessKey', { id })
+export const mcpInfo = (): Promise<McpInfo> => call('mcpInfo')
+export const connectHarness = (harness: Connectable, replace?: boolean): Promise<HarnessConnect> => call('connectHarness', { harness, ...(replace ? { replace } : {}) })
+export const harnessNoticeSeen = (): Promise<void> => call('harnessNoticeSeen')
 export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)

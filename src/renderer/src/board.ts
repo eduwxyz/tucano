@@ -251,13 +251,15 @@ export function costOf(c: BoardCard, now = Date.now()): { ms: number; tokens: nu
   return { ms, tokens }
 }
 
-// The words of the last thing a card's agent is doing ("Rodando os testes"), while it works.
-export function liveStep(c: BoardCard): string | undefined {
-  const run = c.last?.run
+// The words of the last thing a reply is doing ("Rodando os testes"), while it works.
+export function runStep(run: Run | undefined): string | undefined {
   if (run?.status !== 'working') return undefined
   const s = [...run.steps].reverse().find((x) => x.status === 'running') ?? run.steps.at(-1)
   return s?.label
 }
+
+// The same, for a card's agent.
+export const liveStep = (c: BoardCard): string | undefined => runStep(c.last?.run)
 
 // The family of a card: the request and every part of it (for the hover that lights them up).
 export function familyOf(cards: BoardCard[], id: string): Set<string> {

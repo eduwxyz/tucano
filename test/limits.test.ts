@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { countedTokens, type Agent, type EngineId, type Settings } from '../src/shared/types'
+import { AUTO_CONTINUES, countedTokens, type Agent, type EngineId, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
@@ -188,24 +188,25 @@ describe('the budget per reply', () => {
   })
   const agentReplies = () => db.messages().filter((m) => m.author.kind === 'agent')
 
-  it('goes on by itself when it paused while getting somewhere, twice in a row at most, then waits', async () => {
+  it(`goes on by itself when it paused while getting somewhere, ${AUTO_CONTINUES} times in a row at most, then waits`, async () => {
+    settings = { ...settings, runBudgetPct: 1 } // 10 mil per reply: the month's limit lasts the whole test
     const seen: { turns: Turn[] } = { turns: [] }
-    const r = runner(working(120_000, seen))
+    const r = runner(working(12_000, seen))
     await r.send('d1', 'investiga o bug')
     await r.idle()
-    expect(seen.turns).toHaveLength(3)
-    expect(seen.turns[1]!.prompt).toContain('como estava avançando, segue sozinho agora (1 de 2 vezes seguidas')
-    expect(seen.turns[2]!.prompt).toContain('(2 de 2 vezes seguidas')
-    const [first, second, third] = agentReplies()
-    expect(first!.run).toMatchObject({ status: 'done' })
-    expect(first!.run!.steps.at(-1)?.label).toBe('Continuou sozinho')
-    expect(second!.run).toMatchObject({ status: 'done', autoContinued: 1 })
-    // The third paused too, and now it's the person's call.
-    expect(third!.run).toMatchObject({ status: 'paused', autoContinued: 2 })
+    expect(seen.turns).toHaveLength(AUTO_CONTINUES + 1)
+    expect(seen.turns[1]!.prompt).toContain(`como estava avançando, segue sozinho agora (1 de ${AUTO_CONTINUES} vezes seguidas`)
+    expect(seen.turns[AUTO_CONTINUES]!.prompt).toContain(`(${AUTO_CONTINUES} de ${AUTO_CONTINUES} vezes seguidas`)
+    const replies = agentReplies()
+    expect(replies[0]!.run).toMatchObject({ status: 'done' })
+    expect(replies[0]!.run!.steps.at(-1)?.label).toBe('Continuou sozinho')
+    expect(replies[1]!.run).toMatchObject({ status: 'done', autoContinued: 1 })
+    // The last paused too, and now it's the person's call.
+    expect(replies.at(-1)!.run).toMatchObject({ status: 'paused', autoContinued: AUTO_CONTINUES })
     // Continuing by hand starts the count over.
-    await r.continue(third!.id)
+    await r.continue(replies.at(-1)!.id)
     await r.idle()
-    expect(seen.turns).toHaveLength(6)
+    expect(seen.turns).toHaveLength(2 * (AUTO_CONTINUES + 1))
   })
 
   it('waits for the person when the month has no room for another reply that size, or when that is turned off', async () => {
@@ -309,7 +310,7 @@ describe('keeping the Mac awake', () => {
 })
 
 describe('usage alert', () => {
-  it('warns once, in the conversation and with a notification, when an agent crosses 80% of its limit', async () => {
+  it('warns once, in the conversation and without a notification, when an agent crosses 80% of its limit', async () => {
     db.saveAgent(agent({ limit: 10_000 }))
     db.addReceipt({ model: 'sonnet', inputTokens: 7_900, cacheReadTokens: 0, outputTokens: 0, ms: 1, messageId: 'old', agentId: 'a1', engine: 'claude', at: Date.now() })
     const r = runner(fakeEngine('claude', { delayMs: 1 }))
@@ -319,8 +320,9 @@ describe('usage alert', () => {
     await r.idle()
     const alerts = db.messages().filter((m) => m.author.kind === 'system' && m.text.includes('do limite do mês'))
     expect(alerts).toHaveLength(1)
-    expect(alerts[0]!.text).toMatch(/\*\*Lia\*\* já usou 8\d% do limite do mês \(\d+ mil de 10 mil tokens\)/)
-    expect(notes.filter((n) => n.includes('limite'))).toEqual([expect.stringMatching(/^Lia usou 8\d% do limite do mês$/)])
+    expect(alerts[0]!.text).toMatch(/\*\*Lia\*\* já usou [89]\d% do limite do mês \(\d+ mil de 10 mil tokens\)/)
+    // The line in the conversation is enough: no push for it (the person hears only of what needs them).
+    expect(notes.filter((n) => n.includes('limite'))).toEqual([])
   })
 })
 

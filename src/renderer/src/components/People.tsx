@@ -577,12 +577,14 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return named ? L(`excluiu o canal #${named}`, `deleted the #${named} channel`) : L('excluiu um canal', 'deleted a channel')
     case 'dm.deleted':
       return L('apagou uma conversa privada', 'deleted a private conversation')
+    case 'vault_key.imported':
+      return L(`importou ${String(d['count'] ?? '')} chaves pro Cofre`, `imported ${String(d['count'] ?? '')} keys into the Vault`)
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
   }
   const [thing, verb] = e.kind.split('.')
-  const noun = ({ agent: L('o agente', 'agent'), connector: L('o conector', 'connector'), skill: L('a skill', 'skill'), routine: L('a rotina', 'routine'), channel: L('o canal', 'channel') } as Record<string, string>)[thing ?? ''] ?? thing
-  const did = ({ created: L('criou', 'created'), updated: L('mudou', 'changed'), removed: L('removeu', 'removed'), archived: L('arquivou', 'archived'), restored: L('reativou', 'restored'), decided: L('decidiu', 'decided') } as Record<string, string>)[verb ?? ''] ?? verb
+  const noun = ({ vault_key: L('a chave do Cofre', 'Vault key'), vault_login: L('o login do Cofre', 'Vault login'), agent: L('o agente', 'agent'), connector: L('o conector', 'connector'), skill: L('a skill', 'skill'), routine: L('a rotina', 'routine'), channel: L('o canal', 'channel') } as Record<string, string>)[thing ?? ''] ?? thing
+  const did = ({ created: L('criou', 'created'), updated: L('mudou', 'changed'), removed: L('removeu', 'removed'), archived: L('arquivou', 'archived'), deleted: L('excluiu', 'deleted'), restored: L('reativou', 'restored'), decided: L('decidiu', 'decided') } as Record<string, string>)[verb ?? ''] ?? verb
   return `${did} ${noun}${named ? ` ${thing === 'channel' ? '#' : ''}${named}` : ''}`
 }
 

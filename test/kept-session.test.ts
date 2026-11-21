@@ -169,6 +169,7 @@ describe('a reply with a kept session', () => {
     db.saveAgent(agent('a2', 'theo'))
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     db.createConversation({ id: 'c1', kind: 'channel', name: 'engenharia', members: ['a1', 'a2'] })
+    db.setProactive('c1', false) // the turns here are the agents' own: no one called in on their own
   })
 
   it('sends the whole conversation once, then only the new message', async () => {

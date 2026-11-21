@@ -39,6 +39,22 @@ describe('the decisions card', () => {
     expect(html).not.toContain('Pra quando?') // the next decision comes after this one
   })
 
+  it('marks the recommended option, and goes with the recommendations only when every decision has one', () => {
+    const picks: Decision[] = [
+      { question: 'Paginação no menu?', kind: 'single', options: [{ label: 'Busca remota', recommended: true }, { label: 'Paginar' }] },
+      { question: 'Onde?', kind: 'single', options: [{ label: 'Menu' }, { label: 'Topo', recommended: true }] }
+    ]
+    const html = renderToStaticMarkup(<AskCard id="m1" questions={picks} mode="answer" badge="Esperando você" />)
+    expect(html.match(/recomendada/g)).toHaveLength(1) // one decision at a time
+    expect(html).toContain('Pode seguir com a recomendação')
+    // A free-text decision has no recommendation: the card asks as usual.
+    expect(renderToStaticMarkup(<AskCard id="m1" questions={[picks[0]!, decisions[1]!]} mode="answer" badge="Esperando você" />)).not.toContain('Pode seguir com a recomendação')
+    // Someone else's to answer: they see what's recommended, not the button.
+    const view = renderToStaticMarkup(<AskCard id="m1" questions={picks} mode="view" badge="Esperando Bia" />)
+    expect(view.match(/recomendada/g)).toHaveLength(2)
+    expect(view).not.toContain('Pode seguir com a recomendação')
+  })
+
   it('answered, keeps each decision with what was chosen', () => {
     const html = renderToStaticMarkup(<AskCard id="m1" questions={decisions} saved={[{ chosen: [1] }, { text: 'sexta' }]} mode="done" badge="Respondida por Bia" />)
     expect(html).toContain('Respondida por Bia')

@@ -214,6 +214,12 @@ const DOWN = new RegExp(
   "i"
 );
 const BUSY = /SQLITE_BUSY|database is locked/i;
+// Something that passes by itself: no network, a slow or busy service, a plan's window that resets.
+// A reply that failed on one of these waits and tries again by itself (src/core/runs.ts).
+export const passes = (e: unknown): boolean => {
+  const raw = message(e);
+  return !AUTH.test(raw) && (OUT_OF_QUOTA.test(raw) || OFFLINE.test(raw) || SLOW.test(raw) || DOWN.test(raw) || BUSY.test(raw));
+};
 // When the plan frees up again, as the CLI said it: "resets 5pm", "will reset at 3pm",
 // "try again in 6.5s". Up to the end of the sentence; "try again later" says no time.
 const RESETS =

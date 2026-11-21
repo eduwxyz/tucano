@@ -10,6 +10,7 @@ import { CODE_SPANS, scopePerson, type Agent, type Approval, type Artifact, type
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
+import { harnessSummary } from './mcp'
 import { agentsFor, assertAgentVisible, peopleFor, viewedConversations, withinAccess } from './access-policy'
 import { cleanAccess, covers, EVERYTHING, restricted, seesAgent } from '../shared/access'
 
@@ -275,7 +276,7 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, sidebarHidden: _h, onboarding: _o, wikiDir: _w, ...rest } = s
+    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, sidebarHidden: _h, navOrder: _no, agentOrder: _ao, sectorOrder: _so2, onboarding: _o, wikiDir: _w, ...rest } = s
     return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 
@@ -539,7 +540,35 @@ export class People {
     // Asked to them and answered a moment ago by someone else (an admin, whoever covers for them).
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)
     const proposals = isAdmin(person) ? this.forwardedProposals() : []
-    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}) }
+    const harness = this.harnessNotices(person)
+    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}), ...(harness.length ? { harness } : {}) }
+  }
+
+  // What this person's harnesses changed over MCP since they last looked: one line per harness,
+  // counting each thing once however often it changed ("Claude Code criou ou mudou 3 agentes e 2 rotinas").
+  harnessNotices(person: Pick<Person, 'id'>): NonNullable<Inbox['harness']> {
+    const seen = Number(this.db.meta(`harnessSeen:${person.id}`) ?? 0)
+    // Per harness: what it made and what it changed, each thing once (made wins over changed).
+    const by = new Map<string, { made: Map<string, Set<string>>; changed: Map<string, Set<string>>; at: number }>()
+    for (const e of this.db.activity({ personId: person.id, limit: 200 })) {
+      if (e.at <= seen) break
+      const via = typeof e.detail?.['via'] === 'string' ? e.detail['via'] : undefined
+      if (!via) continue
+      const [kind = '', what = ''] = e.kind.split('.')
+      const one = by.get(via) ?? { made: new Map<string, Set<string>>(), changed: new Map<string, Set<string>>(), at: e.at }
+      if (!by.has(via)) by.set(via, one)
+      const into = /^(created|added|proposed)$/.test(what) ? one.made : one.changed
+      const set = into.get(kind) ?? new Set<string>()
+      set.add(e.target ?? e.id)
+      into.set(kind, set)
+    }
+    const count = (m: Map<string, Set<string>>, minus?: Map<string, Set<string>>): Record<string, number> =>
+      Object.fromEntries([...m].map(([k, set]) => [k, [...set].filter((id) => !minus?.get(k)?.has(id)).length]))
+    return [...by].map(([name, v]) => ({ name, at: v.at, text: harnessSummary(name, count(v.made), count(v.changed, v.made)) }))
+  }
+
+  harnessNoticeSeen(person: Pick<Person, 'id'>, now = Date.now()): void {
+    this.db.setMeta(`harnessSeen:${person.id}`, String(now))
   }
 
   // The cards members sent to the admins that no one has applied or dismissed yet (a reply's cards

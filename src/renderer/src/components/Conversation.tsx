@@ -52,6 +52,7 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  continueJob,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -91,7 +92,10 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { askWay } from './OrgSectors'
+import { runStep } from '../board'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { KeyRequestCard } from './Vault'
+import { COFRE } from '../../../shared/vault'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
@@ -178,6 +182,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
   const dmAgentId = conv?.kind === 'dm' ? conv.members[0] : undefined
   const routinesHere = useStore((s) => (dmAgentId ? s.routines.filter((r) => r.conversationId === id && r.agentId === dmAgentId && r.enabled).length : 0))
+  // A DM with an agent deleted for good: its history to read, nothing to write.
+  const gone = useStore((s) => {
+    const a = dmAgentId ? agentById(s, dmAgentId) : undefined
+    return a?.deleted ? a : undefined
+  })
 
   if (!conv)
     return (
@@ -274,7 +283,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        {gone ? (
+          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
+        ) : (
+          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        )}
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
     </div>
@@ -497,6 +510,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
+    if (message.stop) return <StopNote message={message} />
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`} data-id={message.id}>
         <Icon name="spark" size={13} />
@@ -521,7 +535,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
     <article className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
-          (agent ? (
+          (agent?.deleted ? (
+            <span className="msg__face is-deleted">
+              <AgentAvatar agent={agent} size={34} />
+            </span>
+          ) : agent ? (
             <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
               <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
             </AgentCardButton>
@@ -532,7 +550,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
-            {agent ? (
+            {agent?.deleted ? (
+              <span className="msg__author is-deleted" title={L(`${agent.name} foi excluído`, `${agent.name} was deleted`)}>
+                {name}
+              </span>
+            ) : agent ? (
               <AgentCardButton agentId={agent.id} className="msg__author link">
                 {name}
               </AgentCardButton>
@@ -860,7 +882,7 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
   const by = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : undefined))
   const team = useStore(teamMode)
   const state = approval.state === 'approved' ? L('Aprovada', 'Approved') : approval.state === 'refused' ? L('Recusada', 'Refused') : L('Expirou', 'Expired')
-  const what = approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
+  const what = approval.connectorId === COFRE ? (typeof approval.args['nome'] === 'string' ? L(`a chave ${approval.args['nome']}`, `the ${approval.args['nome']} key`) : L(`o login de ${String(approval.args['site'] ?? '')}`, `the login for ${String(approval.args['site'] ?? '')}`)) : approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
   return (
     <div className={`approval-line approval-line--${approval.state} ${open ? 'is-open' : ''}`}>
       <button className="approval-line__head" aria-expanded={open} title={`${approval.connectorName} · ${approval.tool}`} onClick={() => setOpen(!open)}>
@@ -877,6 +899,23 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
         </span>
       </button>
       {open && <ApprovalCard approval={approval} />}
+    </div>
+  )
+}
+
+// Where a piece of work stopped on its brakes: why, what got done, where it stopped, and Continuar. Once
+// someone goes on, the core drops `stop` and the note says who did.
+function StopNote({ message }: { message: Message }): ReactNode {
+  return (
+    <div className="system-line system-line--stop" data-id={message.id}>
+      <Icon name="spark" size={13} />
+      <div className="system-line__body md">
+        <Markdown urlTransform={safeUrl}>{message.text}</Markdown>
+        <button className="btn btn--xs retry" onClick={() => continueJob(message.id)}>
+          {L('Continuar', 'Continue')}
+        </button>
+      </div>
+      <span className="muted">{time(message.at)}</span>
     </div>
   )
 }
@@ -1316,6 +1355,8 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
   const agents = useStore((s) => s.agents)
   const d = useStore((s) => (asked ? s.delegations.find((x) => x.id === at.id) : undefined))
   const approval = useStore((s) => (d?.state === 'open' && d.approval ? s.approvals.find((a) => a.id === d.approval && a.state === 'pending') : undefined))
+  // While it's worked on: what the doer is doing right now, from its newest reply in the request's thread.
+  const step = useStore((s) => (d?.state === 'open' ? runStep(repliesOf(s, at.conversationId, at.threadId ?? at.rootId).findLast((m) => m.author.kind === 'agent' && m.author.id === at.to)?.run) : undefined))
   const kind = from && to ? askWay(agents, { from, to: at.to }) : undefined
   const label =
     kind === 'up'
@@ -1332,7 +1373,7 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
         ? { tone: 'is-warn', text: L('com uma dúvida', 'has a question') }
         : approval
           ? { tone: 'is-warn', text: L('esperando sua aprovação', 'waiting for your approval') }
-          : { tone: 'is-live', text: L('trabalhando', 'working') }
+          : { tone: 'is-live', text: step ? `${L('trabalhando', 'working')} · ${step}` : L('trabalhando', 'working') }
       : d.state === 'done'
         ? { tone: 'is-done', text: L('concluído', 'done') }
         : d.state === 'cancelled'
@@ -1671,6 +1712,12 @@ function StepRow({ step }: { step: Step }): ReactNode {
       </span>
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
+      {step.keys?.map((k) => (
+        <span key={k} className="step__key" title={L('Chave do Cofre usada neste comando', 'Vault key used in this command')}>
+          <Icon name="key" size={11} />
+          {k}
+        </span>
+      ))}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
       {step.input && (
         // What it asked (the SQL, the path): two lines, the whole of it on a click.
@@ -1721,6 +1768,12 @@ function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['ru
 }
 
 export function ApprovalCard({ approval, compact }: { approval: Approval; compact?: boolean }): ReactNode {
+  // A key or a login asked for (pedir_chave): pasted in its own card, never approved like a call.
+  if (approval.connectorId === COFRE) return <KeyRequestCard approval={approval} {...(compact ? { compact } : {})} />
+  return <CallApprovalCard approval={approval} {...(compact ? { compact } : {})} />
+}
+
+function CallApprovalCard({ approval, compact }: { approval: Approval; compact?: boolean }): ReactNode {
   const agent = useStore((s) => agentById(s, approval.agentId))
   const me = useStore((s) => s.me)
   // With a team: who asked, whose decision it is, and who decided; only who may decide gets buttons.
