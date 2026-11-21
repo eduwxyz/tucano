@@ -197,6 +197,7 @@ export const LISTEN_NO = '__nao'
 
 export async function listenJev(opts: {
   key: string
+  target?: ClassifierConfig
   messages: Message[]
   trigger: Message
   listeners: Agent[]
@@ -239,8 +240,9 @@ export async function listenJev(opts: {
     'No one: the message asks nothing of what only one of these agents does, or whoever is already in the channel handles it.'
   )
 
-  const questions: Record<string, unknown> = {
-    who: {
+  const questions: ClassifierQuestion[] = [
+    {
+      name: 'who',
       type: 'choice',
       instructions: L(
         'Qual destes agentes, que estão só escutando, precisa entrar nesta mensagem? Escolha um só se o pedido exigir a especialidade, o modelo caro ou o acesso que só ele tem, e ninguém no canal der conta. Na dúvida, ninguém.',
@@ -248,12 +250,13 @@ export async function listenJev(opts: {
       ),
       criteria
     }
-  }
+  ]
   // A room with nobody answering has no "whoever is already in the channel" to weigh the listener
   // against: there the second question has no true answer, and a model's "yes" would keep the only
   // agent who could do the work out of an empty room. So it is asked only when someone can answer.
   if (answering.length)
-    questions['needed'] = {
+    questions.push({
+      name: 'needed',
       type: 'choice',
       instructions: L(
         'Quem já está no canal (ou ninguém) dá conta desta mensagem, sem o agente escolhido?',
@@ -263,28 +266,16 @@ export async function listenJev(opts: {
         [LISTEN_YES]: L('Sim: os que estão no canal dão conta, ou a mensagem não pede trabalho.', 'Yes: whoever is in the channel handles it, or the message asks for no work.'),
         [LISTEN_NO]: L('Não: falta o que só o agente escolhido faz.', 'No: what only the agent you picked does is missing.')
       }
-    }
-
-  let res: Response
-  try {
-    res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'jev-latest', state, questions }),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
     })
-  } catch {
-    return { error: noAnswer('typesafe'), ms: ms() }
-  }
-  if (!res.ok) return { error: failure(res.status, 'typesafe'), ms: ms() }
 
-  const body = (await res.json().catch(() => null)) as {
-    answers?: { who?: { choice?: unknown; probabilities?: Record<string, number> }; needed?: { choice?: unknown } }
-  } | null
-  const who = body?.answers?.who
-  const needed = body?.answers?.needed
-  if (typeof who?.choice !== 'string' || (answering.length > 0 && typeof needed?.choice !== 'string')) return { error: badFormat('typesafe'), ms: ms() }
-  const pct = (h: string): string => `${Math.round((who?.probabilities?.[h] ?? 0) * 100)}%`
+  const target = targetOf(opts.target)
+  const answers = await ask({ target, key: opts.key, state, questions, timeoutMs: TIMEOUT_MS, fetch: opts.fetch })
+  if (failed(answers)) return { error: answers.error, ms: ms() }
+  const who = answers['who']
+  const needed = answers['needed']
+  if (typeof who?.choice !== 'string' || (answering.length > 0 && typeof needed?.choice !== 'string')) return { error: badFormat(target.provider), ms: ms() }
+  const probs = who.probabilities ?? {}
+  const pct = (h: string): string => `${Math.round((probs[h] ?? 0) * 100)}%`
   const picked = listeners.find((a) => a.handle === who.choice)
   if (who.choice === LISTEN_NONE || !picked) return { agents: [], reason: '', ms: ms() }
   // It's the right agent for the subject, but the room can do without it: it stays out. With nobody

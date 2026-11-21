@@ -8,7 +8,9 @@
 // The shapes — pools, chains, roles, what may be saved, the trace — live in
 // src/shared/routing.ts, which the screen reads too. Everything here is pure except readPrompt,
 // the one thing that talks to TypeSafe.
+import { JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
 import { L } from '../shared/lang'
+import { ask, type ClassifierQuestion } from './classifiers'
 import {
   KIND_IMPORT,
   POOL_RANK,
@@ -206,6 +208,7 @@ export function readAnswer(payload: unknown, ms: number, roles: Record<string, R
 /** One TypeSafe call: four questions, answered together. This is the only network hop here. */
 export async function readPrompt(opts: {
   key: string
+  target?: ClassifierConfig
   prompt: string
   history?: string
   roles: Record<string, RoleSetting>
@@ -214,6 +217,38 @@ export async function readPrompt(opts: {
   signal?: AbortSignal
 }): Promise<ReadResult> {
   const started = Date.now()
+  // Another provider answers the same four questions through the one classifier seam; TypeSafe keeps
+  // its own call below, which is the shape this module was written against.
+  const target = opts.target ?? JEV_CLASSIFIER
+  if (target.provider !== 'typesafe') {
+    const body = readingBody(opts)
+    const asked = Object.entries(body.questions as Record<string, { type?: string; instructions?: string; criteria?: Record<string, string> | string[] }>).map(([name, q]) => ({
+      name,
+      type: (q.type === 'noul' ? 'yesno' : q.type) as ClassifierQuestion['type'],
+      instructions: q.instructions ?? '',
+      ...(q.criteria ? { criteria: q.criteria } : {})
+    }))
+    const answers = await ask({ target, key: opts.key, state: body.state, questions: asked, timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, fetch: opts.fetch })
+    const err = (answers as { error?: unknown }).error
+    if (typeof err === 'string') return { error: err }
+    const a = answers as Record<string, { choice?: string; probability?: number; score?: number; probabilities?: Record<string, number> }>
+    // Back into the shape readAnswer knows: what TypeSafe would have answered, field for field.
+    const payload = {
+      answers: {
+        // Only TypeSafe states a confidence. The others give a distribution over the roles, so its
+        // top is the same claim: how sure the read is of the role it named. Without it every read on
+        // another provider would cap at tier 2 (see poolFor), which is not what choosing one meant.
+        acao: {
+          ...(a['acao']?.choice !== undefined ? { choice: a['acao'].choice, confidence: Math.max(0, ...Object.values(a['acao'].probabilities ?? {})) } : {}),
+          ...(a['acao']?.probabilities ? { probabilities: a['acao'].probabilities } : {})
+        },
+        complexidade: { ...(a['complexidade']?.score !== undefined ? { score: a['complexidade'].score } : {}) },
+        capacidade: { ...(a['capacidade']?.score !== undefined ? { score: a['capacidade'].score } : {}) },
+        raciocinio: { ...(a['raciocinio']?.probability !== undefined ? { noul: a['raciocinio'].probability } : {}) }
+      }
+    }
+    return readAnswer(payload, Date.now() - started, opts.roles)
+  }
   const timeout = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout
   let res: Response
