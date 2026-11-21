@@ -141,6 +141,13 @@ export const NEEDS: Record<Method, Need> = {
   survey: 'owner', // one answer per install: the owner's
   answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
+  // The Cofre: each person has their own keys; the team's are checked inside (src/core/vault.ts: only an admin changes them).
+  vaultKeys: 'anyone',
+  vaultUses: 'anyone',
+  saveVaultKey: 'anyone',
+  removeVaultKey: 'anyone',
+  setVaultKeyAgent: 'anyone',
+  importVaultKeys: 'anyone',
   browserLogins: 'admin', // the logins saved for an agent's browser, like a connector's token
   saveBrowserLogin: 'admin',
   removeBrowserLogin: 'admin',

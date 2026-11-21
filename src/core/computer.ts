@@ -341,9 +341,12 @@ const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
 type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
 
-function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Exec> {
+// `-e NAME` for each value passed in the docker client's own environment (docker(…, { env })).
+const envNames = (env?: Record<string, string>): string[] => Object.keys(env ?? {}).flatMap((k) => ['-e', k])
+
+function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal; env?: Record<string, string> } = {}): Promise<Exec> {
   return new Promise((resolve) => {
-    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'], ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}) })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
@@ -627,14 +630,16 @@ export class Computers {
     this.set(agentId, { state: agent?.computer ? 'stopped' : 'off', services: [] })
   }
 
-  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer } = {}): Promise<Exec> {
+  // opts.env: values for this command only. Docker gets their names (-e NAME) and reads each value from
+  // its own environment, so a value is never on a command line another process could list.
+  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer; env?: Record<string, string> } = {}): Promise<Exec> {
     const t = Math.min(600, Math.max(1, Math.round(opts.timeoutSeconds ?? 120)))
-    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', this.name(agentId)]
+    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', ...envNames(opts.env), this.name(agentId)]
     // `timeout` runs inside, so the command stops even if the docker client is killed.
     const run = ['timeout', '-k', '5', String(t), 'bash', '-lc', command]
     const owner = await this.hostOwner(agentId)
     const args = owner ? [...head, 'bash', '-c', ownedBack(run.map(q).join(' '), this.shared(agentId), owner.uid, owner.gid)] : [...head, ...run]
-    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin })
+    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin, env: opts.env })
   }
 
   // The folders this computer writes into that are also the person's: /work and what's lent.
@@ -696,7 +701,7 @@ export class Computers {
     return r.code === 0
   }
 
-  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal, conversationId?: string): Promise<ToolOutcome> {
+  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal, conversationId?: string, env?: Record<string, string>): Promise<ToolOutcome> {
     const name = typeof args['name'] === 'string' ? args['name'].trim() : ''
     const command = typeof args['command'] === 'string' ? args['command'].trim() : ''
     const port = Number(args['port'])
@@ -711,7 +716,7 @@ export class Computers {
     await docker(['exec', this.name(agentId), 'bash', '-c', `mkdir -p /run/tucano ${WORK}/.logs && : > ${q(log)}`], { timeoutMs: 10_000 })
     // setsid gives the service its own process group, so stopping it stops its children too.
     const script = `echo $$ > /run/tucano/${name}.pid; cd ${WORK}; exec bash -lc ${q(command)} >> ${q(log)} 2>&1`
-    const start = await docker(['exec', '-d', this.name(agentId), 'setsid', 'bash', '-c', script], { timeoutMs: 15_000 })
+    const start = await docker(['exec', '-d', ...envNames(env), this.name(agentId), 'setsid', 'bash', '-c', script], { timeoutMs: 15_000, ...(env ? { env } : {}) })
     if (start.code !== 0) return { result: textResult(L(`Não consegui iniciar: ${start.stderr.trim()}`, `I couldn't start it: ${start.stderr.trim()}`), true) }
     this.deps.db.saveService(agentId, { name, command, port, startedAt: Date.now(), conversationId })
 
@@ -871,7 +876,8 @@ export class Computers {
 
   // ---------- the tools ----------
 
-  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal }): Promise<ToolOutcome> {
+  // ctx.env: the Cofre's keys this command asked for (src/core/vault.ts), for bash and start_service only.
+  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal; env?: Record<string, string> }): Promise<ToolOutcome> {
     if (agent.computerKind === 'mac') return this.mac.call(agent, name, args, ctx)
     try {
       await this.ensure(agent.id)
@@ -885,7 +891,7 @@ export class Computers {
         const command = String(args['command'] ?? '').trim()
         if (!command) return { result: textResult(L('Faltou o comando.', 'Missing the command.'), true) }
         const t = Math.min(600, Math.max(1, Number(args['timeout_seconds']) || 120))
-        const r = await this.exec(agent.id, command, { timeoutSeconds: t, signal: ctx.signal })
+        const r = await this.exec(agent.id, command, { timeoutSeconds: t, signal: ctx.signal, ...(ctx.env ? { env: ctx.env } : {}) })
         return { result: textResult(formatExec(r, t), r.code !== 0) }
       }
       case 'read_file':
@@ -895,7 +901,7 @@ export class Computers {
       case 'edit_file':
         return { result: await this.editFile(agent.id, args) }
       case 'start_service':
-        return this.startService(agent.id, args, ctx.signal, ctx.conversationId)
+        return this.startService(agent.id, args, ctx.signal, ctx.conversationId, ctx.env)
       case 'stop_service': {
         const svc = String(args['name'] ?? '')
         if (!this.deps.db.services(agent.id).some((s) => s.name === svc)) return { result: textResult(noService(svc), true) }

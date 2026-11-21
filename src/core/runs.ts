@@ -15,6 +15,7 @@ import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
 import { BROWSER_TOOL_NAMES, browserStep, browserTools, NAVEGADOR, type Browser } from './browser'
 import { APP_TOOL_NAMES, APPS, appStep, appTools, type DesktopApps } from './apps'
 import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
+import type { Vault } from './vault'
 import { extractFile } from './wiki-extract'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
@@ -277,6 +278,7 @@ export interface RunnerDeps {
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
+  vault?: Pick<Vault, 'usable' | 'pick' | 'open' | 'mask' | 'warm'> // the Cofre's keys, for bash and start_service (src/core/vault.ts)
   browser?: Pick<Browser, 'call' | 'approved'> & Partial<Pick<Browser, 'loginSites'>> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -326,6 +328,11 @@ export function githubAccess(connectors: Connector[], agent: Pick<Agent, 'grants
 // "2,4 mi", "850 mil"
 const tokenCount = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toLocaleString(locale(), { maximumFractionDigits: 1 })} ${L('mi', 'M')}` : `${Math.round(n / 1000).toLocaleString(locale())}${L(' mil', 'k')}`
+
+// A tool's result with each text passed through `f` (the Cofre's masking): images and the rest as they are.
+export function maskResult(r: CallToolResult, f: (text: string) => string): CallToolResult {
+  return { ...r, content: r.content.map((c) => (c.type === 'text' ? { ...c, text: f(c.text) } : c)) }
+}
 
 export function resultText(r: CallToolResult): string {
   const text = r.isError ? errorReason(r) : contentText(r)
@@ -1466,6 +1473,24 @@ export class Runner {
             }
           }
         : undefined
+    // bash and start_service, told which keys of the Cofre this agent may use here (src/core/vault.ts):
+    // their names, never their values. Without any, the tools stay as they were.
+    const usableKeys = computers && this.deps.vault ? this.deps.vault.usable(agent.id, requester.id) : []
+    if (usableKeys.length) await this.deps.vault!.warm(agent.id)
+    const withKeys = (t: ToolDef): ToolDef => {
+      if (!usableKeys.length || (t.name !== 'bash' && t.name !== 'start_service')) return t
+      const names = usableKeys.map((k) => (k.approve ? L(`${k.name} (pede aprovação a cada uso)`, `${k.name} (asks for approval each use)`) : k.name)).join(', ')
+      const props = (t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+      const keys = {
+        type: 'array',
+        items: { type: 'string' },
+        description: L(
+          `Chaves do Cofre que este comando usa, pelo nome. Cada uma entra como variável de ambiente só neste comando (use $NOME nele) e, no que o comando imprimir, o valor aparece como [cofre:NOME]. Disponíveis: ${names}. Nunca escreva o valor de uma chave num arquivo, numa mensagem ou num commit; e nunca peça que alguém cole uma chave na conversa.`,
+          `Keys of the Cofre this command uses, by name. Each one goes in as an environment variable for this command only (use $NAME in it), and in what the command prints its value shows as [cofre:NAME]. Available: ${names}. Never write a key's value into a file, a message or a commit; and never ask anyone to paste a key into the conversation.`
+        )
+      }
+      return { ...t, inputSchema: { ...t.inputSchema, properties: { ...props, keys } } as ToolDef['inputSchema'] }
+    }
     // bash, told which commands wait for me and which never run, so the agent plans around them.
     const SHELL_KINDS: ActionKind[] = ['commit', 'push', 'pr', 'merge', 'delete', 'publish']
     const withRules = (t: ToolDef): ToolDef => {
@@ -1529,7 +1554,7 @@ ${note}`,
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(team.length ? DELEGATION_TOOLS : []),
-      ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
+      ...(computers ? computerTools(agent).map((t) => withKeys(t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
@@ -2026,6 +2051,49 @@ ${note}`,
         if (computers && COMPUTER_TOOL_NAMES.has(name)) {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult(L('Seu computador foi desligado.', 'Your computer was turned off.'), true)
+          // The keys of the Cofre this command asked for, checked before anything runs (src/core/vault.ts).
+          const wanted = (name === 'bash' || name === 'start_service') && Array.isArray(args['keys']) ? args['keys'].filter((k): k is string => typeof k === 'string' && !!k.trim()) : []
+          const vault = this.deps.vault
+          const picked = wanted.length ? (vault ? vault.pick(agent.id, wanted, requester.id) : { error: L('O Cofre não está disponível aqui.', "The Cofre isn't available here.") }) : { keys: [] }
+          if ('error' in picked) {
+            addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${wanted.join(', ')}`, `Cofre key: ${wanted.join(', ')}`), status: 'error' })
+            return textResult(picked.error, true)
+          }
+          const strict = picked.keys.filter((k) => k.approve).map((k) => k.name)
+          if (strict.length && name === 'start_service') return textResult(L(`${strict.join(', ')} pede aprovação a cada uso, e um serviço fica rodando sozinho: use essa chave com bash.`, `${strict.join(', ')} asks for approval each use, and a service keeps running on its own: use that key with bash.`), true)
+          // A command that waits for me: the exact one goes into a request; approved, the app runs it (decide()).
+          const askToRun = (command: string, title: string, detail: string, highRisk: boolean, note?: string): CallToolResult => {
+            if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
+            const { [REASON_PARAM]: why, ...callArgs } = args
+            approval = {
+              id: randomUUID(),
+              hash: approvalHash(COMPUTADOR, 'bash', callArgs),
+              agentId: agent.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              connectorId: COMPUTADOR,
+              connectorName: L('Computador', 'Computer'),
+              tool: 'bash',
+              args: callArgs,
+              why: typeof why === 'string' ? why.trim() : '',
+              highRisk,
+              state: 'pending',
+              createdAt: Date.now(),
+              expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000,
+              requestedBy: requester.id
+            }
+            db.createApproval(approval)
+            emit({ type: 'approval', approval })
+            msg.run = { ...msg.run!, approvalId: approval.id }
+            addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${detail} · ${command.length > 120 ? `${command.slice(0, 120)}…` : command}`, ...(note ? { note } : {}), status: 'done' })
+            this.deps.notify?.(title, approval.why || command.slice(0, 120), conv.id, 'approval')
+            return textResult(
+              L(
+                `Pedido de aprovação criado, com o comando exato. O comando ainda NÃO rodou. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe a saída numa nova mensagem.`,
+                `Approval request created, with the exact command. The command has NOT run yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the output in a new message.`
+              )
+            )
+          }
           // A command that commits, pushes, deletes…: by the rules, it runs, waits for me, or never runs.
           if (name === 'bash' || name === 'start_service') {
             const command = typeof args['command'] === 'string' ? args['command'] : ''
@@ -2045,36 +2113,26 @@ ${note}`,
             }
             if (!rules.run) {
               if (name === 'start_service') return textResult(L(`Esse comando faz ${words}, que pede aprovação: rode com bash, não como serviço.`, `That command does ${words}, which asks for approval: run it with bash, not as a service.`), true)
-              if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
-              const { [REASON_PARAM]: why, ...callArgs } = args
-              approval = {
-                id: randomUUID(),
-                hash: approvalHash(COMPUTADOR, 'bash', callArgs),
-                agentId: agent.id,
-                conversationId: conv.id,
-                messageId: msg.id,
-                connectorId: COMPUTADOR,
-                connectorName: L('Computador', 'Computer'),
-                tool: 'bash',
-                args: callArgs,
-                why: typeof why === 'string' ? why.trim() : '',
-                // Deleting is held to approve, like any high-risk action, and never allowed for good from the card.
-                highRisk: kinds.includes('delete'),
-                state: 'pending',
-                createdAt: Date.now(),
-                expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
-              }
-              db.createApproval(approval)
-              emit({ type: 'approval', approval })
-              msg.run = { ...msg.run!, approvalId: approval.id }
-              addSteps({ id: randomUUID(), label: L('Pediu aprovação', 'Asked for approval'), detail: `${words} · ${command.length > 120 ? `${command.slice(0, 120)}…` : command}`, ...(rules.why === 'guard' ? { note: guardNote() } : {}), status: 'done' })
-              this.deps.notify?.(L(`${agent.name} quer ${rules.kinds.map(actionVerb).join(' e ')}`, `${agent.name} wants to ${rules.kinds.map(actionVerb).join(' and ')}`), approval.why || command.slice(0, 120), conv.id, 'approval')
-              return textResult(
-                L(
-                  `Pedido de aprovação criado, com o comando exato. O comando ainda NÃO rodou. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe a saída numa nova mensagem.`,
-                  `Approval request created, with the exact command. The command has NOT run yet. End your reply now saying in one sentence what you asked for. When ${settings.workspaceName} decides, you get the output in a new message.`
-                ) + askedBecause(rules)
-              )
+              const keysToo = strict.length ? L(` · usa ${strict.join(', ')}`, ` · uses ${strict.join(', ')}`) : ''
+              // Deleting is held to approve, like any high-risk action, and never allowed for good from the card.
+              const asked = askToRun(command, L(`${agent.name} quer ${rules.kinds.map(actionVerb).join(' e ')}`, `${agent.name} wants to ${rules.kinds.map(actionVerb).join(' and ')}`), words + keysToo, kinds.includes('delete'), rules.why === 'guard' ? guardNote() : undefined)
+              return asked.isError ? asked : { ...asked, content: [{ type: 'text', text: resultText(asked) + askedBecause(rules) }] }
+            }
+            // A key that asks for approval each use: the command waits for me like a commit would.
+            if (strict.length) {
+              const command = typeof args['command'] === 'string' ? args['command'] : ''
+              return askToRun(command, L(`${agent.name} quer usar ${strict.join(', ')}`, `${agent.name} wants to use ${strict.join(', ')}`), L(`usa ${strict.join(', ')}`, `uses ${strict.join(', ')}`), false)
+            }
+          }
+          // Opened only now, with nothing left to stop the command: each use goes in the Cofre's log.
+          let env: Record<string, string> | undefined
+          if (picked.keys.length) {
+            try {
+              env = await vault!.open(picked.keys, { agentId: agent.id, conversationId: conv.id, messageId: msg.id, personId: requester.id, via: name === 'start_service' ? 'service' : 'bash' })
+            } catch (e) {
+              const why = e instanceof Error ? e.message : String(e)
+              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${why}`, `Cofre key: ${why}`), status: 'error' })
+              return textResult(L(`Não rodei: ${why}`, `Not run: ${why}`), true)
             }
           }
           // An agent with connectors sleeping with nothing checked after it is waiting for something outside
@@ -2096,13 +2154,16 @@ ${note}`,
           const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
           // A command shows whole (or the SQL it runs, pulled out), masked, from the moment it starts.
           const command = name === 'bash' && typeof args['command'] === 'string' ? commandStep(args['command']) : undefined
+          const used = picked.keys.length ? { keys: picked.keys.map((k) => k.name) } : {}
           const step: Step = command
-            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, status: 'running' }
-            : { id: randomUUID(), label, detail: maskSecrets(detail), status: 'running' }
+            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, status: 'running', ...used }
+            : { id: randomUUID(), label, detail: maskSecrets(detail), status: 'running', ...used }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
-          const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          const called = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal, ...(env ? { env } : {}) })
+          // What the computer printed, with the values of the Cofre's keys it may have had masked, before the agent reads it.
+          const out = vault ? { ...called, result: maskResult(called.result, (t) => vault.mask(agent.id, t)) } : called
           const failed = !!out.result.isError
           const end: Pick<Step, 'output' | 'error'> = command
             ? execSummary(resultText(out.result), failed)
@@ -2933,8 +2994,25 @@ ${note}`,
       // A command on the agent's computer: the app runs exactly the one approved, and the agent gets its output.
       const command = String(ap.args['command'] ?? '')
       const what = L(`rodar \`${command}\``, `running \`${command}\``)
-      if (decision === 'approved' && agent?.computer && this.deps.computers) {
-        const out = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId })
+      // The Cofre's keys it asked for are checked again now: one taken back meanwhile doesn't go in.
+      const wanted = Array.isArray(ap.args['keys']) ? ap.args['keys'].filter((k): k is string => typeof k === 'string') : []
+      const vault = this.deps.vault
+      const picked = wanted.length && agent ? (vault ? vault.pick(agent.id, wanted, ap.requestedBy) : { error: L('O Cofre não está disponível aqui.', "The Cofre isn't available here.") }) : { keys: [] }
+      let env: Record<string, string> | undefined
+      let keyError = 'error' in picked ? picked.error : undefined
+      if (decision === 'approved' && agent?.computer && this.deps.computers && 'keys' in picked && picked.keys.length) {
+        try {
+          env = await vault!.open(picked.keys, { agentId: agent.id, conversationId: ap.conversationId, messageId: ap.messageId, ...(ap.requestedBy ? { personId: ap.requestedBy } : {}), via: 'bash' })
+        } catch (e) {
+          keyError = e instanceof Error ? e.message : String(e)
+        }
+      }
+      if (decision === 'approved' && keyError) {
+        outcome = L(`Não executou: ${keyError}`, `Didn't run: ${keyError}`)
+        task = L(`${me} aprovou ${what}, mas não rodou: ${keyError} Avise ${me} em uma frase.`, `${me} approved ${what}, but it didn't run: ${keyError} Tell ${me} in one sentence.`)
+      } else if (decision === 'approved' && agent?.computer && this.deps.computers) {
+        const called = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId, ...(env ? { env } : {}) })
+        const out = vault ? { ...called, result: maskResult(called.result, (t) => vault.mask(agent.id, t)) } : called
         ok = !out.result.isError
         outcome = ok ? ran : L('Rodou, com erro.', 'Ran, with an error.')
         task = L(

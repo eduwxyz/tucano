@@ -69,6 +69,7 @@ import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-impo
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
+import { Vault } from './vault'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
 import { BrowserLogins } from './browser-logins'
 import { downloadsFolder } from './downloads'
@@ -854,9 +855,11 @@ const browser = new Browser({
   jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
   onHandback: (agentId) => void runner.handedBack(agentId)
 })
+const vault = new Vault({ db, secrets })
 const connectors = new ConnectorManager({
   db,
   secrets,
+  vaultValue: (name) => vault.teamValue(name),
   emit,
   // On a server there's nothing to open it in: authorizeConnector hands it to the page.
   openUrl: (url) => serverMode || toMain({ type: 'open', url }),
@@ -1095,6 +1098,7 @@ const runner = new Runner({
   connectors,
   memory,
   computers,
+  vault,
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
@@ -1779,6 +1783,8 @@ const wikiSourcesFor = (ctx: Ctx, limit = 100): WikiSource[] =>
   wiki.sources(limit).flatMap((s) => (people.canSeeFrom(ctx.person, s.origin.conversationId) ? [s] : isAdmin(ctx.person) ? [privateSource(s)] : []))
 // The team's log (owners and admins read it): who did what, never what a DM said.
 // Done by a harness over MCP: the key's name goes with it (the Activity shows it, the inbox counts it).
+// Who asks the Cofre (src/core/vault.ts): with no team (one person on a desktop) there are only the team's keys.
+const asker = (ctx: Ctx): { id: string; admin: boolean; team: boolean } => ({ id: ctx.person.id, admin: isAdmin(ctx.person), team: serverMode || db.people().length > 1 })
 const record = (ctx: Ctx | undefined, kind: string, target?: string, detail?: Record<string, unknown>): void => {
   const all = ctx?.via ? { ...detail, via: ctx.via } : detail
   void db.addActivity({ ...(ctx ? { personId: ctx.person.id } : {}), kind, ...(target ? { target } : {}), ...(all ? { detail: all } : {}) })
@@ -2657,6 +2663,44 @@ const api: Handlers = {
 
   // The logins the person saves for an agent's browser (browser-logins.ts): the page lists sites and
   // usernames, never a password, and nothing here goes to a log.
+  // ---------- the Cofre (src/core/vault.ts) ----------
+  // Values never come back: a key reads as its name, its agents and its last characters. A person's own
+  // keys stay out of the activity log, which the admins read.
+  vaultKeys: (_, ctx) => vault.list(ctx.person),
+  vaultUses: (_, ctx) => {
+    const mine = new Set(vault.list(ctx.person).map((k) => k.id))
+    const team = new Set(db.vaultKeys().filter((k) => k.owner).map((k) => k.id)) // anyone's own: never someone else's to see
+    return db.vaultUses().filter((u) => mine.has(u.keyId) || (isAdmin(ctx.person) && !team.has(u.keyId)))
+  },
+  saveVaultKey: async ({ key }, ctx) => {
+    const saved = await vault.save(asker(ctx), key)
+    if (!saved.owner) record(ctx, key.id ? 'vault_key.updated' : 'vault_key.created', saved.id, { name: saved.name })
+    return saved
+  },
+  removeVaultKey: async ({ id }, ctx) => {
+    const gone = await vault.remove(asker(ctx), id)
+    if (gone && !gone.owner) record(ctx, 'vault_key.removed', id, { name: gone.name })
+  },
+  setVaultKeyAgent: ({ id, agentId, on }, ctx) => {
+    const k = vault.setAgent(asker(ctx), id, agentId, on)
+    if (!k.owner) record(ctx, 'vault_key.updated', id, { name: k.name })
+    return k
+  },
+  // An .env pasted on the page, read there (parseEnv): the lines to save, and the names to put over keys already saved.
+  importVaultKeys: async ({ lines, mine, replace }, ctx) => {
+    const who = asker(ctx)
+    const have = vault.list(ctx.person)
+    let saved = 0
+    for (const l of lines) {
+      const owner = who.team && (mine || !who.admin) ? who.id : undefined
+      const same = have.find((k) => k.name === l.name && k.owner === owner)
+      if (same && !replace.includes(l.name)) continue
+      await vault.save(who, same ? { id: same.id, name: same.name, value: l.value, agents: same.agents, approve: same.approve, ...(same.note ? { note: same.note } : {}) } : { name: l.name, value: l.value, mine: !!mine, agents: [], approve: false })
+      saved++
+    }
+    if (saved && !(who.team && (mine || !who.admin))) record(ctx, 'vault_key.imported', undefined, { count: saved })
+    return { saved }
+  },
   browserLogins: async ({ agentId }) => {
     if (!db.agent(agentId)) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
     return browserLogins.list(agentId)

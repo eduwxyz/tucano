@@ -1710,6 +1710,12 @@ function StepRow({ step }: { step: Step }): ReactNode {
       </span>
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
+      {step.keys?.map((k) => (
+        <span key={k} className="step__key" title={L('Chave do Cofre usada neste comando', 'Cofre key used in this command')}>
+          <Icon name="key" size={11} />
+          {k}
+        </span>
+      ))}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
       {step.input && (
         // What it asked (the SQL, the path): two lines, the whole of it on a click.

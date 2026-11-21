@@ -1,6 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { cleanAccess } from '../shared/access'
+import type { VaultKey, VaultUse } from '../shared/vault'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
@@ -585,6 +586,37 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS jobs_running ON jobs (state) WHERE state = 'running';
   -- The replies waiting to try again (retriesDue, every minute): found without reading every message.
   CREATE INDEX IF NOT EXISTS messages_retry ON messages (json_extract(run, '$.retryAt')) WHERE json_extract(run, '$.retryAt') IS NOT NULL;
+  `,
+  // The Cofre (src/core/vault.ts): keys the agents use by name, one command at a time. The value is in
+  // secrets ('vault:<id>'), encrypted; here only what the pages show. owner '' is the team's key, a
+  // person's id their own. And each use of one, never with its value.
+  `
+  CREATE TABLE IF NOT EXISTS vault_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    agents TEXT NOT NULL DEFAULT '[]',
+    approve INTEGER NOT NULL DEFAULT 0,
+    hint TEXT NOT NULL DEFAULT '',
+    note TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    used_at INTEGER,
+    UNIQUE (owner, name)
+  );
+  CREATE TABLE IF NOT EXISTS vault_uses (
+    id TEXT PRIMARY KEY,
+    key_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT,
+    message_id TEXT,
+    person_id TEXT,
+    via TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS vault_uses_by_at ON vault_uses (at);
   `
 ]
 
@@ -1878,6 +1910,70 @@ export class Db {
 
   removeRoutine(id: string): void {
     this.db.prepare('DELETE FROM routines WHERE id = ?').run(id)
+  }
+
+  // ---------- the Cofre (src/core/vault.ts) ----------
+
+  private toVaultKey(r: Row): VaultKey {
+    return {
+      id: str(r['id']),
+      name: str(r['name']),
+      ...(r['owner'] ? { owner: str(r['owner']) } : {}),
+      agents: JSON.parse(str(r['agents']) || '[]') as string[],
+      approve: r['approve'] === 1,
+      hint: str(r['hint']),
+      ...(r['note'] ? { note: str(r['note']) } : {}),
+      ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at']),
+      ...(r['used_at'] ? { usedAt: Number(r['used_at']) } : {})
+    }
+  }
+
+  vaultKeys(): VaultKey[] {
+    return (this.db.prepare('SELECT * FROM vault_keys ORDER BY owner, name').all() as Row[]).map((r) => this.toVaultKey(r))
+  }
+
+  vaultKey(id: string): VaultKey | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_keys WHERE id = ?').get(id) as Row | undefined
+    return r && this.toVaultKey(r)
+  }
+
+  saveVaultKey(k: VaultKey): void {
+    this.db
+      .prepare(
+        `INSERT INTO vault_keys (id, name, owner, agents, approve, hint, note, created_by, created_at, updated_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, agents = excluded.agents, approve = excluded.approve, hint = excluded.hint, note = excluded.note, updated_at = excluded.updated_at`
+      )
+      .run(k.id, k.name, k.owner ?? '', JSON.stringify(k.agents), k.approve ? 1 : 0, k.hint, k.note ?? null, k.createdBy ?? null, k.createdAt, k.updatedAt, k.usedAt ?? null)
+  }
+
+  removeVaultKey(id: string): void {
+    this.db.prepare('DELETE FROM vault_keys WHERE id = ?').run(id)
+  }
+
+  recordVaultUse(u: VaultUse): void {
+    this.tx(() => {
+      this.db
+        .prepare('INSERT INTO vault_uses (id, key_id, name, agent_id, conversation_id, message_id, person_id, via, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(u.id, u.keyId, u.name, u.agentId, u.conversationId ?? null, u.messageId ?? null, u.personId ?? null, u.via, u.at)
+      this.db.prepare('UPDATE vault_keys SET used_at = ? WHERE id = ?').run(u.at, u.keyId)
+    })
+  }
+
+  // The latest uses, newest first.
+  vaultUses(limit = 200): VaultUse[] {
+    return (this.db.prepare('SELECT * FROM vault_uses ORDER BY at DESC LIMIT ?').all(limit) as Row[]).map((r) => ({
+      id: str(r['id']),
+      keyId: str(r['key_id']),
+      name: str(r['name']),
+      agentId: str(r['agent_id']),
+      ...(r['conversation_id'] ? { conversationId: str(r['conversation_id']) } : {}),
+      ...(r['message_id'] ? { messageId: str(r['message_id']) } : {}),
+      ...(r['person_id'] ? { personId: str(r['person_id']) } : {}),
+      via: str(r['via']) as VaultUse['via'],
+      at: Number(r['at'])
+    }))
   }
 
   // ---------- skills ----------

@@ -158,6 +158,7 @@ export interface Step {
   error?: string // why it failed, in the tool's own words
   input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
   output?: string // what came back, in a few words ("120 rows")
+  keys?: string[] // the Cofre's keys the command used, by name (src/core/vault.ts)
   status: StepStatus
   ms?: number
 }
