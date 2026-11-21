@@ -5658,13 +5658,45 @@ table.csv th {
   margin-left: 2px;
 }
 
+
+/* Keep overflow and its fades inside the tab row, not the page. */
+.page-tabs__viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.page-tabs__strip {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.page-tabs__strip::-webkit-scrollbar { display: none; }
+.page-tabs__strip > button { flex: none; white-space: nowrap; }
+.page-tabs__viewport::before,
+.page-tabs__viewport::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.page-tabs__viewport::before { left: 0; background: linear-gradient(to right, var(--panel), transparent); }
+.page-tabs__viewport::after { right: 0; background: linear-gradient(to left, var(--panel), transparent); }
+.page-tabs__viewport.has-left::before,
+.page-tabs__viewport.has-right::after { opacity: 1; }
+
 /* ---------- tabs (Settings, the agent page) ---------- */
 .tabs {
   position: sticky;
   top: 0;
   z-index: 3;
   display: flex;
-  gap: 2px;
+  min-width: 0;
   margin: -6px 0 18px;
   padding-top: 6px;
   border-bottom: 1px solid var(--border);
@@ -13869,11 +13901,10 @@ button.agent-card__now:hover {
   color: var(--text-2);
 }
 .hub__tabs {
-  display: flex;
-  gap: 24px;
   margin-top: 18px;
-  overflow-x: auto;
-  scrollbar-width: none;
+}
+.hub__tabs .page-tabs__strip {
+  gap: 24px;
 }
 .hub__tab {
   flex: none;
@@ -15610,6 +15641,7 @@ button.agent-card__now:hover {
 
 /* The agent's save state at the tabs' right end, once its head scrolled away. */
 .tabs__aside {
+  flex: none;
   margin-left: auto;
   padding: 0 4px 2px;
 }

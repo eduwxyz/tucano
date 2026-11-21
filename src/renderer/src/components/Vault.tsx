@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { agentById, amAdmin, answerKeyRequest, canDecide, decideApproval, importVaultKeys, isTeam, navigate, personById, personName, removeVaultKey, removeVaultLogin, saveVaultKey, saveVaultLogin, setVaultKeyAgent, setVaultLoginAgent, teamMode, useStore, vaultKeys, vaultLogins, vaultUses, type Agent } from '../store'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
+import { PageTabs } from './PageTabs'
 import { Field, Page, Toggle } from './Pages'
 import { AgentAvatar, Icon } from './ui'
 
@@ -99,11 +100,6 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
     )
   }
 
-  const tabButton = (id: 'keys' | 'logins' | 'log', label: string): ReactNode => (
-    <button role="tab" aria-selected={tab === id} className={tab === id ? 'is-active' : ''} onClick={() => navigate({ kind: 'vault', tab: id })}>
-      {label}
-    </button>
-  )
   return (
     <Page
       title={L('Cofre', 'Cofre')}
@@ -128,11 +124,11 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
         ) : undefined
       }
     >
-      <div className="tabs" role="tablist">
-        {tabButton('keys', L('Chaves', 'Keys'))}
-        {tabButton('logins', L('Logins', 'Logins'))}
-        {tabButton('log', L('Registro', 'Log'))}
-      </div>
+      <PageTabs items={[
+        { id: 'keys', label: L('Chaves', 'Keys') },
+        { id: 'logins', label: L('Logins', 'Logins') },
+        { id: 'log', label: L('Registro', 'Log') }
+      ]} active={tab} onChange={(id) => navigate({ kind: 'vault', tab: id })} />
       {error && <p className="note note--error">{error}</p>}
       {tab === 'log' ? (
         <UsesLog />
