@@ -39,6 +39,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Connectors',
     summary: 'Connecting Tucano to your tools (Linear, GitHub, Notion…) over MCP: the store, the custom ones, sign-in, tool classes and errors.'
   },
+  cofre: {
+    title: 'Cofre (vault)',
+    summary: 'Keeping API keys and tokens for the agents to use by name, in a command, without ever seeing the value: who may use one, approval per use, the log and .env import.'
+  },
   conversas: {
     title: 'Conversations, channels and threads',
     summary: 'Channels, direct messages, threads, mentions, who answers, work that goes on until it is done, who joins on their own, stop and try again, images and dictation.'

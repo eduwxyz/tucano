@@ -396,6 +396,7 @@ const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] =>
       ] as const)
     : []),
   { label: L('Conectores', 'Connectors'), view: { kind: 'connectors' }, icon: 'plug' },
+  { label: L('Cofre', 'Cofre'), view: { kind: 'vault' }, icon: 'key' },
   { label: L('Configurações', 'Settings'), view: { kind: 'settings' }, icon: 'gear' }
 ]
 

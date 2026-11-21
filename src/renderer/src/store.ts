@@ -1,3 +1,4 @@
+import type { EnvPair, VaultKey, VaultKeyInput, VaultUse } from '../../shared/vault'
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
@@ -79,6 +80,7 @@ export type View =
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
+  | { kind: 'vault'; tab?: 'keys' | 'log' } // the Cofre (components/Vault.tsx)
   | { kind: 'memory' }
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
@@ -1087,6 +1089,13 @@ export const stopService = (agentId: string, name: string): void => void fire(L(
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
 // The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
 export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
+// The Cofre (src/core/vault.ts): keys by name, never their values.
+export const vaultKeys = (): Promise<VaultKey[]> => call('vaultKeys')
+export const vaultUses = (): Promise<VaultUse[]> => call('vaultUses')
+export const saveVaultKey = (key: VaultKeyInput): Promise<VaultKey> => call('saveVaultKey', { key })
+export const removeVaultKey = (id: string): Promise<void> => call('removeVaultKey', { id })
+export const setVaultKeyAgent = (id: string, agentId: string, on: boolean): Promise<VaultKey> => call('setVaultKeyAgent', { id, agentId, on })
+export const importVaultKeys = (lines: EnvPair[], replace: string[], mine?: boolean): Promise<{ saved: number }> => call('importVaultKeys', { lines, replace, ...(mine ? { mine } : {}) })
 export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
 export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I

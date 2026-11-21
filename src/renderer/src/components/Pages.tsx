@@ -7,6 +7,7 @@ import { useContext, useEffect, useId, useRef, useState, type CSSProperties, typ
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
 import { BrowserLogins } from './BrowserLogins'
+import { AgentVaultKeys } from './Vault'
 import {
   agentById,
   harnessNoticeSeen,
@@ -1017,6 +1018,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 else shareComputer(id, agentsWith(id, draft.id, on))
               }}
             />
+          )}
+          {!isNew && pane('ferramentas') && draft.computer && (
+            <Section title={L('Chaves do Cofre', 'Cofre keys')} help={L(`As chaves que ${name} pode usar nos comandos. Cada uso fica no registro do Cofre.`, `The keys ${name} may use in its commands. Each use goes in the Cofre’s log.`)}>
+              <AgentVaultKeys agentId={draft.id} name={draft.name} />
+            </Section>
           )}
 
           {pane('memoria') && (

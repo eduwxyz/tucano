@@ -1675,6 +1675,18 @@ h3 {
   display: block;
   cursor: text;
 }
+.step__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--mono, ui-monospace, monospace);
+  color: var(--text-2);
+  background: var(--panel-2, rgba(127, 127, 127, 0.12));
+}
 .step__ms {
   margin-left: auto;
   flex-shrink: 0;
@@ -15588,4 +15600,118 @@ button.agent-card__now:hover {
   white-space: pre-wrap;
   word-break: break-all;
   user-select: text;
+}
+
+/* ---------- the Cofre (components/Vault.tsx) ---------- */
+.vault-keys,
+.vault-log,
+.vault-import__lines {
+  margin-top: 12px;
+}
+.vault-key__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.vault-key__name {
+  font: 600 13px/1.4 var(--mono);
+}
+.vault-key__hint {
+  font-family: var(--mono);
+}
+.vault-key__note {
+  flex-basis: 100%;
+}
+.vault-key__agents {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.vault-key__used,
+.vault-log__at {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.vault-drawer {
+  margin-top: 20px;
+}
+.vault-drawer__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.vault-drawer__head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.vault-drawer__head .link {
+  margin-left: auto;
+}
+.vault-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.vault-editor__agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vault-editor__agents .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.vault-editor__agents .chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.vault-editor__agents .chip:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+.vault-editor__agents .chip:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vault-editor__agents .chip.is-on .muted {
+  color: inherit;
+  opacity: 0.8;
+}
+.vault-import__text {
+  width: 100%;
+  font: 12.5px/1.5 var(--mono);
+}
+.vault-agent .hint {
+  margin-top: 8px;
+}
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 28px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  color: var(--text-2);
+}
+.empty-card p {
+  max-width: 460px;
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .vault-key {
+    flex-wrap: wrap;
+  }
+  .vault-key__used {
+    display: none;
+  }
 }
