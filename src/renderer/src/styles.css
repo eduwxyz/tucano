@@ -5352,6 +5352,7 @@ table.csv th {
   flex-wrap: wrap;
   gap: 8px;
   width: 100%;
+  min-width: 0;
 }
 .model-picker select {
   flex: 0 0 auto;
