@@ -15749,6 +15749,24 @@ button.agent-card__now:hover {
   width: 100%;
   font: 12.5px/1.5 var(--mono);
 }
+.vault-import__lines .table__row {
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+/* A browser's export can carry an address of any length, and the reason it stays out can be a
+   sentence. The address shortens with an ellipsis and the state takes the row's second line, so no
+   two of them are ever drawn over each other. */
+.vault-import__lines .table__row > code {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-import__lines .vault-import__state {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
 .vault-agent .hint {
   margin-top: 8px;
 }

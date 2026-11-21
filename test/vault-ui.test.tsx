@@ -13,6 +13,7 @@ let team = false
 let keys: VaultKey[] = []
 const saved = vi.fn(async (k: unknown) => k)
 const imported = vi.fn(async (_lines: unknown, _replace: unknown, _mine?: boolean) => ({ saved: 1 }))
+const importedLogins = vi.fn(async (_rows: unknown, _mine?: boolean) => ({ saved: 1 }))
 const answered = vi.fn(async (_a: unknown) => {})
 let logins: { id: string; origin: string; username: string; owner?: string; agents: string[]; createdAt: number; updatedAt: number }[] = []
 vi.mock('../src/renderer/src/store', () => ({
@@ -29,6 +30,7 @@ vi.mock('../src/renderer/src/store', () => ({
   removeVaultKey: vi.fn(async () => {}),
   setVaultKeyAgent: vi.fn(),
   importVaultKeys: (l: unknown, r: unknown, m?: boolean) => imported(l, r, m),
+  importVaultLogins: (rows: unknown, m?: boolean) => importedLogins(rows, m),
   vaultLogins: async () => logins,
   saveVaultLogin: vi.fn(),
   removeVaultLogin: vi.fn(),
@@ -72,11 +74,15 @@ beforeEach(() => {
   keys = []
   saved.mockClear()
   imported.mockClear()
+  importedLogins.mockClear()
   answered.mockClear()
   logins = []
   root = createRoot(document.getElementById('root')!)
 })
-afterEach(async () => { await act(async () => root.unmount()) })
+afterEach(async () => {
+  delete (window as { tucano?: unknown }).tucano
+  await act(async () => root.unmount())
+})
 
 it('alone: one list, a key as its name and last characters, never its value', async () => {
   keys = [key('STRIPE_KEY', { agents: ['fin'], approve: true })]
@@ -162,4 +168,34 @@ it('the card for a member: the team’s key is an admin’s to give; a site’s 
   await act(async () => root.render(<KeyRequestCard approval={request({ site: 'https://conta.luz.com.br' }, { id: 'ap2' })} />))
   expect(text()).toContain('conta.luz.com.br')
   expect(document.querySelectorAll('form input').length).toBe(2)
+})
+
+it('a browser’s CSV: the chosen file is read, every row shown, and only the confirmed ones saved', async () => {
+  logins = [{ id: 'l1', origin: 'https://conta.luz.com.br', username: 'edu@x.com', agents: ['fin'], createdAt: 1, updatedAt: 1 }]
+  const csv =
+    'name,url,username,password,note\n' +
+    'Luz,https://conta.luz.com.br/entrar,edu@x.com,senha-nova,\n' +
+    'Banco,https://app.banco.com,"ana@x.com","sen,ha",\n' +
+    'App,android://abcd@app.exemplo/,a@x.com,senha-app,\n'
+  ;(window as unknown as { tucano?: unknown }).tucano = { pickLoginsCsv: async () => ({ name: 'Chrome Passwords.csv', text: csv }) }
+  await act(async () => root.render(<VaultPage tab="logins" />))
+  await click(button('Importar CSV'))
+  await act(async () => {})
+  expect(text()).toContain('Chrome Passwords.csv')
+  expect(text()).toContain('app.banco.com')
+  expect(text()).toContain('já salvo: trocar a senha')
+  expect(text()).toContain('não é um site')
+  expect(button('Guardar 1 login')).toBeDefined() // the new one only
+  // A ticked box through React's own handler: linkedom does not toggle a checkbox on click.
+  const box = document.querySelector('[role="dialog"] input') as HTMLInputElement
+  const props = Object.entries(box).find(([k]) => k.startsWith('__reactProps'))![1] as { onChange: (e: { target: { checked: boolean } }) => void }
+  await act(async () => props.onChange({ target: { checked: true } }))
+  await click(button('Guardar 2 logins'))
+  expect(importedLogins).toHaveBeenCalledWith(
+    [
+      { id: 'l1', site: 'https://conta.luz.com.br/entrar', username: 'edu@x.com', password: 'senha-nova' },
+      { site: 'https://app.banco.com', username: 'ana@x.com', password: 'sen,ha' }
+    ],
+    false
+  )
 })

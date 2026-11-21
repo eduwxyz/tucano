@@ -162,3 +162,127 @@ export function pageOrigin(url: string): string | undefined {
 
 // What stands for a key's value in what the agent reads.
 export const masked = (name: string): string => `[cofre:${name}]`
+
+// ---------- a browser's exported passwords ----------
+
+// Chrome (Settings > Passwords > Export) writes `Chrome Passwords.csv`: name,url,username,password,note.
+// Firefox (about:logins > Export Logins) writes `logins.csv`: "url","username","password","httpRealm",
+// "formActionOrigin","guid","timeCreated","timeLastUsed","timePasswordChanged". Both are read here, on
+// the page, and what it found is shown before anything is saved (components/Vault.tsx).
+export type BrowserExport = 'chrome' | 'firefox'
+
+// Why a row of an export cannot become a login. `again` is the same site and username earlier in the file.
+export type CsvSkip = 'address' | 'protocol' | 'realm' | 'username' | 'password' | 'again'
+
+// A row of an export, as the preview shows it: the site and the username, and the password only to save.
+export interface CsvLogin {
+  row: number // 1 for the first row after the header
+  site: string
+  username: string
+  password: string
+  origin?: string // what the vault binds a login to; unset when the row cannot be one
+  skip?: CsvSkip
+}
+
+export interface ParsedLogins {
+  browser?: BrowserExport
+  logins: CsvLogin[]
+  error?: string
+}
+
+// One row the person confirmed in the import. `id` is the login already saved that it replaces, which
+// keeps that login's agents and note (src/core/vault.ts: importLogins).
+export interface LoginImport {
+  id?: string
+  site: string
+  username: string
+  password: string
+}
+
+// A CSV into records: quotes around a field, a doubled quote inside one, a comma or a newline inside
+// one, CRLF or LF between them, and a BOM at the start. Both browsers' exports are read by this.
+function csvRecords(text: string): string[][] {
+  const rows: string[][] = []
+  const src = text.replace(/^\uFEFF/, '')
+  let row: string[] = []
+  let field = ''
+  let quoted = false
+  const end = (): void => {
+    row.push(field)
+    if (row.some((f) => f.trim() !== '')) rows.push(row)
+    row = []
+    field = ''
+  }
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!
+    if (quoted) {
+      if (c !== '"') field += c
+      else if (src[i + 1] === '"') {
+        field += '"'
+        i++
+      } else quoted = false
+    } else if (c === '"') quoted = true
+    else if (c === ',') {
+      row.push(field)
+      field = ''
+    } else if (c === '\n') end()
+    else if (c === '\r') {
+      if (src[i + 1] === '\n') i++
+      end()
+    } else field += c
+  }
+  if (field !== '' || row.length) end()
+  return rows
+}
+
+// Which browser wrote the file, from its header: the columns are found by name, never by position.
+function browserOf(header: readonly string[]): BrowserExport | undefined {
+  const has = (n: string): boolean => header.includes(n)
+  if (!has('url') || !has('username') || !has('password')) return undefined
+  if (has('httprealm') || has('guid') || has('formactionorigin')) return 'firefox'
+  if (has('name') || has('note')) return 'chrome'
+  return undefined
+}
+
+// What a browser's export holds, row by row. A row that cannot be a login says why, and stays in the
+// list so the preview can show it: nothing goes in without the person seeing it first.
+export function parseLoginCsv(text: string): ParsedLogins {
+  const records = csvRecords(text)
+  const header = (records[0] ?? []).map((c) => c.trim().toLowerCase())
+  const browser = browserOf(header)
+  if (!browser) {
+    return {
+      logins: [],
+      error: L(
+        'Esse arquivo não é a exportação de senhas de um navegador: o Chrome grava um Chrome Passwords.csv e o Firefox um logins.csv.',
+        'This file is not a browser’s password export: Chrome writes a Chrome Passwords.csv and Firefox a logins.csv.'
+      )
+    }
+  }
+  const col = (r: readonly string[], name: string): string => r[header.indexOf(name)] ?? ''
+  const logins: CsvLogin[] = []
+  const seen = new Set<string>()
+  for (const r of records.slice(1)) {
+    const site = col(r, 'url').trim()
+    const username = col(r, 'username').trim()
+    const password = col(r, 'password')
+    const login: CsvLogin = { row: logins.length + 1, site, username, password }
+    const protocol = /^([a-z][a-z0-9+.-]*):/i.exec(site)?.[1]?.toLowerCase()
+    if (!username) login.skip = 'username'
+    else if (!password) login.skip = 'password'
+    else if (protocol !== 'http' && protocol !== 'https') login.skip = 'protocol'
+    else if (browser === 'firefox' && col(r, 'httprealm').trim()) login.skip = 'realm'
+    else {
+      const origin = loginOrigin(site)
+      if (!origin) login.skip = 'address'
+      else {
+        login.origin = origin
+        const key = `${origin}\u0000${username}`
+        if (seen.has(key)) login.skip = 'again'
+        else seen.add(key)
+      }
+    }
+    logins.push(login)
+  }
+  return { browser, logins }
+}
