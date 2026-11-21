@@ -1,6 +1,6 @@
 // The steer's field, open: it takes the width of the reply's chain, not a column narrower than it.
-// Laid out as the app draws it (Conversation.tsx: the steer sub-button in the steps row beside Stop,
-// the field under the box), it runs from where the steps' text starts to where the chain stops. Left
+// Laid out as the app draws it (Conversation.tsx: the steer pill in the row under the chain, the
+// field under that row), it runs from where the steps' text starts to where the chain stops. Left
 // to itself the note stopped at 520 px in a 583 px chain, and its box ran on to the message body's
 // edge instead of the chain's, which is what this pins.
 import { existsSync } from 'node:fs'
@@ -19,8 +19,8 @@ const CHAIN = (open: boolean, summary = 'Working · 2 steps'): string => `
         <span class="steps__summary">${summary}</span>
         <span class="steps__elapsed">4s</span>
         <span class="btn btn--xs btn--ghost steps__stop">Stop</span>
-        <span class="steps__steer-pill" role="button" aria-expanded="${open}">Steer</span>
       </button>
+      <div class="steps__pills"><span class="steps__steer-pill" role="button" aria-expanded="${open}">Steer</span></div>
       <ol class="steps__list">
         <li class="step step--tool step--done"><span class="step__icon"></span><span class="step__label">Read steer-demo</span></li>
         <li class="step step--tool step--running"><span class="step__icon"></span><span class="step__label">Reading the two last commits</span></li>
@@ -90,18 +90,19 @@ it.skipIf(!existsSync(chromium.executablePath()))('gives the open steer field th
   }
 })
 
-it.skipIf(!existsSync(chromium.executablePath()))('keeps the compact steer beside Stop while the field is closed', async () => {
+it.skipIf(!existsSync(chromium.executablePath()))('keeps the compact steer in the row under the chain while the field is closed', async () => {
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 880 } })
     await page.setContent(`<style>${css}</style><main class="main"><div class="messages">${CHAIN(false)}</div></main>`)
     const chain = await box(page, '.steps')
-    const stop = await box(page, '.steps__stop')
     const pill = await box(page, '.steps__steer-pill')
-    // The steer is a sub-button of the same row, just after Stop, and takes no room under the chain.
-    expect(pill.left).toBeGreaterThanOrEqual(stop.right)
+    // The steer is a pill in the row under the chain, lined up with the steps' own text, and the
+    // header keeps Stop alone so the pill cannot also fire the header's toggle.
+    expect(pill.left).toBeCloseTo(chain.left + 17, 0)
     expect(pill.right).toBeLessThanOrEqual(chain.right)
     expect(pill.h).toBeLessThan(21)
+    expect(await page.locator('.steps__toggle .steps__steer-pill').count()).toBe(0)
     expect(await page.locator('.steps__steer').count()).toBe(0)
   } finally {
     await browser.close()

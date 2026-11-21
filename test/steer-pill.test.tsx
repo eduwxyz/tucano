@@ -93,18 +93,22 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the steer pill', () => {
-  it('is one compact sub-button beside Stop in the steps row of a reply at work', async () => {
+  it('is one pill in the row under the chain of a reply at work, not a control inside its header', async () => {
     await draw(reply('working'))
-    const row = document.querySelector('.steps__toggle')!
-    const stop = row.querySelector('.steps__stop')!
-    const steer = row.querySelector<HTMLElement>('.steps__steer-pill')!
+    const pills = document.querySelector('.steps__pills')!
+    const steer = pills.querySelector<HTMLElement>('.steps__steer-pill')!
     expect(steer.textContent?.trim()).toBe('Orientar')
     expect(steer.getAttribute('title')).toMatch(/Dizer como seguir|Say how to go on/)
+    expect(document.querySelectorAll('.steps__pills')).toHaveLength(1) // one row, not one row per control
     expect(document.querySelectorAll('.steps__steer-pill')).toHaveLength(1) // not a second steer control
     expect(document.querySelectorAll('.steps__stop')).toHaveLength(1) // Stop stays the stop action
-    expect(steer.previousElementSibling).toBe(stop)
+    // The header keeps Stop alone: a pill inside it would also fire the header's own toggle.
+    expect(document.querySelector('.steps__toggle')!.querySelector('.steps__steer-pill')).toBeNull()
     expect(document.querySelector('.steps__list')).not.toBeNull()
     expect(document.querySelector('.steps__steer')).toBeNull() // no field until it is opened
+    // The row sits inside the box, under the header and above the steps it opened.
+    expect(pills.parentElement!.className).toContain('steps')
+    expect(pills.nextElementSibling!.className).toBe('steps__list')
     await act(async () => steer.click())
     expect(document.querySelector('.steps')!.nextElementSibling?.className).toBe('steps__steer')
     expect(stopped).toHaveLength(0) // steering did not stop the reply

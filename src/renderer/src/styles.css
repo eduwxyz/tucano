@@ -1584,8 +1584,18 @@ h3 {
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
 }
-/* Steer opens from a compact sub-button beside Stop in the steps row. Its field sits under the
-   box, starting where the steps' text starts and ending where the chain ends. */
+/* One row of pills under the chain: a control is a pill in this row, not a row of its own, so the
+   steer and a held reply's pause sit side by side. It lines up with the steps' own text. */
+.steps__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0 3px;
+  padding-left: 14px;
+}
+/* Steer opens from its pill in that row. Its field sits under the box, starting where the steps'
+   text starts and ending where the chain ends. */
 .steps__steer {
   display: grid;
   gap: 8px;
@@ -1597,7 +1607,6 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 2px;
   height: 20px;
   padding: 0 7px;
   border: 1px solid var(--border);

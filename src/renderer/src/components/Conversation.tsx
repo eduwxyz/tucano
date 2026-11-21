@@ -1635,8 +1635,8 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  // The steer is a sub-button of this row, beside Stop: it opens a field under the box, still held
-  // by this reply's id so it cannot direct another reply of the same agent.
+  // The steer is a pill in the row under this chain: it opens a field under the box, still held by
+  // this reply's id so it cannot direct another reply of the same agent.
   const [steerOpen, setSteerOpen] = useState(false)
   const [steerNote, setSteerNote] = useState('')
   const steerTyped = steerNote.trim()
@@ -1701,21 +1701,22 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
               <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
             </span>
           )}
-          {working && (
+        </button>
+        {/* One row of pills under the chain, not one row per control: the steer opens here, and the
+            pause pill of a held reply joins the same row instead of drawing a second one. */}
+        {working && (
+          <div className="steps__pills">
             <span
               className="steps__steer-pill"
               role="button"
               aria-expanded={steerOpen}
               title={L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply')}
-              onClick={(e) => {
-                e.stopPropagation()
-                setSteerOpen((v) => !v)
-              }}
+              onClick={() => setSteerOpen((v) => !v)}
             >
               <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
             </span>
-          )}
-        </button>
+          </div>
+        )}
         {open && (
           <ol className="steps__list">
             {run.steps.map((st) => (
