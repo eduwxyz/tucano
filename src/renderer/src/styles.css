@@ -8355,6 +8355,65 @@ kbd {
 .channel-drop {
   height: 6px;
 }
+/* Sorting the sidebar by hand (reorder.ts): the row held dims, and an orange line shows where it
+   lands, above the row it would come before. The places that only take a drop (a list's end) take no
+   room at rest, and only listen while a row of their list is carried. */
+/* Positioned only while it shows the line, so a row at rest paints exactly as it always has. */
+.channel-row.is-over,
+.agent-sector__head.is-over,
+.channel-drop.is-over,
+.drop-zone.is-live {
+  position: relative;
+}
+.top-row.is-picked,
+.channel-row.is-picked,
+.agent-row.is-picked,
+.agent-sector__head.is-picked {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.top-row.is-over::after,
+.channel-row.is-over::after,
+.agent-row.is-over::after,
+.agent-sector__head.is-over::after,
+.channel-drop.is-over::after,
+.drop-zone.is-over::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.channel-drop.is-over::after {
+  top: 2px;
+}
+/* Let go on a group's name, a channel goes into the group: the name lights up instead of a line. */
+.channel-group__head.is-over {
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.drop-zone {
+  height: 0;
+}
+.drop-zone.is-live {
+  z-index: 1;
+}
+.drop-zone.is-live::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  height: 14px;
+}
+.is-folded .drop-zone {
+  display: none;
+}
 
 /* The wiki: what you and the team know, as linked pages */
 
@@ -8792,11 +8851,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   }
 }
 /* A group's channels sit a step in, along a thin line, so it's clear where the group ends. */
-.channel-group > [draggable] {
+.channel-group > .channel-row {
   position: relative;
   padding-left: 14px;
 }
-.channel-group > [draggable]::before {
+.channel-group > .channel-row::before {
   content: '';
   position: absolute;
   left: 15px;
@@ -8805,7 +8864,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   width: 1px;
   background: var(--border-strong);
 }
-.channel-group > [draggable] .nav-item {
+.channel-group > .channel-row .nav-item {
   padding-left: 12px;
 }
 
