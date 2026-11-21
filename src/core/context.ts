@@ -492,7 +492,8 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
       ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),
-      questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`)
+      questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`),
+      m.run?.cancelled && L('(a pergunta foi cancelada: ninguém respondeu, siga sem a resposta)', '(the question was cancelled: no one answered, go on without the answer)')
     ]
       .filter(Boolean)
       .join('\n\n')

@@ -1004,6 +1004,7 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
+export const cancelQuestion = (messageId: string): Promise<void> => fire(L('Não consegui cancelar a pergunta.', "I couldn't cancel the question."), 'cancelQuestion', { messageId })
 export const submitDecisions = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitDecisions', { messageId })
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and

@@ -421,6 +421,20 @@ describe('questions, mentions and memory between people', () => {
     expect(notes.find((n) => n.title === 'Lia te mencionou')).toMatchObject({ to: [bia.id] })
   })
 
+  it('cancelling a decisions card: only who may answer it; the question leaves the inbox without waking the agent', async () => {
+    await runner.send('ch', '@lia me ajuda a decidir, decida com a Bia', [], undefined, ana.id)
+    await runner.idle()
+    const [asked] = lia()
+    const before = turns.length
+    expect(() => runner.cancelQuestion(asked!.id, carl)).toThrow('Essa pergunta não é pra você.')
+    runner.cancelQuestion(asked!.id, bia)
+    await runner.idle()
+    expect(db.message(asked!.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.question(asked!.id)?.state).toBe('closed')
+    expect(people.inbox(bia).questions).toHaveLength(0)
+    expect(turns).toHaveLength(before)
+  })
+
   // ask_user with options (decisions): answered on the card, one at a time, only by who may answer the question.
   it('decisions to Bia: only she (or an admin) answers them on the card; anyone else is refused, and their message stays theirs', async () => {
     await runner.send('ch', '@lia me ajuda a decidir, decida com a Bia', [], undefined, ana.id)
