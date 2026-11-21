@@ -3,6 +3,7 @@ import type { UplinkStatus } from './node-link'
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ChannelLayout } from './channel-layout'
+import type { RouteTrace, RoutingConfig } from './routing'
 import type { Answer, Decision } from './questions'
 import { L, lang, locale, type Lang } from './lang'
 
@@ -76,6 +77,9 @@ export interface Agent {
   fallbackAccountId?: string
   accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
+  // Jev reads each prompt and picks from the person's pools instead of modelId, which stays
+  // here as the baseline (what the agent runs on when routing is off, or decides nothing).
+  smartRouting?: boolean
   limit: number // tokens per month
   maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   used: number // tokens used this month, computed from receipts
@@ -207,6 +211,7 @@ export interface Run {
   autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   retryAt?: number // 'failed' on something that passes (a network, a plan's window, a computer off): when it tries again by itself
   retries?: number // how many times it already tried again by itself
+  route?: RouteTrace // what smart routing decided for this reply, drawn as the thin line over it
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
@@ -535,6 +540,7 @@ export interface Settings {
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
+  routing?: RoutingConfig // Settings › Routing: pools, role chains and the switch that turns routing on (src/shared/routing.ts)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
   // An address in OpenAI's format the agents run on with no harness: its base URL and the models picked
   // from what it lists. The key is a secret (ENDPOINT_SECRET); `hasKey` only says one is saved.

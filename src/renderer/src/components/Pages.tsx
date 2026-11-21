@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
 import { AgentVaultKeys, AgentVaultLogins } from './Vault'
 import { COFRE } from '../../../shared/vault'
+import { defaultRouting } from '../../../shared/routing'
 import {
   agentById,
   harnessNoticeSeen,
@@ -115,6 +116,7 @@ import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
+import { RoutingPane, SmartRoutingSwitch } from './Routing'
 
 // Every page's head, the same on all of them: the title big, inside the content and at the same
 // place; the actions on its line, at the right; one line under it. Tabs, when a page has them,
@@ -421,6 +423,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const globalRules = useStore((s) => s.settings.actionRules)
   const globalAutonomy = useStore((s) => s.settings.autonomy)
   const globalGuard = useStore((s) => s.settings.outsideGuard)
+  const routing = useStore((s) => s.settings.routing)
 
   const memberOf = (agentId: string): string[] => channels.filter((c) => c.members.includes(agentId)).map((c) => c.id)
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
@@ -531,6 +534,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     }
     if (fromMessage) settleDraft(fromMessage, draft.id) // the Tuca's card shows it was created
     navigate({ kind: 'agent', id: draft.id })
+  }
+
+  // Smart routing for this agent only: on, off, or follow the global switch (the key absent).
+  // `patch` is the page's autosave path; it stores the absent key as null, which reads back as undefined.
+  const setSmartRouting = (v: boolean | undefined): void => {
+    patch({ smartRouting: v })
+    // A bot can route with the global switch off, so its pools have to exist for it to have anywhere to go.
+    if (v === true && !routing) updateSettings({ routing: defaultRouting() })
   }
 
   const model = modelInfo(draft.modelId)
@@ -694,7 +705,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
       )}
       {!admin && <div className="admin-only--lead"><AdminOnly>{L('Só um admin muda os agentes. Você pode conversar com eles e ver como estão configurados.', 'Only an admin changes the agents. You can chat with them and see how they’re set up.')}</AdminOnly></div>}
       <fieldset className="member-lock" disabled={!admin || !!existing?.deleted}>
-        <div className="agent-sections">
+        <div className={`agent-sections ${tab === 'roteamento' ? 'agent-sections--wide' : ''}`}>
+          {/* The Routing pane carries more per row than the other panes: it gets the wider column. */}
           {pane('perfil') && (
             <Section title={L('Identidade', 'Identity')} help={L('Como você chama e reconhece o agente no chat. O papel, numa linha, ajuda a decidir quem responde nos canais.', 'How you call and recognize the agent in chat. The role, in one line, helps decide who replies in channels.')}>
               <label className="lrow lrow--field">
@@ -758,6 +770,42 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             >
               <Row label={L('Modelo', 'Model')} className="lrow--wide">
                 <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
+              </Row>
+              {/* Settings › Router has the global switch; here it's this agent's own, in three states, so
+                  the global one can be off while a bot or two still route. An explicit model above stays the
+                  baseline it runs on whenever routing decides nothing. */}
+              <Row
+                className="lrow--switch"
+                label={L('Roteamento inteligente', 'Smart routing')}
+                sub={
+                  draft.smartRouting === true
+                    ? L(
+                        'Ligado só pra este agente: o Jev escolhe dos seus pools a cada prompt, mesmo com o roteamento geral desligado. O modelo acima é a base.',
+                        'On for this agent alone: Jev picks from your pools for each prompt, even with global routing off. The model above is the baseline.'
+                      )
+                    : draft.smartRouting === false
+                      ? L(
+                          'Desligado só pra este agente: ele usa o modelo acima em todo prompt, mesmo com o roteamento geral ligado.',
+                          'Off for this agent alone: it uses the model above for every prompt, even with global routing on.'
+                        )
+                      : routing?.enabled
+                        ? L(
+                            'Seguindo o geral, que está ligado: o Jev escolhe o modelo a cada prompt. O modelo acima é a base.',
+                            'Following the global switch, which is on: Jev picks the model for each prompt. The model above is the baseline.'
+                          )
+                        : L(
+                            'Seguindo o geral, que está desligado: este agente usa o modelo acima em todo prompt.',
+                            'Following the global switch, which is off: this agent uses the model above for every prompt.'
+                          )
+                }
+              >
+                <div className="segmented" role="radiogroup" aria-label={L('Roteamento inteligente', 'Smart routing')}>
+                  {([undefined, true, false] as const).map((v) => (
+                    <button key={String(v)} role="radio" aria-checked={draft.smartRouting === v} className={draft.smartRouting === v ? 'is-active' : ''} onClick={() => setSmartRouting(v)}>
+                      {v === undefined ? L('Geral', 'Global') : v ? L('Ligado', 'On') : L('Desligado', 'Off')}
+                    </button>
+                  ))}
+                </div>
               </Row>
               <div className="lrow lrow--picker">
                 <AccountPicker draft={draft} patch={patch} />
@@ -2529,11 +2577,14 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
 type TabList = readonly (readonly [string, string])[]
 // With a team, Pessoas (everyone) and Atividade (admins); a member sees only what's theirs to change.
 // The phone (Telegram) is the owner's alone.
-export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList => [
+// `routing`: smart model routing is on, globally or for at least one bot, so its tab exists. Off,
+// the tab is gone and what was configured stays saved (a reply that already has a trace keeps it).
+export const SETTINGS_TABS = (team = false, admin = true, owner = true, routing = false): TabList => [
   ['geral', L('Geral', 'General')],
   ...(admin
     ? ([
         ['modelos', L('Modelos', 'Models')],
+        ...(routing ? [['roteamento', L('Rotas', 'Routing')]] : []),
         ['agentes', L('Agentes', 'Agents')],
         ...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])
       ] as [string, string][])
@@ -3215,7 +3266,10 @@ export function SettingsPage(): ReactNode {
   const team = useStore(teamMode)
   const admin = useStore(amAdmin)
   const owner = useStore(amOwner)
-  const tabs = SETTINGS_TABS(team, admin, owner)
+  // Smart routing's tab exists while the global switch is on, or while any bot is set to On by itself:
+  // its pools are what both of those route through.
+  const routingOn = useStore((s) => s.settings.routing?.enabled === true || s.agents.some((a) => a.smartRouting === true))
+  const tabs = SETTINGS_TABS(team, admin, owner, routingOn)
   const tab = useTab('settings', tabs)
   const pane = (t: string): boolean => tab === t
   return (
@@ -3379,13 +3433,25 @@ export function SettingsPage(): ReactNode {
 
         {pane('modelos') && (
           <Card title={L('Roteador', 'Router')} lead={L('Modelo pequeno que lê a conversa e decide quem responde nos canais. Não concede permissão nenhuma.', 'A small model that reads the conversation and decides who replies in channels. It grants no permissions at all.')}>
-            <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
-              <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
-            </Field>
+            <div className="key-row key-row--form">
+              <Icon name="spark" />
+              <div className="grow">
+                <Field label={L('Modelo do roteador', 'Router model')} hint={L('Prefira um modelo rápido: ele roda antes de cada resposta num canal.', 'Go for a fast model: it runs before every reply in a channel.')}>
+                  <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
+                </Field>
+              </div>
+              <span className="key-row__glyph" aria-hidden="true" />
+            </div>
             {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
+            <SmartRoutingSwitch />
+            {routingOn && work && (
+              <OutsideGateway what={L('o pedido de cada resposta vai pro TypeSafe escolher o modelo.', 'each reply’s request goes to TypeSafe to pick the model.')} />
+            )}
             {settings.routerModel === 'jev' && work && <OutsideGateway what={L('cada mensagem sem @menção vai pra TypeSafe escolher quem responde.', 'every message without an @mention goes to TypeSafe to pick who replies.')} />}
           </Card>
         )}
+
+        {pane('roteamento') && admin && routingOn && <RoutingPane />}
 
         {pane('agentes') && (
           <Card
