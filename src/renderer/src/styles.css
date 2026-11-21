@@ -13686,6 +13686,26 @@ button.agent-card__now:hover {
 .agent-row.is-archived > .nav-item {
   opacity: 0.6;
 }
+.agent-row.is-deleted .nav-item__label,
+.msg__author.is-deleted {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+}
+.msg__face.is-deleted {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+.composer-off {
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  text-align: center;
+}
+.member .member__delete {
+  color: var(--danger);
+}
 .nav-item > .nav-item__mac,
 .nav-item > .dot,
 .nav-item > .waiting-pill,

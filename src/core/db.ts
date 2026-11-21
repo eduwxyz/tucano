@@ -632,7 +632,9 @@ const COLUMNS: [string, string, string][] = [
   // A person's message sent by a harness over MCP (src/core/mcp.ts): the key's name, for the agent to read; the screens don't show it.
   ['messages', 'via', 'TEXT'],
   // The note a job left where it stopped on its brakes (src/core/jobs.ts): the job it carries Continuar for.
-  ['messages', 'stop_job', 'TEXT']
+  ['messages', 'stop_job', 'TEXT'],
+  // When an agent was deleted for good (retireAgent): it stays only as a name for its old messages.
+  ['agents', 'deleted_at', 'INTEGER']
 ]
 
 
@@ -941,6 +943,7 @@ export class Db {
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
+      ...(r['deleted_at'] ? { deleted: true as const } : {}),
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
       owner: r['owner'] ? str(r['owner']) : this.ownerId(),
@@ -1120,6 +1123,27 @@ export class Db {
     this.tx(() => {
       this.db.prepare('DELETE FROM members WHERE agent_id = ?').run(id)
       this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    })
+  }
+
+  // An agent deleted for good, the way Slack keeps a deactivated person: its row stays as a tombstone
+  // (name, color, picture) so the messages and receipts it left still say who wrote them, and
+  // everything else goes: its channels, settings, permissions, own memories, routines and services.
+  // It stays archived, so every list of the team already leaves it out; its handle is freed.
+  retireAgent(id: string): void {
+    this.tx(() => {
+      // Out of its channels; its DMs keep it, so they still read as the conversation with it.
+      this.db.prepare("DELETE FROM members WHERE agent_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'channel')").run(id)
+      this.db.prepare('UPDATE agents SET reports_to = NULL WHERE reports_to = ?').run(id)
+      this.db.prepare('DELETE FROM memories WHERE scope = ?').run(id)
+      this.db.prepare('DELETE FROM services WHERE agent_id = ?').run(id)
+      for (const r of this.db.prepare('SELECT id FROM routines WHERE agent_id = ?').all(id) as { id: string }[]) this.removeRoutine(r.id)
+      this.db
+        .prepare(
+          `UPDATE agents SET deleted_at = ?, archived = 1, handle = ?, role = '', instructions = '', grants = '{}', computer = 0, browser = 0, apps = '[]',
+             auto_approve = '[]', action_rules = '{}', folders = '[]', reports_to = NULL, sector_name = NULL, sector_does = NULL, entry = NULL WHERE id = ?`
+        )
+        .run(Date.now(), `~${id}`, id)
     })
   }
 

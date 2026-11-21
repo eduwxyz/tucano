@@ -984,6 +984,7 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
+export const deleteAgent = (id: string): Promise<void> => call('deleteAgent', { id })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 // Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })

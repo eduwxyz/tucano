@@ -180,6 +180,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
   const dmAgentId = conv?.kind === 'dm' ? conv.members[0] : undefined
   const routinesHere = useStore((s) => (dmAgentId ? s.routines.filter((r) => r.conversationId === id && r.agentId === dmAgentId && r.enabled).length : 0))
+  // A DM with an agent deleted for good: its history to read, nothing to write.
+  const gone = useStore((s) => {
+    const a = dmAgentId ? agentById(s, dmAgentId) : undefined
+    return a?.deleted ? a : undefined
+  })
 
   if (!conv)
     return (
@@ -276,7 +281,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        {gone ? (
+          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
+        ) : (
+          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        )}
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
     </div>
@@ -524,7 +533,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
     <article className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
-          (agent ? (
+          (agent?.deleted ? (
+            <span className="msg__face is-deleted">
+              <AgentAvatar agent={agent} size={34} />
+            </span>
+          ) : agent ? (
             <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
               <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
             </AgentCardButton>
@@ -535,7 +548,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
-            {agent ? (
+            {agent?.deleted ? (
+              <span className="msg__author is-deleted" title={L(`${agent.name} foi excluído`, `${agent.name} was deleted`)}>
+                {name}
+              </span>
+            ) : agent ? (
               <AgentCardButton agentId={agent.id} className="msg__author link">
                 {name}
               </AgentCardButton>
