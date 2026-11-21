@@ -15664,6 +15664,14 @@ button.agent-card__now:hover {
 }
 
 /* ---------- the Cofre (components/Vault.tsx) ---------- */
+.modal__card.vault-modal {
+  max-height: calc(100vh - 80px);
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+}
+.vault-modal > * {
+  flex-shrink: 0;
+}
 .vault-keys,
 .vault-log,
 .vault-import__lines {

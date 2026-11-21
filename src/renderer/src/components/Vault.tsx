@@ -212,7 +212,7 @@ export function LoginEditor({ l, mine, agentId, onClose, onSaved }: { l?: VaultL
   }
   const toggle = (id: string): void => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))
   return (
-    <Modal title={l ? L(`Editar o login de ${host(l.origin)}`, `Edit the login for ${host(l.origin)}`) : mine ? L('Novo login seu', 'New login of yours') : L('Novo login', 'New login')} onClose={onClose}>
+    <Modal title={l ? L(`Editar o login de ${host(l.origin)}`, `Edit the login for ${host(l.origin)}`) : mine ? L('Novo login seu', 'New login of yours') : L('Novo login', 'New login')} onClose={onClose} className="vault-modal">
       <form
         className="vault-editor"
         onSubmit={(e) => {
@@ -319,7 +319,7 @@ function KeyEditor({ k, mine, onClose, onSaved }: { k?: VaultKey; mine: boolean;
   }
   const toggle = (id: string): void => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))
   return (
-    <Modal title={k ? L(`Editar ${k.name}`, `Edit ${k.name}`) : mine ? L('Nova chave sua', 'New key of yours') : L('Nova chave', 'New key')} onClose={onClose}>
+    <Modal title={k ? L(`Editar ${k.name}`, `Edit ${k.name}`) : mine ? L('Nova chave sua', 'New key of yours') : L('Nova chave', 'New key')} onClose={onClose} className="vault-modal">
       <form
         className="vault-editor"
         onSubmit={(e) => {
@@ -394,7 +394,7 @@ function ImportEnv({ have, mine, onClose, onSaved }: { have: VaultKey[]; mine: b
       .finally(() => setBusy(false))
   }
   return (
-    <Modal title={L('Importar .env', 'Import .env')} onClose={onClose}>
+    <Modal title={L('Importar .env', 'Import .env')} onClose={onClose} className="vault-modal">
       <p className="small modal__lead">{L('Cole o conteúdo do arquivo. Cada NOME=valor vira uma chave, sem nenhum agente liberado: você escolhe depois.', 'Paste the file’s content. Each NAME=value becomes a key, given to no agent: you choose afterwards.')}</p>
       <textarea className="vault-import__text" rows={6} spellCheck={false} autoFocus value={text} placeholder={'STRIPE_KEY=sk_live_…\nDATABASE_URL=postgres://…'} onChange={(e) => setText(e.target.value)} />
       {lines.length > 0 && (
