@@ -148,6 +148,7 @@ export const NEEDS: Record<Method, Need> = {
   removeVaultKey: 'anyone',
   setVaultKeyAgent: 'anyone',
   importVaultKeys: 'anyone',
+  importVaultLogins: 'anyone',
   vaultLogins: 'anyone',
   saveVaultLogin: 'anyone',
   removeVaultLogin: 'anyone',

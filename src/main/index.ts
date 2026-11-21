@@ -4,7 +4,7 @@ import { readInstall } from '../core/feedback'
 import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { copyFile } from 'node:fs/promises'
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -732,6 +732,26 @@ ipcMain.handle('pick-folder', async (event, o?: { start?: string; hidden?: boole
   }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
+})
+
+// A browser's exported passwords, for the Cofre's import: the person picks the CSV in the system's
+// dialog and the page gets its text, never a path it could read anything else with. The file stays
+// where it was: nothing is copied into the app's own folder, and no line of it is logged.
+const LOGINS_CSV_MAX = 20 * 1024 * 1024
+ipcMain.handle('pick-logins-csv', async (event) => {
+  if (!fromApp(event)) return null
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const opts = {
+    title: L('Escolher o CSV exportado', 'Choose the exported CSV'),
+    buttonLabel: L('Abrir', 'Open'),
+    properties: ['openFile'] as 'openFile'[],
+    filters: [{ name: 'CSV', extensions: ['csv'] }]
+  }
+  const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+  const chosen = r.canceled ? undefined : r.filePaths[0]
+  if (!chosen) return null
+  if (statSync(chosen).size > LOGINS_CSV_MAX) throw new Error(L('Esse arquivo é grande demais pra ser uma exportação de senhas.', 'That file is too large to be a password export.'))
+  return { name: basename(chosen), text: readFileSync(chosen, 'utf8') }
 })
 
 function createWindow(): BrowserWindow {

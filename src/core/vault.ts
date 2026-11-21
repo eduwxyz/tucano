@@ -13,7 +13,7 @@
 // (navegador_login) on that exact site; the agent never gets the password.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
-import { keyHint, keyNameError, loginOrigin, masked, type KeyRequestAnswer, type VaultKey, type VaultKeyInput, type VaultLogin, type VaultLoginInput, type VaultUse } from '../shared/vault'
+import { keyHint, keyNameError, loginOrigin, masked, type KeyRequestAnswer, type LoginImport, type VaultKey, type VaultKeyInput, type VaultLogin, type VaultLoginInput, type VaultUse } from '../shared/vault'
 import type { Db } from './db'
 import { isOpRef, resolveOp } from './onepassword'
 import type { Secrets } from './secrets'
@@ -253,6 +253,24 @@ export class Vault {
     db.saveVaultLogin(login)
     this.takeOff(login, login.agents)
     return login
+  }
+
+  // A browser's export confirmed on the page (parseLoginCsv): each row a login, given to no agent.
+  // A row that replaces one already saved keeps that login's agents and note.
+  async importLogins(who: Asker, rows: readonly LoginImport[], mine?: boolean): Promise<number> {
+    let saved = 0
+    for (const r of rows) {
+      const before = r.id ? this.deps.db.vaultLogin(r.id) : undefined
+      await this.saveLogin(who, {
+        ...(before ? { id: before.id, agents: before.agents, ...(before.note ? { note: before.note } : {}) } : { agents: [] }),
+        site: r.site,
+        username: r.username,
+        password: r.password,
+        ...(mine ? { mine } : {})
+      })
+      saved++
+    }
+    return saved
   }
 
   async removeLogin(who: Asker, id: string): Promise<VaultLogin | undefined> {
