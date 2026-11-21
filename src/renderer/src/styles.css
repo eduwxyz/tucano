@@ -15567,25 +15567,27 @@ button.agent-card__now:hover {
 }
 
 /* The logins saved for an agent's browser, in its browser card. */
-.saved-logins {
+/* An agent's page: the Cofre's logins, under its browser's switch. */
+.lrow--stack {
   display: grid;
   gap: 8px;
+  align-items: start;
 }
-.saved-logins__row {
-  display: flex;
+
+/* The card pedir_chave leaves in the chat: paste into the Cofre, or give one already there. */
+.key-request__form {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.key-request__form input[type='password'],
+.key-request__form input:not([type]) {
+  width: 100%;
+}
+.key-request__saved {
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-}
-.saved-logins__site {
-  overflow-wrap: anywhere;
-}
-.saved-logins__form {
-  display: grid;
-  gap: 6px;
-}
-.saved-logins .hint {
-  margin: 0;
+  margin-top: 6px;
 }
 
 /* Configurações › Harnesses: the snippet to paste into a harness, and a row of buttons that wraps. */

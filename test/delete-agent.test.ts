@@ -58,6 +58,10 @@ describe('an agent deleted for good', () => {
     db.saveVaultKey(key('k3', ['bia']))
     db.retireAgent('ana')
     expect(Object.fromEntries(db.vaultKeys().map((k) => [k.id, k.agents]))).toEqual({ k1: ['bia'], k2: [], k3: ['bia'] })
+    db.saveVaultLogin({ id: 'l1', origin: 'https://a.com', username: 'u', agents: ['bia'], createdAt: 1, updatedAt: 1 })
+    db.saveVaultLogin({ id: 'l2', origin: 'https://b.com', username: 'u', agents: ['bia', 'ana'], createdAt: 1, updatedAt: 1 })
+    db.retireAgent('bia')
+    expect(Object.fromEntries(db.vaultLogins().map((l) => [l.id, l.agents]))).toEqual({ l1: [], l2: ['ana'] })
   })
 
   it('an agent not deleted reads as before', () => {

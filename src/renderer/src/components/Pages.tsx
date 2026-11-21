@@ -6,8 +6,8 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
-import { BrowserLogins } from './BrowserLogins'
-import { AgentVaultKeys } from './Vault'
+import { AgentVaultKeys, AgentVaultLogins } from './Vault'
+import { COFRE } from '../../../shared/vault'
 import {
   agentById,
   harnessNoticeSeen,
@@ -988,7 +988,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               >
                 <Toggle label={L('Navegador próprio', 'Own browser')} on={!!draft.browser} onChange={(v) => patch({ browser: v }, true)} />
               </Row>
-              {!isNew && draft.browser && admin && <BrowserLogins agentId={draft.id} agentName={draft.name} />}
+              {!isNew && draft.browser && (
+                <div className="lrow lrow--stack">
+                  <span className="lrow__label">
+                    <span className="lrow__name">{L('Logins do Cofre', 'Cofre logins')}</span>
+                  </span>
+                  <AgentVaultLogins agentId={draft.id} name={draft.name} />
+                </div>
+              )}
             </Section>
           )}
 
@@ -1808,6 +1815,7 @@ function NothingWaiting({ why }: { why: string }): ReactNode {
 // What an approval was for, in a few words: "Rodar um comando", "Abrir pull request", "Send email".
 export function approvalWhat(a: Approval): string {
   const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+  if (a.connectorId === COFRE) return typeof a.args['nome'] === 'string' ? L(`Chave ${a.args['nome']}`, `Key ${a.args['nome']}`) : L('Login de site', 'Site login')
   if (a.tool === ACCESS_REQUEST) return L('Pedir acesso', 'Ask for access')
   if (a.connectorId === COMPUTADOR) return shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || L('Rodar um comando', 'Run a command')
   if (a.tool === 'abrir_pr') return L('Abrir pull request', 'Open a pull request')

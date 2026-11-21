@@ -13,6 +13,8 @@ let team = false
 let keys: VaultKey[] = []
 const saved = vi.fn(async (k: unknown) => k)
 const imported = vi.fn(async (_lines: unknown, _replace: unknown, _mine?: boolean) => ({ saved: 1 }))
+const answered = vi.fn(async (_a: unknown) => {})
+let logins: { id: string; origin: string; username: string; owner?: string; agents: string[]; createdAt: number; updatedAt: number }[] = []
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(fake),
   amAdmin: () => admin,
@@ -26,7 +28,15 @@ vi.mock('../src/renderer/src/store', () => ({
   saveVaultKey: (k: unknown) => saved(k),
   removeVaultKey: vi.fn(async () => {}),
   setVaultKeyAgent: vi.fn(),
-  importVaultKeys: (l: unknown, r: unknown, m?: boolean) => imported(l, r, m)
+  importVaultKeys: (l: unknown, r: unknown, m?: boolean) => imported(l, r, m),
+  vaultLogins: async () => logins,
+  saveVaultLogin: vi.fn(),
+  removeVaultLogin: vi.fn(),
+  setVaultLoginAgent: vi.fn(),
+  answerKeyRequest: (a: unknown) => answered(a),
+  canDecide: () => true,
+  decideApproval: vi.fn(),
+  personName: (_s: unknown, id: string) => (id === 'ana' ? 'Ana' : 'Você')
 }))
 vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, Icon: () => null }))
 vi.mock('../src/renderer/src/components/Dialogs', () => ({ confirmDialog: async () => true }))
@@ -37,7 +47,7 @@ vi.mock('../src/renderer/src/components/Pages', () => ({
   Toggle: ({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) => <input type="checkbox" aria-label="toggle" checked={on} onChange={(e) => onChange(e.target.checked)} />
 }))
 const { createRoot } = await import('react-dom/client')
-const { VaultPage } = await import('../src/renderer/src/components/Vault')
+const { VaultPage, KeyRequestCard } = await import('../src/renderer/src/components/Vault')
 let root: ReturnType<typeof createRoot>
 const render = async (): Promise<void> => act(async () => root.render(<VaultPage />))
 const click = async (el: Element) => act(async () => { el.dispatchEvent(new window.Event('click', { bubbles: true })) })
@@ -62,6 +72,8 @@ beforeEach(() => {
   keys = []
   saved.mockClear()
   imported.mockClear()
+  answered.mockClear()
+  logins = []
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(async () => { await act(async () => root.unmount()) })
@@ -108,4 +120,46 @@ it('an .env: new names go in, a name already saved only when its box is checked'
   expect(text()).toContain('não entra')
   await click(button('Guardar 1 chave'))
   expect(imported).toHaveBeenCalledWith([{ name: 'STRIPE_KEY', value: 'sk_live_x' }], [], false)
+})
+
+it('the logins tab: a site and its username, never the password', async () => {
+  logins = [{ id: 'l1', origin: 'https://conta.luz.com.br', username: 'edu@x.com', agents: ['fin'], createdAt: 1, updatedAt: 1 }]
+  await act(async () => root.render(<VaultPage tab="logins" />))
+  expect(text()).toContain('conta.luz.com.br')
+  expect(text()).toContain('edu@x.com')
+  expect(button('Novo login')).toBeDefined()
+})
+
+const request = (args: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+  ({ id: 'ap1', hash: 'h', agentId: 'fin', conversationId: 'c1', messageId: 'm1', connectorId: 'cofre', connectorName: 'Cofre', tool: 'pedir_chave', args, why: 'puxar as cobranças', highRisk: false, state: 'pending', createdAt: 1, expiresAt: 9e15, requestedBy: 'owner', ...extra }) as never
+
+it('the card in the chat: the key pasted goes straight to the Cofre, never into the conversation', async () => {
+  await act(async () => root.render(<KeyRequestCard approval={request({ nome: 'STRIPE_KEY' })} />))
+  expect(text()).toContain('STRIPE_KEY')
+  expect(text()).toContain('puxar as cobranças')
+  expect(text()).not.toContain('Salvar no time') // alone: just the Cofre
+  await type(document.querySelector('input[type="password"]')!, 'sk_live_123456')
+  await act(async () => { document.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
+  expect(answered).toHaveBeenCalledWith({ id: 'ap1', value: 'sk_live_123456' })
+})
+
+it('the card in a team: an admin may keep it for the team, or give the team’s one already saved', async () => {
+  team = true
+  keys = [key('STRIPE_KEY')]
+  await act(async () => root.render(<KeyRequestCard approval={request({ nome: 'STRIPE_KEY' })} />))
+  expect(text()).toContain('Salvar no time')
+  await click(button('Liberar pra Fin'))
+  expect(answered).toHaveBeenCalledWith({ id: 'ap1', existing: 'STRIPE_KEY' })
+})
+
+it('the card for a member: the team’s key is an admin’s to give; a site’s login takes username and password', async () => {
+  team = true
+  admin = false
+  keys = [key('STRIPE_KEY')]
+  await act(async () => root.render(<KeyRequestCard approval={request({ nome: 'STRIPE_KEY' })} />))
+  expect(text()).toContain('só um admin libera')
+  expect(text()).not.toContain('Salvar no time')
+  await act(async () => root.render(<KeyRequestCard approval={request({ site: 'https://conta.luz.com.br' }, { id: 'ap2' })} />))
+  expect(text()).toContain('conta.luz.com.br')
+  expect(document.querySelectorAll('form input').length).toBe(2)
 })

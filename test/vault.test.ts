@@ -158,3 +158,87 @@ describe('masking', () => {
     expect(maskKeys('abc', [{ name: 'TINY', value: 'abc' }])).toBe('abc')
   })
 })
+
+describe('a site’s login', () => {
+  it('in the two drawers, as keys: the site and username shown, never the password', async () => {
+    const { db, vault } = setup()
+    await vault.saveLogin(admin, { site: 'conta.luz.com.br/entrar', username: 'edu@x.com', password: 'senha-123', agents: ['fin'] })
+    await vault.saveLogin(ana, { site: 'https://app.banco.com', username: 'ana@x.com', password: 'senha-ana', agents: ['fin'] })
+    expect(vault.logins(admin).map((l) => l.origin)).toEqual(['https://conta.luz.com.br'])
+    expect(vault.logins(ana).map((l) => l.origin).sort()).toEqual(['https://app.banco.com', 'https://conta.luz.com.br'])
+    expect(JSON.stringify(db.vaultLogins())).not.toContain('senha')
+    await expect(vault.saveLogin(admin, { site: 'http://conta.luz.com.br', username: 'a', password: 'b', agents: [] })).rejects.toThrow() // never over plain http
+    expect(() => vault.setLoginAgent(ana, vault.logins(admin)[0]!.id, 'mkt', true)).toThrow() // the team's: an admin's
+  })
+
+  it('an agent has one per site: giving it another takes the first off', async () => {
+    const { vault } = setup()
+    const a = await vault.saveLogin(admin, { site: 'conta.luz.com.br', username: 'um@x.com', password: 'senha-1', agents: ['fin'] })
+    const b = await vault.saveLogin(admin, { site: 'conta.luz.com.br', username: 'dois@x.com', password: 'senha-2', agents: ['mkt'] })
+    vault.setLoginAgent(admin, b.id, 'fin', true)
+    expect(vault.logins(admin).find((l) => l.id === a.id)?.agents).toEqual([])
+    expect(vault.logins(admin).find((l) => l.id === b.id)?.agents.sort()).toEqual(['fin', 'mkt'])
+  })
+
+  it('typed only for whom it may be: the person’s own in their work, and each use logged', async () => {
+    const { db, vault } = setup()
+    await vault.saveLogin(admin, { site: 'conta.luz.com.br', username: 'time@x.com', password: 'senha-time', agents: ['fin'] })
+    await vault.saveLogin(ana, { site: 'conta.luz.com.br', username: 'ana@x.com', password: 'senha-ana', agents: ['fin'] })
+    expect(await vault.loginFor('fin', 'https://conta.luz.com.br', { personId: 'joao' })).toEqual({ username: 'time@x.com', password: 'senha-time' })
+    expect(await vault.loginFor('fin', 'https://conta.luz.com.br', { personId: 'ana' })).toEqual({ username: 'ana@x.com', password: 'senha-ana' })
+    expect(await vault.loginFor('mkt', 'https://conta.luz.com.br', {})).toBeUndefined()
+    expect(await vault.loginFor('fin', 'https://conta.luz.com.br.golpe.com', {})).toBeUndefined()
+    expect(db.vaultUses().map((u) => [u.via, u.personId])).toEqual([['login', 'ana'], ['login', 'joao']])
+  })
+
+  it('the logins saved on an agent’s page before the Cofre move in as the team’s, one per account', async () => {
+    const { db, vault } = setup()
+    const secrets = (vault as unknown as { deps: { secrets: Secrets } }).deps.secrets
+    await secrets.set('browser-login:fin:https://conta.luz.com.br', JSON.stringify({ username: 'edu@x.com', password: 'senha-1' }))
+    await secrets.set('browser-login:mkt:https://conta.luz.com.br', JSON.stringify({ username: 'edu@x.com', password: 'senha-1' }))
+    await secrets.set('browser-login:mkt:https://app.banco.com', JSON.stringify({ username: 'mkt@x.com', password: 'senha-2' }))
+    expect(await vault.moveOldLogins()).toBe(3)
+    expect(db.secretKeys('browser-login:')).toEqual([])
+    expect(db.vaultLogins().map((l) => [l.origin, l.owner, l.agents.sort()])).toEqual([
+      ['https://app.banco.com', undefined, ['mkt']],
+      ['https://conta.luz.com.br', undefined, ['fin', 'mkt']]
+    ])
+    expect(await vault.loginFor('mkt', 'https://conta.luz.com.br', {})).toEqual({ username: 'edu@x.com', password: 'senha-1' })
+    expect(await vault.moveOldLogins()).toBe(0) // once
+  })
+})
+
+describe('pedir_chave’s card', () => {
+  it('a key pasted goes to the person’s own and to the agent; an admin may keep it for the team', async () => {
+    const { vault } = setup()
+    const own = await vault.answer(ana, 'fin', { nome: 'STRIPE_KEY' }, { value: 'sk_live_ana_123' })
+    expect(own).toMatchObject({ kind: 'key', created: true, item: { name: 'STRIPE_KEY', owner: 'ana', agents: ['fin'] } })
+    const team = await vault.answer(admin, 'fin', { nome: 'STRIPE_KEY' }, { value: 'sk_live_team_123', team: true })
+    expect(team.item.owner).toBeUndefined()
+    const notTeam = await vault.answer(ana, 'mkt', { nome: 'OTHER_KEY' }, { value: 'value-123456', team: true }) // a member can't say "the team's"
+    expect(notTeam.item.owner).toBe('ana')
+  })
+
+  it('a key already there by that name gets the new value and the agent', async () => {
+    const { vault } = setup()
+    const k = await vault.save(admin, { name: 'STRIPE_KEY', value: 'sk_live_old_1234', agents: ['mkt'], approve: true })
+    const r = await vault.answer(admin, 'fin', { nome: 'STRIPE_KEY' }, { value: 'sk_live_new_5678', team: true })
+    expect(r).toMatchObject({ created: false, item: { id: k.id, hint: '••••5678', approve: true } })
+    expect(r.item.agents.sort()).toEqual(['fin', 'mkt'])
+  })
+
+  it('one already in the Cofre is given: the team’s only by an admin', async () => {
+    const { vault } = setup()
+    const k = await vault.save(admin, { name: 'STRIPE_KEY', value: 'sk_live_team_123', agents: [], approve: false })
+    await expect(vault.answer(ana, 'fin', { nome: 'STRIPE_KEY' }, { existing: k.id })).rejects.toThrow()
+    expect((await vault.answer(admin, 'fin', { nome: 'STRIPE_KEY' }, { existing: k.id })).item.agents).toEqual(['fin'])
+  })
+
+  it('a login pasted needs the username and the password', async () => {
+    const { vault } = setup()
+    await expect(vault.answer(alone, 'fin', { site: 'https://conta.luz.com.br' }, { password: 'x' })).rejects.toThrow()
+    const r = await vault.answer(alone, 'fin', { site: 'https://conta.luz.com.br' }, { username: 'edu@x.com', password: 'senha-123' })
+    expect(r).toMatchObject({ kind: 'login', item: { origin: 'https://conta.luz.com.br', agents: ['fin'] } })
+    expect(vault.loginSites('fin')).toEqual(['https://conta.luz.com.br'])
+  })
+})

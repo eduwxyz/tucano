@@ -1,7 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { cleanAccess } from '../shared/access'
-import type { VaultKey, VaultUse } from '../shared/vault'
+import type { VaultKey, VaultLogin, VaultUse } from '../shared/vault'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
@@ -617,6 +617,23 @@ export const MIGRATIONS = [
     at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS vault_uses_by_at ON vault_uses (at);
+  `,
+  // The Cofre's site logins (src/core/vault.ts): the password, with the username, is in secrets
+  // ('vault-login:<id>'); here the site and the username the pages show. The same site may have more
+  // than one (each agent its own account); an agent gets one per site.
+  `
+  CREATE TABLE IF NOT EXISTS vault_logins (
+    id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
+    agents TEXT NOT NULL DEFAULT '[]',
+    note TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    used_at INTEGER
+  );
   `
 ]
 
@@ -1172,6 +1189,9 @@ export class Db {
       // Off the Cofre's keys it was given; the log of what it used stays.
       this.db
         .prepare("UPDATE vault_keys SET agents = (SELECT json_group_array(value) FROM json_each(vault_keys.agents) WHERE value <> ?) WHERE EXISTS (SELECT 1 FROM json_each(vault_keys.agents) WHERE value = ?)")
+        .run(id, id)
+      this.db
+        .prepare("UPDATE vault_logins SET agents = (SELECT json_group_array(value) FROM json_each(vault_logins.agents) WHERE value <> ?) WHERE EXISTS (SELECT 1 FROM json_each(vault_logins.agents) WHERE value = ?)")
         .run(id, id)
       for (const r of this.db.prepare('SELECT id FROM routines WHERE agent_id = ?').all(id) as { id: string }[]) this.removeRoutine(r.id)
       this.db
@@ -1956,12 +1976,49 @@ export class Db {
     this.db.prepare('DELETE FROM vault_keys WHERE id = ?').run(id)
   }
 
+  private toVaultLogin(r: Row): VaultLogin {
+    return {
+      id: str(r['id']),
+      origin: str(r['origin']),
+      username: str(r['username']),
+      ...(r['owner'] ? { owner: str(r['owner']) } : {}),
+      agents: JSON.parse(str(r['agents']) || '[]') as string[],
+      ...(r['note'] ? { note: str(r['note']) } : {}),
+      ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at']),
+      ...(r['used_at'] ? { usedAt: Number(r['used_at']) } : {})
+    }
+  }
+
+  vaultLogins(): VaultLogin[] {
+    return (this.db.prepare('SELECT * FROM vault_logins ORDER BY owner, origin, username').all() as Row[]).map((r) => this.toVaultLogin(r))
+  }
+
+  vaultLogin(id: string): VaultLogin | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_logins WHERE id = ?').get(id) as Row | undefined
+    return r && this.toVaultLogin(r)
+  }
+
+  saveVaultLogin(l: VaultLogin): void {
+    this.db
+      .prepare(
+        `INSERT INTO vault_logins (id, origin, username, owner, agents, note, created_by, created_at, updated_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET origin = excluded.origin, username = excluded.username, agents = excluded.agents, note = excluded.note, updated_at = excluded.updated_at`
+      )
+      .run(l.id, l.origin, l.username, l.owner ?? '', JSON.stringify(l.agents), l.note ?? null, l.createdBy ?? null, l.createdAt, l.updatedAt, l.usedAt ?? null)
+  }
+
+  removeVaultLogin(id: string): void {
+    this.db.prepare('DELETE FROM vault_logins WHERE id = ?').run(id)
+  }
+
   recordVaultUse(u: VaultUse): void {
     this.tx(() => {
       this.db
         .prepare('INSERT INTO vault_uses (id, key_id, name, agent_id, conversation_id, message_id, person_id, via, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(u.id, u.keyId, u.name, u.agentId, u.conversationId ?? null, u.messageId ?? null, u.personId ?? null, u.via, u.at)
-      this.db.prepare('UPDATE vault_keys SET used_at = ? WHERE id = ?').run(u.at, u.keyId)
+      this.db.prepare(`UPDATE ${u.via === 'login' ? 'vault_logins' : 'vault_keys'} SET used_at = ? WHERE id = ?`).run(u.at, u.keyId)
     })
   }
 

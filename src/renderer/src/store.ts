@@ -1,4 +1,4 @@
-import type { EnvPair, VaultKey, VaultKeyInput, VaultUse } from '../../shared/vault'
+import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from '../../shared/vault'
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
@@ -63,8 +63,7 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo,
-  type SavedLogin
+  type NodeInfo
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -80,7 +79,7 @@ export type View =
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
-  | { kind: 'vault'; tab?: 'keys' | 'log' } // the Cofre (components/Vault.tsx)
+  | { kind: 'vault'; tab?: 'keys' | 'logins' | 'log' } // the Cofre (components/Vault.tsx)
   | { kind: 'memory' }
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
@@ -1087,8 +1086,6 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
-// The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
-export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
 // The Cofre (src/core/vault.ts): keys by name, never their values.
 export const vaultKeys = (): Promise<VaultKey[]> => call('vaultKeys')
 export const vaultUses = (): Promise<VaultUse[]> => call('vaultUses')
@@ -1096,8 +1093,13 @@ export const saveVaultKey = (key: VaultKeyInput): Promise<VaultKey> => call('sav
 export const removeVaultKey = (id: string): Promise<void> => call('removeVaultKey', { id })
 export const setVaultKeyAgent = (id: string, agentId: string, on: boolean): Promise<VaultKey> => call('setVaultKeyAgent', { id, agentId, on })
 export const importVaultKeys = (lines: EnvPair[], replace: string[], mine?: boolean): Promise<{ saved: number }> => call('importVaultKeys', { lines, replace, ...(mine ? { mine } : {}) })
-export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
-export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
+// Its site logins: sites and usernames, never a password.
+export const vaultLogins = (): Promise<VaultLogin[]> => call('vaultLogins')
+export const saveVaultLogin = (login: VaultLoginInput): Promise<VaultLogin> => call('saveVaultLogin', { login })
+export const removeVaultLogin = (id: string): Promise<void> => call('removeVaultLogin', { id })
+export const setVaultLoginAgent = (id: string, agentId: string, on: boolean): Promise<VaultLogin> => call('setVaultLoginAgent', { id, agentId, on })
+// pedir_chave's card in the chat: the key or the login pasted, or one in the Cofre given to the agent.
+export const answerKeyRequest = (answer: KeyRequestAnswer): Promise<void> => call('answerKeyRequest', { answer })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)
