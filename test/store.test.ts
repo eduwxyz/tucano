@@ -99,3 +99,93 @@ describe("the window's messages", () => {
     expect(store.messagesIn(store.getState(), 'c2').map((m) => m.id)).toEqual(['x1'])
   })
 })
+
+describe('the navigation history', () => {
+  it('walks back and forward through the screens, like Slack', () => {
+    // Open on a channel: the first screen has no history.
+    let s = store.getState()
+    const start = s.view
+    expect(start).not.toBeNull()
+    expect(s.navBack).toEqual([])
+    expect(s.navForward).toEqual([])
+
+    // The same screen again doesn't start a step.
+    store.navigate({ ...start! })
+    s = store.getState()
+    expect(s.navBack).toEqual([])
+    expect(s.navForward).toEqual([])
+
+    // A channel, then a DM: each step stacks behind.
+    store.navigate({ kind: 'conversation', id: 'geral' })
+    store.navigate({ kind: 'conversation', id: 'dm' })
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'dm' })
+    expect(s.navBack).toEqual([{ kind: 'conversation', id: 'c2' }, { kind: 'conversation', id: 'geral' }])
+    expect(s.navForward).toEqual([])
+
+    // Back: the DM goes ahead, the channel comes back.
+    store.goBack()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'geral' })
+    expect(s.navBack).toEqual([{ kind: 'conversation', id: 'c2' }])
+    expect(s.navForward).toEqual([{ kind: 'conversation', id: 'dm' }])
+
+    // Back again: the first screen, with both ahead.
+    store.goBack()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'c2' })
+    expect(s.navBack).toEqual([])
+    expect(s.navForward).toEqual([{ kind: 'conversation', id: 'dm' }, { kind: 'conversation', id: 'geral' }])
+
+    // Forward: the channel, then the DM again.
+    store.goForward()
+    store.goForward()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'dm' })
+    expect(s.navBack).toEqual([{ kind: 'conversation', id: 'c2' }, { kind: 'conversation', id: 'geral' }])
+    expect(s.navForward).toEqual([])
+
+    // Nothing more ahead: forward is a no-op.
+    store.goForward()
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'dm' })
+    expect(s.navForward).toEqual([])
+
+    // A new navigation branches: the forward stack clears.
+    store.navigate({ kind: 'conversation', id: 'other' })
+    s = store.getState()
+    expect(s.navBack).toEqual([
+      { kind: 'conversation', id: 'c2' },
+      { kind: 'conversation', id: 'geral' },
+      { kind: 'conversation', id: 'dm' }
+    ])
+    expect(s.navForward).toEqual([])
+  })
+
+  it('treats the Tuca builder as an overlay, not a step', () => {
+    const before = store.getState()
+    const where = before.view!
+    expect(where).not.toBeNull()
+
+    // Opening the builder leaves the history alone.
+    store.navigate({ kind: 'tuca', from: where })
+    let s = store.getState()
+    expect(s.navBack).toEqual(before.navBack)
+    expect(s.navForward).toEqual(before.navForward)
+
+    // Closing it (back to `from`) isn't a step either.
+    store.navigate(where)
+    s = store.getState()
+    expect(s.view).toEqual(where)
+    expect(s.navBack).toEqual(before.navBack)
+    expect(s.navForward).toEqual(before.navForward)
+
+    // Leaving the builder for somewhere else steps from where it was opened.
+    store.navigate({ kind: 'tuca', from: where })
+    store.navigate({ kind: 'conversation', id: 'built' })
+    s = store.getState()
+    expect(s.view).toEqual({ kind: 'conversation', id: 'built' })
+    expect(s.navBack).toEqual([...before.navBack, where])
+    expect(s.navForward).toEqual([])
+  })
+})
