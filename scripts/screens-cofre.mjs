@@ -13,7 +13,7 @@ const data = mkdtempSync(join(tmpdir(), 'tucano-'))
 const env = { ...process.env, TUCANO_DATA: data, TUCANO_SEED: '1', TUCANO_FAKE_ENGINES: '1', TUCANO_LOCALE: process.env.TUCANO_LOCALE ?? 'pt-BR' }
 const errors = []
 const open = async () => {
-  const app = await electron.launch({ args: ['.'], env })
+  const app = await electron.launch({ args: [...(env.TUCANO_ELECTRON ? [] : ['.'])], ...(env.TUCANO_ELECTRON ? { executablePath: env.TUCANO_ELECTRON } : {}), env })
   const win = await app.firstWindow()
   win.on('pageerror', (e) => errors.push(String(e)))
   win.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
