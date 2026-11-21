@@ -1149,6 +1149,9 @@ export const importAgents = (p: { path?: string; data?: string }): Promise<strin
 export const hermesPreview = (path?: string): Promise<HermesPreview> => call('hermesPreview', { path })
 export const importHermes = (path: string, profiles: string[]): Promise<string> => call('importHermes', { path, profiles })
 export const backupNow = (): Promise<string> => call('backupNow')
+// The workspace's file: what it takes, how much of that nothing will reuse, and whether it reads sound.
+export const dbHealth = (): Promise<{ bytes: number; free: number; sound: boolean; said: string }> => call('dbHealth')
+export const optimizeDb = (): Promise<{ before: number; after: number; free: number; sound: boolean; said: string }> => call('optimizeDb')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
 export const loadUsage = (): Promise<UsageReport> => call('usage')

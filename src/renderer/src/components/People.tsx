@@ -581,6 +581,13 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return L(`importou ${String(d['count'] ?? '')} chaves pro Cofre`, `imported ${String(d['count'] ?? '')} keys into the Cofre`)
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
+    case 'db.optimized':
+      return typeof d['before'] === 'number' && typeof d['after'] === 'number'
+        ? L(
+            `reescreveu o arquivo do Tucano (${(d['before'] / 1024 ** 2).toFixed(1)} MB → ${(d['after'] / 1024 ** 2).toFixed(1)} MB)`,
+            `rebuilt the Tucano's file (${(d['before'] / 1024 ** 2).toFixed(1)} MB → ${(d['after'] / 1024 ** 2).toFixed(1)} MB)`
+          )
+        : L('reescreveu o arquivo do Tucano', "rebuilt the Tucano's file")
   }
   const [thing, verb] = e.kind.split('.')
   const noun = ({ vault_key: L('a chave do Cofre', 'Cofre key'), vault_login: L('o login do Cofre', 'Cofre login'), agent: L('o agente', 'agent'), connector: L('o conector', 'connector'), skill: L('a skill', 'skill'), routine: L('a rotina', 'routine'), channel: L('o canal', 'channel') } as Record<string, string>)[thing ?? ''] ?? thing
