@@ -787,6 +787,7 @@ const model = (id: string, engine: EngineId, label: string, pt: string, en: stri
 export const MODELS: Model[] = [
   model('sonnet', 'claude', 'Sonnet', 'Bom pra maioria', 'Good for most things'),
   model('opus', 'claude', 'Opus', 'Tarefas longas e difíceis', 'Long, hard tasks'),
+  model('fable', 'claude', 'Fable', 'O mais capaz, pros problemas mais difíceis', 'The most capable, for the hardest problems'),
   model('haiku', 'claude', 'Haiku', 'Rápido, gasta pouco do plano', 'Fast, uses little of the plan'),
   model('gpt-5.6-luna', 'codex', 'GPT-5.6 Luna', 'Bom pra maioria', 'Good for most things'),
   model('gpt-5.6-terra', 'codex', 'GPT-5.6 Terra', 'Problemas difíceis', 'Hard problems'),
