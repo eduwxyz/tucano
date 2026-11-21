@@ -79,7 +79,6 @@ export async function routeJev(opts: {
   ]
   const answers = await ask({ target, key: opts.key, state, questions, timeoutMs: TIMEOUT_MS, fetch: opts.fetch })
   if (failed(answers)) return { error: answers.error, ms: ms() }
-<<<<<<< HEAD
 
   const who = answers['who']
   if (typeof who?.choice !== 'string') return { error: badFormat(target.provider), ms: ms() }
@@ -97,89 +96,6 @@ export async function routeJev(opts: {
   return { agents: picked, reason: `${target.name}, ${picked.map((a) => pct(a.handle)).join(L(' e ', ' and '))}`, ms: ms() }
 }
 
-<<<<<<< HEAD
-// ---------- listening: the expensive agents ----------
-// An agent in listen mode sits in the room and out of the roster: before the router picks, one
-// cheap question says whether this message is about what that agent does, and whether the agents
-// already there can handle it. Only then does it join — so the expensive model is paid for when
-// the work calls for it, and not for every message in the room.
-export const LISTEN_NONE = '__ninguem'
-// The answers to the second question, exported so the fake (src/core/jev-fake.ts) asks with the
-// same two they are read as here instead of keeping copies that can drift.
-export const LISTEN_YES = '__sim'
-export const LISTEN_NO = '__nao'
-
-export async function listenJev(opts: {
-  key: string
-  messages: Message[]
-  trigger: Message
-  listeners: Agent[]
-  answering: Agent[]
-  me: string
-  people?: Pick<Person, 'id' | 'name'>[]
-  connectors?: Connector[]
-  fetch?: Fetch
-}): Promise<{ agents: Agent[]; reason: string; ms: number } | { error: string; ms: number }> {
-  const started = Date.now()
-  const ms = (): number => Date.now() - started
-  const { listeners, answering, connectors = [] } = opts
-  const everyone = [...listeners, ...answering]
-  const name = (m: Message): string =>
-    m.author.kind === 'person'
-      ? (opts.people?.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? opts.me)
-      : m.author.kind === 'routine'
-        ? L(`rotina de ${opts.me}`, `${opts.me}'s routine`)
-        : (everyone.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
-  const line = (m: Message): string => `[${name(m)}] ${m.text.replace(/\s+/g, ' ').trim().slice(0, 600)}`
-  // The message that came in, then what was said before it, oldest first: the last line is the one
-  // the question is about.
-  const recent = opts.messages.filter((m) => !!m.text.trim() && m.author.kind !== 'system' && m.id !== opts.trigger.id).slice(-ROUTER_HISTORY)
-  const state = [
-    L('Agentes que escutam este canal (só entram quando a mensagem precisa do que só eles fazem):', 'Agents listening in this channel (they join only when the message needs what only they do):'),
-    ...listeners.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
-    '',
-    L('Agentes já no canal, que respondem sem ser chamados:', 'Agents already in the channel, who answer without being called:'),
-    ...(answering.length ? answering.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`) : [L('- ninguém', '- no one')]),
-    '',
-    L('Conversa (a última é a que acabou de chegar):', 'Conversation (the last one just arrived):'),
-    ...recent.map(line),
-    line(opts.trigger)
-  ].join('\n')
-
-  const criteria: Record<string, string> = {}
-  for (const a of listeners) criteria[a.handle] = describeAgent(a, connectors)
-  criteria[LISTEN_NONE] = L(
-    'Ninguém: a mensagem não pede nada do que só um destes agentes faz, ou quem já está no canal resolve.',
-    'No one: the message asks nothing of what only one of these agents does, or whoever is already in the channel handles it.'
-  )
-
-  const questions: Record<string, unknown> = {
-    who: {
-      type: 'choice',
-      instructions: L(
-        'Qual destes agentes, que estão só escutando, precisa entrar nesta mensagem? Escolha um só se o pedido exigir a especialidade, o modelo caro ou o acesso que só ele tem, e ninguém no canal der conta. Na dúvida, ninguém.',
-        'Which of these agents, who are only listening, does this message need? Pick one only if the request needs the specialty, the expensive model or the access only that agent has, and no one in the channel can handle it. When in doubt, no one.'
-      ),
-      criteria
-    }
-  }
-  // A room with nobody answering has no "whoever is already in the channel" to weigh the listener
-  // against: there the second question has no true answer, and a model's "yes" would keep the only
-  // agent who could do the work out of an empty room. So it is asked only when someone can answer.
-  if (answering.length)
-    questions['needed'] = {
-      type: 'choice',
-      instructions: L(
-        'Quem já está no canal (ou ninguém) dá conta desta mensagem, sem o agente escolhido?',
-        'Can whoever is already in the channel (or no one) handle this message, without the agent you picked?'
-      ),
-      criteria: {
-        [LISTEN_YES]: L('Sim: os que estão no canal dão conta, ou a mensagem não pede trabalho.', 'Yes: whoever is in the channel handles it, or the message asks for no work.'),
-        [LISTEN_NO]: L('Não: falta o que só o agente escolhido faz.', 'No: what only the agent you picked does is missing.')
-      }
-    }
-
-=======
 // ---------- the decisions an agent asks (ask_user) ----------
 // A question can offer two or three ways forward and the person has to pick one. One cheap typed
 // question per decision says which option Jev would pick, and the card shows it as a pill. It never
@@ -201,52 +117,11 @@ async function recommendOne(opts: { key: string; state: string; decision: Decisi
     'Nenhuma: nenhuma opção é claramente melhor, ou a escolha é da própria pessoa (gosto, preferência, algo que só ela sabe).',
     "None: no option is clearly better, or the choice is the person's own (taste, preference, something only they know)."
   )
->>>>>>> 716bbd0f (Move the recommended-option switch into Classifier Uses)
   let res: Response
   try {
     res = await (opts.fetch ?? fetch)(`${API}/systemone`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${opts.key}`, 'Content-Type': 'application/json' },
-<<<<<<< HEAD
-      body: JSON.stringify({ model: 'jev-latest', state, questions }),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    })
-  } catch {
-    return { error: noAnswer(), ms: ms() }
-  }
-  if (!res.ok) return { error: failure(res.status), ms: ms() }
-
-  const body = (await res.json().catch(() => null)) as {
-    answers?: { who?: { choice?: unknown; probabilities?: Record<string, number> }; needed?: { choice?: unknown } }
-  } | null
-  const who = body?.answers?.who
-  const needed = body?.answers?.needed
-  if (typeof who?.choice !== 'string' || (answering.length > 0 && typeof needed?.choice !== 'string')) return { error: badFormat(), ms: ms() }
-  const pct = (h: string): string => `${Math.round((who?.probabilities?.[h] ?? 0) * 100)}%`
-  const picked = listeners.find((a) => a.handle === who.choice)
-  if (who.choice === LISTEN_NONE || !picked) return { agents: [], reason: '', ms: ms() }
-  // It's the right agent for the subject, but the room can do without it: it stays out. With nobody
-  // in the room that question was never asked: the listener it picked is the only one who can answer.
-  if (answering.length > 0 && needed?.choice !== LISTEN_NO) return { agents: [], reason: L(`o ${picked.name} caberia, mas quem está no canal dá conta`, `${picked.name} would fit, but whoever is in the channel handles it`), ms: ms() }
-  return { agents: [picked], reason: `${picked.name}, ${pct(picked.handle)}`, ms: ms() }
-=======
-
-  const who = answers['who']
-  if (typeof who?.choice !== 'string') return { error: badFormat(target.provider), ms: ms() }
-  const probs = who.probabilities ?? {}
-  const pct = (h: string): string => `${Math.round((probs[h] ?? 0) * 100)}%`
-  if (who.choice === NOBODY) return { agents: [], reason: `${target.name}, ${pct(NOBODY)}`, ms: ms() }
-  if (who.choice === EVERYONE) return { agents: [...agents], reason: `${target.name}, ${pct(EVERYONE)}`, ms: ms() }
-
-  const first = agents.find((a) => a.handle === who.choice)
-  if (!first) return { error: L(`${inSentence(target).pt} escolheu alguém fora do canal`, `${inSentence(target).en} picked someone outside the channel`), ms: ms() }
-  const second = agents
-    .filter((a) => a !== first && (probs[a.handle] ?? 0) >= SECOND_AT)
-    .sort((a, b) => (probs[b.handle] ?? 0) - (probs[a.handle] ?? 0))[0]
-  const picked = [first, ...(second ? [second] : [])].slice(0, MAX_ROUTED)
-  return { agents: picked, reason: `${target.name}, ${picked.map((a) => pct(a.handle)).join(L(' e ', ' and '))}`, ms: ms() }
->>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
-=======
       body: JSON.stringify({
         model: 'jev-latest',
         state: opts.state,
@@ -307,7 +182,106 @@ export async function recommendOptions(opts: {
   const problem = picks.find((p): p is { error: string } => !!p && typeof p === 'object')
   if (problem) return { error: problem.error, ms: ms() }
   return { picks: picks as Suggested[], ms: ms() }
->>>>>>> 716bbd0f (Move the recommended-option switch into Classifier Uses)
+}
+
+// ---------- listening: the expensive agents ----------
+// An agent in listen mode sits in the room and out of the roster: before the router picks, one
+// cheap question says whether this message is about what that agent does, and whether the agents
+// already there can handle it. Only then does it join — so the expensive model is paid for when
+// the work calls for it, and not for every message in the room.
+export const LISTEN_NONE = '__ninguem'
+// The answers to the second question, exported so the fake (src/core/jev-fake.ts) asks with the
+// same two they are read as here instead of keeping copies that can drift.
+export const LISTEN_YES = '__sim'
+export const LISTEN_NO = '__nao'
+
+export async function listenJev(opts: {
+  key: string
+  target?: ClassifierConfig
+  messages: Message[]
+  trigger: Message
+  listeners: Agent[]
+  answering: Agent[]
+  me: string
+  people?: Pick<Person, 'id' | 'name'>[]
+  connectors?: Connector[]
+  fetch?: Fetch
+}): Promise<{ agents: Agent[]; reason: string; ms: number } | { error: string; ms: number }> {
+  const started = Date.now()
+  const ms = (): number => Date.now() - started
+  const { listeners, answering, connectors = [] } = opts
+  const everyone = [...listeners, ...answering]
+  const name = (m: Message): string =>
+    m.author.kind === 'person'
+      ? (opts.people?.find((p) => m.author.kind === 'person' && p.id === m.author.id)?.name ?? opts.me)
+      : m.author.kind === 'routine'
+        ? L(`rotina de ${opts.me}`, `${opts.me}'s routine`)
+        : (everyone.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? L('agente', 'agent'))
+  const line = (m: Message): string => `[${name(m)}] ${m.text.replace(/\s+/g, ' ').trim().slice(0, 600)}`
+  // The message that came in, then what was said before it, oldest first: the last line is the one
+  // the question is about.
+  const recent = opts.messages.filter((m) => !!m.text.trim() && m.author.kind !== 'system' && m.id !== opts.trigger.id).slice(-ROUTER_HISTORY)
+  const state = [
+    L('Agentes que escutam este canal (só entram quando a mensagem precisa do que só eles fazem):', 'Agents listening in this channel (they join only when the message needs what only they do):'),
+    ...listeners.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
+    '',
+    L('Agentes já no canal, que respondem sem ser chamados:', 'Agents already in the channel, who answer without being called:'),
+    ...(answering.length ? answering.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`) : [L('- ninguém', '- no one')]),
+    '',
+    L('Conversa (a última é a que acabou de chegar):', 'Conversation (the last one just arrived):'),
+    ...recent.map(line),
+    line(opts.trigger)
+  ].join('\n')
+
+  const criteria: Record<string, string> = {}
+  for (const a of listeners) criteria[a.handle] = describeAgent(a, connectors)
+  criteria[LISTEN_NONE] = L(
+    'Ninguém: a mensagem não pede nada do que só um destes agentes faz, ou quem já está no canal resolve.',
+    'No one: the message asks nothing of what only one of these agents does, or whoever is already in the channel handles it.'
+  )
+
+  const questions: ClassifierQuestion[] = [
+    {
+      name: 'who',
+      type: 'choice',
+      instructions: L(
+        'Qual destes agentes, que estão só escutando, precisa entrar nesta mensagem? Escolha um só se o pedido exigir a especialidade, o modelo caro ou o acesso que só ele tem, e ninguém no canal der conta. Na dúvida, ninguém.',
+        'Which of these agents, who are only listening, does this message need? Pick one only if the request needs the specialty, the expensive model or the access only that agent has, and no one in the channel can handle it. When in doubt, no one.'
+      ),
+      criteria
+    }
+  ]
+  // A room with nobody answering has no "whoever is already in the channel" to weigh the listener
+  // against: there the second question has no true answer, and a model's "yes" would keep the only
+  // agent who could do the work out of an empty room. So it is asked only when someone can answer.
+  if (answering.length)
+    questions.push({
+      name: 'needed',
+      type: 'choice',
+      instructions: L(
+        'Quem já está no canal (ou ninguém) dá conta desta mensagem, sem o agente escolhido?',
+        'Can whoever is already in the channel (or no one) handle this message, without the agent you picked?'
+      ),
+      criteria: {
+        [LISTEN_YES]: L('Sim: os que estão no canal dão conta, ou a mensagem não pede trabalho.', 'Yes: whoever is in the channel handles it, or the message asks for no work.'),
+        [LISTEN_NO]: L('Não: falta o que só o agente escolhido faz.', 'No: what only the agent you picked does is missing.')
+      }
+    })
+
+  const target = targetOf(opts.target)
+  const answers = await ask({ target, key: opts.key, state, questions, timeoutMs: TIMEOUT_MS, fetch: opts.fetch })
+  if (failed(answers)) return { error: answers.error, ms: ms() }
+  const who = answers['who']
+  const needed = answers['needed']
+  if (typeof who?.choice !== 'string' || (answering.length > 0 && typeof needed?.choice !== 'string')) return { error: badFormat(target.provider), ms: ms() }
+  const probs = who.probabilities ?? {}
+  const pct = (h: string): string => `${Math.round((probs[h] ?? 0) * 100)}%`
+  const picked = listeners.find((a) => a.handle === who.choice)
+  if (who.choice === LISTEN_NONE || !picked) return { agents: [], reason: '', ms: ms() }
+  // It's the right agent for the subject, but the room can do without it: it stays out. With nobody
+  // in the room that question was never asked: the listener it picked is the only one who can answer.
+  if (answering.length > 0 && needed?.choice !== LISTEN_NO) return { agents: [], reason: L(`o ${picked.name} caberia, mas quem está no canal dá conta`, `${picked.name} would fit, but whoever is in the channel handles it`), ms: ms() }
+  return { agents: [picked], reason: `${picked.name}, ${pct(picked.handle)}`, ms: ms() }
 }
 
 // ---------- the browser (spec §24) ----------

@@ -12,7 +12,7 @@ import type { Settings } from './types'
 export type ClassifierProvider = 'typesafe' | 'openrouter' | 'openai' | 'gemini'
 
 // Where a classifier is used. A job has at most one classifier, and unassigned means off.
-export type ClassifierJob = 'routing' | 'recommend' | 'browser'
+export type ClassifierJob = 'routing' | 'listen' | 'recommend' | 'smart' | 'browser'
 
 export interface ClassifierConfig {
   id: string
@@ -88,12 +88,14 @@ export const providerSpec = (p: ClassifierProvider): ProviderSpec => PROVIDERS.f
 export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provider: 'typesafe', model: 'jev-latest' }
 
 // The jobs the Classifier Uses card offers, one selector each.
-export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser', 'recommend']
+export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'listen', 'smart', 'browser', 'recommend']
 
 export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
   ({
     routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
+    listen: { pt: 'Quem escuta entra', en: 'Which listener joins' },
     recommend: { pt: 'Marcar a opção recomendada', en: 'Mark the recommended option' },
+    smart: { pt: 'Qual modelo responde', en: 'Which model answers' },
     browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
   })[job]
 
@@ -103,9 +105,17 @@ export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
       pt: 'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador. Cada mensagem sem @menção vai pro provedor escolhido.',
       en: 'Reads the conversation and picks who replies, in place of the router’s small model. Every message without an @mention goes to the chosen provider.'
     },
+    listen: {
+      pt: 'Antes de escolher quem responde, lê a mensagem e diz se ela pede o agente que está só escutando no canal. Sem ninguém no canal, ele entra quando o pedido é da área dele.',
+      en: 'Before picking who replies, reads the message and says whether it needs the agent that is only listening in the channel. With nobody else in the channel, it joins when the request is its own work.'
+    },
     recommend: {
       pt: 'Sugere uma opção na pergunta do agente; você escolhe.',
       en: 'Suggests an option on an agent question; you still choose.'
+    },
+    smart: {
+      pt: 'Lê o pedido e diz que tipo de trabalho é e quanta capacidade merece; os pools e as correntes da aba Roteamento escolhem o modelo a partir disso. Sem leitura, o agente segue com o modelo dele.',
+      en: 'Reads the request and says what kind of work it is and how much capability it deserves; the Routing tab’s pools and chains pick the model from that. With no reading, the agent stays on its own model.'
     },
     browser: {
       pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',

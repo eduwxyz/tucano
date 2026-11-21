@@ -1200,13 +1200,14 @@ export class Runner {
   private async heard(conv: Conversation, trigger: Message, members: Agent[], answering: Agent[]): Promise<{ agents: Agent[]; reason: string; problem: string }> {
     const listeners = this.listening(conv, members)
     if (listeners.length === 0) return { agents: [], reason: '', problem: '' }
-    const key = await this.deps.jev?.key()
+    const key = await this.deps.jev?.key('listen')
     if (!key) return { agents: [], reason: '', problem: L('os agentes que escutam ficaram de fora: falta a chave do TypeSafe', 'the listening agents stayed out: the TypeSafe key is missing') }
     try {
       const settings = await this.deps.settings()
       const { messages } = contextWindow(this.deps.db, trigger, ROUTER_HISTORY)
       const j = await listenJev({
         key,
+        ...(this.deps.jev?.target?.('listen') ? { target: this.deps.jev.target('listen') } : {}),
         messages,
         trigger,
         listeners,
@@ -1524,7 +1525,7 @@ export class Runner {
     const anchor = anchorId ? db.message(anchorId) : undefined
     const prompt = (asked.task ?? anchor?.text ?? '').trim()
     if (!prompt) return { trace: unavailableTrace(undefined, config, L('não havia pedido pra ler', 'there was no request to read'), baseline), blocked: false }
-    const key = await this.deps.jev?.key()
+    const key = await this.deps.jev?.key('smart')
     if (!key) return { trace: unavailableTrace(undefined, config, L('falta a chave do TypeSafe', 'the TypeSafe key is missing'), baseline), blocked: false }
     // The last few messages, so a short follow-up ("e o teste?") is read in its context.
     const before = anchor ? contextWindow(db, anchor, 6).messages : []
@@ -1533,6 +1534,7 @@ export class Runner {
     const history = before.map((m) => `${who(m)}: ${m.text}`).join('\n')
     const read = await readPrompt({
       key,
+      ...(this.deps.jev?.target?.('smart') ? { target: this.deps.jev.target('smart') } : {}),
       prompt,
       ...(history ? { history } : {}),
       roles: config.roles,
