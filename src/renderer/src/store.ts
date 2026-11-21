@@ -1020,6 +1020,8 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+// The note where a piece of work stopped on its brakes (message.stop): the work goes on from there.
+export const continueJob = (messageId: string): void => void fire(L('Não consegui continuar o trabalho.', "I couldn't continue the work."), 'continueJob', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })

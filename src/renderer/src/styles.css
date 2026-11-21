@@ -2764,6 +2764,21 @@ h3 {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+.ask-option__tag {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.ask-chip .ask-option__tag {
+  margin-left: 4px;
+  font-size: 10.5px;
+  padding: 0 5px;
+}
+/* "Pode seguir com a recomendação": the agent's recommended option on every decision, in one click. */
+.ask__recommend {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 .ask-option__detail {
   font-size: 12px;
   color: var(--text-3);
@@ -3420,6 +3435,28 @@ body.is-resizing webview {
 .system-line > .muted {
   margin-left: auto;
   flex-shrink: 0;
+}
+/* Where a piece of work stopped: the whole note, a few lines, and Continuar under it. */
+.system-line--stop {
+  align-items: flex-start;
+}
+.system-line--stop > .icon {
+  margin-top: 3px;
+}
+.system-line__body {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.5;
+}
+.system-line__body p,
+.system-line__body ul {
+  margin: 0 0 6px;
+}
+.system-line__body ul {
+  padding-left: 18px;
+}
+.system-line__body .retry {
+  margin-top: 2px;
 }
 
 /* A reply's receipt and "Guardar na wiki", on one quiet line that shows on hover. */
@@ -5365,6 +5402,10 @@ table.csv th {
 }
 .menu__item:hover .icon {
   color: var(--accent-text);
+}
+.menu__check {
+  margin-left: auto;
+  display: inline-flex;
 }
 .menu__item.is-danger {
   color: var(--danger);

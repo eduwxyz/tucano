@@ -364,11 +364,18 @@ export function Sidebar(): ReactNode {
     icon: 'layers',
     onClick: () => void call('setWikiCapture', { conversationId: id, on: !on })
   })
+  // In a channel, an agent may join on its own when something is its to do (the core says who and why).
+  const proactiveItem = (id: string, on: boolean): MenuItem => ({
+    label: L('Agentes entram sozinhos', 'Agents join on their own'),
+    icon: 'spark',
+    checked: on,
+    onClick: () => void call('setProactive', { conversationId: id, on: !on })
+  })
   const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
     ...(canEditChannel({ people, you }, c) ? [{ label: L('Adicionar ou remover agentes…', 'Add or remove agents…'), icon: 'users' as const, onClick: () => openDialog({ kind: 'members', id: c.id }) }] : []),
     { label: L('Configurações do canal…', 'Channel settings…'), icon: 'gear', onClick: () => openDialog({ kind: 'settings', id: c.id }) },
     ...(c.unread ? [{ label: L('Marcar como lido', 'Mark as read'), icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
-    ...(canEditChannel({ people, you }, c) ? [wikiItem(c.id, c.wikiCapture !== false)] : []),
+    ...(canEditChannel({ people, you }, c) ? [wikiItem(c.id, c.wikiCapture !== false), proactiveItem(c.id, c.proactive !== false)] : []),
     ...channelMenuRest(c)
   ]
   const channelMenuRest = (c: (typeof channels)[number]): MenuItem[] => [

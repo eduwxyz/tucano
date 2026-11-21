@@ -1182,6 +1182,7 @@ void ready.then(async () => {
   // A question to someone that waited past its deadline: its requester hears of it.
   setInterval(() => runner.sweepQuestions(), 60_000).unref()
   setInterval(() => runner.sweepDelegations(), 60_000).unref()
+  setInterval(() => runner.sweepRetries(), 60_000).unref()
   if (!fake) {
     // A port taken (another Tucano open, say) is logged and the rest goes on: a call there reaches
     // a server that doesn't know its token, never this workspace's data.
@@ -1939,6 +1940,12 @@ const api: Handlers = {
   retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
+  // The note a job left where it stopped on its brakes: Continuar, by whoever can see it.
+  continueJob: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
+    const job = db.message(messageId)?.stop?.job
+    if (job) bg(runner.continueJob(job, ctx.person), 'continueJob')
+  },
 
   setAgentModels: ({ agentIds, modelId }, ctx) => {
     const value = modelId.trim()
@@ -1977,6 +1984,7 @@ const api: Handlers = {
     clean.actionRules = cleanRules(clean.actionRules)
     if (!isAutonomy(clean.autonomy)) delete clean.autonomy
     if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
+    if (clean.proactive !== false) delete clean.proactive // on unless turned off
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
@@ -2844,6 +2852,12 @@ const api: Handlers = {
   setWikiCapture: ({ conversationId, on }, ctx) => {
     manage(ctx, conversationId)
     db.setWikiCapture(conversationId, on)
+    const c = db.conversation(conversationId)
+    if (c) emit({ type: 'conversation', conversation: c })
+  },
+  setProactive: ({ conversationId, on }, ctx) => {
+    manage(ctx, conversationId)
+    db.setProactive(conversationId, on)
     const c = db.conversation(conversationId)
     if (c) emit({ type: 'conversation', conversation: c })
   },

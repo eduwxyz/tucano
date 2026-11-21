@@ -437,7 +437,8 @@ function Search({ onClose }: { onClose: () => void }): ReactNode {
 
 // ---------- the right-click menu ----------
 
-export type MenuItem = { label: string; icon?: IconName; danger?: boolean; onClick: () => void } | 'separator'
+// `checked`: an on/off item, ticked while on.
+export type MenuItem = { label: string; icon?: IconName; danger?: boolean; checked?: boolean; onClick: () => void } | 'separator'
 export type MenuState = { x: number; y: number; items: MenuItem[] } | null
 
 export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }): ReactNode {
@@ -470,7 +471,8 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
         ) : (
           <button
             key={i}
-            role="menuitem"
+            role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-checked={it.checked}
             className={`menu__item ${it.danger ? 'is-danger' : ''}`}
             onClick={() => {
               onClose()
@@ -479,6 +481,11 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
           >
             {it.icon && <Icon name={it.icon} size={14} />}
             {it.label}
+            {it.checked && (
+              <span className="menu__check">
+                <Icon name="check" size={13} />
+              </span>
+            )}
           </button>
         )
       )}

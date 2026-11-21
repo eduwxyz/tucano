@@ -52,6 +52,7 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  continueJob,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
@@ -91,6 +92,7 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { askWay } from './OrgSectors'
+import { runStep } from '../board'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
@@ -497,6 +499,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
+    if (message.stop) return <StopNote message={message} />
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`} data-id={message.id}>
         <Icon name="spark" size={13} />
@@ -877,6 +880,23 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
         </span>
       </button>
       {open && <ApprovalCard approval={approval} />}
+    </div>
+  )
+}
+
+// Where a piece of work stopped on its brakes: why, what got done, where it stopped, and Continuar. Once
+// someone goes on, the core drops `stop` and the note says who did.
+function StopNote({ message }: { message: Message }): ReactNode {
+  return (
+    <div className="system-line system-line--stop" data-id={message.id}>
+      <Icon name="spark" size={13} />
+      <div className="system-line__body md">
+        <Markdown urlTransform={safeUrl}>{message.text}</Markdown>
+        <button className="btn btn--xs retry" onClick={() => continueJob(message.id)}>
+          {L('Continuar', 'Continue')}
+        </button>
+      </div>
+      <span className="muted">{time(message.at)}</span>
     </div>
   )
 }
@@ -1316,6 +1336,8 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
   const agents = useStore((s) => s.agents)
   const d = useStore((s) => (asked ? s.delegations.find((x) => x.id === at.id) : undefined))
   const approval = useStore((s) => (d?.state === 'open' && d.approval ? s.approvals.find((a) => a.id === d.approval && a.state === 'pending') : undefined))
+  // While it's worked on: what the doer is doing right now, from its newest reply in the request's thread.
+  const step = useStore((s) => (d?.state === 'open' ? runStep(repliesOf(s, at.conversationId, at.threadId ?? at.rootId).findLast((m) => m.author.kind === 'agent' && m.author.id === at.to)?.run) : undefined))
   const kind = from && to ? askWay(agents, { from, to: at.to }) : undefined
   const label =
     kind === 'up'
@@ -1332,7 +1354,7 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
         ? { tone: 'is-warn', text: L('com uma dúvida', 'has a question') }
         : approval
           ? { tone: 'is-warn', text: L('esperando sua aprovação', 'waiting for your approval') }
-          : { tone: 'is-live', text: L('trabalhando', 'working') }
+          : { tone: 'is-live', text: step ? `${L('trabalhando', 'working')} · ${step}` : L('trabalhando', 'working') }
       : d.state === 'done'
         ? { tone: 'is-done', text: L('concluído', 'done') }
         : d.state === 'cancelled'

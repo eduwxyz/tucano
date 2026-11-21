@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -33,7 +33,7 @@ import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
-import { ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
+import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
 import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
@@ -44,11 +44,12 @@ import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellAct
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
-import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teamSection, type Returned } from './delegations'
-import { askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, reachOf, sectorName, sectorOf } from '../shared/org'
+import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
+import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
-import { CONCLUIR_OBJETIVO, GOAL_MAX_TURNS, goalEnd, goalTask, goalText, sameReply, type Goal } from './goals'
+import { countAsk, jobTurn, MAX_CHIMES, newJob, resumeJob, stopNote, withoutGoal, type Job } from './jobs'
+import { passes } from '../shared/errors'
 
 const refOf = (d: Delegation): DelegationRef => ({ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) })
 // The thread a request is worked in: its own, or the one it was asked inside.
@@ -82,6 +83,7 @@ const GIVE_UP_MS = 10 * 60_000
 const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
+const RETRY_MINUTES = [5, 10, 20, 30, 30, 30] // a failure that passes: tried again after each wait, about two hours in all
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
 // a failure, and neither is the same as the person stopping it.
 const cutOf = (status: RunStatus): string =>
@@ -98,7 +100,6 @@ const cutOf = (status: RunStatus): string =>
 export const MAX_RESULT_BYTES = 40_000
 const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
-const RESUME_WINDOW_MS = 12 * 3_600_000 // a reply the app cut longer ago than this, when it reopens, is left for the person
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 // An agent with no monthly ceiling (limit 0) still keeps a per-reply cap, or a
@@ -205,7 +206,8 @@ export const ASK_USER: ToolDef = {
                   type: 'object',
                   properties: {
                     label: { type: 'string', maxLength: MAX_LABEL_LENGTH, description: L('Curto: o que aparece no botão.', 'Short: what shows on the button.') },
-                    description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') }
+                    description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que essa opção implica.', 'Optional: what this option implies.') },
+                    recommended: { type: 'boolean', description: L('true na opção que você recomenda (uma por decisão): a pessoa pode seguir com ela num clique.', 'true on the option you recommend (one per decision): the person can go on with it in one click.') }
                   },
                   required: ['label']
                 }
@@ -360,7 +362,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; goal?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
@@ -399,8 +401,10 @@ export class Runner {
   // Every other reply asked for while the agent replies there (a person's mention or DM, a routine,
   // an approval's outcome, a retry), in the order they came: they wait here, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
-  // Goals under way, by the message that set them (src/core/goals.ts).
-  private goals = new Map<string, Goal>()
+  // Jobs under way, by the message that set them off (src/core/jobs.ts): read from the database when not here.
+  private jobs = new Map<string, Job>()
+  // What a teammate delivered (or was asked) while a request was being worked on, for its next step: by request.
+  private notes = new Map<string, string[]>()
 
   constructor(private deps: RunnerDeps) {
     this.sessions = new Sessions({
@@ -542,7 +546,8 @@ export class Runner {
   async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
-    const typed = text.trim()
+    // "/objetivo …" from before: every message now runs until it's done, so it reads as the message itself.
+    const typed = withoutGoal(text.trim())
     const pictures = this.deps.dataDir ? images.filter((i) => IMAGE_MIMES.includes(i.mime)).slice(0, MAX_IMAGES_PER_MESSAGE) : []
     const docs = this.deps.dataDir ? (opts.files ?? []).filter((f) => typeof f?.name === 'string' && typeof f.data === 'string' && f.data.length > 0).slice(0, MAX_FILES_PER_MESSAGE) : []
     if (!conv) return
@@ -580,13 +585,6 @@ export class Runner {
     const reading = docs.map((f) => this.keepFile(mine, f))
     db.saveMessage(mine)
     emit({ type: 'message', message: mine })
-    // "/objetivo …" in a channel: the agents work on it by themselves until it's done (src/core/goals.ts).
-    const goalAsked = conv.kind === 'channel' ? goalText(typed) : undefined
-    if (goalAsked === '') return void this.post(conv.id, replyIn, L('Escreva o objetivo depois de /objetivo, por exemplo: /objetivo landing page com lista de espera, revisada e aprovada.', 'Write the goal after /goal, for example: /goal a landing page with a waitlist, reviewed and approved.'))
-    if (goalAsked) {
-      this.goals.set(mine.id, { id: mine.id, text: goalAsked, conversationId: conv.id, ...(replyIn ? { threadId: replyIn } : {}), turns: 0, state: 'running', last: new Map() })
-      this.post(conv.id, replyIn, L(`**Objetivo**: os agentes trabalham nele sozinhos, passando a vez entre si, até alguém marcar como cumprido (no máximo ${GOAL_MAX_TURNS} respostas).`, `**Goal**: the agents work on it by themselves, passing the turn to each other, until someone marks it done (${GOAL_MAX_TURNS} replies at most).`))
-    }
     const calledPeople = this.callPeople(conv, mine, writer.name, writer.id, typed) // what they wrote: an option's label never calls anyone
     if (confirmed !== undefined && q) return this.confirm(q.id, confirmed, writer)
 
@@ -657,10 +655,10 @@ export class Runner {
         return
       }
     }
-    // An answer to a question asked while working on a goal: the work on it goes on.
-    const goalOn = asked?.run?.goal && this.goals.get(asked.run.goal)?.state === 'running' ? asked.run.goal : undefined
+    // An answer to a question asked on a job: the same job goes on (its brakes count from where they were).
+    const jobOn = asked?.run?.job && this.jobOf(asked.run.job)?.state === 'running' ? asked.run.job : undefined
     const reply = (agent: Agent, opts: Partial<ReplyOpts> = {}): Promise<Message | undefined> =>
-      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(goalOn ? { goal: goalOn } : {}), ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
+      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(jobOn ? { job: jobOn } : {}), ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
     if (responders.length === 1) return void reply(responders[0]!)
     // Several called by name answer one after another, in the order written: each answers my message
     // and reads what the ones before it answered (routedHistory), like a routed message.
@@ -755,9 +753,9 @@ export class Runner {
     // At its cap, each time it goes on by itself counts; a person's Continue starts the count over.
     const autoContinued = auto === 'cap' ? (msg.run.autoContinued ?? 0) + 1 : auto === 'restart' ? msg.run.autoContinued : undefined
     const steps = (msg.run.steps ?? [])
-      .filter((s) => s.status !== 'running' && !WORKLESS_LABELS.includes(s.label))
+      .filter((s) => (s.status !== 'running' || cut === 'interrupted') && !WORKLESS_LABELS.includes(s.label))
       .slice(-40)
-      .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : ''}`)
+      .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? L(' (deu erro)', ' (failed)') : s.status === 'running' ? L(' (estava no meio quando parou: confira se aconteceu antes de repetir)', ' (it was under way when it stopped: check whether it happened before doing it again)') : ''}`)
     const task = [
       msg.run.task, // what it was asked: a trigger's event is only there
       auto === 'cap'
@@ -767,8 +765,8 @@ export class Runner {
           )
         : auto === 'restart'
           ? L(
-              `A sua última resposta foi cortada porque o app fechou no meio dela, e ela segue sozinha agora que ele abriu de novo. O que você escreveu está na sua última mensagem acima.`,
-              `Your last reply was cut because the app closed in the middle of it, and it goes on by itself now that it's open again. What you wrote is in your last message above.`
+              `A sua última resposta foi cortada porque o app fechou no meio dela, e ela segue sozinha agora que ele abriu de novo. O que você escreveu está na sua última mensagem acima. Antes de seguir, leia o que foi escrito aqui desde então: alguém pode ter mudado a direção, e aí vale o que é mais novo. Se você estava no meio de uma ação que sai daqui (um deploy, um e-mail, uma publicação, um pagamento), confira se ela aconteceu antes de repetir: nada vai pra fora em dobro.`,
+              `Your last reply was cut because the app closed in the middle of it, and it goes on by itself now that it's open again. What you wrote is in your last message above. Before going on, read what was written here since: someone may have changed the direction, and then what is newest counts. If you were in the middle of an action that leaves here (a deploy, an email, a post, a payment), check whether it happened before doing it again: nothing goes out twice.`
             )
           : cut === 'paused'
         ? L(
@@ -784,7 +782,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}), ...(msg.run?.goal ? { goal: msg.run.goal } : {}) }, { urgent: true })
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}), ...(msg.run?.job ? { job: msg.run.job } : {}) }, { urgent: true })
   }
 
   // Whether a reply that paused at its cap goes on by itself: the person didn't turn that off, it hasn't
@@ -793,14 +791,15 @@ export class Runner {
   // another reply that size.
   private goesOnAlone(agent: Agent, run: Run, settings: Settings, budget: number): boolean {
     if (settings.autoContinue === false || this.paused) return false
+    if (run.job && this.jobOf(run.job)?.state === 'stopped') return false
     if ((run.autoContinued ?? 0) >= AUTO_CONTINUES) return false
     if (!(run.steps ?? []).some((s) => s.status === 'done' && !WORKLESS_LABELS.includes(s.label))) return false
     return this.deps.db.usedThisMonth(agent.id) + budget <= monthlyCeiling(agent.limit)
   }
 
   // Replies that were working when the app closed (interruptStaleRuns): they go on by themselves once
-  // the app is back, unless the person turned that off. While everything is paused they wait for the
-  // resume; one cut long ago is left for the person, who may no longer want it.
+  // the app is back, however long it was, unless the person turned that off. While everything is paused
+  // they wait for the resume. Each reads what was said since before going on (continue's task).
   private toResume: string[] = []
   resumeInterrupted(ids: string[]): void {
     this.toResume.push(...ids)
@@ -815,7 +814,7 @@ export class Runner {
     const { db } = this.deps
     for (const id of ids) {
       const msg = db.message(id)
-      if (msg?.author.kind !== 'agent' || msg.run?.status !== 'interrupted' || Date.now() - msg.at > RESUME_WINDOW_MS) continue
+      if (msg?.author.kind !== 'agent' || msg.run?.status !== 'interrupted') continue
       // With something done, it goes on from there; with nothing, it just starts over.
       if (canContinue(msg.run)) await this.continue(id, 'restart')
       else this.retry(id)
@@ -1134,13 +1133,13 @@ export class Runner {
     // Handed work that never got going (no login, the month's limit already used): whoever asked hears now.
     // One that stopped short along the way was settled by its own reply.
     const st = msg.run?.status
-    const short = st === 'failed' || st === 'limit_reached' ? this.handedIn(msg) : undefined
+    const short = (st === 'failed' && !msg.run?.retryAt) || st === 'limit_reached' ? this.handedIn(msg) : undefined
     if (short) this.settle(short, 'failed', msg)
     this.followups.end(key)
     const f = this.followups.take(key)
-    if (f && msg.run?.status === 'done' && !this.paused) {
+    if (f && msg.run?.status === 'done' && !this.paused && !(f.job && this.jobOf(f.job)?.state === 'stopped')) {
       this.followups.reserve(key)
-      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true, ...(f.goal ? { goal: f.goal } : {}) }))
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true, ...(f.job ? { job: f.job } : {}) }))
     }
     this.startWaiting(key)
     return msg
@@ -1179,14 +1178,17 @@ export class Runner {
     const handedId = opts.handed ?? opts.existing?.run?.handed
     // How many times in a row the work went on by itself to get here: kept, so it stops going on at the cap.
     const autoContinued = opts.autoContinued ?? opts.existing?.run?.autoContinued
-    const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}), ...(autoContinued ? { autoContinued } : {}) }
+    // How many times it already tried again by itself, after something that passes (waitToRetry).
+    const retries = opts.existing?.run?.retries
+    const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}), ...(autoContinued ? { autoContinued } : {}), ...(retries ? { retries } : {}) }
     const replyTo = opts.trigger ?? opts.replyTo ?? opts.existing?.run?.replyTo
-    // The goal this reply works on: handed along the chain, kept on a retry, or the message it answers set one.
-    const goalId = [opts.goal, opts.existing?.run?.goal, replyTo].find((id): id is string => !!id && this.goals.get(id)?.state === 'running')
-    const goal = goalId ? this.goals.get(goalId) : undefined
+    // The job this reply is part of: handed along (a hand-off, a request, what came back), kept on a retry, or
+    // set off by the message it answers. One with none starts its own (a routine's run, an approval's outcome).
+    const jobId = opts.job ?? opts.existing?.run?.job ?? replyTo ?? msg.id
+    const job = this.jobOf(jobId) ?? this.startJob(jobId, conv, msg.threadId, replyTo, task)
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), ...(goalId ? { goal: goalId } : {}), ...decidedCards(opts.existing?.run) }
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run) }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
@@ -1319,10 +1321,12 @@ export class Runner {
     // does. It hands them work (src/core/delegations.ts).
     // And when this reply is itself such work (in the thread a request opened), whose request it is:
     // what it asks goes up to that one, and what it ends with goes back to where that one asked.
-    const team = this.deps.gateway ? agentsFor(requester, reachOf(db.agents(), agent.id)) : [] // a restricted person's agent hands work only to what they see
+    // The tree no longer fences anyone in: any agent may ask any other (anyoneOf), nearest first.
+    const team = this.deps.gateway ? agentsFor(requester, anyoneOf(db.agents(), agent.id)) : [] // a restricted person's agent hands work only to what they see
     const handed = this.handedIn(msg)
     const boss = handed ? db.agent(handed.from) : undefined
     const delegated: DelegationRef[] = []
+    let handedOn = 0 // requests handed on in this reply that weren't asked before on the job: the work moving on
     let answeredUp = false // answered a question its team left on a request: nothing in that for the person
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     // Docker was off last time: asked again now. Still off, the agent gets no computer tools and is told
@@ -1416,7 +1420,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES, CONCLUIR_OBJETIVO.name])
+    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1525,7 +1529,6 @@ ${note}`,
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
       ...(helps ? [LER_GUIA, VER_ESTADO] : []),
       ...(team.length ? DELEGATION_TOOLS : []),
-      ...(goal ? [CONCLUIR_OBJETIVO] : []),
       ...(computers ? computerTools(agent).map((t) => (t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
       ...(apps ? appTools(agent) : []),
@@ -1653,20 +1656,10 @@ ${note}`,
           )
         }
 
-        if (name === CONCLUIR_OBJETIVO.name && goal) {
-          const result = typeof args['resultado'] === 'string' ? args['resultado'].trim().slice(0, 2_000) : ''
-          if (!result) return textResult(L('Diga em "resultado" o que ficou pronto e como foi conferido.', 'Say in "resultado" what got done and how it was checked.'), true)
-          goal.state = 'done'
-          goal.result = result
-          goal.by = agent.id
-          addSteps({ id: randomUUID(), label: L('Marcou o objetivo como cumprido', 'Marked the goal done'), detail: result.slice(0, 200), status: 'done' })
-          return textResult(L('Objetivo marcado como cumprido. Encerre agora com o resultado, sem passar a vez a ninguém.', 'Goal marked done. End now with the result, without passing the turn to anyone.'))
-        }
-
         if (name === PEDIR.name && team.length) {
           const ask = parseAsk(args)
           if ('error' in ask) return textResult(ask.error, true)
-          const now = agentsFor(requester, reachOf(db.agents(), agent.id)) // as the tree is now: it may have changed mid-turn
+          const now = agentsFor(requester, anyoneOf(db.agents(), agent.id)) // as the agents are now: they may have changed mid-turn
           // A follow-up on a request that came back here: the same agent, in the same thread.
           const code = typeof args['continuar'] === 'string' && args['continuar'].trim() ? args['continuar'] : undefined
           const before = code ? byCode(db.delegationsFrom(agent.id, conv.id, this.originThread(msg)), code) : undefined
@@ -1682,6 +1675,7 @@ ${note}`,
           if (chain.some((c) => c.from === to.id)) return textResult(L(`${to.name} já está esperando por este pedido: não dá pra pedir de volta a quem pediu. Se falta algo dele, pergunte com ask_user.`, `${to.name} is already waiting on this request: you can't ask back whoever asked. If you need something from them, ask with ask_user.`), true)
           if (chain.length >= MAX_CHAIN) return textResult(L(`Este trabalho já passou por ${MAX_CHAIN} pedidos seguidos, o máximo. Faça você, ou diga na resposta o que ficou faltando.`, `This work has already gone through ${MAX_CHAIN} requests in a row, the most allowed. Do it yourself, or say in your reply what is left.`), true)
           if (this.paused) return textResult(L('Os agentes estão pausados: nenhum pedido sai agora.', 'The agents are paused: no request goes out now.'), true)
+          if (job.state === 'stopped') return textResult(L('Este trabalho parou nos freios (nada andava): nenhum pedido sai até alguém clicar em Continuar. Encerre dizendo onde parou.', "This work stopped on its brakes (nothing was moving): no request goes out until someone clicks Continue. End saying where it stopped."), true)
           if (delegated.length >= MAX_DELEGATIONS_PER_REPLY) return textResult(L(`Já são ${MAX_DELEGATIONS_PER_REPLY} pedidos nesta resposta, o máximo. Encerre e espere o que voltar.`, `That's ${MAX_DELEGATIONS_PER_REPLY} requests in this reply, the most allowed. End now and wait for what comes back.`), true)
           if (before?.state !== 'open' && db.openDelegations().filter((d) => d.from === agent.id).length >= MAX_OPEN_DELEGATIONS) return textResult(L(`Você já tem ${MAX_OPEN_DELEGATIONS} pedidos em aberto, o máximo. Espere algum voltar, ou cancele um com cancelar_pedido.`, `You already have ${MAX_OPEN_DELEGATIONS} open requests, the most allowed. Wait for one to come back, or cancel one with cancelar_pedido.`), true)
           let d: Delegation
@@ -1704,16 +1698,23 @@ ${note}`,
             const wanted = typeof args['canal'] === 'string' && args['canal'].trim() ? args['canal'] : undefined
             const named = wanted && !wantsDm(wanted) ? channelNamed(channels, wanted) : undefined
             const kept = fromDm && !(named && saidChannel(named))
-            // Where it stays: the channel named; the DM the agent has with this person when the subject is of
-            // no channel ("dm"), or when it is in none (that this person sees); else its first channel.
-            const picked = kept ? this.dmWith(to.id, requester.id) : wantsDm(wanted) ? this.dmWith(to.id, requester.id) : wanted ? named : (channels[0] ?? this.dmWith(to.id, requester.id))
+            // Where it stays: right here when the one asked is in this conversation (the work goes on under the
+            // message); the channel named, when one was; otherwise a private conversation of theirs with this
+            // person (their DM), which the person opens from the request's line.
+            const here = !wanted && conv.members.includes(to.id) && sees.canSeeConversation(requester, conv) ? conv : undefined
+            const picked = here ?? (kept ? this.dmWith(to.id, requester.id) : wantsDm(wanted) ? this.dmWith(to.id, requester.id) : wanted ? named : this.dmWith(to.id, requester.id))
             if (!picked && !channels.length) return textResult(L(`${to.name} não está em "${wanted}", nem em canal nenhum. Peça sem dizer o canal: o pedido chega na DM dele.`, `${to.name} is not in "${wanted}", nor in any channel. Ask without naming a channel: the request arrives in their DM.`), true)
             if (!picked) return textResult(L(`${to.name} não está em "${wanted}". Os canais dele: ${channels.map((c) => `#${c.name}`).join(', ')}. Ou "dm", se o assunto não é de nenhum.`, `${to.name} is not in "${wanted}". Their channels: ${channels.map((c) => `#${c.name}`).join(', ')}. Or "dm", if the subject belongs to none.`), true)
             channel = picked
             d = this.delegate(agent, to, channel, ask, msg, requester, settings.workspaceName)
+            // The parts already under way learn of this one at their next step: no one does another's part.
+            for (const x of db.delegationsFrom(agent.id, d.originConversationId, d.originThreadId)) if (x.id !== d.id && x.state === 'open') this.noteFor(x.id, teammateNote('asked', to.name, ask.text))
           }
           delegated.push(refOf(d))
           msg.run = { ...msg.run!, delegations: [...delegated] }
+          // The same request to the same agent coming around again is the work going in circles (src/core/jobs.ts).
+          if (countAsk(job, to.id, ask.text) === 1) handedOn++
+          this.saveJob(job)
           // Out of a thread, a reply that hands work on moves into the thread of the person's message: the
           // subject lives there from now on (what comes back, questions, the closing), and the person's
           // message carries the request's status line.
@@ -2507,7 +2508,7 @@ ${note}`,
         acted = true
         sign()
         try {
-          const r = await runTool(name, args)
+          const r = this.withNotes(handedId, await runTool(name, args))
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2571,7 +2572,7 @@ ${note}`,
     }
     const system = systemPrompt(promptOpts)
     const live = liveContext(promptOpts)
-    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task: goal ? [task, goalTask(goal, settings.workspaceName)].filter(Boolean).join('\n\n') : task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.some((m) => m.id === anchor.id) ? { answering: anchor } : {}) })
+    const { blocks, blockOf } = transcriptBlocks({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, people: named, routineOwner: scheduledBy, task, summary, images: names, thread, before: above, files: fileNames, searchable: canSeekThreads, unix: exposed.size > 0, live, ...(anchor && history.some((m) => m.id === anchor.id) ? { answering: anchor } : {}) })
     const images: TurnImage[] = fresh
       .slice(-MAX_TURN_IMAGES)
       .flatMap((a) => (blockOf.has(a.messageId) ? [{ block: blockOf.get(a.messageId)!, path: join(this.deps.dataDir!, 'artifacts', a.id, a.name), mime: mimeOf(a.name) }] : []))
@@ -2721,18 +2722,11 @@ ${note}`,
           `**${agent.name}** has used ${pct} of the month's limit (${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens). It can be raised on their page.`
         )
       )
-      this.deps.notify?.(
-        L(`${agent.name} usou ${pct} do limite do mês`, `${agent.name} used ${pct} of the month's limit`),
-        L(`${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens. Dá pra aumentar na página dele.`, `${tokenCount(usedNow)} of ${tokenCount(agent.limit)} tokens. It can be raised on their page.`),
-        conv.id,
-        undefined,
-        msg.threadId
-      )
     }
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}) }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -2816,17 +2810,37 @@ ${note}`,
           // A reply that only handed work on isn't done: whoever asked hears when the work comes back. One
           // that only answered its team's question, saying nothing, has nothing for the person either.
           if (delegated.length || (answeredUp && !msg.text.trim())) return
+          // The job's last reply: the answer. The person hears it once, here.
+          this.endJob(job)
           if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id])
         }
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
         const next = agentsFor(requester, this.mentions(agent, conv, msg, requester)).filter((a) => a.id !== handedNow?.from)
-        // On a goal the team goes on past the usual replies in a row, until it's done or stops (goalTurn).
-        if (goal) {
-          if (this.goalTurn(goal, agent, conv, msg, next.length > 0) && next.length) void this.handOff(conv, msg, agent, next, opts.depth, Number.MAX_SAFE_INTEGER, finished, goal.id)
-          else finished()
-        } else if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, chainDepthCap(settings.chainDepth), finished)
-        else finished()
+        // One more reply on the job: past its brakes (nothing moving, going in circles, hours with nothing new),
+        // it stops here and leaves a note; otherwise the turn goes on to whoever was named, or to whoever the
+        // router sees has something of theirs to do now, and only then is the work done.
+        // A reply that hands nothing on and waits on nothing ends the work anyway: there the brakes only keep
+        // anyone else from being called in, with no note (the answer is the answer).
+        const ending = !next.length && !handedNow && !delegated.length && !answeredUp
+        // A reply that ends a request handed to it, with what it found: its part, delivered.
+        const answers = !!handedNow && !delegated.length && !answeredUp
+        const turn = this.jobReply(job, agent, msg, requester, ending, answers, handedOn)
+        if (turn === 'stop') {
+          const mine = this.handedIn(msg)
+          if (mine) this.settle(mine, 'done', msg)
+        } else if (next.length) void this.handOff(conv, msg, agent, next, opts.depth, finished, job.id)
+        else if (handedNow || delegated.length || answeredUp || opts.routine || turn === 'end') finished()
+        else {
+          // Counted as routing until finished() has run: the work isn't idle before the person is told.
+          this.routing++
+          void this.chime(conv, msg, agent, requester, job, opts.depth)
+            .then((on) => on || finished(), () => finished())
+            .finally(() => {
+              this.routing--
+              this.checkIdle()
+            })
+        }
       }
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
@@ -2834,21 +2848,19 @@ ${note}`,
       save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: failure.text, ...(failure.detail ? { errorDetail: failure.detail } : {}) } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
+    // Unless it failed on something that passes (the network, a plan's window, its computer off): then it
+    // waits and tries again by itself, and only when that keeps failing does it count as stopped.
+    if (msg.run?.status === 'failed' && !this.paused && job.state !== 'stopped') this.waitToRetry(msg, control.reason, thrown ?? error)
     const st = msg.run?.status
     // Paused at its cap while it was getting somewhere: it goes on by itself (a few times), instead of waiting.
     const goesOn = st === 'paused' && !!msg.run && this.goesOnAlone(agent, msg.run, settings, budget)
     // Handed work that stopped short: whoever asked hears why, and takes it to the person.
-    const short = !goesOn && (st === 'failed' || st === 'limit_reached' || st === 'paused' || st === 'stopped') ? this.handedIn(msg) : undefined
+    const retrying = st === 'failed' && !!msg.run?.retryAt
+    const short = !goesOn && !retrying && (st === 'failed' || st === 'limit_reached' || st === 'paused' || st === 'stopped') ? this.handedIn(msg) : undefined
     if (short) this.settle(short, st === 'stopped' ? 'cancelled' : 'failed', msg)
-    else if (!opts.routine && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id])
+    else if (!opts.routine && !retrying && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id])
 
     if (goesOn) void this.continue(msg.id, 'cap')
-    // A reply on a goal that didn't finish, and won't go on by itself: the goal ends there, and says so.
-    if (goal?.state === 'running' && !goesOn && (st === 'failed' || st === 'stopped' || st === 'limit_reached' || st === 'paused')) {
-      goal.state = 'cut'
-      this.goals.delete(goal.id)
-      this.post(conv.id, msg.threadId, goalEnd(goal, agent.name))
-    }
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
@@ -3280,6 +3292,179 @@ ${note}`,
     )
   }
 
+  // ---------- jobs: what a message sets off, until it's done (src/core/jobs.ts) ----------
+
+  private jobOf(id: string | undefined): Job | undefined {
+    if (!id) return undefined
+    const had = this.jobs.get(id)
+    if (had) return had
+    const kept = this.deps.db.job(id)
+    if (kept) this.jobs.set(id, kept)
+    return kept
+  }
+
+  private saveJob(job: Job): void {
+    this.jobs.set(job.id, job)
+    this.deps.db.saveJob(job)
+  }
+
+  // A job set off by the message this reply answers, or by the reply itself when nothing else did.
+  private startJob(id: string, conv: Conversation, threadId: string | undefined, replyTo: string | undefined, task: string | undefined): Job {
+    const asked = replyTo ? this.deps.db.message(replyTo) : undefined
+    const job = newJob({ id, conversationId: conv.id, text: (asked?.text ?? task ?? '').slice(0, 6_000), ...(threadId ? { threadId } : {}), ...(asked?.author.kind === 'person' ? { requestedBy: asked.author.id } : {}) })
+    this.saveJob(job)
+    return job
+  }
+
+  private endJob(job: Job): void {
+    if (job.state !== 'running') return
+    job.state = 'done'
+    job.endedAt = Date.now()
+    this.saveJob(job)
+  }
+
+  // One more reply on the job, counted. Past a brake, the job stops: a note where it was asked says why,
+  // what got done and where it stopped, with Continuar, and the person hears of it (one of the few times).
+  // Not on a reply that ends the work anyway (`ending`): that one is the answer, and only no one else is
+  // called in after it ('end'). 'go': the work goes on as it would.
+  private jobReply(job: Job, agent: Agent, msg: Message, requester: Person, ending: boolean, answers: boolean, handedOn: number): 'go' | 'stop' | 'end' {
+    if (job.state === 'stopped') return 'stop'
+    if (job.state === 'done') job.state = 'running' // something came back after the answer: it counts again
+    const why = jobTurn(job, { agentId: agent.id, agentName: agent.name, text: msg.text, run: msg.run, answers, handedOn })
+    if (!why) {
+      this.saveJob(job)
+      return 'go'
+    }
+    if (ending) {
+      job.state = 'running' // finished() ends it as done
+      delete job.why
+      delete job.circleBy
+      delete job.endedAt
+      this.saveJob(job)
+      return 'end'
+    }
+    const { db, emit } = this.deps
+    const here = db.conversation(job.conversationId) ? { conversationId: job.conversationId, threadId: job.threadId } : { conversationId: msg.conversationId, threadId: msg.threadId }
+    const note: Message = { id: randomUUID(), conversationId: here.conversationId, author: { kind: 'system' }, text: stopNote(job, { name: agent.name, text: msg.text }), at: Date.now(), stop: { job: job.id }, ...(here.threadId ? { threadId: here.threadId } : {}) }
+    db.saveMessage(note)
+    emit({ type: 'message', message: note })
+    job.stoppedAt = msg.id
+    job.noteId = note.id
+    this.saveJob(job)
+    this.deps.notify?.(L('Parei um trabalho', 'I stopped a piece of work'), L('Nada andava: veja onde parou e continue se quiser.', 'Nothing was moving: see where it stopped and go on if you want.'), here.conversationId, 'done', here.threadId, [job.requestedBy ?? requester.id])
+    return 'stop'
+  }
+
+  // "Continuar" on a job that stopped on its brakes: the counts start over, and the agent it stopped on goes on.
+  async continueJob(id: string, by?: Person): Promise<void> {
+    const { db } = this.deps
+    const job = this.jobOf(id)
+    if (!job || job.state !== 'stopped' || this.paused) return
+    const why = job.why
+    resumeJob(job)
+    this.saveJob(job)
+    const note = job.noteId ? db.message(job.noteId) : undefined
+    if (note) {
+      const { stop: _stop, ...rest } = note
+      this.update(note, { ...rest, stop: undefined, text: `${note.text.replace(/\n\n[^\n]*$/, '')}\n\n${L(`${by?.name ?? 'Você'} pediu pra continuar.`, `${by?.name ?? 'You'} asked to go on.`)}` })
+    }
+    const last = job.stoppedAt ? db.message(job.stoppedAt) : undefined
+    const agent = last?.author.kind === 'agent' ? db.agent(last.author.id) : undefined
+    const conv = last ? db.conversation(last.conversationId) : undefined
+    if (!last || !agent || agent.archived || !conv) return
+    const reason = why === 'circle' ? L('andava em círculos', 'it was going around in circles') : why === 'quiet' ? L('fazia horas que nada avançava', 'nothing had moved for hours') : L('as respostas seguidas não mudavam nada', 'the replies in a row changed nothing')
+    const who = by?.name ?? (await this.deps.settings()).workspaceName
+    void this.startReply(agent, conv, { depth: 1, threadId: last.threadId, job: job.id, ...(last.run?.handed ? { handed: last.run.handed } : {}), task: L(`${who} pediu pra continuar este trabalho, que tinha parado porque ${reason}. Leia onde parou e o que foi escrito desde então, mude de abordagem se o que estava sendo feito não andava, e siga até terminar.`, `${who} asked to go on with this work, which had stopped because ${reason}. Read where it stopped and what was written since, change your approach if what was being done wasn't moving, and go on until it's done.`) }, { urgent: true })
+  }
+
+  // After an agent's reply that passed the turn to no one, in a channel: one other agent may be called in,
+  // when the router sees something concrete of theirs to do now. Never to comment; at most one per reply and
+  // MAX_CHIMES per job; not someone already on it; off by agent or by channel. Resolves with whether one was.
+  private async chime(conv: Conversation, msg: Message, agent: Agent, requester: Person, job: Job, depth: number): Promise<boolean> {
+    const { db, engines } = this.deps
+    if (this.paused || conv.kind !== 'channel' || conv.proactive === false || job.state !== 'running' || job.chimed.length >= MAX_CHIMES || !msg.text.trim()) return false
+    const members = agentsFor(requester, this.members(conv))
+    // Not who is already on it: who replied on this job, who was called in, who the message named, and who
+    // is replying, queued or waiting to reply here.
+    const named = new Set(mentioned(job.text, members).map((a) => a.id))
+    const onIt = (a: Agent): boolean => {
+      const key = replyKey(a.id, conv.id, msg.threadId)
+      return a.id in job.last || job.chimed.includes(a.id) || named.has(a.id) || this.followups.busy(key) || this.parked.has(key) || this.waiting.has(key)
+    }
+    const candidates = members.filter((a) => a.id !== agent.id && a.proactive !== false && a.kind !== 'tuca' && !onIt(a))
+    if (!candidates.length) return false
+    const settings = await this.deps.settings()
+    const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
+    const status = settings.engines[model.engine]
+    if (!status?.installed || !status.loggedIn) return false
+    this.routing++
+    try {
+      const cwd = join(this.deps.workDir, '_router')
+      mkdirSync(cwd, { recursive: true })
+      const sees = new People(db)
+      const messages = contextWindow(db, msg, ROUTER_HISTORY).messages.filter((m) => sees.visibleAt(requester, m))
+      const r = await chimeIn({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates, messages, members, me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), asked: job.text, cwd })
+      if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
+      if ('error' in r || !r.agent || this.paused || job.state !== 'running') return false
+      const who = r.agent
+      const key = replyKey(who.id, conv.id, msg.threadId)
+      if (this.followups.busy(key)) return false
+      job.chimed.push(who.id)
+      this.saveJob(job)
+      this.post(conv.id, msg.threadId, r.reason ? L(`**${who.name}** entrou: ${r.reason}`, `**${who.name}** joined: ${r.reason}`) : L(`**${who.name}** entrou`, `**${who.name}** joined`))
+      const task = L(
+        `Ninguém chamou você: você entrou porque há algo da sua área pra fazer agora${r.reason ? ` (${r.reason})` : ''}, depois da resposta de ${agent.name} acima. Faça essa parte de verdade, com as suas ferramentas, e responda com o resultado. Não comente o que os outros fizeram, não concorde nem repita o que já foi dito. Se olhando de perto não houver nada seu pra fazer, responda só “Nada pra mim aqui.”`,
+        `No one called you: you joined because there is something of your area to do now${r.reason ? ` (${r.reason})` : ''}, after ${agent.name}'s reply above. Do that part for real, with your tools, and reply with the result. Don't comment on what others did, don't agree or repeat what was said. If, looking closely, there's nothing of yours to do, reply only “Nothing for me here.”`
+      )
+      this.followups.reserve(key)
+      this.enqueue(() => this.execute(who, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, job: job.id, task }))
+      return true
+    } catch (e) {
+      console.warn('[chime]', e)
+      return false
+    } finally {
+      this.routing--
+      this.checkIdle()
+    }
+  }
+
+  // A reply that failed on something that passes waits and tries again by itself, a few times over about two
+  // hours (RETRY_MINUTES): no network, a busy service, a plan's window, its computer off. The step says why
+  // and when; nothing goes back to whoever asked, and no one is told, until it has really given up.
+  private waitToRetry(msg: Message, reason: Control['reason'], error: unknown): void {
+    const run = msg.run
+    if (!run || run.status !== 'failed') return
+    const tries = run.retries ?? 0
+    const passing = reason === 'computer' || (reason === undefined && error !== null && error !== undefined && passes(error))
+    if (!passing || tries >= RETRY_MINUTES.length) return
+    const at = Date.now() + RETRY_MINUTES[tries]! * 60_000
+    const hm = new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+    const cause = reason === 'computer' ? L('o computador dele não está funcionando', 'their computer isn\'t working') : (run.error ?? L('uma falha passageira', 'a passing failure')).replace(/[.\s]+$/, '')
+    this.update(msg, { run: { ...run, retryAt: at, retries: tries + 1, steps: [...run.steps, { id: randomUUID(), label: L('Esperando pra tentar de novo', 'Waiting to try again'), detail: L(`${cause} · tenta de novo às ${hm}`, `${cause} · tries again at ${hm}`), status: 'done' }] } })
+  }
+
+  // Every minute: the replies whose time to try again has come go again, in place.
+  sweepRetries(now = Date.now()): void {
+    if (this.paused) return
+    for (const m of this.deps.db.retriesDue(now)) {
+      if (this.controllers.has(m.id)) continue
+      this.update(m, { run: { ...m.run!, retryAt: undefined } })
+      this.retry(m.id)
+    }
+  }
+
+  // A note for whoever works on request `id`, at its next step (a tool's result carries it).
+  private noteFor(id: string, note: string): void {
+    this.notes.set(id, [...(this.notes.get(id) ?? []), note].slice(-5))
+  }
+
+  private withNotes(handed: string | undefined, r: CallToolResult): CallToolResult {
+    const notes = handed ? this.notes.get(handed) : undefined
+    if (!handed || !notes?.length) return r
+    this.notes.delete(handed)
+    return { ...r, content: [...r.content, ...notes.map((text) => ({ type: 'text' as const, text }))] }
+  }
+
   // ---------- work handed down the tree (src/core/delegations.ts) ----------
 
   // Kept, and the screens told: the organogram shows what is going on as it happens.
@@ -3353,7 +3538,7 @@ ${note}`,
     const rootId = randomUUID()
     // Asked from inside a thread, of someone in the same conversation: it stays in that thread, so
     // everything on the subject reads in one place. Elsewhere it opens a thread of its own.
-    const inside = reply.threadId && channel.id === reply.conversationId ? reply.threadId : undefined
+    const inside = channel.id === reply.conversationId ? (reply.threadId ?? this.originThread(reply)) : undefined
     const root = this.say(from.id, channel.id, inside, askMessage(to, ask), { id, to: to.id, conversationId: channel.id, rootId, ...(inside ? { threadId: inside } : {}) }, rootId)
     const origin = this.originThread(reply)
     const d: Delegation = { id, from: from.id, to: to.id, conversationId: channel.id, rootId: root.id, ...(inside ? { threadId: inside } : {}), originConversationId: reply.conversationId, ...(origin ? { originThreadId: origin } : {}), originMessageId: reply.id, requestedBy: requester.id, text: ask.text, ...(ask.done ? { done: ask.done } : {}), ...(ask.dueAt ? { dueAt: ask.dueAt } : {}), state: 'open', createdAt: Date.now() }
@@ -3389,10 +3574,27 @@ ${note}`,
     const threadId = workThread(d)
     const agents = this.deps.db.agents()
     const kind = askKind(agents, from.id, to.id)
-    const task = askTask(from, me, done, kind, kind === 'sector' ? sectorName(sectorOf(agents, from.id) ?? from, L('Setor de', 'Sector of')) : undefined, headsOf(agents).some((h) => h.id === to.id) || entriesOf(agents).some((e) => e.id === to.id))
+    const job = this.jobOf(this.deps.db.message(d.originMessageId)?.run?.job)
+    const task = askTask(from, me, done, kind, kind === 'sector' ? sectorName(sectorOf(agents, from.id) ?? from, L('Setor de', 'Sector of')) : undefined, headsOf(agents).some((h) => h.id === to.id) || entriesOf(agents).some((e) => e.id === to.id), this.askContextOf(d, job, me))
     const more = again ? ` ${L('Isto continua esta thread: o que você já fez nela está acima. Não refaça o que já está pronto.', 'This continues this thread: what you already did in it is above. Do not redo what is done.')}` : ''
     // One reply at a time per agent and thread: a second request to the same agent in the same thread waits its turn.
-    void this.startReply(to, channel, { depth: 1, threadId, task: `${task}${more}`, handed: d.id })
+    void this.startReply(to, channel, { depth: 1, threadId, task: `${task}${more}`, handed: d.id, ...(job ? { job: job.id } : {}) })
+  }
+
+  // What goes with a request, so a part doesn't lose the whole: what the person asked, the split, what's delivered.
+  private askContextOf(d: Delegation, job: Job | undefined, me: string): AskContext {
+    const { db } = this.deps
+    const name = (id: string): string => db.agent(id)?.name ?? L('agente removido', 'removed agent')
+    const all = db.delegationsFrom(d.from, d.originConversationId, d.originThreadId).filter((x) => x.createdAt >= (job?.createdAt ?? 0))
+    const delivered = all.flatMap((x) => {
+      const end = x.id !== d.id && x.state === 'done' && x.result ? db.message(x.result) : undefined
+      return end?.text.trim() ? [{ to: name(x.to), text: end.text }] : []
+    })
+    return {
+      ...(job?.text.trim() ? { asked: { by: me, text: job.text } } : {}),
+      split: all.map((x) => ({ to: name(x.to), text: x.text, state: x.state, code: codeOf(x), ...(x.id === d.id ? { mine: true } : {}) })),
+      delivered
+    }
   }
 
   // How a request ended: `last` is the reply it ended with (the answer, or the one that failed or was stopped).
@@ -3400,6 +3602,11 @@ ${note}`,
     // Nothing is posted where it was asked: whoever asked hears how it ended (its task carries the answer)
     // and says it to the person; the line under the asker's message shows it ended.
     this.keep({ ...d, state, endedAt: Date.now(), asking: undefined, askingTold: false, ...(last ? { result: last.id } : {}) })
+    // The parts of the same work still under way hear of this one at their next step.
+    if (state === 'done' && last?.text.trim()) {
+      const who = this.deps.db.agent(d.to)?.name ?? L('um colega', 'a teammate')
+      for (const x of this.deps.db.delegationsFrom(d.from, d.originConversationId, d.originThreadId)) if (x.id !== d.id && x.state === 'open') this.noteFor(x.id, teammateNote('done', who, last.text))
+    }
     this.tellAsker(d.from, d.originConversationId, d.originThreadId)
   }
 
@@ -3433,7 +3640,7 @@ ${note}`,
         if (d.state !== 'open') {
           if (d.told) return []
           const end = d.result ? db.message(d.result) : undefined
-          return [{ ...place(d), what: d.state, ...(d.state === 'failed' && end?.run?.error ? { why: end.run.error } : {}), ...(d.state === 'done' && end?.text.trim() ? { text: end.text } : {}) }]
+          return [{ ...place(d), what: d.state, ...(d.state === 'failed' && end?.run?.error ? { why: end.run.error } : {}), ...((d.state === 'done' || d.state === 'failed') && end?.text.trim() ? { text: end.text } : {}) }]
         }
         if (d.asking && !d.askingTold) {
           const q = db.message(d.asking)
@@ -3443,6 +3650,9 @@ ${note}`,
         return []
       })
       if (!returned.length) return
+      // Work that stopped on its brakes: nothing goes on until someone clicks Continuar; then it's told.
+      const jobId = db.message(returned[0]!.d.originMessageId)?.run?.job
+      if (this.jobOf(jobId)?.state === 'stopped') return
       const open = all.filter((d) => d.state === 'open' && !returned.some((r) => r.d.id === d.id))
       // Answers alone wait for the rest, so the person hears it once. Not for one held on an approval:
       // that is the person's to give, whenever they do (they see it under the asker's message), and the
@@ -3459,7 +3669,7 @@ ${note}`,
       const requester = behalf ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
-      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}) }), true)
+      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}), ...(jobId ? { job: jobId } : {}) }), true)
     }
     if (this.followups.busy(key)) this.tells.set(key, go)
     else go()
@@ -3540,6 +3750,7 @@ ${note}`,
         continue
       }
       if (last.author.kind !== 'agent' || !last.run || !SHORT.includes(last.run.status) || this.controllers.has(last.id)) continue
+      if (last.run.retryAt) continue // waiting to try again by itself (waitToRetry)
       if (this.toResume.includes(last.id)) continue // cut when the app closed: it goes on by itself (resumeInterrupted)
       if (now - (last.run.endedAt ?? last.at) < 60_000) continue // its own reply settles it; this is for the ones that never got to
       this.settle(d, last.run.status === 'stopped' ? 'cancelled' : 'failed', last)
@@ -3596,27 +3807,9 @@ ${note}`,
   }
 
   // Screens the mentions before waking anyone: "thanks, @bia" doesn't need an answer. If the
-  // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn.
-  // One more reply on a goal: whether the team goes on. It doesn't when the reply marked it done, when it
-  // reached GOAL_MAX_TURNS, when the agent said the same as its last reply on it (going in circles), or
-  // when it passed the turn to no one. Each of those leaves a line in the channel, and the goal ends.
-  private goalTurn(g: Goal, agent: Agent, conv: Conversation, msg: Message, passing: boolean): boolean {
-    g.turns++
-    if (g.state === 'running') {
-      const before = g.last.get(agent.id)
-      if (before !== undefined && sameReply(before, msg.text)) g.state = 'stuck'
-      else if (g.turns >= GOAL_MAX_TURNS) g.state = 'capped'
-      else if (!passing) g.state = 'dropped'
-      g.last.set(agent.id, msg.text)
-    }
-    if (g.state === 'running') return true
-    this.goals.delete(g.id)
-    this.post(conv.id, msg.threadId, goalEnd(g, g.by ? (this.deps.db.agent(g.by)?.name ?? agent.name) : agent.name))
-    return false
-  }
-
-  // On a goal (`goal`), the turn passed with @ is the work itself: no screening, and the goal goes along.
-  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, limit: number, finished: () => void, goal?: string): Promise<void> {
+  // router can't say, everyone mentioned is called. `finished` runs when no one gets the turn. There is no
+  // count of replies in a row: the job's brakes stop work that no longer moves (src/core/jobs.ts).
+  private async handOff(conv: Conversation, msg: Message, agent: Agent, next: Agent[], depth: number, finished: () => void, job?: string): Promise<void> {
     const { db, engines } = this.deps
     const and = L(' e ', ' and ')
     const list = (agents: Agent[]): string => agents.map((a) => a.name).join(and)
@@ -3630,8 +3823,7 @@ ${note}`,
         console.warn('[handoff]', why)
         step.detail = `${list(next)} · ${L('não consegui avaliar, chamei todos', "couldn't screen it, called everyone")}`
       }
-      if (!goal)
-        try {
+      try {
         const settings = await this.deps.settings()
         // Jev stays for human messages: here 'jev' isn't a model, so this falls to Haiku.
         const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
@@ -3669,16 +3861,12 @@ ${note}`,
         if (saved.run) this.update(saved, { run: { ...saved.run, steps: [...saved.run.steps, { id: randomUUID(), ...step, status: 'done' }] } })
       }
       if (called.length === 0) return finished()
-      if (depth >= limit) {
-        this.post(conv.id, msg.threadId, L(`Parei a conversa entre agentes aqui: ${limit === 1 ? 'foi 1 resposta seguida' : `foram ${limit} respostas seguidas`}. Mande uma mensagem pra continuar.`, `I stopped the conversation between agents here: ${limit === 1 ? '1 reply' : `${limit} replies`} in a row. Send a message to go on.`))
-        return finished()
-      }
       // A noted follow-up counts as someone taking the turn: the agent will answer it, so no "done" yet.
       for (const a of called) {
-        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work, ...(goal ? { goal } : {}) })
+        if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work, ...(job ? { job } : {}) })
         else {
           this.followups.reserve(keyOf(a))
-          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(goal ? { goal } : {}) }))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(job ? { job } : {}) }))
         }
       }
     } finally {
