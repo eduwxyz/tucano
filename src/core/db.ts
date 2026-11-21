@@ -1169,6 +1169,10 @@ export class Db {
       this.db.prepare('UPDATE agents SET reports_to = NULL WHERE reports_to = ?').run(id)
       this.db.prepare('DELETE FROM memories WHERE scope = ?').run(id)
       this.db.prepare('DELETE FROM services WHERE agent_id = ?').run(id)
+      // Off the Cofre's keys it was given; the log of what it used stays.
+      this.db
+        .prepare("UPDATE vault_keys SET agents = (SELECT json_group_array(value) FROM json_each(vault_keys.agents) WHERE value <> ?) WHERE EXISTS (SELECT 1 FROM json_each(vault_keys.agents) WHERE value = ?)")
+        .run(id, id)
       for (const r of this.db.prepare('SELECT id FROM routines WHERE agent_id = ?').all(id) as { id: string }[]) this.removeRoutine(r.id)
       this.db
         .prepare(

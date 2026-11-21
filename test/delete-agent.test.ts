@@ -50,6 +50,16 @@ describe('an agent deleted for good', () => {
     expect(db.services('ana')).toEqual([])
   })
 
+  it('is taken off the Cofre’s keys it was given; the keys stay for the others', () => {
+    const db = seeded()
+    const key = (id: string, agents: string[]) => ({ id, name: id.toUpperCase(), agents, approve: false, hint: '••••', createdAt: 1, updatedAt: 1 })
+    db.saveVaultKey(key('k1', ['ana', 'bia']))
+    db.saveVaultKey(key('k2', ['ana']))
+    db.saveVaultKey(key('k3', ['bia']))
+    db.retireAgent('ana')
+    expect(Object.fromEntries(db.vaultKeys().map((k) => [k.id, k.agents]))).toEqual({ k1: ['bia'], k2: [], k3: ['bia'] })
+  })
+
   it('an agent not deleted reads as before', () => {
     const db = seeded()
     expect(db.agent('bia')?.deleted).toBeUndefined()
