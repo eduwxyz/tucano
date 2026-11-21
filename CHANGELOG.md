@@ -6,6 +6,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Added
 
+### Changed
+
+- **Settings are organized by task, with a second row of section links under each tab.** The page keeps its tabs (General, Models, Agents, Phone, People, Activity, Servers, Harnesses) and the controls in them are grouped by the decision a person is making rather than by the order they were built: what they change about themselves, about the workspace, and about this computer each have their own section. Under the tabs, a row of links names the sections of the open tab, stays there while the page scrolls, follows the reading position and takes the page to a section. A pointer click scrolls with an interruptible 280 ms ease-in-out, a keyboard activation and a reduced-motion preference move at once, and a section whose card this role does not get never becomes a link. The row wraps instead of scrolling sideways at narrow widths. No setting, value, default, permission or scope changes, and every tab keeps its id. `npm run check:settings` holds the declaration, the cards and the tabs to each other. Thanks to Apostol Apostolov.
+
 - **Sort the whole sidebar by hand: hold a row, see where it lands, or move it with the keyboard.** Press and hold a row for a moment to pick it up: it dims, and an orange line shows where it will land as you move. Let go there and the order is saved; let go where it was and it just opens, like a click. It works for the items at the top (Aprovações, Quadro, Conhecimento, Operação; the Tuca stays first), the channels (let go on a group's name to put a channel in that group), the agents, and the sectors. An agent moves only within its sector. With the keyboard, **Alt+↑** and **Alt+↓** move the row you're on. Before, only channels could be moved, by dragging. An item you took out of the sidebar stays out, and keeps its place for when it comes back. In a team, the order is yours alone, like the channel groups. Thanks to Apostol Apostolov.
 
 ## [0.2.44] - 2026-11-21
