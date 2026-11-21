@@ -36,7 +36,8 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
-import { JEV_MODEL, listenJev, routeJev } from './jev'
+import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
+import { JEV_MODEL, listenJev, recommendOptions, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -286,7 +287,10 @@ export interface RunnerDeps {
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
-  jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
+  // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
+  // `target` are asked per job, so the same seam serves the jobs Apo's own branches add (listening,
+  // the recommended option, the next steps): a job with no classifier is off.
+  jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
@@ -542,7 +546,7 @@ export class Runner {
       const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
     }
-    if (opened || settings.routerModel === JEV_MODEL) return
+    if (opened || settings.routerModel === JEV_MODEL || classifierFor(settings, 'routing')) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -1006,6 +1010,25 @@ export class Runner {
     this.post(conversationId, threadId, hint)
   }
 
+  // Assigned in Settings › Classifier Uses: one cheap Jev question per decision with options, and the
+  // pick is written on the reply after the card is already on screen — so asking never waits on TypeSafe.
+  // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
+  private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
+    if (!classifierFor(settings, 'recommend') || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
+    const key = await this.deps.jev?.key('recommend')
+    if (!key) return
+    try {
+      const r = await recommendOptions({ key, questions, context: msg.text, fetch: this.deps.jev?.fetch })
+      if ('error' in r || !r.picks.some((p) => p !== null)) return
+      // Answered while TypeSafe thought: the pill has nowhere to go, and the card is closed.
+      const now = this.deps.db.message(msg.id)
+      if (!now || now.run?.status !== 'waiting_input' || now.run.answers) return
+      this.update(now, { run: { ...now.run, recommended: r.picks } })
+    } catch {
+      // the card works without a suggestion
+    }
+  }
+
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
   private pendingQuestion(conversationId: string, threadId?: string): Message | undefined {
     return this.deps.db.waitingQuestion(conversationId, threadId ?? null)
@@ -1053,13 +1076,16 @@ export class Runner {
         team: db.people().length > 1
       }
 
-      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+      // A classifier first when one is chosen for this job; if it fails, Haiku decides, so the
+      // channel never goes quiet.
       let fellBack = ''
-      if (settings.routerModel === JEV_MODEL) {
-        const key = await this.deps.jev?.key()
-        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
+      const routing = classifierFor(settings, 'routing')
+      if (routing) {
+        const key = await this.deps.jev?.key('routing')
+        const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
+        const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
         if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s${heardWhy}`)
-        fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
+        fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
@@ -3116,6 +3142,8 @@ ${note}`,
         this.keep({ ...handedNow, approval: approval.id })
         this.tellAsker(handedNow.from, handedNow.originConversationId, handedNow.originThreadId)
       }
+      // Turned on in the settings: Jev's pick lands on the card afterwards, so asking never waits on it.
+      if (questions) void this.recommend(msg, questions, settings)
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
         const finished = (): void => {
