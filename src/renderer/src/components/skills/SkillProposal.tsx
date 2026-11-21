@@ -34,7 +34,7 @@ export function Proposal({ proposal: p }: { proposal: Skill }): ReactNode {
             <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{p.body}</Markdown>
           </article>
           <p className="proposal__who">
-            {L('Vale pra', 'For')} <Who ids={p.agents} />. {L('Depois de aprovar, dá pra liberar pra outros agentes.', 'After approving, you can open it to other agents.')}
+            {L('Vale pra', 'For')} <Who ids={p.agents} />. {L('Depois de aprovar, dá pra liberar pra outros agentes.', 'After approval, you can assign it to more agents.')}
           </p>
         </>
       )}
