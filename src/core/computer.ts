@@ -323,7 +323,7 @@ export function hostUrl(url: string, ports: Record<number, number>): string | { 
   try {
     u = new URL(url)
   } catch {
-    return { error: `URL inválida: ${url}` }
+    return { error: L(`URL inválida: ${url}`, `Invalid URL: ${url}`) }
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: L('Só URLs http e https.', 'Only http and https URLs.') }
   if (!['localhost', '127.0.0.1', '0.0.0.0'].includes(u.hostname)) return u.toString()

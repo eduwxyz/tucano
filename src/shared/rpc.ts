@@ -44,10 +44,10 @@ export interface Api {
   artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   revealArtifact(p: { id: string }): void // shows an artifact's file in the file manager; never opens it
   saveArtifact(p: { id: string }): void // saves a copy of an artifact's file where the person picks (the desktop's Save dialog)
-  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string }): void // threadId: a reply in the thread that message started
+  sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string; mode?: 'steer'; steerTo?: string }): void // threadId: a reply in the thread that message started; mode 'steer': from a running reply's own pill, for that reply (steerTo), not a prompt
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
-  retryRun(p: { messageId: string }): void
+  retryRun(p: { messageId: string; note?: string }): void // note: a direction for the new try
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   continueJob(p: { messageId: string }): void // the note where a job stopped on its brakes: its work goes on (src/core/jobs.ts)
   setAgentModels(p: { agentIds: string[]; modelId: string }): number
@@ -261,6 +261,7 @@ export interface Api {
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
+  cancelQuestion(p: { messageId: string }): void // dismisses the question on its card: it closes, and the agent isn't woken
   watchRoutine(p: { id: string; on: boolean }): void // "me avise": told of a channel routine's runs
   // To the people who make Tucano, through tucano.sh (core/feedback.ts). image: the window's picture, base64 PNG or JPEG.
   // Throws, in the person's words, when it didn't go.
@@ -287,8 +288,9 @@ export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
   | { type: 'tasks'; for: string } // someone's to-dos changed: they read them again
   | { type: 'node'; info: NodeInfo } // this computer's lines to the servers it's lent to, as they change
-  | { type: 'message'; message: Message }
+  | { type: 'message'; message: Message; attemptStart?: true }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
+  | { type: 'thinking'; id: string; text: string } // appended to what the model is thinking, shown apart from the reply
   | { type: 'agent'; agent: Agent }
   | { type: 'agent_removed'; id: string } // one just made and taken back with Desfazer before it did anything
   | { type: 'conversation'; conversation: Conversation }
@@ -313,7 +315,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'thinking', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true
