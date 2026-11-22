@@ -34,6 +34,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'app-dictation', page: 'geral', label: L('Ditado', 'Dictation'), icon: 'mic', color: 'var(--c-sky)', keys: ['voice'], scope: 'mixed', visible: admin },
     { id: 'app-conversation', page: 'geral', label: L('Conversas', 'Conversations'), icon: 'thread', color: 'var(--c-indigo)', keys: ['stepsOpen', 'showThinking'], scope: 'personal', visible: true },
     { id: 'agents-permissions', page: 'agentes', label: L('Autonomia', 'Autonomy'), icon: 'shield', color: 'var(--accent)', keys: ['autonomy', 'actionRules', 'outsideGuard'], scope: 'workspace', visible: admin },
+    { id: 'agents-replies', page: 'agentes', label: L('Respostas', 'Replies'), icon: 'send', color: 'var(--c-sky)', keys: ['sendMode'], scope: 'workspace', visible: admin },
     { id: 'agents-limits', page: 'agentes', label: L('Limites', 'Limits'), icon: 'gauge', color: 'var(--c-amber)', keys: ['defaultLimit', 'runBudgetPct', 'runStallMinutes', 'approvalTtlHours', 'autoContinue'], scope: 'workspace', visible: admin },
     { id: 'agents-routines', page: 'agentes', label: L('Rotinas', 'Routines'), icon: 'clock', color: 'var(--c-violet)', keys: ['openAtLogin', 'quietHours'], scope: 'mixed', visible: admin },
     { id: 'agents-tuca', page: 'agentes', label: L('Tuca', 'Tuca'), icon: 'spark', color: 'var(--accent)', keys: ['tucaApplyNow'], scope: 'workspace', visible: admin },
@@ -63,7 +64,7 @@ export type SettingsPageId = SettingsSection['page']
 // what most people change first, what can't be undone last.
 const tabSections: Readonly<Record<string, readonly SettingsSectionId[]>> = {
   geral: ['workspace-context', 'app-appearance', 'app-notifications', 'app-dictation', 'app-conversation'],
-  agentes: ['agents-permissions', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser'],
+  agentes: ['agents-permissions', 'agents-replies', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser'],
   modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-router', 'knowledge-memory'],
   conexoes: ['connections-phone', 'connections-servers', 'harnesses-keys'],
   workspace: ['workspace-people', 'workspace-activity', 'workspace-team', 'workspace-backups', 'app-updates', 'workspace-danger']
@@ -104,6 +105,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'app-dictation': [L('Modelo do ditado', 'Dictation model'), L('Microfone', 'Microphone'), L('Detectar o idioma', 'Detect the language'), 'whisper'],
     'app-conversation': [L('Mostrar os passos do agente', 'Show the agent’s steps'), L('O que o modelo pensa', 'What the model is thinking'), L('Raciocínio', 'Reasoning'), L('Pesquisas', 'Surveys'), L('Enviar feedback', 'Send feedback')],
     'agents-permissions': [L('Aprovações', 'Approvals'), L('Cuidadoso, normal ou sem travas', 'Careful, normal or no locks'), L('Ajustar ação por ação', 'Adjust action by action'), L('Pedir antes depois de ler algo de fora', 'Ask first after reading something from outside')],
+    'agents-replies': [L('Um novo prompt com uma resposta em curso', 'While a reply is running'), L('Em paralelo', 'Parallel'), L('Fila', 'Queue'), L('Orientar', 'Steer'), L('Interromper', 'Interrupt'), 'Enter'],
     'agents-limits': [L('Limite por agente', 'Limit per agent'), L('Limite por resposta', 'Limit per reply'), L('Tokens por mês', 'Tokens per month'), L('Considerar travado', 'Treat as stuck'), L('Expiração das aprovações', 'Approvals expire'), L('Continuar sozinho', 'Keep going on its own')],
     'agents-routines': [L('Abrir ao ligar o computador', 'Open when the computer starts'), L('Horário de silêncio', 'Quiet hours')],
     'agents-tuca': [L('Aplicar mudanças do Tuca na hora', 'Apply Tuca’s changes right away'), L('Desfazer', 'Undo')],

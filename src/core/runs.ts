@@ -380,8 +380,11 @@ type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing
 // moment it's given. It is not a message of theirs: nothing of it is posted, so a reply that ends
 // before taking one leaves it in its chain, marked as not read (see `steerLeftovers`).
 type SteerNote = { id: string; who: string; text: string }
-// A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
-type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
+// A reply waiting for its agent to finish there. Only a send the person marked as queued waits, and
+// what goes on with a reply the person is already reading (an approval's outcome, a question's
+// refusal, a browser hand-back): a message of theirs, a routine, a retry and a reply going on past
+// its budget start their own reply, beside whatever runs there.
+type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; done: ((m: Message | undefined) => void)[] }
 type Control = {
   ctl: AbortController
   msg: Message
@@ -421,9 +424,14 @@ export class Runner {
   private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
   // What came back from an agent's team while it was replying where it asked: told when that reply ends.
   private tells = new Map<string, () => void>()
-  // Every other reply asked for while the agent replies there (a person's mention or DM, a routine,
-  // an approval's outcome, a retry), in the order they came: they wait here, off the queue (startReply).
+  // What waits for the agent to finish there: a prompt the person marked as queued, and what goes on
+  // with a reply the person is already reading there (an approval's outcome, a question's refusal, a
+  // browser hand-back). In the order they came, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
+  // Replies running in each conversation, and the prompts a person marked as queued behind them: one of
+  // those starts when nothing runs there any more (see `runIn`, `settleIn`).
+  private convRuns = new Map<string, number>()
+  private convWaiting = new Map<string, { job: () => Promise<unknown>; queued?: Message }[]>()
   // Jobs under way, by the message that set them off (src/core/jobs.ts): read from the database when not here.
   private jobs = new Map<string, Job>()
   // What a teammate delivered (or was asked) while a request was being worked on, for its next step: by request.
@@ -606,11 +614,18 @@ export class Runner {
     // before any message of mine exists: nothing of a steer ever shows up in the channel or the DM as
     // something to answer. With no reply running there — or with a picture or a file, which a tool
     // result can't carry — there is nothing to steer, and the text goes on as a prompt like any other.
-    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, { who: writer.name, text: typed }, opts.steerTo))
+    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, thread, { who: writer.name, text: typed }, opts.steerTo))
       return
 
-
-const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
+    const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
+    // How it joins a reply already running here (the window says which): alongside it, after it,
+    // handed to it between tool calls, or in place of it. With nothing running, all four are the same.
+    // No mode at all (the phone) means a message of the person's own: it starts its own reply beside
+    // whatever runs there, as a routine and a retry do (neither comes through here). Only `queue`
+    // waits, and a steer or an interrupt acts on the reply already running.
+    const mode = opts.mode ?? 'parallel'
+    const queued = mode === 'queue' && this.busyIn(conv.id)
+    if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -681,24 +696,92 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     const doing = responders.length === 0 && thread ? db.delegationAt(thread) : undefined
     const doer = doing ? may.find((a) => a.id === doing.to) : undefined
     if (doer) responders = [doer]
+    if (mode === 'interrupt') this.interruptIn(conv.id)
     if (responders.length === 0) {
       if (conv.kind === 'dm' || may.length === 1) responders = may
       else if (may.length > 1) {
-        void this.routeAndRun(conv, may, replyIn, mine.id)
+        void this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id, mode === 'parallel'), mode === 'queue', queued ? mine : undefined)
         return
       }
     }
     // An answer to a question asked on a job: the same job goes on (its brakes count from where they were).
     const jobOn = asked?.run?.job && this.jobOf(asked.run.job)?.state === 'running' ? asked.run.job : undefined
     const reply = (agent: Agent, opts: Partial<ReplyOpts> = {}): Promise<Message | undefined> =>
-      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(jobOn ? { job: jobOn } : {}), ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, { urgent: true, merge: true })
-    if (responders.length === 1) return void reply(responders[0]!)
-    // Several called by name answer one after another, in the order written: each answers my message
-    // and reads what the ones before it answered (routedHistory), like a routed message.
-    let before: Promise<unknown> | undefined
-    for (const agent of responders) {
-      const go = (): Promise<Message | undefined> => reply(agent, { trigger: mine.id })
-      before = before ? before.then(go, go) : go()
+      this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(jobOn ? { job: jobOn } : {}), ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, // A queued prompt answers the message it was written for, never taking over an earlier one.
+      { urgent: true, parallel: mode !== 'queue' })
+    // A message of the person's own goes beside the reply running there, two at once; a queued one is
+    // the only one that waits, and it waits for everything running there to end. Several called by
+    // name answer one after another, in the order written: each answers my message and reads what the
+    // ones before it answered (routedHistory), like a routed message.
+    const answer = (): Promise<unknown> => {
+      if (responders.length === 1) return reply(responders[0]!)
+      let before: Promise<unknown> | undefined
+      for (const agent of responders) {
+        const go = (): Promise<Message | undefined> => reply(agent, { trigger: mine.id })
+        before = before ? before.then(go, go) : go()
+      }
+      return before ?? Promise.resolve()
+    }
+    this.runIn(conv.id, answer, mode === 'queue', queued ? mine : undefined)
+  }
+
+
+  // A prompt I queued before the app closed: its message is here, its reply never started (db.ts,
+  // queuedMessages). Each one goes in the order I wrote them, waiting for whatever runs there now.
+  resumeQueued(): void {
+    const { db } = this.deps
+    if (this.paused) return // they keep their mark, and go at the next start
+    for (const m of db.queuedMessages()) {
+      const conv = db.conversation(m.conversationId)
+      const members = conv ? this.members(conv) : []
+      if (!conv || !members.length || m.author.kind !== 'person') continue
+      const named = mentioned(m.text, members).slice(0, MAX_MENTIONS)
+      if (!named.length && conv.kind !== 'dm' && members.length > 1) this.runIn(conv.id, () => this.routeAndRun(conv, members, m.threadId, m.id), true, m)
+      else for (const agent of named.length ? named : members) this.runIn(conv.id, () => this.startReply(agent, conv, { depth: 1, threadId: m.threadId, replyTo: m.id }, { urgent: true, parallel: true }), true, m)
+    }
+  }
+
+  // Something is answering in this conversation: a reply running there (however it was started), a
+  // prompt of mine still waiting its turn, or the router picking who answers.
+  private busyIn(conversationId: string): boolean {
+    if ((this.convRuns.get(conversationId) ?? 0) > 0 || (this.convWaiting.get(conversationId)?.length ?? 0) > 0) return true
+    for (const c of this.controllers.values()) if (c.msg.conversationId === conversationId && !c.reason) return true
+    return false
+  }
+
+  // A prompt marked as queued waits for what is running in that conversation, and there only: what
+  // runs elsewhere, or another agent's reply in another conversation, is none of its business.
+  private runIn(conversationId: string, job: () => Promise<unknown>, after: boolean, queued?: Message): void {
+    if (!after || !this.busyIn(conversationId)) return this.startIn(conversationId, job, queued)
+    this.convWaiting.set(conversationId, [...(this.convWaiting.get(conversationId) ?? []), { job, queued }])
+  }
+
+  // A prompt goes out (now, or once the one before it let go): the mark a queued one kept for a restart
+  // drops in the same step, so the app never starts it twice. From here `execute` counts it as running.
+  // The job takes no slot of the scheduler itself: what it starts does (startReply, routed), and a slot
+  // held here as well would be a second one per reply, so six replies at once would hold all twelve.
+  private startIn(conversationId: string, job: () => Promise<unknown>, queued?: Message): void {
+    if (queued?.sendMode) this.update(queued, { sendMode: undefined })
+    void job().catch((e: unknown) => console.error('[runner]', e))
+  }
+
+  // A reply ended there: the next queued prompt goes, or the conversation is free again.
+  private settleIn(conversationId: string): void {
+    const left = (this.convRuns.get(conversationId) ?? 1) - 1
+    if (left > 0) return void this.convRuns.set(conversationId, left)
+    this.convRuns.delete(conversationId)
+    const waiting = this.convWaiting.get(conversationId)
+    const next = waiting?.shift()
+    if (!waiting?.length) this.convWaiting.delete(conversationId)
+    if (next) this.startIn(conversationId, next.job, next.queued)
+  }
+
+  // Stopping what runs in one conversation, and only there: what it wrote stays, as the stop button leaves it.
+  private interruptIn(conversationId: string): void {
+    for (const c of this.controllers.values()) {
+      if (c.msg.conversationId !== conversationId || c.reason) continue
+      c.reason = 'stopped'
+      c.ctl.abort()
     }
   }
 
@@ -708,10 +791,12 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
   // messages, each its own session), so a steer from a reply's own pill must reach that reply alone.
   // It goes into that reply's chain right here, where the person gave it, so what they steered is
   // part of what the reply is doing — not a prompt, and not a message of theirs.
-  private steerIn(conversationId: string, note: Omit<SteerNote, 'id'>, only?: string): boolean {
+  // `threadId`: where the person wrote it. Only a reply in that same place takes it: what is written in
+  // the channel isn't meant for a reply working inside a thread, nor the other way round.
+  private steerIn(conversationId: string, threadId: string | undefined, note: Omit<SteerNote, 'id'>, only?: string): boolean {
     let taken = false
     for (const c of this.controllers.values()) {
-      if (c.msg.conversationId !== conversationId || c.reason) continue
+      if (c.msg.conversationId !== conversationId || c.reason || (c.msg.threadId ?? undefined) !== (threadId ?? undefined)) continue
       if (only && c.msg.id !== only) continue
       const id = randomUUID()
       ;(c.steer ??= []).push({ ...note, id })
@@ -796,7 +881,8 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     c.ctl.abort()
   }
 
-  // Runs the same agent again in place of a reply that didn't finish.
+  // Runs the same agent again in place of a reply that didn't finish. Beside whatever replies there,
+  // not after it: asking again is an answer to what the person did, and waiting made it look lost.
   retry(messageId: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
@@ -805,7 +891,7 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true })
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true, parallel: true })
   }
 
   // A reply that was cut goes on in a new reply that knows what it did: its text is in the
@@ -861,7 +947,9 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     ]
       .filter(Boolean)
       .join('\n\n')
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}), ...(msg.run?.job ? { job: msg.run.job } : {}) }, { urgent: true })
+    // Beside whatever replies there, like a retry: it answers what the person just did, and a reply that
+    // arrives only after the one already on screen reads as an answer to that one.
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work, threadId: msg.threadId, ...(msg.run?.handed ? { handed: msg.run.handed } : {}), ...(autoContinued ? { autoContinued } : {}), ...(msg.run?.job ? { job: msg.run.job } : {}) }, { urgent: true, parallel: true })
   }
 
   // Whether a reply that paused at its cap goes on by itself: the person didn't turn that off, it hasn't
@@ -922,7 +1010,9 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     db.saveMessage(ask)
     emit({ type: 'message', message: ask })
 
-    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true, routineAsk: ask.id })
+    // Beside whatever replies there, like a message of the person's: a routine that waits its turn
+    // arrives after the reply the person is already reading, and reads as an answer to it.
+    return this.startReply(agent, conv, { depth: 1, task: this.routineTask(r, when, me), work: event ? workIn(event.title) : undefined, routine: true, routineAsk: ask.id }, { parallel: true })
   }
 
   // A routine's reply that failed, run again in place with the same request.
@@ -934,7 +1024,8 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     const agent = db.agent(r.agentId)
     if (!msg?.run || msg.run.status !== 'failed' || !conv || !agent || agent.archived) return undefined
     const me = (await this.deps.settings()).workspaceName
-    return this.startReply(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true })
+    // Beside whatever replies there, for the same reason a retry is: asking again doesn't wait its turn.
+    return this.startReply(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }, { parallel: true })
   }
 
   // `me`: the owner, by the workspace's name; a person's routine reads with theirs, and the team's as the channel's.
@@ -981,7 +1072,7 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
   }
 
   private isIdle(): boolean {
-    return this.active === 0 && this.queue.length === 0 && this.routing === 0
+    return this.active === 0 && this.queue.length === 0 && this.routing === 0 && this.convWaiting.size === 0
   }
 
   private checkIdle(): void {
@@ -1013,7 +1104,9 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
   }
 
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
-  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string): Promise<void> {
+  // `parallel`: the prompt was sent beside the reply running there, so the reply the router picks goes
+  // beside it too (see `routed`), instead of waiting for that reply to end.
+  private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, parallel = false): Promise<void> {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
     this.routing++
@@ -1041,7 +1134,7 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`)
+        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, parallel)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -1055,7 +1148,7 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`)
+      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1064,11 +1157,29 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     }
   }
 
+  // A prompt whose reply hasn't started yet says so in the conversation (Conversation.tsx, `sendMode`)
+  // and is picked up again when the app opens (`queuedMessages`, resumeQueued): no prompt of mine sits
+  // in no one's hands, neither while it waits nor after a restart. The mark goes the moment its reply
+  // starts, and with the message whose reply takes it over.
+  private waitingMark(messageId: string | undefined): void {
+    const m = messageId ? this.deps.db.message(messageId) : undefined
+    if (!m || m.sendMode) return
+    this.update(m, { sendMode: 'queue' })
+  }
+
+  private clearWaiting(messageId: string | undefined): void {
+    const m = messageId ? this.deps.db.message(messageId) : undefined
+    if (m?.sendMode !== 'queue') return
+    this.update(m, { sendMode: undefined })
+  }
+
   // Each reply answers the message that was routed (`trigger`), not whatever came in while it
   // waited. One already waiting for the same agent there takes the newer message instead: one reply.
   // Two or more go one after another, in the order picked: each starts once the one before ends, and
   // reads what it answered (routedHistory), so a part that needs another's result has it.
-  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string): void {
+  // `parallel`: each one goes beside whatever is running there, as the person asked of their own
+  // prompt, instead of waiting for that reply to end (a queued prompt waits; see `runIn`).
+  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string, parallel = false): void {
     const why = reason ? ` · ${reason}` : ''
     if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
     this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(agents.length > 1 ? L(', depois ', ', then ') : '')}${why}`, run: undefined })
@@ -1077,6 +1188,8 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
       const key = replyKey(agent.id, conv.id, note.threadId)
       const waiting = this.waiting.get(key)
       if (waiting) {
+        // This message takes over the one already waiting for this reply: one prompt, one mark.
+        this.clearWaiting(waiting.trigger)
         waiting.trigger = trigger
         continue
       }
@@ -1099,7 +1212,9 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
       this.waiting.set(key, slot)
       const go = (): void => {
         held = false
-        if (this.waiting.get(key) === slot && !this.followups.busy(key) && !this.parked.has(key)) slot.start()
+        if (this.waiting.get(key) !== slot) return
+        if (parallel || (!this.followups.busy(key) && !this.parked.has(key))) slot.start()
+        else this.waitingMark(slot.trigger)
       }
       if (before) void before.then(go)
       else go()
@@ -1120,28 +1235,34 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     else this.tells.get(key)?.()
   }
 
-  // A reply not routed nor handed off (those wait in routed and handOff): one at a time per agent and
-  // thread (replyKey), wherever it comes from. While the agent replies there it waits, off the queue,
-  // and starts when that reply ends; a person's newer message there takes over theirs (`merge`).
+  // A reply not routed nor handed off (those wait in routed and handOff). A message of the person's own
+  // starts its own reply even while another runs there: every message gets a session, and what holds one
+  // back is the scheduler's limit, which serves them in the order they came. A reply parked behind
+  // another for the same agent is what made a second message in a direct message look unanswered.
+  // `parallel`: this one goes beside that reply, not after it (two at once in the same place, which #358
+  // otherwise rules out). The two share a key, so the second one gets no kept session
+  // (`sessions.begin` turns it down) and reads the whole conversation: a session can only go on in one
+  // reply, and the one already there keeps it. A send marked as queued is the only one that waits.
   // Resolves with the reply, or undefined when it failed or was dropped.
-  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; merge?: boolean } = {}): Promise<Message | undefined> {
+  private startReply(agent: Agent, conv: Conversation, opts: ReplyOpts, how: { urgent?: boolean; parallel?: boolean } = {}): Promise<Message | undefined> {
     const key = replyKey(agent.id, conv.id, opts.existing ? opts.existing.threadId : opts.threadId)
     return new Promise((resolve) => {
-      const p: Parked = { agent, conv, opts, urgent: !!how.urgent, merge: !!how.merge, done: [resolve] }
+      const p: Parked = { agent, conv, opts, urgent: !!how.urgent, done: [resolve] }
+      if (how.parallel) return this.launch(key, p)
       const line = this.parked.get(key)
       if (!line && !this.followups.busy(key)) return this.launch(key, p)
-      const same = p.merge ? line?.find((x) => x.merge) : undefined
-      if (same) {
-        // The newer message, keeping what an earlier one asked of the agent (an answer given for someone).
-        same.opts = { ...opts, task: opts.task ?? same.opts.task }
-        same.done.push(resolve)
-      } else if (line) line.push(p)
+      // It waits for the reply running there: it says so in the conversation, and a restart picks it up.
+      this.waitingMark(opts.replyTo)
+      if (line) line.push(p)
       else this.parked.set(key, [p])
     })
   }
 
   private launch(key: string, p: Parked): void {
     this.followups.reserve(key)
+    // It is waiting until its reply takes its first step (executeReply clears it): with nothing holding
+    // it back that is the same tick, and the mark never reaches the screen.
+    this.waitingMark(p.opts.replyTo)
     const done = (m: Message | undefined): void => p.done.forEach((d) => d(m))
     this.enqueue(
       () =>
@@ -1195,10 +1316,22 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
   // Every reply counts while it runs, wherever it came from. A hand-off that reached this agent meanwhile
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
+  // A reply runs here from now on: a prompt marked as queued waits for these, whatever started it.
   private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+    this.convRuns.set(conv.id, (this.convRuns.get(conv.id) ?? 0) + 1)
+    try {
+      return await this.executeReply(agent, conv, opts)
+    } finally {
+      this.settleIn(conv.id)
+    }
+  }
+
+  private async executeReply(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
+    // Its reply is starting: the waiting mark goes in the same step, so a restart can't start it twice.
+    this.clearWaiting(opts.replyTo)
     this.followups.start(key, reserved)
     let msg: Message
     try {

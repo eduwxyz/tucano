@@ -65,6 +65,7 @@ import {
   type EngineId,
   type GrantLevel,
   type MemoryMode,
+  type SendMode,
   type Skill,
   type ToolClass,
   isTeam,
@@ -3454,6 +3455,32 @@ export function SettingsPage(): ReactNode {
               )}
             >
               <AutonomyControls own={{ autonomy: settings.autonomy, actionRules: settings.actionRules, outsideGuard: settings.outsideGuard }} onChange={(p) => updateSettings(p)} />
+            </Card>
+          </SectionAnchor>
+        )}
+
+        {on('agentes') && admin && (
+          <SectionAnchor id="agents-replies" sections={structure}>
+            <Card title={L('Respostas', 'Replies')} section="agents-replies">
+              <Field
+                label={L('Um novo prompt com uma resposta em curso', 'While a reply is running')}
+                hint={L(
+                  'O que o Enter faz quando o agente já está respondendo ali. Ctrl+Enter põe na fila, Alt+Enter entrega no meio do trabalho, Shift+Alt+Enter interrompe, seja qual for o ajuste. Shift+Enter continua quebrando a linha.',
+                  'Enter uses this mode. Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line.'
+                )}
+              >
+                <Select
+                  value={settings.sendMode ?? 'parallel'}
+                  onChange={(v) => { if (v) updateSettings({ sendMode: v as SendMode }) }}
+                  options={[
+                    { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Parallel replies') },
+                    { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') },
+                    { value: 'steer', label: L('Entregue à resposta em curso', 'Steer current reply') },
+                    { value: 'interrupt', label: L('Interrompe e começa com esta', 'Interrupt and restart') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
+              </Field>
             </Card>
           </SectionAnchor>
         )}
