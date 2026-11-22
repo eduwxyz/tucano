@@ -62,7 +62,38 @@ export const SNAPSHOT = `(() => { ${SECRETS}
     out.push({ ref: refs.length, role, label: once(label).slice(0, 100), value: value || undefined, checked: c, disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true' || undefined, inView: r.bottom > 0 && r.right > 0 && r.top < H && r.left < W, focused: el === active || undefined, multiline: (field && (tag === 'textarea' || el.isContentEditable)) || undefined, submits: submits === undefined ? undefined : submits.slice(0, 100) })
   }
   window.__adRefs = refs
-  return { url: location.href, title: document.title, w: W, h: H, scrollY: Math.round(scrollY), scrollH: document.documentElement.scrollHeight, elements: out }
+  // What the page is when it isn't the page (shared/wall.ts): the start of its visible words, how
+  // much of it there is, and the marks a bot check leaves. It stops at the cap, so a long page
+  // costs about as much as a short one, and a wall's own words are all inside the sample.
+  const CAP = 1200, SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG'])
+  let sample = '', more = false
+  const walkText = (node) => {
+    if (node.shadowRoot) walkText(node.shadowRoot) // what it draws itself; the slotted children come next
+    for (const c of node.childNodes) {
+      if (sample.length >= CAP) { more = true; return }
+      if (c.nodeType === 3) { const t = c.data.replace(/\\s+/g, ' ').trim(); if (t) { sample += t + ' '; if (sample.length >= CAP) more = true } }
+      else if (c.nodeType === 1 && !SKIP.has(c.tagName.toUpperCase())) { if (c.checkVisibility && !c.checkVisibility()) continue; walkText(c) }
+    }
+  }
+  if (document.body) walkText(document.body)
+  let words = sample.replace(/\\s+/g, ' ').trim().slice(0, CAP).toLowerCase()
+  for (const s of secrets) if (s.length >= 4) words = words.split(s.toLowerCase()).join('••••')
+  const count = (role) => out.filter((e) => e.role === role).length
+  const marks = []
+  for (const m of ['challenge-form', 'challenge-stage', 'cf-turnstile', 'g-recaptcha', 'h-captcha', 'px-captcha', 'datadome']) if (document.querySelector('#' + m + ', .' + m)) marks.push(m)
+  const signs = {
+    chars: words.length,
+    more,
+    words,
+    links: count('link'),
+    fields: count('campo'),
+    buttons: count('botão'),
+    password: [...document.querySelectorAll('input[type=password]')].filter((i) => !i.checkVisibility || i.checkVisibility()).length,
+    frames: [...document.querySelectorAll('iframe')].map((f) => (f.getAttribute('src') || '').toLowerCase()).filter(Boolean).slice(0, 8),
+    marks,
+    media: [...document.querySelectorAll('img,video,canvas,embed,object')].filter((e) => { const r = e.getBoundingClientRect(); return r.width >= 100 && r.height >= 100 }).length
+  }
+  return { url: location.href, title: document.title, w: W, h: H, scrollY: Math.round(scrollY), scrollH: document.documentElement.scrollHeight, elements: out, signs }
 })()`
 
 // Where to click an element of the last snapshot, brought into view first.
