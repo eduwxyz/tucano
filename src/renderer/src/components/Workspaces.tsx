@@ -139,8 +139,9 @@ export function WorkspaceMenu(): ReactNode {
             <span className="grow">{paused ? L('Retomar o time', 'Resume the team') : L('Pausar o time', 'Pause the team')}</span>
           </button>
         )}
-        {/* Following Omarchy, light or dark is the desktop theme's: the switch would do nothing. */}
-        {!omarchy?.on && (
+        {/* Following Omarchy, light or dark is the desktop theme's: the switch would do nothing.
+            A theme with no colours leaves Tucano's, and the person's light or dark with them. */}
+        {!(omarchy?.on && omarchy.palette) && (
           <button className="menu__item" role="menuitem" onClick={pick(() => updateSettings({ theme: isDark ? 'light' : 'dark' }))}>
             <Icon name={isDark ? 'sun' : 'moon'} size={15} />
             <span className="grow">{isDark ? L('Tema claro', 'Light theme') : L('Tema escuro', 'Dark theme')}</span>

@@ -38,14 +38,14 @@ let applied: string[] = []
 // Before React's first frame: the tokens only, since the light/dark side is already Electron's
 // (main sets it to the theme's) and the person's own choice isn't loaded yet.
 export function paintOmarchyEarly(): void {
-  if (state?.on) paintOmarchy(state, 'system')
+  if (state?.on && state.palette) paintOmarchy(state, 'system')
 }
 
 export function paintOmarchy(theme: OmarchyState | null, fallback: 'system' | 'light' | 'dark'): void {
   const root = document.documentElement
   for (const key of applied) root.style.removeProperty(key)
   applied = []
-  const followed = theme?.on ? theme : null
+  const followed = theme?.on ? theme.palette : null
   if (followed) {
     for (const [key, value] of Object.entries(followed.vars)) root.style.setProperty(key, value)
     applied = Object.keys(followed.vars)

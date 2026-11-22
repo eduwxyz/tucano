@@ -22,7 +22,7 @@ import { Workspaces } from './workspaces'
 import { backgroundOptions } from './background-qa'
 import { homePhone } from './home-phone'
 import { readOmarchy, watchOmarchy, type OmarchyTheme } from './omarchy'
-import type { OmarchyState } from '../shared/omarchy'
+import type { OmarchyPalette, OmarchyState } from '../shared/omarchy'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
 import { proxyFromPac } from '../core/network'
@@ -682,7 +682,8 @@ ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
 // computer's choice, kept in workspaces.json beside light/dark, so every workspace shows it
 // and a server's page, which is someone else's computer, never does.
 let omarchy: OmarchyTheme | null = null
-const followedOmarchy = (): OmarchyTheme | null => (omarchy && registry.omarchy() ? omarchy : null)
+// The colours the window takes: none while not following, or with a theme that has none.
+const followedOmarchy = (): OmarchyPalette | null => (registry.omarchy() ? (omarchy?.palette ?? null) : null)
 const omarchyState = (): OmarchyState | null => (omarchy ? { ...omarchy, on: registry.omarchy() } : null)
 // What the window shows before the page draws, so a dark desktop doesn't flash cream.
 function windowBackground(): string {

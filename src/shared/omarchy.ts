@@ -14,10 +14,13 @@ export interface OmarchyPalette {
   vars: Record<`--${string}`, string>
 }
 
-// Read by the window from main (src/main/omarchy.ts): null off Omarchy.
-export interface OmarchyState extends OmarchyPalette {
+// Read by the window from main (src/main/omarchy.ts): null off Omarchy. On Omarchy with a
+// theme that has no colours to read (Osaka Jade ships none), the palette is null and the
+// window keeps Tucano's, but the choice stays there to turn off.
+export interface OmarchyState {
   on: boolean
   name: string // the theme's folder name, "tokyo-night"
+  palette: OmarchyPalette | null
 }
 
 // key → value, for the lines that hold one. Quoted values may carry a '#', which outside

@@ -70,11 +70,21 @@ it.runIf(linux)("reads the desktop's current theme, from the state folder or the
   expect(readOmarchy([state, config])).toBeNull()
   mkdirSync(join(config, 'theme'), { recursive: true })
   writeFileSync(join(config, 'theme', 'colors.toml'), fixture('white'))
-  expect(readOmarchy([state, config])?.mode).toBe('light')
+  expect(readOmarchy([state, config])?.palette?.mode).toBe('light')
   mkdirSync(join(state, 'theme'), { recursive: true })
   writeFileSync(join(state, 'theme', 'colors.toml'), fixture('tokyo-night'))
   writeFileSync(join(state, 'theme.name'), 'tokyo-night\n')
-  expect(readOmarchy([state, config])).toMatchObject({ name: 'tokyo-night', mode: 'dark' })
+  expect(readOmarchy([state, config])).toMatchObject({ name: 'tokyo-night', palette: { mode: 'dark' } })
+})
+
+it.runIf(linux)('still says it is Omarchy under a theme with no colours, so the choice can be turned off', () => {
+  // Osaka Jade ships no colors.toml: the window keeps Tucano's colours, the choice stays.
+  const current = join(temp(), 'current')
+  mkdirSync(join(current, 'theme'), { recursive: true })
+  writeFileSync(join(current, 'theme.name'), 'osaka-jade\n')
+  expect(readOmarchy([current])).toEqual({ name: 'osaka-jade', palette: null })
+  writeFileSync(join(current, 'theme', 'colors.toml'), 'accent = "#7aa2f7"\n') // nothing to build on
+  expect(readOmarchy([current])).toEqual({ name: 'osaka-jade', palette: null })
 })
 
 it.runIf(linux)('sees a switch, which renames the next theme over the current one', async () => {
@@ -82,7 +92,7 @@ it.runIf(linux)('sees a switch, which renames the next theme over the current on
   mkdirSync(join(current, 'theme'), { recursive: true })
   writeFileSync(join(current, 'theme', 'colors.toml'), fixture('tokyo-night'))
   const seen: (string | undefined)[] = []
-  const stop = watchOmarchy((t) => seen.push(t?.mode), [current])
+  const stop = watchOmarchy((t) => seen.push(t?.palette?.mode ?? (t ? 'none' : undefined)), [current])
   try {
     // What omarchy-theme-set does: build next-theme/, then move it over theme/.
     mkdirSync(join(current, 'next-theme'))
@@ -93,6 +103,10 @@ it.runIf(linux)('sees a switch, which renames the next theme over the current on
     // …and a file rewritten in place, inside the new folder.
     writeFileSync(join(current, 'theme', 'colors.toml'), fixture('tokyo-night'))
     await expect.poll(() => seen, { timeout: 3_000 }).toEqual(['light', 'dark'])
+    // …and a switch to a theme with no colours is still a change, not Omarchy going away.
+    rmSync(join(current, 'theme'), { recursive: true })
+    mkdirSync(join(current, 'theme'))
+    await expect.poll(() => seen, { timeout: 3_000 }).toEqual(['light', 'dark', 'none'])
   } finally {
     stop()
   }

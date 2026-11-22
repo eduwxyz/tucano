@@ -10,25 +10,20 @@ export function omarchyCurrentDirs(home = homedir()): string[] {
   return [join(home, '.local', 'state', 'omarchy', 'current'), join(home, '.config', 'omarchy', 'current')]
 }
 
-export type OmarchyTheme = OmarchyPalette & { name: string }
+// The desktop's theme: its name, and its colours when it has some to read.
+export type OmarchyTheme = { name: string; palette: OmarchyPalette | null }
 
-// The desktop's theme now, or null off Omarchy (or with a theme that has no colours to read).
+// The desktop's theme now, or null off Omarchy. Being on Omarchy is its folder being there,
+// not the theme having colours: a theme without them still shows the choice, to turn it off.
 export function readOmarchy(dirs = omarchyCurrentDirs()): OmarchyTheme | null {
   if (process.platform !== 'linux') return null
-  for (const dir of dirs) {
-    const file = join(dir, 'theme', 'colors.toml')
-    if (!existsSync(file)) continue
-    try {
-      const palette = omarchyPalette(readFileSync(file, 'utf8'))
-      if (!palette) continue
-      let name = ''
-      try { name = readFileSync(join(dir, 'theme.name'), 'utf8').trim() } catch { /* a theme without its name still has its colours */ }
-      return { ...palette, name }
-    } catch {
-      continue
-    }
-  }
-  return null
+  const dir = dirs.find((d) => existsSync(d))
+  if (!dir) return null
+  let palette: OmarchyPalette | null = null
+  try { palette = omarchyPalette(readFileSync(join(dir, 'theme', 'colors.toml'), 'utf8')) } catch { /* no colours to read */ }
+  let name = ''
+  try { name = readFileSync(join(dir, 'theme.name'), 'utf8').trim() } catch { /* a theme without its name still has its colours */ }
+  return { name, palette }
 }
 
 // Calls back with the new theme each time it changes. A switch builds the next theme beside
