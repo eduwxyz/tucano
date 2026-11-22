@@ -3179,6 +3179,19 @@ h3 {
   justify-content: flex-end;
   margin-top: 8px;
 }
+/* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */
+.ask-option__pill {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
 .ask-option__detail {
   font-size: 12px;
   color: var(--text-3);

@@ -8,7 +8,7 @@ import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import { ACCESS_REQUEST, CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Person, type Routine, type Settings, type Skill } from '../shared/types'
 import type { ToolDef } from './gateway'
-import { describeQuestions, questionsOf } from '../shared/questions'
+import { describeQuestions, hasOpenSteps, isNextSteps, questionsOf } from '../shared/questions'
 import { osOf, shellCommand, systemName } from './platform'
 import { kindLabel, levelOf, policyOf, type ActionKind, type Autonomy } from '../shared/actions'
 
@@ -498,14 +498,25 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
     return a ? `${a.name}${a.id === agent.id ? L(' (você)', ' (you)') : ''} · ${L('agente', 'agent')}` : L('agente removido', 'removed agent')
   }
 
+  // The next steps it proposed are part of what it said. Proposed is not asked for: unless they came
+  // back ticked (in a message of the person's), they're not work to do.
+  const nextStepsLine = (m: Message): string => {
+    const steps = questionsOf(m.run).flatMap((q) => (q.options ?? []).map((o) => o.label)).join(' | ')
+    if (m.run?.cancelled) return L(`(próximos passos que você propôs e a pessoa dispensou, não faça: ${steps})`, `(next steps you proposed and the person dismissed, don't do them: ${steps})`)
+    if (m.run?.stepsReplaced) return L(`(próximos passos que você propôs num card que um mais novo substituiu, sem escolha da pessoa, não faça sem ela pedir: ${steps})`, `(next steps you proposed on a card that a newer one replaced, not chosen by the person, don't do them unless they ask: ${steps})`)
+    if (hasOpenSteps(m.run)) return L(`(próximos passos que você propôs num card, ainda sem escolha da pessoa, não faça sem ela pedir: ${steps})`, `(next steps you proposed on a card, not chosen by the person yet, don't do them unless they ask: ${steps})`)
+    return L(`(próximos passos que você propôs num card: ${steps})`, `(next steps you proposed on a card: ${steps})`)
+  }
+
   // A question asked with ask_user is part of what the agent said.
   const body = (m: Message): string =>
     [
       m.text.trim(),
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
       ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),
-      questionsOf(m.run).length > 0 && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`),
-      m.run?.cancelled && L('(a pergunta foi cancelada: ninguém respondeu, siga sem a resposta)', '(the question was cancelled: no one answered, go on without the answer)')
+      questionsOf(m.run).some(isNextSteps) && nextStepsLine(m),
+      questionsOf(m.run).length > 0 && !questionsOf(m.run).some(isNextSteps) && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`),
+      m.run?.cancelled && !questionsOf(m.run).some(isNextSteps) && L('(a pergunta foi cancelada: ninguém respondeu, siga sem a resposta)', '(the question was cancelled: no one answered, go on without the answer)')
     ]
       .filter(Boolean)
       .join('\n\n')
