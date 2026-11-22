@@ -153,7 +153,7 @@ export class Vault {
       return {
         error: L(
           `Não rodei: ${missing.join(', ')} não ${missing.length > 1 ? 'estão' : 'está'} no Cofre pra você. ${have.length ? `As chaves que você pode usar: ${have.join(', ')}.` : 'Nenhuma chave do Cofre foi liberada pra você.'} Peça a quem você atende que salve a chave no Cofre e libere pra você; nunca peça que cole a chave na conversa.`,
-          `Not run: ${missing.join(', ')} ${missing.length > 1 ? "aren't" : "isn't"} in the Cofre for you. ${have.length ? `The keys you may use: ${have.join(', ')}.` : 'No key in the Cofre was given to you.'} Ask the person you're working for to save the key in the Cofre and give it to you; never ask them to paste the key in the conversation.`
+          `Not run: ${missing.join(', ')} ${missing.length > 1 ? "aren't" : "isn't"} in the Vault for you. ${have.length ? `The keys you may use: ${have.join(', ')}.` : 'No key in the Vault was given to you.'} Ask the person you're working for to save the key in the Vault and give it to you; never ask them to paste the key in the conversation.`
         )
       }
     }
@@ -163,7 +163,7 @@ export class Vault {
   // A key's value: from the keychain, or read from 1Password when it's a reference.
   private async value(k: VaultKey): Promise<string> {
     const stored = await this.deps.secrets.get(secretKey(k.id))
-    if (stored === undefined) throw new Error(L(`A chave ${k.name} está sem valor no Cofre: salve de novo.`, `The ${k.name} key has no value in the Cofre: save it again.`))
+    if (stored === undefined) throw new Error(L(`A chave ${k.name} está sem valor no Cofre: salve de novo.`, `The ${k.name} key has no value in the Vault: save it again.`))
     const value = isOpRef(stored) ? await resolveOp(stored, this.deps.readOp) : stored
     this.values.set(k.id, value)
     return value

@@ -1114,6 +1114,7 @@ setInterval(() => {
 
 const runner = new Runner({
   db,
+  feedbackOn: () => feedback.on,
   engines: engineImpls,
   settings: () => enginesReady.then(settings),
   emit,
@@ -1250,6 +1251,8 @@ void ready.then(async () => {
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await enginesReady
   routines.start()
+  // A prompt of mine that was still queued when the app closed goes now (runs.ts, resumeQueued).
+  void runner.resumeQueued()
   // A Tucano that had more people (or an invite out) before the heritage existed gets it now.
   if (db.people({ removed: true }).length > 1 || db.invites().length) inherit()
 }).catch((e: unknown) => {
@@ -1965,9 +1968,10 @@ const api: Handlers = {
     return people.pageFor(ctx.person, [root, ...db.recentMessages(root.conversationId, 100_000, rootId)])
   },
 
-  sendMessage: ({ conversationId, text, images, files, threadId }, ctx) => {
+  sendMessage: ({ conversationId, text, images, files, threadId, mode, steerTo }, ctx) => {
     reach(ctx, conversationId)
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, files?.length ? { files } : {}), 'sendMessage')
+    // `mode` 'steer': written in a running reply's own pill, for that reply (`steerTo`), not a prompt.
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(mode === 'steer' ? { mode } : {}), ...(steerTo ? { steerTo } : {}) }), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
@@ -1977,7 +1981,7 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
-  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
+  retryRun: ({ messageId, note }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId, note ?? undefined)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
   // The note a job left where it stopped on its brakes: Continuar, by whoever can see it.
@@ -2026,6 +2030,7 @@ const api: Handlers = {
     if (!isAutonomy(clean.autonomy)) delete clean.autonomy
     if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
     if (clean.proactive !== false) delete clean.proactive // on unless turned off
+    if (clean.oneAtATime !== true) delete clean.oneAtATime // as many at once unless turned on
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo
@@ -2658,7 +2663,7 @@ const api: Handlers = {
     if (!people.canSeeApproval(ctx.person, a)) throw new Error(L('Esse pedido não existe mais.', 'That request no longer exists.'))
     must(ctx.person, { kind: 'approval', agentOwner: agentOwner(db, a.agentId) })
     if (!people.canDecide(ctx.person, a)) throw new UserError(L('Isso roda no computador de outra pessoa: só ela decide.', "That runs on someone else's computer: only they decide."))
-    if (a.connectorId === COFRE && decision === 'approved') throw new UserError(L('Cole a chave no card, ou libere uma do Cofre.', 'Paste the key in the card, or give one from the Cofre.'))
+    if (a.connectorId === COFRE && decision === 'approved') throw new UserError(L('Cole a chave no card, ou libere uma do Cofre.', 'Paste the key in the card, or give one from the Vault.'))
     bg(runner.decide(id, decision, reason?.trim() || undefined, always, ctx.person.id), 'decideApproval')
   },
 
@@ -3166,6 +3171,7 @@ const api: Handlers = {
   // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
   answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),
   submitDecisions: ({ messageId }, ctx) => runner.submitDecisions(messageId, ctx.person),
+  cancelQuestion: ({ messageId }, ctx) => runner.cancelQuestion(messageId, ctx.person),
   runRoutine: ({ id }, ctx) => {
     const r = db.routine(id)
     if (!r) throw new Error(L('Essa rotina não existe mais.', 'That routine no longer exists.'))

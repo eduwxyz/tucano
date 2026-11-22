@@ -29,6 +29,7 @@ import {
   roleLabel,
   teamMode,
   youPerson,
+  windowless,
   type Agent,
   type Conversation,
   type Message,
@@ -74,7 +75,7 @@ function NavItem({ view, icon, label, badge, fresh }: { view: View; icon: IconNa
 // The Tuca is a screen, not one of the agents: here at the top, and behind the "+" for a new agent.
 function TucaItem(): ReactNode {
   return (
-    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Monte um agente conversando com o Tuca', 'Build an agent by chatting with Tuca')}>
+    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Pergunte ao Tuca como algo funciona, por que algo falhou, ou monte um agente com ele', 'Ask Tuca how something works or why something failed, or build an agent with him')}>
       <TucaMark size={18} />
       <span className="nav-item__label">Tuca</span>
       <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
@@ -224,7 +225,7 @@ function TopRow({ item, back, onMenu, sort, children }: { item: TopItem; back?: 
           <Icon name="more" size={14} />
         </button>
       )}
-      {back && <p className="top-row__back">{L('Você tinha tirado da barra. Some de novo quando nada esperar por você.', 'You took it out of the sidebar. It goes again once nothing waits on you.')}</p>}
+      {back && <p className="top-row__back">{L('Você tinha tirado da barra. Some de novo quando nada esperar por você.', 'You removed this from the sidebar. It hides again when nothing needs your attention.')}</p>}
     </div>
   )
 }
@@ -751,9 +752,10 @@ const AgentRow = memo(function AgentRow({ id, dm, unread, owner }: { id: string;
           </span>
         ) : null}
         {/* Last, so what comes and goes (working, waiting, unread) shows before it and it never moves. */}
+        {/* On a server, "this computer" is the server's own: said as that, not as the person's laptop. */}
         {agent.computer && agent.computerKind === 'mac' && (
-          <span className="nav-item__mac" title={L('Roda no seu computador', 'Runs on your computer')}>
-            <Icon name="laptop" size={12} />
+          <span className="nav-item__mac" title={windowless() ? L('Roda direto no servidor', 'Runs right on the server') : L('Roda no seu computador', 'Runs on your computer')}>
+            <Icon name={windowless() ? 'globe' : 'laptop'} size={12} />
           </span>
         )}
       </button>

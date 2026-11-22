@@ -95,7 +95,7 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
-  if (dialog?.kind === 'feedback') return <FeedbackDialog image={dialog.image} onClose={close} />
+  if (dialog?.kind === 'feedback') return <FeedbackDialog {...(dialog.image ? { image: dialog.image } : {})} {...(dialog.draft ? { draft: dialog.draft } : {})} {...(dialog.from ? { from: dialog.from } : {})} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
   if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />
@@ -106,8 +106,9 @@ function DialogBody(): ReactNode {
 function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () => void }): ReactNode {
   const dmName = useStore((s) => (conv?.kind === 'dm' && conv.members[0] ? agentById(s, conv.members[0])?.name : undefined))
   const channel = conv?.kind !== 'dm'
-  // Its name and topic are its maker's and the admins'; anyone else only sees them.
-  const editable = useStore((s) => !conv || canEditChannel(s, conv))
+  // A channel's name and topic are its maker's and the admins'; anyone else only sees them.
+  // Where a DM's agent answers is up to whoever is in it.
+  const editable = useStore((s) => !conv || conv.kind === 'dm' || canEditChannel(s, conv))
   const [name, setName] = useState(conv?.name ?? '')
   const [topic, setTopicText] = useState(conv?.topic ?? '')
   const [threads, setThreadsOn] = useState(!!conv?.threads)
@@ -156,7 +157,7 @@ function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () =>
           </span>
           <span className="hint">
             {editable
-              ? L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', 'One line at the top of the channel saying what it is for. Empty, it goes away.')
+              ? L('Uma linha no topo do canal dizendo pra que ele serve. Vazio, some.', "One-line channel description. Leave empty to hide it.")
               : L('O nome, o tema e os agentes, quem muda é quem criou o canal ou um admin.', 'The name, topic and agents are changed by whoever created the channel or an admin.')}
           </span>
         </label>
@@ -276,7 +277,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
         </a>
       </p>
       {automatic ? (
-        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', '2. After you allow it, come back here: Tucano connects on its own and this closes.')}</p>
+        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', "2. Once you allow it, come back here. Tucano connects and closes this window.")}</p>
       ) : (
         <label className="field">
           <span className="field__label">{L('2. Cole aqui o endereço em que ela terminou', '2. Paste the address it ended on')}</span>
@@ -286,7 +287,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
           <span className="hint">
             {L(
               'Depois de permitir, o navegador vai pra um endereço que começa com http://127.0.0.1 e mostra que a página não abre. É normal: o Tucano está no servidor. Copie o endereço inteiro da barra e cole aqui.',
-              'After you allow it, the browser goes to an address starting with http://127.0.0.1 and says the page can’t be reached. That’s expected: Tucano is on the server. Copy the whole address from the bar and paste it here.'
+              "After you allow it, a 127.0.0.1 page may not load, because Tucano runs on a server. Copy the full address and paste it here."
             )}
           </span>
         </label>
@@ -313,7 +314,7 @@ export function confirmDeleteAgent(agent: Pick<Agent, 'id' | 'name'>): Promise<b
     title: L(`Excluir ${agent.name} para sempre?`, `Delete ${agent.name} for good?`),
     body: L(
       `As mensagens que ${agent.name} escreveu continuam nas conversas, com o nome riscado, e os recibos continuam em Uso e limites. Vão embora as instruções, as permissões, as memórias dele, as rotinas, o computador, os logins do navegador e os arquivos da pasta dele.\n\nNão dá pra desfazer.`,
-      `The messages ${agent.name} wrote stay in the conversations, with the name struck out, and its receipts stay in Usage and limits. Its instructions, permissions, memories, routines, computer, browser logins and folder go.\n\nThis can’t be undone.`
+      `Messages written by ${agent.name} remain in conversations with the name struck out; receipts remain in Usage and limits. Its instructions, permissions, memories, routines, computer, browser logins and folder are deleted.\n\nThis cannot be undone.`
     ),
     confirm: L(`Excluir ${agent.name}`, `Delete ${agent.name}`),
     danger: true,
@@ -396,7 +397,7 @@ const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] =>
       ] as const)
     : []),
   { label: L('Conectores', 'Connectors'), view: { kind: 'connectors' }, icon: 'plug' },
-  { label: L('Cofre', 'Cofre'), view: { kind: 'vault' }, icon: 'key' },
+  { label: L('Cofre', 'Vault'), view: { kind: 'vault' }, icon: 'key' },
   { label: L('Configurações', 'Settings'), view: { kind: 'settings' }, icon: 'gear' }
 ]
 

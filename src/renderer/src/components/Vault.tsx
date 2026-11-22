@@ -39,7 +39,7 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
   const remove = (k: VaultKey): void =>
     void confirmDialog({
       title: L(`Apagar ${k.name}?`, `Delete ${k.name}?`),
-      body: L('Os agentes deixam de poder usar essa chave, e o valor sai do chaveiro do sistema. Um conector que aponta pra ela para de conectar. Não dá pra desfazer.', 'The agents can no longer use this key, and its value leaves the system keychain. A connector pointing to it stops connecting. This can’t be undone.'),
+      body: L('Os agentes deixam de poder usar essa chave, e o valor sai do chaveiro do sistema. Um conector que aponta pra ela para de conectar. Não dá pra desfazer.', 'Agents can no longer use this key, and its value is removed from the system keychain. A connector using it will stop connecting. This cannot be undone.'),
       confirm: L(`Apagar ${k.name}`, `Delete ${k.name}`),
       danger: true
     }).then((ok) => {
@@ -48,7 +48,7 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
   const removeLogin = (l: VaultLogin): void =>
     void confirmDialog({
       title: L(`Apagar o login de ${host(l.origin)}?`, `Delete the login for ${host(l.origin)}?`),
-      body: L('Os agentes deixam de entrar sozinhos nesse site, e a senha sai do chaveiro do sistema. O que já está logado no navegador deles continua até sair.', 'The agents stop signing in to that site on their own, and the password leaves the system keychain. What’s already signed in in their browsers stays until they sign out.'),
+      body: L('Os agentes deixam de entrar sozinhos nesse site, e a senha sai do chaveiro do sistema. O que já está logado no navegador deles continua até sair.', 'Agents will no longer sign in to this site automatically, and the password is removed from the system keychain. Existing browser sessions remain signed in until signed out.'),
       confirm: L('Apagar', 'Delete'),
       danger: true
     }).then((ok) => {
@@ -106,7 +106,7 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
   )
   return (
     <Page
-      title={L('Cofre', 'Cofre')}
+      title={L('Cofre', 'Vault')}
       subtitle={L(
         'Chaves e logins que os agentes usam sem nunca ver: uma chave pelo nome, só no comando que pede (no que ele imprime, aparece como [cofre:NOME]); um login, digitado pelo app no site exato.',
         'Keys and logins the agents use without ever seeing them: a key by name, only in the command that asks for it (in what it prints, it shows as [cofre:NAME]); a login, typed by the app on the exact site.'
@@ -138,10 +138,10 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
         <UsesLog />
       ) : tab === 'logins' ? (
         logins === null ? null : (
-          drawers(logins, loginList, <EmptyLogins onNew={newLogin} />, { none: L('Nenhum login do time ainda.', 'No team logins yet.'), noneMine: L('Nenhum login seu.', 'No logins of yours.'), newMine: L('Novo login meu…', 'New login of mine…') }, () => setEditingLogin('new-mine'))
+          drawers(logins, loginList, <EmptyLogins onNew={newLogin} />, { none: L('Nenhum login do time ainda.', 'No team logins yet.'), noneMine: L('Nenhum login seu.', 'You have no logins yet.'), newMine: L('Novo login meu…', 'New personal login…') }, () => setEditingLogin('new-mine'))
         )
       ) : keys === null ? null : (
-        drawers(keys, keyList, <Empty onNew={newKey} />, { none: L('Nenhuma chave do time ainda.', 'No team keys yet.'), noneMine: L('Nenhuma chave sua.', 'No keys of yours.'), newMine: L('Nova chave minha…', 'New key of mine…') }, () => setEditing('new-mine'))
+        drawers(keys, keyList, <Empty onNew={newKey} />, { none: L('Nenhuma chave do time ainda.', 'No team keys yet.'), noneMine: L('Nenhuma chave sua.', 'You have no keys yet.'), newMine: L('Nova chave minha…', 'New personal key…') }, () => setEditing('new-mine'))
       )}
       {editing && <KeyEditor k={typeof editing === 'string' ? undefined : editing} mine={editing === 'new-mine'} onClose={() => setEditing(null)} onSaved={() => (setEditing(null), load())} />}
       {editingLogin && <LoginEditor l={typeof editingLogin === 'string' ? undefined : editingLogin} mine={editingLogin === 'new-mine'} onClose={() => setEditingLogin(null)} onSaved={() => (setEditingLogin(null), load())} />}
@@ -202,7 +202,7 @@ export function LoginEditor({ l, mine, agentId, onClose, onSaved }: { l?: VaultL
   const [note, setNote] = useState(l?.note ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const siteError = site.trim() && !loginOrigin(site) ? L('Use o endereço do site, com https: conta.exemplo.com.br.', 'Use the site’s address, with https: account.example.com.') : undefined
+  const siteError = site.trim() && !loginOrigin(site) ? L('Use o endereço do site, com https: conta.exemplo.com.br.', 'Enter the site address with HTTPS, for example https://account.example.com.') : undefined
   const save = (): void => {
     setBusy(true)
     setError('')
@@ -212,7 +212,7 @@ export function LoginEditor({ l, mine, agentId, onClose, onSaved }: { l?: VaultL
   }
   const toggle = (id: string): void => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))
   return (
-    <Modal title={l ? L(`Editar o login de ${host(l.origin)}`, `Edit the login for ${host(l.origin)}`) : mine ? L('Novo login seu', 'New login of yours') : L('Novo login', 'New login')} onClose={onClose}>
+    <Modal title={l ? L(`Editar o login de ${host(l.origin)}`, `Edit the login for ${host(l.origin)}`) : mine ? L('Novo login seu', 'New personal login') : L('Novo login', 'New login')} onClose={onClose}>
       <form
         className="vault-editor"
         onSubmit={(e) => {
@@ -226,10 +226,10 @@ export function LoginEditor({ l, mine, agentId, onClose, onSaved }: { l?: VaultL
         <Field label={L('Usuário ou email', 'Username or email')} hint={l ? L(`Salvo: ${l.username}. Deixe vazio pra manter.`, `Saved: ${l.username}. Leave empty to keep it.`) : undefined}>
           <input spellCheck={false} autoComplete="off" value={username} placeholder={l?.username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
-        <Field label={L('Senha', 'Password')} hint={l ? L('Deixe vazio pra manter; digite outra pra trocar.', 'Leave empty to keep it; type another to replace it.') : L('Fica cifrada no chaveiro do sistema. Um op://Cofre/Item/senha vem do 1Password na hora.', 'It stays encrypted in the system keychain. An op://Vault/Item/password comes from 1Password at the moment.')}>
+        <Field label={L('Senha', 'Password')} hint={l ? L('Deixe vazio pra manter; digite outra pra trocar.', 'Leave empty to keep it; type another to replace it.') : L('Fica cifrada no chaveiro do sistema. Um op://Cofre/Item/senha vem do 1Password na hora.', 'The password stays encrypted in the system keychain. An op://Vault/Item/password reference is read from 1Password when used.')}>
           <input type="password" spellCheck={false} autoComplete="new-password" value={password} placeholder={L('Senha ou op://…', 'Password or op://…')} onChange={(e) => setPassword(e.target.value)} />
         </Field>
-        <Field label={L('Agentes que podem usar', 'Agents that may use it')} group hint={L('Cada agente tem um login por site: liberar este tira o outro.', 'Each agent has one login per site: giving this one takes the other away.')}>
+        <Field label={L('Agentes que podem usar', 'Agents that may use it')} group hint={L('Cada agente tem um login por site: liberar este tira o outro.', 'Each agent can have one login per site. Assigning this login replaces its existing login for that site.')}>
           <div className="vault-editor__agents">
             {agents.map((a) => (
               <label key={a.id} className={`chip ${chosen.includes(a.id) ? 'is-on' : ''}`}>
@@ -250,7 +250,7 @@ export function LoginEditor({ l, mine, agentId, onClose, onSaved }: { l?: VaultL
             {L('Cancelar', 'Cancel')}
           </button>
           <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !site.trim() || !!siteError || (!l && (!username.trim() || !password))}>
-            {l ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Cofre')}
+            {l ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Vault')}
           </button>
         </footer>
       </form>
@@ -319,7 +319,7 @@ function KeyEditor({ k, mine, onClose, onSaved }: { k?: VaultKey; mine: boolean;
   }
   const toggle = (id: string): void => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))
   return (
-    <Modal title={k ? L(`Editar ${k.name}`, `Edit ${k.name}`) : mine ? L('Nova chave sua', 'New key of yours') : L('Nova chave', 'New key')} onClose={onClose}>
+    <Modal title={k ? L(`Editar ${k.name}`, `Edit ${k.name}`) : mine ? L('Nova chave sua', 'New personal key') : L('Nova chave', 'New key')} onClose={onClose}>
       <form
         className="vault-editor"
         onSubmit={(e) => {
@@ -333,7 +333,7 @@ function KeyEditor({ k, mine, onClose, onSaved }: { k?: VaultKey; mine: boolean;
         <Field label={L('Valor', 'Value')} hint={k ? L(`Salvo: ${k.hint}. Deixe vazio pra manter; cole outro pra trocar.`, `Saved: ${k.hint}. Leave empty to keep it; paste another to replace it.`) : L('Fica cifrado no chaveiro do sistema e nunca mais aparece. Um op://Cofre/Item/campo vem do 1Password na hora do uso.', 'It stays encrypted in the system keychain and never shows again. An op://Vault/Item/field comes from 1Password at the moment of use.')}>
           <input type="password" autoFocus={!!k} spellCheck={false} autoComplete="new-password" value={value} placeholder={k ? k.hint : L('Cole a chave', 'Paste the key')} onChange={(e) => setValue(e.target.value)} />
         </Field>
-        <Field label={L('Agentes que podem usar', 'Agents that may use it')} group hint={chosen.length ? undefined : L('Nenhum ainda: a chave fica guardada até você liberar.', 'None yet: the key stays put until you give it out.')}>
+        <Field label={L('Agentes que podem usar', 'Agents that may use it')} group hint={chosen.length ? undefined : L('Nenhum ainda: a chave fica guardada até você liberar.', 'No agents selected. The key remains unassigned until you choose an agent.')}>
           <div className="vault-editor__agents">
             {agents.map((a) => (
               <label key={a.id} className={`chip ${chosen.includes(a.id) ? 'is-on' : ''}`}>
@@ -347,7 +347,7 @@ function KeyEditor({ k, mine, onClose, onSaved }: { k?: VaultKey; mine: boolean;
         <label className="lrow">
           <span className="lrow__label">
             <span className="lrow__name">{L('Pedir aprovação a cada uso', 'Ask for approval each use')}</span>
-            <span className="lrow__sub">{L('O comando espera alguém aprovar, com o comando inteiro à vista. Pra chaves que mexem em dinheiro ou em produção.', 'The command waits for someone to approve, with the whole command in view. For keys that touch money or production.')}</span>
+            <span className="lrow__sub">{L('O comando espera alguém aprovar, com o comando inteiro à vista. Pra chaves que mexem em dinheiro ou em produção.', 'The command waits for approval, and the full command is shown to the approver. Use this for keys that affect money or production.')}</span>
           </span>
           <Toggle on={approve} onChange={setApprove} label={L('Pedir aprovação a cada uso', 'Ask for approval each use')} />
         </label>
@@ -361,7 +361,7 @@ function KeyEditor({ k, mine, onClose, onSaved }: { k?: VaultKey; mine: boolean;
             {L('Cancelar', 'Cancel')}
           </button>
           <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !name.trim() || !!nameError || (!k && !value)}>
-            {k ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Cofre')}
+            {k ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Vault')}
           </button>
         </footer>
       </form>
@@ -395,7 +395,7 @@ function ImportEnv({ have, mine, onClose, onSaved }: { have: VaultKey[]; mine: b
   }
   return (
     <Modal title={L('Importar .env', 'Import .env')} onClose={onClose}>
-      <p className="small modal__lead">{L('Cole o conteúdo do arquivo. Cada NOME=valor vira uma chave, sem nenhum agente liberado: você escolhe depois.', 'Paste the file’s content. Each NAME=value becomes a key, given to no agent: you choose afterwards.')}</p>
+      <p className="small modal__lead">{L('Cole o conteúdo do arquivo. Cada NOME=valor vira uma chave, sem nenhum agente liberado: você escolhe depois.', 'Paste the file contents. Each NAME=value becomes a key without an assigned agent; you choose agents afterwards.')}</p>
       <textarea className="vault-import__text" rows={6} spellCheck={false} autoFocus value={text} placeholder={'STRIPE_KEY=sk_live_…\nDATABASE_URL=postgres://…'} onChange={(e) => setText(e.target.value)} />
       {lines.length > 0 && (
         <div className="table vault-import__lines">
@@ -437,7 +437,7 @@ function UsesLog(): ReactNode {
   const s = useStore((st) => ({ agents: st.agents, people: st.people }))
   useEffect(() => void vaultUses().then(setUses, () => setUses([])), [])
   if (!uses) return null
-  if (!uses.length) return <p className="muted">{L('Nada do Cofre foi usado ainda. Cada uso aparece aqui: qual chave ou login, qual agente, pra quem e onde.', 'Nothing in the Cofre was used yet. Each use shows here: which key or login, which agent, for whom and where.')}</p>
+  if (!uses.length) return <p className="muted">{L('Nada do Cofre foi usado ainda. Cada uso aparece aqui: qual chave ou login, qual agente, pra quem e onde.', 'No Vault items have been used yet. Each use shows the key or login, agent, who it was used for and where.')}</p>
   const via = { bash: L('comando', 'command'), service: L('serviço', 'service'), connector: L('conector', 'connector'), login: L('login no navegador', 'browser sign-in') }
   return (
     <div className="table vault-log">
@@ -485,9 +485,9 @@ export function AgentVaultKeys({ agentId, name }: { agentId: string; name: strin
     <div className="vault-agent">
       {keys.length === 0 ? (
         <p className="muted small">
-          {L('Nenhuma chave no Cofre ainda.', 'No keys in the Cofre yet.')}{' '}
+          {L('Nenhuma chave no Cofre ainda.', 'No keys in the Vault yet.')}{' '}
           <button type="button" className="link" onClick={() => navigate({ kind: 'vault' })}>
-            {L('Abrir o Cofre', 'Open the Cofre')}
+            {L('Abrir o Cofre', 'Open the Vault')}
           </button>
         </p>
       ) : (
@@ -590,13 +590,13 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
   }
   const who = agent?.name ?? L('O agente', 'The agent')
   const ready = nome ? !!value.trim() : !!username.trim() && !!password
-  const ownWords = !team ? '' : admin && forTeam ? L('Fica entre as do time.', 'It goes among the team’s.') : approval.requestedBy && approval.requestedBy !== you ? L(`Fica entre as suas: ${who} só usa no que você pedir, e este pedido é de ${requester}.`, `It goes among yours: ${who} only uses it in what you ask for, and this request is ${requester}’s.`) : L(`Fica entre as suas: ${who} usa no que você pedir.`, `It goes among yours: ${who} uses it in what you ask for.`)
+  const ownWords = !team ? '' : admin && forTeam ? L('Fica entre as do time.', 'Saved with the team’s items.') : approval.requestedBy && approval.requestedBy !== you ? L(`Fica entre as suas: ${who} só usa no que você pedir, e este pedido é de ${requester}.`, `Saved with your items. ${who} can use it only for work you request. This request is from ${requester}.`) : L(`Fica entre as suas: ${who} usa no que você pedir.`, `Saved with your items. ${who} can use it for work you request.`)
   return (
     <div className={`approval approval--${approval.state} key-request ${compact ? 'approval--compact' : ''}`}>
       <div className="approval__head">
         <span className="approval__badge">
           <Icon name={nome ? 'key' : 'lock'} size={13} />
-          {pending ? L('Esperando uma chave', 'Waiting for a key') : approval.state === 'approved' ? L('No Cofre', 'In the Cofre') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
+          {pending ? L('Esperando uma chave', 'Waiting for a key') : approval.state === 'approved' ? L('No Cofre', 'In the Vault') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
         </span>
       </div>
       <div className="approval__title">
@@ -609,7 +609,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
             (k.owner ? k.owner === you : admin) ? (
               <div key={k.id} className="row key-request__saved">
                 <span className="grow small">
-                  {k.owner ? L('Você já tem uma no Cofre', 'You already have one in the Cofre') : L('Já tem uma do time no Cofre', 'There’s a team one in the Cofre')} <span className="muted">({k.label})</span>
+                  {k.owner ? L('Você já tem uma no Cofre', 'You already have one in the Vault') : L('Já tem uma do time no Cofre', 'A team item is already in the Vault')} <span className="muted">({k.label})</span>
                 </span>
                 <button className="btn btn--sm" disabled={busy} onClick={() => send({ existing: k.id })}>
                   {L(`Liberar pra ${who}`, `Give it to ${who}`)}
@@ -617,7 +617,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
               </div>
             ) : (
               <p key={k.id} className="muted small">
-                {L('Já tem uma do time no Cofre: só um admin libera.', 'There’s a team one in the Cofre: only an admin gives it out.')}
+                {L('Já tem uma do time no Cofre: só um admin libera.', 'A team item is already in the Vault. Only an admin can assign it.')}
               </p>
             )
           )}
@@ -643,7 +643,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
             )}
             <div className="row approval__buttons">
               <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !ready}>
-                {L('Guardar no Cofre e liberar', 'Keep in the Cofre and give')}
+                {L('Guardar no Cofre e liberar', 'Save in the Vault and assign')}
               </button>
               {mayRefuse && (
                 <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => decideApproval(approval.id, 'refused')}>
@@ -653,7 +653,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
             </div>
           </form>
           <p className="approval__bound">
-            {L(`Vai direto pro Cofre, cifrado: não aparece na conversa, e ${who} nunca vê.`, `It goes straight into the Cofre, encrypted: it doesn’t show in the conversation, and ${who} never sees it.`)} {ownWords}
+            {L(`Vai direto pro Cofre, cifrado: não aparece na conversa, e ${who} nunca vê.`, `Saved directly in the Vault, encrypted. It does not appear in the conversation, and ${who} never sees it.`)} {ownWords}
           </p>
           {error && <p className="note note--error">{error}</p>}
         </>

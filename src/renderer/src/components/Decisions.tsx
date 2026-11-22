@@ -8,7 +8,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
 import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
-import { answerDecision, submitDecisions, type Message } from '../store'
+import { answerDecision, cancelQuestion, submitDecisions, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
 
@@ -47,6 +47,7 @@ export function AskCard({
   byline,
   answeredInText,
   recommended,
+  cancelled,
   children
 }: {
   id: string
@@ -57,23 +58,24 @@ export function AskCard({
   byline?: string
   answeredInText?: boolean
   recommended?: (number | null)[] | undefined
+  cancelled?: boolean | undefined
   children?: ReactNode
 }): ReactNode {
   if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} recommended={recommended} extra={children} />
   return (
     <section className={`ask ask--${mode}`} aria-label={badge}>
-      <Head badge={badge} byline={byline} done={mode === 'done'} />
-      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} /> : <Asked questions={questions} recommended={recommended} />}
+      <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} />
+      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} /> : <Asked questions={questions} recommended={recommended} />}
       {children}
     </section>
   )
 }
 
-function Head({ badge, byline, done, nav }: { badge: string; byline?: string | undefined; done?: boolean; nav?: ReactNode }): ReactNode {
+function Head({ badge, byline, done, cancelled, nav }: { badge: string; byline?: string | undefined; done?: boolean; cancelled?: boolean | undefined; nav?: ReactNode }): ReactNode {
   return (
     <div className="ask__head">
       <span className="ask__badge">
-        <Icon name={done ? 'check' : 'ask'} size={13} />
+        <Icon name={cancelled ? 'x' : done ? 'check' : 'ask'} size={13} />
         {badge}
       </span>
       {byline && <span className="ask__byline">{byline}</span>}
@@ -113,7 +115,7 @@ function Asked({ questions, recommended }: { questions: Decision[]; recommended?
 }
 
 // Answered: each decision and what was chosen. Answered in writing: the questions, and a note.
-function Summary({ questions, answers, answeredInText }: { questions: Decision[]; answers?: (Answer | null)[] | undefined; answeredInText?: boolean | undefined }): ReactNode {
+function Summary({ questions, answers, answeredInText, cancelled }: { questions: Decision[]; answers?: (Answer | null)[] | undefined; answeredInText?: boolean | undefined; cancelled?: boolean | undefined }): ReactNode {
   const any = !!answers?.some(isAnswered)
   return (
     <>
@@ -123,7 +125,7 @@ function Summary({ questions, answers, answeredInText }: { questions: Decision[]
           return (
             <div key={i} className="ask-summary__row">
               <dt>{isLong(q) ? <Prose className="ask__prose" text={q.question} /> : q.question}</dt>
-              <dd className={!a || !isAnswered(a) || a.skipped ? 'is-muted' : ''}>{a && isAnswered(a) ? answerLabel(q, a) : any ? L('respondida em texto', 'answered in text') : L('respondida na mensagem abaixo', 'answered in the message below')}</dd>
+              <dd className={cancelled || !a || !isAnswered(a) || a.skipped ? 'is-muted' : ''}>{cancelled ? L('(cancelada)', '(cancelled)') : a && isAnswered(a) ? answerLabel(q, a) : any ? L('respondida em texto', 'answered in text') : L('respondida na mensagem abaixo', 'answered in the message below')}</dd>
             </div>
           )
         })}
@@ -152,6 +154,14 @@ function Answering({ id, questions, saved, badge, byline, recommended, extra }: 
     if (sending) return
     setSending(true)
     void submitDecisions(id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
+  }
+
+  // Dismissed: nothing is sent and the agent isn't woken. What was ticked or typed here goes with it.
+  const cancelAsk = (): void => {
+    if (sending) return
+    setSending(true)
+    for (let i = 0; i < questions.length; i++) drafts.delete(draftKey(id, i))
+    void cancelQuestion(id).finally(() => setSending(false))
   }
 
   // Every decision with the option the agent recommends, sent at once. Only when each one has such an option.
@@ -215,7 +225,11 @@ function Answering({ id, questions, saved, badge, byline, recommended, extra }: 
 
   return (
     <section className="ask ask--answer" aria-label={badge}>
-      <Head badge={badge} byline={byline} nav={nav} />
+      <Head
+        badge={badge}
+        byline={byline}
+        nav={nav}
+      />
       {questions.length > 1 && (
         <div className="ask__progress" aria-hidden>
           {questions.map((_, i) => (
@@ -224,9 +238,9 @@ function Answering({ id, questions, saved, badge, byline, recommended, extra }: 
         </div>
       )}
       {step === 'review' ? (
-        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} sending={sending} />
+        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} />
       ) : (
-        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} recommended={recommended?.[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} />
+        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} recommended={recommended?.[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
       )}
       {agentPicks && (
         <div className="ask__recommend">
@@ -240,7 +254,7 @@ function Answering({ id, questions, saved, badge, byline, recommended, extra }: 
   )
 }
 
-function DecisionStep({ draftId, question, answer, recommended, last, takeFocus, onAnswer }: { draftId: string; question: Decision; answer: Answer | null; recommended?: number | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void }): ReactNode {
+function DecisionStep({ draftId, question, answer, recommended, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; recommended?: number | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
   const options = question.options ?? []
   const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
@@ -360,12 +374,15 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
             {last ? L('Enviar', 'Send') : L('Próxima', 'Next')}
           </button>
         )}
+        <button className="btn btn--ghost btn--sm" onClick={onCancel}>
+          {L('Cancelar', 'Cancel')}
+        </button>
       </div>
     </div>
   )
 }
 
-function Review({ takeFocus, questions, answers, onEdit, onSend, sending }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; sending: boolean }): ReactNode {
+function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean }): ReactNode {
   // Reached from the last decision, Send has the keyboard; on a card that just showed up, nothing does.
   const sendButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -390,6 +407,9 @@ function Review({ takeFocus, questions, answers, onEdit, onSend, sending }: { ta
         <button ref={sendButton} className="btn btn--primary btn--sm" disabled={sending} onClick={onSend}>
           <Icon name="send" size={12} /> {L('Enviar', 'Send')}
         </button>
+        <button className="btn btn--ghost btn--sm" onClick={onCancel}>
+          {L('Cancelar', 'Cancel')}
+        </button>
       </div>
     </div>
   )
@@ -400,7 +420,8 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   const questions = questionsOf(message.run)
   if (!questions.length) return null
   const waiting = message.run?.status === 'waiting_input'
-  return <AskCard id={message.id} questions={questions} saved={message.run?.answers} recommended={message.run?.recommended} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} />
+  const cancelled = !!message.run?.cancelled
+  return <AskCard id={message.id} questions={questions} saved={message.run?.answers} recommended={message.run?.recommended} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : cancelled ? L('Cancelada', 'Cancelled') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} cancelled={cancelled} />
 }
 
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it

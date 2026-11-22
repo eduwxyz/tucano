@@ -89,6 +89,32 @@ describe('the decisions card', () => {
   })
 })
 
+describe('cancelling a decisions card', () => {
+  it('offers a Cancelar button, always the last one on the right, only where the person answers, never a corner ✕', () => {
+    const answering = renderToStaticMarkup(<AskCard id="m1" questions={decisions} mode="answer" badge="Esperando você" />)
+    expect(answering).toContain('Cancelar')
+    expect(answering.indexOf('Pular')).toBeLessThan(answering.indexOf('Cancelar'))
+    expect(answering).not.toContain('Cancelar pergunta')
+    expect(answering).not.toContain('ask__cancel')
+    expect(renderToStaticMarkup(<AskCard id="m1" questions={[decisions[0]!]} mode="answer" badge="Esperando você" />)).toContain('Cancelar')
+    expect(renderToStaticMarkup(<AskCard id="m1" questions={decisions} mode="view" badge="Esperando Bia" />)).not.toContain('Cancelar')
+    expect(renderToStaticMarkup(<AskCard id="m1" questions={decisions} mode="done" badge="Respondida" />)).not.toContain('Cancelar')
+  })
+
+  it('cancelled, says so on every decision and does not claim it was answered', () => {
+    const html = renderToStaticMarkup(<AskCard id="m1" questions={decisions} mode="done" badge="Cancelada" cancelled />)
+    expect(html).toContain('Cancelada')
+    expect(html.match(/\(cancelada\)/g)).toHaveLength(2)
+    expect(html).not.toContain('respondida na mensagem abaixo')
+    expect(html).not.toContain('Respondida')
+  })
+
+  it('through the question card (team): a cancelled one reads as Cancelada, even for who it was asked', () => {
+    expect(card({ answered: true, cancelled: true })).toContain('(cancelada)')
+    expect(card({ answered: true, cancelled: true })).not.toContain('Respondida')
+  })
+})
+
 describe('the message that sent the answers', () => {
   const asked = (run: Record<string, unknown>) => ({ id: 'q', conversationId: 'ch', author: { kind: 'agent' as const, id: 'a1' }, text: 'Te mandei duas decisões.', at: 1, run: { status: 'done' as const, steps: [], questions: decisions, ...run } })
   const answer = { id: 'ans', conversationId: 'ch', author: { kind: 'person' as const, id: 'bia' }, text: '- Paginação no menu? → Busca remota\n\nE mais uma coisa', at: 2 }
