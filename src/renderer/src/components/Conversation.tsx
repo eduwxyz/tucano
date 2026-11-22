@@ -1948,8 +1948,12 @@ export function Thought({ message, working }: { message: Message; working: boole
         title={open ? L('Recolher o que ele pensou', "Collapse reasoning") : L('Ler o que ele pensou', "Show reasoning")}
         onClick={() => setAsked(!open)}
       >
+        {/* The word alone names the block, in both states: in English it is the same word while it
+            thinks and once it is over, and the Portuguese keeps the pair it already had there. The
+            chevron that opens the block comes after the word, never before it, so the line starts
+            with what it is rather than with a control. */}
+        <span className="thought__label">{L(working ? 'Pensando' : 'Pensou', 'Thinking')}</span>
         <Icon name="chevron" size={11} />
-        <span className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</span>
         {!open && <span className="thought__last">{last}</span>}
       </button>
       {open && (

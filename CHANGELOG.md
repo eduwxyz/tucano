@@ -14,6 +14,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
+> - **Mudou:** o cabeçalho do raciocínio diz primeiro o que é, e a seta que abre o bloco vem depois da palavra, não antes: em inglês é **Thinking** enquanto ele pensa e depois também.
 
 ### Added
 
@@ -28,6 +29,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+- **The reasoning header names itself before it offers the control.** The line above the reasoning reads **Thinking**, and the chevron that opens and folds the block now comes after the word instead of before it, so the line starts with what the block is rather than with a control. In English one word covers it both while the model thinks and once it is over; the Portuguese keeps its two. Thanks to Apostol Apostolov. (#638)
 
 ### Changed
 

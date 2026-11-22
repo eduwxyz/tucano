@@ -6,6 +6,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Message, Settings } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
+import { setLang } from '../src/shared/lang'
 
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
 window.Element.prototype.scrollTo = () => {} // the block keeps itself at the last line; linkedom has no scrolling
@@ -75,6 +76,26 @@ describe('the thinking block', () => {
     await draw(true)
     await click(head())
     expect(document.querySelector('.thought__text')).toBeNull()
+  })
+
+  it('names itself with the word first and the chevron after it, in the same English word either way', async () => {
+    // The word says what the block is; the chevron that opens it follows the word, never leads it,
+    // and in English one word covers both states instead of "Thinking" turning into "Thought".
+    const label = (): string => head().querySelector('.thought__label')!.textContent ?? ''
+    setLang('en')
+    try {
+      await draw(true)
+      expect(label()).toBe('Thinking')
+      expect(head().firstElementChild!.getAttribute('class')).toBe('thought__label')
+      expect(head().children[1]!.tagName.toLowerCase()).toBe('svg')
+      await draw(false)
+      expect(label()).toBe('Thinking')
+      expect(head().firstElementChild!.getAttribute('class')).toBe('thought__label')
+      expect(head().children[1]!.tagName.toLowerCase()).toBe('svg')
+      expect(head().children[2]!.getAttribute('class')).toBe('thought__last')
+    } finally {
+      setLang('pt')
+    }
   })
 
   it('is nothing at all while it has thought nothing, or with the switch off', async () => {
