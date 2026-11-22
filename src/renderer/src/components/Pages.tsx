@@ -1,4 +1,4 @@
-import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
+import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
 import { L, lang, locale, type Lang } from '../../../shared/lang'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
@@ -34,7 +34,6 @@ import {
   updateTool,
   shareComputer,
   updateSettings,
-  setJevKey,
   setClassifierKey,
   browserAction,
   setTelegramToken,
@@ -3176,25 +3175,23 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
   )
 }
 
-// The TypeSafe key for the Jev router: checked by the core, kept encrypted, never shown again.
-export function JevKey({ saved, hint }: { saved: boolean; hint?: string }): ReactNode {
+// A classifier's key where a job is chosen: checked by the core with that provider, kept encrypted,
+// never shown again.
+function ClassifierKey({ classifier, saved }: { classifier: ClassifierConfig; saved: boolean }): ReactNode {
+  const spec = providerSpec(classifier.provider)
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const save = (value: string | null): void => {
     setBusy(true)
     setError('')
-    setJevKey(value)
+    setClassifierKey(classifier.id, value)
       .then(() => setKey(''))
       .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
       .finally(() => setBusy(false))
   }
   return (
     <>
-      <p className="hint">
-        <Icon name="shield" size={13} />{' '}
-        {hint ?? L('Decide em menos de 1 segundo, mas cada decisão manda as últimas 10 mensagens do canal pra TypeSafe e é cobrada na sua conta de lá (centavos por mês). Se ele falhar, o Haiku decide.', 'Decides in under 1 second, but each decision sends the channel’s last 10 messages to TypeSafe and is billed to your account there (cents a month). If it fails, Haiku decides.')}
-      </p>
       {saved ? (
         <div className="row">
           <span className="tag tag--ok">{L('Chave salva', 'Key saved')}</span>
@@ -3204,7 +3201,7 @@ export function JevKey({ saved, hint }: { saved: boolean; hint?: string }): Reac
           </button>
         </div>
       ) : (
-        <Field label={L('Chave do TypeSafe', 'TypeSafe key')} hint={L('Crie em console.typesafe.ai → API Keys. O app confere antes de guardar.', 'Create one at console.typesafe.ai → API Keys. The app checks it before saving.')}>
+        <Field label={L(`Chave do ${spec.label}`, `${spec.label} key`)} hint={`${spec.keyHint[lang()]} ${L('O app confere antes de guardar.', 'The app checks it before saving.')}`}>
           <div className="row">
             <input className="grow" type="password" value={key} placeholder={L('Cole a chave aqui', 'Paste the key here')} onChange={(e) => setKey(e.target.value)} />
             <button className="btn" disabled={busy || !key.trim()} onClick={() => save(key)}>
@@ -3215,6 +3212,17 @@ export function JevKey({ saved, hint }: { saved: boolean; hint?: string }): Reac
       )}
       {error && <p className="note note--error">{error}</p>}
     </>
+  )
+}
+
+// What a chosen job sends out, and to which provider. On a company gateway it's the stronger notice.
+function ClassifierNotice({ job, classifier, work }: { job: ClassifierJob; classifier: ClassifierConfig; work: boolean }): ReactNode {
+  const what = jobNotice(job, classifier)
+  if (work) return <OutsideGateway what={what} />
+  return (
+    <p className="hint">
+      <Icon name="shield" size={13} /> {what.charAt(0).toUpperCase() + what.slice(1)}
+    </p>
   )
 }
 
@@ -3259,16 +3267,17 @@ export function ClassifiersCard(): ReactNode {
     setModel('')
     setOpen(id) // the key is the next thing it needs
   }
-  const remove = (id: string): void => {
-    const left = Object.fromEntries(Object.entries(jobs).filter(([, v]) => v !== id)) as Partial<Record<ClassifierJob, string>>
-    updateSettings({ classifiers: list.filter((c) => c.id !== id), classifierJobs: left })
-    if (open === id) setOpen(null)
-  }
-  const assign = (job: ClassifierJob, id: string): void => {
-    const next = { ...jobs }
-    if (id) next[job] = id
-    else delete next[job]
-    updateSettings({ classifierJobs: next })
+  const remove = async (c: ClassifierConfig): Promise<void> => {
+    const ok = await confirmDialog({
+      title: L(`Remover ${c.name}?`, `Remove ${c.name}?`),
+      body: L('A chave dele é apagada, e o que ele fazia fica desligado.', 'Its key is deleted, and the jobs it served turn off.'),
+      confirm: L('Remover', 'Remove'),
+      danger: true
+    })
+    if (!ok) return
+    const left = Object.fromEntries(Object.entries(jobs).filter(([, v]) => v !== c.id)) as Partial<Record<ClassifierJob, string>>
+    updateSettings({ classifiers: list.filter((x) => x.id !== c.id), classifierJobs: left })
+    if (open === c.id) setOpen(null)
   }
   const saveKey = (id: string, value: string | null): void => {
     setBusy(true)
@@ -3347,7 +3356,7 @@ export function ClassifiersCard(): ReactNode {
                 </div>
               )}
             </div>
-            <button className="btn btn--sm btn--ghost" title={L('Remover este classificador', 'Remove this classifier')} onClick={() => remove(c.id)}>
+            <button className="btn btn--sm btn--ghost" title={L('Remover este classificador', 'Remove this classifier')} aria-label={L(`Remover ${c.name}`, `Remove ${c.name}`)} onClick={() => void remove(c)}>
               ×
             </button>
           </div>
@@ -3412,6 +3421,7 @@ export function ClassifierUsesCard(): ReactNode {
   }
   return (
     <>
+      {list.length === 0 && <p className="muted small">{L('Adicione um classificador acima para escolher o que ele faz.', 'Add a classifier above to choose what it does.')}</p>}
       {list.length > 0 && (
         <>
           {CLASSIFIER_JOBS.map((job) => (
@@ -3425,16 +3435,16 @@ export function ClassifierUsesCard(): ReactNode {
           ))}
           {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
             const c = list.find((x) => x.id === jobs[job])
-            if (!c || !work) return null
+            if (!c) return null
             return (
-              <OutsideGateway
-                key={job}
-                what={
-                  job === 'routing'
-                    ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
-                    : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
-                }
-              />
+              <div key={job}>
+                <ClassifierNotice job={job} classifier={c} work={work} />
+                {!settings.classifierKeys?.[c.id] && (
+                  <p className="hint hint--warn">
+                    {L(`${jobLabel(job).pt}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${jobLabel(job).en}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
+                  </p>
+                )}
+              </div>
             )
           })}
         </>
@@ -3470,36 +3480,16 @@ export function BrowserClickCard(): ReactNode {
   }
   return (
     <Card
-      title={L('Uso do navegador', 'Browser Use')}
-      lead={L(
-        'Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.',
-        'How the app finds what the agent asks to click (“the Search button”). By text it’s free and handles most cases; when it can’t find it, the agent uses the element’s number.'
-      )}
+      title={L('Navegador', 'Browser')}
+      section="agents-browser"
+      lead={L('Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.', 'Finds the element an agent asks to click. Text matching is free; when it fails, the agent uses the element number.')}
     >
       <div className="browser-choice">
-        <strong>{L('Quem acha o clique', 'Who finds the click')}</strong>
-        <p className="muted small">
-          {jobs.browser
-            ? L('Um classificador lê a lista de elementos da página e às vezes a tela.', 'A classifier reads the page’s element list, and sometimes its screenshot.')
-            : L('Usa o texto da página e, quando não encontra, o número do elemento.', 'Uses the page’s text, then the element’s number when text fails.')}
-        </p>
-        <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Quem acha o clique', 'Who finds the click')}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!jobs.browser}
-            className={jobs.browser ? '' : 'is-active'}
-            onClick={() => choose('')}
-          >
-            {L('Pelo texto da página', 'By the page’s text')}
+        <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Navegador dos agentes', 'Agents’ browser')}>
+          <button type="button" role="radio" aria-checked={!jobs.browser} className={jobs.browser ? '' : 'is-active'} onClick={() => choose('')}>
+            {L('Só pelo texto da página', 'Only by the page’s text')}
           </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!!jobs.browser}
-            className={jobs.browser ? 'is-active' : ''}
-            onClick={() => choose(jobs.browser || JEV_CLASSIFIER.id)}
-          >
+          <button type="button" role="radio" aria-checked={!!jobs.browser} className={jobs.browser ? 'is-active' : ''} onClick={() => choose(jobs.browser || JEV_CLASSIFIER.id)}>
             {L('Com um classificador', 'With a classifier')}
           </button>
         </div>
@@ -3509,26 +3499,16 @@ export function BrowserClickCard(): ReactNode {
             onChange={(v) => choose(v ?? JEV_CLASSIFIER.id)}
             options={[
               { value: JEV_CLASSIFIER.id, label: 'Jev (TypeSafe)', hint: providerSpec(JEV_CLASSIFIER.provider).label },
-              ...list
-                .filter((c) => c.id !== JEV_CLASSIFIER.id)
-                .map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))
+              ...list.filter((c) => c.id !== JEV_CLASSIFIER.id).map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))
             ]}
           />
         )}
       </div>
-      {chosen && work && (
-        <OutsideGateway
-          what={L(
-            `a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(chosen.provider).label}.`,
-            `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(chosen.provider).label}.`
-          )}
-        />
-      )}
+      {chosen && <ClassifierNotice job="browser" classifier={chosen} work={work} />}
+      {chosen && <ClassifierKey key={chosen.id} classifier={chosen} saved={!!settings.classifierKeys?.[chosen.id]} />}
     </Card>
   )
 }
-
-
 
 function VoiceCard(): ReactNode {
   const voice = useStore((s) => s.settings.voice)

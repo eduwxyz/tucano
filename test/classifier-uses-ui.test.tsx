@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CLASSIFIER_JOBS, JEV_CLASSIFIER } from '../src/shared/classifiers'
+import { CLASSIFIER_JOBS, JEV_CLASSIFIER, type ClassifierConfig } from '../src/shared/classifiers'
 import { setLang } from '../src/shared/lang'
 import type { Settings } from '../src/shared/types'
 import { ENGINE_IDS } from '../src/shared/types'
@@ -24,6 +24,7 @@ Object.assign(globalThis, {
   }
 })
 
+const luna: ClassifierConfig = { id: 'luna-01', name: 'Luna', provider: 'openai', model: 'gpt-6-luna' }
 let settings: Partial<Settings>
 const save = vi.fn(async (_patch: Partial<Settings>) => {})
 vi.mock('../src/renderer/src/store', async (original) => {
@@ -89,6 +90,21 @@ describe('the classifier uses', () => {
   it('has no key field of its own: the Classifiers card keeps the keys', () => {
     expect(text()).not.toContain('TypeSafe key')
     expect(document.body.innerHTML).not.toContain('key-row')
+  })
+
+  it('says what a chosen job sends, without a gateway too, and when its key is missing', async () => {
+    expect(text()).not.toContain('recent messages')
+    await act(async () => root.render(<div />))
+    settings = { ...settings, classifiers: [luna], classifierJobs: { routing: 'luna-01' }, classifierKeys: {} }
+    await act(async () => root.render(<ClassifierUsesCard />))
+    expect(text()).toContain('Every message without an @mention sends the channel’s recent messages to OpenAI')
+    expect(text()).not.toContain('Outside the gateway')
+    expect(text()).toContain('Luna has no key yet')
+    await act(async () => root.render(<div />))
+    settings = { ...settings, classifierKeys: { 'luna-01': true }, engines: engines('gateway') }
+    await act(async () => root.render(<ClassifierUsesCard />))
+    expect(text()).toContain('Outside the gateway')
+    expect(text()).not.toContain('has no key yet')
   })
 })
 
