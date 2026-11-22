@@ -11,13 +11,14 @@ import type { ReactNode } from 'react'
 // what was picked.
 export function AskStrip({ asked, who, onOpen }: { asked: Message; who: string | undefined; onOpen: () => void }): ReactNode {
   const questions = questionsOf(asked.run)
-  const text = asked.run?.question ?? asked.text
+  // Each decision in its own words: the run's `question` is the copy written for the agent, options and all.
+  const text = questions.map((q) => q.question).join(' · ') || asked.text
   return (
     <button className="ask-strip" onClick={onOpen} title={L('Ir para a pergunta', 'Go to the question')}>
       <Icon name="ask" size={14} />
       <span className="ask-strip__who">{who ?? L('Um agente', 'An agent')}</span>
       <span className="ask-strip__text">{text}</span>
-      {questions.length > 0 && <span className="ask-strip__count">{L(`${questions.length} ${questions.length === 1 ? 'decisão' : 'decisões'}`, `${questions.length} ${questions.length === 1 ? 'choice' : 'choices'}`)}</span>}
+      {questions.length > 1 && <span className="ask-strip__count">{L(`${questions.length} decisões`, `${questions.length} choices`)}</span>}
       <span className="ask-strip__go">{L('Responder', 'Answer')}</span>
     </button>
   )

@@ -33,7 +33,14 @@ describe('the ask strip', () => {
       />
     )
     expect(html).toContain('2 decisões')
-    expect(html).toContain('1. Paginar? 2. Quando?') // what was asked, not the numbered prompt copy
+    expect(html).toContain('Paginar? · Quando?') // each decision in its words
+    expect(html).not.toContain('1. Paginar?') // not the numbered copy written for the agent
+  })
+
+  it('does not count a single question as a decision', () => {
+    const html = renderToStaticMarkup(<AskStrip asked={asked({ question: 'Pra quando?' })} who="Lia" onOpen={() => {}} />)
+    expect(html).toContain('Pra quando?')
+    expect(html).not.toContain('decis')
   })
 
   it('still makes sense when the agent is gone', () => {
