@@ -52,6 +52,8 @@ import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
+import { classifierFor, classifierJobsOf, classifierList, cleanClassifierJobs, cleanClassifiers, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
@@ -320,10 +322,56 @@ const ready = gateway.start()
 // for Testing and three extensions from the store: a download into the data folder, on the switch, never
 // on the way of a reply — the lane works as it does today until it lands, and if it never does.
 const addOns = new AddOns(join(dataDir, 'navegador-extra'), () => emit({ type: 'settings', settings: settings() }))
+
+// A classifier's key, as the page sees it: saved or not. An install from before Settings ›
+// Classifiers kept Jev's under the old name, and that one still counts.
+const classifierKeySaved = (c: ClassifierConfig): boolean =>
+  db.getSecret(classifierSecret(c.id)) !== undefined || (c.id === JEV_CLASSIFIER.id && db.getSecret(JEV_SECRET) !== undefined)
+const classifierKeyOf = async (c: ClassifierConfig): Promise<string | undefined> =>
+  (await secrets.get(classifierSecret(c.id))) ?? (c.id === JEV_CLASSIFIER.id ? await secrets.get(JEV_SECRET) : undefined)
+// The stored settings as the classifier helpers read them: whether Jev has a key lives in the secret
+// store, and an install whose only trace of Jev is that key still gets its row.
+const classifierSettings = (s: Omit<Settings, 'engines'> = db.getSettings(DEFAULTS)): Omit<Settings, 'engines'> => ({ ...s, jevKey: classifierKeySaved(JEV_CLASSIFIER) })
+// A key removed takes the router off that classifier, as removing Jev's always has: the channel goes
+// back to the router's model instead of failing on every message. Other jobs stay chosen, and idle.
+const stopRoutingOn = (id: string): void => {
+  const s = classifierSettings()
+  const { routing, ...others } = classifierJobsOf(s)
+  if (routing === id) db.setSettings({ classifierJobs: others, ...(s.routerModel === JEV_MODEL ? { routerModel: 'haiku' } : {}) })
+}
+// Checks a patch's classifiers and returns the rows it removes, whose keys go with them. A router
+// left on the old 'jev' value with no classifier serving it goes back to a model it can run.
+const settleClassifiers = (patch: Partial<Settings>): ClassifierConfig[] => {
+  if (patch.classifiers === undefined && patch.classifierJobs === undefined) return []
+  const stored = classifierSettings()
+  const before = classifierList(stored)
+  const list = patch.classifiers === undefined ? before : cleanClassifiers(patch.classifiers, before)
+  if (patch.classifiers !== undefined) patch.classifiers = list
+  const gone = before.filter((c) => !list.some((x) => x.id === c.id))
+  if (patch.classifierJobs !== undefined) patch.classifierJobs = cleanClassifierJobs(patch.classifierJobs, list)
+  else if (gone.length && stored.classifierJobs) patch.classifierJobs = cleanClassifierJobs(stored.classifierJobs, list)
+  const next = { ...stored, ...patch }
+  if (next.routerModel === JEV_MODEL && !classifierFor(next, 'routing')) patch.routerModel = 'haiku'
+  return gone
+}
+
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), ...(addOns.info ? { addOns: addOns.info } : {}), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  const stored = classifierSettings(s)
+  const classifiers = classifierList(stored)
+  return {
+    ...s,
+    classifiers,
+    classifierJobs: classifierJobsOf(stored),
+    classifierKeys: Object.fromEntries(classifiers.map((c) => [c.id, classifierKeySaved(c)])),
+    engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses),
+    ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}),
+    jevKey: classifiers.some((c) => c.provider === 'typesafe' && classifierKeySaved(c)),
+    telegram: telegram?.info(),
+    ...(addOns.info ? { addOns: addOns.info } : {}),
+    accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) }))
+  }
 }
 
 // More logins of Claude Code, Codex and Antigravity (Settings › Accounts): each in its own folder, checked with
@@ -864,7 +912,11 @@ const browser = new Browser({
   emit,
   logins: vault,
   me: () => settings().workspaceName,
-  jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true },
+  jev: {
+    key: () => classifierKeyOf(classifierFor(settings(), 'browser') ?? JEV_CLASSIFIER),
+    on: () => !!classifierFor(settings(), 'browser'),
+    target: () => classifierFor(settings(), 'browser')
+  },
   onHandback: (agentId) => void runner.handedBack(agentId)
 })
 const connectors = new ConnectorManager({
@@ -1126,7 +1178,15 @@ const runner = new Runner({
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
     void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
-  jev: { key: () => secrets.get(JEV_SECRET) },
+  jev: {
+    key: (job) => {
+      // A job reads the classifier chosen for it; with no job, Jev's own classifier, which is also
+      // what an install from before the classifiers keeps using.
+      const c = job ? classifierFor(settings(), job) : JEV_CLASSIFIER
+      return c ? classifierKeyOf(c) : Promise.resolve(undefined)
+    },
+    target: (job) => classifierFor(settings(), job ?? 'routing')
+  },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
@@ -2418,7 +2478,6 @@ const api: Handlers = {
   },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
-  // Checked with TypeSafe before it's saved; null removes it.
   nodeInfo: async () => nodeInfo(),
   setNode: async ({ apps }) => {
     db.setSettings({ node: { ...(settings().node ?? {}), apps } })
@@ -2440,11 +2499,14 @@ const api: Handlers = {
     return lentNow()
   },
   nodeLog: async ({ limit }) => nodeLog.read(limit ?? 100),
+  // Checked with TypeSafe before it's saved; null removes it. Jev's own row, for the pages that
+  // still ask for it; Settings › Classifiers uses setClassifierKey, which takes the id.
   setJevKey: async ({ key }) => {
     const k = key?.trim()
     if (k) await checkJevKey(k)
-    await secrets.set(JEV_SECRET, k || undefined)
-    if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
+    await secrets.set(classifierSecret(JEV_CLASSIFIER.id), k || undefined)
+    await secrets.set(JEV_SECRET, undefined) // the old name is retired the first time the key is saved here
+    if (!k) stopRoutingOn(JEV_CLASSIFIER.id)
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2475,6 +2537,19 @@ const api: Handlers = {
       const chosen = db.getSettings(DEFAULTS).harnesses
       if (chosen && !chosen.includes('endpoint')) db.setSettings({ harnesses: [...chosen, 'endpoint'] })
     }
+    emit({ type: 'settings', settings: settings() })
+  },
+
+  // A classifier's key, checked with its own provider before it's saved; null removes it. Each
+  // classifier keeps its own key, so two accounts of one provider never share one.
+  setClassifierKey: async ({ id, key }) => {
+    const c = classifierList(classifierSettings()).find((x) => x.id === id)
+    if (!c) throw new Error(L('Esse classificador não existe mais.', 'That classifier no longer exists.'))
+    const k = key?.trim()
+    if (k) await checkClassifierKey(c, k)
+    await secrets.set(classifierSecret(c.id), k || undefined)
+    if (c.id === JEV_CLASSIFIER.id) await secrets.set(JEV_SECRET, undefined) // one home for the key
+    if (!k) stopRoutingOn(c.id)
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2533,7 +2608,7 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, addOns: _addOns, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, addOns: _addOns, ...all } }, ctx) => {
     // A server takes no browser extensions yet: the switch isn't drawn there, and one sent anyway is dropped.
     if (serverMode) {
       delete all.browserAddOns
@@ -2562,7 +2637,12 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    const removedClassifiers = settleClassifiers(patch)
     db.setSettings(patch)
+    for (const c of removedClassifiers) {
+      db.setSecret(classifierSecret(c.id), undefined)
+      if (c.id === JEV_CLASSIFIER.id) db.setSecret(JEV_SECRET, undefined)
+    }
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
       db.renamePerson(db.ownerId(), cleanName(patch.workspaceName))
