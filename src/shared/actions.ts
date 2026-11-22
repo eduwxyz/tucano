@@ -32,8 +32,8 @@ export const kindLabel = (k: ActionKind): string =>
     send: L('Enviar mensagem', 'Send a message'),
     publish: L('Publicar ou colocar no ar', 'Publish or deploy'),
     pay: L('Pagar ou transferir', 'Pay or transfer'),
-    browser: L('Clique arriscado no navegador', 'A risky click in the browser'),
-    apps: L('Ação arriscada nos apps', 'A risky action in an app')
+    browser: L('Clique arriscado no navegador', "Risky browser clicks"),
+    apps: L('Ação arriscada nos apps', "Risky app actions")
   })[k]
 
 export const actionHint = (k: ActionKind): string =>
@@ -65,7 +65,7 @@ export const actionVerb = (k: ActionKind): string =>
     apps: L('agir num app', 'act in an app')
   })[k]
 
-export const modeLabel = (m: ActionMode): string => ({ ask: L('Pede aprovação', 'Asks first'), auto: L('Faz sozinho', 'Does it alone'), off: L('Nunca', 'Never') })[m]
+export const modeLabel = (m: ActionMode): string => ({ ask: L('Pede aprovação', "Ask first"), auto: L('Faz sozinho', "Automatic"), off: L('Nunca', 'Never') })[m]
 
 // Only known kinds with known modes: what a saved rule set may hold.
 export function cleanRules(value: unknown): ActionRules {
@@ -89,9 +89,9 @@ export const isAutonomy = (v: unknown): v is Autonomy => typeof v === 'string' &
 export const autonomyLabel = (a: Autonomy): string => ({ careful: L('Cuidadoso', 'Careful'), normal: L('Normal', 'Normal'), free: L('Sem travas', 'No guardrails') })[a]
 export const autonomyHint = (a: Autonomy): string =>
   ({
-    careful: L('Pede aprovação antes de qualquer coisa que mude algo: escrever num conector, commit, push, um clique arriscado.', 'Asks before anything that changes something: writing in a connector, a commit, a push, a risky click.'),
-    normal: L('Lê e escreve sozinho; pede antes do que é sensível: enviar, apagar, publicar, pagar, um clique arriscado.', 'Reads and writes on its own; asks before what’s sensitive: sending, deleting, publishing, paying, a risky click.'),
-    free: L('Faz tudo sozinho, sem pedir. O que você marcou como alto risco ainda pede.', 'Does everything on its own, without asking. What you marked high risk still asks.')
+    careful: L('Pede aprovação antes de qualquer coisa que mude algo: escrever num conector, commit, push, um clique arriscado.', "Ask before changes, including connector writes, commits, pushes, and risky clicks."),
+    normal: L('Lê e escreve sozinho; pede antes do que é sensível: enviar, apagar, publicar, pagar, um clique arriscado.', "Allow reads and writes; ask before sending, deleting, publishing, paying, or risky clicks."),
+    free: L('Faz tudo sozinho, sem pedir. O que você marcou como alto risco ainda pede.', "Act without approval, except for tools marked high risk.")
   })[a]
 
 // What a level says about a kind; undefined: the tool's class decides (sensitive asks), as before levels.

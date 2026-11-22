@@ -1,6 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { cleanAccess } from '../shared/access'
+import type { VaultKey, VaultLogin, VaultUse } from '../shared/vault'
 import { MAX_MONTHLY_LIMIT, safeLimit } from '../shared/limits'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
@@ -48,6 +49,8 @@ import {
   type Trigger
 } from '../shared/types'
 import { stricter } from '../shared/classify'
+import type { Job } from './jobs'
+import { isHarnessLevel, type HarnessKey, type HarnessLevel } from '../shared/harness-keys'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
 
@@ -549,6 +552,88 @@ export const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS tasks_by_owner ON tasks (owner, position);
+  `,
+  // The keys of the harnesses a person connected over MCP (src/core/mcp.ts): each acts as that person, up to
+  // its level. Only the hash is kept. And what each key created with an idempotency key, so a retry makes nothing twice.
+  `
+  CREATE TABLE IF NOT EXISTS harness_keys (
+    hash TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    level TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS harness_keys_by_person ON harness_keys (person_id);
+  CREATE TABLE IF NOT EXISTS mcp_creations (
+    key_hash TEXT NOT NULL,
+    idem TEXT NOT NULL,
+    result TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (key_hash, idem)
+  );
+  `,
+  // What a message sets off, from its first reply to its last (src/core/jobs.ts): kept, so a job the app
+  // closed on goes on, and its brakes count from where they were.
+  `
+  CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS jobs_running ON jobs (state) WHERE state = 'running';
+  -- The replies waiting to try again (retriesDue, every minute): found without reading every message.
+  CREATE INDEX IF NOT EXISTS messages_retry ON messages (json_extract(run, '$.retryAt')) WHERE json_extract(run, '$.retryAt') IS NOT NULL;
+  `,
+  // The Cofre (src/core/vault.ts): keys the agents use by name, one command at a time. The value is in
+  // secrets ('vault:<id>'), encrypted; here only what the pages show. owner '' is the team's key, a
+  // person's id their own. And each use of one, never with its value.
+  `
+  CREATE TABLE IF NOT EXISTS vault_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    agents TEXT NOT NULL DEFAULT '[]',
+    approve INTEGER NOT NULL DEFAULT 0,
+    hint TEXT NOT NULL DEFAULT '',
+    note TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    used_at INTEGER,
+    UNIQUE (owner, name)
+  );
+  CREATE TABLE IF NOT EXISTS vault_uses (
+    id TEXT PRIMARY KEY,
+    key_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT,
+    message_id TEXT,
+    person_id TEXT,
+    via TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS vault_uses_by_at ON vault_uses (at);
+  `,
+  // The Cofre's site logins (src/core/vault.ts): the password, with the username, is in secrets
+  // ('vault-login:<id>'); here the site and the username the pages show. The same site may have more
+  // than one (each agent its own account); an agent gets one per site.
+  `
+  CREATE TABLE IF NOT EXISTS vault_logins (
+    id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
+    agents TEXT NOT NULL DEFAULT '[]',
+    note TEXT,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    used_at INTEGER
+  );
   `
 ]
 
@@ -584,12 +669,25 @@ const COLUMNS: [string, string, string][] = [
   ['delegations', 'approval', 'TEXT'],
   // The thread a request is worked in, when it was asked inside another's in the same channel.
   ['delegations', 'thread_id', 'TEXT'],
+  // Off (0): the router doesn't call this agent in on its own, or no one in this conversation (src/core/router.ts chimeIn).
+  ['agents', 'proactive', 'INTEGER'],
+  ['conversations', 'proactive', 'INTEGER'],
   // What a connector's server says can't be loosened here (META_FLOOR, META_HIGH_RISK in shared/classify.ts):
   // the class a tool can't go below, and that it's high risk. A node says both for the person's computer.
   ['connector_tools', 'cls_floor', 'TEXT'],
   ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
-  ['messages', 'title', 'TEXT']
+  ['messages', 'title', 'TEXT'],
+  // A person's message sent by a harness over MCP (src/core/mcp.ts): the key's name, for the agent to read; the screens don't show it.
+  ['messages', 'via', 'TEXT'],
+  // The note a job left where it stopped on its brakes (src/core/jobs.ts): the job it carries Continuar for.
+  ['messages', 'stop_job', 'TEXT'],
+  // When an agent was deleted for good (retireAgent): it stays only as a name for its old messages.
+  ['agents', 'deleted_at', 'INTEGER'],
+  // A prompt of mine waiting its turn: 'queue' while it waits (src/core/runs.ts, resumeQueued).
+  ['messages', 'send_mode', 'TEXT'],
+  // An agent whose replies go one at a time (Agent.oneAtATime): 1; unset, as many as the app runs.
+  ['agents', 'one_at_a_time', 'INTEGER']
 ]
 
 
@@ -604,8 +702,8 @@ function parseAccess(v: unknown): PersonAccess | undefined {
   } catch { return undefined }
 }
 
-// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
-const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
+// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT, and more of them than input came apart from it.
+const COUNTED = `(CASE WHEN cache_read_tokens > input_tokens THEN input_tokens + cache_read_tokens * ${CACHE_READ_WEIGHT} ELSE input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} END) + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
@@ -677,6 +775,8 @@ export class Db {
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
           DELETE FROM person_keys;
+          DELETE FROM harness_keys;
+          DELETE FROM mcp_creations;
           DELETE FROM removed_keys;
           DELETE FROM invites;
           DELETE FROM read_state;
@@ -688,6 +788,7 @@ export class Db {
           DELETE FROM routine_watchers;
           DELETE FROM questions;
           DELETE FROM delegations;
+          DELETE FROM jobs;
           DELETE FROM tasks;
           DELETE FROM activity;
         `)
@@ -720,7 +821,7 @@ export class Db {
   // comes archived (with no agents it would apply to everyone), a routine needs its agent and place.
   private keepOnly(parts: WorkspaceParts): void {
     if (WORKSPACE_PARTS.every((p) => parts[p])) return
-    const kept = new Set(['seenVersion', 'theme', 'onboarding', ...(parts.general ? GENERAL_SETTINGS : []), ...(parts.context ? ['context'] : []), ...(parts.channels ? ['channelLayout', 'folded'] : [])])
+    const kept = new Set(['seenVersion', 'theme', 'onboarding', ...(parts.general ? GENERAL_SETTINGS : []), ...(parts.context ? ['context'] : []), ...(parts.channels ? ['channelLayout', 'folded', 'navOrder', 'agentOrder', 'sectorOrder'] : [])])
     for (const { key } of this.db.prepare('SELECT key FROM settings').all() as { key: string }[]) if (!kept.has(key)) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
     if (!parts.general) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(JEV_KEY)
     if (!parts.connectors) {
@@ -788,6 +889,8 @@ export class Db {
       this.db.exec(`
         DELETE FROM secrets;
         DELETE FROM person_keys;
+        DELETE FROM harness_keys;
+        DELETE FROM mcp_creations;
         DELETE FROM removed_keys;
         DELETE FROM invites;
         DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts', 'wikiDir', 'harnesses');
@@ -812,6 +915,12 @@ export class Db {
           this.db
             .prepare("INSERT OR IGNORE INTO person_keys (hash, person_id, label, created_at, last_seen) SELECT hash, ?, label, created_at, last_seen FROM old.person_keys WHERE person_id = (SELECT id FROM old.people WHERE role = 'owner')")
             .run(owner)
+          // The owner's harnesses keep working, as their devices do (a server from before had none).
+          try {
+            this.db.prepare("INSERT OR IGNORE INTO harness_keys (hash, person_id, name, level, created_at, last_seen) SELECT hash, ?, name, level, created_at, last_seen FROM old.harness_keys WHERE person_id = (SELECT id FROM old.people WHERE role = 'owner')").run(owner)
+          } catch (e) {
+            console.warn('[restore] kept no harness keys:', e instanceof Error ? e.message : e)
+          }
           was("INSERT OR REPLACE INTO settings (key, value) SELECT key, value FROM old.settings WHERE key IN ('harnesses', 'telegram')")
         })
       } finally {
@@ -887,13 +996,16 @@ export class Db {
       ...(r['outside_guard'] === 0 || r['outside_guard'] === 1 ? { outsideGuard: r['outside_guard'] === 1 } : {}),
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1,
+      ...(r['deleted_at'] ? { deleted: true as const } : {}),
       ...(str(r['kind']) === 'tuca' ? { kind: 'tuca' as const } : {}),
       // One with no owner (put there by another tool, after the people came) is the Tucano owner's.
       owner: r['owner'] ? str(r['owner']) : this.ownerId(),
       ...(r['reports_to'] ? { reportsTo: str(r['reports_to']) } : {}),
       ...(r['sector_name'] ? { sectorName: str(r['sector_name']) } : {}),
       ...(r['sector_does'] ? { sectorDoes: str(r['sector_does']) } : {}),
-      ...(r['entry'] ? { entry: true as const } : {})
+      ...(r['entry'] ? { entry: true as const } : {}),
+      ...(r['proactive'] === 0 ? { proactive: false } : {}),
+      ...(r['one_at_a_time'] === 1 ? { oneAtATime: true as const } : {})
     }
   }
 
@@ -919,7 +1031,7 @@ export class Db {
       .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
-    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.id)
+    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ?, proactive = ?, one_at_a_time = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.proactive === false ? 0 : null, a.oneAtATime ? 1 : null, a.id)
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -964,6 +1076,7 @@ export class Db {
       ...(r['threads'] === 1 ? { threads: true } : {}),
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
+      ...(r['proactive'] === 0 ? { proactive: false } : {}),
       unread: Number(r['unread'])
     }
   }
@@ -1019,6 +1132,11 @@ export class Db {
     this.db.prepare('UPDATE conversations SET wiki_capture = ? WHERE id = ?').run(on ? null : 0, id)
   }
 
+  // Off: no agent is called in here on its own. On is the default (stored as null).
+  setProactive(id: string, on: boolean): void {
+    this.db.prepare('UPDATE conversations SET proactive = ? WHERE id = ?').run(on ? null : 0, id)
+  }
+
   // On: answers go in threads. Off, in the conversation, is the default (stored as null).
   setThreads(id: string, on: boolean): void {
     this.db.prepare('UPDATE conversations SET threads = ? WHERE id = ?').run(on ? 1 : null, id)
@@ -1039,6 +1157,55 @@ export class Db {
   // Its messages and members go with it (foreign keys).
   deleteConversation(id: string): void {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
+  }
+
+  // Whether anything was said there yet, by anyone.
+  hasMessages(conversationId: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1').get(conversationId)
+  }
+
+  // Whether an agent left any trace of work: a message it wrote, a to-do on someone's board, a memory or note.
+  agentUsed(agentId: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 WHERE EXISTS (SELECT 1 FROM messages WHERE author_kind = 'agent' AND author_id = ?) OR EXISTS (SELECT 1 FROM tasks WHERE agent_id = ?) OR EXISTS (SELECT 1 FROM memories WHERE agent_id = ? OR scope = ?)")
+      .get(agentId, agentId, agentId, agentId)
+  }
+
+  // An agent gone for good, with its places in channels: only for one taken back before it did anything
+  // (its DMs go first, through deleteConversation).
+  deleteAgent(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM members WHERE agent_id = ?').run(id)
+      this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    })
+  }
+
+  // An agent deleted for good, the way Slack keeps a deactivated person: its row stays as a tombstone
+  // (name, color, picture) so the messages and receipts it left still say who wrote them, and
+  // everything else goes: its channels, settings, permissions, own memories, routines and services.
+  // It stays archived, so every list of the team already leaves it out; its handle is freed.
+  retireAgent(id: string): void {
+    this.tx(() => {
+      // Out of its channels; its DMs keep it, so they still read as the conversation with it.
+      this.db.prepare("DELETE FROM members WHERE agent_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'channel')").run(id)
+      this.db.prepare('UPDATE agents SET reports_to = NULL WHERE reports_to = ?').run(id)
+      this.db.prepare('DELETE FROM memories WHERE scope = ?').run(id)
+      this.db.prepare('DELETE FROM services WHERE agent_id = ?').run(id)
+      // Off the Cofre's keys it was given; the log of what it used stays.
+      this.db
+        .prepare("UPDATE vault_keys SET agents = (SELECT json_group_array(value) FROM json_each(vault_keys.agents) WHERE value <> ?) WHERE EXISTS (SELECT 1 FROM json_each(vault_keys.agents) WHERE value = ?)")
+        .run(id, id)
+      this.db
+        .prepare("UPDATE vault_logins SET agents = (SELECT json_group_array(value) FROM json_each(vault_logins.agents) WHERE value <> ?) WHERE EXISTS (SELECT 1 FROM json_each(vault_logins.agents) WHERE value = ?)")
+        .run(id, id)
+      for (const r of this.db.prepare('SELECT id FROM routines WHERE agent_id = ?').all(id) as { id: string }[]) this.removeRoutine(r.id)
+      this.db
+        .prepare(
+          `UPDATE agents SET deleted_at = ?, archived = 1, handle = ?, role = '', instructions = '', grants = '{}', computer = 0, browser = 0, apps = '[]',
+             auto_approve = '[]', action_rules = '{}', folders = '[]', reports_to = NULL, sector_name = NULL, sector_does = NULL, entry = NULL WHERE id = ?`
+        )
+        .run(Date.now(), `~${id}`, id)
+    })
   }
 
   // Puts the agent in exactly these channels (DMs are untouched).
@@ -1127,7 +1294,10 @@ export class Db {
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
-      ...(r['title'] ? { title: str(r['title']) } : {})
+      ...(r['send_mode'] === 'queue' ? { sendMode: 'queue' as const } : {}),
+      ...(r['title'] ? { title: str(r['title']) } : {}),
+      ...(r['via'] ? { via: str(r['via']) } : {}),
+      ...(r['stop_job'] ? { stop: { job: str(r['stop_job']) } } : {})
     }
   }
 
@@ -1186,6 +1356,13 @@ export class Db {
       )
       .all(before, since) as Row[]
     return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), last: Number(r['last']) }))
+  }
+
+  // The agents' replies, newest first (what ran: src/core/mcp.ts's list_runs). `agentId`: only its; `since`: after then.
+  recentReplies(f: { agentId?: string; since?: number; limit: number }): Message[] {
+    const where = ["author_kind = 'agent'", 'run IS NOT NULL', ...(f.agentId ? ['author_id = ?'] : []), ...(f.since !== undefined ? ['at > ?'] : [])]
+    const args = [...(f.agentId ? [f.agentId] : []), ...(f.since !== undefined ? [f.since] : []), Math.min(Math.max(1, Math.floor(f.limit)), 500)]
+    return (this.db.prepare(`SELECT * FROM messages WHERE ${where.join(' AND ')} ORDER BY at DESC LIMIT ?`).all(...args) as Row[]).map((r) => this.toMessage(r))
   }
 
   // Oldest first.
@@ -1272,8 +1449,8 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, via, stop_job, send_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run, stop_job = excluded.stop_job, send_mode = excluded.send_mode`
       )
       .run(
         m.id,
@@ -1284,8 +1461,25 @@ export class Db {
         m.at,
         m.run ? JSON.stringify(m.run) : null,
         m.routine ? JSON.stringify(m.routine) : null,
-        m.threadId ?? null
+        m.threadId ?? null,
+        m.via ?? null,
+        m.stop?.job ?? null,
+        m.sendMode ?? null
       )
+  }
+
+  // My prompts that were still waiting their turn when the app closed, oldest first (runs.ts, `resumeQueued`).
+  // Only 'queue': an older build marked a message handed into a running reply 'steer', and that reply
+  // answered it already.
+  queuedMessages(): Message[] {
+    return (this.db.prepare(`SELECT * FROM messages WHERE send_mode = 'queue' ORDER BY at`).all() as Row[]).map((r) => this.toMessage(r))
+  }
+
+  // Replies that failed on something that passes, whose time to try again has come (src/core/runs.ts).
+  // Found through messages_retry: every minute, without reading every message.
+  retriesDue(now: number): Message[] {
+    const rows = this.db.prepare("SELECT * FROM messages WHERE run IS NOT NULL AND json_extract(run, '$.status') = 'failed' AND json_extract(run, '$.retryAt') <= ? ORDER BY at").all(now) as Row[]
+    return rows.map((r) => this.toMessage(r))
   }
 
   // The replies whose run is in one of these states, oldest first. Found in SQL: the rest of
@@ -1304,18 +1498,19 @@ export class Db {
     return r ? this.toApproval(r) : undefined
   }
 
-  // Runs that were working when the app closed can't continue: their CLI process is gone.
-  interruptStaleRuns(): number {
-    let n = 0
+  // Runs that were working when the app closed can't continue: their CLI process is gone. Returns
+  // their messages, so the work can go on in new replies (Runner.resumeInterrupted).
+  interruptStaleRuns(): string[] {
+    const ids: string[] = []
     for (const m of this.messagesWithRun(['working'])) {
       if (m.run?.status !== 'working') continue
-      n++
+      ids.push(m.id)
       this.saveMessage({
         ...m,
         run: { ...m.run, status: 'interrupted', steps: m.run.steps.map((s) => (s.status === 'running' ? { ...s, status: 'error' } : s)) }
       })
     }
-    return n
+    return ids
   }
 
   // ---------- receipts ----------
@@ -1468,6 +1663,11 @@ export class Db {
 
   getSecret(key: string): string | undefined {
     return (this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: string } | undefined)?.value
+  }
+
+  // The keys that start with a prefix: what's saved, without opening any of it.
+  secretKeys(prefix: string): string[] {
+    return (this.db.prepare('SELECT key FROM secrets WHERE substr(key, 1, ?) = ? ORDER BY key').all(prefix.length, prefix) as { key: string }[]).map((r) => r.key)
   }
 
   setSecret(key: string, value: string | undefined): void {
@@ -1750,6 +1950,107 @@ export class Db {
     this.db.prepare('DELETE FROM routines WHERE id = ?').run(id)
   }
 
+  // ---------- the Cofre (src/core/vault.ts) ----------
+
+  private toVaultKey(r: Row): VaultKey {
+    return {
+      id: str(r['id']),
+      name: str(r['name']),
+      ...(r['owner'] ? { owner: str(r['owner']) } : {}),
+      agents: JSON.parse(str(r['agents']) || '[]') as string[],
+      approve: r['approve'] === 1,
+      hint: str(r['hint']),
+      ...(r['note'] ? { note: str(r['note']) } : {}),
+      ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at']),
+      ...(r['used_at'] ? { usedAt: Number(r['used_at']) } : {})
+    }
+  }
+
+  vaultKeys(): VaultKey[] {
+    return (this.db.prepare('SELECT * FROM vault_keys ORDER BY owner, name').all() as Row[]).map((r) => this.toVaultKey(r))
+  }
+
+  vaultKey(id: string): VaultKey | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_keys WHERE id = ?').get(id) as Row | undefined
+    return r && this.toVaultKey(r)
+  }
+
+  saveVaultKey(k: VaultKey): void {
+    this.db
+      .prepare(
+        `INSERT INTO vault_keys (id, name, owner, agents, approve, hint, note, created_by, created_at, updated_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, agents = excluded.agents, approve = excluded.approve, hint = excluded.hint, note = excluded.note, updated_at = excluded.updated_at`
+      )
+      .run(k.id, k.name, k.owner ?? '', JSON.stringify(k.agents), k.approve ? 1 : 0, k.hint, k.note ?? null, k.createdBy ?? null, k.createdAt, k.updatedAt, k.usedAt ?? null)
+  }
+
+  removeVaultKey(id: string): void {
+    this.db.prepare('DELETE FROM vault_keys WHERE id = ?').run(id)
+  }
+
+  private toVaultLogin(r: Row): VaultLogin {
+    return {
+      id: str(r['id']),
+      origin: str(r['origin']),
+      username: str(r['username']),
+      ...(r['owner'] ? { owner: str(r['owner']) } : {}),
+      agents: JSON.parse(str(r['agents']) || '[]') as string[],
+      ...(r['note'] ? { note: str(r['note']) } : {}),
+      ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at']),
+      ...(r['used_at'] ? { usedAt: Number(r['used_at']) } : {})
+    }
+  }
+
+  vaultLogins(): VaultLogin[] {
+    return (this.db.prepare('SELECT * FROM vault_logins ORDER BY owner, origin, username').all() as Row[]).map((r) => this.toVaultLogin(r))
+  }
+
+  vaultLogin(id: string): VaultLogin | undefined {
+    const r = this.db.prepare('SELECT * FROM vault_logins WHERE id = ?').get(id) as Row | undefined
+    return r && this.toVaultLogin(r)
+  }
+
+  saveVaultLogin(l: VaultLogin): void {
+    this.db
+      .prepare(
+        `INSERT INTO vault_logins (id, origin, username, owner, agents, note, created_by, created_at, updated_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET origin = excluded.origin, username = excluded.username, agents = excluded.agents, note = excluded.note, updated_at = excluded.updated_at`
+      )
+      .run(l.id, l.origin, l.username, l.owner ?? '', JSON.stringify(l.agents), l.note ?? null, l.createdBy ?? null, l.createdAt, l.updatedAt, l.usedAt ?? null)
+  }
+
+  removeVaultLogin(id: string): void {
+    this.db.prepare('DELETE FROM vault_logins WHERE id = ?').run(id)
+  }
+
+  recordVaultUse(u: VaultUse): void {
+    this.tx(() => {
+      this.db
+        .prepare('INSERT INTO vault_uses (id, key_id, name, agent_id, conversation_id, message_id, person_id, via, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(u.id, u.keyId, u.name, u.agentId, u.conversationId ?? null, u.messageId ?? null, u.personId ?? null, u.via, u.at)
+      this.db.prepare(`UPDATE ${u.via === 'login' ? 'vault_logins' : 'vault_keys'} SET used_at = ? WHERE id = ?`).run(u.at, u.keyId)
+    })
+  }
+
+  // The latest uses, newest first.
+  vaultUses(limit = 200): VaultUse[] {
+    return (this.db.prepare('SELECT * FROM vault_uses ORDER BY at DESC LIMIT ?').all(limit) as Row[]).map((r) => ({
+      id: str(r['id']),
+      keyId: str(r['key_id']),
+      name: str(r['name']),
+      agentId: str(r['agent_id']),
+      ...(r['conversation_id'] ? { conversationId: str(r['conversation_id']) } : {}),
+      ...(r['message_id'] ? { messageId: str(r['message_id']) } : {}),
+      ...(r['person_id'] ? { personId: str(r['person_id']) } : {}),
+      via: str(r['via']) as VaultUse['via'],
+      at: Number(r['at'])
+    }))
+  }
+
   // ---------- skills ----------
 
   skills(): Skill[] {
@@ -1905,6 +2206,7 @@ export class Db {
       // Only the hashes stay, to tell their browsers "you no longer have access" instead of counting a guess.
       this.db.prepare('INSERT OR IGNORE INTO removed_keys (hash, person_id, removed_at) SELECT hash, person_id, ? FROM person_keys WHERE person_id = ?').run(Date.now(), id)
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
+      this.db.prepare('DELETE FROM harness_keys WHERE person_id = ?').run(id) // their harnesses stop at once too
       this.db.prepare('DELETE FROM tasks WHERE owner = ?').run(id) // their to-dos: never started, only theirs
     })
   }
@@ -1968,6 +2270,57 @@ export class Db {
     const r = this.db.prepare('SELECT p.* FROM person_keys k JOIN people p ON p.id = k.person_id WHERE k.hash = ? AND p.removed_at IS NULL').get(hash) as Row | undefined
     if (r) this.db.prepare('UPDATE person_keys SET last_seen = ? WHERE hash = ?').run(Date.now(), hash)
     return r && this.toPerson(r)
+  }
+
+  // ---------- harness keys (src/core/mcp.ts) ----------
+
+  addHarnessKey(hash: string, personId: string, name: string, level: HarnessLevel): void {
+    this.db.prepare('INSERT INTO harness_keys (hash, person_id, name, level, created_at) VALUES (?, ?, ?, ?, ?)').run(hash, personId, name, level, Date.now())
+  }
+
+  // A person's harness keys, newest first. The id is the key's hash: it opens nothing.
+  harnessKeys(personId: string): HarnessKey[] {
+    return (this.db.prepare('SELECT * FROM harness_keys WHERE person_id = ? ORDER BY created_at DESC').all(personId) as Row[]).map((r) => this.toHarnessKey(r))
+  }
+
+  removeHarnessKey(personId: string, id: string): boolean {
+    return this.tx(() => {
+      const gone = this.db.prepare('DELETE FROM harness_keys WHERE hash = ? AND person_id = ?').run(id, personId).changes > 0
+      if (gone) this.db.prepare('DELETE FROM mcp_creations WHERE key_hash = ?').run(id)
+      return gone
+    })
+  }
+
+  // The person a harness key acts as, if they still have access, with the key; seen now.
+  harnessByKey(hash: string): { person: Person; key: HarnessKey } | undefined {
+    const r = this.db.prepare('SELECT k.* FROM harness_keys k JOIN people p ON p.id = k.person_id WHERE k.hash = ? AND p.removed_at IS NULL').get(hash) as Row | undefined
+    const person = r ? this.person(str(r['person_id'])) : undefined
+    if (!r || !person) return undefined
+    const now = Date.now()
+    // Seen at most once a minute: a harness calls many times in a row.
+    if (!r['last_seen'] || now - Number(r['last_seen']) > 60_000) this.db.prepare('UPDATE harness_keys SET last_seen = ? WHERE hash = ?').run(now, hash)
+    return { person, key: this.toHarnessKey({ ...r, last_seen: now }) }
+  }
+
+  private toHarnessKey(r: Row): HarnessKey {
+    const level = str(r['level'])
+    return { id: str(r['hash']), name: str(r['name']), level: isHarnessLevel(level) ? level : 'read', createdAt: Number(r['created_at']), ...(r['last_seen'] ? { seenAt: Number(r['last_seen']) } : {}) }
+  }
+
+  // What a key made with an idempotency key (a JSON result), if it did, in the last 7 days.
+  mcpCreation(keyHash: string, idem: string): unknown {
+    const r = this.db.prepare('SELECT result FROM mcp_creations WHERE key_hash = ? AND idem = ? AND at > ?').get(keyHash, idem, Date.now() - 7 * 86_400_000) as Row | undefined
+    if (!r) return undefined
+    try {
+      return JSON.parse(str(r['result']))
+    } catch {
+      return undefined
+    }
+  }
+
+  saveMcpCreation(keyHash: string, idem: string, result: unknown): void {
+    this.db.prepare('INSERT OR REPLACE INTO mcp_creations (key_hash, idem, result, at) VALUES (?, ?, ?, ?)').run(keyHash, idem, JSON.stringify(result), Date.now())
+    this.db.prepare('DELETE FROM mcp_creations WHERE at < ?').run(Date.now() - 7 * 86_400_000)
   }
 
   // ---------- invites ----------
@@ -2134,6 +2487,23 @@ export class Db {
 
   openQuestions(): Question[] {
     return (this.db.prepare("SELECT * FROM questions WHERE state = 'open' ORDER BY created_at").all() as Row[]).map((r) => this.toQuestion(r))
+  }
+
+  // ---------- jobs (src/core/jobs.ts) ----------
+
+  saveJob(j: Job): void {
+    if (!this.conversation(j.conversationId)) return
+    this.db.prepare('INSERT INTO jobs (id, conversation_id, state, data, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, data = excluded.data').run(j.id, j.conversationId, j.state, JSON.stringify(j), j.createdAt)
+  }
+
+  job(id: string): Job | undefined {
+    const r = this.db.prepare('SELECT data FROM jobs WHERE id = ?').get(id) as { data: string } | undefined
+    if (!r) return undefined
+    try {
+      return JSON.parse(r.data) as Job
+    } catch {
+      return undefined
+    }
   }
 
   // ---------- delegations ----------

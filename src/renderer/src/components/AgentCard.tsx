@@ -6,7 +6,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { ENGINES } from '../../../shared/types'
-import { agentById, canDecide, modelById, navigate, openDialog, openDm, personName, useStore } from '../store'
+import { lentComputersOf } from '../lent'
+import { agentById, canDecide, modelById, navigate, openDialog, openDm, personName, useStore, windowless } from '../store'
 import { agentChannels, agentNow, cardState, placeCard, scrollMovesAnchor, type AgentNow, type CardOpen, type CardOptions } from '../agent-card'
 import { AgentAvatar, Icon, ago, ownColor } from './ui'
 
@@ -69,6 +70,11 @@ function AgentCard({ open }: { open: Open }): ReactNode {
   const messages = useStore((s) => s.messages)
   const conversations = useStore((s) => s.conversations)
   const model = useStore((s) => (agent ? modelById(s, agent.modelId) : undefined))
+  // The computers people lent this server that it uses, and whether each is on now (only on a server).
+  const connectors = useStore((s) => s.connectors)
+  const people = useStore((s) => s.people)
+  const you = useStore((s) => s.you)
+  const lent = agent ? lentComputersOf({ connectors, people, you }, agent) : []
   // Already in its DM: "Message" would lead right here.
   const inItsDm = useStore((s) => {
     if (s.view?.kind !== 'conversation') return false
@@ -189,10 +195,30 @@ function AgentCard({ open }: { open: Open }): ReactNode {
             {model && <span className="muted"> · {ENGINES[model.engine].label}</span>}
           </dd>
         </div>
+        {lent.length > 0 && (
+          <div>
+            <dt>{agent.computer ? L('Também usa', 'Also uses') : L('Computador', 'Computer')}</dt>
+            <dd className="agent-card__lent">
+              {lent.map((c) => (
+                <span key={c.id}>
+                  {c.name}
+                  <span className={`agent-card__live ${c.on ? 'is-on' : ''}`} aria-hidden />
+                  <span className="muted">{c.on ? L('conectado', 'connected') : L('desligado', 'off')}</span>
+                </span>
+              ))}
+            </dd>
+          </div>
+        )}
         {agent.computer && (
           <div>
             <dt>{L('Computador', 'Computer')}</dt>
-            <dd>{agent.computerKind === 'mac' ? L('Roda no seu computador', 'Runs on your computer') : L('Um computador só dele, isolado', 'One of its own, isolated')}</dd>
+            <dd>
+              {agent.computerKind !== 'mac'
+                ? L('Um computador só dele, isolado', 'One of its own, isolated')
+                : windowless()
+                  ? L('Roda direto no servidor', 'Runs right on the server')
+                  : L('Roda no seu computador', 'Runs on your computer')}
+            </dd>
           </div>
         )}
         {!tuca && (

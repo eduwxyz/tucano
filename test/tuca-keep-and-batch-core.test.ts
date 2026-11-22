@@ -1,6 +1,8 @@
 // The Tuca over the real core (fake engines): his conversation is kept when the person leaves his
 // screen and comes back, "Nova conversa" starts another, each person has their own; and a reply with
 // several proposals is applied card by card or all at once, in order, one failing not stopping the rest.
+// These are the cards as they were before the Tuca's changes applied by themselves: the setting is off
+// here (tucaApplyNow: false), and test/tuca-apply-now-core.test.ts covers it on.
 // One core for the whole file: the describes run in order and build on each other.
 import { rmSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -8,14 +10,20 @@ import type { Agent, Conversation, Inbox, Message, Person, ProposalsResult, Rout
 import { proposalsOf } from '../src/shared/types'
 import { bootCore, type Client, type TestCore } from './helpers/core'
 
-vi.setConfig({ testTimeout: process.platform === 'win32' ? 60_000 : 30_000 })
+vi.setConfig({ testTimeout: process.platform === 'win32' ? 120_000 : 60_000 })
 
 let core: TestCore
 let ana: Client // the owner
 let bia: Client // a member
 const crashes: unknown[] = []
 const onCrash = (e: unknown): void => void crashes.push(e)
-const until = async (ok: () => boolean | Promise<boolean>, ms = 20_000): Promise<void> => {
+// How long one wait gets before it gives up. The B2 reply is five MCP tool calls and the fake engine
+// opens a fresh client for each (`callTool`, src/core/engines/fake.ts), so it takes ~19.7 s on this
+// machine and 20.2 s on windows-latest: a 20 s default made it fail by two tenths of a second while
+// doing exactly what it was told. The budget is the wait's, not the test's, and the test's own ceiling
+// above is raised with it.
+const WAIT_MS = process.platform === 'win32' ? 45_000 : 30_000
+const until = async (ok: () => boolean | Promise<boolean>, ms = WAIT_MS): Promise<void> => {
   const end = Date.now() + ms
   while (!(await ok())) {
     if (Date.now() > end) throw new Error('timed out')
@@ -46,6 +54,7 @@ beforeAll(async () => {
   core = await bootCore({ server: true })
   ana = core.connect()
   await ana.call('setMyName', { name: 'Ana' })
+  await ana.call('updateSettings', { patch: { tucaApplyNow: false } })
 }, 30_000)
 afterAll(() => {
   process.off('unhandledRejection', onCrash)

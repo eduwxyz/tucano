@@ -7,12 +7,13 @@
 // screen streams to the app while it changes, so the panel is a live view.
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
-import { existsSync, mkdirSync, readlinkSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { L } from '../shared/lang'
 import { chromeKeyringFlags, findChrome, userAgentPlatform } from './platform'
-import { POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
-import type { BrowserInput, BrowserOp, BrowserReply } from '../shared/types'
+import { fillRefused, FILL, HIDE_SECRETS, POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
+import { MAX_FILE_BYTES, type BrowserInput, type BrowserOp, type BrowserReply } from '../shared/types'
+import { land, partialFolder, refuse } from './downloads'
 
 // Google Chrome on this computer, where it usually is on each system (see platform.ts).
 export const CHROME = findChrome()
@@ -82,6 +83,7 @@ class Tab {
   url = ''
   private world: number | undefined // our isolated world in the tab's main frame
   closedAll?: () => void // every tab is gone (I closed the window)
+  onDownload?: (method: string, params: Record<string, unknown>) => void // a download began or moved on
   remote = false // I'm driving it from the panel (no window: Tucano as a server)
   // True from the first byte of the handshake to the last: Chrome answering its first command on a
   // loaded machine is the slow part, and it gets the same generous deadline as the open itself.
@@ -158,6 +160,7 @@ class Tab {
       return
     }
     const params = (m['params'] ?? {}) as Record<string, unknown>
+    if (typeof m['method'] === 'string' && m['method'].startsWith('Browser.download')) return this.onDownload?.(m['method'], params)
     const info = params['targetInfo'] as { targetId: string; type: string; url: string; openerId?: string } | undefined
     if (m['method'] === 'Target.targetCreated' && info?.type === 'page' && info.openerId === this.target) void this.follow(info.targetId).catch(() => {}) // a link that opens a new tab: go with it
     else if (m['method'] === 'Target.targetInfoChanged' && info?.targetId === this.target) this.url = info.url
@@ -255,7 +258,9 @@ export class ChromeBrowsers {
     private windowless = false,
     // A Chrome nobody asked anything of for this long is closed (cookies kept) and reopens on the
     // same page when next needed: on a server several people share, each costs hundreds of MB.
-    private idleMs?: number
+    private idleMs?: number,
+    // Where each agent's downloads land (core/downloads.ts); without it, nothing downloads.
+    private downloads?: (agentId: string) => string
   ) {
     process.on('exit', () => this.quit())
     if (idleMs) setInterval(() => void this.closeIdle(), Math.min(60_000, Math.max(100, idleMs / 2))).unref()
@@ -295,6 +300,8 @@ export class ChromeBrowsers {
   private async launch(agentId: string, headed: boolean, url?: string): Promise<Tab> {
     const profile = this.profile(agentId)
     mkdirSync(profile, { recursive: true })
+    const downloads = agentId.startsWith('.shot-') ? undefined : this.downloads?.(agentId)
+    if (downloads) pdfsDownload(profile)
     // A Chrome left behind (the app crashed) still holds the profile: a new one would just hand over to it.
     try {
       const pid = Number(readlinkSync(join(profile, 'SingletonLock')).split('-').pop())
@@ -330,6 +337,7 @@ export class ChromeBrowsers {
     })
     try {
       await Promise.race([tab.connect(), failed])
+      await this.watchDownloads(tab, downloads)
     } catch (e) {
       proc.kill()
       throw e
@@ -345,6 +353,44 @@ export class ChromeBrowsers {
     if (headed) tab.closedAll = () => this.handBack(agentId, tab.url)
     this.tabs.set(agentId, tab)
     return tab
+  }
+
+  // Downloads go to the agent's own folder, through .partial (core/downloads.ts), never past the size
+  // limit: one that grows past it is cancelled and the agent told. With no folder, nothing downloads.
+  private async watchDownloads(tab: Tab, folder?: string): Promise<void> {
+    if (!folder) {
+      await tab.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {})
+      return
+    }
+    const partial = partialFolder(folder)
+    rmSync(partial, { recursive: true, force: true }) // what a Chrome closed mid-download left: never coming
+    mkdirSync(partial, { recursive: true })
+    const going = new Map<string, { name: string; url: string; refused?: boolean }>()
+    tab.onDownload = (method, p) => {
+      const guid = String(p['guid'] ?? '')
+      if (method === 'Browser.downloadWillBegin') return void going.set(guid, { name: String(p['suggestedFilename'] ?? ''), url: String(p['url'] ?? '') })
+      const d = going.get(guid)
+      if (method !== 'Browser.downloadProgress' || !d) return
+      // allowAndName: Chrome writes the file under its guid; it gets its own name once whole.
+      const file = join(partial, guid)
+      const size = Math.max(Number(p['totalBytes']) || 0, Number(p['receivedBytes']) || 0)
+      if (p['state'] === 'inProgress' && size > MAX_FILE_BYTES && !d.refused) {
+        d.refused = true
+        refuse(folder, d.name, size)
+        void tab.send('Browser.cancelDownload', { guid }).catch(() => {})
+      } else if (p['state'] === 'completed' || p['state'] === 'canceled') {
+        going.delete(guid)
+        if (p['state'] === 'canceled' || d.refused) rmSync(file, { force: true })
+        else {
+          try {
+            land(folder, file, d.name, d.url)
+          } catch {
+            rmSync(file, { force: true })
+          }
+        }
+      }
+    }
+    await tab.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: partial, eventsEnabled: true }).catch(() => {})
   }
 
   // Asked to close, Chrome writes its cookies first. Killed, it loses what the last 30 s or so
@@ -510,6 +556,25 @@ export class ChromeBrowsers {
         await this.settle(tab)
         return here(true, at)
       }
+      case 'fill': {
+        // A saved login (navegador_login): checked in the page right before typing, on that exact origin
+        // and, for a password, in a password field. Errors never carry the text: it may be the password.
+        const ref = Number(args['ref'])
+        const text = String(args['text'] ?? '')
+        const password = args['password'] === true
+        const check = (focus: boolean): string => FILL(ref, String(args['origin'] ?? ''), password, focus, password && focus ? text : '')
+        const at = await tab.run<{ x: number; y: number } | string>(check(false))
+        if (typeof at === 'string') throw new Error(fillRefused(at))
+        await wait(80)
+        await this.click(tab, at.x, at.y)
+        await wait(120)
+        const again = await tab.run<{ x: number; y: number } | string>(check(true))
+        if (typeof again === 'string') throw new Error(fillRefused(again))
+        await tab.cmd('Input.insertText', { text })
+        await wait(150)
+        await this.settle(tab)
+        return here(true, at)
+      }
       case 'key': {
         const key = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
         if (!KEYS[key]) throw new Error(L(`Tecla desconhecida. Use uma destas: ${Object.keys(KEYS).join(', ')}.`, `Unknown key. Use one of these: ${Object.keys(KEYS).join(', ')}.`))
@@ -620,9 +685,23 @@ export class ChromeBrowsers {
 
   // Never waits more than 5 s: a page that can't be painted gives no frame, not a stuck agent.
   private async frame(tab: Tab): Promise<string | undefined> {
+    await tab.run(HIDE_SECRETS).catch(() => {}) // a saved password shown ("show password") goes back to dots first
     const r = (await Promise.race([tab.cmd('Page.captureScreenshot', { format: 'jpeg', quality: 70 }).catch(() => null), wait(5000).then(() => null)])) as { data?: string } | null
     return r?.data
   }
 }
 
 export const hasChrome = (bin = CHROME): boolean => !!bin && existsSync(bin)
+
+// A PDF link downloads instead of opening in Chrome's viewer, where the agent couldn't take the file.
+// Chrome reads its preferences on start; a file it can't parse is left as it is.
+export function pdfsDownload(profile: string): void {
+  const file = join(profile, 'Default', 'Preferences')
+  try {
+    const prefs = (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}) as { plugins?: Record<string, unknown> }
+    if (prefs.plugins?.['always_open_pdf_externally'] === true) return
+    prefs.plugins = { ...prefs.plugins, always_open_pdf_externally: true }
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify(prefs))
+  } catch {}
+}

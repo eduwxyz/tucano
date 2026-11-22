@@ -2,7 +2,7 @@
 // and the arrows go through the others.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { closeLightbox, moveLightbox, useStore } from '../store'
+import { canSaveArtifact, closeLightbox, moveLightbox, saveArtifact, saveLabel, useStore } from '../store'
 import { Icon } from './ui'
 
 const MAX = 8
@@ -12,6 +12,7 @@ const FIT: View = { scale: 1, x: 0, y: 0 }
 export function Lightbox(): ReactNode {
   const box = useStore((s) => s.lightbox)
   const item = box?.items[box.index]
+  const canSave = useStore(canSaveArtifact)
   const [view, setView] = useState<View>(FIT)
   const stage = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
@@ -81,6 +82,11 @@ export function Lightbox(): ReactNode {
             <span className="small lightbox__zoom">{Math.round(view.scale * 100)}%</span>
             <button className="icon-btn" title={L('Aproximar (+)', 'Zoom in (+)')} aria-label={L('Aproximar', 'Zoom in')} onClick={() => zoomBy(1.4)}>+</button>
           </>
+        )}
+        {item.artifact && canSave && (
+          <button className="btn btn--sm btn--ghost" title={item.artifact.name} onClick={() => saveArtifact(item.artifact!)}>
+            <Icon name="down" size={14} /> {saveLabel()}
+          </button>
         )}
         <button className="icon-btn" title={L('Fechar (Esc)', 'Close (Esc)')} aria-label={L('Fechar', 'Close')} onClick={closeLightbox}>
           <Icon name="x" size={16} />

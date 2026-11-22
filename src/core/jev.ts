@@ -19,7 +19,7 @@ const TIMEOUT_MS = 10_000
 type Fetch = typeof fetch
 
 const noAnswer = (): string => L('o TypeSafe não respondeu', "TypeSafe didn't answer")
-const badFormat = (): string => L('resposta do TypeSafe fora do formato', "TypeSafe's answer wasn't in the format")
+const badFormat = (): string => L('resposta do TypeSafe fora do formato', "TypeSafe's response was not in the expected format")
 
 function failure(status: number): string {
   if (status === 401 || status === 403) return L('a chave do TypeSafe não vale mais', 'the TypeSafe key is no longer valid')
