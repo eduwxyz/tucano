@@ -65,6 +65,7 @@ import {
   type EngineId,
   type GrantLevel,
   type MemoryMode,
+  type SendMode,
   type Skill,
   type ToolClass,
   isTeam,
@@ -3403,6 +3404,19 @@ export function SettingsPage(): ReactNode {
                 </div>
                 <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
               </div>
+              <div className="key-row">
+                <Icon name="spark" />
+                <div className="grow">
+                  <strong>{L('O que o modelo pensa', "Show reasoning")}</strong>
+                  <p className="muted small">
+                    {L(
+                      'Enquanto um agente responde, o raciocínio dele aparece em letra pequena e apagada, embaixo dos passos, e fica ali depois que a resposta acaba. Desligado, você vê só os passos e a resposta. Por enquanto, só os agentes que rodam no Pi mandam o raciocínio.',
+                      "Shows reasoning below the steps, during and after replies. When off, only steps and answers appear. Currently available only with Pi."
+                    )}
+                  </p>
+                </div>
+                <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
+              </div>
             </Card>
             <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>
               {owner && (
@@ -3441,6 +3455,32 @@ export function SettingsPage(): ReactNode {
               )}
             >
               <AutonomyControls own={{ autonomy: settings.autonomy, actionRules: settings.actionRules, outsideGuard: settings.outsideGuard }} onChange={(p) => updateSettings(p)} />
+            </Card>
+          </SectionAnchor>
+        )}
+
+        {on('agentes') && admin && (
+          <SectionAnchor id="agents-replies" sections={structure}>
+            <Card title={L('Respostas', 'Replies')} section="agents-replies">
+              <Field
+                label={L('Um novo prompt com uma resposta em curso', "New prompts during a reply")}
+                hint={L(
+                  'O que o Enter faz quando o agente já está respondendo ali. Ctrl+Enter põe na fila, Alt+Enter entrega no meio do trabalho, Shift+Alt+Enter interrompe, seja qual for o ajuste. Shift+Enter continua quebrando a linha.',
+                  'Enter uses this mode. Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line.'
+                )}
+              >
+                <Select
+                  value={settings.sendMode ?? 'parallel'}
+                  onChange={(v) => { if (v) updateSettings({ sendMode: v as SendMode }) }}
+                  options={[
+                    { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Parallel replies') },
+                    { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') },
+                    { value: 'steer', label: L('Entregue à resposta em curso', 'Steer current reply') },
+                    { value: 'interrupt', label: L('Interrompe e começa com esta', 'Interrupt and restart') }
+                  ]}
+                  placeholder={L('Escolha', 'Pick')}
+                />
+              </Field>
             </Card>
           </SectionAnchor>
         )}

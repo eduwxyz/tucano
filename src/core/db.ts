@@ -41,6 +41,7 @@ import {
   type Routine,
   type RoutineRun,
   type Run,
+  type SendMode,
   type Settings,
   type Skill,
   type SkillVersion,
@@ -683,7 +684,9 @@ const COLUMNS: [string, string, string][] = [
   // The note a job left where it stopped on its brakes (src/core/jobs.ts): the job it carries Continuar for.
   ['messages', 'stop_job', 'TEXT'],
   // When an agent was deleted for good (retireAgent): it stays only as a name for its old messages.
-  ['agents', 'deleted_at', 'INTEGER']
+  ['agents', 'deleted_at', 'INTEGER'],
+  // A prompt of mine waiting its turn: 'queue' while it waits (src/core/runs.ts, resumeQueued).
+  ['messages', 'send_mode', 'TEXT']
 ]
 
 
@@ -1289,6 +1292,7 @@ export class Db {
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
+      ...(r['send_mode'] ? { sendMode: str(r['send_mode']) as SendMode } : {}),
       ...(r['title'] ? { title: str(r['title']) } : {}),
       ...(r['via'] ? { via: str(r['via']) } : {}),
       ...(r['stop_job'] ? { stop: { job: str(r['stop_job']) } } : {})
@@ -1443,8 +1447,8 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, via, stop_job) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run, stop_job = excluded.stop_job`
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine, thread_id, via, stop_job, send_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run, stop_job = excluded.stop_job, send_mode = excluded.send_mode`
       )
       .run(
         m.id,
@@ -1457,8 +1461,16 @@ export class Db {
         m.routine ? JSON.stringify(m.routine) : null,
         m.threadId ?? null,
         m.via ?? null,
-        m.stop?.job ?? null
+        m.stop?.job ?? null,
+        m.sendMode ?? null
       )
+  }
+
+  // My prompts that were still waiting their turn when the app closed, oldest first (runs.ts, `resumeQueued`).
+  // Only 'queue': a message handed into a running reply keeps its 'steer' mark after that reply answered
+  // it, and an app that opened again must not answer it a second time.
+  queuedMessages(): Message[] {
+    return (this.db.prepare(`SELECT * FROM messages WHERE send_mode = 'queue' ORDER BY at`).all() as Row[]).map((r) => this.toMessage(r))
   }
 
   // Replies that failed on something that passes, whose time to try again has come (src/core/runs.ts).

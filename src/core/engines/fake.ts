@@ -191,6 +191,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
           'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
         )
+      } else if (turn.mcpUrl && /sem pressa com a skill `([\w-]+)`/i.test(last)) {
+        // A run that is still working when the person steers it: a step, a pause long enough to write
+        // in (TUCANO_FAKE_HOLD_MS), then a second call, which is where the steer is handed over. Only
+        // the fake engine holds: it is how the steer pill can be shown at all (screens-steer-pill.mjs).
+        const [, nome] = /sem pressa com a skill `([\w-]+)`/i.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        reply = L('Segui a orientação e terminei.', 'I followed the steer and finished.')
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`
@@ -280,6 +289,42 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const slow = /^\s*(?:delegue|hand) /i.test(last) ? null : /demore (\d+) ?s/i.exec(last) // what it hands down is the other's to take its time on
       if (slow) await new Promise((r) => setTimeout(r, Number(slow[1]) * 1000))
       if (id === 'claude') yield { type: 'quota', quota: { fiveHour: { utilization: 0.34, resetsAt: Date.now() + 2 * 3_600_000 }, sevenDay: { utilization: 0.21, resetsAt: Date.now() + 4 * 86_400_000 }, at: Date.now() } }
+      // With TUCANO_FAKE_THINKING=1, the model thinks out loud first, slowly, so the window has
+      // something to show as it arrives: the same shape Pi's thinking_delta has.
+      if (process.env['TUCANO_FAKE_THINKING'] === '1') {
+        const thoughts = [
+          'Reading the request: it is about ',
+          'a piece of code and a test that fails. ',
+          'Before answering, worth seeing where the request comes from ',
+          'and what was already said in this conversation. ',
+          'The short path is reading the file it names, ',
+          'src/renderer/src/components/Conversation.tsx:11799 ',
+          'checking the version in the repository ',
+          'and only then saying what to do. ',
+          'If the test fails the same on a clean main, it is not the build. ',
+          'Better to say that with the number in hand. ',
+          'This machine may not have the branch the test was written on, ',
+          'so a failure here says nothing about the build yet. ',
+          'First the file, then whether the same test fails on a clean main. ',
+          'If it does, the machine and the build are both fine. ',
+          'If it passes there, something in this checkout changed under it. ',
+          'Also worth checking the Node version the runner used, ',
+          'since the suite pins nothing and this machine may run another one. ',
+          'That is the whole plan: two runs, one comparison, and the number. ',
+          'One more thing before the run: the suite reads its fixtures from the repository, ',
+          'so a checkout that is behind would fail for a reason that has nothing to do with the code. ',
+          'Worth printing the commit first as well. ',
+          'Then the two runs against that same commit, one here and one on a clean main. ',
+          'If the numbers agree the machine is out of it entirely. ',
+          'If they differ, the difference is the answer and it needs to be said the same way. ',
+          'No guessing before the runs: a wrong cause costs more than the minute they take.'
+        ]
+        for (const piece of thoughts) {
+          if (turn.signal.aborted) return
+          await new Promise((r) => setTimeout(r, 260))
+          yield { type: 'thinking', delta: piece }
+        }
+      }
       let text = ''
       for (const word of reply.split(/(\s+)/)) {
         if (turn.signal.aborted) return

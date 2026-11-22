@@ -581,7 +581,7 @@ describe('the people who left (18)', () => {
 })
 
 describe('a busy channel (20)', () => {
-  it('each routed reply answers the message that called it; an agent already replying there is called once more, not twice', async () => {
+  it('each message that comes while the agent answers there gets a reply of its own, one per message', async () => {
     const db = new Db(':memory:')
     db.renamePerson(db.ownerId(), 'Ana')
     db.saveAgent(agent('a1', 'lia'))
@@ -614,18 +614,22 @@ describe('a busy channel (20)', () => {
     await wait(() => prompts.length === 1)
     await runner.send('ch', 'SEGUNDA pergunta', [])
     await runner.send('ch', 'TERCEIRA pergunta', [])
-    await new Promise((r) => setTimeout(r, 50))
-    // The first reply, still running, read only up to its message; nothing else started beside it.
-    expect(prompts).toHaveLength(1)
+    // Each of the three is answered by a reply of its own, beside the one still running: none is parked
+    // behind it and none is folded into another. Until #261 this was one reply at a time per agent and
+    // place, the newer message taking over the waiting one (#358); a person's second message looked
+    // unanswered until the first reply ended, which is what #261 replaces.
+    await expect.poll(() => prompts.length, { timeout: 5000 }).toBe(3)
+    // The first reply, still running, read only up to its message.
     expect(prompts[0]).toContain('PRIMEIRA')
     expect(prompts[0]).not.toContain('SEGUNDA')
     release()
     await runner.idle()
-    // One more reply, after it, for what came while it worked.
-    expect(prompts).toHaveLength(2)
-    expect(prompts[1]).toContain('TERCEIRA')
+    expect(prompts).toHaveLength(3) // one per message, never a second one for the same
     const replies = db.messages().filter((m) => m.author.kind === 'agent')
-    expect(replies).toHaveLength(2)
+    expect(replies).toHaveLength(3)
+    // Every message answered, and each by a reply of its own: that is what `replyTo` says it answers.
+    const asked = db.messages().filter((m) => m.author.kind === 'person').map((m) => m.id)
+    expect(replies.map((m) => m.run?.replyTo).sort()).toEqual([...asked].sort())
   })
 
   it('a reply queued for an older message reads it as the last one, even when newer ones came', async () => {

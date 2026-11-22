@@ -161,6 +161,9 @@ export interface Step {
   keys?: string[] // the Cofre's keys the command used, by name (src/core/vault.ts)
   status: StepStatus
   ms?: number
+  // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran,
+  // between two calls, and its row carries their words (src/core/runs.ts, `steerIn`).
+  kind?: 'steer'
 }
 
 export interface Receipt {
@@ -484,6 +487,9 @@ export interface Message {
   title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
   via?: string // a person's message a harness sent over MCP: the harness key's name ("Claude Code"). The agent reads it; the screens don't show it
   stop?: { job: string } // the note left where a job stopped on its brakes (src/core/jobs.ts): it carries Continuar
+  // A prompt of mine waiting its turn in a conversation that was already answering: 'queue' while it
+  // waits, unset once its reply goes. Kept in the database, so it outlives a restart (runs.ts, resumeQueued).
+  sendMode?: SendMode
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
@@ -552,6 +558,7 @@ export interface Settings {
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
+  sendMode?: SendMode // what Enter does while a reply is running: beside it, two replies at once (the default), after it, into it, or stopping it
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
@@ -595,6 +602,9 @@ export interface Settings {
   sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
+  // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
+  // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
+  showThinking?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
@@ -1305,6 +1315,11 @@ export interface Report {
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
 }
+
+// How a new prompt arrives in a conversation that is already answering (src/core/runs.ts): beside
+// what's running, after it, handed to it between tool calls, or in place of it. No mode at all is
+// beside what's running, like a message of the person's own: it starts its own reply.
+export type SendMode = 'parallel' | 'queue' | 'steer' | 'interrupt'
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'

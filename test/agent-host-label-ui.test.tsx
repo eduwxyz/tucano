@@ -13,7 +13,7 @@ Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, N
 Object.assign(window, { ResizeObserver: ResizeObserverStub, innerWidth: 1200, innerHeight: 800 })
 
 const lia = { id: 'lia', name: 'Lia', handle: 'lia', color: 'sky', modelId: 'sonnet', archived: false, kind: 'agent', role: '', computer: true, computerKind: 'mac' } as unknown as Agent
-const fake = { view: { kind: 'conversation', id: 'dm' }, messages: {}, conversations: [] }
+const fake: Record<string, unknown> = { view: { kind: 'conversation', id: 'dm' }, messages: {}, conversations: [], connectors: [], people: [], you: '' }
 let onServer = false
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(fake),
@@ -55,3 +55,18 @@ it('says the server on a server, never "your computer"', async () => {
   expect(text).toContain('Roda direto no servidor')
   expect(text).not.toContain('seu computador')
 })
+
+it('says which lent computer it also uses, and whether it is on now', async () => {
+  onServer = true
+  Object.assign(lia, { grants: { mac: 'read_write' } })
+  fake.connectors = [{ id: 'mac', name: 'MacBook do Edu', kind: 'remote', url: 'tucano-node://MacBook', auth: 'none', status: 'disconnected', tools: [] }]
+  fake.people = [{ id: 'edu', role: 'owner' }]
+  fake.you = 'edu'
+  const text = await card()
+  expect(text).toContain('Também usa')
+  expect(text).toContain('MacBook do Edu')
+  expect(text).toContain('desligado')
+  fake.connectors = []
+  Object.assign(lia, { grants: {} })
+})
+
