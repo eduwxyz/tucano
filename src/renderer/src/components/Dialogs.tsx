@@ -95,7 +95,7 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
-  if (dialog?.kind === 'feedback') return <FeedbackDialog image={dialog.image} onClose={close} />
+  if (dialog?.kind === 'feedback') return <FeedbackDialog {...(dialog.image ? { image: dialog.image } : {})} {...(dialog.draft ? { draft: dialog.draft } : {})} {...(dialog.from ? { from: dialog.from } : {})} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
   if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />
