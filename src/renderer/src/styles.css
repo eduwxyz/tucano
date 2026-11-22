@@ -8939,7 +8939,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 /* The two dictation model choices sit side by side until the card gets narrow. */
 .voice-setup__choices { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 /* The workspace's name and the name the agents use share one line, each with its own label. */
-.settings-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.settings-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .settings-pair > .field { min-width: 0; margin-bottom: 0; }
 .voice-choice, .choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
 .voice-choice small, .choice small { color: var(--text-2); font-size: 12px; }
