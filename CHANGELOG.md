@@ -7,12 +7,14 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
 > - **Novo:** um agente pode deixar os **próximos passos** num cartão de caixas de marcar, todas vazias. O que você marcar volta como a sua mensagem; se preferir escrever outra coisa, o cartão não atrapalha nem fica esperando você. **Cancelar** fecha o cartão sem acordar o agente, e um cartão novo do mesmo agente no mesmo lugar substitui o anterior.
+> - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 
 ### Added
 
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
 - **An agent can leave its next steps in a card of checkboxes.** When a piece of work reaches a point with concrete ways to go on, the agent can propose 1 to 6 of them with the new `next_steps` tool instead of burying them in its text. The card opens with nothing ticked: **Do these** sends what you tick as your next message, **Another step…** takes one written by hand, and **Cancel** closes it without waking the agent. It holds nothing up: the reply is finished, it stays out of For you, it takes no slot in **Replies at once**, and a message written instead is a new request, not an answer to the card. When the same agent proposes a new card in the same conversation and thread, its previous open card closes quietly and reads as replaced. In a team, only the person it was proposed to, whoever covers for them or an admin can answer it. Thanks to Apostol Apostolov. (#298)
+- **The browser names the wall it landed on.** A Cloudflare check answers 200 with a title and a few words, so an agent read it as a page that had changed and clicked again. After each browser action, the agent now gets one line when the page is a bot check, a refusal, a sign-in, a cookie wall, a failed load or an empty page, with the move that helps. A page that only mentions these things stays silent, and the line never quotes the page's own text. Thanks to Apostol Apostolov. (#620)
 
 ### Changed
 
