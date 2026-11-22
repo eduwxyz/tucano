@@ -1,7 +1,7 @@
 {
-  "base": "98554fdd007637409696f98e061973b5ca9338c6",
+  "base": "2e38864165b3cf8b0ee522b890e07db239d25a7b",
   "scope": "English user-facing copy after accepted #410",
-  "count": 182,
+  "count": 195,
   "replacements": [
     {
       "id": 127,
@@ -2004,6 +2004,150 @@
       "before": "The endpoint refused the key. Check its key in Settings › Models.",
       "after": "The endpoint rejected the key. Check the key in Settings › Models.",
       "reason": "Removes the ambiguous repeated possessive while preserving the recovery path."
+    },
+    {
+      "id": "incoming-01",
+      "file": "src/core/runs.ts",
+      "line": 833,
+      "context": "module",
+      "attribute": null,
+      "source": "A resposta terminou antes de ler isto",
+      "before": "The reply ended before reading this instruction.",
+      "after": "The reply ended before the agent read this instruction.",
+      "reason": "Name the agent as the actor reading instructions."
+    },
+    {
+      "id": "incoming-02",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 318,
+      "context": "ComputerOff",
+      "attribute": "title",
+      "source": "Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.",
+      "before": "Off: the Tucano app is closed there. Opening it brings it back.",
+      "after": "Tucano is closed on this computer. Open it to reconnect.",
+      "reason": "Distinguish the closed app from computer power and name recovery."
+    },
+    {
+      "id": "incoming-03",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 647,
+      "context": "MessageRow",
+      "attribute": "title",
+      "source": "Chega quando a resposta acima terminar",
+      "before": "Goes when the reply above ends",
+      "after": "Runs after the reply above finishes",
+      "reason": "Name the queued action."
+    },
+    {
+      "id": "incoming-04",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 1786,
+      "context": "RunSteps",
+      "attribute": "aria-label",
+      "source": "Orientação para a resposta em curso",
+      "before": "A steer for the reply running now",
+      "after": "Instructions for the current reply",
+      "reason": "Use a natural accessible field name."
+    },
+    {
+      "id": "incoming-05",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 1879,
+      "context": "Thought",
+      "attribute": "title",
+      "source": "Recolher o que ele pensou",
+      "before": "Fold what it thought",
+      "after": "Collapse reasoning",
+      "reason": "Name the disclosure action using the established term."
+    },
+    {
+      "id": "incoming-06",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 1879,
+      "context": "Thought",
+      "attribute": "title",
+      "source": "Ler o que ele pensou",
+      "before": "Read what it thought",
+      "after": "Show reasoning",
+      "reason": "Name the disclosure action using the established term."
+    },
+    {
+      "id": "incoming-07",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 2963,
+      "context": "Composer",
+      "attribute": "title",
+      "source": "Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Ctrl+Enter põe na fila, Alt+Enter entrega, Shift+Alt+Enter interrompe, Shift+Enter quebra a linha).",
+      "before": "While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Ctrl+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts, Shift+Enter breaks the line).",
+      "after": "Enter uses this mode during a reply. Select to restore parallel replies. Shortcuts apply to one send: Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line.",
+      "reason": "Identify the restored mode and preserve all shortcuts and their per-send scope."
+    },
+    {
+      "id": "incoming-08",
+      "file": "src/renderer/src/components/Conversation.tsx",
+      "line": 2966,
+      "context": "Composer",
+      "attribute": null,
+      "source": "Enter: entregue à resposta",
+      "before": "Enter: into the reply",
+      "after": "Enter: steer",
+      "reason": "Name the action consistently with the mode."
+    },
+    {
+      "id": "incoming-09",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3410,
+      "context": "SettingsPage",
+      "attribute": null,
+      "source": "O que o modelo pensa",
+      "before": "What the model is thinking",
+      "after": "Show reasoning",
+      "reason": "Describe the enabled behavior and synchronize its search label."
+    },
+    {
+      "id": "incoming-10",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3414,
+      "context": "SettingsPage",
+      "attribute": null,
+      "source": "Enquanto um agente responde, o raciocínio dele aparece em letra pequena e apagada, embaixo dos passos, e fica ali depois que a resposta acaba. Desligado, você vê só os passos e a resposta. Por enquanto, só os agentes que rodam no Pi mandam o raciocínio.",
+      "before": "While an agent replies, its reasoning shows in small, dim text under the steps, and it stays there once the reply ends. Off, you see only the steps and the answer. For now only agents running on Pi send their reasoning.",
+      "after": "Shows reasoning below the steps, during and after replies. When off, only steps and answers appear. Currently available only with Pi.",
+      "reason": "Preserve timing, off state and Pi availability while removing visual narration."
+    },
+    {
+      "id": "incoming-11",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3466,
+      "context": "SettingsPage",
+      "attribute": "label",
+      "source": "Um novo prompt com uma resposta em curso",
+      "before": "While a reply is running",
+      "after": "New prompts during a reply",
+      "reason": "Name what the choice controls and synchronize its search label."
+    },
+    {
+      "id": "incoming-12",
+      "file": "src/renderer/src/settings-structure.ts",
+      "line": 106,
+      "context": "settingsTerms",
+      "attribute": null,
+      "source": "O que o modelo pensa",
+      "before": "What the model is thinking",
+      "after": "Show reasoning",
+      "reason": "Describe the enabled behavior and synchronize its search label."
+    },
+    {
+      "id": "incoming-13",
+      "file": "src/renderer/src/settings-structure.ts",
+      "line": 108,
+      "context": "settingsTerms",
+      "attribute": null,
+      "source": "Um novo prompt com uma resposta em curso",
+      "before": "While a reply is running",
+      "after": "New prompts during a reply",
+      "reason": "Name what the choice controls and synchronize its search label."
     }
-  ]
+  ],
+  "initialAuditBase": "98554fdd007637409696f98e061973b5ca9338c6"
 }

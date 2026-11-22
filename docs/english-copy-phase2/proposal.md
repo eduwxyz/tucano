@@ -1,10 +1,13 @@
 # English copy review, phase 2
 
-This proposal revises 182 English interface strings after accepted #410, using
-`98554fdd007637409696f98e061973b5ca9338c6` as the baseline. It makes actions,
+This proposal revises 195 English interface strings after accepted #410. The
+initial audit used `98554fdd007637409696f98e061973b5ca9338c6`; the PR now includes
+upstream `2e38864165b3cf8b0ee522b890e07db239d25a7b`. It makes actions,
 settings and consequences easier to understand across Settings, conversations,
 agent setup, the task board, Vault, server access, invitations and feedback.
-The review considered 206 candidates and deferred 24.
+The initial review considered 206 candidates and deferred 24. A further review
+of 50 incoming English occurrences revised 13, retained 35 and excluded two
+model-facing or test-engine strings.
 
 The edits preserve behavior. They change English literals without changing
 Portuguese strings, localization structure, interpolation expressions, model
@@ -83,7 +86,7 @@ certify every conditional tooltip, user-facing error or permission state.
 
 `npm run typecheck`, `npm run build`, `git diff --check` and the affected test
 selection pass (9 files, 93 tests). Parsed-source comparison confirms that all
-182 source changes are English arguments of `L(...)` across 33 files;
+195 source changes are English arguments of `L(...)` across 34 files;
 Portuguese and the surrounding application syntax are unchanged. One Settings
 navigation test expectation now matches the revised empty-result text.
 
