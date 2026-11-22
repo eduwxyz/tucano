@@ -22,7 +22,9 @@ interface Saved {
   node?: boolean // this computer is lent to it: its agents use this computer's terminal, files, browser and apps (core/node-link.ts)
 }
 
-// The app's bar above a server's page (the renderer's ServerBar): where to go back.
+// The app's bar above a server's page (the renderer's ServerBar): where to go back. A page that
+// draws the way back in its own workspace menu says so (own), and then fills the window: an older
+// server's page, or one that isn't drawn yet (it doesn't answer, it's still loading), keeps the bar.
 export const BAR = 40
 
 // What the app's own page sees of a server: never its token.
@@ -32,6 +34,7 @@ export interface ServerInfo {
   origin: string
   open: boolean // on screen now, in the app's window
   node: boolean // this computer is lent to it
+  own: boolean // its page draws the way back itself (its workspace menu): no bar over it
 }
 
 // paired; cancelled (the person said no); invalid (not a pairing link); unsafe (nowhere safe to keep it);
@@ -65,6 +68,7 @@ function guard(ses: Session, origin: string): void {
 
 export class Servers {
   private views = new Map<string, WebContentsView>() // kept while the app runs: going back and forth is instant
+  private owned = new Set<string>() // the servers whose page draws the way back itself, as it is now
   private active: string | null = null // the server on screen; null: this computer
   private host: BrowserWindow | null = null // the window the view is in now
   private guarded = new WeakSet<Session>()
@@ -108,7 +112,17 @@ export class Servers {
   }
 
   summary(): ServerInfo[] {
-    return this.list().map((s) => ({ id: s.id, name: serverName(s.origin), origin: s.origin, open: this.active === s.id, node: !!s.node }))
+    return this.list().map((s) => ({ id: s.id, name: serverName(s.origin), origin: s.origin, open: this.active === s.id, node: !!s.node, own: this.owned.has(s.id) }))
+  }
+
+  // A server's page draws the way back in its own menu (on), or stopped (its menu is gone: the
+  // first run's screens, a page going away). The bar comes back the moment it stops.
+  own(id: string, on: boolean): void {
+    if (this.owned.has(id) === on || !this.views.has(id)) return
+    if (on) this.owned.add(id)
+    else this.owned.delete(id)
+    if (this.active === id) this.place()
+    this.deps.changed()
   }
 
   // A pairing link from outside the app (the system, the menu's clipboard): it says so when it isn't one.
@@ -204,7 +218,8 @@ export class Servers {
     const view = this.active ? this.views.get(this.active) : undefined
     if (!view) return void win.setTitle('Tucano')
     const { width, height } = win.getContentBounds()
-    view.setBounds({ x: 0, y: BAR, width, height: Math.max(0, height - BAR) })
+    const top = this.owned.has(this.active!) ? 0 : BAR
+    view.setBounds({ x: 0, y: top, width, height: Math.max(0, height - top) })
     win.contentView.addChildView(view)
     const s = this.list().find((x) => x.id === this.active)
     if (s) win.setTitle(`Tucano · ${serverName(s.origin)}`)
@@ -269,6 +284,8 @@ export class Servers {
     wc.on('will-navigate', stay)
     wc.on('will-redirect', stay)
     wc.on('will-attach-webview', (e) => e.preventDefault())
+    // A new page (a reload, the server's own restart) says again, once drawn, that it has the way back.
+    wc.on('did-navigate', () => this.own(s.id, false))
     wc.on('did-fail-load', (_e, code, _desc, url, mainFrame) => {
       if (!mainFrame || code === -3) return // -3: a navigation cut short, not a failure
       void wc.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(unreachable(name, s.origin, url))}`)
@@ -313,6 +330,7 @@ export class Servers {
     const v = this.views.get(id)
     if (!v) return
     this.views.delete(id)
+    this.owned.delete(id)
     if (this.host && !this.host.isDestroyed()) this.host.contentView.removeChildView(v)
     if (!v.webContents.isDestroyed()) v.webContents.close()
   }

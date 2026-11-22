@@ -784,7 +784,12 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
     installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() },
     // In the desktop app: this computer's Tucano, on Settings › Servers, to lend it here.
-    openLending: desktop && desktop.openLending ? () => desktop.openLending() : undefined
+    openLending: desktop && desktop.openLending ? () => desktop.openLending() : undefined,
+    // In the desktop app: its workspaces and servers, in this page's own workspace menu (the app's bar
+    // over the page goes away while the menu draws them). An older app has none of it: the bar stays.
+    places: desktop && desktop.places
+      ? { list: () => desktop.places(), onChanged: (cb) => desktop.onPlaces(cb), go: (p) => desktop.go(p), own: (on) => desktop.own(on), os: desktop.os }
+      : undefined
   }
 })()
 `

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { sortWorkspaces, workspaceLabel, type WorkspaceList } from '../../../shared/workspaces'
-import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, teamMode, updateSettings, useStore, type State } from '../store'
+import type { DesktopPlaces } from '../../../shared/servers'
+import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, teamMode, updateSettings, useStore, windowless, type State } from '../store'
 import { Icon } from './ui'
 import { useServers } from './Servers'
 import { useSidebarParts } from './Missions'
@@ -20,6 +21,25 @@ export function useWorkspaceList(): { list: WorkspaceList | null; error: string 
     return () => { active = false; off() }
   }, [api])
   return { list, error }
+}
+
+// On a server's page in the desktop app: this computer's workspaces and the servers, for the menu.
+// Elsewhere (the app's own page, a browser) none: null.
+function useDesktopPlaces(): DesktopPlaces | null {
+  const api = window.tucano?.places
+  const [places, setPlaces] = useState<DesktopPlaces | null>(null)
+  useEffect(() => {
+    if (!api) return
+    let alive = true
+    const load = (): void => void api.list().then((p) => alive && setPlaces(p), () => {})
+    load()
+    const off = api.onChanged(load)
+    return () => {
+      alive = false
+      off()
+    }
+  }, [api])
+  return places
 }
 
 // What needs the person on the connectors' side: one line for the menu, empty when nothing does.
@@ -52,6 +72,16 @@ export function WorkspaceMenu(): ReactNode {
   const selectedId = list?.selected
   const workspaces = sortWorkspaces(list?.workspaces)
   const servers = useServers()
+  // A server's page in the desktop app lists the app's workspaces and servers here, as the app's own
+  // menu does, and once it does, the app takes away its bar over the page (src/main/servers.ts).
+  const desktop = window.tucano?.places
+  const places = useDesktopPlaces()
+  const onServer = windowless()
+  useEffect(() => {
+    if (!desktop || !places) return
+    desktop.own(true)
+    return () => desktop.own(false)
+  }, [desktop, !!places])
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -82,7 +112,14 @@ export function WorkspaceMenu(): ReactNode {
     <div className="workspace-picker ws-menu" ref={root}>
       <button ref={button} className="workspace-picker__button" title={name} aria-label={L(`${name}: workspaces e ajustes`, `${name}: workspaces and settings`)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="workspace__logo">{name.slice(0, 1)}</span>
-        <span className="workspace__name">{name}</span>
+        {onServer ? (
+          <span className="workspace__text">
+            <span className="workspace__name">{name}</span>
+            <span className="workspace__where"><Icon name="globe" size={11} /> {L('no servidor', 'on the server')}</span>
+          </span>
+        ) : (
+          <span className="workspace__name">{name}</span>
+        )}
         <span className="ws-menu__caret">
           <Icon name="caret" size={12} />
         </span>
@@ -100,7 +137,7 @@ export function WorkspaceMenu(): ReactNode {
         {/* The workspaces, where this window can switch them (not in a browser on a server). */}
         {api && <>
           <div className="workspace-picker__head">
-            <span className="ws-menu__label">Workspaces</span>
+            <span className="ws-menu__label">{servers.length ? L('Neste computador', 'On this computer') : 'Workspaces'}</span>
             <div className="workspace-picker__actions">
               <button className="icon-btn icon-btn--sm" role="menuitem" disabled={busy} title={L('Criar workspace', 'Create Workspace')} aria-label={L('Criar workspace', 'Create Workspace')} onClick={pick(() => openDialog({ kind: 'workspaces', create: true }))}><Icon name="plus" size={14} /></button>
             </div>
@@ -124,6 +161,21 @@ export function WorkspaceMenu(): ReactNode {
           <button className="menu__item ws-menu__quiet" role="menuitem" disabled={busy} onClick={pick(() => openDialog({ kind: 'workspaces' }))}>
             {L('Gerenciar workspaces…', 'Manage workspaces…')}
           </button>
+          <div className="menu__sep" role="separator" />
+        </>}
+        {/* A server's page in the desktop app: the way back, the app's workspaces and the other servers. */}
+        {!api && desktop && places && <>
+          <div className="workspace-picker__head"><span className="ws-menu__label">{L('Neste computador', 'On this computer')}</span></div>
+          {places.workspaces.map((w) => <button key={w.id} className="menu__item" role="menuitem" onClick={pick(() => desktop.go({ kind: 'workspace', id: w.id }))}>
+            <span className="ws-menu__logo" aria-hidden="true">{w.name.slice(0, 1)}</span>
+            <span className="grow">{w.name}</span>
+          </button>)}
+          <div className="workspace-picker__head workspace-picker__head--servers"><span className="ws-menu__label">{L('Servidores', 'Servers')}</span></div>
+          {places.servers.map((s) => <button key={s.id} className="menu__item" role="menuitemradio" aria-checked={s.open} onClick={pick(() => { if (!s.open) desktop.go({ kind: 'server', id: s.id }) })}>
+            <span className="ws-menu__logo is-server" aria-hidden="true"><Icon name="globe" size={12} /></span>
+            {s.open ? <span className="grow">{name} <span className="muted small">{s.name}</span></span> : <span className="grow">{s.name}</span>}
+            <span className="workspace-picker__check" aria-hidden="true">{s.open && <Icon name="check" size={14} />}</span>
+          </button>)}
           <div className="menu__sep" role="separator" />
         </>}
         {admin && (
