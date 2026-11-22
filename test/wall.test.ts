@@ -39,6 +39,21 @@ describe('what a page is, when it is not the page', () => {
     expect(readWall(signs({ chars: 260, frames: ['https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b'] }))?.kind).toBe('challenge')
   })
 
+  it('says nothing about a real page that merely carries a captcha', () => {
+    // Measured 2026-11-22: linkedin.com/login is a sign-in form with an invisible reCAPTCHA on it —
+    // 12 links, 2 fields, 6 buttons, 1 password field, 148 characters of its own words (the labels
+    // are placeholders, so the page reads short). It is not a test, and an agent told it was one
+    // would stop in front of a form that only wanted its Vault login.
+    const frames = ['https://www.google.com/recaptcha/enterprise/anchor?ar=1&size=invisible', 'https://accounts.google.com/gsi/button?logo_alignment=center']
+    // It reads as what it is, a sign-in wall, so the agent is told about the Vault login instead.
+    expect(readWall(signs({ chars: 148, links: 12, fields: 2, buttons: 6, password: 1, frames }), { title: 'LinkedIn Login, Sign in | LinkedIn' })).toEqual({ kind: 'login', why: 'campo de senha' })
+    // The signed-out home page: 96 links, 5 buttons, 699 characters and the same invisible reCAPTCHA.
+    expect(readWall(signs({ chars: 699, links: 96, fields: 0, buttons: 5, frames }), { title: 'LinkedIn: Log In or Sign Up' })).toBeUndefined()
+    // Reddit's "Prove your humanity" is a test and stays one: 6 links, nothing to fill in, 238 characters.
+    const reddit = signs({ chars: 238, words: 'reddit - prove your humanity', links: 6, fields: 0, buttons: 0, marks: ['g-recaptcha'], frames: ['https://www.google.com/recaptcha/api2/anchor?a', 'https://www.google.com/recaptcha/api2/bframe?h'] })
+    expect(readWall(reddit, { title: 'Reddit - Prove your humanity' })).toEqual({ kind: 'challenge', why: 'prove your humanity' })
+  })
+
   it('says nothing about a long page that merely carries a captcha or quotes the words', () => {
     expect(readWall(signs({ chars: 1200, more: true, words: 'contact us. we use cookies only for analytics... just a moment please', marks: ['cf-turnstile'] }), { title: 'Contact' })).toBeUndefined()
     expect(readWall(signs({ more: true, words: 'an article about "just a moment": why cloudflare shows it' }))).toBeUndefined()

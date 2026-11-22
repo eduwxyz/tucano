@@ -112,7 +112,14 @@ export function readWall(signs: PageSigns | undefined, page: { url?: string; tit
   const controls = signs.links + signs.fields + signs.buttons
   const bot = signs.marks[0] ?? signs.frames.flatMap((f) => BOT_FRAMES.filter((b) => f.includes(b)))[0]
   const botWords = found(words, BOT_WORDS)
-  if (short && (bot || botWords)) return { kind: 'challenge', why: bot ?? botWords! }
+  // A mark or a captcha iframe says the page is a test only when the page is nothing: a real page
+  // carries them too. Measured 2026-11-22 — linkedin.com/login has 20 clickable things, a password
+  // field and an invisible reCAPTCHA, and it is a sign-in form; reddit's "Prove your humanity" has 6
+  // links, no field and no password, and it is a test. The words are the strong sign; a mark or a
+  // frame gets the benefit of the doubt only on a page with nothing on it.
+  const nothingToDo = controls <= 10 && signs.password === 0
+  if (short && botWords) return { kind: 'challenge', why: botWords }
+  if (short && bot && nothingToDo) return { kind: 'challenge', why: bot }
   const gone = /err_[a-z_]+/.exec(words)?.[0] ?? (short ? found(words, LOAD_WORDS) : undefined)
   if (gone) return { kind: 'failed', why: gone }
   const refused =
