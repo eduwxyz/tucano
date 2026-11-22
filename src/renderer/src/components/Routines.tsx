@@ -44,7 +44,7 @@ import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
 import { Modal } from './Modal'
 import { Select } from './Select'
-import { chipOcc, FAILED, failedWords, finished, firstLine, listSections, markOf, nextWords, routineWords, splitWeek, stripDay, waitWords, WAITS, type Need, type Occ } from './routines-view'
+import { chipOcc, FAILED, failedWords, finished, firstLine, isOff, listSections, markOf, nextWords, routineWords, splitWeek, stripDay, waitWords, WAITS, type Need, type Occ } from './routines-view'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -189,7 +189,8 @@ export function RoutinesPage(): ReactNode {
   const mine = (agentId: string): boolean => !only || only === agentId
   const days = Array.from({ length: 7 }, (_, i) => dayAt(week, i))
   const end = dayAt(week, 7)
-  const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.at >= week && o.at < end)
+  // A routine that's off keeps its place in the week; a deleted one leaves it with its runs.
+  const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.routine && o.at >= week && o.at < end)
   const { grid, strip } = splitWeek(occs)
   const failedHere = occs.filter((o) => !o.upcoming && o.status && FAILED.has(o.status) && mine(o.agentId)).length
   const onlyProblems = problems && failedHere > 0
@@ -406,15 +407,19 @@ function runsOf(messages: Message[], routines: Routine[]): Occ[] {
   return out
 }
 
-// What's still to come this week, from each routine's clock.
+// What's still to come this week, from each routine's clock — the ones that are off too: a routine
+// the person turned off keeps its place in the week, greyed, so it can be turned back on from its
+// own panel. Only a deleted routine leaves the timetable.
 function planned(routines: Routine[], week: number, now: number): Occ[] {
   const out: Occ[] = []
   for (const r of routines) {
-    if (!r.enabled || r.trigger) continue
+    if (r.trigger) continue
     // A one-off (a date too) is at its next time; a repeating one, each time it falls in the week.
+    // While it's off the core keeps no next time, so it is read from its own clock — unless it ran.
     const times: number[] = []
     if (r.schedule.once) {
-      if (r.nextAt) times.push(r.nextAt)
+      const at = r.nextAt ?? (r.lastAt ? undefined : nextRun(r.schedule, Math.max(week, now) - 1))
+      if (at !== undefined) times.push(at)
     } else for (let t = nextRun(r.schedule, Math.max(week, now) - 1); t !== undefined && t < dayAt(week, 7); t = nextRun(r.schedule, t)) times.push(t)
     for (const t of times) if (t > now) out.push({ key: `${r.id}-${t}`, routine: r, name: r.name, agentId: r.agentId, at: t, conversationId: r.conversationId, upcoming: true })
   }
@@ -422,7 +427,7 @@ function planned(routines: Routine[], week: number, now: number): Occ[] {
 }
 
 // A run's state in words, for a tick's or a block's tooltip.
-const statusWords = (o: Occ): string => (o.upcoming ? L('vai rodar', 'will run') : (o.status && LAST()[o.status]?.label) || '')
+const statusWords = (o: Occ): string => (o.upcoming ? (isOff(o) ? L('desligada', 'off') : L('vai rodar', 'will run')) : (o.status && LAST()[o.status]?.label) || '')
 
 function Calendar({
   days,
@@ -525,10 +530,11 @@ function Calendar({
                 const a = agents.find((x) => x.id === chip.routine.agentId)
                 const occ = chipOcc(chip)
                 const live = chip.ticks.some((t) => t.status === 'working')
+                const off = isOff({ routine: chip.routine })
                 return (
                   <button
                     key={chip.routine.id}
-                    className={`cal__allday c-${a?.color ?? 'graphite'} ${dim(chip.ticks) ? 'is-dim' : ''} ${chip.ticks.some((t) => t.key === selected) ? 'is-selected' : ''} ${live ? 'is-live' : ''}`}
+                    className={`cal__allday c-${a?.color ?? 'graphite'} ${off ? 'is-off' : ''} ${dim(chip.ticks) ? 'is-dim' : ''} ${chip.ticks.some((t) => t.key === selected) ? 'is-selected' : ''} ${live ? 'is-live' : ''}`}
                     style={a ? ownColor(a) : undefined}
                     title={`${chip.routine.name} · ${routineWords(chip.routine)}`}
                     onClick={(e) => onPick(occ, e.currentTarget.getBoundingClientRect())}
@@ -591,10 +597,11 @@ function Calendar({
                   const a = agents.find((x) => x.id === o.agentId)
                   const mark = markOf(o)
                   const live = mark === 'live'
+                  const off = isOff(o)
                   return (
                     <button
                       key={o.key}
-                      className={`cal__ev cal__ev--two ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${selected === o.key ? 'is-selected' : ''} ${dim([o]) ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
+                      className={`cal__ev cal__ev--two ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${off ? 'is-off' : ''} ${selected === o.key ? 'is-selected' : ''} ${dim([o]) ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
                       style={{ ...(a ? ownColor(a) : {}), top }}
                       title={`${hm(o.at)} · ${o.name}${statusWords(o) ? ` · ${statusWords(o)}` : ''}`}
                       onMouseEnter={() => setGhost(null)}
@@ -903,7 +910,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
             {status && <span className={`cal-pop__status ${status.tone}`}> · {status.label}</span>}
           </span>
         ) : occ.upcoming ? (
-          <span>{L('Vai rodar', 'Will run')} {when(occ.at)}</span>
+          <span>{isOff(occ) ? L('Desligada · rodaria', 'Off · would run') : L('Vai rodar', 'Will run')} {when(occ.at)}</span>
         ) : null}
         {r && <span className="cal-pop__rule">{describeRoutine(r, connector?.name)}</span>}
         {!r && <span className="cal-pop__rule">{L('Esta rotina foi apagada.', 'This routine was deleted.')}</span>}
