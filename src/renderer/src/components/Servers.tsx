@@ -13,7 +13,7 @@ import type { NodeInfo, NodeLogEntry } from '../../../shared/types'
 import type { UplinkStatus } from '../../../shared/node-link'
 import { FoldToggle } from './Fold'
 
-type Server = { id: string; name: string; origin: string; open: boolean; node: boolean }
+type Server = { id: string; name: string; origin: string; open: boolean; node: boolean; own?: boolean }
 
 export const hasServers = (): boolean => !!window.tucano?.servers
 
@@ -138,11 +138,13 @@ export function useServers(): Server[] {
 }
 
 // Over a server's page, which fills the rest of the window: which Tucano it is, the other
-// servers, and the way back to this computer's (src/main/servers.ts keeps BAR px for it).
+// servers, and the way back to this computer's (src/main/servers.ts keeps BAR px for it). Only
+// while its page doesn't draw that in its own workspace menu (an older server, a page not drawn yet).
 export function ServerBar(): ReactNode {
   const servers = useServers()
   const on = servers.find((s) => s.open)
-  if (!on) return null
+  // A page that draws the way back in its own menu fills the window: no bar over it.
+  if (!on || on.own) return null
   const api = window.tucano.servers!
   return (
     <div className="server-bar">

@@ -3300,6 +3300,7 @@ export function SettingsPage(): ReactNode {
       <div className="settings-page" ref={body}>
         <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
         {searching ? <SettingsResults hits={searchSettings(structure, query)} query={query} onPick={pickHit} /> : <SettingsJumps key={tab} sections={settingsTabStructure(tab, structure)} />}
+        {windowless() && <SettingsWhere />}
 
         {/* ---------- You ---------- */}
         {on('geral') && admin && (
@@ -3723,6 +3724,31 @@ export function SettingsPage(): ReactNode {
         {on('workspace') && owner && <SectionAnchor id="workspace-danger" sections={structure}><WorkspaceDangerArea /></SectionAnchor>}
       </div>
     </Page>
+  )
+}
+
+// On a server, over its settings: whose they are, and that what belongs to the person's own computer
+// (lending it to the agents) is set in the Tucano app there. In the desktop app, one click to it.
+export function SettingsWhere(): ReactNode {
+  const host = typeof location === 'undefined' ? '' : location.host
+  const open = typeof window === 'undefined' ? undefined : window.tucano?.openLending
+  return (
+    <div className="settings-where" role="note">
+      <Icon name="laptop" size={16} />
+      <span className="grow">
+        {L('Estes ajustes são do servidor ', 'These are the settings of the server ')}
+        <b>{host}</b>
+        {L(
+          ' e valem lá, de qualquer computador. O que é só do seu computador, como emprestá-lo aos agentes, fica no app do Tucano nele.',
+          ', and they apply there, from any computer. What belongs to your own computer, like lending it to the agents, is in the Tucano app on it.'
+        )}
+      </span>
+      {open && (
+        <button className="btn btn--sm" onClick={() => open()}>
+          {L('Abrir no meu computador', 'Open on my computer')}
+        </button>
+      )}
+    </div>
   )
 }
 
