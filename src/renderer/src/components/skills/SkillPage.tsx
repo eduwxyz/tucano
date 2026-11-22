@@ -56,7 +56,7 @@ export function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; st
     >
       <dl className="skill-facts">
         <div>
-          <dt>{L('Quem usa', 'Who uses it')}</dt>
+          <dt>{L('Quem usa', 'Assigned agents')}</dt>
           <dd>
             <Who ids={k.agents} />
             {admin && (
@@ -67,7 +67,7 @@ export function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; st
           </dd>
         </div>
         <div>
-          <dt>{L('Como está indo', 'How it’s going')}</dt>
+          <dt>{L('Como está indo', 'Performance')}</dt>
           <dd>
             {result(stat)}
             {changed && (
@@ -89,7 +89,7 @@ export function SkillPage({ skill: k, stat, onBack, onEdit }: { skill: Skill; st
         </div>
       )}
       <section className="read-group">
-        <h2>{L('Receita', 'Recipe')}</h2>
+        <h2>{L('Receita', 'Instructions')}</h2>
         {k.source && k.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(k.body.length)}</p>}
         {k.body.trim() ? (
           <article className="recipe">

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, BrowserElement, BrowserReply, Settings } from '../src/shared/types'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from '../src/core/browser'
-import { BrowserLogins, loginOrigin, pageOrigin } from '../src/core/browser-logins'
+import { Vault } from '../src/core/vault'
+import { loginOrigin, pageOrigin } from '../src/shared/vault'
 import { systemPrompt } from '../src/core/context'
 import { Db } from '../src/core/db'
 import { downloaded, downloadsFolder, freeName, land, listDownloads, partialFolder, refuse, safeName } from '../src/core/downloads'
@@ -171,10 +172,12 @@ describe('downloads and files in the browser tools', () => {
   })
 })
 
+const owner = { id: 'owner', admin: true, team: false }
+
 describe('saved logins', () => {
   let db: Db
   let dataDir: string
-  let logins: BrowserLogins
+  let logins: Vault
   let events: CoreEvent[]
   let fake: ReturnType<typeof fakeHost>
   let browser: Browser
@@ -184,8 +187,8 @@ describe('saved logins', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ad-nav-login-'))
     db = new Db(join(dataDir, 'test.db'))
     db.saveAgent(lia())
-    logins = new BrowserLogins(db, new Secrets(db, plainCipher), async (ref) => (ref === 'op://Casa/Luz/senha' ? PASSWORD : ''))
-    await logins.save('lia-0001', 'conta.luz.com.br/entrar', 'edu@exemplo.com', PASSWORD)
+    logins = new Vault({ db, secrets: new Secrets(db, plainCipher), readOp: async (ref) => (ref === 'op://Casa/Luz/senha' ? PASSWORD : '') })
+    await logins.saveLogin(owner, { site: 'conta.luz.com.br/entrar', username: 'edu@exemplo.com', password: PASSWORD, agents: ['lia-0001'] })
     events = []
     fake = fakeHost(dataDir)
     browser = new Browser({ host: fake.host, db, dataDir, emit: (e) => events.push(e), me: () => 'Edu', logins })
@@ -204,10 +207,11 @@ describe('saved logins', () => {
   })
 
   it('the person sees sites and usernames; the agent only which sites', async () => {
-    expect(await logins.list('lia-0001')).toEqual([{ origin: 'https://conta.luz.com.br', username: 'edu@exemplo.com' }])
-    expect(logins.sites('lia-0001')).toEqual(['https://conta.luz.com.br'])
-    expect(logins.sites('theo-001')).toEqual([])
-    expect(JSON.stringify(db.secretKeys('browser-login:'))).not.toContain(PASSWORD)
+    expect(logins.logins(owner)).toMatchObject([{ origin: 'https://conta.luz.com.br', username: 'edu@exemplo.com', agents: ['lia-0001'] }])
+    expect(logins.loginSites('lia-0001')).toEqual(['https://conta.luz.com.br'])
+    expect(logins.loginSites('theo-001')).toEqual([])
+    expect(JSON.stringify(db.secretKeys('vault-login:'))).not.toContain(PASSWORD)
+    expect(JSON.stringify(db.vaultLogins())).not.toContain(PASSWORD)
 
     const settings = { workspaceName: 'Edu', context: '' }
     const conv = { id: 'c1', kind: 'channel' as const, name: 'contas', members: ['lia-0001'], createdAt: 0 }
@@ -234,8 +238,9 @@ describe('saved logins', () => {
   })
 
   it('reads a 1Password reference only when it types it', async () => {
-    await logins.save('lia-0001', 'https://conta.luz.com.br', 'edu@exemplo.com', 'op://Casa/Luz/senha')
-    expect(await logins.list('lia-0001')).toEqual([{ origin: 'https://conta.luz.com.br', username: 'edu@exemplo.com', onePassword: true }])
+    const [l] = logins.logins(owner)
+    await logins.saveLogin(owner, { id: l!.id, site: 'https://conta.luz.com.br', password: 'op://Casa/Luz/senha', agents: l!.agents })
+    expect(logins.logins(owner)).toMatchObject([{ username: 'edu@exemplo.com' }]) // the username kept
     await browser.call(lia(), 'navegador_login', { senha: '2' }, ctx)
     expect(fake.calls.find((c) => c.op === 'fill')!.args).toMatchObject({ ref: 2, text: PASSWORD, password: true })
   })
@@ -250,10 +255,16 @@ describe('saved logins', () => {
     expect(fake.calls.some((c) => c.op === 'fill')).toBe(false)
   })
 
+  it('each sign-in goes in the Cofre’s log, for whoever the work was', async () => {
+    await browser.call(lia(), 'navegador_login', { usuario: '#1', senha: '#2' }, { ...ctx, personId: 'owner' })
+    expect(db.vaultUses()).toMatchObject([{ name: 'https://conta.luz.com.br', agentId: 'lia-0001', via: 'login', personId: 'owner' }])
+  })
+
   it('removed, it is gone for good', async () => {
-    await logins.remove('lia-0001', 'https://conta.luz.com.br')
-    expect(logins.sites('lia-0001')).toEqual([])
-    expect(await logins.get('lia-0001', 'https://conta.luz.com.br')).toBeUndefined()
+    await logins.removeLogin(owner, logins.logins(owner)[0]!.id)
+    expect(logins.loginSites('lia-0001')).toEqual([])
+    expect(await logins.loginFor('lia-0001', 'https://conta.luz.com.br', {})).toBeUndefined()
+    expect(db.secretKeys('vault-login:')).toEqual([])
   })
 })
 
@@ -263,8 +274,8 @@ describe('the runner with a saved login', () => {
     const db = new Db(join(dataDir, 'test.db'))
     db.saveAgent(lia())
     db.createConversation({ id: 'c1', kind: 'channel', name: 'contas', members: ['lia-0001'] })
-    const logins = new BrowserLogins(db, new Secrets(db, plainCipher))
-    await logins.save('lia-0001', 'https://conta.luz.com.br', 'edu@exemplo.com', PASSWORD)
+    const logins = new Vault({ db, secrets: new Secrets(db, plainCipher) })
+    await logins.saveLogin(owner, { site: 'https://conta.luz.com.br', username: 'edu@exemplo.com', password: PASSWORD, agents: ['lia-0001'] })
     const fake = fakeHost(dataDir)
     const browser = new Browser({ host: fake.host, db, dataDir, emit: () => {}, me: () => 'Edu', logins })
     const ready = { installed: true, loggedIn: true }

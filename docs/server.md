@@ -161,6 +161,12 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 
 Once a browser has the cookie, the server answers only its own page: a page of another site (a sibling subdomain included) can't call it, and no site can show it inside a frame. Twenty wrong tokens from one address in ten minutes lock that address out for ten minutes.
 
+## Your harness over MCP
+
+The server answers MCP at `/mcp` on its own address (`https://tucano.example.com/mcp`), so Claude Code, Codex, Cursor, OpenCode or any MCP client can understand the team, talk to the agents and set Tucano up from where you already work. Each harness needs a key of its own: make one in **Settings › Harnesses**, which shows the key once with what to paste into each harness. A key acts as the person who made it, with what they can do in the app, up to the level picked (read, talk, configure). Nothing over MCP deletes anything, decides approvals, or touches people, logins or secrets.
+
+The key goes in an `Authorization: Bearer` header; the path takes no cookie. A reverse proxy in front of Tucano passes `/mcp` like any other path; keep its timeout above a minute, since a call can wait up to 45 seconds for an agent's answer. claude.ai and ChatGPT reach only a public `https://` address, and they need a sign-in Tucano doesn't offer yet (only keys, for now).
+
 ## How it differs from the desktop app
 
 - **Your computer's terminal, files, browser and apps** stay on your computer. To let the server's agents use them, lend it from the desktop app (**Settings › Servers › Let this server use this computer**): see [Your computer lent to a server](local-node.md).

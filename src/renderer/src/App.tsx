@@ -6,6 +6,7 @@ import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
 import { Lightbox } from './components/Lightbox'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
+import { VaultPage } from './components/Vault'
 import { UsagePage } from './components/Usage'
 import { MemoryPage } from './components/Memory'
 import { WikiView } from './components/Wiki'
@@ -32,7 +33,8 @@ export function App(): ReactNode {
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
   const guest = useStore(guestWelcome)
-  const mac = useStore((s) => s.platform === 'mac')
+  // A server's page in the desktop app on a Mac: the window's buttons are over it, as over the app's own.
+  const mac = useStore((s) => s.platform === 'mac') || window.tucano?.places?.os === 'darwin'
   const navOpen = useStore((s) => s.navOpen)
   const tab = hubTab(view)
 
@@ -109,6 +111,7 @@ export function App(): ReactNode {
         {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
         {view.kind === 'approvals' && <ApprovalsPage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
+        {view.kind === 'vault' && <VaultPage tab={view.tab} />}
         {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
         {tab && (
           <Hub tab={tab}>

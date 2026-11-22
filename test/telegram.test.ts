@@ -102,6 +102,17 @@ describe('Telegram', () => {
     expect(api.sent.find((s) => s.method === 'editMessageText')!.body['text']).toContain('✅ Aprovado pelo Telegram')
   })
 
+  it('a key asked for (pedir_chave) is pasted in the app: the phone only refuses it', async () => {
+    await pair()
+    await tg.approvalAsked(ap({ connectorId: 'cofre', connectorName: 'Cofre', tool: 'pedir_chave', args: { nome: 'STRIPE_KEY' } }), 'Fin')
+    const msg = api.sent.at(-1)!
+    expect(msg.body['text']).toContain('Fin pede a chave STRIPE_KEY')
+    expect(JSON.stringify(msg.body['reply_markup'])).not.toContain('ap:ap1:ok')
+    api.push({ callback_query: { id: 'q1', data: 'ap:ap1:ok', message: { message_id: 100, chat: me } } }) // an old button
+    await settle()
+    expect(decided).toEqual([])
+  })
+
   it('a high-risk action needs a second tap; taps from another chat or on a decided request do nothing', async () => {
     await pair()
     await tg.approvalAsked(ap({ highRisk: true }), 'PM')
