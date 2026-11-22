@@ -802,7 +802,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               {/* On: its replies never run two at once, in any conversation (src/core/runs.ts, enqueue); stored only when on. */}
               <Row
                 label={L('Uma resposta por vez', 'One reply at a time')}
-                sub={L(`Ligado, um prompt novo para ${name} espera a resposta em curso terminar, em qualquer conversa. Desligado, segue Configurações › Agentes › Respostas.`, `On, a new prompt for ${name} waits for the running reply to end, in any conversation. Off, it follows Settings › Agents › Replies.`)}
+                sub={L(`Ligado, um prompt novo para ${name} espera a resposta em curso terminar, em qualquer conversa. Desligado, segue Configurações › Agentes › Respostas.`, `New prompts for ${name} wait until its current reply finishes, across all conversations. When off, Settings › Agents › Replies applies.`)}
               >
                 <Toggle label={L('Uma resposta por vez', 'One reply at a time')} on={draft.oneAtATime === true} onChange={(v) => patch({ oneAtATime: v ? true : undefined }, true)} />
               </Row>
@@ -3470,14 +3470,14 @@ export function SettingsPage(): ReactNode {
           <SectionAnchor id="agents-replies" sections={structure}>
             <Card title={L('Respostas', 'Replies')} section="agents-replies">
               <Field
-                label={L('Respostas ao mesmo tempo numa conversa', 'Replies at once in a conversation')}
+                label={L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation")}
                 hint={L(
                   'Cada prompt ganha uma resposta própria, ao lado das que já estão em curso. Passando deste número, o prompt espera na fila até uma terminar. Um agente pode ir uma por vez na página dele.',
-                  'Each prompt gets its own reply beside the running ones. Past this number, it waits in the queue until one ends. An agent can go one at a time on its own page.'
+                  "New prompts start separate replies up to this limit, then queue until one finishes. An agent can override this with “One reply at a time”."
                 )}
               >
                 <Select
-                  aria-label={L('Respostas ao mesmo tempo numa conversa', 'Replies at once in a conversation')}
+                  aria-label={L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation")}
                   value={String(settings.repliesAtOnce ?? 6)}
                   onChange={(v) => { if (v) updateSettings({ repliesAtOnce: Number(v) }) }}
                   options={[
@@ -3485,7 +3485,7 @@ export function SettingsPage(): ReactNode {
                     { value: '2', label: L('Até 2', 'Up to 2') },
                     { value: '3', label: L('Até 3', 'Up to 3') },
                     { value: '4', label: L('Até 4', 'Up to 4') },
-                    { value: '6', label: L('Até 6, o máximo do app', 'Up to 6, the app’s most') }
+                    { value: '6', label: L('Até 6, o máximo do app', "Up to 6 (app maximum)") }
                   ]}
                   placeholder={L('Escolha', 'Pick')}
                 />
@@ -3744,16 +3744,16 @@ export function SettingsWhere(): ReactNode {
     <div className="settings-where" role="note">
       <Icon name="laptop" size={16} />
       <span className="grow">
-        {L('Estes ajustes são do servidor ', 'These are the settings of the server ')}
+        {L('Estes ajustes são do servidor ', "Settings apply to server ")}
         <b>{host}</b>
         {L(
           ' e valem lá, de qualquer computador. O que é só do seu computador, como emprestá-lo aos agentes, fica no app do Tucano nele.',
-          ', and they apply there, from any computer. What belongs to your own computer, like lending it to the agents, is in the Tucano app on it.'
+          " from any computer. Manage computer-specific settings, including lending it to agents, in that computer’s Tucano app."
         )}
       </span>
       {open && (
         <button className="btn btn--sm" onClick={() => open()}>
-          {L('Abrir no meu computador', 'Open on my computer')}
+          {L('Abrir no meu computador', "Open computer settings")}
         </button>
       )}
     </div>
