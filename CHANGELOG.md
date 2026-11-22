@@ -6,6 +6,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
+> - **Mudou:** o **cartão de aprovação** abre com a ação e o alvo, e diz o que aconteceu depois: **Concluído**, **Falhou** ou **não rodou**, em vez de só "Aprovado". Um aviso acima do campo leva às aprovações que esperam você.
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
@@ -21,6 +22,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+
+### Changed
+
+- **The approval card leads with what is being approved, and says what became of it.** The card opens with the action and its target, the status is a quiet row above them, and the decisions sit on one line. Its receipt now tells approved apart from completed: **Approved · waiting for result**, **Completed**, **Failed** with the reason, or **Approved · didn't run**. A row above the message field counts the approvals waiting on you, and **Review** goes back to the oldest one. Thanks to Apostol Apostolov. (#334)
 
 ## [0.2.45] - 2026-11-22
 
