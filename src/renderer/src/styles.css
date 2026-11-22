@@ -2622,6 +2622,17 @@ h3 {
   display: flex;
   margin-bottom: 12px;
 }
+.browser-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.browser-choice .segmented {
+  margin-bottom: 0;
+}
+.browser-choice p {
+  margin: 0;
+}
 .segmented--wide button {
   flex: 1;
   padding: 6px 10px;
@@ -2907,6 +2918,15 @@ h3 {
   align-self: flex-start;
   margin-top: 2px;
   flex-shrink: 0;
+}
+/* A form row lines up under the rows above it: the fields start where their text does, and the
+   right-hand column stays free for the button those rows carry there. */
+.key-row--form {
+  align-items: flex-start;
+}
+.key-row__glyph {
+  width: 28px;
+  flex: none;
 }
 
 /* An error arrives calm: it rises in on a red tint that fades, no shake. */

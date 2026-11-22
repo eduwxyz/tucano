@@ -277,7 +277,9 @@ export class People {
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
     const { sounds: _s, stepsOpen: _so, showThinking: _t, channelLayout: _c, folded: _f, sidebarHidden: _h, navOrder: _no, agentOrder: _ao, sectorOrder: _so2, onboarding: _o, wikiDir: _w, ...rest } = s
-    return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
+    // Which classifiers exist and which have a key is for those who manage them.
+    const { classifiers: _cl, classifierJobs: _cj, classifierKeys: _ck, ...forMember } = rest
+    return { ...(person.role === 'admin' ? rest : forMember), onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 
   // A settings change by this person: their display preferences are kept on them (the owner's are
