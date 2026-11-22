@@ -12,6 +12,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 > - **Novo:** **Extensões do navegador** em Configurações › Agentes: um bloqueador de anúncios e dois removedores de aviso de cookies, cada um com seu interruptor e desligados por padrão. Ligados, o navegador dos agentes roda no Chrome for Testing, com logins próprios; os de antes voltam quando você desliga.
+> - **Novo:** mais duas extensões no mesmo cartão, já configuradas para um agente e não para uma pessoa: o **PopUpOFF** limpa sozinho o que fica por cima da página, em todo site, e o **Unclutter** deixa só o que se lê (é o único que muda o desenho da página, e vem desligado). O **uBlock Origin Lite** passa a filtrar no modo completo, o que tira também o buraco que o anúncio deixava no layout.
+> - **Novo:** **Acessibilidade extra**, uma chave no fim do mesmo cartão: a página pede menos animação, então o botão não sai de baixo do clique, e nenhum vídeo começa sozinho.
 
 ### Added
 
@@ -24,6 +26,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+- **Two more extensions, set up for an agent rather than for a person, and one switch that keeps a page still.** The card carries **PopUpOFF** and **Unclutter** beside the three, and each arrives already set up: uBlock Origin Lite filters in **Complete** mode instead of its store default of Basic, so the request is blocked *and* the box it left behind is taken out of the layout (measured on wetter.de: an empty 803×250 slot, a quarter of the screen, before); PopUpOFF is armed for every site instead of one list at a time, and its tutorial tab no longer opens in the agent's browser; Unclutter's own error report to Sentry and usage report to PostHog are switched off in the build that lands, along with the welcome page it would open. A store update that moves a line leaves that extension as its vendor ships it, and its row says which file, rather than looking set up and not being. Under them, **Additional accessibility** is one switch for two of Chrome's own: `--force-prefers-reduced-motion`, so a carousel stops sliding the button out from under the click, and `--autoplay-policy=user-gesture-required`, so a video waits for a press instead of talking over the reply. Measured on Chrome for Testing 158.0.8127.36, one fresh profile per arm: with these settings uBlock runs its cosmetic filters and scriptlets, and PopUpOFF cleans a page it was never told about (0.49 of the screen, 1 item).
 
 ### Fixed
 
