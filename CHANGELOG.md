@@ -6,10 +6,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
+> - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 
 ### Added
 
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
+- **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
 
 ## [0.2.45] - 2026-11-22
 

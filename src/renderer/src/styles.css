@@ -2054,6 +2054,9 @@ h3 {
 .work-drawer__list {
   display: grid;
   gap: 1px;
+  /* Finished rows stay until they're taken off: the list scrolls rather than eating the conversation. */
+  max-height: min(220px, 32vh);
+  overflow-y: auto;
   padding: 2px 6px 6px;
   border-top: 1px solid var(--border);
 }
@@ -2087,11 +2090,6 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.work-row--queued .work-row__text {
-  color: var(--text-2);
-}
-/* A working session carries its steer pill. A row is the prompt alone on one line: nothing under it
-   says why it waits, because a queued reply is not drawn here at all (that group is #261's). */
 /* A reply that ended: the glyph says how, and its row stays until the trash takes it off. */
 .work-row__state {
   display: inline-flex;
@@ -2115,7 +2113,7 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 /* Opening the thread a reply lives in, from its row: the glyph alone, so a row stays one line, and as
-   dim as the steer pill beside it — it opens a view, it doesn't stop anything (the x is the bright one). */
+   dim, since it opens a view and doesn't stop anything (the x is the bright one). */
 .work-row__thread-btn {
   color: var(--text-3);
 }

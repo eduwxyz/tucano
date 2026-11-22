@@ -11,6 +11,7 @@ import { Icon, duration } from './ui'
 interface DrawerMemory {
   open?: boolean
   done: string[]
+  working?: string // the replies at work when it was last drawn, so one that ends while you're elsewhere still counts
 }
 const drawerMemory = new Map<string, DrawerMemory>()
 const drawerFor = (conversationId: string): DrawerMemory => {
@@ -83,8 +84,9 @@ export function WorkDrawer({
   }
   // What it says about a reply: the prompt it answers, not its own words.
   const asked = (m: Message): string => {
-    const mine = m.run?.replyTo ? messages.find((x) => x.id === m.run?.replyTo) : undefined
-    return oneLine(mine?.text ?? m.run?.work ?? '', 90) || L('sem o que dizer', 'nothing to say')
+    const from = m.run?.replyTo ?? m.run?.routineAsk
+    const mine = from ? messages.find((x) => x.id === from) : undefined
+    return oneLine(mine?.text ?? m.run?.work ?? '', 90) || L('Uma resposta', 'A reply')
   }
   const paint = (next: boolean): void => {
     remember.open = next
@@ -102,11 +104,12 @@ export function WorkDrawer({
   // A reply that leaves the working list here has ended: it stays as a row of its own, so it can
   // still be jumped to, and only the trash glyph in that row takes it off.
   const working = ids.join(',')
-  const watched = useRef(working)
+  const watched = useRef(remember.working ?? working)
   useEffect(() => {
     const before = watched.current ? watched.current.split(',') : []
     const nowIds = working ? working.split(',') : []
     watched.current = working
+    remember.working = working
     const over = before.filter((id) => !nowIds.includes(id) && !remember.done.includes(id))
     if (over.length) keep([...remember.done, ...over])
     // eslint-disable-next-line react-hooks/exhaustive-deps

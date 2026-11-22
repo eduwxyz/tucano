@@ -1,8 +1,8 @@
 // The work drawer above the field: the replies running now with the prompt each answers, a way to
 // stop one and to jump to it, and the replies that already ended — kept, marked with how they ended,
 // until their row is taken off. It opens by itself when it gains something to show, isn't there when
-// it has nothing, and each conversation has its own. The prompts marked as queued are #261's: they
-// join this drawer as their own group once send modes land, which is why there are no cases for them.
+// it has nothing, and each conversation has its own. A prompt waiting its turn has no reply yet, so
+// it is never a row here: it says so on its own message in the conversation.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -178,6 +178,22 @@ describe('the work drawer', () => {
     // Back in the DM: what it remembered, as it was left.
     await render(dm, [said('m1', 'pedido do dm', 1), reply('r1', 'm1', 'done')])
     expect(text()).toContain('1 terminada')
+  })
+
+  it('a reply that ends while you are in another conversation is a finished row when you come back', async () => {
+    const here = nextConv()
+    const there = nextConv()
+    await render(here, [said('m1', 'o pedido daqui', 1), reply('r1', 'm1')])
+    await render(there, [said('m2', 'outro assunto', 1)])
+    await render(here, [said('m1', 'o pedido daqui', 1), reply('r1', 'm1', 'done')])
+    expect(text()).toContain('1 terminada')
+  })
+
+  it('a reply with no prompt of its own still has a row that reads', async () => {
+    const conv = nextConv()
+    await render(conv, [{ ...reply('r1', 'gone'), run: { status: 'working', steps: [] } }])
+    await act(async () => button('1 respondendo').click())
+    expect(text()).toContain('Uma resposta')
   })
 
   it('a reply at work inside a thread is work here too: its row opens that thread, and one outside opens its own', async () => {
