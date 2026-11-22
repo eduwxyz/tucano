@@ -3,9 +3,12 @@
 // "the site changed its interface", and it clicks the same place again (2026-11-22: one session spent
 // 143 of its 248 browser calls on a single host that way).
 //
-// Each of the three has its own switch (Settings › Agents): on, it is downloaded and loaded into the next
+// Each of them has its own switch (Settings › Agents): on, it is downloaded and loaded into the next
 // session's browser; off, its folder leaves the disk, which is how an extension is removed from a build
-// that takes them from a folder rather than from the store.
+// that takes them from a folder rather than from the store. An extension that arrives switched on is also
+// set up the way an agent needs it rather than the way a person's browser is left (shared/addons.ts has
+// the edits and why), in the folder itself, so it holds on every start and after any update of the store's
+// own build.
 //
 // Chrome takes an extension only from a folder (--load-extension), and the branded build has ignored
 // that flag since version 158 — measured on this machine: branded Chrome loaded its own three built-ins
@@ -21,7 +24,7 @@
 import { createHash, createVerify } from 'node:crypto'
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { ADD_ONS, addOnsOf, type AddOnExtension } from '../shared/addons'
+import { ADD_ONS, TUNE, TUNE_REVISION, addOnsOf, type AddOnExtension } from '../shared/addons'
 import { L } from '../shared/lang'
 import type { AddOn, AddOnStep, AddOnsInfo, BrowserAddOns } from '../shared/types'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
@@ -215,15 +218,56 @@ async function download(fetcher: typeof fetch, url: string, to: string, signal: 
   }
 }
 
-// Each of the three in its own folder under extensions/, fetched from the store once and then left as it
-// is: the stamp is the unpacked manifest itself, so a folder someone deleted comes back and one that is
-// there is never asked for twice. The folder's presence is also the switch's answer: off means it leaves
-// the disk, and a lane started afterwards does not carry it.
+// A stamp inside the folder saying which revision of the edits above it already carries. Its absence is
+// an older build's download: that one is set up in place, with no second download.
+const TUNE_STAMP = '.tucano-tuned'
+
+// The vendor's default, changed to what an agent needs, in the unpacked folder. Each edit has to find its
+// own line exactly once: an extension the store has moved on is left as its vendor ships it and says so in
+// its row, because an extension that does half of this is worse than one that does its own default — it
+// looks set up and is not. Returns the reason to show when something could not be written.
+export function tune(dir: string, key: AddOn): string | undefined {
+  try {
+    if (readFileSync(join(dir, TUNE_STAMP), 'utf8').trim() === String(TUNE_REVISION)) return undefined
+  } catch {
+    // unpacked by a build that wrote no stamp, or never set up at all: below is what it needs
+  }
+  const edits = TUNE[key] ?? []
+  if (!edits.length) {
+    writeFileSync(join(dir, TUNE_STAMP), String(TUNE_REVISION))
+    return undefined
+  }
+  for (const edit of edits) {
+    const file = join(dir, edit.file)
+    let text: string
+    try {
+      text = readFileSync(file, 'utf8')
+    } catch {
+      return L(`Ficou como veio da loja: ${edit.file} não está nesta versão.`, `Left as the store ships it: ${edit.file} isn’t in this version.`)
+    }
+    const hits = text.split(edit.from).length - 1
+    if (hits !== 1) {
+      return L(
+        `Ficou como veio da loja: a linha de ${edit.file} não é mais a mesma (${hits} iguais).`,
+        `Left as the store ships it: the line in ${edit.file} has moved (${hits} matches).`
+      )
+    }
+    writeFileSync(file, text.replace(edit.from, edit.to))
+  }
+  writeFileSync(join(dir, TUNE_STAMP), String(TUNE_REVISION))
+  return undefined
+}
+
+// Each of them in its own folder under extensions/, fetched from the store once and then left as it is
+// (set up by tune above): the stamp is the unpacked manifest itself, so a folder someone deleted comes
+// back and one that is there is never asked for twice. The folder's presence is also the switch's answer:
+// off means it leaves the disk, and a lane started afterwards does not carry it.
 export class AddOns {
   bin = '' // Chrome for Testing, when it's here: the build that still takes a folder of extensions
   dirs: string[] = [] // the folders of the ones switched on and downloaded, in the store's own order
   private want: readonly AddOn[] = []
   private failed = new Map<AddOn, string>()
+  private notes = new Map<AddOn, string>() // landed, but set up as its vendor ships it: why, for the row
   private browserError = ''
   private progress?: { received: number; total: number }
   private running?: Promise<void>
@@ -255,6 +299,7 @@ export class AddOns {
       rmSync(this.folder(e.id), { recursive: true, force: true })
       rmSync(`${this.folder(e.id)}.part`, { recursive: true, force: true })
       this.failed.delete(e.key)
+      this.notes.delete(e.key)
     }
     this.pick()
     this.changed()
@@ -295,7 +340,12 @@ export class AddOns {
       if (!this.want.includes(e.key)) continue
       const here = existsSync(join(this.folder(e.id), 'manifest.json'))
       const error = this.failed.get(e.key)
-      extensions[e.key] = here ? { state: 'ready' } : error ? { state: 'failed', error } : { state: this.running ? 'preparing' : 'waiting' }
+      const note = this.notes.get(e.key)
+      extensions[e.key] = here
+        ? { state: 'ready', ...(note ? { note } : {}) }
+        : error
+          ? { state: 'failed', error }
+          : { state: this.running ? 'preparing' : 'waiting' }
     }
     const browser: AddOnStep & { progress?: { received: number; total: number } } = this.browserError
       ? { state: 'failed', error: this.browserError }
@@ -327,6 +377,23 @@ export class AddOns {
   }
 
   private pick(): void {
+    for (const e of ADD_ONS) {
+      if (!this.want.includes(e.key)) continue
+      const folder = this.folder(e.id)
+      if (!existsSync(join(folder, 'manifest.json'))) continue
+      // A folder an older build unpacked carries no stamp (or an older one): the edits go in now, on the
+      // files that are already here, and nothing is asked of the store.
+      let stamp = ''
+      try {
+        stamp = readFileSync(join(folder, TUNE_STAMP), 'utf8').trim()
+      } catch {
+        // unpacked before there were edits to write
+      }
+      if (stamp === String(TUNE_REVISION)) continue
+      const note = tune(folder, e.key)
+      if (note) this.notes.set(e.key, note)
+      else this.notes.delete(e.key)
+    }
     this.dirs = ADD_ONS.filter((e) => this.want.includes(e.key)).map((e) => this.folder(e.id)).filter((d) => existsSync(join(d, 'manifest.json')))
     if (!this.bin) this.bin = this.stamp()
   }
@@ -393,6 +460,11 @@ export class AddOns {
         zip.close()
       }
       if (!existsSync(join(staging, 'manifest.json'))) throw new Error(L(`${e.name} veio sem o arquivo que o Chrome lê.`, `${e.name} came without the file Chrome reads.`))
+      // Set up before it is moved into place: a folder that appears without its stamp is one the next
+      // start would edit again, and a half-written one is never what a lane loads.
+      const note = tune(staging, e.key)
+      if (note) this.notes.set(e.key, note)
+      else this.notes.delete(e.key)
     } catch (err) {
       rmSync(staging, { recursive: true, force: true })
       throw err
