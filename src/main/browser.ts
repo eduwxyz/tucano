@@ -151,6 +151,10 @@ export class Browsers {
         win.hide()
         this.fresh(agentId, win)
         return { url: wc.getURL(), title: wc.getTitle(), shown: false }
+      // A real window is not something this fallback can do: it is one window, the app's. The page's
+      // own note (shared/wall.ts) is the answer, and the person can take it over.
+      case 'headful':
+        return { ...here(), headful: false }
       case 'open': {
         const url = String(args['url'] ?? '')
         if (!/^https?:\/\//.test(url)) throw new Error(L('Só endereços http e https.', 'Only http and https addresses.'))
