@@ -127,6 +127,7 @@ export interface State {
   packaged: boolean
   isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
+  panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
@@ -212,6 +213,7 @@ let state: State = {
   packaged: false,
   isolatedComputers: true,
   panel: null,
+  panelWide: false,
   dialog: null,
   tabs: {},
   toasts: [],
@@ -612,7 +614,8 @@ function apply(e: CoreEvent): void {
           messages,
           history,
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
-          panel: here ? null : s.panel
+          panel: here ? null : s.panel,
+          panelWide: here ? false : s.panelWide
         }
       }
       case 'routine_removed':
@@ -832,7 +835,7 @@ export const navigate = (view: View): void =>
     ...s,
     view,
     navOpen: false,
-    panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
+    ...(s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? {} : { panel: null, panelWide: false }),
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
   }))
@@ -1063,7 +1066,9 @@ export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
   link.click()
 }
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
-export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
+// The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
+export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
 // I've seen this thread up to now (it's open, or was just closed).
 export const seeThread = (rootId: string): void =>

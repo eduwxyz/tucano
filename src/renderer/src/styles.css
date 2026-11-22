@@ -2,6 +2,9 @@
 /* Warm neutrals and the toucan's orange, from the logo. Primary actions are ink
    (cream in the dark); the orange marks focus, links, mentions and what's alive. */
 :root {
+  /* The conversation's column: messages, their lines and the field. A little wider on big screens,
+     never so wide that a line gets hard to follow. */
+  --chat-w: 860px;
   --bg: #f3f0ea;
   --panel: #fffefb;
   --sidebar: #f3f0ea;
@@ -1321,7 +1324,7 @@ h3 {
   grid-template-columns: 34px 1fr;
   gap: 12px;
   padding: 7px 28px;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
 }
 /* What just arrived comes in, lightly. */
@@ -1491,7 +1494,7 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 6px 24px 6px 70px;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   color: var(--text-2);
   font-size: 12.5px;
@@ -1921,7 +1924,7 @@ h3 {
   padding: 6px 28px 18px;
   flex: none;
   width: 100%;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
 }
 .composer {
@@ -3115,6 +3118,27 @@ h3 {
   flex: 1;
   min-width: 0;
 }
+/* Big screens: the column grows a little (a maximized window on a 24" or 27" monitor). */
+@media (min-width: 1600px) {
+  :root {
+    --chat-w: 940px;
+  }
+}
+@media (min-width: 2000px) {
+  :root {
+    --chat-w: 1020px;
+  }
+}
+/* A panel expanded over the whole page: the conversation steps aside until it's shrunk or closed. */
+.split.is-wide > .conversation {
+  display: none;
+}
+.side-panel.is-wide {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  border-left: 0;
+}
 /* The side panel slides in from its edge. */
 .side-panel {
   --rise: 0;
@@ -3368,6 +3392,11 @@ body.is-resizing webview {
 }
 .side-panel--thread .composer-wrap {
   padding-inline: 16px;
+}
+.side-panel--thread.is-wide .thread__lead {
+  width: 100%;
+  max-width: var(--chat-w);
+  margin-inline: auto;
 }
 /* The root sits on the panel's paper, like the conversation it came from. */
 .thread__lead {
@@ -8455,8 +8484,12 @@ kbd {
 .wk-kinds button.is-dim { opacity: 0.45; }
 
 .wk-panel { position: absolute; z-index: 3; top: 12px; right: 12px; bottom: 12px; width: 560px; max-width: calc(100% - 24px); overflow-y: auto; background: var(--panel); border-radius: 18px; box-shadow: 0 0 0 1px var(--border), 0 24px 60px -20px rgba(40, 25, 10, 0.28), 0 8px 20px -12px rgba(40, 25, 10, 0.18); --rise: 0; --rise-x: 24px; animation: rise var(--dur-slow) var(--ease-out) both; }
-.wk-panel__close { position: sticky; top: 14px; float: right; margin: 14px 14px -44px 0; z-index: 2; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; border: 0; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(6px); color: var(--text-3); cursor: pointer; }
-.wk-panel__close:hover { background: var(--hover); color: var(--text); }
+.wk-panel__tools { position: sticky; top: 14px; float: right; margin: 14px 14px -44px 0; z-index: 2; display: flex; gap: 2px; border-radius: 9px; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(6px); }
+.wk-panel__btn { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; border: 0; background: none; color: var(--text-3); cursor: pointer; }
+.wk-panel__btn:hover { background: var(--hover); color: var(--text); }
+/* Expanded: over the whole map, the page in a reading column. */
+.wk-panel.is-wide { left: 12px; width: auto; max-width: none; }
+.wk-panel.is-wide .wk-page { max-width: 900px; margin-inline: auto; }
 
 .wk-drop { position: absolute; inset: 12px; z-index: 5; display: grid; place-items: center; border-radius: 18px; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(4px); pointer-events: none; animation: rise var(--dur-fast) var(--ease-out) both; }
 .wk-drop div { display: grid; justify-items: center; gap: 8px; color: var(--accent); }
@@ -8919,6 +8952,28 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .catalog {
   display: grid;
   gap: 18px;
+}
+.catalog__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.catalog__cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.catalog__cats .chip {
+  cursor: pointer;
+}
+.catalog__cats .chip:not(.is-on):hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.catalog__count {
+  opacity: 0.6;
+  margin-left: 2px;
 }
 .catalog__search {
   display: flex;
@@ -12575,7 +12630,7 @@ button.agent-card__now:hover {
   flex-wrap: wrap;
   row-gap: 4px;
   /* In line with what the messages say: their column, past the face. */
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   padding: 6px 28px 6px 74px;
 }
@@ -13274,7 +13329,7 @@ button.agent-card__now:hover {
 /* Runs in a row of one routine that found nothing new: one line in the text column, a row per run when open. */
 .no-news {
   width: 100%;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   padding: 3px 28px 3px 74px;
 }
