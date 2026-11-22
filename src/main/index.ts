@@ -15,7 +15,7 @@ import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
 import { thisDevice } from './redeem'
-import { serverNote } from '../shared/servers'
+import { placeOf, serverNote, type DesktopPlaces } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -77,7 +77,11 @@ let registry: Workspaces
 type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean; wikiFolder: string }
 const cores = new Map<string, Runtime>()
 const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }) })
-const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()) }
+const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()); tellPlaces() }
+// A server's page in this window lists this computer's workspaces and the servers in its own menu
+// (src/preload/server.ts): told when their names or which is on screen change, it asks again.
+let toldPlaces = ''
+let tellPlaces = (): void => {} // set once the servers are (below)
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
@@ -827,6 +831,7 @@ const servers = new Servers({
   changed: () => {
     setMenu()
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
+    tellPlaces()
   },
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
   showLocal: () => showWindow(),
@@ -851,6 +856,36 @@ function machineName(): string {
   machine ||= thisDevice(hostname(), process.platform).name.replace(/-/g, ' ')
   return machine
 }
+// What a server's page lists in its workspace menu: names and ids only, never a token or an address.
+function desktopPlaces(): DesktopPlaces {
+  return {
+    workspaces: workspaceList().workspaces.map((w) => ({ id: w.id, name: w.name })),
+    servers: servers.summary().map((s) => ({ id: s.id, name: s.name, open: s.open }))
+  }
+}
+tellPlaces = () => {
+  const now = JSON.stringify(desktopPlaces())
+  if (now === toldPlaces) return
+  toldPlaces = now
+  servers.tell('server:places', null)
+}
+ipcMain.handle('server:places', (e) => (fromServer(e) ? desktopPlaces() : null))
+// Picked in a server's menu: one of this computer's workspaces (its Tucano on screen, switched to it),
+// or a server. The page only names where; nothing is changed but what's on screen.
+ipcMain.on('server:go', (e, raw: unknown) => {
+  const place = fromServer(e) ? placeOf(raw) : null
+  if (!place) return
+  if (place.kind === 'server') return void servers.show(place.id).catch(console.error)
+  if (!registry.list().some((w) => w.id === place.id)) return
+  servers.showLocal()
+  void switchWorkspace(place.id).catch(console.error)
+})
+// The page draws the way back itself (its workspace menu is on screen), or stopped: the bar goes or comes back.
+ipcMain.on('server:own', (e, on: unknown) => {
+  const frame = e.senderFrame
+  const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
+  if (id && typeof on === 'boolean') servers.own(id, on)
+})
 // Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
 // pasted link, opening and forgetting.
 ipcMain.handle('servers:list', (e) => (fromApp(e) ? servers.summary() : []))

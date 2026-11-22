@@ -23,7 +23,7 @@ function Copy({ text, label }: { text: string; label: string }): ReactNode {
   const copy = (): void =>
     void navigator.clipboard.writeText(text).then(
       () => (setCopied(true), setTimeout(() => setCopied(false), 1600)),
-      () => toast(L('Não consegui copiar. Selecione o texto e copie.', "I couldn't copy. Select the text and copy it."))
+      () => toast(L('Não consegui copiar. Selecione o texto e copie.', "Couldn't copy. Select the text and copy it."))
     )
   return (
     <button className="btn btn--sm" onClick={copy} aria-label={label}>
@@ -50,7 +50,7 @@ export function HarnessesPane(): ReactNode {
         title="Harnesses"
         lead={L(
           'Conecte o seu harness (Claude Code, Codex, Cursor, OpenCode…) a este Tucano. De lá, ele entende o time, conversa com os agentes e configura agentes, canais, rotinas e skills, como você faria aqui.',
-          'Connect your harness (Claude Code, Codex, Cursor, OpenCode…) to this Tucano. From there it understands the team, talks to the agents and sets up agents, channels, routines and skills, as you would here.'
+          'Connect your harness (Claude Code, Codex, Cursor, OpenCode…) to this Tucano to view the team, talk to agents and configure agents, channels, routines and skills.'
         )}
       >
         {info?.error && <p className="field__error">{info.error}</p>}
@@ -63,10 +63,10 @@ export function HarnessesPane(): ReactNode {
             </div>
             <span className="hint">
               {info?.local
-                ? L('Só programas neste computador chegam a este endereço, e só com o Tucano aberto. O claude.ai e o ChatGPT não chegam.', 'Only programs on this computer reach this address, and only with Tucano open. claude.ai and ChatGPT don’t.')
+                ? L('Só programas neste computador chegam a este endereço, e só com o Tucano aberto. O claude.ai e o ChatGPT não chegam.', 'Only programs on this computer can reach this address, and only while Tucano is open. claude.ai and ChatGPT cannot.')
                 : url.startsWith('https://')
-                  ? L('Qualquer harness com uma chave chega aqui, de qualquer lugar.', 'Any harness with a key reaches it, from anywhere.')
-                  : L('Harnesses na mesma rede chegam aqui. O claude.ai e o ChatGPT precisam de um endereço https público.', 'Harnesses on the same network reach it. claude.ai and ChatGPT need a public https address.')}
+                  ? L('Qualquer harness com uma chave chega aqui, de qualquer lugar.', 'Any harness with a key can reach it from anywhere.')
+                  : L('Harnesses na mesma rede chegam aqui. O claude.ai e o ChatGPT precisam de um endereço https público.', 'Harnesses on the same network can reach it. claude.ai and ChatGPT need a public HTTPS address.')}
             </span>
           </div>
         )}
@@ -105,7 +105,7 @@ function OneClick({ onDone }: { onDone: () => void }): ReactNode {
   }
   return (
     <div className="field">
-      <span className="field__label">{L('Conectar em um clique', 'Connect in one click')}</span>
+      <span className="field__label">{L('Conectar em um clique', 'Connect')}</span>
       <div className="row row--wrap">
         {CONNECTABLE.map((h) => (
           <button key={h} className="btn btn--sm" disabled={!!busy} onClick={() => void go(h)}>
@@ -132,7 +132,7 @@ function NewKey({ url, onMade }: { url: string | undefined; onMade: () => void }
   const snippets = made && url ? harnessSnippets(url, made.key) : []
   const shown = snippets[tab]
   return (
-    <Card title={L('Gerar uma chave', 'Make a key')} lead={L('Uma chave por harness. Ele age como você, com o que você pode fazer aqui, até o nível escolhido.', 'One key per harness. It acts as you, with what you can do here, up to the level you pick.')}>
+    <Card title={L('Gerar uma chave', 'Create a key')} lead={L('Uma chave por harness. Ele age como você, com o que você pode fazer aqui, até o nível escolhido.', 'One key per harness. It acts as you, with what you can do here, up to the level you pick.')}>
       {!made && (
         <>
           <Field label={L('Nome', 'Name')} hint={L('O harness e onde ele roda: “Claude Code no notebook”.', 'The harness and where it runs: “Claude Code on the laptop”.')} error={error || null}>
@@ -149,7 +149,7 @@ function NewKey({ url, onMade }: { url: string | undefined; onMade: () => void }
           </Field>
           <div className="row">
             <button className="btn btn--primary btn--sm" disabled={!name.trim()} onClick={make}>
-              {L('Gerar chave', 'Make key')}
+              {L('Gerar chave', 'Create key')}
             </button>
           </div>
         </>
@@ -162,7 +162,7 @@ function NewKey({ url, onMade }: { url: string | undefined; onMade: () => void }
               <input className="grow mono" readOnly value={made.key} onFocus={(e) => e.target.select()} aria-label={L('Chave', 'Key')} />
               <Copy text={made.key} label={L('Copiar a chave', 'Copy the key')} />
             </div>
-            <span className="hint">{L('Ela aparece só agora: cole já no harness (ou guarde num lugar seguro).', 'It shows only now: paste it into the harness now (or keep it somewhere safe).')}</span>
+            <span className="hint">{L('Ela aparece só agora: cole já no harness (ou guarde num lugar seguro).', 'This key is shown only once. Paste it into the harness or store it safely.')}</span>
           </div>
           {shown && (
             <div className="field">
@@ -195,7 +195,7 @@ function KeyList({ keys, onChange }: { keys: HarnessKey[]; onChange: () => void 
   const remove = (k: HarnessKey): void =>
     void confirmDialog({
       title: L(`Tirar a chave “${k.name}”?`, `Remove the key “${k.name}”?`),
-      body: L('O harness que usa essa chave perde o acesso agora.', 'The harness using this key loses access now.'),
+      body: L('O harness que usa essa chave perde o acesso agora.', 'The harness using this key loses access immediately.'),
       confirm: L('Tirar', 'Remove'),
       danger: true
     }).then((ok) => ok && void removeHarnessKey(k.id).then(onChange, (e: unknown) => toast(message(e))))
@@ -208,7 +208,7 @@ function KeyList({ keys, onChange }: { keys: HarnessKey[]; onChange: () => void 
               <span>
                 <strong>{k.name}</strong> <span className="tag">{levelLabel(k.level)}</span>
               </span>
-              <span className="muted small">{[L(`criada ${ago(k.createdAt)}`, `made ${ago(k.createdAt)}`), k.seenAt ? L(`usada ${ago(k.seenAt)}`, `used ${ago(k.seenAt)}`) : L('nunca usada', 'never used')].join(' · ')}</span>
+              <span className="muted small">{[L(`criada ${ago(k.createdAt)}`, `created ${ago(k.createdAt)}`), k.seenAt ? L(`usada ${ago(k.seenAt)}`, `used ${ago(k.seenAt)}`) : L('nunca usada', 'never used')].join(' · ')}</span>
             </div>
             <button className="btn btn--ghost btn--sm" onClick={() => remove(k)}>
               {L('Tirar', 'Remove')}

@@ -24,7 +24,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     navigate: vi.fn()
   }
 })
-const { getState, runRoutine } = await import('../src/renderer/src/store')
+const { getState, runRoutine, saveRoutine } = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { RoutinesPage } = await import('../src/renderer/src/components/Routines')
 
@@ -42,12 +42,17 @@ const ran = (r: Routine, n: number, status: 'done' | 'failed', error?: string): 
 
 let root: Root
 beforeEach(() => {
+  // The week is drawn around today, so the clock is fixed: on a Sunday after 09:00 every block of a
+  // 09:00 routine would already be in the past, and there would be no upcoming one to open.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 10, 18, 8, 0))
   const base = getState()
   fake = { ...base, ready: true, agents: [lia], conversations: [{ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] }], routines: [vigia, briefing], messages: { d1: [...ran(vigia, 0, 'failed', 'O GitHub não respondeu.'), ...ran(briefing, 10, 'done')] }, connectors: [] } as State
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(async () => {
   await act(async () => root.unmount())
+  vi.useRealTimers()
   vi.clearAllMocks()
 })
 
@@ -76,6 +81,24 @@ describe('the routines page', () => {
     expect(document.querySelector('.cal__ev.is-dim')?.textContent).toContain('Briefing')
     const failedChip = [...document.querySelectorAll('.cal__allday')].find((x) => x.querySelector('i.is-bad'))!
     expect(failedChip.className).not.toContain('is-dim')
+  })
+
+  it('keeps a routine that’s off in the week, greyed, and turns it back on from its own panel', async () => {
+    const semanal: Routine = { id: 'r3', name: 'Semanal', agentId: 'a1', conversationId: 'd1', prompt: 'z', schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:00' }, enabled: false, createdAt: 0 }
+    const apagada: Routine = { id: 'r4', name: 'Apagada', agentId: 'a1', conversationId: 'd1', prompt: 'w', schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:00' }, enabled: true, createdAt: 0 }
+    fake = { ...fake, routines: [vigia, briefing, semanal], messages: { d1: [...(fake.messages.d1 ?? []), ...ran(semanal, 20, 'done'), ...ran(apagada, 30, 'done')] } }
+    await act(async () => root.render(<RoutinesPage />))
+    const offBlocks = () => [...document.querySelectorAll('.cal__ev.is-off')]
+    expect(offBlocks().map((x) => x.textContent ?? '').join(' | ')).toContain('Semanal')
+    expect(all('.cal__ev').some((t) => t.includes('Apagada'))).toBe(false)
+
+    const block = offBlocks().find((x) => (x.textContent ?? '').includes('Semanal') && !x.className.includes('is-past'))!
+    await click(block)
+    const toggle = document.querySelector('.cal-pop .toggle')!
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(document.querySelector('.cal-pop__when')?.textContent).toContain('Desligada')
+    await click(toggle)
+    expect(saveRoutine).toHaveBeenCalledWith(expect.objectContaining({ id: 'r3', enabled: true }))
   })
 
   it('lists what needs me first, with why and what to do, then the rest; and remembers the list', async () => {

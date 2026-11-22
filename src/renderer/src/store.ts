@@ -2,6 +2,7 @@ import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, Va
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { ThoughtCache, type RetainedThought } from './thoughts'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from '../../shared/harness-keys'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
@@ -63,7 +64,8 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo
+  type NodeInfo,
+  type FeedbackDraft
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -127,6 +129,7 @@ export interface State {
   packaged: boolean
   isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
+  panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
@@ -141,7 +144,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string } } // image: the window, taken before it opened
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string }; draft?: FeedbackDraft; from?: string } // image: the window, taken before it opened; draft: what the Tuca wrote, from his message `from`
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -212,6 +215,7 @@ let state: State = {
   packaged: false,
   isolatedComputers: true,
   panel: null,
+  panelWide: false,
   dialog: null,
   tabs: {},
   toasts: [],
@@ -464,6 +468,7 @@ export async function loadThread(rootId: string): Promise<void> {
 
 const live = new Map<string, string>()
 const liveListeners = new Map<string, Set<() => void>>()
+const thoughtListeners = new Map<string, Set<() => void>>()
 
 function listen(map: Map<string, Set<() => void>>, key: string, l: () => void): () => void {
   let ls = map.get(key)
@@ -482,6 +487,45 @@ function stream(id: string, text: string): void {
 }
 
 export const liveText = (id: string): string | undefined => live.get(id)
+
+// What the model is thinking, streamed apart from the reply: kept here, in memory, because it is
+// something to watch as it goes and not part of what the agent said.
+const thoughts = new ThoughtCache((id) => wake(thoughtListeners, id))
+
+function streamThought(id: string, text: string): void {
+  thoughts.append(id, text)
+}
+
+export const liveThought = (id: string): string | undefined => thoughts.get(id)
+
+// The thinking as it is now, woken as it arrives. `every`: wake at most that often (ms).
+export function useLiveThought(id: string, every = 0): string | undefined {
+  return useLiveThoughtState(id, every)?.text
+}
+
+export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {
+  const subscribe = useCallback(
+    (l: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const off = listen(thoughtListeners, id, () => {
+        if (!every) return l()
+        if (timer) return
+        timer = setTimeout(() => {
+          timer = undefined
+          l()
+        }, every)
+      })
+      return () => {
+        if (timer) clearTimeout(timer)
+        off()
+      }
+    },
+    [id, every]
+  )
+  // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
+  // frame) has none, and asking for them there would throw instead of drawing the steps.
+  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)
+}
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
 export function useLiveText(m: Message, every = 0): string {
@@ -539,6 +583,7 @@ function withMe(s: State): State {
 }
 
 function withSettings(s: State, settings: Settings): State {
+  if (settings.showThinking !== true) thoughts.clear()
   setLang(settings.language)
   return withMe({ ...s, settings })
 }
@@ -546,6 +591,9 @@ function withSettings(s: State, settings: Settings): State {
 function apply(e: CoreEvent): void {
   // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
+  // The model's reasoning is kept only when this person asked for it (Settings › General): off, the
+  // text never lands in memory, so nothing of it can be drawn or read back later.
+  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined
   if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   if (e.type === 'tasks') return void (state.tasks && loadTasks())
   set((s) => {
@@ -553,6 +601,7 @@ function apply(e: CoreEvent): void {
       case 'node':
         return { ...s, node: e.info }
       case 'message': {
+        if (e.attemptStart) thoughts.clear([e.message.id])
         const id = e.message.conversationId
         const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
         // What I just wrote in a conversation that answers in threads opens its thread, where the
@@ -601,6 +650,7 @@ function apply(e: CoreEvent): void {
       case 'routine':
         return { ...s, routines: upsert(s.routines, e.routine) }
       case 'conversation_removed': {
+        thoughts.clear(messagesIn(s, e.id).map((message) => message.id))
         const left = s.conversations.filter((c) => c.id !== e.id)
         const here = s.view?.kind === 'conversation' && s.view.id === e.id
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
@@ -612,7 +662,8 @@ function apply(e: CoreEvent): void {
           messages,
           history,
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
-          panel: here ? null : s.panel
+          panel: here ? null : s.panel,
+          panelWide: here ? false : s.panelWide
         }
       }
       case 'routine_removed':
@@ -683,6 +734,7 @@ export async function start(): Promise<void> {
   }
   await connect(apply)
   const snap = await call('snapshot')
+  thoughts.clear() // A replacement snapshot may no longer grant access to previously shown replies.
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
@@ -832,7 +884,7 @@ export const navigate = (view: View): void =>
     ...s,
     view,
     navOpen: false,
-    panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
+    ...(s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? {} : { panel: null, panelWide: false }),
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
   }))
@@ -996,16 +1048,17 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // A message sent outside threads, in a conversation that answers in them: its thread opens when it
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
-// `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+// `threadId`: a reply in the thread that message started. `mode` 'steer': from a running reply's own pill, for it (`steerTo`).
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: 'steer', steerTo?: string): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}), ...(steerTo ? { steerTo } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
+export const cancelQuestion = (messageId: string): Promise<void> => fire(L('Não consegui cancelar a pergunta.', "I couldn't cancel the question."), 'cancelQuestion', { messageId })
 export const submitDecisions = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitDecisions', { messageId })
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
@@ -1063,7 +1116,9 @@ export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
   link.click()
 }
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
-export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
+// The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
+export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
 // I've seen this thread up to now (it's open, or was just closed).
 export const seeThread = (rootId: string): void =>

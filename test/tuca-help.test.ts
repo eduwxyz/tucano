@@ -230,6 +230,31 @@ describe('the Tuca helping, in a conversation', () => {
     expect(db.agent('a1')?.modelId).toBe('sonnet')
   })
 
+  it('writes feedback for the people who make Tucano as a card, and sends nothing himself', async () => {
+    const sent: unknown[] = []
+    const engines: Record<EngineId, Engine> = { claude: scripted, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
+    runner = new Runner({ db, engines, settings: async () => settings, emit: (e) => sent.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, feedbackOn: () => true })
+    calls = [{ tool: 'propor_feedback', args: { tipo: 'bug', texto: '  A rotina das 9h não roda depois que o Mac acorda.  ' } }]
+    await runner.send('d1', 'a rotina das 9h nunca roda quando eu abro o Mac, isso é bug?')
+    await runner.idle()
+    expect(turns[0]!.system).toContain('propor_feedback')
+    expect((results[0] as { isError?: boolean }).isError).toBeFalsy()
+    const reply = db.messages().find((m) => m.author.kind === 'agent' && m.text === 'pronto')!
+    expect(reply.run?.feedbackDraft).toEqual({ kind: 'bug', message: 'A rotina das 9h não roda depois que o Mac acorda.' })
+    expect(reply.run?.steps.map((s) => s.label)).toEqual(expect.arrayContaining(['Escreveu um feedback']))
+  })
+
+  it("has no feedback tool where sending feedback is off, and says what's missing in an empty one", async () => {
+    calls = [{ tool: 'propor_feedback', args: { tipo: 'idea', texto: 'Um modo escuro mais escuro.' } }]
+    await runner.send('d1', 'queria um modo escuro mais escuro')
+    await runner.idle()
+    expect((results[0] as { isError?: boolean }).isError).toBe(true)
+    expect(db.messages().find((m) => m.author.kind === 'agent' && m.text === 'pronto')?.run?.feedbackDraft).toBeUndefined()
+    const { feedbackFrom } = await import('../src/core/tuca-help')
+    expect(feedbackFrom({ tipo: 'idea', texto: '   ' }).error).toBeTruthy()
+    expect(feedbackFrom({ tipo: 'whatever', texto: 'x' }).draft).toEqual({ kind: 'bug', message: 'x' })
+  })
+
   it('lets any agent propose, but only the Tuca reads the guide and the workspace', async () => {
     db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
     calls = [
@@ -332,7 +357,9 @@ describe("the Tuca's prompt, for several changes", () => {
         ['- After proposing, one short sentence is enough: what you did, or what is left for them to confirm.', '- After proposing, one short sentence is enough.']
       ]
     }
-    const clicked = (lang: 'pt' | 'en'): string => CLICK[lang].reduce((t, [now, then]) => (expect(t).toContain(now), t.replace(now, then)), tucaInstructions())
+    // Last of all came the feedback rule (propor_feedback): every version before lacks it.
+    const unfed = (): string => tucaInstructions().replace(/\n- (?:Se for um bug do Tucano|If it's a bug in Tucano)[^\n]*/, '')
+    const clicked = (lang: 'pt' | 'en'): string => CLICK[lang].reduce((t, [now, then]) => (expect(t).toContain(now), t.replace(now, then)), (setLang(lang), unfed()))
     // Before that, the rule on several new agents in one reply: every version before lacks it.
     const lastRule = (lang: 'pt' | 'en'): string => clicked(lang).replace(/\n- (?:Mais de um agente novo|More than one new agent)[^\n]*/, '')
     const before = (lang: 'pt' | 'en'): string => {
@@ -345,6 +372,8 @@ describe("the Tuca's prompt, for several changes", () => {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }
       setLang(lang)
       expect(clicked(lang)).not.toBe(tucaInstructions())
+      expect(unfed()).not.toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: unfed() })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: clicked(lang) })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: lastRule(lang) })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate(old)?.instructions).toBe(tucaInstructions())
