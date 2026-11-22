@@ -21,6 +21,9 @@ type Section = {
   keys: readonly (keyof Settings)[]
   scope: Scope
   visible: boolean
+  // `false`: the subject is drawn where it belongs, and the jump row under the groups lists no link
+  // for it. A subject that reads inside the one above it has no place of its own to jump to.
+  nav?: boolean
 }
 
 // Every subject of the page, once: the group it sits in, its name and tile, the settings keys it
@@ -39,7 +42,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'agents-routines', page: 'agentes', label: L('Rotinas', 'Routines'), icon: 'clock', color: 'var(--c-violet)', keys: ['openAtLogin', 'quietHours'], scope: 'mixed', visible: admin },
     { id: 'agents-tuca', page: 'agentes', label: L('Tuca', 'Tuca'), icon: 'spark', color: 'var(--accent)', keys: ['tucaApplyNow'], scope: 'workspace', visible: admin },
     { id: 'agents-browser', page: 'agentes', label: L('Navegador', 'Browser'), icon: 'globe', color: 'var(--c-teal)', keys: ['browserJev'], scope: 'workspace', visible: admin },
-    { id: 'agents-addons', page: 'agentes', label: L('Anúncios e avisos de cookies', 'Ads and consent notices'), icon: 'shield', color: 'var(--c-green)', keys: ['browserAddOns'], scope: 'workspace', visible: admin },
+    { id: 'agents-addons', page: 'agentes', label: L('Anúncios e avisos de cookies', 'Ads and consent notices'), icon: 'shield', color: 'var(--c-green)', keys: ['browserAddOns'], scope: 'workspace', visible: admin, nav: false },
     { id: 'models-agents', page: 'modelos', label: L('Modelos dos agentes', 'Agent models'), icon: 'layers', color: 'var(--c-indigo)', keys: [], scope: 'workspace', visible: admin },
     { id: 'models-runtimes', page: 'modelos', label: L('Harnesses', 'Harnesses'), icon: 'terminal', color: 'var(--c-graphite)', keys: ['harnesses', 'endpoint'], scope: 'mixed', visible: admin },
     { id: 'models-accounts', page: 'modelos', label: L('Contas', 'Accounts'), icon: 'key', color: 'var(--c-green)', keys: ['accounts'], scope: 'mixed', visible: admin },
@@ -58,6 +61,11 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
 }
 
 export type SettingsSection = ReturnType<typeof settingsStructure>[number]
+// Whether the jump row under the groups names a subject. One declared `nav: false` reads inside the
+// subject above it, so a link of its own there would be a second way to the same place: the subject
+// still renders and keeps its anchor, the row just gets no entry for it. The structure is `as const`,
+// so a section without the flag carries no property to read and the cast keeps the default `true`.
+export const inStrip = (section: SettingsSection): boolean => (section as { nav?: boolean }).nav !== false
 export type SettingsSectionId = SettingsSection['id']
 export type SettingsPageId = SettingsSection['page']
 

@@ -1,6 +1,6 @@
 import { createContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { settingsGroupLabel, type SettingsHit, type SettingsPageId, type SettingsSection } from '../settings-structure'
+import { inStrip, settingsGroupLabel, type SettingsHit, type SettingsPageId, type SettingsSection } from '../settings-structure'
 import { Icon, type IconName } from './ui'
 
 export const SETTINGS_SCROLL_MS = 280
@@ -57,6 +57,9 @@ export function SettingsJumps({ sections }: { sections: readonly SettingsSection
   const [present, setPresent] = useState<readonly string[] | null>(null)
   const listed = sections.filter((section) => section.visible)
   const available = present ? listed.filter((section) => present.includes(section.id)) : listed
+  // A subject declared `nav: false` is drawn inside the one above it: it keeps its place and its
+  // anchor, and the row gets no link of its own for it — two names for one place read as two.
+  const links = available.filter(inStrip)
   const root = useRef<HTMLElement>(null)
   const frame = useRef<number | null>(null)
   const ids = listed.map((section) => section.id).join('|')
@@ -107,10 +110,10 @@ export function SettingsJumps({ sections }: { sections: readonly SettingsSection
     glideTo(scroller, id, event.detail > 0, frame, () => root.current?.setAttribute('data-settings-scrolling', id), () => root.current?.removeAttribute('data-settings-scrolling'))
   }
 
-  if (available.length < 2) return null
+  if (links.length < 2) return null
   return (
     <nav className="settings-jumps" aria-label={L('Ir para', 'Go to')} ref={root}>
-      {available.map((section) => (
+      {links.map((section) => (
         <a key={section.id} href={`#settings-${section.id}`} onClick={(event) => go(event, section.id)}>
           <SettingsTile section={section} size="sm" />
           {section.label}
