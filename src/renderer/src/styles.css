@@ -2882,16 +2882,7 @@ h3 {
   justify-content: flex-end;
   margin-top: 8px;
 }
-/* The label and, when Jev suggests it, its pill: they share a line, and the pill wraps under on a
-   narrow card instead of squeezing the label. */
-.ask-option__line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-/* Jev's pick: an accent pill, quiet enough to sit next to a label. It never takes the tick. */
+/* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */
 .ask-option__pill {
   flex: none;
   padding: 0 7px;
@@ -2903,11 +2894,6 @@ h3 {
   font-weight: 600;
   line-height: 16px;
   white-space: nowrap;
-}
-.ask-list__option {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 .ask-option__detail {
   font-size: 12px;

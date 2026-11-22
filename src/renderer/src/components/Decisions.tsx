@@ -36,7 +36,6 @@ export type AskMode = 'answer' | 'view' | 'done'
 
 // `answer`: this person may answer it now. `view`: someone else's to answer (or not yet asked).
 // `done`: answered. `badge`: the state, as the head says it; `byline`: who asked whom (a team).
-// `recommended`: Jev's pick per decision, when it's turned on and has answered.
 // `children`: what goes under it (a hint, buttons).
 export function AskCard({
   id,
@@ -46,7 +45,6 @@ export function AskCard({
   badge,
   byline,
   answeredInText,
-  recommended,
   cancelled,
   children
 }: {
@@ -57,17 +55,16 @@ export function AskCard({
   badge: string
   byline?: string
   answeredInText?: boolean
-  recommended?: (number | null)[] | undefined
   cancelled?: boolean | undefined
   children?: ReactNode
 }): ReactNode {
   // A next-steps card is a to-do, not a menu: it says so, in every mode.
   const steps = questions.some(isNextSteps)
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} recommended={recommended} steps={steps} extra={children} />
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} steps={steps} extra={children} />
   return (
     <section className={`ask ask--${mode}${steps ? ' ask--steps' : ''}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} steps={steps} />
-      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} /> : <Asked questions={questions} recommended={recommended} />}
+      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} /> : <Asked questions={questions} />}
       {children}
     </section>
   )
@@ -87,14 +84,8 @@ function Head({ badge, byline, done, cancelled, nav, steps }: { badge: string; b
   )
 }
 
-// Jev's pick, as a pill: the card still waits for the person, so it never takes the tick or the
-// keyboard. It's a hint on an option, not a state. The agent's own mark is the tag above.
-function JevPick(): ReactNode {
-  return <span className="ask-option__pill">{L('Recomendado', 'Recommended')}</span>
-}
-
 // Someone else's question, waiting: each decision with its options, to read.
-function Asked({ questions, recommended }: { questions: Decision[]; recommended?: (number | null)[] | undefined }): ReactNode {
+function Asked({ questions }: { questions: Decision[] }): ReactNode {
   return (
     <ol className="ask-list">
       {questions.map((q, i) => (
@@ -103,10 +94,9 @@ function Asked({ questions, recommended }: { questions: Decision[]; recommended?
           {q.options && (
             <span className="ask-list__options">
               {q.options.map((o, j) => (
-                <span key={j} className="ask-list__option">
-                  <span className="ask-chip">{o.label}</span>
+                <span key={j} className="ask-chip">
+                  {o.label}
                   {o.recommended && <Recommended />}
-                  {recommended?.[i] === j && <JevPick />}
                 </span>
               ))}
             </span>
@@ -138,7 +128,7 @@ function Summary({ questions, answers, answeredInText, cancelled }: { questions:
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, recommended, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; recommended?: (number | null)[] | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -168,14 +158,14 @@ function Answering({ id, questions, saved, badge, byline, recommended, steps, ex
   }
 
   // Every decision with the option the agent recommends, sent at once. Only when each one has such an option.
-  const agentPicks = recommendedAnswers(questions)
+  const recommended = recommendedAnswers(questions)
   const goRecommended = (): void => {
-    if (!agentPicks || sending) return
-    agentPicks.forEach((a, i) => {
+    if (!recommended || sending) return
+    recommended.forEach((a, i) => {
       drafts.delete(draftKey(id, i))
       answerDecision(id, i, a)
     })
-    setAnswers(agentPicks)
+    setAnswers(recommended)
     send()
   }
 
@@ -239,9 +229,9 @@ function Answering({ id, questions, saved, badge, byline, recommended, steps, ex
       {step === 'review' ? (
         <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} />
       ) : (
-        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} recommended={recommended?.[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
+        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
       )}
-      {agentPicks && (
+      {recommended && (
         <div className="ask__recommend">
           <button className="btn btn--sm" disabled={sending} onClick={goRecommended}>
             <Icon name="check" size={12} /> {L('Pode seguir com a recomendação', 'Go with the recommendation')}
@@ -253,7 +243,7 @@ function Answering({ id, questions, saved, badge, byline, recommended, steps, ex
   )
 }
 
-function DecisionStep({ draftId, question, answer, recommended, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; recommended?: number | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
+function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
   const options = question.options ?? []
   // A next-steps card opens with its boxes already ticked (or with the ones Jev found worth doing
   // now); a question opens with nothing picked. A draft I left here, or an answer saved, wins.
@@ -337,10 +327,9 @@ function DecisionStep({ draftId, question, answer, recommended, last, takeFocus,
               <button key={i} role={multiple ? 'checkbox' : 'radio'} aria-checked={on} className={`ask-option ${on ? 'is-on' : ''} ${focus === i ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(i)} onClick={() => pick(i)}>
                 <span className="ask-option__key">{i + 1}</span>
                 <span className="ask-option__text">
-                  <span className="ask-option__line">
-                    <span className="ask-option__label">{o.label}</span>
+                  <span className="ask-option__label">
+                    {o.label}
                     {o.recommended && <Recommended />}
-                    {recommended === i && <JevPick />}
                   </span>
                   {o.description && <span className="ask-option__detail">{o.description}</span>}
                 </span>
@@ -425,7 +414,7 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   if (!questions.length) return null
   const waiting = message.run?.status === 'waiting_input'
   const cancelled = !!message.run?.cancelled
-  return <AskCard id={message.id} questions={questions} saved={message.run?.answers} recommended={message.run?.recommended} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : cancelled ? L('Cancelada', 'Cancelled') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} cancelled={cancelled} />
+  return <AskCard id={message.id} questions={questions} saved={message.run?.answers} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : cancelled ? L('Cancelada', 'Cancelled') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} cancelled={cancelled} />
 }
 
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it
