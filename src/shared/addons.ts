@@ -41,15 +41,25 @@ export interface TuneEdit {
 }
 
 // A revision per extension: a folder unpacked by an older build is set up again on the next start, without
-// being downloaded a second time. Bump it when an edit below changes.
-export const TUNE_REVISION = 1
+// being downloaded a second time. Bump it when an edit below changes. Revision 2 is the ad blocker's mode
+// written the way its own lookup reads it (see the two edits below): a folder revision 1 set up carries
+// both lists naming all urls, which is Optimal filtering with extra words.
+export const TUNE_REVISION = 2
 
 export const TUNE: Partial<Record<AddOn, readonly TuneEdit[]>> = {
-  // Its store build filters in "Basic" mode: requests are blocked and the hole the ad left stays in the
+  // Its store build filters in "Optimal" mode: requests are blocked and the hole the ad left stays in the
   // layout (measured 2026-11-22: an 803x250 empty box on wetter.de, a quarter of the screen). "Complete"
   // adds its cosmetic filters, which is what takes the hole away, and its scriptlets, which is what gets a
   // page to draw itself when the network blocked something it was waiting on.
-  ads: [{ file: 'js/mode-manager.js', from: '    complete: [],', to: "    complete: [ 'all-urls' ],", why: 'Complete filtering from the first page' }],
+  //
+  // Two edits, in this order, because the extension reads its modes most specific first (none, basic,
+  // optimal, complete): naming all urls under complete while optimal still named them changed nothing at
+  // all — measured, still one empty 803x250 box on wetter.de — so optimal's list is emptied first, and
+  // then complete's is filled.
+  ads: [
+    { file: 'js/mode-manager.js', from: "    optimal: [ 'all-urls' ],", to: '    optimal: [],', why: 'the mode it reads first no longer claims every url' },
+    { file: 'js/mode-manager.js', from: '    complete: [],', to: "    complete: [ 'all-urls' ],", why: 'Complete filtering from the first page' }
+  ],
   // Off until armed by hand, and by hand it is one site at a time, which is no use to an agent that meets
   // a new site every minute. "easyModeActive" is its moderate mode: clean what covers the page, keep what
   // the page needs. It also opens its own tutorial tab on install, which the agent would find in its browser.

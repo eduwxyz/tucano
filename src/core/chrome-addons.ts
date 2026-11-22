@@ -246,6 +246,9 @@ export function tune(dir: string, key: AddOn): string | undefined {
       return L(`Ficou como veio da loja: ${edit.file} não está nesta versão.`, `Left as the store ships it: ${edit.file} isn’t in this version.`)
     }
     const hits = text.split(edit.from).length - 1
+    // An edit an earlier revision of this app already wrote: the folder is being set up again after the
+    // list changed (revision 2 emptied the ad blocker's optimal list), and what this edit wants is there.
+    if (hits === 0 && text.split(edit.to).length - 1 === 1) continue
     if (hits !== 1) {
       return L(
         `Ficou como veio da loja: a linha de ${edit.file} não é mais a mesma (${hits} iguais).`,
