@@ -30,6 +30,7 @@ import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
+import { loginsInOrder, nextLogin, noLoginLeft, primaryAccountOf, Spent, USUAL_LOGIN } from '../shared/primary-login'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
@@ -460,6 +461,7 @@ export class Runner {
   private active = 0
   private soloRunning = new Set<string>() // agents that go one at a time, with a reply running now
   private routing = 0
+  private spent = new Spent() // logins that ran out lately, by harness: see shared/primary-login
   private controllers = new Map<string, Control>()
   private held = new Map<string, Promise<void>>() // by agent: its replies on an engine that keeps the MCP connection
   private paused = false // "Pausar tudo": nobody starts working until it's off
@@ -1215,12 +1217,24 @@ export class Runner {
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
-      if (!status.installed || !status.loggedIn) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+      // The router's logins: the primary one first when one is set, then the others in order, each tried once.
+      const logins = loginsInOrder(settings, model.engine)
+      if (!status.installed || !logins.some((login) => login.ready)) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
 
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
-      const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
-      if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
+      const tried = new Set<string>()
+      let r: Awaited<ReturnType<typeof route>> | undefined
+      for (let login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried }); login; login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried })) {
+        tried.add(login.id)
+        r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd, account: login.account && this.deps.dataDir ? accountDir(this.deps.dataDir, login.account.id) : undefined })
+        if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
+        if (!('error' in r) || !outOfQuota(r.error)) break
+        this.spent.mark(model.engine, login.id, Date.now())
+      }
+      const label = ENGINES[model.engine].label
+      if (!r) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if ('error' in r && tried.size > 1 && outOfQuota(r.error)) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
       this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
@@ -1526,8 +1540,29 @@ export class Runner {
       return msg
     }
 
-    // Another login of this harness (Settings › Accounts), when the agent has one.
+    // Another login of this harness (Settings › Accounts), when the agent has one. Without one, the harness's primary
+    // login runs the reply when one is set, and the others follow in order if it runs out (shared/primary-login).
     let account = agent.accountId ? settings.accounts?.find((a) => a.id === agent.accountId && a.engine === engineId) : undefined
+    const chain = !agent.accountId && primaryAccountOf(settings, engineId) !== USUAL_LOGIN ? loginsInOrder(settings, engineId) : undefined
+    const tried = new Set<string>()
+    if (chain) {
+      const first = nextLogin(chain, { engine: engineId, spent: this.spent, now: Date.now(), tried })
+      if (!first) {
+        save({
+          run: {
+            status: 'failed',
+            endedAt: Date.now(),
+            depth: opts.depth,
+            steps: [],
+            ...again,
+            error: L('Não consegui responder: ', "I couldn't reply: ") + noLoginLeft(chain, { engine: engineId, label: ENGINES[engineId].label, spent: this.spent, now: Date.now() }) + '.'
+          }
+        })
+        return msg
+      }
+      tried.add(first.id)
+      account = first.account
+    }
     if (account && !account.loggedIn) {
       save({
         run: {
@@ -3153,10 +3188,35 @@ ${note}`,
           error = e instanceof Error ? e.message : String(e)
           thrown = e
         }
+        // The login in use ran out before it did anything: the same reply goes on to the next login of the harness, each once.
+        const outNow = !result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error)
+        if (outNow && chain && !onReserve) {
+          this.spent.mark(engineId, account?.id ?? USUAL_LOGIN, Date.now())
+          const next = nextLogin(chain, { engine: engineId, spent: this.spent, now: Date.now(), tried })
+          if (next) {
+            tried.add(next.id)
+            const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
+            flush()
+            msg.text = ''
+            if (plan) lost = plan
+            plan = undefined
+            input = whole
+            account = next.account
+            const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
+            addSteps({ id: randomUUID(), label: L('Trocou de conta', 'Switched account'), detail: L(`${from} está sem limite agora; segue no ${to}`, `${from} is out of quota for now; going on with ${to}`), status: 'done' })
+            error = null
+            thrown = undefined
+            progress = { tokens: 0, cacheRead: 0 }
+            continue
+          }
+        }
         // The main model's subscription is out before it did anything: the same reply goes to the reserve, once.
         // After a tool call it doesn't, since that would run the call again; the next reply starts on the main model.
         const reserve = !onReserve && !result && error && !control.reason && !acted && !questions && !approval && (!msg.text.trim() || outOfQuota(msg.text)) && outOfQuota(error) ? this.reserveFor(agent, settings, account) : undefined
-        if (!reserve) break
+        if (!reserve) {
+          if (outNow && chain && !onReserve) error = L('Não consegui responder: ', "I couldn't reply: ") + noLoginLeft(chain, { engine: engineId, label: ENGINES[engineId].label, spent: this.spent, now: Date.now() }) + '.'
+          break
+        }
         const from = `${engineLabel}${account ? ` (${account.name})` : ''}`
         flush()
         msg.text = '' // the CLI's own "you've hit your limit", when it wrote it as text

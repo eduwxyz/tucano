@@ -616,6 +616,7 @@ export interface Settings {
   showThinking?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  primaryAccounts?: Partial<Record<AccountEngine, string>> // the primary login of a harness with accounts (its id, or unset: the usual login); the reply goes there first
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
   tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
