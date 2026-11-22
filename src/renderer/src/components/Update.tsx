@@ -71,7 +71,7 @@ export function UpdateNote(): ReactNode {
 function status(u: UpdateState): string {
   switch (u.status) {
     case 'off':
-      return L('As atualizações funcionam no app instalado.', 'Automatic updates are off.')
+      return L('As atualizações funcionam no app instalado.', 'Updates work in the installed app.')
     case 'checking':
       return L('Procurando uma versão nova…', "Checking for updates…")
     case 'downloading':
@@ -80,10 +80,10 @@ function status(u: UpdateState): string {
       return L(`O Tucano ${u.next} está pronto. Ele entra quando você reiniciar ou fechar o app.`, `Tucano ${u.next} is ready. Restart or quit to install.`)
     case 'error':
       return u.errorKind === 'other'
-        ? L('Não deu pra atualizar sozinho. Baixe a versão nova em Releases.', "Automatic update failed. Download the latest version from Releases.")
+        ? L('Não deu pra atualizar sozinho. Baixe a versão nova em Releases.', "Couldn’t update on its own. Download the latest version from Releases.")
         : u.errorKind === 'offline'
-          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', "Could not check for updates while offline. Tucano will retry automatically.")
-          : L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Could not check for updates. Try again later.')
+          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', "No internet to check for updates. Tucano tries again on its own later.")
+          : L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Couldn’t check for updates. Try again later.')
     default:
       return u.checkedAt
         ? L(`É a versão mais recente. Conferido ${ago(u.checkedAt)}.`, `It’s the latest version. Checked ${ago(u.checkedAt)}.`)

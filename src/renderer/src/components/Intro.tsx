@@ -509,7 +509,7 @@ function ConnectAi({ name, onBack, onNext }: { name: string; onBack: () => void;
         <aside className="intro-side intro-side--teal">
           <TucaHead />
           <Bubble>{L('Opa, você já tem tudo pronto aqui. Achei o que você usa.', 'Oh, you’re all set up already. I found what you use.')}</Bubble>
-          <Bubble>{auto ? L('Já escolhi os modelos rápidos pros bastidores. Se quiser mexer, é ali embaixo.', "Fast models are selected for background tasks. You can change them below.") : L('Só falta escolher os modelos rápidos pros bastidores, ali embaixo.', 'Just pick the quick models for behind the scenes, down there.')}</Bubble>
+          <Bubble>{auto ? L('Já escolhi os modelos rápidos pros bastidores. Se quiser mexer, é ali embaixo.', "I picked fast models for the work behind the scenes. You can change them below.") : L('Só falta escolher os modelos rápidos pros bastidores, ali embaixo.', 'Just pick the quick models for behind the scenes, down there.')}</Bubble>
         </aside>
         <section className="intro__main">
           <Top at={1} onBack={onBack} />

@@ -63,7 +63,7 @@ function Skills({ admin }: { admin: boolean }): ReactNode {
 
   if (place.kind === 'review' && pending.length > 0)
     return (
-      <Sheet back={{ label: 'Skills', onClick: toList }} title={L('Propostas', 'Proposals')} lede={L('Dos agentes. Só entram em uso se você aprovar.', "Agent proposals become available after your approval.")}>
+      <Sheet back={{ label: 'Skills', onClick: toList }} title={L('Propostas', 'Proposals')} lede={L('Dos agentes. Só entram em uso se você aprovar.', "Proposed by the agents. They’re used only once you approve.")}>
         {pending.map((k) => (
           <Proposal key={k.id} proposal={k} />
         ))}

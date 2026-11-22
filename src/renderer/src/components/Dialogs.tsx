@@ -277,7 +277,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
         </a>
       </p>
       {automatic ? (
-        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', "2. After authorization, return here. Tucano connects and closes this dialog.")}</p>
+        <p className="small muted">{L('2. Depois de permitir, volte pra cá: o Tucano conecta sozinho e esta janela fecha.', "2. Once you allow it, come back here. Tucano connects and closes this window.")}</p>
       ) : (
         <label className="field">
           <span className="field__label">{L('2. Cole aqui o endereço em que ela terminou', '2. Paste the address it ended on')}</span>
@@ -287,7 +287,7 @@ function OAuthDialog({ id, url, onClose }: { id: string; url: string; onClose: (
           <span className="hint">
             {L(
               'Depois de permitir, o navegador vai pra um endereço que começa com http://127.0.0.1 e mostra que a página não abre. É normal: o Tucano está no servidor. Copie o endereço inteiro da barra e cole aqui.',
-              "After authorization, a 127.0.0.1 page may fail to load because Tucano runs on a server. Copy the full address and paste it here."
+              "After you allow it, a 127.0.0.1 page may not load, because Tucano runs on a server. Copy the full address and paste it here."
             )}
           </span>
         </label>

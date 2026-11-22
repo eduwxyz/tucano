@@ -380,3 +380,32 @@ The off state must describe its actual state rather than imply that installation
 | 'Updates work in the installed app.' | 'Automatic updates are off.' |
 | 'Couldn’t look for a new version just now. Try again later.' | 'Could not check for updates. Try again later.' |
 | `Tucano ${u.next} is ready. It goes in when you restart or quit the app.` | `Tucano ${u.next} is ready. Restart or quit to install.` |
+
+## After review
+
+Merged with these changes to the proposal above. The `off` update status only shows when the app runs
+unpackaged with no update feed, so the original sentence was already describing its state. The rest
+keeps the shorter text but goes back to the app's plain, direct voice where the proposal turned
+formal.
+
+| Proposed | Merged |
+| --- | --- |
+| Automatic updates are off. | Updates work in the installed app. |
+| Could not check for updates while offline. Tucano will retry automatically. | No internet to check for updates. Tucano tries again on its own later. |
+| Could not check for updates. Try again later. | Couldn’t check for updates. Try again later. |
+| Automatic update failed. Download the latest version from Releases. | Couldn’t update on its own. Download the latest version from Releases. |
+| After a few quiet minutes, this thread is summarized and personal memories are extracted. | After a few quiet minutes, this thread is summed up here, and the memories about you come from it. |
+| awaiting an answer | waiting for an answer |
+| The final result is returned to the requester. | the final answer goes back to whoever asked |
+| 2. After authorization, return here. Tucano connects and closes this dialog. | 2. Once you allow it, come back here. Tucano connects and closes this window. |
+| After authorization, a 127.0.0.1 page may fail to load because Tucano runs on a server. | After you allow it, a 127.0.0.1 page may not load, because Tucano runs on a server. |
+| Fast models are selected for background tasks. You can change them below. | I picked fast models for the work behind the scenes. You can change them below. |
+| Excluded from prompts and blocked from relearning. Permanent deletion also removes that block. | Left out of the prompt and kept from being learned again. Deleting permanently removes that too. |
+| Manage workspace access and roles. Each person’s DMs remain private. | Who has access to this Tucano and what each person can do. Each person’s DMs stay private. |
+| Workspace activity. Private DM content is excluded. | Who did what in this Tucano. What’s said in DMs never shows here. |
+| Agent proposals become available after your approval. | Proposed by the agents. They’re used only once you approve. |
+| Switching runtimes uses the default login. The fallback model stays unchanged. | Switching harnesses uses the default login. The fallback model stays the same. |
+| Complete installation in the terminal. Tucano detects it automatically. | Finish installing in the terminal. Tucano picks it up on its own. |
+| No open findings. | All in order. Nothing to look after now. |
+| This passage will be removed without replacement. | This passage leaves the page, with nothing in its place. |
+| Excessive history | Reads like a log |

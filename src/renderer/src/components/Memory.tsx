@@ -183,7 +183,7 @@ export function MemoryPage(): ReactNode {
           </button>
         </>
       ) : tab === 'forgotten' ? (
-        <ReadGroup title={L('Esquecidas', 'Forgotten')} lead={L('Saíram do prompt. O registro impede que sejam aprendidas de novo; apagar de vez remove até ele.', "Excluded from prompts and blocked from relearning. Permanent deletion also removes that block.")}>
+        <ReadGroup title={L('Esquecidas', 'Forgotten')} lead={L('Saíram do prompt. O registro impede que sejam aprendidas de novo; apagar de vez remove até ele.', "Left out of the prompt and kept from being learned again. Deleting permanently removes that too.")}>
           {forgotten.filter(hit).map((m) => (
             <Line key={m.id} memory={m}>
               <button className="text-btn" onClick={() => purgeMemory(m.id)}>

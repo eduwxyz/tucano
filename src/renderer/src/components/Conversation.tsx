@@ -1186,7 +1186,7 @@ function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies
       at={s?.at}
       ready={since > 0}
       notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
-      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few quiet minutes, this thread is summarized and personal memories are extracted.")}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few quiet minutes, this thread is summed up here, and the memories about you come from it.")}
       hint={L(
         `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
         `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
@@ -1294,7 +1294,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
     ? null
     : d.state === 'open'
       ? d.asking
-        ? { tone: 'is-warn', text: L('esperando uma resposta', "awaiting an answer") }
+        ? { tone: 'is-warn', text: L('esperando uma resposta', "waiting for an answer") }
         : { tone: 'is-live', text: L('em andamento', 'under way') }
       : d.state === 'done'
         ? { tone: 'is-done', text: L('terminado', 'done') }
@@ -1311,7 +1311,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
           {state.text}
         </span>
       )}
-      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', "The final result is returned to the requester.")}</span>
+      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', "the final answer goes back to whoever asked")}</span>
     </div>
   )
 }

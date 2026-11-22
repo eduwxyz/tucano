@@ -49,7 +49,7 @@ export function AgentModelsPanel(): ReactNode {
         <div className="agent-models__bulk">
           <strong>{L('Alterar em lote', 'Bulk change')}</strong>
           <ModelPicker value={model} onChange={setModel} />
-          <p className="hint">{L('Ao trocar de harness, o agente passa a usar o login padrão dele. O modelo reserva continua igual.', "Switching runtimes uses the default login. The fallback model stays unchanged.")}</p>
+          <p className="hint">{L('Ao trocar de harness, o agente passa a usar o login padrão dele. O modelo reserva continua igual.', "Switching harnesses uses the default login. The fallback model stays the same.")}</p>
           <div className="row">
             <button type="button" className="btn btn--primary btn--sm" disabled={!targets.length || !modelInfo(model)?.id} onClick={() => void save(targets.map((a) => a.id), model)}>
               {L(`Aplicar aos selecionados (${targets.length})`, `Apply to selected (${targets.length})`)}
