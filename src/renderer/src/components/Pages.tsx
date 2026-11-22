@@ -3690,7 +3690,7 @@ export function SettingsPage(): ReactNode {
         {on('agentes') && admin && (
           <SectionAnchor id="agents-addons" sections={structure}>
             <Card
-              title={L('Bloqueador de anúncios e avisos de cookies', 'An ad blocker, and consent notices answered')}
+              title={L('Extensões do navegador', 'Browser Extensions')}
               section="agents-addons"
               lead={L(
                 'O navegador dos agentes roda com as extensões que você ligar, para o agente ler a própria página: nenhum aviso de cookies ou anúncio fica por cima dela. Cada uma é um interruptor; as três dividem 215 MB de Chrome for Testing.',

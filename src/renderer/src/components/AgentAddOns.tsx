@@ -1,5 +1,5 @@
-// The three extensions an agent's browser can carry, one row each (Settings › Agents › Anúncios e avisos
-// de cookies). Each row is its own switch: on downloads it and puts it in the next session's browser, off
+// The three extensions an agent's browser can carry, one row each (Settings › Agents › Extensões do
+// navegador). Each row is its own switch: on downloads it and puts it in the next session's browser, off
 // takes its folder off the disk. The catalogue of the three lives in shared/addons.ts, which the core also
 // installs from, so a name cannot drift from what is on disk.
 import type { ReactNode } from 'react'
