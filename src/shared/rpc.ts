@@ -288,8 +288,9 @@ export type CoreEvent =
   | { type: 'voice' } // dictation's model: downloading, done, removed
   | { type: 'tasks'; for: string } // someone's to-dos changed: they read them again
   | { type: 'node'; info: NodeInfo } // this computer's lines to the servers it's lent to, as they change
-  | { type: 'message'; message: Message }
+  | { type: 'message'; message: Message; attemptStart?: true }
   | { type: 'delta'; id: string; text: string } // appended to message text while streaming
+  | { type: 'thinking'; id: string; text: string } // appended to what the model is thinking, shown apart from the reply
   | { type: 'agent'; agent: Agent }
   | { type: 'agent_removed'; id: string } // one just made and taken back with Desfazer before it did anything
   | { type: 'conversation'; conversation: Conversation }
@@ -314,7 +315,7 @@ export type CoreEvent =
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'thinking', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

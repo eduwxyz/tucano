@@ -598,6 +598,9 @@ export interface Settings {
   sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
+  // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
+  // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
+  showThinking?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on

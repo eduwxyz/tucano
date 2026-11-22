@@ -84,6 +84,8 @@ const GIVE_UP_MS = 10 * 60_000
 // not started out of the blue now; it ends as failed and whoever asked hears it, to ask again if it still matters.
 const STALE_MS = 60 * 60_000
 const DELTA_FLUSH_MS = 40
+// How much thinking is worth one wake-up of the window: it is read, not parsed.
+const THOUGHT_FLUSH = 240
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const RETRY_MINUTES = [5, 10, 20, 30, 30, 30] // a failure that passes: tried again after each wait, about two hours in all
 // How the reply was cut, in the words the next reply reads: the app closing is not the same news as
@@ -1002,12 +1004,12 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     return m
   }
 
-  private update(m: Message, patch: Partial<Message>): void {
+  private update(m: Message, patch: Partial<Message>, attemptStart = false): void {
     Object.assign(m, patch)
     // A card settled while the reply was working stays settled (keepDecided).
     if (m.run?.agentDraft || m.run?.proposals?.length) m.run = keepDecided(m.run, this.deps.db.message(m.id)?.run)
     this.deps.db.saveMessage(m)
-    this.deps.emit({ type: 'message', message: { ...m } })
+    this.deps.emit({ type: 'message', message: { ...m }, ...(attemptStart ? { attemptStart: true } : {}) })
   }
 
   // The router reads the thread it picks for, and the conversation's other threads in a line each.
@@ -1266,9 +1268,17 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
     msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run) }
-    const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
+    // Only a new execution replaces this reply's reasoning; tool/steering updates do not.
+    let attemptStart = true
+    const save = (patch: Partial<Message> = {}): void => {
+      this.update(msg, patch, attemptStart)
+      attemptStart = false
+    }
     // What it writes before using a tool is narration ("Vou abrir o Studio"): it
     // goes with that step, and the reply keeps only what it says at the end.
+    // What the model is thinking, streamed to the window and never added to the reply: it is shown
+    // as it goes and dropped when the turn ends, since the run column is rewritten whole each step.
+    let thought = ''
     let narration: string | undefined
     const said = (): string | undefined => {
       const text = msg.text.trim()
@@ -1483,6 +1493,10 @@ const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { k
     const flush = (): void => {
       if (timer) clearTimeout(timer)
       timer = null
+      if (thought) {
+        emit({ type: 'thinking', id: msg.id, text: thought })
+        thought = ''
+      }
       if (!pending) return
       emit({ type: 'delta', id: msg.id, text: pending })
       pending = ''
@@ -2871,6 +2885,12 @@ ${note}`,
               msg.text += ev.delta
               pending += ev.delta
               timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+            } else if (ev.type === 'thinking') {
+              if (ev.delta) {
+                thought += ev.delta
+                if (thought.length > THOUGHT_FLUSH) flush()
+                else timer ??= setTimeout(flush, DELTA_FLUSH_MS)
+              }
             } else if (ev.type === 'progress') {
               progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
               const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))

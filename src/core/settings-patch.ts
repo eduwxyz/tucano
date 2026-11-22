@@ -43,6 +43,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   sectorOrder: { kind: 'array', max: 100_000, nullable: true },
   sounds: { kind: 'boolean', max: 10, nullable: true },
   stepsOpen: { kind: 'boolean', max: 10, nullable: true },
+  showThinking: { kind: 'boolean', max: 10, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true },
   surveys: { kind: 'boolean', max: 10, nullable: true },
   tucaApplyNow: { kind: 'boolean', max: 10, nullable: true }
