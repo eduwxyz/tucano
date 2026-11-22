@@ -1,6 +1,7 @@
-// The keys the message field answers to while a reply may be running somewhere: Enter does what the
-// setting says, and a modifier picks one of the four ways, once, whatever the setting says. Shift+Enter
-// is the line break it has always been, so the queue sits on Ctrl+Enter (Cmd+Enter on a Mac).
+// The keys the message field answers to: Enter sends a prompt, which starts its own reply (or waits its
+// turn past the conversation's limit, in the core), and Shift+Enter is the line break it has always been.
+// The field writes to the conversation, never into a running reply: no key there steers or interrupts one
+// (a reply is steered from its own pill, and stopped with Parar).
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -80,10 +81,11 @@ const press = async (init: { key: string; shiftKey?: boolean; altKey?: boolean; 
   return prevented
 }
 
+// What the field sent: the text, and whether it asked for anything beyond a plain prompt.
 const modeOf = (): unknown => sent[0]?.[5]
 
 describe('the keys that send from the message field', () => {
-  it('Shift+Enter is a new line, never a queue, and nothing is sent', async () => {
+  it('Shift+Enter is a new line, and nothing is sent', async () => {
     await act(async () => root.render(<Composer conversationId="c1" members={[]} placeholder="Mensagem" />))
     await type('primeira')
     const prevented = await press({ key: 'Enter', shiftKey: true })
@@ -91,38 +93,29 @@ describe('the keys that send from the message field', () => {
     expect(sent).toHaveLength(0)
   })
 
-  it('Ctrl+Enter queues, whatever the setting says', async () => {
-    await act(async () => root.render(<Composer conversationId="c1" members={[]} placeholder="Mensagem" />))
-    await type('isto depois')
-    expect(await press({ key: 'Enter', ctrlKey: true })).toBe(true)
-    expect(sent).toHaveLength(1)
-    expect(modeOf()).toBe('queue')
-  })
-
-  it('Alt+Enter hands it to the reply, and Shift+Alt+Enter interrupts it', async () => {
-    await act(async () => root.render(<Composer conversationId="c1" members={[]} placeholder="Mensagem" />))
-    await type('mude de plano')
-    expect(await press({ key: 'Enter', altKey: true })).toBe(true)
-    expect(modeOf()).toBe('steer')
-    sent.length = 0
-    await type('pare')
-    expect(await press({ key: 'Enter', altKey: true, shiftKey: true })).toBe(true)
-    expect(modeOf()).toBe('interrupt')
-  })
-
-  it('Enter alone follows the setting: parallel, until it says otherwise', async () => {
+  it('Enter sends a plain prompt', async () => {
     await act(async () => root.render(<Composer conversationId="c1" members={[]} placeholder="Mensagem" />))
     await type('mais uma')
     expect(await press({ key: 'Enter' })).toBe(true)
-    expect(modeOf()).toBe('parallel')
+    expect(sent).toHaveLength(1)
+    expect(modeOf()).toBeUndefined()
   })
 
-  it('Enter alone follows the setting: whatever it is set to, with no modifier held', async () => {
+  it('no modifier steers, queues or interrupts: Ctrl, Alt and Shift+Alt with Enter send the same plain prompt', async () => {
+    await act(async () => root.render(<Composer conversationId="c1" members={[]} placeholder="Mensagem" />))
+    for (const held of [{ ctrlKey: true }, { altKey: true }, { altKey: true, shiftKey: true }]) {
+      sent.length = 0
+      await type('isto')
+      await press({ key: 'Enter', ...held })
+      expect(modeOf()).toBeUndefined()
+    }
+  })
+
+  it('an old setting from before is ignored: Enter is still a plain prompt', async () => {
     fake = { ...fake, settings: { sendMode: 'steer' } } as unknown as State
     await act(async () => root.render(<Composer conversationId="c1" members={[]} placeholder="Mensagem" />))
     await type('então')
     expect(await press({ key: 'Enter' })).toBe(true)
-    expect(modeOf()).toBe('steer')
+    expect(modeOf()).toBeUndefined()
   })
 })
-

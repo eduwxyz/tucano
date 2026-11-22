@@ -41,7 +41,6 @@ import {
   type Routine,
   type RoutineRun,
   type Run,
-  type SendMode,
   type Settings,
   type Skill,
   type SkillVersion,
@@ -686,7 +685,9 @@ const COLUMNS: [string, string, string][] = [
   // When an agent was deleted for good (retireAgent): it stays only as a name for its old messages.
   ['agents', 'deleted_at', 'INTEGER'],
   // A prompt of mine waiting its turn: 'queue' while it waits (src/core/runs.ts, resumeQueued).
-  ['messages', 'send_mode', 'TEXT']
+  ['messages', 'send_mode', 'TEXT'],
+  // An agent whose replies go one at a time (Agent.oneAtATime): 1; unset, as many as the app runs.
+  ['agents', 'one_at_a_time', 'INTEGER']
 ]
 
 
@@ -1003,7 +1004,8 @@ export class Db {
       ...(r['sector_name'] ? { sectorName: str(r['sector_name']) } : {}),
       ...(r['sector_does'] ? { sectorDoes: str(r['sector_does']) } : {}),
       ...(r['entry'] ? { entry: true as const } : {}),
-      ...(r['proactive'] === 0 ? { proactive: false } : {})
+      ...(r['proactive'] === 0 ? { proactive: false } : {}),
+      ...(r['one_at_a_time'] === 1 ? { oneAtATime: true as const } : {})
     }
   }
 
@@ -1029,7 +1031,7 @@ export class Db {
       .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
-    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ?, proactive = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.proactive === false ? 0 : null, a.id)
+    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ?, proactive = ?, one_at_a_time = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.proactive === false ? 0 : null, a.oneAtATime ? 1 : null, a.id)
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -1292,7 +1294,7 @@ export class Db {
       routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined,
       threadId: r['thread_id'] ? str(r['thread_id']) : undefined,
       ...(r['thread_summary'] ? { threadSummary: JSON.parse(str(r['thread_summary'])) as ThreadSummary } : {}),
-      ...(r['send_mode'] ? { sendMode: str(r['send_mode']) as SendMode } : {}),
+      ...(r['send_mode'] === 'queue' ? { sendMode: 'queue' as const } : {}),
       ...(r['title'] ? { title: str(r['title']) } : {}),
       ...(r['via'] ? { via: str(r['via']) } : {}),
       ...(r['stop_job'] ? { stop: { job: str(r['stop_job']) } } : {})
@@ -1467,8 +1469,8 @@ export class Db {
   }
 
   // My prompts that were still waiting their turn when the app closed, oldest first (runs.ts, `resumeQueued`).
-  // Only 'queue': a message handed into a running reply keeps its 'steer' mark after that reply answered
-  // it, and an app that opened again must not answer it a second time.
+  // Only 'queue': an older build marked a message handed into a running reply 'steer', and that reply
+  // answered it already.
   queuedMessages(): Message[] {
     return (this.db.prepare(`SELECT * FROM messages WHERE send_mode = 'queue' ORDER BY at`).all() as Row[]).map((r) => this.toMessage(r))
   }
