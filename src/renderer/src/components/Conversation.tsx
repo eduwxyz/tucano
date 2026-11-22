@@ -1757,8 +1757,11 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
-  // The steer is a pill in the row under this chain: it opens a field under the box, still held by
-  // this reply's id so it cannot direct another reply of the same agent.
+  // A reply that ended carries the same pill, under another name: there is nothing left to steer, so
+  // the instruction it takes makes that reply go on from where it stopped (runs.ts, `followIn`).
+  const followable = working || run.status === 'done'
+  // The pill is in the row under this chain: it opens a field under the box, still held by this
+  // reply's id so it cannot direct another reply of the same agent.
   const [steerOpen, setSteerOpen] = useState(false)
   const [steerNote, setSteerNote] = useState('')
   const steerTyped = steerNote.trim()
@@ -1826,16 +1829,16 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
         </button>
         {/* One row of pills under the chain, not one row per control: the steer opens here, and the
             pause pill of a held reply joins the same row instead of drawing a second one. */}
-        {working && (
+        {followable && (
           <div className="steps__pills">
             <span
               className="steps__steer-pill"
               role="button"
               aria-expanded={steerOpen}
-              title={L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply')}
+              title={working ? L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply') : L('Pedir a esta resposta para seguir daqui', 'Ask this reply to go on from here')}
               onClick={() => setSteerOpen((v) => !v)}
             >
-              <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+              <Icon name={working ? 'pointer' : 'down'} size={11} /> {working ? L('Orientar', 'Steer') : L('Seguir', 'Follow')}
             </span>
           </div>
         )}
@@ -1848,12 +1851,12 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
         )}
         <Thought message={message} working={working} />
       </div>
-      {working && steerOpen && (
+      {followable && steerOpen && (
         <div className="steps__steer">
           <div className="steps__steer-note">
             <textarea
-              aria-label={L('Orientação para a resposta em curso', "Instructions for the current reply")}
-              placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+              aria-label={working ? L('Orientação para a resposta em curso', 'Instructions for the current reply') : L('O que mais esta resposta deve fazer', 'What more this reply should do')}
+              placeholder={working ? L('Como ele deve seguir?', 'How should it go on?') : L('O que mais?', 'What next?')}
               rows={2}
               value={steerNote}
               autoFocus
@@ -1868,7 +1871,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
             />
             <div className="steps__steer-row">
               <button className="btn btn--primary btn--xs" disabled={!steerTyped} onClick={() => steer(steerTyped)}>
-                {L('Orientar', 'Steer')}
+                {working ? L('Orientar', 'Steer') : L('Seguir', 'Follow')}
               </button>
               <button
                 className="link"
@@ -1968,9 +1971,9 @@ export function Thought({ message, working }: { message: Message; working: boole
   )
 }
 
-// One reply's run as the conversation draws it: its steps, the steer sub-button beside Stop in
-// the steps row, and the steer's field under the box. Anything the run says about itself — its steps
-// and the thinking under them — still sits above the field.
+// One reply's run as the conversation draws it: its steps, the pill in the steps row (Steer while it
+// works, Follow once it has ended) and the field that pill opens under the box. Anything the run says
+// about itself — its steps and the thinking under them — still sits above the field.
 export function RunBlock({ message }: { message: Message }): ReactNode {
   return <RunSteps message={message} />
 }
