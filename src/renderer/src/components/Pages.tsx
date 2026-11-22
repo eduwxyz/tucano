@@ -3693,7 +3693,7 @@ export function notifyHint(state: NotifyState | 'shown', mac: boolean): string |
     'Or use the desktop app (Settings › Servers), iPhone app or Telegram (Settings › Phone).'
   )
   if (state === 'insecure') return L('O navegador não mostra notificações de um endereço sem HTTPS (como o do Tailscale, http://100.…). ', "Browsers don't show notifications from an address without HTTPS (like Tailscale's, http://100.…). ") + elsewhere
-  if (state === 'blocked') return L('O navegador bloqueou as notificações deste endereço. Libere nas permissões do site e recarregue a página. ', 'Notifications blocked. Allow them in site permissions and reload. ') + elsewhere
+  if (state === 'blocked') return L('O navegador bloqueou as notificações deste endereço. Libere nas permissões do site e recarregue a página. ', 'Unblock site notifications, then reload. ') + elsewhere
   if (state === 'unsupported') return L('Aqui não dá pra mostrar notificações. ', "Notifications can't be shown here. ") + elsewhere
   if (state === 'shown')
     return mac

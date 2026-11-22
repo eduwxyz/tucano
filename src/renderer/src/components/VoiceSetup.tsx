@@ -14,7 +14,7 @@ export const VOICE_CHOICES = (): { id: VoiceModelId; name: string; size: string;
 // Recommended model takes most of a minute for one sentence (measured: 47 s for 8 s of speech; the Light one, 9 s).
 export const VOICE_WHERE = (): string =>
   windowless()
-    ? L('O áudio vira texto no servidor deste Tucano, sem passar por nenhum outro serviço. Num servidor, o modelo Leve é bem mais rápido.', "Audio is transcribed only on this server. Light is faster on servers.")
+    ? L('O áudio vira texto no servidor deste Tucano, sem passar por nenhum outro serviço. Num servidor, o modelo Leve é bem mais rápido.', "Audio is transcribed only on this server.")
     : L('O áudio vira texto neste computador, sem internet.', 'The audio becomes text on this computer, offline.')
 
 // Dictation's state, read again whenever the core says it changed.
