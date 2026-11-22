@@ -6,10 +6,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
+> - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 
 ### Added
 
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
+
+### Changed
+
+- **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
 
 ## [0.2.45] - 2026-11-22
 
