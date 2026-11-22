@@ -21,6 +21,7 @@ import { FeedbackDraftCard } from './Feedback'
 import { lentComputersOf } from '../lent'
 import { canEditChannel,
   agentById,
+  approvalsIn,
   askerIn,
   messagesIn,
   attachedTo,
@@ -104,6 +105,7 @@ import { askWay } from './OrgSectors'
 import { runStep } from '../board'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { KeyRequestCard } from './Vault'
+import { historyStatus } from '../approval-history'
 import { COFRE } from '../../../shared/vault'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
@@ -114,6 +116,7 @@ import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '.
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
+import { AskStrip } from './AskStrip'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
@@ -309,7 +312,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           <Composer conversationId={id} members={members} onJump={onJump} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
         )}
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} {...(jump && jump.rootId === thread ? { focusId: jump.id, focusKey: jump.n } : {})} /> : <SidePanel />}
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} onJump={onJump} {...(jump && jump.rootId === thread ? { focusId: jump.id, focusKey: jump.n } : {})} /> : <SidePanel />}
     </div>
   )
 }
@@ -990,13 +993,14 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
   const [open, setOpen] = useState(false)
   const by = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : undefined))
   const team = useStore(teamMode)
-  const state = approval.state === 'approved' ? L('Aprovada', 'Approved') : approval.state === 'refused' ? L('Recusada', 'Refused') : L('Expirou', 'Expired')
+  // The same words as the card it opens: a call that failed never reads as a green "approved".
+  const status = approvalStatus(approval, false)
   const what = approval.connectorId === COFRE ? (typeof approval.args['nome'] === 'string' ? L(`a chave ${approval.args['nome']}`, `the ${approval.args['nome']} key`) : L(`o login de ${String(approval.args['site'] ?? '')}`, `the login for ${String(approval.args['site'] ?? '')}`)) : approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
   return (
-    <div className={`approval-line approval-line--${approval.state} ${open ? 'is-open' : ''}`}>
+    <div className={`approval-line approval-line--${status.tone === 'error' ? 'refused' : status.tone === 'muted' ? 'expired' : approval.state} ${open ? 'is-open' : ''}`}>
       <button className="approval-line__head" aria-expanded={open} title={`${approval.connectorName} · ${approval.tool}`} onClick={() => setOpen(!open)}>
-        <Icon name={approval.state === 'approved' ? 'check' : approval.state === 'refused' ? 'x' : 'clock'} size={12} />
-        <span className="approval-line__state">{state}</span>
+        <Icon name={status.tone === 'error' ? 'x' : status.tone === 'muted' ? 'clock' : 'check'} size={12} />
+        <span className="approval-line__state">{status.text}</span>
         <span className="approval-line__what">
           · {what}
           {team && by ? ` · ${by}` : ''}
@@ -1152,7 +1156,7 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members, focusId, focusKey }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number }): ReactNode {
+function ThreadPanel({ rootId, conv, title, members, focusId, focusKey, onJump }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -1225,7 +1229,7 @@ function ThreadPanel({ rootId, conv, title, members, focusId, focusKey }: { root
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
           <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} {...(focusId ? { focus: focusId } : {})} {...(focusKey ? { focusKey } : {})} />
-          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+          <Composer conversationId={conv.id} threadId={rootId} members={members} {...(onJump ? { onJump } : {})} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
         <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
@@ -2050,6 +2054,56 @@ function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['ru
   )
 }
 
+const capital = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+
+// What the card leads with (issue #252, direction A): the action, and the one thing it lands on.
+// Where the app can't name a target reliably it says only the action — the exact arguments are
+// still below, so nothing is invented to fill the line.
+function approvalFace(approval: Approval): { action: string; target?: string } {
+  const s = (k: string): string => (typeof approval.args[k] === 'string' ? String(approval.args[k]) : typeof approval.args[k] === 'number' ? String(approval.args[k]) : '')
+  if (approval.tool === ACCESS_REQUEST) {
+    const rw = approval.args['nivel'] === 'read_write'
+    return { action: rw ? L('Ler e escrever em', 'Read and write in') : L('Ler', 'Read'), target: approval.connectorName }
+  }
+  if (approval.connectorId === COMPUTADOR) {
+    const kinds = shellActions(s('command'))
+    return { action: kinds.length ? capital(kinds.map(actionVerb).join(L(' e ', ' and '))) : L('Rodar um comando', 'Run a command') }
+  }
+  if (approval.tool === 'abrir_pr') return { action: L('Abrir um pull request em', 'Open a pull request in'), target: s('repo') || undefined }
+  if (approval.connectorId === 'apps') {
+    const app = s('app')
+    if (s('texto')) return { action: L('Confirmar', 'Confirm'), target: `“${s('texto')}”${app ? ` ${L('no', 'in')} ${app}` : ''}` }
+    if (s('tecla')) return { action: L('Apertar', 'Press'), target: `${s('tecla')}${app ? ` ${L('no', 'in')} ${app}` : ''}` }
+    const alvo = s('alvo')
+    return { action: L('Clicar em', 'Click'), target: `${alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen')}${app ? ` ${L('no', 'in')} ${app}` : ''}` }
+  }
+  if (approval.connectorId === 'navegador') {
+    // The page it lands on is part of what's being approved: the card has no other line that says it.
+    const alvo = s('alvo')
+    const page = s('url').replace(/^https?:\/\//, '').slice(0, 60)
+    return { action: s('tecla') ? L('Apertar', 'Press') : L('Clicar em', 'Click'), target: `${alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen')}${page ? ` ${L('em', 'on')} ${page}` : ''}` }
+  }
+  // A connector's own tool names the action; the first argument that names a thing is the target.
+  const named = ['title', 'name', 'subject', 'repo', 'query', 'path', 'to'].map(s).find((v) => v.trim())
+  return { action: capital(toolWords(approval.tool)), ...(named ? { target: `“${named}”` } : {}) }
+}
+
+// The quiet status row: what's waiting, and once it's over, the one thing the person wants to know
+// without reading the prose above it. "Approved" is not "completed": the decision is stored the
+// moment it's made and the call finishes later, so the two are said apart.
+function approvalStatus(approval: Approval, mayDecide: boolean): { text: string; tone: 'wait' | 'ok' | 'error' | 'muted' } {
+  if (approval.state === 'pending') return { text: mayDecide ? L('Esperando você', 'Waiting for you') : L('Esperando aprovação', 'Waiting for approval'), tone: 'wait' }
+  if (approval.state === 'refused') return { text: L('Recusado', 'Refused'), tone: 'error' }
+  if (approval.state === 'expired') return { text: L('Expirado', 'Expired'), tone: 'muted' }
+  // No result but an outcome: a grant, a key, an app's action the agent makes next, or a row from
+  // before this field (whose failures only its outcome can tell). Without either, it's on its way.
+  if (!approval.result && historyStatus(approval) === 'failed') return { text: L('Falhou', 'Failed'), tone: 'error' }
+  if (!approval.result) return { text: approval.outcome ? L('Aprovado', 'Approved') : L('Aprovado · esperando o resultado', 'Approved · waiting for result'), tone: 'ok' }
+  if (approval.result === 'done') return { text: L('Concluído', 'Completed'), tone: 'ok' }
+  if (approval.result === 'error') return { text: L('Falhou', 'Failed'), tone: 'error' }
+  return { text: L('Aprovado · não rodou', 'Approved · didn’t run'), tone: 'muted' }
+}
+
 export function ApprovalCard({ approval, compact }: { approval: Approval; compact?: boolean }): ReactNode {
   // A key or a login asked for (pedir_chave): pasted in its own card, never approved like a call.
   if (approval.connectorId === COFRE) return <KeyRequestCard approval={approval} {...(compact ? { compact } : {})} />
@@ -2068,6 +2122,19 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const decidedBy = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : me.name))
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
+  // One decision at a time: the controls stay disabled until the core acknowledges it, and when it
+  // doesn't, they come back with a line saying so instead of a card that looks decided.
+  const [asking, setAsking] = useState(false)
+  const [unconfirmed, setUnconfirmed] = useState(false)
+  const decide = (how: 'approved' | 'refused', why?: string, always?: boolean): void => {
+    if (asking) return
+    setAsking(true)
+    setUnconfirmed(false)
+    void decideApproval(approval.id, how, why, always).then((acknowledged) => {
+      setAsking(false)
+      setUnconfirmed(!acknowledged)
+    })
+  }
   const summary = argSummary(approval.args)
   // A runner's call (Composio's): the actions it runs are what's being approved.
   const runner = isRunner(approval.tool)
@@ -2078,23 +2145,27 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
         ?.map(ruleTool)
         .map(({ tool, account }) => accountLabel(tool, account))
     : undefined
-  // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
+  // Hold to approve: CSS fills a 3px track in 1.5s (.is-holding) and this timer approves, so the
   // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
   // Letting go drains the fill back and clears the timer. Space or Enter hold too.
   const [holding, setHolding] = useState(false)
   const startHold = (): void => setHolding(true)
   const cancelHold = (): void => setHolding(false)
+  // Decided on another device mid-hold: the button is gone, so its release never comes.
+  const pendingNow = approval.state === 'pending'
   useEffect(() => {
     if (!holding) return
+    if (!pendingNow) return setHolding(false)
     const t = setTimeout(() => {
       setHolding(false)
-      decideApproval(approval.id, 'approved')
+      decide('approved')
     }, 1500)
     return () => clearTimeout(t)
-  }, [holding, approval.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holding, pendingNow, approval.id])
 
   const decided = approval.state !== 'pending'
-  // A command on the agent's computer: what it does, in words, and the command itself.
+  // A command on the agent's computer: what it does, in words.
   const onComputer = approval.connectorId === COMPUTADOR
   const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
@@ -2102,57 +2173,44 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const alwaysTitle = onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `Allow ${agent?.name ?? 'the agent'} to use “${toolWords(approval.tool)}” in ${approval.connectorName} without approval on any call, even after reading external content. Revoke this on its page.`)
+  const face = approvalFace(approval)
+  const status = approvalStatus(approval, mayDecide)
+  const idArg = typeof approval.args['id'] === 'string' || typeof approval.args['id'] === 'number' ? String(approval.args['id']) : ''
+  // The same target without the quotation marks, with its id: "what exactly" in the metadata row.
+  const targetMeta = [face.target?.replace(/[“”]/g, ''), idArg ? `ID ${idArg}` : ''].filter(Boolean).join(', ')
 
   return (
-    <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
+    <div className={`approval approval--${approval.state} ${status.tone === 'error' ? 'approval--error' : ''} ${approval.result === 'not_run' ? 'approval--not-run' : ''} ${compact ? 'approval--compact' : ''}`} data-approval={approval.id}>
       <div className="approval__head">
         <span className="approval__badge">
           <Icon name="shield" size={13} />
-          {approval.state === 'pending' ? (mayDecide ? L('Esperando você', 'Waiting for you') : L('Esperando aprovação', 'Waiting for approval')) : approval.state === 'approved' ? L('Aprovado', 'Approved') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
+          {status.text}
         </span>
+        {agent && <span className="approval__who">{agent.name}</span>}
+        <span className="approval__grow" />
         {approval.highRisk && <span className="tag tag--danger">{L('alto risco', 'high risk')}</span>}
       </div>
-      <div className="approval__title">
-        {approval.tool === ACCESS_REQUEST ? (
+      {/* The heading is what Review focuses: it's where the decision starts. */}
+      <h3 className="approval__title" tabIndex={-1}>
+        {face.action}
+        {face.target && (
           <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
-          </>
-        ) : onComputer ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
-          </>
-        ) : approval.tool === 'abrir_pr' ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer abrir uma', 'wants to open a')} <strong>pull request</strong> {L('em', 'on')} {String(approval.args['repo'])}
-          </>
-        ) : approval.connectorId === 'apps' ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')}{' '}
-            {typeof approval.args['texto'] === 'string' ? (
-              <>
-                {L('quer confirmar', 'wants to confirm')} <strong>“{approval.args['texto']}”</strong>
-              </>
-            ) : typeof approval.args['tecla'] === 'string' ? (
-              <>
-                {L('quer apertar', 'wants to press')} <strong>{approval.args['tecla']}</strong>
-              </>
-            ) : (
-              <>
-                {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] ?? '')}</strong>
-              </>
-            )}{' '}
-            {L('no', 'in')} {String(approval.args['app'] ?? '')}
-          </>
-        ) : approval.connectorId === 'navegador' ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] || L('um ponto da tela', 'a spot on the screen'))}</strong> {L('em', 'on')} {String(approval.args['url']).replace(/^https?:\/\//, '').slice(0, 60)}
-          </>
-        ) : (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer usar', 'wants to use')} <strong>{toolWords(approval.tool)}</strong> {L('no', 'in')} {approval.connectorName}
+            {' '}
+            <strong>{face.target}</strong>
           </>
         )}
-      </div>
+      </h3>
+      {approval.why && <p className="approval__why">{approval.why}</p>}
+      <p className="approval__meta">
+        <span>
+          <span className="muted">{L('Conector:', 'Connector:')}</span> {approval.connectorName}
+        </span>
+        {targetMeta && (
+          <span>
+            <span className="muted">{L('Alvo:', 'Target:')}</span> {targetMeta}
+          </span>
+        )}
+      </p>
       {runner && (
         <div className="approval__args small">
           {actions ? (
@@ -2169,7 +2227,6 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
           )}
         </div>
       )}
-      {approval.why && <p className="approval__why">{approval.why}</p>}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
@@ -2215,7 +2272,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
           className="approval__refuse"
           onSubmit={(e) => {
             e.preventDefault()
-            decideApproval(approval.id, 'refused', reason.trim() || undefined)
+            decide('refused', reason.trim() || undefined)
           }}
         >
           <textarea
@@ -2226,22 +2283,24 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
             onChange={(e) => setReason(e.target.value)}
           />
           <div className="row">
-            <button type="button" className="btn btn--ghost" onClick={() => setRefusing(false)}>
+            <button type="button" className="btn btn--ghost" disabled={asking} onClick={() => setRefusing(false)}>
               {L('Cancelar', 'Cancel')}
             </button>
-            <button type="submit" className="btn btn--danger">
-              {L('Recusar', 'Refuse')}
+            <button type="submit" className="btn btn--danger" disabled={asking}>
+              {asking ? L('Enviando…', 'Submitting…') : L('Recusar', 'Refuse')}
             </button>
           </div>
+          {unconfirmed && <span className="approval__unconfirmed">{L('Não deu pra confirmar a decisão. Tente de novo.', 'Couldn’t confirm the decision. Try again.')}</span>}
         </form>
       ) : (
-        <div className="row approval__buttons">
+        <div className="approval__actions">
           {approval.highRisk ? (
             // The hold can't depend on the pointer staying inside the button: taking capture makes
             // the browser fire pointerout/pointerleave on the button at once, and a cursor that drifts
             // off fires them too. Capture keeps the release, and pointercancel is the real interruption.
             <button
-              className={`btn btn--primary btn--hold ${holding ? 'is-holding' : ''}`}
+              className={`btn btn--primary btn--hold approval__approve ${holding ? 'is-holding' : ''}`}
+              disabled={asking}
               onPointerDown={(e) => {
                 e.currentTarget.setPointerCapture(e.pointerId)
                 startHold()
@@ -2253,36 +2312,38 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
               onBlur={cancelHold}
             >
               {/* One label for both states: swapping it to "Hold…" shrank the button under the
-                  cursor, and the fill from ::before is the feedback anyway. */}
-              <span>{L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
+                  cursor, and the 3px track along its bottom is the feedback anyway. */}
+              <span>{asking ? L('Enviando…', 'Submitting…') : L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
             </button>
           ) : (
             <>
-              <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
-                {L('Aprovar', 'Approve')}
+              <button className="btn btn--primary approval__approve" disabled={asking} onClick={() => decide('approved')}>
+                {asking ? L('Enviando…', 'Submitting…') : L('Aprovar', 'Approve')}
               </button>
               {canAlways && (
-                <button className="btn approval__always" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
-                  {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                <button className="btn approval__allow" disabled={asking} title={alwaysTitle} onClick={() => decide('approved', undefined, true)}>
+                  <span className="approval__allow-label">{L('Aprovar e sempre permitir', 'Approve and always allow')}</span>
                 </button>
               )}
               {forGood && (
                 <button
-                  className="btn approval__always"
+                  className="btn approval__allow"
+                  disabled={asking}
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
                     `Allow ${agent?.name ?? 'the agent'} to run ${forGood.join(', ')} through ${approval.connectorName} without approval on any call, even after reading external content. Other actions still require approval. Revoke this on its page.`
                   )}
-                  onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
+                  onClick={() => decide('approved', undefined, true)}
                 >
-                  {L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}
+                  <span className="approval__allow-label">{L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}</span>
                 </button>
               )}
             </>
           )}
-          <button className="btn" onClick={() => setRefusing(true)}>
+          <button className="btn approval__refuse-btn" disabled={asking} onClick={() => setRefusing(true)}>
             {L('Recusar', 'Refuse')}
           </button>
+          {unconfirmed && <span className="approval__unconfirmed">{L('Não deu pra confirmar a decisão. Tente de novo.', 'Couldn’t confirm the decision. Try again.')}</span>}
         </div>
       )}
     </div>
@@ -2664,12 +2725,18 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   // Replies at work and questions asked here: in this thread, or outside threads. Ids, not the
   // messages, so a reply's steps don't redraw the field.
   const working = useStore((s) => workingIds(s, conversationId, threadId))
+  // Requests still waiting on me in this conversation (or thread), oldest first: what the reminder
+  // over the field counts, and where Review goes back to.
+  const waiting = useStore((s) => approvalsIn(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
-  const asker = useStore((s) => {
+  // The message itself, not just the name: the strip above the field needs what was asked.
+  const asked = useStore((s) => {
     const q = askerIn(s, conversationId, threadId)
     if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
-    return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
+    return q
   })
+  const askerId = asked?.author.kind === 'agent' ? asked.author.id : undefined
+  const asker = useStore((s) => (askerId ? agentById(s, askerId)?.name : undefined))
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -2887,6 +2954,22 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
     setMention(null)
   }
 
+  // Review goes back to the oldest request, in this conversation, and puts the cursor's focus on the
+  // card's heading — only for the person who asked for it, never on arrival.
+  const review = (approval: Approval): void => {
+    const cardOf = (): HTMLElement | null => document.querySelector<HTMLElement>(`[data-approval="${CSS.escape(approval.id)}"]`)
+    const go = (): void => {
+      const card = cardOf()
+      if (!card) return
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      card.querySelector<HTMLElement>('.approval__title')?.focus({ preventScroll: true })
+    }
+    if (cardOf()) return go()
+    // Further back than what's loaded: the conversation opens on that message and loads the way back.
+    navigate({ kind: 'conversation', id: approval.conversationId, message: approval.messageId })
+    setTimeout(go, 400)
+  }
+
   return (
     <div className="composer-wrap">
       {/* The work this conversation is carrying, attached to the field it belongs to. A thread has
@@ -2898,6 +2981,15 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           {...(onJump ? { onJump } : {})}
           onThread={(rootId) => openThread(rootId)}
         />
+      )}
+      {waiting.length > 0 && (
+        <div className="approval-reminder">
+          <Icon name="shield" size={13} />
+          <span>{waiting.length === 1 ? L('1 aprovação espera a sua decisão', '1 approval needs your decision') : L(`${waiting.length} aprovações esperam a sua decisão`, `${waiting.length} approvals need your decision`)}</span>
+          <button className="link" onClick={() => review(waiting[0]!)}>
+            {L('Ver', 'Review')}
+          </button>
+        </div>
       )}
       {dragging && !inThread && (
         <div className="drop-overlay">
@@ -2936,6 +3028,8 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
         </div>
       )}
       {notice}
+      {/* Only where it can take you to the card: the intro's short chats have it in plain sight. */}
+      {asked && onJump && <AskStrip asked={asked} who={asker} onOpen={() => onJump(asked.id, asked.threadId)} />}
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">

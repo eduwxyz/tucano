@@ -3342,6 +3342,7 @@ ${note}`,
 
     let outcome: string
     let ok = false // whether the approved thing went through
+    let attempted = false // whether the app itself made the call (a computer that was off never did)
     let task: string
     if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
       // A PR asked for before pushing from the agent's computer left Tucano: nothing is opened.
@@ -3372,6 +3373,7 @@ ${note}`,
         outcome = L(`Não executou: ${keyError}`, `Didn't run: ${keyError}`)
         task = L(`${me} aprovou ${what}, mas não rodou: ${keyError} Avise ${me} em uma frase.`, `${me} approved ${what}, but it didn't run: ${keyError} Tell ${me} in one sentence.`)
       } else if (decision === 'approved' && agent?.computer && this.deps.computers) {
+        attempted = true
         const called = await this.deps.computers.call(agent, 'bash', ap.args, { conversationId: ap.conversationId, messageId: ap.messageId, ...(env ? { env } : {}) })
         const out = vault ? { ...called, result: maskResult(called.result, (t) => vault.mask(agent.id, t)) } : called
         ok = !out.result.isError
@@ -3421,6 +3423,7 @@ ${note}`,
       const key = typeof ap.args['tecla'] === 'string' ? (ap.args['tecla'] === 'enter' ? 'Enter' : L('Espaço', 'Space')) : undefined
       const what = key ? L(`apertar ${key} em "${alvo}"`, `pressing ${key} on "${alvo}"`) : L(`clicar em "${alvo}"`, `clicking "${alvo}"`)
       if (decision === 'approved' && agent?.browser && this.deps.browser) {
+        attempted = true
         const r = await this.deps.browser.approved(agent, ap.args)
         ok = r.ok
         outcome = r.ok ? ran : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
@@ -3502,6 +3505,7 @@ ${note}`,
         )
       } else {
         try {
+          attempted = true
           const onNode = ap.tool === NODE_BASH && db.tools(ap.connectorId).some((t) => t.name === NODE_BASH)
           const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args, onNode ? { timeoutMs: nodeCommandMs(ap.args) } : {})
           ok = !r.isError
@@ -3526,6 +3530,14 @@ ${note}`,
       outcome = expired
       task = L(`O seu pedido ${call} expirou sem decisão de ${me}. Nada foi executado. Avise ${me} em uma frase.`, `Your request ${call} expired without a decision from ${me}. Nothing was run. Tell ${me} in one sentence.`)
     }
+    // What became of the call, for the receipt the card keeps: it went through, it ran and came
+    // back an error, or nothing ran (a refusal, a computer that was off, an access that changed).
+    // Never read out of the outcome text, which is prose. Only a call the app made has one: a grant
+    // or a key is just given, and an app's action is only let through here (the agent makes it on
+    // its next turn), so none of those may ever read "completed".
+    const letThrough = ok && (ap.connectorId === APPS || (ap.tool === NODE_APPROVED && ap.args['kind'] === 'apps'))
+    const noCall = ap.tool === ACCESS_REQUEST || ap.connectorId === COFRE || letThrough
+    if (!noCall) db.setApprovalResult(id, ok ? 'done' : attempted ? 'error' : 'not_run')
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
@@ -3686,6 +3698,13 @@ ${note}`,
         }
       })
       n++
+      this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
+    }
+    // A call the app was making when it quit never said how it went: without this its card would
+    // read "waiting for result" for good. What it did is unknown, so that's what the card says.
+    for (const ap of db.approvals()) {
+      if (ap.state !== 'approved' || ap.outcome || ap.result) continue
+      db.setApprovalOutcome(ap.id, L('O app fechou antes de saber o resultado.', 'The app closed before it knew the result.'))
       this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
     }
     return n
