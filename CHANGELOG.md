@@ -21,6 +21,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Changed
 
+- **The router's pick opens the reply it started.** A routed message used to leave a line of its own in the channel ("Called Builder · …"), between the prompt and the answer and directly above the message field. Who was picked, and what the picker said about the message, is now the first line of the reply itself, before anything it did or said, and it goes up with the reply as the conversation grows. A message nobody needs to answer still says so. Thanks to Apostol Apostolov. (#635)
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
 
 ### Changed

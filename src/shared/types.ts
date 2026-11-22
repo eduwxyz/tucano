@@ -186,6 +186,13 @@ export interface FeedbackDraft {
   message: string
 }
 
+// Who picked this agent for the message it answers, and what the classifier said about it. It rides on
+// the reply, not on a message of its own: the pick opens the session it started (src/core/runs.ts).
+export interface Routed {
+  by: 'jev' | 'router' // the classifier that picked, or the plain router when Jev could not answer
+  reason?: string // a few words about the message, as the picker said them
+}
+
 export interface Run {
   status: RunStatus
   steps: Step[]
@@ -197,6 +204,7 @@ export interface Run {
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
+  routed?: Routed // who picked this agent for that message, said at the head of the session
   handed?: string // the request (Delegation) this reply works on: what it ends with goes back to whoever asked
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here

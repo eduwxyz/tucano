@@ -75,7 +75,9 @@ describe('in a channel', () => {
   }
   const runner = (f: typeof fetch, key: string | undefined): Runner =>
     new Runner({ db, engines: engines(), settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), jev: { key: async () => key, fetch: f } })
-  const note = () => db.messages().find((m) => m.author.kind === 'system')!.text
+  // Who answers is said on the reply it started (`routed`), not in a note of its own in the channel.
+  const picks = () => db.messages().filter((m) => m.author.kind === 'agent').map((m) => m.run?.routed)
+  const notes = () => db.messages().filter((m) => m.author.kind === 'system')
 
   beforeEach(() => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-jev-')), 'test.db'))
@@ -91,7 +93,8 @@ describe('in a channel', () => {
     const r = runner(typesafe({ lia: 0.9, nina: 0.05, __ninguem: 0.05 }).f, 'ts-key')
     await r.send('c1', 'o build quebrou')
     await r.idle()
-    expect(note()).toMatch(/^Chamei \*\*Lia\*\* · Jev, 90%, \d+,\d s$/)
+    expect(picks()).toEqual([{ by: 'jev', reason: expect.stringMatching(/^Jev, 90%, \d+,\d s$/) as unknown as string }])
+    expect(notes()).toEqual([]) // the pick is on the reply: nothing is left under the prompt
     expect(routerTurns).toBe(0)
     expect(db.messages().filter((m) => m.author.kind === 'agent')).toHaveLength(1)
   })
@@ -100,7 +103,10 @@ describe('in a channel', () => {
     const r = runner(typesafe({ lia: 0.1, nina: 0.1, __todos: 0.8 }).f, 'ts-key')
     await r.send('c1', 'o build quebrou, e alguém avisa os clientes')
     await r.idle()
-    expect(note()).toMatch(/^Chamei \*\*Lia\*\*, depois \*\*Nina\*\* · Jev/)
+    expect(picks().map((p) => [p?.by, p?.reason?.startsWith('Jev')])).toEqual([
+      ['jev', true],
+      ['jev', true]
+    ])
     expect(seen.map((t) => (t.system.includes('Você é Lia') ? 'lia' : t.system.includes('Você é Nina') ? 'nina' : '?'))).toEqual(['lia', 'nina'])
     const lia = db.messages().find((m) => m.author.kind === 'agent' && m.author.id === 'a1')!
     expect(seen[0]!.prompt).not.toContain('já respondeu a ela antes de você')
@@ -112,7 +118,7 @@ describe('in a channel', () => {
     const r = runner(typesafe(429).f, 'ts-key')
     await r.send('c1', 'o build quebrou')
     await r.idle()
-    expect(note()).toContain('o Jev falhou (o TypeSafe pediu pra esperar (limite de uso)), o Haiku decidiu')
+    expect(picks()[0]).toMatchObject({ by: 'router', reason: expect.stringContaining('o Jev falhou (o TypeSafe pediu pra esperar (limite de uso)), o Haiku decidiu') as unknown as string })
     expect(routerTurns).toBe(1)
 
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-jev-')), 'test.db'))
@@ -122,6 +128,6 @@ describe('in a channel', () => {
     const r2 = runner(typesafe({ lia: 1 }).f, undefined)
     await r2.send('c1', 'o build quebrou')
     await r2.idle()
-    expect(note()).toContain('o Jev falhou (falta a chave do TypeSafe)')
+    expect(picks()[0]).toMatchObject({ by: 'router', reason: expect.stringContaining('o Jev falhou (falta a chave do TypeSafe)') as unknown as string })
   })
 })

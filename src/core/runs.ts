@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Routed, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -373,7 +373,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string; routed?: Routed } // for: whom it's for, when it isn't read from the conversation (an answer back)
 
 // What a person wrote into a reply that was already running (`send` with mode 'steer'): the agent
 // reads it with its next tool result, and the reply's own chain carries it, in their words, from the
@@ -430,7 +430,7 @@ export class Runner {
   // Routed replies not started yet, by agent and place: a newer routing that picks the same agent
   // there moves the reply's trigger to its message instead of queueing a second reply. One whose
   // agent is still replying there starts when that reply ends (it reads what that reply said).
-  private waiting = new Map<string, { trigger: string; queued: boolean; start: () => void }>()
+  private waiting = new Map<string, { trigger: string; queued: boolean; routed?: Routed; start: () => void }>()
   // What came back from an agent's team while it was replying where it asked: told when that reply ends.
   private tells = new Map<string, () => void>()
   // What waits for the agent to finish there: a prompt the person marked as queued, and what goes on
@@ -1140,15 +1140,23 @@ export class Runner {
   private async routeAndRun(conv: Conversation, members: Agent[], threadId: string | undefined, trigger: string, parallel = false): Promise<void> {
     const { db, engines } = this.deps
     if (this.paused) return // nobody starts working while paused
+    // The prompt the pick is for: what the router reads around, and the message the read's receipt
+    // belongs to. Nothing is posted before the pick is known: who answers is said on the reply itself
+    // (`routed`), and a note of its own was a row at the end of the conversation for good.
+    const asked = db.message(trigger)
+    if (!asked) return // the prompt went while the pick waited: nothing to answer
+    // The router reads around the prompt itself, ended at the moment of the pick: `contextWindow` takes
+    // what was said up to the message it is given and leaves that message out, so the prompt is read
+    // as if it had just arrived (there is no note of this pick to read up to any more).
+    const upTo: Message = { ...asked, id: '', at: Date.now(), ...(threadId ? { threadId } : {}) }
     this.routing++
-    const note = this.post(conv.id, threadId, L('Escolhendo quem responde…', 'Picking who answers…'), { status: 'working', steps: [] })
     const fail = (why: string): void => {
       const reason = why.trim().replace(/[.\s]+$/, '') // one sentence: the reason may carry parentheses of its own
-      this.update(note, { text: L(`Não consegui escolher quem responde: ${reason}. Mencione um agente com **@nome**.`, `I couldn't pick who answers: ${reason}. Mention an agent with **@name**.`), run: undefined })
+      this.post(conv.id, threadId, L(`Não consegui escolher quem responde: ${reason}. Mencione um agente com **@nome**.`, `I couldn't pick who answers: ${reason}. Mention an agent with **@name**.`))
     }
     try {
       const settings = await this.deps.settings()
-      const { messages, threads } = contextWindow(db, note, 20)
+      const { messages, threads } = contextWindow(db, upTo, 20)
       const input = {
         messages,
         threads,
@@ -1165,7 +1173,7 @@ export class Runner {
       if (settings.routerModel === JEV_MODEL) {
         const key = await this.deps.jev?.key()
         const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, parallel)
+        if (!('error' in j)) return this.routed(conv, threadId, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, 'jev', parallel)
         fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
       }
 
@@ -1176,10 +1184,10 @@ export class Runner {
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
       const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
-      if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
+      if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: trigger, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
+      this.routed(conv, threadId, r.agents, trigger, `${r.reason}${fellBack}`, 'router', parallel)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1210,33 +1218,39 @@ export class Runner {
   // reads what it answered (routedHistory), so a part that needs another's result has it.
   // `parallel`: each one goes beside whatever is running there, as the person asked of their own
   // prompt, instead of waiting for that reply to end (a queued prompt waits; see `runIn`).
-  private routed(conv: Conversation, note: Message, agents: Agent[], trigger: string, reason: string, parallel = false): void {
+  private routed(conv: Conversation, threadId: string | undefined, agents: Agent[], trigger: string, reason: string, by: Routed['by'], parallel = false): void {
     const why = reason ? ` · ${reason}` : ''
-    if (agents.length === 0) return void this.update(note, { text: `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`, run: undefined })
-    this.update(note, { text: `${L('Chamei', 'Called')} ${agents.map((a) => `**${a.name}**`).join(agents.length > 1 ? L(', depois ', ', then ') : '')}${why}`, run: undefined })
+    // Nobody to pick has no session to say it on, so it is said here: the one case that still posts.
+    if (agents.length === 0) return void this.post(conv.id, threadId, `${L('Ninguém precisa responder', 'No one needs to answer')}${why}`)
+    // Who answers rides on the reply it starts: said at the head of that session, before anything it did
+    // or said, and it goes up with the session as the conversation grows. A row of its own sat under the
+    // prompt, at the end of the conversation and above the field, for good.
+    const pick: Routed = { by, ...(reason ? { reason } : {}) }
     let before: Promise<void> | undefined // the first starts right away, as one alone always did
     for (const agent of agents) {
-      const key = replyKey(agent.id, conv.id, note.threadId)
+      const key = replyKey(agent.id, conv.id, threadId)
       const waiting = this.waiting.get(key)
       if (waiting) {
         // This message takes over the one already waiting for this reply: one prompt, one mark.
         this.clearWaiting(waiting.trigger)
         waiting.trigger = trigger
+        waiting.routed = pick // it starts later, and says then what picked it
         continue
       }
       let ended!: () => void
       const done = new Promise<void>((resolve) => (ended = resolve))
       let held = !!before // until the one before it has answered
-      const slot = {
+      const slot: { trigger: string; queued: boolean; routed?: Routed; start: () => void } = {
         trigger,
         queued: false,
+        routed: pick,
         start: (): void => {
           if (slot.queued || held) return
           slot.queued = true
           this.followups.reserve(key) // taken now: what comes meanwhile waits for this reply
           this.enqueue(() => {
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
-            return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger, reserved: true }).finally(ended)
+            return this.execute(agent, conv, { depth: 1, threadId, trigger: slot.trigger, reserved: true, ...(slot.routed ? { routed: slot.routed } : {}) }).finally(ended)
           }, true, agent)
         }
       }
@@ -1439,7 +1453,10 @@ export class Runner {
     const job = this.jobOf(jobId) ?? this.startJob(jobId, conv, msg.threadId, replyTo, task)
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run) }
+    // Who picked this agent is kept when the reply is retried or goes on: it is still the reason that
+    // session exists, and the line at its head would otherwise fall off on the first Try again.
+    const routed = opts.routed ?? opts.existing?.run?.routed
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routed ? { routed } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run) }
     // Only a new execution replaces this reply's reasoning; tool/steering updates do not.
     let attemptStart = true
     const save = (patch: Partial<Message> = {}): void => {
@@ -3148,7 +3165,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(msg.run?.routed ? { routed: msg.run.routed } : {}), ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {

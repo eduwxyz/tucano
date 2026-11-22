@@ -119,13 +119,14 @@ describe('a conversation that answers in it', () => {
     db.createConversation({ id: 'p1', kind: 'channel', name: 'papo', members: ['a1', 'a2'] }) // threads off, the default
   })
 
-  it("my message, the router's note and the answers stay in the conversation, like a chat", async () => {
+  it('my message and the answers stay in the conversation, like a chat, and the pick rides the answer', async () => {
     const r = runner()
     await r.send('p1', 'qual a média de retenção da semana?')
     await r.idle()
     const here = db.messages().filter((m) => m.conversationId === 'p1')
-    expect(here.map((m) => m.author.kind)).toEqual(['person', 'system', 'agent'])
+    expect(here.map((m) => m.author.kind)).toEqual(['person', 'agent'])
     expect(here.every((m) => m.threadId === undefined)).toBe(true)
+    expect(here[1]!.run?.routed?.by).toBe('router')
     expect(notes.at(-1)).toEqual({ conversationId: 'p1', kind: 'done', threadId: undefined })
   })
 
@@ -288,7 +289,9 @@ describe('who answers in a thread', () => {
     expect(routed).toContain('RAIZ: precisamos da métrica')
     expect(routed).toContain('qual a média da semana?')
     expect(replies().map((m) => [(m.author as { id: string }).id, m.threadId])).toEqual([['a2', root.id]])
-    expect(db.messages().find((m) => m.author.kind === 'system')).toMatchObject({ threadId: root.id, text: expect.stringContaining('Chamei **Theo**') as string })
+    // Who was picked is said on the reply itself, in the thread it answers in, and not in a row of its own.
+    expect(replies().map((m) => m.run?.routed?.by)).toEqual(['router'])
+    expect(db.messages().filter((m) => m.author.kind === 'system')).toEqual([])
   })
 
   it('the router reads the thread, and the other threads a line each with who answered them', async () => {
