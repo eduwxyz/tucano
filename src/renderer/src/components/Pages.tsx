@@ -3327,7 +3327,8 @@ export function SettingsPage(): ReactNode {
   const tabs = SETTINGS_TABS(team, admin, owner)
   // The subjects this page shows, from settings-structure.ts: the groups, the jump row and the search
   // are built from them, and every subject below is one of them.
-  const structure = settingsStructure({ admin, owner, team, servers: hasServers() })
+  const browserExtensions = useStore((s) => s.browserExtensions)
+  const structure = settingsStructure({ admin, owner, team, servers: hasServers(), extensions: browserExtensions })
   // A link written for one of the old tabs (Settings › Servers) opens its group at that subject.
   const aliased = kept && settingsTabAliases[kept] ? structure.find((s) => s.id === settingsTabAliases[kept!]) : undefined
   const open = useTab('settings', tabs)
@@ -3687,14 +3688,14 @@ export function SettingsPage(): ReactNode {
           </SectionAnchor>
         )}
 
-        {on('agentes') && admin && (
+        {on('agentes') && admin && browserExtensions && (
           <SectionAnchor id="agents-addons" sections={structure}>
             <Card
               title={L('Extensões do navegador', 'Browser Extensions')}
               section="agents-addons"
               lead={L(
-                'O navegador dos agentes roda com as extensões que você ligar, para o agente ler a própria página: nenhum aviso de cookies ou anúncio fica por cima dela. Cada uma é um interruptor; as três dividem 215 MB de Chrome for Testing. Esse navegador guarda logins próprios: o agente entra de novo nos sites, e os de antes voltam quando você desliga.',
-                'The agents’ browser runs with the extensions you turn on, so what an agent reads is the page itself: no cookie notice or ad sits over it. Each has its own switch; the three share one 215 MB Chrome for Testing download. That browser keeps its own sign-ins: agents sign in to sites again, and the earlier ones come back when you turn them off.'
+                'O navegador dos agentes roda com as extensões que você ligar, para o agente ler a própria página: nenhum aviso de cookies ou anúncio fica por cima dela. Cada uma é um interruptor; todas dividem 215 MB de Chrome for Testing, em versões fixas e conferidas. Esse navegador guarda logins próprios: o agente entra de novo nos sites, e os de antes voltam quando você desliga. Um agente que usa um login do Cofre passa a navegar sem extensões, pra elas não verem a senha.',
+                'The agents’ browser runs with the extensions you turn on, so what an agent reads is the page itself: no cookie notice or ad sits over it. Each has its own switch; they all share one 215 MB Chrome for Testing download, at fixed, verified versions. That browser keeps its own sign-ins: agents sign in to sites again, and the earlier ones come back when you turn them off. An agent that uses a Vault login browses without extensions from then on, so they can’t see the password.'
               )}
             >
               <AgentAddOns />

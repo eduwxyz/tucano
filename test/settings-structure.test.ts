@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PERSONAL_SETTINGS } from '../src/core/policy-people'
-import { settingsStructure, settingsTabAliases, settingsTabStructure } from '../src/renderer/src/settings-structure'
+import { searchSettings, settingsStructure, settingsTabAliases, settingsTabStructure } from '../src/renderer/src/settings-structure'
 import { inspectSettingsPlacement } from '../scripts/lib/settings-placement.mjs'
 
 const all = { admin: true, owner: true, team: true, servers: true }
@@ -110,5 +110,20 @@ describe('placement validation rejects a control without a home', () => {
     expect(unlisted.failures).toContain('Section has no tab in tabSections: app-missing')
     const unknown = fixture(section('app-appearance', "'breakingBad'"), 'const a = <Card section="app-appearance" />')
     expect(unknown.failures).toContain('app-appearance owns breakingBad, which Settings does not declare')
+  })
+})
+
+describe('the browser extensions card', () => {
+  const access = { admin: true, owner: true, team: true, servers: true }
+  const card = (extensions?: boolean) => settingsStructure({ ...access, extensions }).find(s => s.id === 'agents-addons')!
+
+  it('is there on a computer, and not on a server, where the search does not find it either', () => {
+    expect(card(true).visible).toBe(true)
+    expect(card(false).visible).toBe(false)
+    expect(card(undefined).visible).toBe(false) // a core that doesn't say is not one that takes them
+    for (const term of ['uBlock', 'Consent-O-Matic', 'Browser Extensions', 'Extensões do navegador', 'Ad blocker']) {
+      expect(searchSettings(settingsStructure({ ...access, extensions: false }), term), term).toEqual([])
+    }
+    expect(searchSettings(settingsStructure({ ...access, extensions: true }), 'uBlock').map(hit => hit.section.id)).toEqual(['agents-addons'])
   })
 })

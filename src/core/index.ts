@@ -804,7 +804,7 @@ const electronHost: BrowserHost = (agentId, op, args) =>
     setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error(L('o navegador não respondeu em 60 s', "the browser didn't answer in 60 s")))), 60_000).unref()
   })
 // Each extension's switch, as they were left: what is on is here already, or downloads on this start.
-if (!fake && hasChrome()) bg(addOns.set(settings().browserAddOns), 'browserAddOns')
+if (!fake && !serverMode && hasChrome()) bg(addOns.set(settings().browserAddOns), 'browserAddOns')
 
 // Google Chrome when the Mac has it (Google refuses logins in embedded browsers); Electron's Chromium otherwise.
 const chrome =
@@ -817,8 +817,8 @@ const chrome =
         serverMode,
         serverMode ? 10 * 60_000 : undefined, // on a server, an idle agent's Chrome gives its memory back
         (agentId) => downloadsFolder(dataDir, agentId),
-        addOns,
-        () => assistFlags(settings().browserAccessibility) // Settings › Agents › Additional accessibility
+        serverMode ? undefined : addOns, // not on a server until this is tested in its container
+        serverMode ? undefined : () => assistFlags(settings().browserAccessibility) // Settings › Agents › Additional accessibility
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -1926,6 +1926,7 @@ const api: Handlers = {
     // On a desktop it's always offered (the page says when Docker is missing); a server without Docker,
     // inside a container, can't have one, so it isn't.
     isolatedComputers: !serverMode || onPath('docker'),
+    browserExtensions: !serverMode,
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }, { server: serverMode }),
 
@@ -2533,6 +2534,11 @@ const api: Handlers = {
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
   updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, addOns: _addOns, ...all } }, ctx) => {
+    // A server takes no browser extensions yet: the switch isn't drawn there, and one sent anyway is dropped.
+    if (serverMode) {
+      delete all.browserAddOns
+      delete all.browserAccessibility
+    }
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)

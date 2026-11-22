@@ -92,7 +92,8 @@ class Tab {
   constructor(
     readonly proc: ChildProcess,
     readonly headed: boolean,
-    private onFrame?: (jpeg: string) => boolean
+    private onFrame?: (jpeg: string) => boolean,
+    readonly carriesExtensions = false // fixed for this process's life: what fill() refuses on
   ) {}
 
   // Chrome reads commands on its fd 3 and writes on fd 4, each message ending in a NUL.
@@ -248,6 +249,11 @@ class Tab {
 export const assistFlags = (on: boolean | undefined): string[] =>
   on ? ['--force-prefers-reduced-motion', '--autoplay-policy=user-gesture-required'] : []
 
+// Left in an agent's own profile by its first Cofre login. An extension reads every page it is on, what is
+// typed there included, so from then on that agent's browser runs without them, on the profile that holds
+// the sessions those logins opened. Clearing the browser removes it with the profile.
+const VAULT_LOGIN_MARK = 'tucano-vault-login'
+
 export class ChromeBrowsers {
   private tabs = new Map<string, Tab>()
   // What each lane was started with (browser and extension folders), so a switch turned on under an open
@@ -324,9 +330,10 @@ export class ChromeBrowsers {
   // The browser and the extension folders a lane runs with now, or '' for the browser the app found. It
   // changes only when Chrome for Testing and something to carry are both here: each extension landing
   // during the download is not a reason to restart the page an agent is on.
-  private wanted(): string {
+  private wanted(agentId: string): string {
     const a = this.addOns
-    if (!a?.bin || !a.dirs.length) return ''
+    // Never in a throwaway screenshot ('.shot-'): that one draws the person's own page as the page is.
+    if (!a?.bin || !a.dirs.length || agentId.startsWith('.shot-') || this.usesVaultLogins(agentId)) return ''
     const set = `${a.bin}|${a.dirs.join('|')}`
     return set === this.brokenWith ? '' : set
   }
@@ -334,13 +341,32 @@ export class ChromeBrowsers {
   // Everything a lane is started with that a switch can change: what it carries and how its Chrome
   // behaves. Kept apart from wanted() above, which also decides the profile: a switch that changes how a
   // page behaves must not send the lane to the other profile and sign the agent out of every site.
-  private fingerprint(): string {
-    return `${this.wanted()}|${(this.flags?.() ?? []).join(' ')}`
+  private fingerprint(agentId: string): string {
+    return `${this.wanted(agentId)}|${(this.flags?.() ?? []).join(' ')}`
+  }
+
+  private usesVaultLogins(agentId: string): boolean {
+    return existsSync(join(this.profile(agentId), VAULT_LOGIN_MARK))
+  }
+
+  // Before a Cofre login is read: this agent's browser stops carrying extensions, for good, and a lane open
+  // with them closes (cookies written) and comes back without them on the same address. The page is a new
+  // one, so the caller has the agent read it again; the second call finds a clean lane and goes through,
+  // which is why this can't loop. A window the person is using is never closed under them: that one refuses.
+  private async withoutExtensions(agentId: string): Promise<BrowserReply> {
+    const before = this.tabs.get(agentId) ?? (await this.starting.get(agentId)?.catch(() => undefined))
+    if (before?.carriesExtensions && (before.headed || before.remote)) throw new Error(extensionsRefusal())
+    mkdirSync(this.profile(agentId), { recursive: true })
+    writeFileSync(join(this.profile(agentId), VAULT_LOGIN_MARK), '')
+    let tab = await this.tab(agentId)
+    if (tab.carriesExtensions) tab = await this.tab(agentId) // a launch already under way when the mark went in
+    if (tab.carriesExtensions) throw new Error(extensionsRefusal())
+    return { url: tab.url, title: '', ...(before?.carriesExtensions ? { reopened: true } : {}) }
   }
 
   private async launch(agentId: string, headed: boolean): Promise<Tab> {
-    // Never in a throwaway screenshot ('.shot-'): that one draws the person's own page as the page is.
-    const carried = agentId.startsWith('.shot-') ? '' : this.wanted()
+    const carried = this.wanted(agentId)
+    const startedWith = this.fingerprint(agentId) // as it is now: what lands during the start is the next lane's
     const profile = this.profile(agentId, !!carried)
     mkdirSync(profile, { recursive: true })
     const downloads = agentId.startsWith('.shot-') ? undefined : this.downloads?.(agentId)
@@ -377,7 +403,7 @@ export class ChromeBrowsers {
     ]
     const proc = spawn(carried ? this.addOns!.bin : this.bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
     const onFrame = this.onFrame
-    const tab = new Tab(proc, headed, onFrame && ((jpeg) => onFrame(agentId, jpeg)))
+    const tab = new Tab(proc, headed, onFrame && ((jpeg) => onFrame(agentId, jpeg)), load.length > 0)
     let timer: ReturnType<typeof setTimeout> | undefined
     const failed = new Promise<never>((_, reject) => {
       proc.once('error', reject) // the program isn't there, or can't be run
@@ -413,7 +439,7 @@ export class ChromeBrowsers {
     })
     if (headed) tab.closedAll = () => this.handBack(agentId, tab.url)
     this.tabs.set(agentId, tab)
-    this.launchedWith.set(agentId, this.fingerprint())
+    this.launchedWith.set(agentId, startedWith)
     return tab
   }
 
@@ -471,7 +497,7 @@ export class ChromeBrowsers {
     const t = this.tabs.get(agentId)
     if (t) {
       // A window the person took over is theirs until they hand it back: nothing restarts under it.
-      if (t.headed || agentId.startsWith('.shot-') || this.launchedWith.get(agentId) === this.fingerprint()) return t
+      if (t.headed || agentId.startsWith('.shot-') || this.launchedWith.get(agentId) === this.fingerprint(agentId)) return t
       // This one was started with a different set of extensions: a switch was turned on (or off) while it
       // was open, or the download landed. Without this it keeps the old set for as long as it lives — on a
       // Mac with no idle close, for the whole session. It closes the way an idle one does (cookies are
@@ -549,6 +575,7 @@ export class ChromeBrowsers {
       }
       return { url: '', title: '' }
     }
+    if (op === 'prepare_login') return this.withoutExtensions(agentId)
     if (op === 'show' && this.windowless) {
       const tab = await this.tab(agentId)
       tab.remote = true
@@ -637,6 +664,8 @@ export class ChromeBrowsers {
       case 'fill': {
         // A saved login (navegador_login): checked in the page right before typing, on that exact origin
         // and, for a password, in a password field. Errors never carry the text: it may be the password.
+        // The last word on extensions, whatever led here: this process has none, or nothing is typed.
+        if (tab.carriesExtensions) throw new Error(extensionsRefusal())
         const ref = Number(args['ref'])
         const text = String(args['text'] ?? '')
         const password = args['password'] === true
@@ -785,6 +814,12 @@ export class ChromeBrowsers {
     return r?.data
   }
 }
+
+const extensionsRefusal = (): string =>
+  L(
+    'Este navegador está com extensões, e elas leem o que é digitado na página: o login do Cofre não foi preenchido. Peça pra fechar a janela do navegador e tente de novo.',
+    'This browser has extensions in it, and they read what is typed on the page: the Cofre login was not filled in. Ask for the browser window to be closed, then try again.'
+  )
 
 export const hasChrome = (bin = CHROME): boolean => !!bin && existsSync(bin)
 

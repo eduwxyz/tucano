@@ -6,6 +6,7 @@ export interface SettingsAccess {
   owner: boolean
   team: boolean
   servers: boolean
+  extensions?: boolean // this install's browser can carry extensions: not a server, until tested there
 }
 
 type Scope = 'personal' | 'workspace' | 'computer' | 'mixed'
@@ -29,7 +30,7 @@ type Section = {
 // Every subject of the page, once: the group it sits in, its name and tile, the settings keys it
 // owns, its scope and who sees it. A card declares the subject it holds, so moving a control means
 // moving its keys with it. Labels are read again after locale changes.
-export function settingsStructure({ admin, owner, team, servers }: SettingsAccess) {
+export function settingsStructure({ admin, owner, team, servers, extensions = false }: SettingsAccess) {
   return [
     { id: 'workspace-context', page: 'geral', label: L('Geral', 'General'), icon: 'gear', color: 'var(--c-graphite)', keys: ['workspaceLabel', 'workspaceName', 'context', 'onboarding'], scope: 'workspace', visible: admin },
     { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'language'], scope: 'mixed', visible: true },
@@ -42,7 +43,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'agents-routines', page: 'agentes', label: L('Rotinas', 'Routines'), icon: 'clock', color: 'var(--c-violet)', keys: ['openAtLogin', 'quietHours'], scope: 'mixed', visible: admin },
     { id: 'agents-tuca', page: 'agentes', label: L('Tuca', 'Tuca'), icon: 'spark', color: 'var(--accent)', keys: ['tucaApplyNow'], scope: 'workspace', visible: admin },
     { id: 'agents-browser', page: 'agentes', label: L('Navegador', 'Browser'), icon: 'globe', color: 'var(--c-teal)', keys: ['browserJev'], scope: 'workspace', visible: admin },
-    { id: 'agents-addons', page: 'agentes', label: L('Extensões do navegador', 'Browser Extensions'), icon: 'shield', color: 'var(--c-green)', keys: ['browserAddOns', 'browserAccessibility'], scope: 'workspace', visible: admin, nav: false },
+    { id: 'agents-addons', page: 'agentes', label: L('Extensões do navegador', 'Browser Extensions'), icon: 'shield', color: 'var(--c-green)', keys: ['browserAddOns', 'browserAccessibility'], scope: 'workspace', visible: admin && extensions, nav: false },
     { id: 'models-agents', page: 'modelos', label: L('Modelos dos agentes', 'Agent models'), icon: 'layers', color: 'var(--c-indigo)', keys: [], scope: 'workspace', visible: admin },
     { id: 'models-runtimes', page: 'modelos', label: L('Harnesses', 'Harnesses'), icon: 'terminal', color: 'var(--c-graphite)', keys: ['harnesses', 'endpoint'], scope: 'mixed', visible: admin },
     { id: 'models-accounts', page: 'modelos', label: L('Contas', 'Accounts'), icon: 'key', color: 'var(--c-green)', keys: ['accounts'], scope: 'mixed', visible: admin },

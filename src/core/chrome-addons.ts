@@ -17,30 +17,43 @@
 // running MV3 service workers and they changed the page (theverge 22 → 2 ad requests, 12 blocked, the
 // banner gone from the text). So a lane that carries them runs on Chrome for Testing.
 //
-// Both arrive from where the browser gets them: the .crx files from the Chrome Web Store's own update
-// endpoint, which needs no login, and the browser from Google's Chrome-for-Testing build server. Once,
-// into the app's data folder, stamped by what is on disk; nothing here is on the way of a reply, and the
-// lane keeps working without any of it while the download runs or if it never lands.
+// Both arrive from where the browser gets them: the .crx files from the Chrome Web Store, which needs no
+// login, and the browser from Google's Chrome-for-Testing build server. Each is the exact version and hash
+// in chrome-addon-pins.ts, and anything else is refused. Once, into the app's data folder, stamped by the
+// pin it was installed for; nothing here is on the way of a reply, and the lane keeps working without any
+// of it while the download runs or if it never lands.
 import { createHash, createVerify } from 'node:crypto'
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { ADD_ONS, TUNE, TUNE_REVISION, addOnsOf, type AddOnExtension } from '../shared/addons'
 import { L } from '../shared/lang'
 import type { AddOn, AddOnStep, AddOnsInfo, BrowserAddOns } from '../shared/types'
+import { ADD_ON_PINS, type AddOnPins } from './chrome-addon-pins'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 
 // The three are declared once, in shared/addons.ts, with the name the settings page draws: what is
 // installed and what a row says cannot drift apart.
 export { ADD_ONS }
 
-// The browser version the store is asked for. It only decides which build of the .crx comes back; an
-// extension's own updates are its business, and the folder is fetched once and then left alone.
-const STORE_VERSION = '158.0.0.0'
-export const crxUrl = (id: string, version: string = STORE_VERSION): string =>
-  `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${version}&acceptformat=crx2,crx3&x=id%3D${id}%26uc`
+const sha256 = (data: Buffer): string => createHash('sha256').update(data).digest('hex')
 
-// The stable Chrome for Testing of the day, with every platform's download in one small JSON.
-export const CFT_INDEX = 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'
+// The one file a folder is stamped with: which pin it was installed for. A folder from another version, or
+// from a build that didn't check, has no matching stamp, so it is fetched again and never loaded as it is.
+const PIN_FILE = 'tucano-pin.txt'
+
+// Consent-O-Matic reads its rules from its repository's `master` each day, and the list there names more
+// files on `master`: rules that change what it clicks, from outside any version. Its one setting for this
+// is `ruleLists`, whose default is this address. So its rules are taken once from a fixed commit, merged
+// the way the extension merges them, checked against the pin and installed next to it, and that default
+// points at the installed file: it never asks GitHub for anything.
+const RULES_REPO = 'https://raw.githubusercontent.com/cavi-au/Consent-O-Matic/'
+const RULES_LIST = `${RULES_REPO}master/rules-list.json`
+const RULES_DEFAULT = /\b[\w$]+\.defaultRuleLists=\["https:\/\/raw\.githubusercontent\.com\/cavi-au\/Consent-O-Matic\/master\/rules-list\.json"\]/g
+const RULES_SCRIPTS = ['service.js', 'content.js', 'ui.js']
+const RULE_REFERENCE = /^https:\/\/raw\.githubusercontent\.com\/cavi-au\/Consent-O-Matic\/master\/(rules\/[A-Za-z0-9._-]+\.json)$/
+const MAX_RULE_BYTES = 2 * 1024 * 1024
+const RULE_FETCHES = 8
+const rulesName = (commit: string): string => `tucano-rules-${commit.slice(0, 12)}.json`
 
 // A .crx is the extension's own .zip behind a short header: "Cr24", the format's version (3), how long
 // the header is, and the header itself — the signature and the key the store proved it with. The zip
@@ -135,17 +148,18 @@ const CFT_TAIL: Record<string, string[]> = {
 const PART_TIMEOUT_MS = 10 * 60_000 // a download that stops moving for this long has failed
 const SMALL_FETCH_MS = 2 * 60_000 // an extension or the index: small files, on a connection that may hang
 const MAX_CRX_BYTES = 64 * 1024 * 1024
-// The one place the browser's zip may come from. The index that names it is a page on another host,
-// and what it points at is a program this app runs.
+// The one place the browser's zip comes from, at the pinned version: what it holds is a program this app runs.
 const CFT_DOWNLOADS = 'https://storage.googleapis.com/chrome-for-testing-public/'
+export const cftUrl = (version: string, platform: string): string => `${CFT_DOWNLOADS}${version}/${platform}/chrome-${platform}.zip`
 const tookTooLong = (e: unknown): unknown => (e instanceof Error && e.name === 'TimeoutError' ? new Error(L('O download demorou demais. Tentar de novo resolve.', 'The download took too long. Trying again fixes it.')) : e)
 
 // Enough for the browser itself: its biggest file is a ~250 MB library, and the whole unzipped set is
 // under 800 MB. The caps are what zip.ts checks before it inflates anything.
 const CFT_CAPS = { file: 512 * 1024 * 1024, total: 3 * 1024 * 1024 * 1024 }
 
-async function download(fetcher: typeof fetch, url: string, to: string, signal: AbortSignal, progress: (received: number, total: number) => void): Promise<void> {
+async function download(fetcher: typeof fetch, url: string, to: string, want: string, signal: AbortSignal, progress: (received: number, total: number) => void): Promise<void> {
   const part = `${to}.part`
+  const hash = createHash('sha256')
   // Its own switch, so a download that stops moving can be given up on without cancelling whatever
   // asked for it: the person's off-switch aborts through the same one.
   const ctrl = new AbortController()
@@ -190,6 +204,7 @@ async function download(fetcher: typeof fetch, url: string, to: string, signal: 
         if (done) break
         if (!out.write(value)) await drained()
         if (writeError) throw writeError
+        hash.update(value)
         received += value.length
         if (Date.now() - last > 500) {
           last = Date.now()
@@ -210,6 +225,10 @@ async function download(fetcher: typeof fetch, url: string, to: string, signal: 
     if (total && received !== total) {
       rmSync(part, { force: true })
       throw new Error(L('O download veio incompleto. Tentar de novo resolve.', 'The download came incomplete. Trying again fixes it.'))
+    }
+    if (hash.digest('hex') !== want) {
+      rmSync(part, { force: true })
+      throw new Error(L('O arquivo baixado não é o da versão fixada: foi recusado.', "The downloaded file isn't the pinned version: it was refused."))
     }
     renameSync(part, to)
   } finally {
@@ -262,9 +281,9 @@ export function tune(dir: string, key: AddOn): string | undefined {
 }
 
 // Each of them in its own folder under extensions/, fetched from the store once and then left as it is
-// (set up by tune above): the stamp is the unpacked manifest itself, so a folder someone deleted comes
-// back and one that is there is never asked for twice. The folder's presence is also the switch's answer:
-// off means it leaves the disk, and a lane started afterwards does not carry it.
+// (set up by tune above): the stamp in it names the pin it was installed for, so a folder someone deleted,
+// or one of another version, comes back, and one that matches is never asked for twice. The folder is also
+// the switch's answer: off means it leaves the disk, and a lane started afterwards does not carry it.
 export class AddOns {
   bin = '' // Chrome for Testing, when it's here: the build that still takes a folder of extensions
   dirs: string[] = [] // the folders of the ones switched on and downloaded, in the store's own order
@@ -283,7 +302,8 @@ export class AddOns {
     private fetcher: typeof fetch = fetch,
     private os: NodeJS.Platform = process.platform,
     private arch: string = process.arch,
-    private openCrx: (crx: Buffer, id: string) => Buffer = verifiedCrxZip // tests hand it files no store signed
+    private openCrx: (crx: Buffer, id: string) => Buffer = verifiedCrxZip, // tests hand it files no store signed
+    private pins: AddOnPins = ADD_ON_PINS // tests pin what their made-up store serves
   ) {
     // What a previous run left is ready before anyone asks: no download on this start.
     this.bin = this.stamp()
@@ -341,7 +361,7 @@ export class AddOns {
     const extensions: Partial<Record<AddOn, AddOnStep>> = {}
     for (const e of ADD_ONS) {
       if (!this.want.includes(e.key)) continue
-      const here = existsSync(join(this.folder(e.id), 'manifest.json'))
+      const here = this.installed(e)
       const error = this.failed.get(e.key)
       const note = this.notes.get(e.key)
       extensions[e.key] = here
@@ -376,14 +396,14 @@ export class AddOns {
   }
 
   private missing(): AddOnExtension[] {
-    return ADD_ONS.filter((e) => this.want.includes(e.key) && !existsSync(join(this.folder(e.id), 'manifest.json')))
+    return ADD_ONS.filter((e) => this.want.includes(e.key) && !this.installed(e))
   }
 
   private pick(): void {
     for (const e of ADD_ONS) {
       if (!this.want.includes(e.key)) continue
       const folder = this.folder(e.id)
-      if (!existsSync(join(folder, 'manifest.json'))) continue
+      if (!this.installed(e)) continue // only what was checked against its pin is ever set up or loaded
       // A folder an older build unpacked carries no stamp (or an older one): the edits go in now, on the
       // files that are already here, and nothing is asked of the store.
       let stamp = ''
@@ -397,7 +417,7 @@ export class AddOns {
       if (note) this.notes.set(e.key, note)
       else this.notes.delete(e.key)
     }
-    this.dirs = ADD_ONS.filter((e) => this.want.includes(e.key)).map((e) => this.folder(e.id)).filter((d) => existsSync(join(d, 'manifest.json')))
+    this.dirs = ADD_ONS.filter((e) => this.want.includes(e.key) && this.installed(e)).map((e) => this.folder(e.id))
     if (!this.bin) this.bin = this.stamp()
   }
 
@@ -408,7 +428,7 @@ export class AddOns {
     for (const e of ADD_ONS) {
       if (!this.want.includes(e.key)) continue
       const folder = this.folder(e.id)
-      if (existsSync(join(folder, 'manifest.json'))) {
+      if (this.installed(e)) {
         this.failed.delete(e.key)
         continue
       }
@@ -440,11 +460,60 @@ export class AddOns {
     return join(this.dir, 'extensions', id)
   }
 
+  // What this extension's folder is stamped with: its .crx and, for the one that reads rules, those too.
+  private pinOf(e: AddOnExtension): string {
+    const crx = this.pins.extensions[e.key].sha256
+    return e.key === 'consent' ? `${crx} ${this.pins.consentRules.sha256}` : crx
+  }
+
+  private installed(e: AddOnExtension): boolean {
+    try {
+      return readFileSync(join(this.folder(e.id), PIN_FILE), 'utf8') === this.pinOf(e) && existsSync(join(this.folder(e.id), 'manifest.json'))
+    } catch {
+      return false
+    }
+  }
+
+  // Consent-O-Matic's rules at the pinned commit, as the one file it will read: every file its list names,
+  // merged in the list's order, the way the extension merges them. Nothing is kept unless the result is
+  // byte for byte the pinned one.
+  private async fetchConsentRules(name: string, signal: AbortSignal): Promise<Buffer> {
+    const { commit, sha256: want } = this.pins.consentRules
+    const base = `${RULES_REPO}${commit}/`
+    const json = async (url: string): Promise<Record<string, unknown>> => {
+      const res = await this.fetcher(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(SMALL_FETCH_MS)]), redirect: 'error' })
+      if (!res.ok) throw new Error(L(`O GitHub respondeu ${res.status} para as regras de ${name}.`, `GitHub answered ${res.status} for ${name}'s rules.`))
+      const body = Buffer.from(await res.arrayBuffer())
+      if (body.length > MAX_RULE_BYTES) throw new Error(L(`As regras de ${name} vieram grandes demais.`, `${name}'s rules came too big.`))
+      return JSON.parse(body.toString('utf8')) as Record<string, unknown>
+    }
+    const refused = (): Error => new Error(L(`As regras de ${name} não são as da versão fixada: foram recusadas.`, `${name}'s rules aren't the pinned version: they were refused.`))
+    try {
+      const references = (await json(`${base}rules-list.json`))['references']
+      if (!Array.isArray(references)) throw refused()
+      const paths = references.map((r) => RULE_REFERENCE.exec(String(r))?.[1])
+      if (paths.some((p) => !p)) throw refused()
+      const files = new Array<Record<string, unknown>>(paths.length)
+      let next = 0
+      await Promise.all(
+        Array.from({ length: RULE_FETCHES }, async () => {
+          for (let i = next++; i < paths.length; i = next++) files[i] = await json(`${base}${paths[i]!}`)
+        })
+      )
+      const bundle = Buffer.from(JSON.stringify(Object.assign({}, ...files)))
+      if (sha256(bundle) !== want) throw refused()
+      return bundle
+    } catch (err) {
+      throw tookTooLong(err)
+    }
+  }
+
   private async fetchExtension(e: AddOnExtension, folder: string, signal: AbortSignal): Promise<void> {
+    const pin = this.pins.extensions[e.key]
     const tooBig = (): Error => new Error(L(`${e.name} veio grande demais.`, `${e.name} came too big.`))
     let crx: Buffer
     try {
-      const res = await this.fetcher(crxUrl(e.id), { signal: AbortSignal.any([signal, AbortSignal.timeout(SMALL_FETCH_MS)]), redirect: 'follow' })
+      const res = await this.fetcher(pin.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(SMALL_FETCH_MS)]), redirect: 'error' })
       if (!res.ok) throw new Error(L(`A Chrome Web Store respondeu ${res.status} para ${e.name}.`, `The Chrome Web Store answered ${res.status} for ${e.name}.`))
       if (Number(res.headers.get('content-length')) > MAX_CRX_BYTES) throw tooBig()
       crx = Buffer.from(await res.arrayBuffer())
@@ -452,7 +521,10 @@ export class AddOns {
       throw tookTooLong(err)
     }
     if (crx.length > MAX_CRX_BYTES) throw tooBig()
-    const zip = zipFromBuffer(this.openCrx(crx, e.id))
+    if (sha256(crx) !== pin.sha256) throw new Error(L(`${e.name} não é a versão fixada (${pin.version}): o arquivo foi recusado.`, `${e.name} isn't the pinned version (${pin.version}): the file was refused.`))
+    const opened = this.openCrx(crx, e.id)
+    const rules = e.key === 'consent' ? await this.fetchConsentRules(e.name, signal) : undefined
+    const zip = zipFromBuffer(opened)
     const staging = `${folder}.part`
     rmSync(staging, { recursive: true, force: true })
     try {
@@ -468,6 +540,8 @@ export class AddOns {
       const note = tune(staging, e.key)
       if (note) this.notes.set(e.key, note)
       else this.notes.delete(e.key)
+      if (rules) this.installConsentRules(staging, rules, e.name)
+      writeFileSync(join(staging, PIN_FILE), this.pinOf(e))
     } catch (err) {
       rmSync(staging, { recursive: true, force: true })
       throw err
@@ -475,33 +549,40 @@ export class AddOns {
     rmSync(folder, { recursive: true, force: true })
     renameSync(staging, folder)
   }
-  // The browser Chrome for Testing last left in the data folder, if it is still there.
+
+  // The rules next to the extension, and its default list pointing at them. Each script must hold that
+  // default exactly once: the .crx is pinned, so anything else means this code no longer fits the file,
+  // and an extension still reading `master` is not one to install.
+  private installConsentRules(folder: string, rules: Buffer, name: string): void {
+    const file = rulesName(this.pins.consentRules.commit)
+    for (const script of RULES_SCRIPTS) {
+      const path = join(folder, script)
+      const source = existsSync(path) ? readFileSync(path, 'utf8') : ''
+      if ((source.match(RULES_DEFAULT) ?? []).length !== 1) throw new Error(L(`Não deu pra fixar as regras de ${name}: o arquivo foi recusado.`, `Couldn't pin ${name}'s rules: the file was refused.`))
+      // Every mention, not only the default: its upgrade from an older list writes this address back.
+      writeFileSync(path, source.replaceAll(`"${RULES_LIST}"`, `chrome.runtime.getURL("${file}")`))
+    }
+    writeFileSync(join(folder, file), rules)
+  }
+
+  // The pinned Chrome for Testing in the data folder, if that is the one there.
   private stamp(): string {
     try {
-      const s = JSON.parse(readFileSync(join(this.dir, 'chrome-for-testing.json'), 'utf8')) as { bin?: string }
-      if (s.bin && existsSync(s.bin)) return s.bin
+      const s = JSON.parse(readFileSync(join(this.dir, 'chrome-for-testing.json'), 'utf8')) as { bin?: string; sha256?: string }
+      if (s.bin && s.sha256 && s.sha256 === this.pins.browser.sha256[cftPlatform(this.os, this.arch)] && existsSync(s.bin)) return s.bin
     } catch {
       // no stamp, or one from a folder that's gone: the next download writes a new one
     }
     return ''
   }
   private async fetchBrowser(signal: AbortSignal): Promise<string> {
-    let data: { channels?: Record<string, { version?: string; downloads?: Record<string, { platform: string; url: string }[]> }> }
-    try {
-      const index = await this.fetcher(CFT_INDEX, { signal: AbortSignal.any([signal, AbortSignal.timeout(SMALL_FETCH_MS)]), redirect: 'follow' })
-      if (!index.ok) throw new Error(L(`A lista do Chrome for Testing respondeu ${index.status}.`, `The Chrome for Testing list answered ${index.status}.`))
-      data = (await index.json()) as typeof data
-    } catch (err) {
-      throw tookTooLong(err)
-    }
-    const stable = data.channels?.['Stable']
+    const { version, sha256: hashes } = this.pins.browser
     const platform = cftPlatform(this.os, this.arch)
-    const url = stable?.downloads?.['chrome']?.find((d) => d.platform === platform)?.url
-    if (!url) throw new Error(L(`Não achei o Chrome for Testing para ${platform}.`, `I didn't find Chrome for Testing for ${platform}.`))
-    if (!url.startsWith(CFT_DOWNLOADS)) throw new Error(L('A lista do Chrome for Testing apontou pra um endereço que não é o do Google.', "The Chrome for Testing list pointed at an address that isn't Google's."))
+    const want = hashes[platform]
+    if (!want) throw new Error(L(`Não há Chrome for Testing fixado para ${platform}.`, `There's no pinned Chrome for Testing for ${platform}.`))
     const zipPath = join(this.dir, 'chrome-for-testing.zip')
     mkdirSync(this.dir, { recursive: true })
-    await download(this.fetcher, url, zipPath, signal, (received, total) => {
+    await download(this.fetcher, cftUrl(version, platform), zipPath, want, signal, (received, total) => {
       this.progress = { received, total }
       this.changed()
     })
@@ -526,7 +607,7 @@ export class AddOns {
       throw new Error(L('O Chrome baixado veio sem o programa dentro.', 'The Chrome downloaded came without the program inside.'))
     }
     if (this.os !== 'win32') chmodSync(found, 0o755) // a .zip keeps no permission bits: on a Mac and on Linux it must be runnable
-    writeFileSync(join(this.dir, 'chrome-for-testing.json'), JSON.stringify({ version: stable?.version ?? '', bin: found, at: Date.now() }))
+    writeFileSync(join(this.dir, 'chrome-for-testing.json'), JSON.stringify({ version, sha256: want, bin: found, at: Date.now() }))
     return found
   }
 }

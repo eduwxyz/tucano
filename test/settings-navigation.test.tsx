@@ -47,7 +47,7 @@ Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { configurab
 Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return 5000 } })
 const { createRoot } = await import('react-dom/client')
 
-const access = { admin: true, owner: true, team: false, servers: false }
+const access = { admin: true, owner: true, team: false, servers: false, extensions: true }
 const ALL = settingsStructure(access)
 const SECTIONS = ALL.filter(section => section.visible)
 let root: Root
