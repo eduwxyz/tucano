@@ -241,6 +241,9 @@ class Tab {
 
 export class ChromeBrowsers {
   private tabs = new Map<string, Tab>()
+  // What each lane was started with (browser and extension folders), so a switch turned on under an open
+  // lane is not waited for until the app restarts: the next op gets a lane with what the switches say.
+  private launchedWith = new Map<string, string>()
   private starting = new Map<string, Promise<Tab>>()
   private handingBack = new Set<string>()
   private used = new Map<string, number>() // when each agent last asked its Chrome for something
@@ -295,10 +298,17 @@ export class ChromeBrowsers {
   quit(): void {
     for (const t of this.tabs.values()) t.proc.kill()
     this.tabs.clear()
+    this.launchedWith.clear()
   }
 
   private profile(agentId: string): string {
     return join(this.dir, agentId)
+  }
+
+  // The browser and the extension folders this lane would be started with now: the switch's answer, read
+  // at every launch rather than once (core/chrome-addons.ts downloads them in the background).
+  private wanted(): string {
+    return this.addOns ? `${this.addOns.bin}|${this.addOns.dirs.join('|')}` : ''
   }
 
   // Chrome for Testing only when it has extensions to carry: the branded build ignores --load-extension
@@ -307,7 +317,7 @@ export class ChromeBrowsers {
     return this.addOns?.bin && this.addOns.dirs.length > 0 ? this.addOns.bin : this.bin
   }
 
-  private async launch(agentId: string, headed: boolean, url?: string): Promise<Tab> {
+  private async launch(agentId: string, headed: boolean): Promise<Tab> {
     const profile = this.profile(agentId)
     mkdirSync(profile, { recursive: true })
     const downloads = agentId.startsWith('.shot-') ? undefined : this.downloads?.(agentId)
@@ -335,7 +345,9 @@ export class ChromeBrowsers {
       // ('.shot-'): that one draws the person's own page as the page is.
       ...(load.length ? [`--load-extension=${load.join(',')}`] : []),
       ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
-      url && /^https?:/.test(url) ? url : 'about:blank'
+      // Never a page on this line: Chrome can drop what it's handed at startup, and a blank page is what an
+      // agent then reads. The page comes from navigate() below, once the lane is answering.
+      'about:blank'
     ]
     const proc = spawn(this.chromeBin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
     const onFrame = this.onFrame
@@ -366,6 +378,7 @@ export class ChromeBrowsers {
     })
     if (headed) tab.closedAll = () => this.handBack(agentId, tab.url)
     this.tabs.set(agentId, tab)
+    this.launchedWith.set(agentId, this.wanted())
     return tab
   }
 
@@ -421,15 +434,30 @@ export class ChromeBrowsers {
   // The agent's Chrome, headless, started when first needed.
   private async tab(agentId: string): Promise<Tab> {
     const t = this.tabs.get(agentId)
-    if (t) return t
+    if (t) {
+      // A window the person took over is theirs until they hand it back: nothing restarts under it.
+      if (t.headed || this.launchedWith.get(agentId) === this.wanted()) return t
+      // This one was started with a different set of extensions: a switch was turned on (or off) while it
+      // was open, or the download landed. Without this it keeps the old set for as long as it lives — on a
+      // Mac with no idle close, for the whole session. It closes the way an idle one does (cookies are
+      // written first) and the page it was on comes back in the next browser, so nothing is lost but the
+      // seconds of the relaunch.
+      this.tabs.delete(agentId)
+      this.launchedWith.delete(agentId)
+      if (/^https?:/.test(t.url)) this.resumeAt.set(agentId, t.url)
+      const restarted = this.shutDown(t)
+        .catch(() => {})
+        .finally(() => this.closing.get(agentId) === restarted && this.closing.delete(agentId))
+      this.closing.set(agentId, restarted)
+    }
     const going = this.starting.get(agentId)
     if (going) return going
     const back = this.resumeAt.get(agentId)
     this.resumeAt.delete(agentId)
     const closing = this.closing.get(agentId)
-    const p = (closing ? closing.then(() => this.launch(agentId, false, back)) : this.launch(agentId, false, back))
+    const p = (closing ? closing.then(() => this.launch(agentId, false)) : this.launch(agentId, false))
       .then(async (tab) => {
-        if (back) await this.settle(tab)
+        if (back) await this.navigate(tab, back)
         return tab
       })
       .finally(() => this.starting.delete(agentId))
@@ -444,9 +472,9 @@ export class ChromeBrowsers {
     const t = this.tabs.get(agentId)
     if (t?.headed) this.tabs.delete(agentId)
     const p = (t?.headed ? this.shutDown(t) : Promise.resolve())
-      .then(() => this.launch(agentId, false, url))
+      .then(() => this.launch(agentId, false))
       .then(async (tab) => {
-        await this.settle(tab)
+        if (/^https?:/.test(url)) await this.navigate(tab, url)
         return tab
       })
       .finally(() => {
@@ -474,6 +502,7 @@ export class ChromeBrowsers {
       this.resumeAt.delete(agentId)
       const t = this.tabs.get(agentId)
       this.tabs.delete(agentId)
+      this.launchedWith.delete(agentId)
       if (t && op === 'close') await this.shutDown(t)
       else if (t) {
         t.close()
@@ -512,7 +541,8 @@ export class ChromeBrowsers {
         this.tabs.delete(agentId)
         await this.shutDown(current)
       }
-      const tab = await this.launch(agentId, true, url)
+      const tab = await this.launch(agentId, true)
+      if (url && /^https?:/.test(url)) await this.navigate(tab, url)
       this.onShown(agentId, true)
       return { url: tab.url, title: '', shown: true }
     }
@@ -535,9 +565,7 @@ export class ChromeBrowsers {
       case 'open': {
         const url = String(args['url'] ?? '')
         if (!/^https?:\/\//.test(url)) throw new Error(L('Só endereços http e https.', 'Only http and https addresses.'))
-        const r = (await tab.cmd('Page.navigate', { url })) as { errorText?: string }
-        if (r.errorText && !/ERR_ABORTED/.test(r.errorText)) throw new Error(L(`não abriu: ${r.errorText}`, `didn't open: ${r.errorText}`))
-        await this.settle(tab)
+        await this.navigate(tab, url)
         return here(true)
       }
       case 'snapshot':
@@ -615,6 +643,24 @@ export class ChromeBrowsers {
     throw new Error(L(`operação desconhecida: ${op}`, `unknown operation: ${op}`))
   }
 
+  // A page opened, with one retry behind it. Chrome can cancel the very first navigation a fresh lane is
+  // handed by its own startup: the provisional load stops, no page is committed, and the agent is given
+  // about:blank as if the site had nothing on it — it reads nothing, clicks nothing, and the session is
+  // spent finding out the page was never there. Measured on this computer, 2026-11-22, over a page served
+  // from this machine: on Chrome for Testing 158.0.8127.36 — the browser a lane with the add-ons runs as —
+  // 5 first opens of 6 landed on about:blank and 0 of 6 did with this second go, while the branded Chrome
+  // of a lane with nothing switched on missed none. The retry asks for the same address, and only while
+  // the browser is still on about:blank: a site that redirected somewhere of its own is left alone.
+  private async navigate(tab: Tab, url: string): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const r = (await tab.cmd('Page.navigate', { url })) as { errorText?: string }
+      if (r.errorText && !/ERR_ABORTED/.test(r.errorText)) throw new Error(L(`não abriu: ${r.errorText}`, `didn't open: ${r.errorText}`))
+      await this.settle(tab)
+      const at = await tab.run<string>('location.href').catch(() => '')
+      if (at !== 'about:blank' || attempt > 0) return
+    }
+  }
+
   private async click(tab: Tab, x: number, y: number): Promise<void> {
     const p = { x: Math.round(x), y: Math.round(y) }
     await tab.cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p })
@@ -632,8 +678,7 @@ export class ChromeBrowsers {
     try {
       const size = (height: number): Promise<unknown> => tab.cmd('Emulation.setDeviceMetricsOverride', { width: o.width, height, deviceScaleFactor: 1, mobile: false })
       await size(o.height)
-      await Promise.race([tab.cmd('Page.navigate', { url: o.url }), wait(30_000).then(() => Promise.reject(new Error(L('a página não carregou em 30 s', "the page didn't load in 30 s"))))])
-      await this.settle(tab)
+      await Promise.race([this.navigate(tab, o.url), wait(30_000).then(() => Promise.reject(new Error(L('a página não carregou em 30 s', "the page didn't load in 30 s"))))])
       await wait(800) // fonts, charts and client-side rendering
       if (o.fullPage) {
         const h = await tab.run<number>('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)').catch(() => 0)

@@ -71,4 +71,47 @@ describe.skipIf(!CFT || !existsSync(CFT))('a lane with the add-ons in it', () =>
     expect(text.text).toContain('the site')
     expect(text.text).not.toContain(MARK)
   })
+
+  // Chrome for Testing can cancel the very first navigation a fresh lane is handed by its own startup: the
+  // provisional load stops, no page is committed, and the agent is given about:blank as if the site had
+  // nothing on it. Measured on this computer 2026-11-22: 5 first opens of 6 landed on about:blank on this
+  // browser, 0 of 6 on the branded build, and 0 of 6 here once the lane asks a second time (chrome.ts,
+  // navigate). Two fresh lanes, because a lost first open is not every first open.
+  it('opens the first page a fresh lane is given, never a blank one', async () => {
+    for (const who of ['fresh-a', 'fresh-b']) {
+      const fresh = new ChromeBrowsers(join(dir, who), () => {}, CFT)
+      try {
+        const first = await fresh.run('lane', 'open', { url })
+        expect(first.url).toBe(url)
+        expect(first.title).toBe('page')
+        expect((await fresh.run('lane', 'text')).text).toContain('the site')
+      } finally {
+        await fresh.run('lane', 'close').catch(() => {})
+      }
+    }
+  }, 120_000)
+
+  // The switch is turned on while an agent's lane is already open: on a computer where an idle lane is
+  // never closed, that lane used to keep the browser it started with for the whole session, so the
+  // person turned the add-ons on and saw no difference. The next op gets them, on the page it was on.
+  it('gives a lane that is already open what a switch brings in, on the page it was on', async () => {
+    const live = { bin: CFT, dirs: [] as string[] }
+    const lane = new ChromeBrowsers(join(dir, 'c'), () => {}, CFT, undefined, false, undefined, undefined, live)
+    try {
+      await lane.run('lane', 'open', { url })
+      expect((await lane.run('lane', 'text')).text).not.toContain(MARK)
+      live.dirs.push(folder)
+      const on = await lane.run('lane', 'text')
+      expect(on.url).toBe(url) // the page came back, it did not start blank
+      expect(on.text).toContain('the site')
+      expect(on.text).toContain(MARK)
+      live.dirs.length = 0
+      const off = await lane.run('lane', 'text')
+      expect(off.url).toBe(url)
+      expect(off.text).toContain('the site')
+      expect(off.text).not.toContain(MARK)
+    } finally {
+      await lane.run('lane', 'close').catch(() => {})
+    }
+  })
 })
