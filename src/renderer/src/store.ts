@@ -45,7 +45,6 @@ import {
   type ActivityEntry,
   type Routine,
   type RoutineInput,
-  type SendMode,
   type Settings,
   type SetupEngine,
   type SetupState,
@@ -1049,8 +1048,8 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // A message sent outside threads, in a conversation that answers in them: its thread opens when it
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
-// `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: SendMode, steerTo?: string): void => {
+// `threadId`: a reply in the thread that message started. `mode` 'steer': from a running reply's own pill, for it (`steerTo`).
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: 'steer', steerTo?: string): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null

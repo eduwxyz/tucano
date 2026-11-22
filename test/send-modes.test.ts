@@ -1,12 +1,9 @@
-// A new prompt in a conversation that is already answering can arrive four ways: beside the reply
-// running there, the two at once (parallel, what the setting says by default), after everything
-// running there (queue), handed to it between two tool calls (steer), or in place of it (interrupt).
-// A prompt with no mode at all (the phone, a routine) is a message of the person's own: it starts its
-// own reply beside whatever runs there, and what holds one back is the limit of sessions running at
-// once. Only a send marked queued waits, and an approval's outcome, a question's refusal and a
-// browser hand-back, which go on with a reply the person is already reading there.
-// With nothing running, all of them are the same thing: a prompt like any other.
-// See `send` in src/core/runs.ts.
+// A new prompt in a conversation that is already answering starts its own reply beside the ones running
+// there, up to the replies at once a conversation may have (Settings › Agents › Replies, 6 when unset);
+// past that it waits its turn, says so on the message, and outlives a restart. An agent can go one at a
+// time (Agent.oneAtATime): its next reply waits for the one running, wherever that one is.
+// A steer is not a prompt: it comes from a running reply's own pill and goes into that reply's chain.
+// See `send` and `runIn` in src/core/runs.ts.
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -116,35 +113,20 @@ afterEach(async () => {
 })
 
 describe('a prompt that arrives while a reply is running', () => {
-  it('no mode: it starts its own reply, beside the one running there', async () => {
+  it('starts its own reply, beside the one running there', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const rec: string[] = []
     const r = runnerWith(recorded(rec))
     await r.send('d1', 'comece, demore 1 s')
     await r.send('d1', 'e isto também')
+    expect(rec.slice(0, 2)).toEqual(['start', 'start']) // it didn't wait for the first one
     await r.idle()
-    // A message of the person's is a reply of its own: the second one didn't wait for the first.
     expect(rec).toEqual(['start', 'start', 'end', 'end'])
-    expect(agentMessages()).toHaveLength(2)
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 
-  it('parallel: it goes beside the reply running there, the two at once', async () => {
-    db.saveAgent(agent())
-    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-    const rec: string[] = []
-    const r = runnerWith(recorded(rec))
-    await r.send('d1', 'comece, demore 1 s')
-    await r.send('d1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
-    expect(rec.slice(0, 2)).toEqual(['start', 'start']) // it didn't wait for the first one
-    await r.idle()
-    expect(rec.filter((x) => x === 'start')).toHaveLength(2)
-    expect(rec.filter((x) => x === 'end')).toHaveLength(2)
-    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done']) // both answered
-  })
-
-  it('parallel: only one of the two holds the kept session, the other reads the whole conversation', async () => {
+  it('only one of the two holds the kept session, the other reads the whole conversation', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const seen: string[] = []
@@ -158,79 +140,58 @@ describe('a prompt that arrives while a reply is running', () => {
     }
     const r = runnerWith(engine)
     await r.send('d1', 'comece, demore 1 s')
-    await r.send('d1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
+    await r.send('d1', 'e isto também')
     await r.idle()
     // A session can only go on in one reply: the one already there keeps it, the second reads it all.
     expect(seen.filter((s) => s !== 'no session')).toHaveLength(1)
     expect(seen.filter((s) => s === 'no session')).toHaveLength(1)
   })
 
-  it('queue behind two parallel replies: it waits for both to end', async () => {
+  it('one at a time: it waits, says so, and starts only when the reply above it ended', async () => {
+    settings.repliesAtOnce = 1
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const rec: string[] = []
     const r = runnerWith(recorded(rec))
     await r.send('d1', 'comece, demore 1 s')
-    await r.send('d1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
-    await r.send('d1', 'isto vem depois', [], undefined, undefined, { mode: 'queue' })
-    expect(rec.filter((x) => x === 'start')).toHaveLength(2) // still waiting: two are running there
-    await r.idle()
-    expect(rec.filter((x) => x === 'start')).toHaveLength(3)
-    expect(rec.at(-1)).toBe('end') // the queued one went last, after both
-  })
-
-  it('queue: it waits, and starts only when the reply above it ended', async () => {
-    db.saveAgent(agent())
-    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-    const rec: string[] = []
-    const r = runnerWith(recorded(rec))
-    await r.send('d1', 'comece, demore 1 s')
-    await r.send('d1', 'isto vem depois', [], undefined, undefined, { mode: 'queue' })
+    await r.send('d1', 'isto vem depois')
     expect(rec).toEqual(['start']) // still waiting its turn
-    expect(mine()).toHaveLength(2) // my message is there already: it waits, it isn't held back
+    expect(mine().map((m) => m.sendMode)).toEqual([undefined, 'queue']) // my message is there, marked as waiting
     await r.idle()
     expect(rec).toEqual(['start', 'end', 'start', 'end']) // one after the other, never side by side
+    expect(mine().map((m) => m.sendMode)).toEqual([undefined, undefined]) // started, so it stops saying it
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 
-  it('queue: with nothing running there, it is a prompt like any other', async () => {
+  it('up to two: the third waits for one of them to end, not for both', async () => {
+    settings.repliesAtOnce = 2
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-    const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
-    await r.send('d1', 'oi', [], undefined, undefined, { mode: 'queue' })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d1', 'esta vai mais longe, demore 3 s')
+    await r.send('d1', 'e esta é curta')
+    expect(rec).toEqual(['start', 'start']) // the third is past the limit
     await r.idle()
-    expect(agentMessages()).toHaveLength(1)
-    expect(agentMessages()[0]?.run?.status).toBe('done')
+    // It went when the first one ended, and was done before the long one.
+    expect(rec).toEqual(['start', 'start', 'end', 'start', 'end', 'end'])
   })
 
-  it('interrupt: the reply that was running stops, and the new one runs in its place', async () => {
-    db.saveAgent(agent())
-    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-    const r = runnerWith(fakeEngine('claude', { delayMs: 15 }))
-    await r.send('d1', 'conte uma história, demore 3 s')
-    await new Promise((res) => setTimeout(res, 150))
-    await r.send('d1', 'pare, faça isto', [], undefined, undefined, { mode: 'interrupt' })
-    // The old one is stopped, and the new one goes as soon as it lets go: it doesn't wait out the
-    // three seconds the old one asked for, only the turn it was in the middle of.
-    await expect.poll(() => agentMessages().filter((m) => m.run?.status === 'done').length, { timeout: 6000 }).toBe(1)
-    await r.idle()
-    expect(agentMessages().map((m) => m.run?.status).sort()).toEqual(['done', 'stopped'])
-  })
-
-  it('interrupt: it stops only that conversation, never another one', async () => {
+  it('the limit is per conversation: another one is never held back by it', async () => {
+    settings.repliesAtOnce = 1
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
-    const r = runnerWith(fakeEngine('claude', { delayMs: 15 }))
-    await r.send('d2', 'conte uma história, demore 2 s')
-    await new Promise((res) => setTimeout(res, 100))
-    await r.send('d1', 'outra coisa', [], undefined, undefined, { mode: 'interrupt' })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d2', 'outra coisa')
+    expect(rec.slice(0, 2)).toEqual(['start', 'start'])
     await r.idle()
-    const other = db.messages().filter((m) => m.conversationId === 'd2' && m.author.kind === 'agent')
-    expect(other[0]?.run?.status).toBe('done') // d2 was left alone
   })
 
-  it('steer: with a reply running there, no other one starts while it runs, and it goes into that reply\'s chain', async () => {
+  it("steer (from a running reply's pill): no other reply starts, and it goes into that reply's chain", async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const r = runnerWith(fakeEngine('claude', { delayMs: 15 }))
@@ -245,9 +206,40 @@ describe('a prompt that arrives while a reply is running', () => {
   })
 })
 
+describe('an agent that goes one at a time', () => {
+  it('its next reply waits for the one running, even in another conversation', async () => {
+    db.saveAgent({ ...agent(), oneAtATime: true })
+    expect(db.agent('a1')?.oneAtATime).toBe(true) // kept as it was saved
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    db.createConversation({ id: 'd2', kind: 'dm', name: 'a1', members: ['a1'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d2', 'e isto, em outra conversa')
+    expect(rec).toEqual(['start'])
+    expect(mine()[1]?.sendMode).toBe('queue') // it says it waits
+    await r.idle()
+    expect(rec).toEqual(['start', 'end', 'start', 'end'])
+    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
+  })
+
+  it('holds back only itself: another agent goes beside it', async () => {
+    db.saveAgent({ ...agent(), oneAtATime: true })
+    db.saveAgent({ ...agent(), id: 'a2', name: 'Nina', handle: 'nina' })
+    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
+    db.createConversation({ id: 'd2', kind: 'dm', name: 'a2', members: ['a2'] })
+    const rec: string[] = []
+    const r = runnerWith(recorded(rec))
+    await r.send('d1', 'comece, demore 1 s')
+    await r.send('d2', 'oi')
+    expect(rec.slice(0, 2)).toEqual(['start', 'start'])
+    await r.idle()
+  })
+})
+
 // A channel message nobody was mentioned in, with more than one agent there, is the router's to give
-// out (`routeAndRun`). The reply it picks follows the same rule as any other: beside the reply running
-// there when the person's prompt asked for it (parallel), after it otherwise.
+// out (`routeAndRun`). The reply it picks follows the same rule as any other: beside the replies running
+// there, up to the conversation's limit.
 describe('a channel prompt the router picks for', () => {
   // The fake engine routes to the first agent in the channel, and takes its time on "demore N s".
   // The router's own turn isn't a reply, so it isn't recorded.
@@ -273,20 +265,7 @@ describe('a channel prompt the router picks for', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
   }
 
-  it('parallel: the picked reply goes beside the reply running there, the two at once', async () => {
-    channel()
-    const rec: string[] = []
-    const r = runnerWith(recording(rec))
-    await r.send('c1', '@lia comece, demore 1 s')
-    await r.send('c1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
-    await expect.poll(() => rec.filter((x) => x === 'start').length, { timeout: 5000 }).toBe(2)
-    expect(rec.slice(0, 2)).toEqual(['start', 'start']) // it didn't wait for the first one
-    await r.idle()
-    expect(rec).toEqual(['start', 'start', 'end', 'end'])
-    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
-  })
-
-  it('no mode: the picked reply goes beside the one running there too', async () => {
+  it('the picked reply goes beside the one running there', async () => {
     channel()
     const rec: string[] = []
     const r = runnerWith(recording(rec))
@@ -298,16 +277,16 @@ describe('a channel prompt the router picks for', () => {
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 
-  it('queue: it waits for the whole conversation to go quiet, the routed one included', async () => {
+  it('one at a time: the routed one waits for the reply running there', async () => {
+    settings.repliesAtOnce = 1
     channel()
     const rec: string[] = []
     const r = runnerWith(recording(rec))
     await r.send('c1', '@lia comece, demore 1 s')
-    await r.send('c1', 'e isto também', [], undefined, undefined, { mode: 'parallel' })
-    await r.send('c1', 'isto vem depois', [], undefined, undefined, { mode: 'queue' })
+    await r.send('c1', 'isto vem depois')
     await r.idle()
-    expect(rec.filter((x) => x === 'start')).toHaveLength(3)
-    expect(rec.at(-1)).toBe('end') // the queued one went last, after both
+    expect(rec).toEqual(['start', 'end', 'start', 'end'])
+    expect(agentMessages().filter((m) => m.run).map((m) => m.run?.status)).toEqual(['done', 'done'])
   })
 })
 
@@ -382,33 +361,22 @@ describe('a queued prompt outlives a restart', () => {
 
     // A fresh runner over the same database, as if the app had been closed and opened.
     const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
-    r.resumeQueued()
+    await r.resumeQueued()
     await r.idle()
     expect(agentMessages().map((m) => m.run?.status)).toEqual(['done'])
     expect(agentMessages()[0]?.run?.replyTo).toBe('m1')
     expect(db.queuedMessages()).toEqual([]) // the mark went with the reply, so it can't start twice
   })
 
-  it('a message handed into a reply is not started again when the app opens', async () => {
-    db.saveAgent(agent())
-    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-    // It says where it went, and keeps saying it: only a queued one is a reply waiting to happen.
-    db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'mude de plano', at: Date.now(), sendMode: 'steer' })
-    expect(db.queuedMessages()).toEqual([])
-    const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
-    r.resumeQueued()
-    await r.idle()
-    expect(agentMessages()).toEqual([]) // nothing ran: that message already went into a reply
-  })
-
-  it('takes its turn after what is already running there', async () => {
+  it('takes its turn after what is already running there, one at a time', async () => {
+    settings.repliesAtOnce = 1
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
     const rec: string[] = []
     const r = runnerWith(recorded(rec))
     await r.send('d1', 'comece, demore 1 s')
     db.saveMessage({ id: 'm1', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'e isto', at: Date.now(), sendMode: 'queue' })
-    r.resumeQueued() // the app reopened while a reply was still going
+    await r.resumeQueued() // the app reopened while a reply was still going
     await r.idle()
     expect(rec).toEqual(['start', 'end', 'start', 'end']) // never side by side
   })
@@ -504,18 +472,6 @@ describe('a steer the reply ended without taking', () => {
 // A prompt whose reply never starts at once is in no one's hands until it does: it says so in the
 // conversation, and a window closed while it waited must not lose it. See `waitingMark` in runs.ts.
 describe('a prompt whose reply has not started yet', () => {
-  it('says it waits, and the mark goes the moment its reply starts', async () => {
-    db.saveAgent(agent())
-    db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
-    const r = runnerWith(fakeEngine('claude', { delayMs: 40 }))
-    await r.send('d1', 'primeira mensagem')
-    await r.send('d1', 'segunda, na fila', [], undefined, undefined, { mode: 'queue' })
-    expect(mine().map((m) => m.sendMode)).toEqual([undefined, 'queue'])
-    await r.idle()
-    expect(mine().map((m) => m.sendMode)).toEqual([undefined, undefined]) // started, so it stops saying it
-    expect(agentMessages().map((m) => m.run?.status)).toEqual(['done', 'done'])
-  })
-
   it('is answered when the app opens again, since no reply ever started for it', async () => {
     db.saveAgent(agent())
     db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
@@ -526,7 +482,7 @@ describe('a prompt whose reply has not started yet', () => {
     db.saveMessage({ id: 'p2', conversationId: 'd1', author: { kind: 'person', id: db.ownerId() }, text: 'segunda', at: now - 1000, sendMode: 'queue' })
     db.interruptStaleRuns()
     const r = runnerWith(fakeEngine('claude', { delayMs: 1 }))
-    r.resumeQueued()
+    await r.resumeQueued()
     await r.idle()
     const replies = agentMessages().filter((m) => m.run?.status === 'done')
     expect(replies).toHaveLength(1)
