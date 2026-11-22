@@ -414,7 +414,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
           <p className="hint">
             {L(
               'Um endereço no padrão da OpenAI (/chat/completions) e a chave dele. Os agentes rodam direto nele, sem Claude Code nem Codex, e cada um usa um dos modelos que você marcar.',
-              'An address in OpenAI’s format (/chat/completions) and its key. Agents run straight on it, with no Claude Code or Codex, each on one of the models you tick.'
+              'Enter an OpenAI-compatible address (/chat/completions) and its key. Agents run directly on the selected models, without Claude Code or Codex.'
             )}
           </p>
           <div className="endpoint__presets">
@@ -457,7 +457,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
                   </label>
                 ))}
               </div>
-              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must handle tool calls: that’s how an agent asks another, asks you and uses connectors.')}</p>
+              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must support tool calls so the agent can ask other agents or you, and use connectors.')}</p>
             </>
           )}
           <div className="endpoint__actions">

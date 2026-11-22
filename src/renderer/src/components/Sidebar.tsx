@@ -225,7 +225,7 @@ function TopRow({ item, back, onMenu, sort, children }: { item: TopItem; back?: 
           <Icon name="more" size={14} />
         </button>
       )}
-      {back && <p className="top-row__back">{L('Você tinha tirado da barra. Some de novo quando nada esperar por você.', 'You took it out of the sidebar. It goes again once nothing waits on you.')}</p>}
+      {back && <p className="top-row__back">{L('Você tinha tirado da barra. Some de novo quando nada esperar por você.', 'You removed this from the sidebar. It hides again when nothing needs your attention.')}</p>}
     </div>
   )
 }

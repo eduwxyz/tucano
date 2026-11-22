@@ -7,14 +7,14 @@ import { Icon } from './ui'
 
 export const VOICE_CHOICES = (): { id: VoiceModelId; name: string; size: string; about: string }[] => [
   { id: 'recommended', name: L('Recomendado', 'Recommended'), size: '574 MB', about: L('O mais preciso, inclusive em português.', 'The most accurate, in any language.') },
-  { id: 'light', name: L('Leve', 'Light'), size: '190 MB', about: windowless() ? L('Num servidor, transcreve umas 5 vezes mais rápido e erra um pouco mais.', 'On a server, it transcribes about 5 times faster, and gets a bit more wrong.') : L('Baixa mais rápido e erra um pouco mais.', 'Downloads faster, and gets a bit more wrong.') }
+  { id: 'light', name: L('Leve', 'Light'), size: '190 MB', about: windowless() ? L('Num servidor, transcreve umas 5 vezes mais rápido e erra um pouco mais.', 'On a server, transcription is about 5 times faster but slightly less accurate.') : L('Baixa mais rápido e erra um pouco mais.', 'Downloads faster, and gets a bit more wrong.') }
 ]
 
 // Where the audio becomes text: on a server (Tucano Pro's), the server, on a few shared processors, where the
 // Recommended model takes most of a minute for one sentence (measured: 47 s for 8 s of speech; the Light one, 9 s).
 export const VOICE_WHERE = (): string =>
   windowless()
-    ? L('O áudio vira texto no servidor deste Tucano, sem passar por nenhum outro serviço. Num servidor, o modelo Leve é bem mais rápido.', "The audio becomes text on this Tucano's server, through no other service. On a server, the Light model is much faster.")
+    ? L('O áudio vira texto no servidor deste Tucano, sem passar por nenhum outro serviço. Num servidor, o modelo Leve é bem mais rápido.', "Audio is transcribed only on this server.")
     : L('O áudio vira texto neste computador, sem internet.', 'The audio becomes text on this computer, offline.')
 
 // Dictation's state, read again whenever the core says it changed.
@@ -88,7 +88,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
       {status.ready ? (
         <>
           <b>{L('Pronto para ditar', 'Ready to dictate')}</b>
-          <p className="small muted">{L(`Clique no microfone, ou ${key('Espaço')}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Click the microphone, or ${key('Space')}, and speak. Click again to finish: the text shows up here to review. The first time, the system asks to allow the microphone.`)}</p>
+          <p className="small muted">{L(`Clique no microfone, ou ${key('Espaço')}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Use the microphone or ${key('Space')} to dictate. Select the microphone again to finish and review the text here. Allow microphone access when first asked.`)}</p>
           <button className="btn btn--sm" onClick={onClose}>
             {L('Entendi', 'Got it')}
           </button>

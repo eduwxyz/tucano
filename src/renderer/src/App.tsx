@@ -33,7 +33,8 @@ export function App(): ReactNode {
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
   const guest = useStore(guestWelcome)
-  const mac = useStore((s) => s.platform === 'mac')
+  // A server's page in the desktop app on a Mac: the window's buttons are over it, as over the app's own.
+  const mac = useStore((s) => s.platform === 'mac') || window.tucano?.places?.os === 'darwin'
   const navOpen = useStore((s) => s.navOpen)
   const tab = hubTab(view)
 

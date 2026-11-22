@@ -155,7 +155,7 @@ export function glideTo(scroller: HTMLElement, id: string, animated: boolean, fr
 // subject it is in. Picking one opens that group at that subject.
 export function SettingsResults({ hits, query, onPick }: { hits: readonly SettingsHit[]; query: string; onPick: (section: SettingsSection) => void }): ReactNode {
   if (hits.length === 0)
-    return <p className="settings-results__none">{L(`Nada com “${query.trim()}”. Tente outra palavra, como “limite”, “modelo” ou “som”.`, `Nothing for “${query.trim()}”. Try another word, like “limit”, “model” or “sound”.`)}</p>
+    return <p className="settings-results__none">{L(`Nada com “${query.trim()}”. Tente outra palavra, como “limite”, “modelo” ou “som”.`, `No results for “${query.trim()}”. Try “limit”, “model” or “sound”.`)}</p>
   return (
     <div className="settings-results" role="list" aria-label={L('Resultados da busca', 'Search results')}>
       {hits.map((hit, i) => (

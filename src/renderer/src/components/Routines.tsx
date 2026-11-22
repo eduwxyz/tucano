@@ -711,7 +711,7 @@ function RoutineList({
       <div className="rt-list">
         <div className="rt-empty">
           <strong>{L('Nenhuma rotina ainda.', 'No routines yet.')}</strong>
-          <span>{L('Crie uma em “Nova rotina”, ou comece por um destes:', 'Create one with “New routine”, or start from one of these:')}</span>
+          <span>{L('Crie uma em “Nova rotina”, ou comece por um destes:', 'Create a routine with “New routine”, or start from one of these:')}</span>
           <Examples onExample={onExample} />
         </div>
       </div>
@@ -798,7 +798,7 @@ function NeedRow({ need, now, open, mayChange, who, onToggle, onPick }: { need: 
   const failed = kind === 'failed'
   const later = okSince === 0 ? '' : okSince === 1 ? L(' Depois, rodou 1 vez normalmente.', ' After that, it ran once as usual.') : L(` Depois, rodou ${okSince} vezes normalmente.`, ` After that, it ran ${okSince} times as usual.`)
   const why = failed
-    ? `${occ.reply?.run?.error ?? (occ.status === 'limit_reached' ? L('Parou no limite de uso do agente.', 'It stopped at the agent’s usage limit.') : L('Não deu certo, e não ficou dito por quê.', 'It didn’t work, and it didn’t say why.'))}${later}`
+    ? `${occ.reply?.run?.error ?? (occ.status === 'limit_reached' ? L('Parou no limite de uso do agente.', 'It stopped at the agent’s usage limit.') : L('Não deu certo, e não ficou dito por quê.', 'The run failed without reporting a reason.'))}${later}`
     : occ.status === 'waiting_input'
       ? L('Ela fez uma pergunta na conversa e está esperando a resposta.', 'It asked a question in the conversation and is waiting for the answer.')
       : L('Ela parou num passo que precisa da sua aprovação.', 'It stopped at a step that needs your approval.')
@@ -1289,11 +1289,11 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                   {mode === 'week' && perWeek > 1
                     ? L(`${perWeek} vezes por semana, na hora do seu computador.`, `${perWeek} times a week, on your computer’s clock.`)
                     : mode === 'once'
-                      ? L('No próximo dia marcado em que o horário ainda não passou. Depois, desliga sozinha.', 'On the next checked day the time hasn’t passed yet. Then it turns itself off.')
+                      ? L('No próximo dia marcado em que o horário ainda não passou. Depois, desliga sozinha.', 'Runs once at the next scheduled time on a selected day, then turns itself off.')
                       : mode === 'date'
                         ? L('Roda uma vez e desliga sozinha.', 'Runs once, then turns itself off.')
                         : mode === 'month'
-                          ? L('Num mês sem esse dia, roda no último.', 'In a month without that day, it runs on the last one.')
+                          ? L('Num mês sem esse dia, roda no último.', 'In shorter months, runs on the last day of the month.')
                           : L('Na hora do seu computador.', 'On your computer’s clock.')}
                 </>
               )}

@@ -68,10 +68,11 @@ export const SNAPSHOT = `(() => { ${SECRETS}
   const CAP = 1200, SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG'])
   let sample = '', more = false
   const walkText = (node) => {
-    for (const c of (node.shadowRoot || node).childNodes) {
+    if (node.shadowRoot) walkText(node.shadowRoot) // what it draws itself; the slotted children come next
+    for (const c of node.childNodes) {
       if (sample.length >= CAP) { more = true; return }
-      if (c.nodeType === 3) { const t = c.data.replace(/\\s+/g, ' ').trim(); if (t) sample += t + ' ' }
-      else if (c.nodeType === 1 && !SKIP.has(c.tagName)) { if (c.checkVisibility && !c.checkVisibility()) continue; walkText(c) }
+      if (c.nodeType === 3) { const t = c.data.replace(/\\s+/g, ' ').trim(); if (t) { sample += t + ' '; if (sample.length >= CAP) more = true } }
+      else if (c.nodeType === 1 && !SKIP.has(c.tagName.toUpperCase())) { if (c.checkVisibility && !c.checkVisibility()) continue; walkText(c) }
     }
   }
   if (document.body) walkText(document.body)
@@ -89,7 +90,8 @@ export const SNAPSHOT = `(() => { ${SECRETS}
     buttons: count('botão'),
     password: [...document.querySelectorAll('input[type=password]')].filter((i) => !i.checkVisibility || i.checkVisibility()).length,
     frames: [...document.querySelectorAll('iframe')].map((f) => (f.getAttribute('src') || '').toLowerCase()).filter(Boolean).slice(0, 8),
-    marks
+    marks,
+    media: [...document.querySelectorAll('img,video,canvas,embed,object')].filter((e) => { const r = e.getBoundingClientRect(); return r.width >= 100 && r.height >= 100 }).length
   }
   return { url: location.href, title: document.title, w: W, h: H, scrollY: Math.round(scrollY), scrollH: document.documentElement.scrollHeight, elements: out, signs }
 })()`

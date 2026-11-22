@@ -22,6 +22,7 @@ export interface PageSigns {
   password: number // visible password fields: a sign-in wall almost always has one
   frames: string[] // the page's iframes, by address, lowercase
   marks: string[] // the ids and classes that name a bot check, as found on the page
+  media?: number // pictures, videos, canvases and embedded documents big enough to be the page
 }
 
 export interface Wall {
@@ -29,108 +30,152 @@ export interface Wall {
   why: string // the mark or the words that gave it away: the evidence, not a guess
 }
 
-// A page with more words than the sample cap (shared/page.ts) is a page, and whatever else it
-// carries -- an invisible captcha on a form, a cookie banner over the content -- is not holding it.
-// These name a bot check by themselves.
-const BOT_MARKS = ['challenge-form', 'challenge-stage', 'cf-turnstile', 'g-recaptcha', 'h-captcha', 'px-captcha', 'datadome']
+// How big a wall is. Every one seen (the study of 2026-11-22 and the vendors' own pages) is a few
+// hundred characters and a handful of controls, so a page past either limit is not one, whatever it
+// quotes: an article about captchas has the words of a captcha in it.
+const WALL_CHARS = 700
+const WALL_CONTROLS = 12
+// A wall opens with what it is. Weak words count only there or in the title: "access denied" heading a
+// page is a refusal, and the same words further down are a page talking about one.
+const OPENS_WITHIN = 40
+
 const BOT_FRAMES = ['challenges.cloudflare.com', 'recaptcha', 'hcaptcha', 'captcha-delivery', 'arkoselabs', 'funcaptcha']
-// The challenger's own words, as the interstitials spell them. The first four are the page
+// The challenger's own sentences, which nothing but the interstitial says. The first four are the page
 // Cloudflare serves today, taken from backerkit.com and linkedin.com on 2026-11-22.
 const BOT_WORDS = [
   'performing security verification',
   'security service to protect against malicious bots',
   'verifies you are not a bot',
   'performance and security by cloudflare',
+  'performance & security by cloudflare',
+  'checking if the site connection is secure',
+  'enable javascript and cookies to continue',
+  'pardon our interruption',
+  'ddos protection by',
+  'needs to review the security of your connection',
+  'to confirm you are a human'
+]
+// Words an article can use too: a bot check only when the page opens with them or is titled by them.
+const BOT_OPENERS = [
   'just a moment',
   'verify you are human',
   'verifying you are human',
   'verify you are not a robot',
   'verify you are a robot',
   'checking your browser',
-  'checking if the site connection is secure',
-  'enable javascript and cookies to continue',
   'prove your humanity',
   'are you a robot',
   'unusual traffic',
-  'pardon our interruption',
-  'ddos protection by',
-  'needs to review the security of your connection',
-  'complete the security check',
-  'press and hold'
+  'complete the security check'
 ]
 // The navigation itself failed: Chrome's own error page, which is short, titled like the site and
-// says nothing an agent can use.
-const LOAD_WORDS = ['this site can’t be reached', "this site can't be reached", 'refused to connect', 'took too long to respond', 'isn’t available right now', 'dns_probe', 'server ip address could not be found']
-// A refusal by the site itself, rather than a challenge with a way through. The last three are what
+// says nothing an agent can use. It opens with one of these.
+const LOAD_WORDS = ['this site can’t be reached', "this site can't be reached", 'this page isn’t working', "this page isn't working", 'refused to connect', 'took too long to respond', 'isn’t available right now', 'dns_probe', 'server ip address could not be found']
+// Chrome's codes, listed rather than matched by shape: what's quoted from here goes into the line the
+// agent trusts, and "err_" plus anything is a sentence a page could write for it.
+const NET_ERRORS = [
+  'err_connection_reset',
+  'err_connection_refused',
+  'err_connection_timed_out',
+  'err_connection_closed',
+  'err_connection_failed',
+  'err_name_not_resolved',
+  'err_internet_disconnected',
+  'err_address_unreachable',
+  'err_network_changed',
+  'err_network_access_denied',
+  'err_timed_out',
+  'err_empty_response',
+  'err_invalid_response',
+  'err_too_many_redirects',
+  'err_tunnel_connection_failed',
+  'err_proxy_connection_failed',
+  'err_ssl_protocol_error',
+  'err_ssl_version_or_cipher_mismatch',
+  'err_cert_authority_invalid',
+  'err_cert_common_name_invalid',
+  'err_cert_date_invalid',
+  'err_http2_protocol_error',
+  'err_quic_protocol_error',
+  'err_blocked_by_client',
+  'err_blocked_by_response',
+  'err_unsafe_port',
+  'err_failed'
+]
+// A refusal by the site itself, rather than a challenge with a way through. The last ones are what
 // idealo.de and x.com answered on 2026-11-22.
 const BLOCK_WORDS = [
   '403 forbidden',
   'http error 403',
-  'access denied',
-  'was denied',
   'you don’t have authorization',
   "you don't have authorization",
   'you have been blocked',
-  'whoa there',
   'request blocked',
-  'too many requests',
-  '429 too many',
   'cf-error',
-  'service unavailable',
   'you are unable to access',
   'make sure your browser is updated to the latest version',
   'please verify you are a human'
 ]
-const BLOCK_TITLES = ['403', 'access denied', 'forbidden', 'too many requests', 'attention required']
+const BLOCK_OPENERS = ['access denied', '429 too many', 'too many requests', 'service unavailable', 'whoa there']
+// Anchored: "403(b) retirement plans" and "The Forbidden Kingdom" are titles too.
+const BLOCK_TITLE = /^(?:error\s*)?(?:403|429)(?:\s*[-:|]?\s*(?:forbidden|too many requests|error))?\s*$|^forbidden\s*$|^access denied\b|^too many requests\b|^attention required/
 // The sign-in wall's own words, when the page has no password field to show it.
 const LOGIN_WORDS = ['sign in to continue', 'log in to continue', 'you must be logged in', 'you must be signed in', 'sign in to see', 'log in to see', 'anmelden, um fortzufahren', 'inicia sessão para continuar', 'faça login para continuar']
 // A consent wall: the notice holds the page, instead of sitting on top of it.
-const CONSENT_WORDS = [
-  'we value your privacy',
-  'before you continue',
-  'we use cookies',
-  'this site uses cookies',
-  'your privacy choices',
-  'manage your consent',
-  'consent to the use of cookies',
-  'wir verwenden cookies',
-  'diese website verwendet cookies',
-  'alle akzeptieren',
-  'datenschutz-einstellungen',
-  'utilizamos cookies',
-  'usamos cookies'
-]
+const CONSENT_WORDS = ['we value your privacy', 'your privacy choices', 'manage your consent', 'consent to the use of cookies', 'alle akzeptieren', 'datenschutz-einstellungen']
+// What a cookie footer on a small page says as well: a wall only when the page opens with it.
+const CONSENT_OPENERS = ['before you continue', 'we use cookies', 'this site uses cookies', 'wir verwenden cookies', 'diese website verwendet cookies', 'utilizamos cookies', 'usamos cookies']
 
 const found = (words: string, list: readonly string[]): string | undefined => list.find((w) => words.includes(w))
+const opens = (words: string, list: readonly string[]): string | undefined =>
+  list.find((w) => {
+    const at = words.indexOf(w)
+    return at >= 0 && at <= OPENS_WITHIN
+  })
 
 // How the page reads, from its own signs and its title. Nothing to say is undefined: the usual case.
+// Every `why` it returns is one of the constants above, never the page's text: the note sits outside
+// the fence around what a page says, so a page must not be able to put words in it.
 export function readWall(signs: PageSigns | undefined, page: { url?: string; title?: string } = {}): Wall | undefined {
   if (!signs) return undefined
+  const url = page.url || ''
+  if (url === 'about:blank') return undefined // the browser before its first page
   const words = (signs.words || '').toLowerCase()
   const title = (page.title || '').toLowerCase()
   const short = !signs.more // the wall is the whole page: nothing longer can be held by one
   const controls = signs.links + signs.fields + signs.buttons
-  const bot = signs.marks[0] ?? signs.frames.flatMap((f) => BOT_FRAMES.filter((b) => f.includes(b)))[0]
-  const botWords = found(words, BOT_WORDS)
+  const sized = short && signs.chars <= WALL_CHARS && controls <= WALL_CONTROLS
+  const says = (strong: readonly string[], weak: readonly string[]): string | undefined =>
+    sized ? (found(words, strong) ?? opens(words, weak) ?? found(title, weak)) : undefined
+
+  const botWords = says(BOT_WORDS, BOT_OPENERS)
+  if (botWords) return { kind: 'challenge', why: botWords }
   // A mark or a captcha iframe says the page is a test only when the page is nothing: a real page
   // carries them too. Measured 2026-11-22 — linkedin.com/login has 20 clickable things, a password
   // field and an invisible reCAPTCHA, and it is a sign-in form; reddit's "Prove your humanity" has 6
-  // links, no field and no password, and it is a test. The words are the strong sign; a mark or a
-  // frame gets the benefit of the doubt only on a page with nothing on it.
-  const nothingToDo = controls <= 10 && signs.password === 0
-  if (short && botWords) return { kind: 'challenge', why: botWords }
-  if (short && bot && nothingToDo) return { kind: 'challenge', why: bot }
-  const gone = /err_[a-z_]+/.exec(words)?.[0] ?? (short ? found(words, LOAD_WORDS) : undefined)
-  if (gone) return { kind: 'failed', why: gone }
+  // links, no field and no password, and it is a test. A form to fill in (a contact page with
+  // Turnstile on it) is a page with something to do.
+  const bot = signs.marks[0] ?? signs.frames.flatMap((f) => BOT_FRAMES.filter((b) => f.includes(b)))[0]
+  if (short && bot && controls <= 10 && signs.fields === 0 && signs.password === 0) return { kind: 'challenge', why: bot }
+
+  const errorPage = url.startsWith('chrome-error:')
+  const load = sized ? opens(words, LOAD_WORDS) : undefined
+  if (errorPage || load) return { kind: 'failed', why: found(words, NET_ERRORS) ?? load ?? 'chrome-error' }
+
+  const deniedAccess = sized && /^.{0,40}\baccess to \S{1,80} (?:was|has been) denied/.test(words) ? 'access was denied' : undefined
   const refused =
-    found(words, BLOCK_WORDS) ?? (short ? found(title, BLOCK_TITLES) : undefined) ?? (/^https?:\/\/[^/]*\/cdn-cgi\//.test(page.url || '') ? 'cloudflare' : undefined)
-  if (short && refused) return { kind: 'blocked', why: refused }
-  if (short && signs.password > 0) return { kind: 'login', why: L('campo de senha', 'a password field') }
-  const asks = found(words, LOGIN_WORDS)
-  if (short && asks) return { kind: 'login', why: asks }
-  const consent = short && controls > 0 ? found(words, CONSENT_WORDS) : undefined
+    says(BLOCK_WORDS, BLOCK_OPENERS) ?? deniedAccess ?? (sized ? BLOCK_TITLE.exec(title)?.[0] : undefined) ?? (sized && /^https?:\/\/[^/]*\/cdn-cgi\//.test(url) ? 'cloudflare' : undefined)
+  if (refused) return { kind: 'blocked', why: refused }
+
+  // One password field is a sign-in; two or three are a sign-up or a change of password, on a page the
+  // agent is already past the door of.
+  if (short && signs.chars <= WALL_CHARS && signs.password === 1) return { kind: 'login', why: L('campo de senha', 'a password field') }
+  const asks = sized ? (opens(words, LOGIN_WORDS) ?? found(title, LOGIN_WORDS)) : undefined
+  if (asks) return { kind: 'login', why: asks }
+  const consent = controls > 0 ? says(CONSENT_WORDS, CONSENT_OPENERS) : undefined
   if (consent) return { kind: 'consent', why: consent }
-  if (signs.chars < 20 && controls < 3 && !signs.frames.length)
+  // A picture, a video, a canvas or a document opened by itself has no words and is all there.
+  if (signs.chars < 20 && controls < 3 && !signs.frames.length && !signs.media)
     return { kind: 'empty', why: L(`${signs.chars} caracteres`, `${signs.chars} characters`) }
   return undefined
 }
