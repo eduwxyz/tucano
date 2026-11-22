@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { generateKeyPairSync, createHash, createSign } from 'node:crypto'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JSZip from 'jszip'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import { ADD_ONS, AddOns, CFT_INDEX, crxUrl, crxZip, cftPlatform } from '../src/core/chrome-addons'
+import { ADD_ONS, AddOns, CFT_INDEX, crxUrl, crxZip, cftPlatform, verifiedCrxZip } from '../src/core/chrome-addons'
+import { extractZip, zipFromBuffer } from '../src/core/zip'
 import { addOnOn, addOnsOf } from '../src/shared/addons'
 
 // The extension as a .zip, which is what the store hands out behind a .crx header.
@@ -42,8 +44,8 @@ const shelf = async (browser: string[] = ['chrome-win64/chrome.exe']): Promise<R
   const routes: Record<string, Route> = {}
   for (const e of ADD_ONS) routes[crxUrl(e.id)] = crxOf(await zipOf({ 'manifest.json': manifest(e.name), 'sw.js': '// nothing' }))
   const platform = 'win64'
-  routes[CFT_INDEX] = JSON.stringify({ channels: { Stable: { version: '158.0.8127.36', downloads: { chrome: [{ platform, url: `https://example.test/${platform}.zip` }] } } } })
-  routes[`https://example.test/${platform}.zip`] = await zipOf(Object.fromEntries(browser.map((f) => [f, 'MZ not really a browser'])))
+  routes[CFT_INDEX] = JSON.stringify({ channels: { Stable: { version: '158.0.8127.36', downloads: { chrome: [{ platform, url: `https://storage.googleapis.com/chrome-for-testing-public/${platform}.zip` }] } } } })
+  routes[`https://storage.googleapis.com/chrome-for-testing-public/${platform}.zip`] = await zipOf(Object.fromEntries(browser.map((f) => [f, 'MZ not really a browser'])))
   return routes
 }
 
@@ -73,6 +75,127 @@ describe('a .crx is the extension’s zip behind a header', () => {
   })
 })
 
+// A real CRX3, signed the way the store's are: the id is the key's, and the proof covers the zip.
+const varint = (n: number): Buffer => {
+  const out: number[] = []
+  while (n > 127) { out.push((n % 128) | 128); n = Math.floor(n / 128) }
+  out.push(n)
+  return Buffer.from(out)
+}
+const field = (no: number, body: Buffer): Buffer => Buffer.concat([varint(no * 8 + 2), varint(body.length), body])
+const signedCrx = (zip: Buffer, claimedId?: Buffer): { crx: Buffer; id: string } => {
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const key = publicKey.export({ type: 'spki', format: 'der' })
+  const raw = createHash('sha256').update(key).digest().subarray(0, 16)
+  const id = [...raw].map((x) => String.fromCharCode(97 + (x >> 4), 97 + (x & 15))).join('')
+  const signedData = field(1, claimedId ?? raw)
+  const size = Buffer.alloc(4)
+  size.writeUInt32LE(signedData.length)
+  const signature = createSign('sha256').update('CRX3 SignedData\0').update(size).update(signedData).update(zip).sign(privateKey)
+  const header = Buffer.concat([field(2, Buffer.concat([field(1, key), field(2, signature)])), field(10000, signedData)])
+  const head = Buffer.alloc(12)
+  head.write('Cr24', 0, 'latin1')
+  head.writeUInt32LE(3, 4)
+  head.writeUInt32LE(header.length, 8)
+  return { crx: Buffer.concat([head, header, zip]), id }
+}
+
+describe('an extension is the one its id names', () => {
+  it('takes a file signed by the key its id comes from', async () => {
+    const inner = await zipOf({ 'manifest.json': manifest('x') })
+    const { crx, id } = signedCrx(inner)
+    expect(verifiedCrxZip(crx, id).equals(inner)).toBe(true)
+  })
+
+  it('refuses a changed file, another extension, a borrowed id and an unsigned file', async () => {
+    const inner = await zipOf({ 'manifest.json': manifest('x') })
+    const { crx, id } = signedCrx(inner)
+    const tampered = Buffer.from(crx)
+    tampered[tampered.length - 30] = tampered[tampered.length - 30]! ^ 0xff
+    expect(() => verifiedCrxZip(tampered, id)).toThrow(/signature doesn't match/)
+    expect(() => verifiedCrxZip(crx, 'a'.repeat(32))).toThrow(/signature doesn't match/)
+    const victim = Buffer.alloc(16, 3)
+    const borrowed = signedCrx(inner, victim)
+    expect(() => verifiedCrxZip(borrowed.crx, 'd'.repeat(32))).toThrow(/signature doesn't match/)
+    expect(() => verifiedCrxZip(crxOf(inner), id)).toThrow(/signature doesn't match/)
+  })
+
+  it('leaves nothing on disk when the store hands over a file that fails the check', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'addons-'))
+    const routes = await shelf()
+    const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64') // the real check
+    await addOns.set({ ads: true })
+    expect(addOns.info?.extensions.ads?.state).toBe('failed')
+    expect(addOns.info?.extensions.ads?.error).toMatch(/signature doesn't match/)
+    expect(addOns.dirs).toEqual([])
+    expect(existsSync(join(dir, 'extensions', ADD_ONS[0]!.id))).toBe(false)
+  })
+})
+
+describe('where the browser may come from', () => {
+  it('refuses an index that points anywhere but Google’s Chrome for Testing downloads', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'addons-'))
+    const routes = await shelf()
+    routes[CFT_INDEX] = JSON.stringify({ channels: { Stable: { version: '1', downloads: { chrome: [{ platform: 'win64', url: 'https://evil.example/chrome-win64.zip' }] } } } })
+    const asked: string[] = []
+    const counting = (async (url: string | URL | Request) => {
+      asked.push(String(url))
+      return (serve(routes) as unknown as (u: string) => Promise<Response>)(String(url))
+    }) as unknown as typeof fetch
+    const addOns = new AddOns(dir, () => {}, counting, 'win32', 'x64', crxZip)
+    await addOns.set({ ads: true })
+    expect(addOns.bin).toBe('')
+    expect(addOns.info?.browser.error).toMatch(/isn't Google's/)
+    expect(asked.some((u) => u.includes('evil.example'))).toBe(false)
+  })
+})
+
+// A zip entry as a Unix tool writes it: the mode in the high half of the external attributes.
+const unixZip = async (files: { name: string; body: string; mode: number }[]): Promise<Buffer> => {
+  const z = new JSZip()
+  for (const f of files) z.file(f.name, f.body, { unixPermissions: f.mode })
+  return Buffer.from(await z.generateAsync({ type: 'nodebuffer', platform: 'UNIX' }))
+}
+
+describe.skipIf(process.platform === 'win32')('a browser unpacked on Mac and Linux', () => {
+  const caps = { file: 1024 * 1024, total: 1024 * 1024 }
+
+  it('keeps its helpers runnable and its framework links as links', async () => {
+    const to = mkdtempSync(join(tmpdir(), 'unzip-'))
+    const buf = await unixZip([
+      { name: 'App/Versions/1/Helper', body: '#!/bin/sh', mode: 0o100755 },
+      { name: 'App/Versions/1/data.pak', body: 'data', mode: 0o100644 },
+      { name: 'App/Versions/Current', body: '1', mode: 0o120755 }
+    ])
+    extractZip(zipFromBuffer(buf), to, caps, { unix: true })
+    expect(statSync(join(to, 'App/Versions/1/Helper')).mode & 0o111).not.toBe(0)
+    expect(statSync(join(to, 'App/Versions/1/data.pak')).mode & 0o111).toBe(0)
+    expect(lstatSync(join(to, 'App/Versions/Current')).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(join(to, 'App/Versions/Current'))).toBe('1')
+  })
+
+  it('refuses a link out of the folder, and a file written through a link', async () => {
+    for (const target of ['/etc', '../../outside', 'a/../../..']) {
+      const to = mkdtempSync(join(tmpdir(), 'unzip-'))
+      const buf = await unixZip([{ name: 'App/link', body: target, mode: 0o120755 }])
+      expect(() => extractZip(zipFromBuffer(buf), to, caps, { unix: true }), target).toThrow(/link out of its folder/)
+    }
+    const to = mkdtempSync(join(tmpdir(), 'unzip-'))
+    const through = await unixZip([
+      { name: 'App/a/link', body: '..', mode: 0o120755 },
+      { name: 'App/a/link/evil', body: 'x', mode: 0o100644 }
+    ])
+    expect(() => extractZip(zipFromBuffer(through), to, caps, { unix: true })).toThrow(/through a link/)
+  })
+
+  it('writes a link as a plain file everywhere else, so an imported vault gains no links', async () => {
+    const to = mkdtempSync(join(tmpdir(), 'unzip-'))
+    const buf = await unixZip([{ name: 'vault/note', body: '/etc/passwd', mode: 0o120755 }])
+    extractZip(zipFromBuffer(buf), to, caps)
+    expect(lstatSync(join(to, 'vault/note')).isSymbolicLink()).toBe(false)
+  })
+})
+
 describe('which Chrome for Testing a computer takes', () => {
   it('names every system’s download', () => {
     expect(cftPlatform('win32', 'x64')).toBe('win64')
@@ -96,7 +219,7 @@ describe('installing them, one switch each', () => {
       return (serve(routes) as unknown as (u: string) => Promise<Response>)(String(url))
     }) as unknown as typeof fetch
     let changes = 0
-    const addOns = new AddOns(dir, () => changes++, counting, 'win32', 'x64')
+    const addOns = new AddOns(dir, () => changes++, counting, 'win32', 'x64', crxZip)
     // Nothing is switched on: no download is anybody's idea of a good time, and no row to speak of.
     expect(addOns.ready).toBe(false)
     expect(addOns.info).toBeUndefined()
@@ -107,7 +230,7 @@ describe('installing them, one switch each', () => {
     expect(addOns.info?.extensions.consent?.state).toBe('ready')
     expect(addOns.info?.browser.state).toBe('ready')
     // Three .crx from the store, the index, and the browser's own zip.
-    expect(asked).toEqual([...ADD_ONS.map((e) => crxUrl(e.id)), CFT_INDEX, 'https://example.test/win64.zip'])
+    expect(asked).toEqual([...ADD_ONS.map((e) => crxUrl(e.id)), CFT_INDEX, 'https://storage.googleapis.com/chrome-for-testing-public/win64.zip'])
     expect(changes).toBeGreaterThan(1)
     // Each one in its own folder, with the file Chrome reads at the top of it.
     expect(addOns.dirs).toHaveLength(3)
@@ -126,7 +249,7 @@ describe('installing them, one switch each', () => {
     // A later start reads what is on disk and asks the network for nothing.
     const offline = new AddOns(dir, () => {}, (async () => {
       throw new Error('the network must not be asked')
-    }) as unknown as typeof fetch, 'win32', 'x64')
+    }) as unknown as typeof fetch, 'win32', 'x64', crxZip)
     await offline.set(all)
     expect(offline.ready).toBe(true)
     expect(offline.dirs).toEqual(addOns.dirs)
@@ -140,14 +263,14 @@ describe('installing them, one switch each', () => {
       asked.push(String(url))
       return (serve(await shelf()) as unknown as (u: string) => Promise<Response>)(String(url))
     }) as unknown as typeof fetch
-    const addOns = new AddOns(dir, () => {}, counting, 'win32', 'x64')
+    const addOns = new AddOns(dir, () => {}, counting, 'win32', 'x64', crxZip)
     const ads = ADD_ONS[0]!
     const consent = ADD_ONS[2]!
 
     // One switch on: the ad blocker and the browser it needs, and nothing of the other two.
     await addOns.set({ ads: true })
     expect(addOns.dirs).toEqual([join(dir, 'extensions', ads.id)])
-    expect(asked).toEqual([crxUrl(ads.id), CFT_INDEX, 'https://example.test/win64.zip'])
+    expect(asked).toEqual([crxUrl(ads.id), CFT_INDEX, 'https://storage.googleapis.com/chrome-for-testing-public/win64.zip'])
     expect(existsSync(join(dir, 'extensions', consent.id))).toBe(false)
 
     // A second one on: only its own folder is fetched.
@@ -187,7 +310,7 @@ describe('installing them, one switch each', () => {
     expect(addOnsOf({ cookies: true })).toEqual({ cookies: true })
     expect(addOnOn(true, 'consent')).toBe(true)
     expect(addOnOn({ ads: true }, 'consent')).toBe(false)
-    const addOns = new AddOns(dir, () => {}, serve(await shelf()), 'win32', 'x64')
+    const addOns = new AddOns(dir, () => {}, serve(await shelf()), 'win32', 'x64', crxZip)
     await addOns.set(true)
     expect(addOns.dirs).toHaveLength(3)
   })
@@ -197,7 +320,7 @@ describe('installing them, one switch each', () => {
     const routes = await shelf()
     // The last extension's id is missing from the shelf: the store answers 404.
     delete routes[crxUrl(ADD_ONS[2]!.id)]
-    const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64')
+    const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64', crxZip)
     await addOns.set(all)
     expect(addOns.info?.extensions.consent?.state).toBe('failed')
     expect(addOns.info?.extensions.consent?.error).toMatch(/404/)
@@ -212,7 +335,7 @@ describe('installing them, one switch each', () => {
     const retry = new AddOns(dir, () => {}, (async (url: string | URL | Request) => {
       asked.push(String(url))
       return (serve(await shelf()) as unknown as (u: string) => Promise<Response>)(String(url))
-    }) as unknown as typeof fetch, 'win32', 'x64')
+    }) as unknown as typeof fetch, 'win32', 'x64', crxZip)
     await retry.set(all)
     expect(retry.ready).toBe(true)
     expect(asked).toEqual([crxUrl(ADD_ONS[2]!.id)])
@@ -222,7 +345,7 @@ describe('installing them, one switch each', () => {
     const dir = mkdtempSync(join(tmpdir(), 'addons-'))
     const routes = index(await shelf())
     routes[crxUrl(ADD_ONS[1]!.id)] = crxOf(await zipOf({ 'readme.txt': 'not an extension' }))
-    const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64')
+    const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64', crxZip)
     await addOns.set(all)
     expect(addOns.info?.extensions.cookies?.state).toBe('failed')
     expect(addOns.info?.extensions.cookies?.error).toMatch(/without the file Chrome reads/)
@@ -233,7 +356,7 @@ describe('installing them, one switch each', () => {
 
   it('refuses a browser download with no program inside it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'addons-'))
-    const addOns = new AddOns(dir, () => {}, serve(await shelf(['chrome-win64/README.txt'])), 'win32', 'x64')
+    const addOns = new AddOns(dir, () => {}, serve(await shelf(['chrome-win64/README.txt'])), 'win32', 'x64', crxZip)
     await addOns.set(all)
     expect(addOns.info?.browser.state).toBe('failed')
     expect(addOns.info?.browser.error).toMatch(/without the program inside/)
@@ -249,7 +372,7 @@ describe('installing them, one switch each', () => {
     // The browser's zip arrives a byte at a time and never finishes on its own.
     const fast = serve(routes) as unknown as (u: string, init?: RequestInit) => Promise<Response>
     const slow = (async (url: string | URL | Request, init?: RequestInit) => {
-      if (String(url) !== 'https://example.test/win64.zip') return fast(String(url), init)
+      if (String(url) !== 'https://storage.googleapis.com/chrome-for-testing-public/win64.zip') return fast(String(url), init)
       const signal = init?.signal
       const body = new ReadableStream({
         start(c) {
@@ -259,7 +382,7 @@ describe('installing them, one switch each', () => {
       })
       return new Response(body)
     }) as unknown as typeof fetch
-    const addOns = new AddOns(dir, () => {}, slow, 'win32', 'x64')
+    const addOns = new AddOns(dir, () => {}, slow, 'win32', 'x64', crxZip)
     const p = addOns.set(all)
     await new Promise((r) => setTimeout(r, 150))
     expect(addOns.info?.browser.state).toBe('preparing')

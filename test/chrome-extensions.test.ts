@@ -55,6 +55,9 @@ describe.skipIf(!CFT || !existsSync(CFT))('a lane with the add-ons in it', () =>
     const text = await withAddOns.run('lane', 'text')
     expect(text.text).toContain('the site')
     expect(text.text).toContain(MARK)
+    // Its own profile: Chrome for Testing deletes the branded build's cookies when it opens them.
+    expect(existsSync(join(dir, 'a', 'lane.extensions'))).toBe(true)
+    expect(existsSync(join(dir, 'a', 'lane'))).toBe(false)
   })
 
   it('reads the same page without it when the lane carries none', async () => {

@@ -33,7 +33,7 @@ export function AgentAddOns(): ReactNode {
       )}
       {browser?.state === 'failed' && (
         <p className="field__error">
-          {L('O Chrome for Testing não baixou: ', 'Chrome for Testing didn’t download: ')}
+          {L('O Chrome for Testing não está disponível: ', 'Chrome for Testing isn’t available: ')}
           {browser.error ?? ''}
         </p>
       )}
@@ -55,6 +55,7 @@ export function AgentAddOns(): ReactNode {
               )}
             </div>
             <Toggle
+              label={extension.name}
               on={addOnOn(stored, extension.key)}
               onChange={(v) => updateSettings({ browserAddOns: { ...addOnsOf(stored), [extension.key]: v } })}
             />

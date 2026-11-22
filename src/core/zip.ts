@@ -1,8 +1,8 @@
 // Reads a .zip without a library: the central directory for the list, then only the entries asked for,
 // stored or deflated. Nothing is written to disk (extractZip, below, is the one that does). Each entry has a cap, checked before inflating, so a
 // small file that claims to unpack into gigabytes is refused. No ZIP64 (files over 4 GB), no encryption.
-import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join } from 'node:path'
+import { chmodSync, closeSync, fstatSync, mkdirSync, openSync, readSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { L } from '../shared/lang'
 
@@ -12,6 +12,7 @@ export interface ZipEntry {
   compressed: number
   method: number // 0 stored, 8 deflate
   offset: number // of its local header
+  mode?: number // its Unix file mode, when a Unix tool made the .zip
 }
 
 export interface Zip {
@@ -47,6 +48,7 @@ function open(size: number, at: At, close: () => void): Zip {
   let p = 0
   for (let i = 0; i < count; i++) {
     if (p + 46 > dir.length || dir.readUInt32LE(p) !== CENTRAL) throw broken()
+    const madeOnUnix = dir.readUInt8(p + 5) === 3
     const flags = dir.readUInt16LE(p + 8)
     const method = dir.readUInt16LE(p + 10)
     const compressed = dir.readUInt32LE(p + 20)
@@ -54,11 +56,12 @@ function open(size: number, at: At, close: () => void): Zip {
     const nameLen = dir.readUInt16LE(p + 28)
     const extraLen = dir.readUInt16LE(p + 30)
     const commentLen = dir.readUInt16LE(p + 32)
+    const mode = madeOnUnix ? dir.readUInt32LE(p + 38) >>> 16 : undefined
     const offset = dir.readUInt32LE(p + 42)
     const name = dir.subarray(p + 46, p + 46 + nameLen).toString(flags & 0x800 ? 'utf8' : 'latin1')
     p += 46 + nameLen + extraLen + commentLen
     if (flags & 1) continue // encrypted: never read
-    if (!name.endsWith('/')) entries.set(name, { name, size: usize, compressed, method, offset })
+    if (!name.endsWith('/')) entries.set(name, { name, size: usize, compressed, method, offset, ...(mode ? { mode } : {}) })
   }
   return {
     entries,
@@ -112,9 +115,12 @@ export function zipFromFile(path: string): Zip {
 // A whole .zip into a folder (a vault sent from another computer): only plain relative paths
 // (never absolute, never "..", never macOS's __MACOSX copies), each file and the total capped.
 // A single folder at the top, as zipping a folder makes, becomes the root. Returns that root.
-export function extractZip(zip: Zip, to: string, caps = { file: 50 * 1024 * 1024, total: 1024 * 1024 * 1024 }): string {
+// `unix` keeps what a program needs from a Unix .zip: its run bit and its symlinks (a Mac app's
+// frameworks are made of them). A link stays inside the folder, and nothing is written through one.
+export function extractZip(zip: Zip, to: string, caps = { file: 50 * 1024 * 1024, total: 1024 * 1024 * 1024 }, opts: { unix?: boolean } = {}): string {
   let total = 0
   const tops = new Set<string>()
+  const links = new Set<string>()
   for (const e of zip.entries.values()) {
     const name = e.name.replace(/\\/g, '/')
     if (name.endsWith('/') || name.startsWith('__MACOSX/') || /(^|\/)\.DS_Store$/.test(name)) continue
@@ -125,8 +131,22 @@ export function extractZip(zip: Zip, to: string, caps = { file: 50 * 1024 * 1024
     const data = zip.read(e.name, caps.file)
     if (!data) continue
     const file = join(to, ...parts)
+    if (opts.unix && parts.some((_, i) => i > 0 && links.has(parts.slice(0, i).join('/')))) throw new Error(L(`O .zip escreve através de um link: ${name}`, `The .zip writes through a link: ${name}`))
     mkdirSync(dirname(file), { recursive: true })
+    if (opts.unix && e.mode !== undefined && (e.mode & 0o170000) === 0o120000) {
+      const target = data.toString('utf8')
+      const steps = target.split('/')
+      const firstName = steps.findIndex((x) => x !== '..')
+      const inside = relative(resolve(to), resolve(dirname(file), target))
+      if (!target || isAbsolute(target) || target.includes('\\') || (firstName >= 0 && steps.slice(firstName).includes('..')) || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside))
+        throw new Error(L(`O .zip tem um link pra fora da pasta: ${name}`, `The .zip has a link out of its folder: ${name}`))
+      symlinkSync(target, file)
+      links.add(parts.join('/'))
+      tops.add(parts.length > 1 ? parts[0]! : '')
+      continue
+    }
     writeFileSync(file, data)
+    if (opts.unix && e.mode !== undefined && e.mode & 0o111) chmodSync(file, 0o755)
     tops.add(parts.length > 1 ? parts[0]! : '')
   }
   return tops.size === 1 && !tops.has('') ? join(to, [...tops][0]!) : to

@@ -3693,8 +3693,8 @@ export function SettingsPage(): ReactNode {
               title={L('Extensões do navegador', 'Browser Extensions')}
               section="agents-addons"
               lead={L(
-                'O navegador dos agentes roda com as extensões que você ligar, para o agente ler a própria página: nenhum aviso de cookies ou anúncio fica por cima dela. Cada uma é um interruptor; as três dividem 215 MB de Chrome for Testing.',
-                'The agents’ browser runs with the extensions you turn on, so what an agent reads is the page itself: no cookie notice or ad sits over it. Each has its own switch; the three share one 215 MB Chrome for Testing download.'
+                'O navegador dos agentes roda com as extensões que você ligar, para o agente ler a própria página: nenhum aviso de cookies ou anúncio fica por cima dela. Cada uma é um interruptor; as três dividem 215 MB de Chrome for Testing. Esse navegador guarda logins próprios: o agente entra de novo nos sites, e os de antes voltam quando você desliga.',
+                'The agents’ browser runs with the extensions you turn on, so what an agent reads is the page itself: no cookie notice or ad sits over it. Each has its own switch; the three share one 215 MB Chrome for Testing download. That browser keeps its own sign-ins: agents sign in to sites again, and the earlier ones come back when you turn them off.'
               )}
             >
               <AgentAddOns />

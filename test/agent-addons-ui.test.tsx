@@ -102,7 +102,7 @@ describe('the extensions an agent’s browser can carry', () => {
 
     settings = { ...base, browserAddOns: { ads: true }, addOns: { browser: { state: 'failed', error: 'The Chrome for Testing list answered 500.' }, extensions: { ads: { state: 'ready' } } } }
     await render()
-    expect(document.body.textContent).toContain('Chrome for Testing didn’t download: The Chrome for Testing list answered 500.')
+    expect(document.body.textContent).toContain('Chrome for Testing isn’t available: The Chrome for Testing list answered 500.')
     expect(rowOf('uBlock Origin Lite').textContent).not.toContain('didn’t download')
   })
 })

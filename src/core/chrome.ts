@@ -244,6 +244,7 @@ export class ChromeBrowsers {
   // What each lane was started with (browser and extension folders), so a switch turned on under an open
   // lane is not waited for until the app restarts: the next op gets a lane with what the switches say.
   private launchedWith = new Map<string, string>()
+  private brokenWith = '' // the set that wouldn't start on this computer: the lane stays on its own browser
   private starting = new Map<string, Promise<Tab>>()
   private handingBack = new Set<string>()
   private used = new Map<string, number>() // when each agent last asked its Chrome for something
@@ -267,7 +268,7 @@ export class ChromeBrowsers {
     // The browser's own extensions, when they're here (core/chrome-addons.ts): Chrome for Testing, the
     // only build that still takes a folder of them, and where they are. Read at every launch, so one
     // that lands while a lane is running is in the next lane, without closing the page an agent is on.
-    private addOns?: { bin: string; dirs: string[] }
+    private addOns?: { bin: string; dirs: string[]; launchFailed?: (why: string) => void }
   ) {
     process.on('exit', () => this.quit())
     if (idleMs) setInterval(() => void this.closeIdle(), Math.min(60_000, Math.max(100, idleMs / 2))).unref()
@@ -301,24 +302,27 @@ export class ChromeBrowsers {
     this.launchedWith.clear()
   }
 
-  private profile(agentId: string): string {
-    return join(this.dir, agentId)
+  // A lane with extensions has a profile of its own. Chrome for Testing can't decrypt the cookies the
+  // branded build saved, and it deletes what it can't read: sharing the folder would sign the agent out
+  // of every site for good, even after the extensions are turned off again.
+  private profile(agentId: string, carried = false): string {
+    return join(this.dir, carried ? `${agentId}.extensions` : agentId)
   }
 
-  // The browser and the extension folders this lane would be started with now: the switch's answer, read
-  // at every launch rather than once (core/chrome-addons.ts downloads them in the background).
+  // The browser and the extension folders a lane runs with now, or '' for the browser the app found. It
+  // changes only when Chrome for Testing and something to carry are both here: each extension landing
+  // during the download is not a reason to restart the page an agent is on.
   private wanted(): string {
-    return this.addOns ? `${this.addOns.bin}|${this.addOns.dirs.join('|')}` : ''
-  }
-
-  // Chrome for Testing only when it has extensions to carry: the branded build ignores --load-extension
-  // since 158. With none switched on, the browser the app found.
-  private get chromeBin(): string {
-    return this.addOns?.bin && this.addOns.dirs.length > 0 ? this.addOns.bin : this.bin
+    const a = this.addOns
+    if (!a?.bin || !a.dirs.length) return ''
+    const set = `${a.bin}|${a.dirs.join('|')}`
+    return set === this.brokenWith ? '' : set
   }
 
   private async launch(agentId: string, headed: boolean): Promise<Tab> {
-    const profile = this.profile(agentId)
+    // Never in a throwaway screenshot ('.shot-'): that one draws the person's own page as the page is.
+    const carried = agentId.startsWith('.shot-') ? '' : this.wanted()
+    const profile = this.profile(agentId, !!carried)
     mkdirSync(profile, { recursive: true })
     const downloads = agentId.startsWith('.shot-') ? undefined : this.downloads?.(agentId)
     if (downloads) pdfsDownload(profile)
@@ -330,7 +334,7 @@ export class ChromeBrowsers {
         for (let i = 0; i < 50 && alive(pid); i++) await wait(200)
       }
     } catch {}
-    const load = agentId.startsWith('.shot-') ? [] : (this.addOns?.dirs ?? [])
+    const load = carried ? this.addOns!.dirs : []
     const args = [
       `--user-data-dir=${profile}`,
       '--remote-debugging-pipe',
@@ -341,19 +345,19 @@ export class ChromeBrowsers {
       '--deny-permission-prompts',
       ...chromeKeyringFlags(),
       `--window-size=${W},${H}`,
-      // The ad blocker and the two cookie-notice removers, as folders. Never in a throwaway screenshot
-      // ('.shot-'): that one draws the person's own page as the page is.
+      // The ad blocker and the two cookie-notice removers, as folders.
       ...(load.length ? [`--load-extension=${load.join(',')}`] : []),
       ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
       // Never a page on this line: Chrome can drop what it's handed at startup, and a blank page is what an
       // agent then reads. The page comes from navigate() below, once the lane is answering.
       'about:blank'
     ]
-    const proc = spawn(this.chromeBin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
+    const proc = spawn(carried ? this.addOns!.bin : this.bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
     const onFrame = this.onFrame
     const tab = new Tab(proc, headed, onFrame && ((jpeg) => onFrame(agentId, jpeg)))
     let timer: ReturnType<typeof setTimeout> | undefined
     const failed = new Promise<never>((_, reject) => {
+      proc.once('error', reject) // the program isn't there, or can't be run
       proc.once('exit', () => reject(new Error(L('o Chrome fechou logo ao abrir', 'Chrome closed right after opening'))))
       // The first open on a computer can be slow, with nothing of Chrome in memory yet. As long as any other answer gets (see send).
       // 90 s, not 30: a cold Chrome with a brand-new profile took 22 s on GitHub's Windows runner and
@@ -366,6 +370,14 @@ export class ChromeBrowsers {
       await this.watchDownloads(tab, downloads)
     } catch (e) {
       proc.kill()
+      if (carried) {
+        // A browser that won't start here is no reason to lose the one that did.
+        clearTimeout(timer)
+        await exited(proc, 3000)
+        this.brokenWith = carried
+        this.addOns?.launchFailed?.(e instanceof Error ? e.message : String(e))
+        return this.launch(agentId, headed)
+      }
       throw e
     } finally {
       clearTimeout(timer)
@@ -378,7 +390,7 @@ export class ChromeBrowsers {
     })
     if (headed) tab.closedAll = () => this.handBack(agentId, tab.url)
     this.tabs.set(agentId, tab)
-    this.launchedWith.set(agentId, this.wanted())
+    this.launchedWith.set(agentId, carried)
     return tab
   }
 
@@ -436,7 +448,7 @@ export class ChromeBrowsers {
     const t = this.tabs.get(agentId)
     if (t) {
       // A window the person took over is theirs until they hand it back: nothing restarts under it.
-      if (t.headed || this.launchedWith.get(agentId) === this.wanted()) return t
+      if (t.headed || agentId.startsWith('.shot-') || this.launchedWith.get(agentId) === this.wanted()) return t
       // This one was started with a different set of extensions: a switch was turned on (or off) while it
       // was open, or the download landed. Without this it keeps the old set for as long as it lives — on a
       // Mac with no idle close, for the whole session. It closes the way an idle one does (cookies are
@@ -510,6 +522,7 @@ export class ChromeBrowsers {
       }
       if (op === 'clear') {
         rmSync(this.profile(agentId), { recursive: true, force: true })
+        rmSync(this.profile(agentId, true), { recursive: true, force: true })
       }
       return { url: '', title: '' }
     }
