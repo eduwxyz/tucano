@@ -7,11 +7,16 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
 > - **Novo:** um agente pode deixar os **próximos passos** num cartão de caixas de marcar, todas vazias. O que você marcar volta como a sua mensagem; se preferir escrever outra coisa, o cartão não atrapalha nem fica esperando você.
+> - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 
 ### Added
 
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
 - **An agent can leave its next steps in a card of checkboxes.** When a piece of work reaches a point with concrete ways to go on, the agent can propose 1 to 6 of them with the new `next_steps` tool instead of burying them in its text. The card opens with nothing ticked: **Do these** sends what you tick as your next message, **Another step…** takes one written by hand, and **Skip** answers without choosing. It holds nothing up: the reply is finished, it stays out of For you, it takes no slot in **Replies at once**, and a message written instead is a new request, not an answer to the card. In a team, only the person it was proposed to, whoever covers for them or an admin can answer it. Thanks to Apostol Apostolov. (#298)
+
+### Changed
+
+- **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
 
 ## [0.2.45] - 2026-11-22
 
