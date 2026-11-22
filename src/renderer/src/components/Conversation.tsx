@@ -363,7 +363,8 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 // `focus` / `focusKey`: bring one message into view and flash it, and again every time the key changes
 // (pressing the same drawer row twice moves again instead of doing nothing).
 // `threadId`: the thread this list is drawn in, so a reply written under one of its rows answers there.
-export function MessageList({ messages: all, replies, older, conversationId, threadId, empty, focus, focusKey, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; threadId?: string; empty?: boolean; focus?: string; focusKey?: number; lead?: ReactNode }): ReactNode {
+// `lead`: the message the thread starts from, drawn above its replies; `divider`: the line under it.
+export function MessageList({ messages: all, replies, older, conversationId, threadId, empty, focus, focusKey, lead, divider }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; threadId?: string; empty?: boolean; focus?: string; focusKey?: number; lead?: Message; divider?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
@@ -411,8 +412,7 @@ export function MessageList({ messages: all, replies, older, conversationId, thr
     const keys = (e: KeyboardEvent): void => {
       if (!isReplyShortcut(e, mac)) return
       const row = selectionRow(ref.current)
-      // The thread's own message is drawn as its lead, outside this list: the store still has it.
-      const message = row?.dataset.id ? (messages.find((m) => m.id === row.dataset.id) ?? messageById(getState(), row.dataset.id, conversationId)) : undefined
+      const message = row?.dataset.id === lead?.id ? lead : messages.find((m) => m.id === row?.dataset.id)
       const quote = row ? selectedQuote(row) : undefined
       if (!message || !quote || message.run?.status === 'working') return
       e.preventDefault()
@@ -543,7 +543,7 @@ export function MessageList({ messages: all, replies, older, conversationId, thr
       }}
     >
       {loading && <div className="messages__older muted small">{L('Carregando mensagens anteriores…', 'Loading earlier messages…')}</div>}
-      {lead}
+      {lead && <ThreadHead message={lead} replyKey={replyKey} divider={divider} quote={selection?.messageId === lead.id ? selection.quote : undefined} />}
       {shown.map((item, i) => {
         if (item.kind === 'no-news') return <NoNewsLine key={item.key} line={item} focus={holder === item ? focus : undefined} replies={replies} />
         const m = item.message
@@ -583,6 +583,17 @@ const NO_ATTACHED: Artifact[] = []
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
 // `quote`: the excerpt of this message selected in the page, for the reply button under it.
+// The message a thread starts from, with the line that counts its replies: the panel hands it to
+// MessageList as the lead, and it answers in the thread's own composer like every row under it.
+export function ThreadHead({ message, replyKey, divider, quote }: { message: Message; replyKey: string; divider?: ReactNode; quote?: string }): ReactNode {
+  return (
+    <div className="thread__lead">
+      <MessageRow message={message} grouped={false} replyKey={replyKey} quote={quote} />
+      {divider}
+    </div>
+  )
+}
+
 // `replyKey`: the composer it answers in (the thread it is in, or the conversation).
 const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies, quote, replyKey = message.conversationId }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[]; quote?: string; replyKey?: string }): ReactNode {
   const [menu, setMenu] = useState<MenuState>(null)
@@ -1367,7 +1378,16 @@ function ThreadPanel({ rootId, conv, title, members, focusId, focusKey, onJump }
       {root?.conversationId === conv.id ? (
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
-          <MessageList key={rootId} messages={replies} conversationId={conv.id} threadId={rootId} lead={lead} {...(focusId ? { focus: focusId } : {})} {...(focusKey ? { focusKey } : {})} />
+          <MessageList
+            key={rootId}
+            messages={replies}
+            conversationId={conv.id}
+            threadId={rootId}
+            lead={root}
+            divider={divider}
+            {...(focusId ? { focus: focusId } : {})}
+            {...(focusKey ? { focusKey } : {})}
+          />
           <Composer conversationId={conv.id} threadId={rootId} members={members} {...(onJump ? { onJump } : {})} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
