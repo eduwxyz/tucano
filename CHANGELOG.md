@@ -4,17 +4,22 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.45] - 2026-11-22
+
 > **Em português:**
-> - **Novo:** **oriente uma resposta em curso** pela linha dos passos dela. Enquanto um agente trabalha, um botão compacto **Orientar** fica ao lado de **Parar**; ele abre um campo sob a caixa dos passos, e o que você escreve vai para aquela resposta no próximo chamado de ferramenta dela, com Ctrl+Enter ou o botão, e Esc fecha sem enviar nada. Uma orientação não é um prompt: nada dela é publicado no canal ou na DM, e ela aparece na cadeia da resposta como uma linha própria, com as suas palavras, que passa de em curso para lida quando a resposta a recebe no chamado seguinte. Uma resposta que termina antes de ler deixa aquela linha na cadeia, marcada como não lida, em vez de virar uma mensagem. Com nada em curso ali, o mesmo texto é um prompt comum, e a pílula some com o trabalho.
-> - **Corrigido:** o campo de uma orientação abre na largura da cadeia, de onde o texto dos passos começa até onde ela termina, em janela larga e estreita, sem rolagem lateral.
-> - **Novo:** veja **o que o modelo pensa** enquanto responde. Ligue em Configurações › Você › Conversas › **O que o modelo pensa**: o raciocínio aparece ao vivo em letra pequena e apagada embaixo dos passos e, quando a resposta acaba, fica dobrado numa linha **Pensou** que um clique abre. Vem desligado, e é de cada pessoa. Por enquanto só os agentes que rodam no Pi mandam o raciocínio.
-> - **Novo:** um prompt novo numa conversa que já está respondendo ganha uma resposta própria, ao lado das que estão em curso, até o limite de **Configurações › Agentes › Respostas** (uma por vez, até 2, 3, 4 ou 6, o padrão). Passando do limite, ele espera na fila, diz que está esperando, e continua na fila mesmo se o app fechar. Na página de um agente, **Uma resposta por vez** faz o próximo prompt para ele esperar a resposta em curso, em qualquer conversa. O Enter só envia: orientar uma resposta é pelo botão dela, e parar é pelo **Parar**. Rotinas, **Tentar de novo** e **Continuar** também rodam ao lado da resposta que já está ali, em vez de esperar.
-> - **Novo:** **cancele uma pergunta** de um agente que você não quer responder: o botão **Cancelar** no cartão da pergunta e no Quadro fecha a pergunta sem rodar o agente. Num trabalho passado de um agente pra outro, quem faz o trabalho segue sem a resposta, dizendo o que assumiu.
-> - **Novo:** o **Tuca escreve feedback** pra quem faz o Tucano quando você conta um problema ou uma ideia. Vira um cartão embaixo da resposta dele; **Revisar e enviar** abre a janela de feedback já preenchida, e quem envia é você.
-> - **Novo:** num servidor, quando um computador emprestado que um agente usa está **desligado**, uma linha discreta acima do campo da DM avisa, e o cartão do agente mostra cada computador como conectado ou desligado.
-> - **Mudou:** um **servidor aberto no app** ocupa a janela toda, sem a barra por cima. O menu do workspace dele lista **Neste computador** e **Servidores** e troca entre eles, e as Configurações do servidor dizem no topo que valem lá.
-> - **Mudou:** na aba Ferramentas do agente, **Onde trabalha** mostra numa frase onde ele roda comandos e junta o servidor e todos os computadores emprestados. O seu liga e desliga ali; o de outra pessoa aparece, mas só ela libera.
-> - **Mudou:** o **chat fica mais largo** em telas grandes; uma thread, um arquivo ou uma página da Wiki **expande** por cima da página; e os Conectores ganham **filtros por categoria**.
+> - **Novo:** um prompt novo numa conversa que já está respondendo ganha **uma resposta própria, ao lado** das que estão em curso, até o limite de Configurações › Agentes › Respostas. Passando do limite, espera na fila. Na página do agente, **Uma resposta por vez** faz ele ir uma de cada vez.
+> - **Novo:** **oriente uma resposta em curso**: o botão **Orientar**, ao lado de **Parar**, manda o que você escreve pra aquela resposta no próximo passo dela, sem virar mensagem no canal.
+> - **Novo:** veja **o que o modelo pensa** enquanto responde, em letra pequena embaixo dos passos. Ligue em Configurações › Você › Conversas. Por enquanto, só nos agentes que rodam no Pi.
+> - **Novo:** **ordene a barra lateral toda à mão**: segure uma linha e solte onde quiser, ou use Alt+↑ e Alt+↓.
+> - **Novo:** **cancele uma pergunta** de um agente que você não quer responder, pelo botão **Cancelar** no cartão e no Quadro.
+> - **Novo:** o **Tuca escreve feedback** pra quem faz o Tucano quando você conta um problema ou uma ideia. Você revisa e envia.
+> - **Novo:** num servidor, quando um computador emprestado que um agente usa está **desligado**, a DM dele avisa.
+> - **Mudou:** um **servidor aberto no app** ocupa a janela toda, sem a barra por cima. O menu do workspace troca entre **Neste computador** e **Servidores**, e as Configurações do servidor dizem que valem lá.
+> - **Mudou:** na aba Ferramentas do agente, **Onde trabalha** junta o servidor e todos os computadores emprestados, com uma frase dizendo onde ele roda comandos.
+> - **Mudou:** as **Configurações** ficam em cinco grupos (Você, Agentes, Modelos, Conexões, Workspace), com uma busca.
+> - **Mudou:** o **chat fica mais largo** em telas grandes, uma thread, um arquivo ou uma página da Wiki **expande** por cima da página, e os Conectores ganham **filtros por categoria**.
+> - **Mudou:** uma **rotina desligada** continua na semana, apagada, em vez de sumir; e a engrenagem de uma DM abre a página do agente.
+> - **Mudou:** a interface em **inglês** ficou completa e mais clara.
 
 ### Added
 
