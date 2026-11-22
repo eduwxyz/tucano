@@ -102,7 +102,7 @@ import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } f
 import { ProposalCard } from './Tuca'
 import { confirmDeleteAgent, confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { Modal } from './Modal'
-import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, Icon, type IconName, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import { openFeedback } from './Feedback'
@@ -295,7 +295,7 @@ const LEVELS = (): { value: GrantLevel; label: string }[] => [
 
 // A section of a settings page: its title with a "?" that holds what used to be the paragraph
 // under it, then its rows in one box. `bare`: what's inside draws its own box (a text area, a list).
-export function Section({ title, help, aside, bare, children }: { title: string; help?: ReactNode; aside?: ReactNode; bare?: boolean; children: ReactNode }): ReactNode {
+export function Section({ title, help, aside, lead, bare, children }: { title: string; help?: ReactNode; aside?: ReactNode; lead?: ReactNode; bare?: boolean; children: ReactNode }): ReactNode {
   return (
     <section className="lgroup">
       <div className="lgroup__head">
@@ -303,6 +303,7 @@ export function Section({ title, help, aside, bare, children }: { title: string;
         {help && <Help about={title}>{help}</Help>}
         {aside && <span className="lgroup__aside">{aside}</span>}
       </div>
+      {lead && <p className="lgroup__lead">{lead}</p>}
       <div className={bare ? 'lgroup__bare' : 'lgroup__box'}>{children}</div>
     </section>
   )
@@ -1021,6 +1022,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {!isNew && pane('ferramentas') && (
             <ComputerCard
               agentId={draft.id}
+              name={draft.name || L('Ele', 'It')}
               kind={draft.computer ? (draft.computerKind ?? 'linux') : 'none'}
               onChange={(k) => patch({ computer: k !== 'none', computerKind: k === 'none' ? (draft.computerKind ?? 'linux') : k }, true)}
               grants={draft.grants}
@@ -1083,14 +1085,46 @@ const COMPUTER_STATE = (): Record<string, { label: string; tone: string }> => ({
 })
 
 type ComputerChoice = 'none' | 'linux' | 'mac'
-// On a server, "this computer" is the server: the person's own is lent to it (YourComputer).
+// The machine's own row: on a server it's the server; a person's own computer comes lent to it (LentRows).
 const COMPUTER_CHOICES = (server = windowless()): { value: ComputerChoice; label: string }[] => [
-  { value: 'none', label: L('Nenhum', 'None') },
+  { value: 'none', label: L('Não', 'No') },
   { value: 'linux', label: L('Linux isolado', 'Isolated Linux') },
-  { value: 'mac', label: server ? L('O servidor', 'The server') : L('Este computador', 'This computer') }
+  { value: 'mac', label: server ? L('Direto no servidor', 'Right on the server') : L('Direto no computador', 'Right on the computer') }
 ]
 
-function ComputerCard({ agentId, kind, onChange, grants, onGrant }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void; grants: Agent['grants']; onGrant: (connectorId: string, on: boolean) => void }): ReactNode {
+// One place an agent may work: the machine itself, or a computer someone lent the server.
+function WhereRow({ icon, name, sub, children }: { icon: IconName; name: ReactNode; sub?: ReactNode; children?: ReactNode }): ReactNode {
+  return (
+    <div className="lrow where-row">
+      <span className="where-row__icon" aria-hidden>
+        <Icon name={icon} size={15} />
+      </span>
+      <div className="lrow__label">
+        <div className="lrow__name">{name}</div>
+        {sub && <div className="lrow__sub">{sub}</div>}
+      </div>
+      {children !== undefined && <div className="lrow__ctl">{children}</div>}
+    </div>
+  )
+}
+
+// "Nina trabalha no servidor e no MacBook de Ana.": where its commands run, in one line, over the rows that change it.
+export function whereSummary(o: { name: string; server: boolean; kind: ComputerChoice; runs: boolean; lent: { name: string; on: boolean }[] }): string {
+  const places: string[] = []
+  if (o.runs && o.kind === 'linux') places.push(o.server ? L('num Linux isolado no servidor', 'in an isolated Linux on the server') : L('num Linux isolado neste computador', 'in an isolated Linux on this computer'))
+  if (o.runs && o.kind === 'mac') places.push(o.server ? L('direto no servidor', 'right on the server') : L('direto neste computador', 'right on this computer'))
+  for (const c of o.lent) places.push(L(`no ${c.name}`, `on ${c.name}`) + (c.on ? '' : L(' (desligado agora)', ' (off right now)')))
+  const and = L(' e ', ' and ')
+  const list = places.length > 1 ? `${places.slice(0, -1).join(', ')}${and}${places[places.length - 1]}` : places[0]
+  const head = list
+    ? L(`${o.name} trabalha ${list}.`, `${o.name} works ${list}.`)
+    : L(`${o.name} não roda comandos em nenhum computador: conversa, pesquisa e usa os conectores.`, `${o.name} runs commands on no computer: it talks, searches and uses the connectors.`)
+  const lent = o.lent.length ? L(' Num computador emprestado, só quando trabalha pra quem emprestou.', ' On a lent computer, only when working for whoever lent it.') : ''
+  const brain = o.server ? L(' A conversa e a memória ficam sempre no servidor.', ' Its conversations and memory always stay on the server.') : ''
+  return head + lent + brain
+}
+
+function ComputerCard({ agentId, name, kind, onChange, grants, onGrant }: { agentId: string; name: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void; grants: Agent['grants']; onGrant: (connectorId: string, on: boolean) => void }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
   // Looking is anyone's; starting, stopping, erasing and opening its folder, the admins'.
   const admin = useStore(amAdmin)
@@ -1109,17 +1143,31 @@ function ComputerCard({ agentId, kind, onChange, grants, onGrant }: { agentId: s
   const on = kind === 'linux' && !confirming && !dockerless
   const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
   const st = COMPUTER_STATE()[state]!
+  const lent = useStore(lentComputers)
+  const summary = whereSummary({ name, server, kind, runs: kind !== 'none' && !(kind === 'linux' && !isolated), lent: server ? lent.filter((c) => (grants[c.id] ?? 'none') !== 'none').map((c) => ({ name: c.name, on: c.status === 'connected' })) : [] })
 
   return (
     <Section
-      title={L('Computador', 'Computer')}
-      help={L(
-        'Onde ele roda comandos, instala, cria e testa. O Linux é uma máquina só dele, isolada do seu computador e sem credenciais. Neste computador, ele usa o que você já tem instalado, mas alcança tudo o que você alcança.',
-        'Where it runs commands, installs, builds and tests. Linux is a machine of its own, isolated from your computer and with no credentials. On this computer, it uses what you already have installed, but reaches everything you can.'
-      )}
+      title={L('Onde trabalha', 'Where it works')}
+      lead={summary}
+      help={
+        server
+          ? L(
+              'Onde ele roda comandos, instala, cria e testa: no servidor, ou num computador que alguém emprestou a este servidor pelo app do Tucano. Só quem emprestou um computador escolhe os agentes que o usam, e um agente só usa quando trabalha pra essa pessoa.',
+              'Where it runs commands, installs, builds and tests: on the server, or on a computer someone lent this server from the Tucano app. Only whoever lent a computer picks the agents that use it, and an agent uses it only when working for them.'
+            )
+          : L(
+              'Onde ele roda comandos, instala, cria e testa. O Linux é uma máquina só dele, isolada do seu computador e sem credenciais. Direto no computador, ele usa o que você já tem instalado, mas alcança tudo o que você alcança.',
+              'Where it runs commands, installs, builds and tests. Linux is a machine of its own, isolated from your computer and with no credentials. Right on the computer, it uses what you already have installed, but reaches everything you can.'
+            )
+      }
     >
-      <Row label={L('Onde roda os comandos', 'Where commands run')}>
-      <div className="segmented segmented--quiet" role="radiogroup" aria-label={L('Computador', 'Computer')}>
+      <WhereRow
+        icon={server ? 'globe' : 'laptop'}
+        name={server ? L('Servidor', 'Server') : L('Este computador', 'This computer')}
+        sub={server ? `${location.host} · ${L('sempre ligado', 'always on')}` : undefined}
+      >
+      <div className="segmented segmented--quiet" role="radiogroup" aria-label={server ? L('Servidor', 'Server') : L('Este computador', 'This computer')}>
         {COMPUTER_CHOICES()
           .filter((c) => c.value !== 'linux' || isolated || kind === 'linux') // on a server without Docker there's none to have
           .map((c) => (
@@ -1139,19 +1187,19 @@ function ComputerCard({ agentId, kind, onChange, grants, onGrant }: { agentId: s
             </button>
           ))}
       </div>
-      </Row>
+      </WhereRow>
       {dockerless && (
         <div className="lgroup__pad computer-body">
           <div className="computer">
             <span className="tag tag--warn">{L('sem Docker', 'no Docker')}</span>
             <span className="muted small grow">
               {L(
-                'Este servidor não tem Docker, então o Linux isolado não roda aqui. Pra rodar comandos, use o seu computador (abaixo), ou escolha Nenhum.',
-                'Docker is unavailable on this server. Use your computer below to run commands, or select None.'
+                'Este servidor não tem Docker, então o Linux isolado não roda aqui. Pra rodar comandos, use Direto no servidor ou um computador emprestado (abaixo), ou escolha Não.',
+                'Docker is unavailable on this server. Use Right on the server or a lent computer below to run commands, or select No.'
               )}
             </span>
             <button className="btn btn--sm" onClick={() => onChange('none')}>
-              {L('Trocar pra Nenhum', 'Switch to None')}
+              {L('Trocar pra Não', 'Switch to No')}
             </button>
           </div>
         </div>
@@ -1269,24 +1317,25 @@ function ComputerCard({ agentId, kind, onChange, grants, onGrant }: { agentId: s
         </>
       )}
       </div>}
-      {server && (
-        <div className="lgroup__pad computer-body">
-          <YourComputer grants={grants} onGrant={onGrant} />
-        </div>
-      )}
+      {server && <LentRows grants={grants} onGrant={onGrant} />}
     </Section>
   )
 }
 
-// On a server, the computers the viewer lent it from the desktop app (docs/local-node.md): each is a connector
-// of their own. Someone else's never shows here.
-const myComputers = (s: { connectors: Connector[]; people: { id: string; role: string }[]; you: string }): Connector[] => {
-  const owner = s.people.find((p) => p.role === 'owner')?.id
-  return s.connectors.filter((c) => {
+// On a server, the computers people lent it from the desktop app (docs/local-node.md): each is a connector of
+// its person's (an unset owner is the Tucano owner), named by who lent it; the viewer's own first.
+type Lent = Connector & { owner: string; ownerName: string; mine: boolean }
+const lentComputers = (s: { connectors: Connector[]; people: { id: string; name: string; role: string }[]; you: string }): Lent[] => {
+  const boss = s.people.find((p) => p.role === 'owner')?.id
+  return s.connectors.flatMap((c) => {
     const node = nodeOf(c.url)
-    return !!node && (node.owner ?? owner) === s.you
-  })
+    if (!node) return []
+    const owner = node.owner ?? boss ?? ''
+    return [{ ...c, owner, ownerName: s.people.find((p) => p.id === owner)?.name ?? L('alguém', 'someone'), mine: owner === s.you }]
+  }).sort((a, b) => Number(b.mine) - Number(a.mine)) // the viewer's own first
 }
+// The ones the viewer lent: theirs to give to agents.
+const myComputers = (s: Parameters<typeof lentComputers>[0]): Lent[] => lentComputers(s).filter((c) => c.mine)
 // The agents that would use a computer once one is turned on or off: the ones that have it now, give or take one.
 const agentsWith = (connectorId: string, agentId: string, on: boolean): string[] => {
   const ids = getState()
@@ -1392,35 +1441,45 @@ function MyComputers(): ReactNode {
   )
 }
 
-// On a server, in an agent's Computer card: whether the viewer's own computer is lent, whether this agent has
-// it, and the one click that's missing (giving access, or lending it).
-function YourComputer({ grants, onGrant }: { grants: Agent['grants']; onGrant: (connectorId: string, on: boolean) => void }): ReactNode {
-  const mine = useStore(myComputers)
+// On a server, in an agent's "Onde trabalha": every computer lent to the server, connected or off. The viewer's own
+// turn on and off for this agent; someone else's only show, since only whoever lent one picks its agents
+// (core/people.ts shareComputer). With none of the viewer's lent, how to lend it.
+function LentRows({ grants, onGrant }: { grants: Agent['grants']; onGrant: (connectorId: string, on: boolean) => void }): ReactNode {
+  const lent = useStore(lentComputers)
+  const mine = lent.some((c) => c.mine)
   return (
-    <div className="your-computer">
-      <strong className="small">{L('Seu computador', 'Your computer')}</strong>
-      {mine.length === 0 ? (
-        <LendHint />
+    <>
+      {lent.map((c) => {
+        const has = (grants[c.id] ?? 'none') !== 'none'
+        const live = c.status === 'connected'
+        return (
+          <WhereRow
+            key={c.id}
+            icon="laptop"
+            name={c.name}
+            sub={
+              <>
+                {c.mine ? L('emprestado por você', 'lent by you') : L(`emprestado por ${c.ownerName}`, `lent by ${c.ownerName}`)} ·{' '}
+                <span className={`where-row__dot ${live ? 'is-on' : ''}`} aria-hidden /> {live ? L('conectado', 'connected') : L('desligado', 'off')}
+              </>
+            }
+          >
+            {!c.mine && <span className="muted small">{L(`só ${c.ownerName} libera`, `only ${c.ownerName} can change`)}</span>}
+            <Toggle on={has} disabled={!c.mine} label={L(`Usa o ${c.name}`, `Uses ${c.name}`)} onChange={(v) => onGrant(c.id, v)} />
+          </WhereRow>
+        )
+      })}
+      {mine ? (
+        <div className="where-foot muted small">
+          <Icon name="laptop" size={13} />
+          {L('Pra ele usar outro computador, empreste ele no app do Tucano de lá.', 'For it to use another computer, lend it from the Tucano app there.')}
+        </div>
       ) : (
-        mine.map((c) => {
-          const has = (grants[c.id] ?? 'none') !== 'none'
-          const live = c.status === 'connected'
-          return (
-            <div key={c.id} className="computer">
-              <span className={`tag ${live ? 'tag--ok' : ''}`}>{live ? L('ligado', 'connected') : L('desligado', 'off')}</span>
-              <span className="muted small grow">
-                {has
-                  ? L(`Ele usa o ${c.name} (terminal, pastas emprestadas e navegador) enquanto o app do Tucano estiver aberto lá.`, `It uses ${c.name} (terminal, lent folders and browser) while the Tucano app is open there.`)
-                  : L(`O ${c.name} está emprestado a este servidor, mas este agente ainda não usa.`, `${c.name} is lent to this server, but this agent doesn't use it yet.`)}
-              </span>
-              <button className={`btn btn--sm ${has ? 'btn--ghost' : 'btn--primary'}`} onClick={() => onGrant(c.id, !has)}>
-                {has ? L('Tirar o acesso', 'Take access away') : L('Dar acesso', 'Give access')}
-              </button>
-            </div>
-          )
-        })
+        <div className="lgroup__pad computer-body">
+          <LendHint />
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
