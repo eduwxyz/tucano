@@ -45,9 +45,13 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
     await new Promise((r) => server.close(r))
   })
 
-  // headless: window at 0, real window: outside the screen (Windows clamps -24000 to the edge, so the
-  // contract is "not on the screen", not the number that was asked for)
-  const outside = (title: string): boolean => Number(/^x:(-?\d+)\|/.exec(title)?.[1] ?? '0') < 0
+  // Where the window is, as the page sees it: headless is always 0. A real window is asked to sit at
+  // -24000,-24000, which Windows clamps to the edge of the desktop and keeps off the screen; macOS
+  // refuses to place a window off screen at all, so there it opens on screen — the one platform where
+  // an agent's window can be in the way, and it is why this is read and not assumed.
+  const where = (title: string): number => Number(/^x:(-?\d+)\|/.exec(title)?.[1] ?? '0')
+  const outside = (title: string): boolean => where(title) < 0
+  const offScreen = process.platform === 'win32'
 
   it('opens the page it is on in a window, keeps the profile, and says so', async () => {
     const headless = await chrome.run('a', 'open', { url })
@@ -57,10 +61,10 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
 
     const w = await chrome.run('a', 'headful')
     expect(w.headful).toBe(true)
-    // The same address and the same cookie, now in a real window — off the screen, so it never takes
-    // the focus from what I'm doing.
+    // The same address and the same cookie, now in a real window — off the screen on Windows, so it
+    // never takes the focus from what I'm doing.
     const inWindow = await chrome.run('a', 'frame')
-    expect(outside(inWindow.title)).toBe(true)
+    if (offScreen) expect(outside(inWindow.title)).toBe(true)
     expect(inWindow.title).toContain('c:true')
     // Every answer from that lane says it is in a window, not only the one that opened it.
     expect((await chrome.run('a', 'snapshot')).headful).toBe(true)
@@ -83,7 +87,7 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
 
     await chrome.run('b', 'hide')
     const back = await chrome.run('b', 'frame')
-    expect(outside(back.title)).toBe(false) // headless again, same profile
+    expect(where(back.title)).toBe(0) // headless again, same profile
     expect(back.title).toContain('c:true')
     expect(shown).toContain('b:false')
 
@@ -100,7 +104,7 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
       await windowless.run('c', 'open', { url })
       expect((await windowless.run('c', 'headful')).headful).toBe(false)
       expect((await windowless.run('c', 'snapshot')).shown).toBe(false)
-      expect(outside((await windowless.run('c', 'frame')).title)).toBe(false)
+      expect(where((await windowless.run('c', 'frame')).title)).toBe(0)
     } finally {
       await windowless.run('c', 'close').catch(() => {})
     }
