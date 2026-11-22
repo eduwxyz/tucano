@@ -1,13 +1,16 @@
+import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from '../../shared/vault'
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { ThoughtCache, type RetainedThought } from './thoughts'
+import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from '../../shared/harness-keys'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
+  artifactUrl,
   asSaid,
   type Account,
   type AccountEngine,
@@ -62,7 +65,7 @@ import {
   type ProposalsResult,
   type BackupSummary,
   type NodeInfo,
-  type SavedLogin
+  type FeedbackDraft
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -78,6 +81,7 @@ export type View =
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
+  | { kind: 'vault'; tab?: 'keys' | 'logins' | 'log' } // the Cofre (components/Vault.tsx)
   | { kind: 'memory' }
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
@@ -108,7 +112,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
-  lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
+  lightbox: { items: LightboxItem[]; index: number } | null
   conversations: Conversation[]
   messages: Record<string, Message[]> // per conversation, oldest first; read through messagesIn and the indexes below
   history: Record<string, number> // per conversation with older messages still in the core: from when it's here whole
@@ -125,6 +129,7 @@ export interface State {
   packaged: boolean
   isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
+  panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
@@ -139,7 +144,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string } } // image: the window, taken before it opened
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string }; draft?: FeedbackDraft; from?: string } // image: the window, taken before it opened; draft: what the Tuca wrote, from his message `from`
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -210,6 +215,7 @@ let state: State = {
   packaged: false,
   isolatedComputers: true,
   panel: null,
+  panelWide: false,
   dialog: null,
   tabs: {},
   toasts: [],
@@ -656,7 +662,8 @@ function apply(e: CoreEvent): void {
           messages,
           history,
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
-          panel: here ? null : s.panel
+          panel: here ? null : s.panel,
+          panelWide: here ? false : s.panelWide
         }
       }
       case 'routine_removed':
@@ -877,7 +884,7 @@ export const navigate = (view: View): void =>
     ...s,
     view,
     navOpen: false,
-    panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
+    ...(s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? {} : { panel: null, panelWide: false }),
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
   }))
@@ -1030,6 +1037,7 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
+export const deleteAgent = (id: string): Promise<void> => call('deleteAgent', { id })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 // Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
@@ -1050,6 +1058,7 @@ export const sendMessage = (conversationId: string, text: string, images: ImageU
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
+export const cancelQuestion = (messageId: string): Promise<void> => fire(L('Não consegui cancelar a pergunta.', "I couldn't cancel the question."), 'cancelQuestion', { messageId })
 export const submitDecisions = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitDecisions', { messageId })
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
@@ -1066,6 +1075,8 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
 export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+// The note where a piece of work stopped on its brakes (message.stop): the work goes on from there.
+export const continueJob = (messageId: string): void => void fire(L('Não consegui continuar o trabalho.', "I couldn't continue the work."), 'continueJob', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })
@@ -1092,8 +1103,22 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
 export const revealArtifact = (id: string): void => void fire(L('Não consegui mostrar o arquivo.', "I couldn't show the file."), 'revealArtifact', { id })
+// A copy of what an agent sent, on this computer. In a browser (Tucano as a server) the file is on
+// the server: it comes down under its own name (src/server/artifact-http.ts). On the desktop the
+// app asks where to put it; that's the owner's, at the computer's own window, like revealArtifact.
+export const canSaveArtifact = (s: Pick<State, 'people' | 'you'>): boolean => windowless() || amOwner(s)
+export const saveLabel = (): string => (windowless() ? L('Baixar', 'Download') : L('Salvar…', 'Save…'))
+export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
+  if (!windowless()) return void fire(L('Não consegui salvar o arquivo.', "I couldn't save the file."), 'saveArtifact', { id: a.id })
+  const link = document.createElement('a')
+  link.href = `${artifactUrl(a)}?download=1`
+  link.download = a.name
+  link.click()
+}
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
-export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
+// The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
+export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
 // I've seen this thread up to now (it's open, or was just closed).
 export const seeThread = (rootId: string): void =>
@@ -1104,7 +1129,9 @@ export const seeThread = (rootId: string): void =>
     } catch {}
     return { ...s, threadSeen }
   })
-export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+// `artifact`: an image an agent sent, which can be saved from there.
+export type LightboxItem = { url: string; title: string; video?: boolean; artifact?: Pick<Artifact, 'id' | 'name'> }
+export const openLightbox = (items: LightboxItem[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
@@ -1114,10 +1141,20 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
-// The logins saved for an agent's browser: the page gets sites and usernames back, never a password.
-export const browserLogins = (agentId: string): Promise<SavedLogin[]> => call('browserLogins', { agentId })
-export const saveBrowserLogin = (agentId: string, site: string, username: string, password: string): Promise<void> => call('saveBrowserLogin', { agentId, site, username, password })
-export const removeBrowserLogin = (agentId: string, origin: string): Promise<void> => call('removeBrowserLogin', { agentId, origin })
+// The Cofre (src/core/vault.ts): keys by name, never their values.
+export const vaultKeys = (): Promise<VaultKey[]> => call('vaultKeys')
+export const vaultUses = (): Promise<VaultUse[]> => call('vaultUses')
+export const saveVaultKey = (key: VaultKeyInput): Promise<VaultKey> => call('saveVaultKey', { key })
+export const removeVaultKey = (id: string): Promise<void> => call('removeVaultKey', { id })
+export const setVaultKeyAgent = (id: string, agentId: string, on: boolean): Promise<VaultKey> => call('setVaultKeyAgent', { id, agentId, on })
+export const importVaultKeys = (lines: EnvPair[], replace: string[], mine?: boolean): Promise<{ saved: number }> => call('importVaultKeys', { lines, replace, ...(mine ? { mine } : {}) })
+// Its site logins: sites and usernames, never a password.
+export const vaultLogins = (): Promise<VaultLogin[]> => call('vaultLogins')
+export const saveVaultLogin = (login: VaultLoginInput): Promise<VaultLogin> => call('saveVaultLogin', { login })
+export const removeVaultLogin = (id: string): Promise<void> => call('removeVaultLogin', { id })
+export const setVaultLoginAgent = (id: string, agentId: string, on: boolean): Promise<VaultLogin> => call('setVaultLoginAgent', { id, agentId, on })
+// pedir_chave's card in the chat: the key or the login pasted, or one in the Cofre given to the agent.
+export const answerKeyRequest = (answer: KeyRequestAnswer): Promise<void> => call('answerKeyRequest', { answer })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
 export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)
@@ -1183,6 +1220,13 @@ export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => 
 export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
 export const myDevices = (): Promise<Device[]> => call('myDevices')
 export const removeDevice = (id: string): Promise<void> => call('removeDevice', { id })
+// Harnesses over MCP (Configurações › Harnesses).
+export const harnessKeys = (): Promise<HarnessKey[]> => call('harnessKeys')
+export const createHarnessKey = (name: string, level: HarnessLevel): Promise<{ key: string; harness: HarnessKey }> => call('createHarnessKey', { name, level })
+export const removeHarnessKey = (id: string): Promise<void> => call('removeHarnessKey', { id })
+export const mcpInfo = (): Promise<McpInfo> => call('mcpInfo')
+export const connectHarness = (harness: Connectable, replace?: boolean): Promise<HarnessConnect> => call('connectHarness', { harness, ...(replace ? { replace } : {}) })
+export const harnessNoticeSeen = (): Promise<void> => call('harnessNoticeSeen')
 export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)

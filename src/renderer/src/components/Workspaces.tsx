@@ -168,11 +168,13 @@ export function WorkspaceMenu(): ReactNode {
 }
 
 // The sidebar's foot: Conectores by name (it's what a new person needs to find) with what needs them
-// there, and Configurações as the gear everyone looks for in this corner.
+// there, the Cofre under it (what the agents may reach outside, both), and Configurações as the gear
+// everyone looks for in this corner.
 export function SidebarFoot(): ReactNode {
   const platform = useStore((s) => s.platform)
   const hint = useStore(connectorsHint)
   const onConnectors = useStore((s) => s.view?.kind === 'connectors')
+  const onVault = useStore((s) => s.view?.kind === 'vault')
   const onSettings = useStore((s) => s.view?.kind === 'settings')
   const parts = useSidebarParts()
   const fresh = parts.fresh('connectors')
@@ -184,11 +186,15 @@ export function SidebarFoot(): ReactNode {
         <Icon name="ask" size={15} />
         <span className="grow">{L('Enviar feedback', 'Send feedback')}</span>
       </button>
-    <div className="sidebar__tools">
-      <button className={`sidebar__tool ${onConnectors ? 'is-active' : ''}`} title={hint || undefined} onClick={() => (fresh && parts.seen('connectors'), navigate({ kind: 'connectors' }))}>
+      <button className={`sidebar__tool sidebar__tool--connectors ${onConnectors ? 'is-active' : ''}`} title={hint || undefined} onClick={() => (fresh && parts.seen('connectors'), navigate({ kind: 'connectors' }))}>
         <Icon name="plug" size={15} />
         <span className="grow">{L('Conectores', 'Connectors')}</span>
         {hint ? <span className="ws-dot" aria-label={hint} /> : fresh ? <span className="nav-item__new">{L('NOVO', 'NEW')}</span> : null}
+      </button>
+    <div className="sidebar__tools">
+      <button className={`sidebar__tool ${onVault ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'vault' })}>
+        <Icon name="key" size={15} />
+        <span className="grow">{L('Cofre', 'Vault')}</span>
       </button>
       <button className={`icon-btn sidebar__gear ${onSettings ? 'is-active' : ''}`} title={L(`Configurações (${shortcut(platform, ',')})`, `Settings (${shortcut(platform, ',')})`)} aria-label={L('Configurações', 'Settings')} onClick={() => navigate({ kind: 'settings' })}>
         <Icon name="gear" size={16} />

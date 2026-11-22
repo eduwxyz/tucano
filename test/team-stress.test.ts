@@ -16,7 +16,7 @@ import { Gateway } from '../src/core/gateway'
 import { Memories } from '../src/core/memory'
 import { hashSecret, Hub, mayEditChannel, mentionedPeople, People, routineDetail, type PortLike } from '../src/core/people'
 import { can, must } from '../src/core/policy-people'
-import { handoffSystem, routerSystem } from '../src/core/router'
+import { chimeSystem, handoffSystem, routerSystem } from '../src/core/router'
 import { Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 import { exportTeam, importTeam } from '../src/core/team'
@@ -88,7 +88,7 @@ describe("an agent's thread tools, for the person a reply is for (2)", () => {
     const claude: Engine = {
       id: 'claude',
       async *run(t) {
-        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.mcpUrl) {
+        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem() && t.mcpUrl) {
           turns.push(t)
           results.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', { busca: 'plano' })))
           results.push(JSON.stringify(await callTool(t.mcpUrl, 'ler_thread', { id: anas.id })))
@@ -595,7 +595,7 @@ describe('a busy channel (20)', () => {
     const claude: Engine = {
       id: 'claude',
       async *run(t) {
-        if (t.system !== routerSystem() && t.system !== handoffSystem()) {
+        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem()) {
           prompts.push(t.prompt)
           if (first) {
             first = false
@@ -645,7 +645,7 @@ describe('a busy channel (20)', () => {
           held = true
           await routed // the router takes a while: a newer message arrives meanwhile
         }
-        if (t.system !== routerSystem() && t.system !== handoffSystem()) prompts.push(t.prompt)
+        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem()) prompts.push(t.prompt)
         yield* base.run(t)
       }
     }
@@ -701,8 +701,10 @@ describe('calling a person by the whole name (22)', () => {
 describe('what the owner alone sees (23, 24)', () => {
   it("the phone tab and the missions are the owner's", async () => {
     const pages = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Pages.tsx'), 'utf8')
-    expect(pages).toContain("...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])")
     expect(pages).toContain('const tabs = SETTINGS_TABS(team, admin, owner)')
+    expect(pages).toContain("{on('conexoes') && owner && (")
+    const structure = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'settings-structure.ts'), 'utf8')
+    expect(structure).toMatch(/id: 'connections-phone', page: 'conexoes', .*visible: owner \}/)
     const sidebar = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Sidebar.tsx'), 'utf8')
     expect(sidebar).toMatch(/const owner = amOwner\(/)
     expect(sidebar).toMatch(/\{owner && settings\.onboarding\?\.done && !settings\.onboarding\.checklistHidden && <MissionsCard \/>\}/)

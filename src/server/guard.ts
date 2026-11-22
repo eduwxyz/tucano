@@ -126,6 +126,15 @@ export const BASE_HEADERS: Record<string, string> = { 'x-content-type-options': 
 export const PAGE_HEADERS: Record<string, string> = { ...BASE_HEADERS, 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" }
 export const ARTIFACT_CSP = "sandbox allow-scripts allow-popups; frame-ancestors 'self'"
 
+// The header that saves a file under its own name instead of showing it: a plain-ASCII name for
+// old clients, and the real one (accents, spaces) as RFC 6266 spells it for the rest. Nothing in a
+// name can end the header or add another (quotes, backslashes and line breaks become _).
+export function attachment(name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_')
+  const utf8 = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`
+}
+
 // A path out of the address, or undefined when it can't be read (a stray % from a scanner).
 export function decodedPath(raw: string): string | undefined {
   try {

@@ -10,7 +10,7 @@ import { headsOf, sectorName, sectorOf } from '../../../shared/org'
 import { canContinue } from '../../../shared/run-progress'
 import { boardCards, costOf, dayStart, liveStep, stepsOf, storyOf, tasksOf, type BoardCard, type BoardTask, type CrewMember } from '../board'
 import { call } from '../rpc'
-import { answerDecision, continueRun, isTeam, loadTasks, navigate, openThread, personName, retryRun, sendMessage, stopRun, submitDecisions, toast, useStore, type Agent, type Conversation } from '../store'
+import { answerDecision, cancelQuestion, continueRun, isTeam, loadTasks, navigate, openThread, personName, retryRun, sendMessage, stopRun, submitDecisions, toast, useStore, type Agent, type Conversation } from '../store'
 import { ApprovalCard, QuestionCard, ReplyText } from './Conversation'
 import { ArtifactCard } from './Panel'
 import { ago, AgentAvatar, tokens as tokenWords } from './ui'
@@ -458,7 +458,7 @@ export function BoardPage(): ReactNode {
   }
 
   const renderCard = (c: BoardTask): ReactNode => (
-    <CardView key={c.id} c={c} ctx={ctx} focus={focus === c.id} fresh={fresh.has(c.id)} fam={!!hover?.has(c.id)} onOpen={() => (justDragged.current ? undefined : openCard(c.id))} onDecide={decide} onAnswer={answerOne} />
+    <CardView key={c.id} c={c} ctx={ctx} focus={focus === c.id} fresh={fresh.has(c.id)} fam={!!hover?.has(c.id)} onOpen={() => (justDragged.current ? undefined : openCard(c.id))} onDecide={decide} onCancel={(id) => void cancelQuestion(id)} onAnswer={answerOne} />
   )
   const renderTask = (t: Task): ReactNode => {
     const a = t.agentId ? agents.get(t.agentId) : undefined
@@ -568,7 +568,7 @@ export function BoardPage(): ReactNode {
                 <div key={c.id} className={`bd-stuck-row ${paused ? 'paused' : ''}`}>
                   <span className="bd-bang">{paused ? '‖' : '!'}</span>
                   <Face agent={a} />
-                  <span className="msg"><b>{a?.name}</b> {paused ? L('pausou em', 'paused on') : L('parou em', 'stopped on')} “{c.title}” {c.last?.run?.error && <em>· {firstLine(c.last.run.error)}</em>}</span>
+                  <span className="bd-stuck-msg"><b>{a?.name}</b> {paused ? L('pausou em', 'paused on') : L('parou em', 'stopped on')} “{c.title}” {c.last?.run?.error && <em>· {firstLine(c.last.run.error)}</em>}</span>
                   <span className="bd-grow" />
                   <button className="bd-btn quiet sm" onClick={() => openCard(c.id)}>{L('Ver', 'See')}</button>
                   {c.last && (paused || canContinue(c.last.run!) ? <button className="bd-btn ink sm" onClick={() => continueRun(c.last!.id)}>{L('Continuar', 'Continue')}</button> : RETRYABLE.has(c.last.run!.status) && <button className="bd-btn ink sm" onClick={() => retryRun(c.last!.id)}>{L('Tentar de novo', 'Try again')}</button>)}
@@ -750,7 +750,7 @@ function QuickAdd({ team, inputRef, onCreate }: { team: Agent[]; inputRef: RefOb
 
 // Where a card is, in a few words (a part in the open card's team, an agent's line on top).
 function statusOf(k: BoardCard, ctx: Ctx): string {
-  if (k.column === 'done') return k.state === 'stopped' ? L('parado', 'stopped') : firstLine(k.last?.text ?? '') || L('pronto', 'done')
+  if (k.column === 'done') return k.last?.run?.cancelled ? L('pergunta cancelada', 'question cancelled') : k.state === 'stopped' ? L('parado', 'stopped') : firstLine(k.last?.text ?? '') || L('pronto', 'done')
   if (k.column === 'you') return k.state === 'approval' ? L('quer sua aprovação', 'wants your approval') : L('perguntou pra você', 'asked you')
   if (k.column === 'stuck') return firstLine(k.last?.run?.error ?? '') || L('parou', 'stopped')
   if (k.state === 'asked-up') return L(`perguntou pra ${k.waitingOn}`, `asked ${k.waitingOn}`)
@@ -787,7 +787,7 @@ function Crew({ c, ctx, live }: { c: BoardTask; ctx: Ctx; live?: boolean }): Rea
   )
 }
 
-function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTask; ctx: Ctx; focus: boolean; fresh: boolean; fam: boolean; onOpen: () => void; onDecide: (id: string, d: 'approved' | 'refused') => void; onAnswer?: (messageId: string, i: number) => void }): ReactNode {
+function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide, onCancel }: { c: BoardTask; ctx: Ctx; focus: boolean; fresh: boolean; fam: boolean; onOpen: () => void; onDecide: (id: string, d: 'approved' | 'refused') => void; onCancel: (messageId: string) => void; onAnswer?: (messageId: string, i: number) => void }): ReactNode {
   const a = ctx.agents.get(c.agentId)
   const conv = ctx.convs.get(c.conversationId)
   const live = c.column === 'doing' && c.crew.some((m) => m.state === 'working')
@@ -797,11 +797,12 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTas
   const ready = c.family.slice(1).filter((k) => k.column === 'done').length
   let body: ReactNode
   if (c.column === 'done') {
-    const result = c.state === 'stopped' ? L('Parado antes de terminar', 'Stopped before finishing') : firstLine(c.last?.text ?? '') || (c.parts.length ? L('O time entregou', 'The team delivered') : L('Pronto', 'Done'))
+    const cancelled = !!c.last?.run?.cancelled // the person dismissed its question: not a result, so grey like a stop
+    const result = cancelled ? L('Pergunta cancelada', 'Question cancelled') : c.state === 'stopped' ? L('Parado antes de terminar', 'Stopped before finishing') : firstLine(c.last?.text ?? '') || (c.parts.length ? L('O time entregou', 'The team delivered') : L('Pronto', 'Done'))
     body = (
       <>
         <div className="bd-done-row"><Face agent={a} /><div className="bd-c-title">{c.title}</div><span className="time">{c.endedAt ? new Date(c.endedAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
-        <div className={`bd-res ${c.state === 'stopped' ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
+        <div className={`bd-res ${c.state === 'stopped' || cancelled ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
       </>
     )
   } else if (c.column === 'you') {
@@ -823,7 +824,10 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTas
               <button className="bd-btn quiet sm" onClick={() => onDecide(approval.id, 'refused')}>{L('Recusar', 'Refuse')}</button>
             </>
           ) : (
-            <button className="bd-btn ink sm" onClick={onOpen}>{L('Responder', 'Answer')}</button>
+            <>
+              <button className="bd-btn ink sm" onClick={onOpen}>{L('Responder', 'Answer')}</button>
+              {question?.decisions?.length ? <button className="bd-btn quiet sm" onClick={() => onCancel(question.id)}>{L('Cancelar', 'Cancel')}</button> : null}
+            </>
           )}
           {parts > 0 && <span className="bd-of">{L(`pedido a ${a?.name ?? ''} · ${ready} de ${parts} prontas`, `asked of ${a?.name ?? ''} · ${ready} of ${parts} done`)}</span>}
         </div>
