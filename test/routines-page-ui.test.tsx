@@ -42,12 +42,17 @@ const ran = (r: Routine, n: number, status: 'done' | 'failed', error?: string): 
 
 let root: Root
 beforeEach(() => {
+  // The week is drawn around today, so the clock is fixed: on a Sunday after 09:00 every block of a
+  // 09:00 routine would already be in the past, and there would be no upcoming one to open.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 10, 18, 8, 0))
   const base = getState()
   fake = { ...base, ready: true, agents: [lia], conversations: [{ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] }], routines: [vigia, briefing], messages: { d1: [...ran(vigia, 0, 'failed', 'O GitHub não respondeu.'), ...ran(briefing, 10, 'done')] }, connectors: [] } as State
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(async () => {
   await act(async () => root.unmount())
+  vi.useRealTimers()
   vi.clearAllMocks()
 })
 
