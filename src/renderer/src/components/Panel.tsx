@@ -430,15 +430,15 @@ export function SidePanel(): ReactNode {
         {artifact && (artifact.kind === 'markdown' || artifact.kind === 'text' || artifact.kind === 'csv') && (
           <button
             type="button"
-            className="btn btn--sm btn--ghost"
-            title={artifact.name}
+            className="icon-btn"
+            title={L('Copiar', 'Copy')}
             onClick={() =>
               void call('artifactText', { id: artifact.id }).then((t) => {
                 if (t) void navigator.clipboard.writeText(t)
               })
             }
           >
-            <Icon name="copy" size={14} /> {L('Copiar', 'Copy')}
+            <Icon name="copy" size={14} />
           </button>
         )}
         {service?.url && (
