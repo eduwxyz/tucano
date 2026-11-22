@@ -47,7 +47,7 @@ export interface Api {
   sendMessage(p: { conversationId: string; text: string; images?: ImageUpload[]; files?: FileUpload[]; threadId?: string; mode?: 'steer'; steerTo?: string }): void // threadId: a reply in the thread that message started; mode 'steer': from a running reply's own pill, for that reply (steerTo), not a prompt
   typing(p: { conversationId: string; threadId?: string; opened?: boolean }): void // the person is writing there (or just opened it): what will answer gets ready
   stopRun(p: { messageId: string }): void
-  retryRun(p: { messageId: string }): void
+  retryRun(p: { messageId: string; note?: string }): void // note: a direction for the new try
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   continueJob(p: { messageId: string }): void // the note where a job stopped on its brakes: its work goes on (src/core/jobs.ts)
   setAgentModels(p: { agentIds: string[]; modelId: string }): number

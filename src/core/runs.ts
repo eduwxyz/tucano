@@ -385,6 +385,13 @@ type SteerNote = { id: string; who: string; text: string }
 // refusal, a browser hand-back): a message of theirs, a routine, a retry and a reply going on past
 // its budget start their own reply, beside whatever runs there.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; done: ((m: Message | undefined) => void)[] }
+// "Try with instructions": what the person wrote goes into the prompt as a direction for the new
+// attempt, and the model is told it outranks the course of what was asked before.
+const RETRY_NOTE = (): string =>
+  L(
+    'Ao pedir para você tentar de novo, a pessoa escreveu esta direção para a nova tentativa. Siga-a, mesmo onde ela muda o rumo do que foi pedido antes:',
+    'When asking you to try again, the person wrote this direction for the new attempt. Follow it, even where it changes the course of what was asked before:'
+  )
 type Control = {
   ctl: AbortController
   msg: Message
@@ -903,7 +910,9 @@ export class Runner {
 
   // Runs the same agent again in place of a reply that didn't finish. Beside whatever replies there,
   // not after it: asking again is an answer to what the person did, and waiting made it look lost.
-  retry(messageId: string): void {
+  // `note`: the person's own direction for the new try. It is added to the prompt after what was
+  // asked, so the reply starts steered instead of merely repeated.
+  retry(messageId: string, note?: string): void {
     const { db } = this.deps
     const msg = db.message(messageId)
     if (this.paused) return // nobody starts working while paused
@@ -911,7 +920,9 @@ export class Runner {
     const agent = db.agent(msg.author.id)
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
-    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }, { urgent: true, parallel: true })
+    const said = note?.trim()
+    const task = said ? [msg.run.task, RETRY_NOTE(), said].filter(Boolean).join('\n\n') : undefined
+    void this.startReply(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg, ...(task ? { task } : {}) }, { urgent: true, parallel: true })
   }
 
   // A reply that was cut goes on in a new reply that knows what it did: its text is in the
