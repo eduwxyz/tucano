@@ -180,19 +180,36 @@ export function readWall(signs: PageSigns | undefined, page: { url?: string; tit
   return undefined
 }
 
+// The walls a real window gets past. Measured 2026-11-22, the same Chrome and the same profile on 11
+// sites: headless was hard-blocked on 4 (backerkit and linkedin on Cloudflare, idealo and x.com with
+// a 403) and a real window on 1 (reddit, which wants a login). A sign-in wall, a cookie notice, a
+// page that never loaded and an empty page read the same in a window, so escalating those would only
+// cost a relaunch.
+export const windowGetsPast = (w: Wall | undefined): boolean => w?.kind === 'challenge' || w?.kind === 'blocked'
+
 // The line the agent reads, in place of the page's own words: what it landed on, and the one move
 // that helps. Short on purpose — it goes in every action's result.
-export function wallNote(w: Wall, me?: string): string {
+export function wallNote(w: Wall, me?: string, opts: { headful?: boolean } = {}): string {
   const who = me || L('a pessoa', 'the person')
   const said: Record<WallKind, string> = {
-    challenge: L(
-      `Barreira: desafio de robô (${w.why}) — isto não é o site, é um teste. Não clique de novo: espere com navegador_esperar, peça pra ${who} assumir o navegador, ou use outra fonte.`,
-      `Wall: a bot check (${w.why}) — this is not the site, it is a test. Don't click again: wait with navegador_esperar, ask ${who} to take the browser over, or use another source.`
-    ),
-    blocked: L(
-      `Barreira: o site recusou este navegador (${w.why}). Abrir o mesmo endereço de novo não muda nada: tente outra fonte, ou peça pra ${who} assumir o navegador.`,
-      `Wall: the site refused this browser (${w.why}). Opening the same address again changes nothing: try another source, or ask ${who} to take the browser over.`
-    ),
+    challenge: opts.headful
+      ? L(
+          `Barreira: desafio de robô (${w.why}) — e já é uma janela de verdade, então esperar não muda nada. Use outra fonte, ou peça pra ${who} assumir o navegador e resolver na mão.`,
+          `Wall: a bot check (${w.why}) — and this is already a real window, so waiting changes nothing. Use another source, or ask ${who} to take the browser over and solve it by hand.`
+        )
+      : L(
+          `Barreira: desafio de robô (${w.why}) — isto não é o site, é um teste. Não clique de novo: espere com navegador_esperar, peça pra ${who} assumir o navegador, ou use outra fonte.`,
+          `Wall: a bot check (${w.why}) — this is not the site, it is a test. Don't click again: wait with navegador_esperar, ask ${who} to take the browser over, or use another source.`
+        ),
+    blocked: opts.headful
+      ? L(
+          `Barreira: o site recusou este navegador, mesmo numa janela de verdade (${w.why}). Use outra fonte: clicar de novo, esperar ou assumir não muda nada.`,
+          `Wall: the site refused this browser even in a real window (${w.why}). Use another source: clicking again, waiting or taking over changes nothing.`
+        )
+      : L(
+          `Barreira: o site recusou este navegador (${w.why}). Abrir o mesmo endereço de novo não muda nada: tente outra fonte, ou peça pra ${who} assumir o navegador.`,
+          `Wall: the site refused this browser (${w.why}). Opening the same address again changes nothing: try another source, or ask ${who} to take the browser over.`
+        ),
     login: L(
       `Barreira: a página pede login (${w.why}). Se o Cofre tem o login deste site, use navegador_login; senão, peça com pedir_chave (site).`,
       `Wall: the page wants a sign-in (${w.why}). If the Vault has this site's login, use navegador_login; otherwise ask for it with pedir_chave (site).`

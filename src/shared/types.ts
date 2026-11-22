@@ -646,7 +646,23 @@ export interface Account {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'fill' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+export type BrowserOp =
+  | 'open'
+  | 'snapshot'
+  | 'click'
+  | 'type'
+  | 'fill'
+  | 'key'
+  | 'scroll'
+  | 'back'
+  | 'text'
+  | 'frame'
+  | 'show'
+  | 'hide'
+  | 'close'
+  | 'clear'
+  | 'input'
+  | 'headful' // the page is a bot check: the same lane, in a real window (chrome.ts)
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -676,6 +692,7 @@ export interface BrowserReply {
   elements?: BrowserElement[]
   text?: string
   shown?: boolean // the window is open for me
+  headful?: boolean // drawn in a real window because this site only lets a real browser through (not a takeover)
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
   signs?: PageSigns // what the page is when it isn't the page: a bot check, a refusal, a wall (shared/wall.ts)
 }

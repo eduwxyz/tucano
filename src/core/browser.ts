@@ -12,7 +12,7 @@ import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import { MAX_FILE_BYTES, type Agent, type Artifact, type BrowserElement, type BrowserOp, type BrowserReply, type BrowserView } from '../shared/types'
 import { pageOrigin } from '../shared/vault'
-import { readWall, wallNote } from '../shared/wall'
+import { readWall, wallNote, windowGetsPast } from '../shared/wall'
 import { artifactKind } from './computer'
 import type { Db } from './db'
 import { downloaded, downloadsFolder, downloadsSince, listDownloads, pendingDownloads } from './downloads'
@@ -220,7 +220,7 @@ export function describePage(p: BrowserReply, opts: { all?: boolean; max?: numbe
   // What it landed on, above the elements: a challenge or a refusal reads as a page full of nothing,
   // and an agent that isn't told so clicks it again (shared/wall.ts).
   const wall = readWall(p.signs, p)
-  const head = [`${L('Página', 'Page')}: ${p.title || L('(sem título)', '(no title)')}`, p.url, ...(wall ? [wallNote(wall, opts.me)] : [])]
+  const head = [`${L('Página', 'Page')}: ${p.title || L('(sem título)', '(no title)')}`, p.url, ...(wall ? [wallNote(wall, opts.me, { headful: p.headful })] : [])]
   const body = [
     shown.length ? `${opts.all ? L('Elementos', 'Elements') : `${L('Na tela', 'On screen')}${where}`}:\n${shown.slice(0, max).map(line).join('\n')}` : L('Nada clicável na tela.', 'Nothing clickable on screen.'),
     rest > 0
@@ -466,7 +466,18 @@ export class Browser {
   // After an action: the screen for the panel, and the page for the agent.
   private async after(agentId: string, r: BrowserReply, log: { label: string; detail: string }): Promise<CallToolResult> {
     this.seen(agentId, r, log)
-    return textResult(describePage(await this.deps.host(agentId, 'snapshot'), { me: this.deps.me() }))
+    return textResult(describePage(await this.pageAfterWall(agentId), { me: this.deps.me() }))
+  }
+
+  // The page as the agent gets it, with the one wall a window gets past tried first: a bot check or a
+  // refusal (shared/wall.ts) is what a real browser passes and a headless one doesn't, so the lane
+  // goes to a real window once per site and the page is read again. If that didn't work, the page is
+  // the wall with the note that says a window didn't help — instead of the looping.
+  private async pageAfterWall(agentId: string): Promise<BrowserReply> {
+    const snap = await this.deps.host(agentId, 'snapshot')
+    if (snap.headful || !windowGetsPast(readWall(snap.signs, snap))) return snap
+    const w = await this.deps.host(agentId, 'headful').catch(() => undefined)
+    return w?.headful ? this.deps.host(agentId, 'snapshot').catch(() => snap) : snap
   }
 
   async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: Ctx): Promise<BrowserOutcome> {
