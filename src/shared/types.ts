@@ -161,6 +161,9 @@ export interface Step {
   keys?: string[] // the Cofre's keys the command used, by name (src/core/vault.ts)
   status: StepStatus
   ms?: number
+  // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran,
+  // between two calls, and its row carries their words (src/core/runs.ts, `steerIn`).
+  kind?: 'steer'
 }
 
 export interface Receipt {
@@ -1305,6 +1308,10 @@ export interface Report {
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
 }
+
+// How a new prompt arrives in a conversation that is already answering (src/core/runs.ts):
+// alongside what's running, after it, handed to it between tool calls, or in place of it.
+export type SendMode = 'parallel' | 'queue' | 'steer' | 'interrupt'
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'

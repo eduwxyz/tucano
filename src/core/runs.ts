@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type SendMode, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -372,9 +372,21 @@ export interface RoutineEvent {
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
 type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+
+// What a person wrote into a reply that was already running (`send` with mode 'steer'): the agent
+// reads it with its next tool result, and the reply's own chain carries it, in their words, from the
+// moment it's given. It is not a message of theirs: nothing of it is posted, so a reply that ends
+// before taking one leaves it in its chain, marked as not read (see `steerLeftovers`).
+type SteerNote = { id: string; who: string; text: string }
 // A reply waiting for its agent to finish there. `merge`: a person's message, which a newer one of theirs takes over.
 type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge: boolean; done: ((m: Message | undefined) => void)[] }
-type Control = { ctl: AbortController; msg: Message; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping' }
+type Control = {
+  ctl: AbortController
+  msg: Message
+  reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'
+  steer?: SteerNote[] // what the person wrote while this reply ran, handed over at the next tool call
+  flush?: () => void // the reply's streamed text, sent before a full message of it: the window's order (`execute`)
+}
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
 // it (what was already said, its own earlier one too), its message, and then what the other agents
@@ -552,7 +564,7 @@ export class Runner {
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
   // `id`: the message's, chosen by the caller (src/core/mcp.ts waits on its replies); `via`: a harness sent it over MCP.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string; mode?: SendMode; steerTo?: string } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     // "/objetivo …" from before: every message now runs until it's done, so it reads as the message itself.
@@ -586,7 +598,17 @@ export class Runner {
     const body = [fromCard, typed].filter(Boolean).join('\n\n')
     if (!body && pictures.length === 0 && docs.length === 0) return
 
-    const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
+    // A steer is not a prompt. It is the person's direction for the reply running in this very place
+    // (its own thread, never another one's), and only that reply carries it: handed over at its next
+    // tool call, and drawn in its own chain, in their words (Conversation.tsx). So it is taken here,
+    // before any message of mine exists: nothing of a steer ever shows up in the channel or the DM as
+    // something to answer. With no reply running there — or with a picture or a file, which a tool
+    // result can't carry — there is nothing to steer, and the text goes on as a prompt like any other.
+    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, { who: writer.name, text: typed }, opts.steerTo))
+      return
+
+
+const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -676,6 +698,52 @@ export class Runner {
       const go = (): Promise<Message | undefined> => reply(agent, { trigger: mine.id })
       before = before ? before.then(go, go) : go()
     }
+  }
+
+  // A steer goes to the reply running in that conversation, which reads it at its next tool call.
+  // With none running, the message is a prompt like any other (the caller runs it).
+  // `only`: the reply a steer was written for. Two replies of one agent can run there at once (two
+  // messages, each its own session), so a steer from a reply's own pill must reach that reply alone.
+  // It goes into that reply's chain right here, where the person gave it, so what they steered is
+  // part of what the reply is doing — not a prompt, and not a message of theirs.
+  private steerIn(conversationId: string, note: Omit<SteerNote, 'id'>, only?: string): boolean {
+    let taken = false
+    for (const c of this.controllers.values()) {
+      if (c.msg.conversationId !== conversationId || c.reason) continue
+      if (only && c.msg.id !== only) continue
+      const id = randomUUID()
+      ;(c.steer ??= []).push({ ...note, id })
+      c.flush?.() // the words streamed so far go first: this full message carries them too
+      const steps = [...(c.msg.run?.steps ?? [])]
+      // Before the step that's running now (the thinking one, or the call in flight): it came after them.
+      const last = steps[steps.length - 1]
+      steps.splice(last?.status === 'running' && last.kind !== 'steer' ? steps.length - 1 : steps.length, 0, {
+        id,
+        kind: 'steer',
+        label: L('Orientação', 'Steer'), // their words are the row's content; who gave it is obvious here
+        input: note.text,
+        status: 'running'
+      })
+      this.update(c.msg, { run: { ...c.msg.run!, steps } })
+      taken = true
+    }
+    return taken
+  }
+
+  // A steer's row changes state where the reply's work does: taken with a call (done), or left unread
+  // when the reply ends before one (error, and it says so). The row was placed when it was given.
+  private markSteer(reply: Message, id: string, status: Step['status'], error?: string): void {
+    const steps = reply.run?.steps
+    if (!steps?.some((s) => s.id === id)) return
+    this.update(reply, { run: { ...reply.run!, steps: steps.map((s) => (s.id === id ? { ...s, status, ...(error ? { error } : {}) } : s)) } })
+  }
+
+  // A steer the reply ended without taking (it made no call after it): the agent never read what the
+  // person wrote. Its row stays in the chain, marked as not read: a steer is the reply's, and its
+  // place is the chain it was given to, not a prompt of its own.
+  private steerLeftovers(control: Control, reply: Message): void {
+    for (const note of control.steer?.splice(0) ?? [])
+      this.markSteer(reply, note.id, 'error', L('A resposta terminou antes de ler isto', 'The reply ended before reading this instruction.'))
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).
@@ -1214,7 +1282,9 @@ export class Runner {
       // The reply ending (replied, stopped, failed) closes whatever still runs.
       const thought = label === THOUGHT()
       const note = thought ? said() : undefined
-      return msg.run!.steps.map((s) => (s.status === 'running' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
+      // A steer's row is the person's, not the reply's thinking: it keeps its own label and only the
+      // reply's work closes it (runs.ts, `steerIn`).
+      return msg.run!.steps.map((s) => (s.status === 'running' && s.kind !== 'steer' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
@@ -1364,6 +1434,7 @@ export class Runner {
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
 
     const control: Control = { ctl: new AbortController(), msg }
+    control.flush = () => flush() // a steer's row goes in after the words streamed so far
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
       if (control.reason) return
@@ -1416,6 +1487,7 @@ export class Runner {
       emit({ type: 'delta', id: msg.id, text: pending })
       pending = ''
     }
+    control.flush = flush // a steer's row is added to this reply from outside it (see `steerIn`)
 
     // Tools for this turn, served by the gateway under a URL only this turn knows:
     // ask_user plus the connector tools this agent's grants allow.
@@ -2652,7 +2724,20 @@ ${note}`,
         acted = true
         sign()
         try {
-          const r = this.withNotes(handedId, await runTool(name, args))
+          // A steer: what the person wrote while this reply ran, handed over here, between two calls.
+          const withSteers = (r: CallToolResult): CallToolResult => {
+            const handed = control.steer?.splice(0) ?? []
+            if (!handed.length) return r
+            const said = handed.map(
+              (n) => `${L(`${n.who} escreveu isto enquanto você trabalhava:`, `${n.who} wrote this while you were working:`)}\n\n${n.text}`
+            )
+            // The row the person's steer already has in this chain turns done here: this is the call it
+            // was handed over with, so what they steered is part of what this reply did.
+            flush()
+            for (const n of handed) this.markSteer(msg, n.id, 'done')
+            return { ...r, content: [...r.content, { type: 'text', text: said.join('\n\n') }] }
+          }
+          const r = withSteers(this.withNotes(handedId, await runTool(name, args)))
           const { [REASON_PARAM]: _why, ...callArgs } = args
           const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
           failing = r.isError ? failing + 1 : 0
@@ -2844,6 +2929,7 @@ ${note}`,
       if (lost) this.sessions.end(sessionKey, lost, { ok: false, config, shown, live })
       if (plan) this.sessions.end(sessionKey, plan, { ok: !!result && !control.reason, config, shown, live, reply: msg.id, context: result?.context })
       this.controllers.delete(msg.id)
+      this.steerLeftovers(control, msg)
     }
 
     const endedAt = Date.now()
