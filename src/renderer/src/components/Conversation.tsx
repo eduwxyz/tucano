@@ -114,6 +114,7 @@ import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '.
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
 import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
+import { AskStrip } from './AskStrip'
 import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
@@ -309,7 +310,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           <Composer conversationId={id} members={members} onJump={onJump} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
         )}
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} {...(jump && jump.rootId === thread ? { focusId: jump.id, focusKey: jump.n } : {})} /> : <SidePanel />}
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} onJump={onJump} {...(jump && jump.rootId === thread ? { focusId: jump.id, focusKey: jump.n } : {})} /> : <SidePanel />}
     </div>
   )
 }
@@ -1152,7 +1153,7 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members, focusId, focusKey }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number }): ReactNode {
+function ThreadPanel({ rootId, conv, title, members, focusId, focusKey, onJump }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -1225,7 +1226,7 @@ function ThreadPanel({ rootId, conv, title, members, focusId, focusKey }: { root
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
           <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} {...(focusId ? { focus: focusId } : {})} {...(focusKey ? { focusKey } : {})} />
-          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+          <Composer conversationId={conv.id} threadId={rootId} members={members} {...(onJump ? { onJump } : {})} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
         <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
@@ -2665,11 +2666,14 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   // messages, so a reply's steps don't redraw the field.
   const working = useStore((s) => workingIds(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
-  const asker = useStore((s) => {
+  // The message itself, not just the name: the strip above the field needs what was asked.
+  const asked = useStore((s) => {
     const q = askerIn(s, conversationId, threadId)
     if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
-    return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
+    return q
   })
+  const askerId = asked?.author.kind === 'agent' ? asked.author.id : undefined
+  const asker = useStore((s) => (askerId ? agentById(s, askerId)?.name : undefined))
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -2936,6 +2940,8 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
         </div>
       )}
       {notice}
+      {/* Only where it can take you to the card: the intro's short chats have it in plain sight. */}
+      {asked && onJump && <AskStrip asked={asked} who={asker} onOpen={() => onJump(asked.id, asked.threadId)} />}
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
