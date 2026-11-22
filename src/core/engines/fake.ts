@@ -235,6 +235,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
         reply = 'Anotado.'
+      } else if (/A pessoa preferiu não responder|The person chose not to answer/.test(turn.prompt)) {
+        // Its question was cancelled (Cancelar on the card): it goes on without the answer, and says what it assumed.
+        reply = L('Segui sem a resposta: assumi que é pra sexta.', 'Went on without the answer: I assumed Friday.')
       } else if (turn.mcpUrl && /pergunte em (\d+) ?s/i.test(last)) {
         // "pergunte em 3 s": asks after a delay, so a test can leave the thread while it's still working.
         await new Promise((r) => setTimeout(r, Number(/pergunte em (\d+) ?s/i.exec(last)![1]) * 1000))

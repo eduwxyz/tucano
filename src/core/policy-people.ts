@@ -204,6 +204,7 @@ export const NEEDS: Record<Method, Need> = {
   confirmQuestion: 'target',
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',
+  cancelQuestion: 'target',
   // agents, skills and the team
   setAgentModels: 'admin',
   saveAgent: 'admin',

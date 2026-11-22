@@ -190,6 +190,7 @@ export interface Run {
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
   answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
   answerTyped?: string // what that message had beyond them, written in the message box

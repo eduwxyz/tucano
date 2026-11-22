@@ -3433,6 +3433,52 @@ ${note}`,
     await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
   }
 
+  // Dismissed with the card's Cancelar button: the question closes and the agent isn't woken. Its next turn reads that it
+  // was cancelled (context.ts). Work handed down the tree waits on it, though: there, cancelling means "I won't answer",
+  // not "stop", so whoever does the work goes on without the answer, assuming what it must and saying so.
+  cancelQuestion(messageId: string, by: Person): void {
+    const { db, emit } = this.deps
+    const asked = this.decidable(messageId, by)
+    const q = db.question(messageId)
+    if (q?.state === 'open') {
+      db.saveQuestion({ ...q, state: 'closed' })
+      emit({ type: 'inbox' })
+    }
+    this.update(asked, { run: { ...asked.run!, status: 'done', cancelled: true } })
+    // The question of whoever does handed work, cancelled right where it was asked.
+    const handed = asked.run?.handed ? db.delegation(asked.run.handed) : asked.threadId ? db.delegationAt(asked.threadId) : undefined
+    if (handed?.state === 'open' && handed.asking === asked.id) {
+      if (handed.askingTold) this.closeRelay(handed, asked)
+      return this.goOnWithout(handed)
+    }
+    // The question the asker took up to the person, from that work: each request it was waiting on goes on.
+    if (asked.author.kind !== 'agent') return
+    for (const d of db.delegationsFrom(asked.author.id, asked.conversationId, asked.threadId)) {
+      const below = d.state === 'open' && d.asking && d.askingTold ? db.message(d.asking) : undefined
+      if (below && below.at <= asked.at) this.goOnWithout(d)
+    }
+  }
+
+  // A question on handed work nobody will answer: it closes, and whoever does the work goes on without it.
+  private goOnWithout(d: Delegation): void {
+    const { db } = this.deps
+    const q = d.asking ? db.message(d.asking) : undefined
+    if (q?.run?.status === 'waiting_input') this.update(q, { run: { ...q.run, status: 'done', cancelled: true } })
+    this.keep({ ...d, asking: undefined, askingTold: false })
+    const to = db.agent(d.to)
+    const conv = db.conversation(d.conversationId)
+    if (!to || to.archived || !conv || this.paused) return
+    void this.startReply(to, conv, {
+      depth: 1,
+      threadId: workThread(d),
+      handed: d.id,
+      task: L(
+        'A pessoa preferiu não responder a sua pergunta. Siga com o pedido sem a resposta: assuma o que for mais razoável e diga o que assumiu.',
+        "The person chose not to answer your question. Go on with the request without the answer: assume what's most reasonable and say what you assumed."
+      )
+    })
+  }
+
   // The user took over the agent's browser ("Assumir") and handed it back
   // ("Devolver" or closing the window) — exactly what the agent asked for with
   // ask_user, so it goes on by itself instead of waiting for a message.
