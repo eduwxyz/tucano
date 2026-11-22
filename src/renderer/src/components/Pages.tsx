@@ -65,7 +65,6 @@ import {
   type EngineId,
   type GrantLevel,
   type MemoryMode,
-  type SendMode,
   type Skill,
   type ToolClass,
   isTeam,
@@ -799,6 +798,13 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               </Row>
               <Row label={L('Máx. rotinas ligadas', 'Max. enabled routines')} sub={L('Quantas rotinas pode ter ligadas ao mesmo tempo.', 'How many routines it can have enabled at the same time.')}>
                 <NumberInput aria-label={L('Máx. rotinas ligadas', 'Max. enabled routines')} min={1} step={1} value={draft.maxRoutines ?? MAX_AGENT_ROUTINES} onChange={(n) => patch({ maxRoutines: routineCap(n) })} onBlur={() => timer.current && void flush()} className="input--short" />
+              </Row>
+              {/* On: its replies never run two at once, in any conversation (src/core/runs.ts, enqueue); stored only when on. */}
+              <Row
+                label={L('Uma resposta por vez', 'One reply at a time')}
+                sub={L(`Ligado, um prompt novo para ${name} espera a resposta em curso terminar, em qualquer conversa. Desligado, segue Configurações › Agentes › Respostas.`, `On, a new prompt for ${name} waits for the running reply to end, in any conversation. Off, it follows Settings › Agents › Replies.`)}
+              >
+                <Toggle label={L('Uma resposta por vez', 'One reply at a time')} on={draft.oneAtATime === true} onChange={(v) => patch({ oneAtATime: v ? true : undefined }, true)} />
               </Row>
               <ReserveModel draft={draft} patch={patch} />
             </Section>
@@ -3300,6 +3306,7 @@ export function SettingsPage(): ReactNode {
       <div className="settings-page" ref={body}>
         <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
         {searching ? <SettingsResults hits={searchSettings(structure, query)} query={query} onPick={pickHit} /> : <SettingsJumps key={tab} sections={settingsTabStructure(tab, structure)} />}
+        {windowless() && <SettingsWhere />}
 
         {/* ---------- You ---------- */}
         {on('geral') && admin && (
@@ -3463,20 +3470,22 @@ export function SettingsPage(): ReactNode {
           <SectionAnchor id="agents-replies" sections={structure}>
             <Card title={L('Respostas', 'Replies')} section="agents-replies">
               <Field
-                label={L('Um novo prompt com uma resposta em curso', "New prompts during a reply")}
+                label={L('Respostas ao mesmo tempo numa conversa', 'Replies at once in a conversation')}
                 hint={L(
-                  'O que o Enter faz quando o agente já está respondendo ali. Ctrl+Enter põe na fila, Alt+Enter entrega no meio do trabalho, Shift+Alt+Enter interrompe, seja qual for o ajuste. Shift+Enter continua quebrando a linha.',
-                  'Enter uses this mode. Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line.'
+                  'Cada prompt ganha uma resposta própria, ao lado das que já estão em curso. Passando deste número, o prompt espera na fila até uma terminar. Um agente pode ir uma por vez na página dele.',
+                  'Each prompt gets its own reply beside the running ones. Past this number, it waits in the queue until one ends. An agent can go one at a time on its own page.'
                 )}
               >
                 <Select
-                  value={settings.sendMode ?? 'parallel'}
-                  onChange={(v) => { if (v) updateSettings({ sendMode: v as SendMode }) }}
+                  aria-label={L('Respostas ao mesmo tempo numa conversa', 'Replies at once in a conversation')}
+                  value={String(settings.repliesAtOnce ?? 6)}
+                  onChange={(v) => { if (v) updateSettings({ repliesAtOnce: Number(v) }) }}
                   options={[
-                    { value: 'parallel', label: L('Ao lado dela, em paralelo', 'Parallel replies') },
-                    { value: 'queue', label: L('Na fila, quando a resposta acabar', 'Queue until replies finish') },
-                    { value: 'steer', label: L('Entregue à resposta em curso', 'Steer current reply') },
-                    { value: 'interrupt', label: L('Interrompe e começa com esta', 'Interrupt and restart') }
+                    { value: '1', label: L('Uma por vez', 'One at a time') },
+                    { value: '2', label: L('Até 2', 'Up to 2') },
+                    { value: '3', label: L('Até 3', 'Up to 3') },
+                    { value: '4', label: L('Até 4', 'Up to 4') },
+                    { value: '6', label: L('Até 6, o máximo do app', 'Up to 6, the app’s most') }
                   ]}
                   placeholder={L('Escolha', 'Pick')}
                 />
@@ -3723,6 +3732,31 @@ export function SettingsPage(): ReactNode {
         {on('workspace') && owner && <SectionAnchor id="workspace-danger" sections={structure}><WorkspaceDangerArea /></SectionAnchor>}
       </div>
     </Page>
+  )
+}
+
+// On a server, over its settings: whose they are, and that what belongs to the person's own computer
+// (lending it to the agents) is set in the Tucano app there. In the desktop app, one click to it.
+export function SettingsWhere(): ReactNode {
+  const host = typeof location === 'undefined' ? '' : location.host
+  const open = typeof window === 'undefined' ? undefined : window.tucano?.openLending
+  return (
+    <div className="settings-where" role="note">
+      <Icon name="laptop" size={16} />
+      <span className="grow">
+        {L('Estes ajustes são do servidor ', 'These are the settings of the server ')}
+        <b>{host}</b>
+        {L(
+          ' e valem lá, de qualquer computador. O que é só do seu computador, como emprestá-lo aos agentes, fica no app do Tucano nele.',
+          ', and they apply there, from any computer. What belongs to your own computer, like lending it to the agents, is in the Tucano app on it.'
+        )}
+      </span>
+      {open && (
+        <button className="btn btn--sm" onClick={() => open()}>
+          {L('Abrir no meu computador', 'Open on my computer')}
+        </button>
+      )}
+    </div>
   )
 }
 

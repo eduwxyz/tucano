@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type SendMode, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -409,8 +409,10 @@ export function routedHistory(db: Pick<Db, 'message'>, windowed: Message[], anch
 }
 
 export class Runner {
-  private queue: { job: () => Promise<unknown>; urgent: boolean }[] = []
+  // `solo`: the agent of a reply that goes one at a time (Agent.oneAtATime), held back while another of its replies runs.
+  private queue: { job: () => Promise<unknown>; urgent: boolean; solo?: string }[] = []
   private active = 0
+  private soloRunning = new Set<string>() // agents that go one at a time, with a reply running now
   private routing = 0
   private controllers = new Map<string, Control>()
   private held = new Map<string, Promise<void>>() // by agent: its replies on an engine that keeps the MCP connection
@@ -428,10 +430,12 @@ export class Runner {
   // with a reply the person is already reading there (an approval's outcome, a question's refusal, a
   // browser hand-back). In the order they came, off the queue (startReply).
   private parked = new Map<string, Parked[]>()
-  // Replies running in each conversation, and the prompts a person marked as queued behind them: one of
-  // those starts when nothing runs there any more (see `runIn`, `settleIn`).
+  // Replies running in each conversation, the prompts on their way to a reply there (the router picking,
+  // a reply waiting for a free slot), and the prompts past the limit of replies at once, queued behind
+  // them: the next one starts as soon as a slot frees there (see `runIn`, `settleIn`).
   private convRuns = new Map<string, number>()
-  private convWaiting = new Map<string, { job: () => Promise<unknown>; queued?: Message }[]>()
+  private convStarting = new Map<string, string[]>() // by the prompt's message id, once per reply it sets off
+  private convWaiting = new Map<string, { job: () => Promise<unknown>; prompt: Message; cap: number }[]>()
   // Jobs under way, by the message that set them off (src/core/jobs.ts): read from the database when not here.
   private jobs = new Map<string, Job>()
   // What a teammate delivered (or was asked) while a request was being worked on, for its next step: by request.
@@ -574,7 +578,7 @@ export class Runner {
   // `answers`: the question this answers, from the inbox or the decisions card (its asker answers,
   // wherever the person writes from). The caller checked that they may answer it.
   // `id`: the message's, chosen by the caller (src/core/mcp.ts waits on its replies); `via`: a harness sent it over MCP.
-  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string; mode?: SendMode; steerTo?: string } = {}): Promise<void> {
+  async send(conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, by?: string, opts: { answers?: string; files?: FileUpload[]; id?: string; via?: string; mode?: 'steer'; steerTo?: string } = {}): Promise<void> {
     const { db, emit } = this.deps
     const conv = db.conversation(conversationId)
     // "/objetivo …" from before: every message now runs until it's done, so it reads as the message itself.
@@ -610,7 +614,8 @@ export class Runner {
 
     // A steer is not a prompt. It is the person's direction for the reply running in this very place
     // (its own thread, never another one's), and only that reply carries it: handed over at its next
-    // tool call, and drawn in its own chain, in their words (Conversation.tsx). So it is taken here,
+    // tool call, and drawn in its own chain, in their words. It comes from that reply's own pill
+    // (Conversation.tsx), never from the message field, which writes to the conversation. So it is taken here,
     // before any message of mine exists: nothing of a steer ever shows up in the channel or the DM as
     // something to answer. With no reply running there — or with a picture or a file, which a tool
     // result can't carry — there is nothing to steer, and the text goes on as a prompt like any other.
@@ -618,14 +623,6 @@ export class Runner {
       return
 
     const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
-    // How it joins a reply already running here (the window says which): alongside it, after it,
-    // handed to it between tool calls, or in place of it. With nothing running, all four are the same.
-    // No mode at all (the phone) means a message of the person's own: it starts its own reply beside
-    // whatever runs there, as a routine and a retry do (neither comes through here). Only `queue`
-    // waits, and a steer or an interrupt acts on the reply already running.
-    const mode = opts.mode ?? 'parallel'
-    const queued = mode === 'queue' && this.busyIn(conv.id)
-    if (queued) mine.sendMode = 'queue' // it says so in the conversation, and it outlives a restart
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
     // only where the conversation answers in threads; elsewhere the answers follow in the conversation.
     const replyIn = thread ?? (conv.threads ? mine.id : undefined)
@@ -696,11 +693,13 @@ export class Runner {
     const doing = responders.length === 0 && thread ? db.delegationAt(thread) : undefined
     const doer = doing ? may.find((a) => a.id === doing.to) : undefined
     if (doer) responders = [doer]
-    if (mode === 'interrupt') this.interruptIn(conv.id)
+    // A prompt of the person's own starts its own reply beside whatever runs there, up to the replies
+    // at once a conversation may have (Settings › Agents › Replies); past that it waits its turn.
+    const cap = await this.repliesAtOnce()
     if (responders.length === 0) {
       if (conv.kind === 'dm' || may.length === 1) responders = may
       else if (may.length > 1) {
-        void this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id, mode === 'parallel'), mode === 'queue', queued ? mine : undefined)
+        this.runIn(conv.id, () => this.routeAndRun(conv, may, replyIn, mine.id, true), mine, cap)
         return
       }
     }
@@ -708,11 +707,9 @@ export class Runner {
     const jobOn = asked?.run?.job && this.jobOf(asked.run.job)?.state === 'running' ? asked.run.job : undefined
     const reply = (agent: Agent, opts: Partial<ReplyOpts> = {}): Promise<Message | undefined> =>
       this.startReply(agent, conv, { depth: 1, threadId: replyIn, replyTo: mine.id, ...(jobOn ? { job: jobOn } : {}), ...opts, ...(onBehalf?.agent === agent.id ? { task: onBehalf.task } : {}) }, // A queued prompt answers the message it was written for, never taking over an earlier one.
-      { urgent: true, parallel: mode !== 'queue' })
-    // A message of the person's own goes beside the reply running there, two at once; a queued one is
-    // the only one that waits, and it waits for everything running there to end. Several called by
-    // name answer one after another, in the order written: each answers my message and reads what the
-    // ones before it answered (routedHistory), like a routed message.
+      { urgent: true, parallel: true })
+    // Several called by name answer one after another, in the order written: each answers my message
+    // and reads what the ones before it answered (routedHistory), like a routed message.
     const answer = (): Promise<unknown> => {
       if (responders.length === 1) return reply(responders[0]!)
       let before: Promise<unknown> | undefined
@@ -722,67 +719,90 @@ export class Runner {
       }
       return before ?? Promise.resolve()
     }
-    this.runIn(conv.id, answer, mode === 'queue', queued ? mine : undefined)
+    this.runIn(conv.id, answer, mine, cap)
   }
 
 
-  // A prompt I queued before the app closed: its message is here, its reply never started (db.ts,
-  // queuedMessages). Each one goes in the order I wrote them, waiting for whatever runs there now.
-  resumeQueued(): void {
+  // A prompt that was waiting its turn when the app closed: its message is here, its reply never started
+  // (db.ts, queuedMessages). Each one goes in the order I wrote them, after whatever runs there now.
+  async resumeQueued(): Promise<void> {
     const { db } = this.deps
     if (this.paused) return // they keep their mark, and go at the next start
+    const cap = await this.repliesAtOnce()
     for (const m of db.queuedMessages()) {
       const conv = db.conversation(m.conversationId)
       const members = conv ? this.members(conv) : []
       if (!conv || !members.length || m.author.kind !== 'person') continue
       const named = mentioned(m.text, members).slice(0, MAX_MENTIONS)
-      if (!named.length && conv.kind !== 'dm' && members.length > 1) this.runIn(conv.id, () => this.routeAndRun(conv, members, m.threadId, m.id), true, m)
-      else for (const agent of named.length ? named : members) this.runIn(conv.id, () => this.startReply(agent, conv, { depth: 1, threadId: m.threadId, replyTo: m.id }, { urgent: true, parallel: true }), true, m)
+      if (!named.length && conv.kind !== 'dm' && members.length > 1) this.runIn(conv.id, () => this.routeAndRun(conv, members, m.threadId, m.id, true), m, cap)
+      else for (const agent of named.length ? named : members) this.runIn(conv.id, () => this.startReply(agent, conv, { depth: 1, threadId: m.threadId, replyTo: m.id }, { urgent: true, parallel: true }), m, cap)
     }
   }
 
-  // Something is answering in this conversation: a reply running there (however it was started), a
-  // prompt of mine still waiting its turn, or the router picking who answers.
-  private busyIn(conversationId: string): boolean {
-    if ((this.convRuns.get(conversationId) ?? 0) > 0 || (this.convWaiting.get(conversationId)?.length ?? 0) > 0) return true
-    for (const c of this.controllers.values()) if (c.msg.conversationId === conversationId && !c.reason) return true
-    return false
+  // How many replies may run at once in one conversation (Settings › Agents › Replies): 1 is one at a
+  // time; unset, as many as the app runs for the person at once.
+  private async repliesAtOnce(): Promise<number> {
+    const n = Math.floor(Number((await this.deps.settings()).repliesAtOnce))
+    return n >= 1 ? Math.min(n, MAX_CONCURRENT_URGENT) : MAX_CONCURRENT_URGENT
   }
 
-  // A prompt marked as queued waits for what is running in that conversation, and there only: what
-  // runs elsewhere, or another agent's reply in another conversation, is none of its business.
-  private runIn(conversationId: string, job: () => Promise<unknown>, after: boolean, queued?: Message): void {
-    if (!after || !this.busyIn(conversationId)) return this.startIn(conversationId, job, queued)
-    this.convWaiting.set(conversationId, [...(this.convWaiting.get(conversationId) ?? []), { job, queued }])
+  // What holds a slot in a conversation: the replies running there (however they were started) and the
+  // prompts on their way to one (the router picking, a reply waiting for the scheduler or its agent).
+  private inUse(conversationId: string): number {
+    return (this.convRuns.get(conversationId) ?? 0) + (this.convStarting.get(conversationId)?.length ?? 0)
   }
 
-  // A prompt goes out (now, or once the one before it let go): the mark a queued one kept for a restart
-  // drops in the same step, so the app never starts it twice. From here `execute` counts it as running.
-  // The job takes no slot of the scheduler itself: what it starts does (startReply, routed), and a slot
-  // held here as well would be a second one per reply, so six replies at once would hold all twelve.
-  private startIn(conversationId: string, job: () => Promise<unknown>, queued?: Message): void {
-    if (queued?.sendMode) this.update(queued, { sendMode: undefined })
-    void job().catch((e: unknown) => console.error('[runner]', e))
+  // A prompt starts its reply now when its conversation has a free slot and nothing queued before it;
+  // otherwise it waits, and says so in the conversation (a restart picks it up: resumeQueued). What runs
+  // elsewhere, or another agent's reply in another conversation, is none of its business.
+  private runIn(conversationId: string, job: () => Promise<unknown>, prompt: Message, cap: number): void {
+    const waiting = this.convWaiting.get(conversationId) ?? []
+    if (waiting.length === 0 && this.inUse(conversationId) < cap) return this.startIn(conversationId, job, prompt)
+    this.waitingMark(prompt.id)
+    this.convWaiting.set(conversationId, [...waiting, { job, prompt, cap }])
   }
 
-  // A reply ended there: the next queued prompt goes, or the conversation is free again.
+  // A prompt goes out: it holds a slot there until its reply runs (execute takes the slot over) or comes
+  // to nothing (the router picked no one, it failed). The waiting mark drops in the same step, so the
+  // app never starts it twice. The job takes no slot of the scheduler itself: what it starts does
+  // (startReply, routed), and a slot held here as well would be a second one per reply.
+  private startIn(conversationId: string, job: () => Promise<unknown>, prompt: Message): void {
+    this.clearWaiting(prompt.id)
+    this.convStarting.set(conversationId, [...(this.convStarting.get(conversationId) ?? []), prompt.id])
+    void job()
+      .catch((e: unknown) => console.error('[runner]', e))
+      .finally(() => {
+        if (this.began(conversationId, prompt.id)) this.nextIn(conversationId)
+      })
+  }
+
+  // The reply of a prompt on its way runs now, or the prompt came to nothing: its slot on the way is
+  // let go. False when there was none (it was let go already).
+  private began(conversationId: string, promptId: string | undefined): boolean {
+    const starting = this.convStarting.get(conversationId)
+    const at = promptId && starting ? starting.indexOf(promptId) : -1
+    if (at < 0) return false
+    starting!.splice(at, 1)
+    if (!starting!.length) this.convStarting.delete(conversationId)
+    return true
+  }
+
+  // A slot freed there: the prompts queued behind it go, as many as fit, in the order they came.
+  private nextIn(conversationId: string): void {
+    const waiting = this.convWaiting.get(conversationId)
+    while (waiting?.length && this.inUse(conversationId) < waiting[0]!.cap) {
+      const next = waiting.shift()!
+      this.startIn(conversationId, next.job, next.prompt)
+    }
+    if (!waiting?.length) this.convWaiting.delete(conversationId)
+  }
+
+  // A reply ended there: its slot frees.
   private settleIn(conversationId: string): void {
     const left = (this.convRuns.get(conversationId) ?? 1) - 1
-    if (left > 0) return void this.convRuns.set(conversationId, left)
-    this.convRuns.delete(conversationId)
-    const waiting = this.convWaiting.get(conversationId)
-    const next = waiting?.shift()
-    if (!waiting?.length) this.convWaiting.delete(conversationId)
-    if (next) this.startIn(conversationId, next.job, next.queued)
-  }
-
-  // Stopping what runs in one conversation, and only there: what it wrote stays, as the stop button leaves it.
-  private interruptIn(conversationId: string): void {
-    for (const c of this.controllers.values()) {
-      if (c.msg.conversationId !== conversationId || c.reason) continue
-      c.reason = 'stopped'
-      c.ctl.abort()
-    }
+    if (left > 0) this.convRuns.set(conversationId, left)
+    else this.convRuns.delete(conversationId)
+    this.nextIn(conversationId)
   }
 
   // A steer goes to the reply running in that conversation, which reads it at its next tool call.
@@ -1206,7 +1226,7 @@ export class Runner {
           this.enqueue(() => {
             if (this.waiting.get(key) === slot) this.waiting.delete(key)
             return this.execute(agent, conv, { depth: 1, threadId: note.threadId, trigger: slot.trigger, reserved: true }).finally(ended)
-          }, true)
+          }, true, agent)
         }
       }
       this.waiting.set(key, slot)
@@ -1270,27 +1290,34 @@ export class Runner {
           done(undefined)
           throw e
         }),
-      p.urgent
+      p.urgent,
+      p.agent
     )
   }
 
   // `urgent`: it answers something the person just did (see MAX_CONCURRENT_URGENT).
-  private enqueue(job: () => Promise<unknown>, urgent = false): void {
-    this.queue.push({ job, urgent })
+  // `agent`: whose reply it is. One that goes one at a time (Agent.oneAtATime) waits here while another
+  // reply of its runs, wherever that one is: what it waits behind says so (the prompt's waiting mark).
+  private enqueue(job: () => Promise<unknown>, urgent = false, agent?: Agent): void {
+    this.queue.push({ job, urgent, ...(agent?.oneAtATime ? { solo: agent.id } : {}) })
     this.pump()
   }
 
   private pump(): void {
     for (;;) {
       if (this.paused) return // paused: nothing new starts, queued work waits
-      const urgent = this.queue.findIndex((q) => q.urgent)
-      const at = this.active < MAX_CONCURRENT ? (urgent >= 0 ? urgent : this.queue.length > 0 ? 0 : -1) : this.active < MAX_CONCURRENT_URGENT ? urgent : -1
+      const free = (q: { solo?: string }): boolean => !q.solo || !this.soloRunning.has(q.solo)
+      const urgent = this.queue.findIndex((q) => q.urgent && free(q))
+      const first = this.queue.findIndex(free)
+      const at = this.active < MAX_CONCURRENT ? (urgent >= 0 ? urgent : first) : this.active < MAX_CONCURRENT_URGENT ? urgent : -1
       if (at < 0) return
-      const { job } = this.queue.splice(at, 1)[0]!
+      const { job, solo } = this.queue.splice(at, 1)[0]!
+      if (solo) this.soloRunning.add(solo)
       if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
         .catch((e: unknown) => console.error('[runner]', e))
         .finally(() => {
+          if (solo) this.soloRunning.delete(solo)
           this.active--
           this.pump()
           if (this.active === 0) this.deps.onBusy?.(false)
@@ -1319,6 +1346,7 @@ export class Runner {
   // A reply runs here from now on: a prompt marked as queued waits for these, whatever started it.
   private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
     this.convRuns.set(conv.id, (this.convRuns.get(conv.id) ?? 0) + 1)
+    this.began(conv.id, opts.replyTo ?? opts.trigger) // the prompt's slot on the way is this reply's now
     try {
       return await this.executeReply(agent, conv, opts)
     } finally {
@@ -1351,7 +1379,7 @@ export class Runner {
     const f = this.followups.take(key)
     if (f && msg.run?.status === 'done' && !this.paused && !(f.job && this.jobOf(f.job)?.state === 'stopped')) {
       this.followups.reserve(key)
-      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true, ...(f.job ? { job: f.job } : {}) }))
+      this.enqueue(() => this.execute(agent, conv, { depth: f.depth, work: f.work, threadId, reserved: true, ...(f.job ? { job: f.job } : {}) }), false, agent)
     }
     this.startWaiting(key)
     return msg
@@ -3895,7 +3923,7 @@ ${note}`,
         `No one called you: you joined because there is something of your area to do now${r.reason ? ` (${r.reason})` : ''}, after ${agent.name}'s reply above. Do that part for real, with your tools, and reply with the result. Don't comment on what others did, don't agree or repeat what was said. If, looking closely, there's nothing of yours to do, reply only “Nothing for me here.”`
       )
       this.followups.reserve(key)
-      this.enqueue(() => this.execute(who, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, job: job.id, task }))
+      this.enqueue(() => this.execute(who, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, job: job.id, task }), false, who)
       return true
     } catch (e) {
       console.warn('[chime]', e)
@@ -4147,7 +4175,7 @@ ${note}`,
       const requester = behalf ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
-      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}), ...(jobId ? { job: jobId } : {}) }), true)
+      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}), ...(jobId ? { job: jobId } : {}) }), true, agent)
     }
     if (this.followups.busy(key)) this.tells.set(key, go)
     else go()
@@ -4344,7 +4372,7 @@ ${note}`,
         if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work, ...(job ? { job } : {}) })
         else {
           this.followups.reserve(keyOf(a))
-          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(job ? { job } : {}) }))
+          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(job ? { job } : {}) }), false, a)
         }
       }
     } finally {

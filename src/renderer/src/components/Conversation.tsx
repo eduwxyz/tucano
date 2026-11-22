@@ -80,7 +80,6 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
-  type SendMode,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -641,11 +640,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             ))}
           </div>
         )}
-        {/* A prompt of mine waiting its turn behind the reply above (the mode on the message, runs.ts):
-            it says so until its own reply starts, and then the mark goes. */}
+        {/* A prompt of mine waiting its turn (the conversation has all its replies at once running, or its
+            agent goes one at a time; runs.ts): it says so until its own reply starts, and then the mark goes. */}
         {message.sendMode === 'queue' && (
-          <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', "Runs after the reply above finishes")}>
-            {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
+          <span className="tag msg__queued" title={L('Começa quando uma resposta em curso terminar (Configurações › Agentes › Respostas)', 'Starts when a running reply ends (Settings › Agents › Replies)')}>
+            {L('Na fila, esperando uma resposta terminar', 'Queued until a reply ends')}
           </span>
         )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
@@ -2807,18 +2806,16 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
-  const sendMode = useStore((st) => st.settings?.sendMode ?? 'parallel')
-  // How this one joins a reply that's already running here: the setting says what Enter does, and
-  // the modifier keys say the rest (see `send` in src/core/runs.ts). Nothing running: all the same.
-  const submit = (mode?: SendMode): void => {
+  // A prompt starts its own reply beside what runs here, up to the replies at once the workspace allows;
+  // past them it waits its turn (see `send` in src/core/runs.ts). A running reply is steered from its own pill.
+  const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data })),
-      mode ?? sendMode
+      images.filter(isFile).map(({ name, data }) => ({ name, data }))
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2925,13 +2922,10 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
                 if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
                 if (e.key === 'Escape') return setMention(null)
               }
-              // Enter does what the setting says; a modifier picks a mode whatever the setting says. Shift+Enter
-              // alone is the line break it has always been, so the queue sits on Ctrl+Enter (Cmd+Enter on a Mac).
-              if (e.key === 'Enter' && e.nativeEvent.isComposing) return
-              if (e.key !== 'Enter') return
-              if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return // a new line, as it always was
-              e.preventDefault()
-              submit(e.altKey ? (e.shiftKey ? 'interrupt' : 'steer') : e.ctrlKey || e.metaKey ? 'queue' : undefined)
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                submit()
+              }
             }}
           />
         </div>
@@ -2954,18 +2948,6 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
             {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
-          {sendMode !== 'parallel' ? (
-            <button
-              className="btn btn--sm btn--ghost composer__mode"
-              onClick={() => updateSettings({ sendMode: 'parallel' })}
-              title={L(
-                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Ctrl+Enter põe na fila, Alt+Enter entrega, Shift+Alt+Enter interrompe, Shift+Enter quebra a linha).',
-                "Enter uses this mode during a reply. Select to restore parallel replies. Shortcuts apply to one send: Ctrl+Enter queues; Alt+Enter steers; Shift+Alt+Enter interrupts. Shift+Enter adds a line."
-              )}
-            >
-              {sendMode === 'queue' ? L('Enter: na fila', 'Enter: queued') : sendMode === 'steer' ? L('Enter: entregue à resposta', "Enter: steer") : L('Enter: interrompe', 'Enter: interrupts')}
-            </button>
-          ) : null}
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}

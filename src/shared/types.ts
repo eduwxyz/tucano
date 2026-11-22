@@ -100,6 +100,7 @@ export interface Agent {
   sectorDoes?: string // on a sector's head: what the sector handles, in one line, read by the other heads
   entry?: boolean // the person chose it as an entry point (src/shared/org.ts entriesOf): it answers to no agent, is in no sector, and the teams below it are sectors
   proactive?: boolean // false: the router never calls it in on its own when something is its to do (src/core/router.ts chimeIn); on unless false
+  oneAtATime?: true // its replies go one at a time, wherever they are: the next waits for the one running (src/core/runs.ts, enqueue)
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -487,9 +488,10 @@ export interface Message {
   title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
   via?: string // a person's message a harness sent over MCP: the harness key's name ("Claude Code"). The agent reads it; the screens don't show it
   stop?: { job: string } // the note left where a job stopped on its brakes (src/core/jobs.ts): it carries Continuar
-  // A prompt of mine waiting its turn in a conversation that was already answering: 'queue' while it
-  // waits, unset once its reply goes. Kept in the database, so it outlives a restart (runs.ts, resumeQueued).
-  sendMode?: SendMode
+  // A prompt of mine waiting its turn (its conversation had all its replies at once running, or its agent
+  // goes one at a time): 'queue' while it waits, unset once its reply goes. Kept in the database, so it
+  // outlives a restart (runs.ts, resumeQueued).
+  sendMode?: 'queue'
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
@@ -558,7 +560,7 @@ export interface Settings {
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
-  sendMode?: SendMode // what Enter does while a reply is running: beside it, two replies at once (the default), after it, into it, or stopping it
+  repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
@@ -1315,11 +1317,6 @@ export interface Report {
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
 }
-
-// How a new prompt arrives in a conversation that is already answering (src/core/runs.ts): beside
-// what's running, after it, handed to it between tool calls, or in place of it. No mode at all is
-// beside what's running, like a message of the person's own: it starts its own reply.
-export type SendMode = 'parallel' | 'queue' | 'steer' | 'interrupt'
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'
