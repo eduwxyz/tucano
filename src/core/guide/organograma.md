@@ -1,45 +1,44 @@
 # Time (quem responde a quem)
-> Um agente acima dos outros passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta. Como montar, o que acontece num pedido, perguntas, cancelar, prazos e limites.
+> Quem divide o trabalho com quem: um mapa, não uma cerca. Como montar, o que acontece num pedido, perguntas, cancelar, falhas e limites.
 
-Por padrão os agentes só se falam no mesmo canal. Quando um **responde a** outro, o de cima passa trabalho ao de baixo, e a resposta volta pra onde ele pediu. Você fala com um só, que divide o pedido.
+Qualquer agente pede trabalho a outro, e a resposta volta pra quem pediu. Quando um **responde a** outro, o de cima divide o trabalho com os de baixo: você fala com um só.
 
 ## Montar
-Em **Time**, na barra lateral (com dois ou mais agentes). Cada agente é um cartão num quadro: arraste o fundo pra andar, ⌘ e rolar (ou pinça) pro zoom. Sem ninguém ligado, escolha **Quem fica no topo**: os outros passam a responder a ele.
-- **Ligar**: puxe a bolinha de baixo de um cartão até quem vai responder a ele, ou a de cima até quem ele vai responder (você: ninguém).
-- **Desligar**: clique na linha e no **×** (ou Delete). Toda mudança mostra **Desfazer** (⌘Z).
-- **Arrumar**: arrastar um cartão só muda o lugar dele, com o time junto (⌥: só ele). **Organizar** volta ao desenho automático.
+Em **Time**, na barra lateral, cada agente é um cartão num quadro: arraste o fundo pra andar, ⌘ e rolar (ou pinça) pro zoom. Sem ninguém ligado, escolha **Quem fica no topo**.
+- **Ligar**: puxe a bolinha de baixo de um cartão até quem vai responder a ele, ou a de cima até quem ele vai responder.
+- **Desligar**: clique na linha e no **×** (ou Delete). **Desfazer**: ⌘Z.
+- **Arrumar**: arrastar um cartão leva o time junto (⌥: só ele). **Organizar** volta ao desenho automático.
 - **Pedir**: a caixa de baixo fala com o agente clicado, ou com quem está no topo.
 
-Clicar num agente mostra canais, time e pedidos. **Agora** lista os abertos; a linha de cada um acende.
-
-Ou na página do agente, em **Canais e skills**: **Responde a**.
-- Um agente responde a um só. Ele pede a todos abaixo dele e aos colegas (quem responde ao mesmo agente); nunca pra cima, nem a outro ramo. Uma linha tem no máximo três agentes.
-- Não vale quem está abaixo dele, nem o Tuca.
-- Arquivado um agente, o time dele responde a quem está acima.
+Clicar num agente mostra canais, time e pedidos; **Agora** lista os abertos.
+- Um agente responde a um só; não vale quem está abaixo dele, nem o Tuca. Arquivado um agente, o time dele responde a quem está acima.
+- O desenho diz a quem pensar primeiro, mas não cerca ninguém: uma pergunta ou uma parte pequena vai direto a quem sabe; trabalho grande de outro setor, de preferência ao chefe dele.
 
 ## O que acontece num pedido
 1. Você pede ao agente de cima.
-2. Ele passa a parte de cada um: cada pedido vira uma thread no canal de quem faz (ou na DM dele), em nome de quem pediu.
-3. Na resposta dele aparece **Pediu a …**, com **Abrir a thread**.
-4. Quando a thread termina, a conversa do pedido ganha um aviso (**respondeu**), com **Ver resposta**.
-5. Quem pediu responde de novo, uma vez, quando tudo voltou. Um pedido parado numa aprovação sua não segura os outros.
+2. Quem está na conversa faz ali mesmo, embaixo da mensagem. Quem não está, numa conversa privada dele com você, aberta pela linha do pedido. As partes andam juntas, e cada um recebe o pedido inteiro, a divisão e o que os outros entregaram.
+3. Embaixo da resposta de quem pediu fica uma linha por pedido: **Pediu a …**, o canal, como está (**trabalhando**, com o passo de agora, **com uma dúvida**, **esperando sua aprovação**, **concluído**) e **Abrir a thread**.
+4. Quando tudo voltou, ele te responde uma vez, na thread da sua mensagem (**Ver a resposta**). Um pedido parado numa aprovação sua não segura os outros.
+5. Pra continuar o assunto, responda nessa thread: o pedido segue onde estava.
 
-Onde fica: no canal do agente cujo **Tema** cobre o assunto. O que não é de canal nenhum (um recado, algo sobre ele), ou um agente sem canal, vai pra DM dele com você. Na dúvida, o primeiro canal. Você pode dizer onde.
+Escreva na thread de um pedido: quem faz te responde ali, e isso entra no resultado.
+
+Vai pra um canal de quem faz só quando o assunto é claramente o **Tema** dele. Com mais pessoas, um pedido feito numa DM fica numa DM, a não ser que você escreva o canal (**#engenharia**).
 
 ## Perguntas
-A dúvida de quem recebeu vai pra quem pediu, não pra você. Ele responde o que sabe; o que for decisão sua ele pergunta, no cartão de sempre, e repassa. Você também pode responder na thread.
+A dúvida de quem recebeu vai pra quem pediu. Ele responde o que sabe sem te escrever; o que for decisão sua ele pergunta na thread da sua mensagem, e repassa.
 
 ## Aprovações
-Não mudam: cada agente pede as suas, a você.
+Cada agente pede as suas a você; a de um pedido aparece também na linha dele: aprove ali.
 
 ## Cancelar
-Diga a quem pediu pra cancelar: quem fazia para, e o que pediu adiante também. **Parar** numa resposta da thread encerra o pedido, e quem pediu fica sabendo.
+Diga a quem pediu pra cancelar: quem fazia para, e o que ele pediu adiante. **Parar** numa resposta da thread encerra o pedido.
 
 ## Quando não termina
-Falhou, parou no limite ou pausou no teto: quem pediu é avisado na hora, com o motivo. Passou do prazo, ou o app fechou no meio: uma vez.
+Falha que passa (internet, janela do plano, computador desligado) espera e tenta de novo sozinha. As outras voltam na hora pra quem pediu, que passa a outro, faz de outro jeito ou te pergunta. Passou do prazo: avisa uma vez. O app fechou: continua quando abrir.
 
 ## Limites
-Até 5 pedidos por resposta, 12 em aberto por agente e 3 seguidos num mesmo trabalho. Ninguém pede de volta a quem pediu. Pausado, nenhum sai. Cada agente gasta do próprio limite.
+Até 5 pedidos por resposta, 12 em aberto por agente e 5 seguidos num mesmo trabalho.
 
 ## Time de pessoas e arquivo de time
 Com mais pessoas, um pedido só chega a canais que quem pediu vê. **Exportar time** leva quem responde a quem.

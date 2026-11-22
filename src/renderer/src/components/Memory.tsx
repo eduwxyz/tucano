@@ -55,8 +55,47 @@ export function MemoryPage(): ReactNode {
   const shown = tab === 'all' ? groups : groups.filter((g) => g.scope === (tab === 'me' ? mine : tab))
   const review = pending.length + stale.length
 
+  // The strip holds a tab per bot, and there is no limit on bots, so it scrolls inside the bar
+  // instead of running past the page. The tab picked comes back to the middle of the strip: with a
+  // dozen bots the one clicked would otherwise sit under an edge or outside the view. The arrows
+  // walk the same strip a screenful at a time, for a person reading along it.
+  const strip = useRef<HTMLDivElement>(null)
+  const [over, setOver] = useState({ back: 0, on: 0 })
+  const measure = (): void => {
+    const s = strip.current
+    if (!s) return
+    setOver({ back: s.scrollLeft, on: s.scrollWidth - s.clientWidth - s.scrollLeft })
+  }
+  useEffect(() => {
+    measure()
+  }, [withNotes.length, forgotten.length, finding])
+  useEffect(() => {
+    const on = (): void => measure()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  // Selecting is where the sliding happens: the chosen tab is put in the middle, whether the click
+  // came from a tab or from an arrow that only moved the strip.
+  useEffect(() => {
+    const s = strip.current
+    const el = s?.querySelector<HTMLElement>(`[data-tab="${tab}"]`)
+    if (!s || !el) return
+    // The strip fits: there is no middle to bring the tab to. Written this way so a host without
+    // layout, where both widths are absent, also leaves the strip alone.
+    if (!(s.scrollWidth > s.clientWidth)) return
+    const box = el.getBoundingClientRect()
+    const own = s.getBoundingClientRect()
+    const middle = s.scrollLeft + (box.left - own.left) - (s.clientWidth - box.width) / 2
+    s.scrollTo({ left: Math.max(0, middle), behavior: 'smooth' })
+  }, [tab])
+  const page = (by: 1 | -1): void => {
+    const s = strip.current
+    if (!s) return
+    s.scrollBy({ left: by * Math.max(160, s.clientWidth - 48), behavior: 'smooth' })
+  }
+
   const tabBtn = (id: Tab, label: ReactNode): ReactNode => (
-    <button key={id} className={tab === id ? 'is-on' : ''} onClick={() => setTab(id)}>
+    <button key={id} data-tab={id} className={tab === id ? 'is-on' : ''} onClick={() => setTab(id)}>
       {label}
     </button>
   )
@@ -64,18 +103,29 @@ export function MemoryPage(): ReactNode {
   return (
     <Sheet title={L('Memória', 'Memory')} lede={L('O que os agentes sabem sobre você e o seu trabalho.', 'What the agents know about you and your work.')}>
       <nav className="tabs-line">
-        {tabBtn('all', L('Tudo', 'All'))}
-        {tabBtn('me', L('Você', 'You'))}
-        {withNotes.map((a) =>
-          tabBtn(
-            a.id,
-            <>
-              <AgentAvatar agent={a} size={14} /> {a.name}
-            </>
-          )
+        <div className="tabs-line__strip" ref={strip} onScroll={measure}>
+          {tabBtn('all', L('Tudo', 'All'))}
+          {tabBtn('me', L('Você', 'You'))}
+          {withNotes.map((a) =>
+            tabBtn(
+              a.id,
+              <>
+                <AgentAvatar agent={a} size={14} /> {a.name}
+              </>
+            )
+          )}
+          {forgotten.length > 0 && tabBtn('forgotten', L('Esquecidas', 'Forgotten'))}
+        </div>
+        {over.back > 1 && (
+          <button className="tabs-line__page tabs-line__page--back" aria-label={L('Abas anteriores', 'Earlier tabs')} title={L('Abas anteriores', 'Earlier tabs')} onClick={() => page(-1)}>
+            <Icon name="chevron" size={16} />
+          </button>
         )}
-        {forgotten.length > 0 && tabBtn('forgotten', L('Esquecidas', 'Forgotten'))}
-        <span className="grow" />
+        {over.on > 1 && (
+          <button className="tabs-line__page" aria-label={L('Mais abas', 'More tabs')} title={L('Mais abas', 'More tabs')} onClick={() => page(1)}>
+            <Icon name="chevron" size={16} />
+          </button>
+        )}
         {finding || q ? (
           <label className="tabs-line__find">
             <Icon name="search" size={13} />
@@ -100,7 +150,7 @@ export function MemoryPage(): ReactNode {
       {tab === 'review' ? (
         <>
           {pending.length > 0 && (
-            <ReadGroup title={L('Novas', 'New')} lead={L('Só entram na memória se você guardar.', 'They only go into memory if you keep them.')}>
+            <ReadGroup title={L('Novas', 'New')} lead={L('Só entram na memória se você guardar.', "Save a suggestion to add it to memory.")}>
               {pending.map((m) => (
                 <Line key={m.id} memory={m} shown>
                   <button className="text-btn text-btn--strong" onClick={() => decideMemory(m.id, true)}>
@@ -133,11 +183,11 @@ export function MemoryPage(): ReactNode {
           </button>
         </>
       ) : tab === 'forgotten' ? (
-        <ReadGroup title={L('Esquecidas', 'Forgotten')} lead={L('Saíram do prompt. O registro impede que sejam aprendidas de novo; apagar de vez remove até ele.', 'Out of the prompt. The record keeps them from being learned again; deleting for good removes even that.')}>
+        <ReadGroup title={L('Esquecidas', 'Forgotten')} lead={L('Saíram do prompt. O registro impede que sejam aprendidas de novo; apagar de vez remove até ele.', "Left out of the prompt and kept from being learned again. Deleting permanently removes that too.")}>
           {forgotten.filter(hit).map((m) => (
             <Line key={m.id} memory={m}>
               <button className="text-btn" onClick={() => purgeMemory(m.id)}>
-                {L('Apagar de vez', 'Delete for good')}
+                {L('Apagar de vez', "Delete permanently")}
               </button>
             </Line>
           ))}
@@ -204,7 +254,7 @@ function Meta({ memory, searchable }: { memory: Memory; searchable?: boolean }):
       )}
       {' · '}
       <span title={new Date(memory.createdAt).toLocaleString(locale())}>{ago(memory.createdAt)}</span>
-      {searchable && <span title={L('Fora do prompt: os agentes acham com buscar_memorias.', 'Out of the prompt: agents find it with buscar_memorias.')}>{L(' · por busca', ' · by search')}</span>}
+      {searchable && <span title={L('Fora do prompt: os agentes acham com buscar_memorias.', "Not included in prompts; agents can find it through memory search.")}>{L(' · por busca', " · searchable")}</span>}
     </span>
   )
 }
@@ -220,7 +270,7 @@ function Line({ memory, searchable, shown, children }: { memory: Memory; searcha
         <Meta memory={memory} searchable={searchable} />
         {previous && (
           <button className="text-btn" onClick={() => setShowPrev(!showPrev)}>
-            {showPrev ? L('Esconder a anterior', 'Hide the previous one') : L('Ver a anterior', 'See the previous one')}
+            {showPrev ? L('Esconder a anterior', "Hide previous version") : L('Ver a anterior', "View previous version")}
           </button>
         )}
         <span className="grow" />
@@ -292,7 +342,7 @@ function Add({ me }: { me: string }): ReactNode {
     >
       <Icon name="plus" size={15} />
       <input value={text} placeholder={L(`Ensinar algo sobre você. Ex.: ${me} prefere PRs pequenos.`, `Teach it something about you. E.g. ${me} prefers small PRs.`)} onChange={(e) => setText(e.target.value)} />
-      {text.trim() && <span className="read-add__hint">{L('Enter guarda', 'Enter keeps it')}</span>}
+      {text.trim() && <span className="read-add__hint">{L('Enter guarda', "Enter to save")}</span>}
     </form>
   )
 }

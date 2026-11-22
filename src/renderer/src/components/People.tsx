@@ -7,7 +7,6 @@ import {
   amAdmin,
   amOwner,
   createInvite,
-  delegating,
   doneNaming,
   initials,
   inviteLink,
@@ -34,13 +33,14 @@ import {
   type Person,
   type State
 } from '../store'
+import { accessSummary, covers, restricted } from '../../../shared/access'
 import { toolWords } from './Conversation'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { Card, Field } from './Pages'
+import { CopyLink, InviteCard, message } from './Invite'
+import { PersonAccessDialog } from './PersonAccess'
 import { ago, Icon, MeAvatar, time } from './ui'
-
-const message = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
 
 // Where an action is the admins', a short line says so instead of a button that fails.
 export function AdminOnly({ children }: { children: ReactNode }): ReactNode {
@@ -107,7 +107,9 @@ export function PeoplePane(): ReactNode {
   const owner = useStore(amOwner)
   const team = useStore((s) => s.settings.workspaceLabel || s.settings.workspaceName)
   const agents = useStore((s) => s.agents.filter((a) => !a.archived && a.kind !== 'tuca'))
+  const conversations = useStore((s) => s.conversations)
   const [inviting, setInviting] = useState(false)
+  const [editing, setEditing] = useState<Person | null>(null)
   const [invites, setInvites] = useState<Invite[]>([])
   const [removed, setRemoved] = useState<(Person & { removedAt: number })[]>([])
   const reload = (): void => {
@@ -137,7 +139,7 @@ export function PeoplePane(): ReactNode {
 
       <Card
         title={L(`Pessoas ${team ? `de ${team}` : 'do Tucano'}`, `People ${team ? `of ${team}` : 'in this Tucano'}`)}
-        lead={L('Quem tem acesso a este Tucano e o que cada um pode fazer. As DMs de cada pessoa são só dela.', 'Who has access to this Tucano and what each one can do. Each person’s DMs are theirs alone.')}
+        lead={L('Quem tem acesso a este Tucano e o que cada um pode fazer. As DMs de cada pessoa são só dela.', "Who has access to this Tucano and what each person can do. Each person’s DMs stay private.")}
         action={
           admin && !inviting ? (
             <button className="btn btn--primary btn--sm" onClick={() => setInviting(true)}>
@@ -159,11 +161,18 @@ export function PeoplePane(): ReactNode {
                     {p.about && <span className="muted"> · {p.about}</span>}
                   </span>
                   <span className="muted small">
-                    {[seenLine(p), owned.length ? L(`dono de ${owned.join(', ')}`, `owns ${owned.join(', ')}`) : '', p.delegateTo && delegating(p, p.delegateTo) ? L(`coberto por ${personById({ people }, p.delegateTo)?.name ?? '…'}`, `covered by ${personById({ people }, p.delegateTo)?.name ?? '…'}`) : '']
+                    {[seenLine(p), owned.length ? L(`dono de ${owned.join(', ')}`, `owns ${owned.join(', ')}`) : '', p.delegateTo && covers(p, personById({ people }, p.delegateTo)) ? L(`coberto por ${personById({ people }, p.delegateTo)?.name ?? '…'}`, `covered by ${personById({ people }, p.delegateTo)?.name ?? '…'}`) : '']
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
                 </div>
+                {/* What someone else sees is for admins (and themself) to know: a member isn't told. */}
+                {(admin || p.id === me?.id) && <span className={`access-chip ${restricted(p) ? '' : 'access-chip--all'}`}>{accessSummary(p, agents, conversations.filter((c) => c.kind === 'channel'))}</span>}
+                {manages(me, p) && p.role === 'member' && (
+                  <button className="btn btn--sm" onClick={() => setEditing(p)}>
+                    {L('Editar acesso', 'Edit access')}
+                  </button>
+                )}
                 {manages(me, p) ? (
                   <select className="person-row__role" aria-label={L(`Papel de ${p.name}`, `${p.name}'s role`)} value={p.role} onChange={(e) => void setRole(p.id, e.target.value as 'admin' | 'member').catch((err: unknown) => toast(message(err)))}>
                     <option value="member">{roleLabel('member')}</option>
@@ -184,6 +193,8 @@ export function PeoplePane(): ReactNode {
         </div>
         {!admin && <AdminOnly>{L('Só um admin convida, muda o papel ou remove alguém.', 'Only an admin invites, changes roles or removes someone.')}</AdminOnly>}
       </Card>
+
+      {editing && <PersonAccessDialog key={editing.id} person={people.find((x) => x.id === editing.id) ?? editing} onClose={() => setEditing(null)} />}
 
       {admin && inviting && <InviteCard onClose={() => (setInviting(false), reload())} owner={owner} />}
 
@@ -271,66 +282,6 @@ function InviteBack({ person, owner, onDone }: { person: Person; owner: boolean;
     >
       {L('Convidar de volta', 'Invite back')}
     </button>
-  )
-}
-
-function CopyLink({ link }: { link: string }): ReactNode {
-  const [copied, setCopied] = useState(false)
-  const copy = (): void =>
-    void navigator.clipboard.writeText(link).then(
-      () => (setCopied(true), setTimeout(() => setCopied(false), 1600)),
-      () => toast(L('Não consegui copiar. Selecione o link e copie.', "I couldn't copy. Select the link and copy it."))
-    )
-  return (
-    <div className="row invite-link">
-      <input className="grow mono" readOnly value={link} onFocus={(e) => e.target.select()} aria-label={L('Link do convite', 'Invite link')} />
-      <button className="btn btn--sm" onClick={copy}>
-        <Icon name={copied ? 'check' : 'copy'} size={14} /> {copied ? L('Copiado', 'Copied') : L('Copiar link', 'Copy link')}
-      </button>
-    </div>
-  )
-}
-
-function InviteCard({ onClose, owner }: { onClose: () => void; owner: boolean }): ReactNode {
-  const [role, setRoleChoice] = useState<'member' | 'admin'>('member')
-  const [about, setAbout] = useState('')
-  const [link, setLink] = useState('')
-  const [error, setError] = useState('')
-  const make = (): void =>
-    void createInvite(role, about.trim()).then(
-      (r) => setLink(inviteLink(r.code)),
-      (e: unknown) => setError(message(e))
-    )
-  return (
-    <Card title={L('Convidar alguém', 'Invite someone')} lead={L('O link vale uma vez, por 7 dias. Quem usa entra com o próprio nome, no navegador ou no app.', 'The link works once, for 7 days. Whoever uses it comes in with their own name, in the browser or the app.')}>
-      <div className="grid2">
-        <Field label={L('Papel', 'Role')} hint={role === 'admin' ? L('Admins mexem em agentes, conectores, skills, configurações e pessoas.', 'Admins handle agents, connectors, skills, settings and people.') : L('Membros conversam, criam canais e rotinas pra si.', 'Members chat, create channels and their own routines.')}>
-          <select value={role} disabled={!!link} onChange={(e) => setRoleChoice(e.target.value as 'member' | 'admin')}>
-            <option value="member">{roleLabel('member')}</option>
-            {owner && <option value="admin">{roleLabel('admin')}</option>}
-          </select>
-        </Field>
-        <Field label={L('O que faz', 'What they do')} hint={L('Pros agentes saberem com quem falam. A pessoa pode mudar depois.', 'So the agents know who they talk to. They can change it later.')}>
-          <input value={about} disabled={!!link} maxLength={200} placeholder={L('Ex.: cuida do financeiro', 'E.g. handles finance')} onChange={(e) => setAbout(e.target.value)} />
-        </Field>
-      </div>
-      {link ? (
-        <Field label={L('Link do convite', 'Invite link')} hint={L('Mande por onde preferir. Ele some daqui quando você fechar: um novo convite gera outro link.', 'Send it however you like. It leaves this screen when you close it: a new invite makes another link.')}>
-          <CopyLink link={link} />
-        </Field>
-      ) : null}
-      {error && <p className="note note--error">{error}</p>}
-      <div className="row row--end">
-        <button className="btn btn--ghost btn--sm" onClick={onClose}>
-          {link ? L('Fechar', 'Close') : L('Cancelar', 'Cancel')}
-        </button>
-        {!link && (
-          <button className="btn btn--primary btn--sm" onClick={make}>
-            {L('Criar convite', 'Create invite')}
-          </button>
-        )}
-      </div>
-    </Card>
   )
 }
 
@@ -482,8 +433,9 @@ function MeCard(): ReactNode {
   const [about, setAbout] = useState(me?.about ?? '')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
-  const others = people.filter((p) => p.id !== me?.id)
-  const covering = me?.delegateTo && delegating(me, me.delegateTo) ? personById({ people }, me.delegateTo) : undefined
+  const others = people.filter((p) => p.id !== me?.id && !restricted(p)) // someone restricted covers for no one (see covers)
+  const left = people.some((p) => p.id !== me?.id && restricted(p))
+  const covering = me?.delegateTo && covers(me, personById({ people }, me.delegateTo)) ? personById({ people }, me.delegateTo) : undefined
   const [to, setTo] = useState(others[0]?.id ?? '')
   const [until, setUntil] = useState(dateInput(Date.now() + 7 * 86_400_000))
   useEffect(() => {
@@ -526,8 +478,9 @@ function MeCard(): ReactNode {
             <p className="muted small">
               {covering
                 ? L(`${covering.name} responde e aprova por você até ${time(me.delegateUntil!)}.`, `${covering.name} answers and approves for you until ${time(me.delegateUntil!)}.`)
-                : L('Enquanto você estiver fora, alguém responde às perguntas e decide as aprovações que seriam suas.', 'While you’re away, someone answers the questions and decides the approvals that would be yours.')}
+                : L('Enquanto você estiver fora, alguém responde às perguntas e decide as aprovações que seriam suas.', "Choose who handles your questions and approvals while you are away.")}
             </p>
+            {!covering && left && <p className="access-cover-hint small">{L('Quem não vê todo o time não aparece aqui: cobrir você é decidir aprovações de qualquer agente.', 'Who doesn’t see the whole team isn’t listed: covering for you means deciding approvals from any agent.')}</p>}
             {!covering && (
               <div className="row row--center cover-row">
                 <select value={to} aria-label={L('Quem', 'Who')} onChange={(e) => setTo(e.target.value)}>
@@ -600,6 +553,8 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return L(`removeu ${named || who(e.target)}`, `removed ${named || who(e.target)}`)
     case 'person.role':
       return L(`mudou o papel de ${who(e.target)} pra ${role(d['to'])}`, `changed ${who(e.target)}'s role to ${role(d['to'])}`)
+    case 'person.access':
+      return L(`mudou o que ${who(e.target)} vê`, `changed what ${who(e.target)} sees`)
     case 'person.delegation':
       return d['to'] ? L(`pediu pra ${who(d['to'])} cobrir até ${typeof d['until'] === 'number' ? time(d['until']) : '…'}`, `asked ${who(d['to'])} to cover until ${typeof d['until'] === 'number' ? time(d['until']) : '…'}`) : L('voltou a responder por si', 'is answering for themselves again')
     case 'person.purged':
@@ -622,12 +577,14 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return named ? L(`excluiu o canal #${named}`, `deleted the #${named} channel`) : L('excluiu um canal', 'deleted a channel')
     case 'dm.deleted':
       return L('apagou uma conversa privada', 'deleted a private conversation')
+    case 'vault_key.imported':
+      return L(`importou ${String(d['count'] ?? '')} chaves pro Cofre`, `imported ${String(d['count'] ?? '')} keys into the Vault`)
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
   }
   const [thing, verb] = e.kind.split('.')
-  const noun = ({ agent: L('o agente', 'agent'), connector: L('o conector', 'connector'), skill: L('a skill', 'skill'), routine: L('a rotina', 'routine'), channel: L('o canal', 'channel') } as Record<string, string>)[thing ?? ''] ?? thing
-  const did = ({ created: L('criou', 'created'), updated: L('mudou', 'changed'), removed: L('removeu', 'removed'), archived: L('arquivou', 'archived'), restored: L('reativou', 'restored'), decided: L('decidiu', 'decided') } as Record<string, string>)[verb ?? ''] ?? verb
+  const noun = ({ vault_key: L('a chave do Cofre', 'Vault key'), vault_login: L('o login do Cofre', 'Vault login'), agent: L('o agente', 'agent'), connector: L('o conector', 'connector'), skill: L('a skill', 'skill'), routine: L('a rotina', 'routine'), channel: L('o canal', 'channel') } as Record<string, string>)[thing ?? ''] ?? thing
+  const did = ({ created: L('criou', 'created'), updated: L('mudou', 'changed'), removed: L('removeu', 'removed'), archived: L('arquivou', 'archived'), deleted: L('excluiu', 'deleted'), restored: L('reativou', 'restored'), decided: L('decidiu', 'decided') } as Record<string, string>)[verb ?? ''] ?? verb
   return `${did} ${noun}${named ? ` ${thing === 'channel' ? '#' : ''}${named}` : ''}`
 }
 
@@ -651,7 +608,7 @@ export function ActivityPane(): ReactNode {
   useEffect(() => void removedPeople().then((r) => setRemoved(new Map(r.map((p) => [p.id, p.name]))), () => {}), [])
   const name = (id?: string): string => (id ? (personById(s, id)?.name ?? removed.get(id) ?? L('Alguém', 'Someone')) : 'Tucano')
   return (
-    <Card title={L('Atividade', 'Activity')} lead={L('Quem fez o quê no Tucano. O que se diz nas DMs nunca aparece aqui.', 'Who did what in this Tucano. What’s said in DMs never shows here.')}>
+    <Card title={L('Atividade', 'Activity')} lead={L('Quem fez o quê no Tucano. O que se diz nas DMs nunca aparece aqui.', "Who did what in this Tucano. What’s said in DMs never shows here.")}>
       <div className="row activity-filters">
         <select value={personId} aria-label={L('Pessoa', 'Person')} onChange={(e) => setPersonId(e.target.value)}>
           <option value="">{L('Todas as pessoas', 'Everyone')}</option>

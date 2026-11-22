@@ -54,6 +54,12 @@ const PATHS: Record<string, ReactNode> = {
   ),
   edit: <path d="M4 20h4L19 9l-4-4L4 16v4Z" />,
   book: <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15ZM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6" />,
+  key: (
+    <>
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="m10.7 12.3 9.8-9.8M17 6l3 3M14.5 8.5l2 2" />
+    </>
+  ),
   lock: (
     <>
       <rect x="5" y="11" width="14" height="10" rx="2" />
@@ -95,6 +101,14 @@ const PATHS: Record<string, ReactNode> = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+  hide: <path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6" />,
+  more: (
+    <>
+      <circle cx="5.5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="18.5" cy="12" r="1" />
+    </>
+  ),
   keyboard: <path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" />,
   down: <path d="M12 5v14M6 13l6 6 6-6" />,
   up: <path d="M12 19V5M6 11l6-6 6 6" />,
@@ -113,6 +127,7 @@ const PATHS: Record<string, ReactNode> = {
   back: <path d="M19 12H5M11 6l-6 6 6 6" />,
   hand: <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5-2.7L3 15.5a1.6 1.6 0 0 1 2.6-1.8L8 16" />,
   expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />,
+  shrink: <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />,
   users: (
     <>
       <circle cx="9" cy="8" r="3.5" />
@@ -122,8 +137,30 @@ const PATHS: Record<string, ReactNode> = {
   volume: <path d="M4 9v6h4l5 4V5L8 9H4ZM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />,
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />,
   archive: <path d="M3 4h18v4H3V4ZM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />,
+  board: (
+    <>
+      <rect x="3.5" y="4" width="17" height="16" rx="3" />
+      <path d="M9.2 4v16M14.8 4v16M5.8 8h1.2M11.4 8h1.2M17 8h1.2M11.4 11.5h1.2" />
+    </>
+  ),
   thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />,
-  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />
+  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />,
+  bell: <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0" />,
+  gauge: <path d="M12 14l4-4M3.3 19a10 10 0 1 1 17.4 0" />,
+  server: (
+    <>
+      <rect x="3.5" y="4" width="17" height="7" rx="2" />
+      <rect x="3.5" y="13" width="17" height="7" rx="2" />
+      <path d="M7.5 7.5h.01M7.5 16.5h.01" />
+    </>
+  ),
+  route: (
+    <>
+      <circle cx="6" cy="18.5" r="2" />
+      <circle cx="18" cy="5.5" r="2" />
+      <path d="M8 18.5h8a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h8" />
+    </>
+  )
 }
 
 export type IconName = keyof typeof PATHS
@@ -214,11 +251,11 @@ export const AVATARS: AvatarDefinition[] = [...examples, ...(gallery as AvatarDe
 const HEX: Record<AgentColor, string> = { sky: '#3b9eea', indigo: '#5b6cf0', violet: '#8b5cf6', rose: '#e5557a', amber: '#e3a008', green: '#22a35a', teal: '#14a3a3', graphite: '#5d6470' }
 
 // A drawn avatar. Big ones and busy ones move (busy: thinking); the rest are one still SVG,
-// so a long chat stays light. The biggest follow the pointer with their eyes.
-function DrawnAvatar({ definition, color, size, busy, happy }: { definition: AvatarDefinition; color: string; size: number; busy?: boolean; happy?: boolean }): ReactNode {
+// so a long chat stays light (a caller can ask for a still one). The biggest follow the pointer with their eyes.
+function DrawnAvatar({ definition, color, size, busy, happy, still }: { definition: AvatarDefinition; color: string; size: number; busy?: boolean; happy?: boolean; still?: boolean }): ReactNode {
   const host = useRef<HTMLSpanElement>(null)
   const avatar = useRef<MountedAvatar | null>(null)
-  const options: AvatarOptions = { definition, color, mood: busy ? 'thinking' : happy ? 'happy' : 'idle', still: size < 40 && !busy && !happy, followPointer: size >= 64, label: '' }
+  const options: AvatarOptions = { definition, color, mood: busy ? 'thinking' : happy ? 'happy' : 'idle', still: (still || size < 40) && !busy && !happy, followPointer: size >= 64, label: '' }
   useEffect(() => {
     avatar.current = mountAvatar(host.current!, options)
     return () => avatar.current?.destroy()
@@ -229,18 +266,18 @@ function DrawnAvatar({ definition, color, size, busy, happy }: { definition: Ava
 
 // busy: the eyes read, left to right, while the agent works. Otherwise they blink now and then.
 // Right after the work ends, one happy squint. A picture wins over a drawn avatar, and both over the face.
-export function AgentAvatar({ agent, size = 32, busy }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture' | 'avatar'>>; size?: number; busy?: boolean }): ReactNode {
+export function AgentAvatar({ agent, size = 32, busy, still }: { agent: Pick<Agent, 'name' | 'color'> & Partial<Pick<Agent, 'kind' | 'customColor' | 'picture' | 'avatar'>>; size?: number; busy?: boolean; still?: boolean }): ReactNode {
   const happy = useJustEnded(!!busy, 600)
   if (agent.kind === 'tuca') return <TucaMark size={size} busy={busy} happy={happy} />
   if (!agent.picture && agent.avatar)
     return (
       <span className="avatar avatar--drawn" style={{ width: size, height: size }}>
-        <DrawnAvatar definition={agent.avatar} color={agent.customColor ?? HEX[agent.color]} size={size} busy={busy} happy={happy} />
+        <DrawnAvatar definition={agent.avatar} color={agent.customColor ?? HEX[agent.color]} size={size} busy={busy} happy={happy} still={still} />
         <span className="sr-only">{agent.name}</span>
       </span>
     )
   return (
-    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''} ${happy ? 'is-happy' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
+    <span className={`avatar avatar--agent c-${agent.color} ${busy ? 'is-busy' : ''} ${happy ? 'is-happy' : ''} ${still && !busy && !happy ? 'is-still' : ''}`} style={{ width: size, height: size, fontSize: size * 0.42, ...ownColor(agent) }}>
       {agent.picture ? (
         <img className="avatar__photo" src={agent.picture} alt="" />
       ) : (

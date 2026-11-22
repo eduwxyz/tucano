@@ -4,7 +4,7 @@
 // Google's and Slack's sign in with an app the person makes once, which the first Connect walks them through.
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogEntry } from '../../../shared/connector-catalog'
+import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogCategory, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
 import { addConnector, authorizeConnector, openExternal, ownApp, setOwnApp, useStore, type Connector } from '../store'
 import { Modal } from './Modal'
@@ -57,6 +57,13 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
   const words = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
   const mine = connectors.filter((c) => !words || `${c.name} ${entryOf(c)?.about() ?? ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(words))
   const found = searchCatalog(query).filter((e) => !connectors.some((c) => entryOf(c)?.id === e.id))
+  // One category at a time, picked on top, instead of scrolling past all of them. "All" shows what's connected too.
+  const [picked, setOnly] = useState<CatalogCategory | null>(null)
+  const counts = CATEGORIES().map((cat) => ({ ...cat, n: found.filter((c) => c.category === cat.id).length })).filter((cat) => cat.n > 0)
+  // A search that leaves nothing in the picked category shows all again, rather than an empty page.
+  const only = counts.length > 1 && counts.some((cat) => cat.id === picked) ? picked : null
+  const shown = only ? found.filter((c) => c.category === only) : found
+  const mineShown = only ? [] : mine
 
   const connect = (c: CatalogEntry): void => {
     if (c.app && !apps[c.app.provider]) return setAppSetup({ provider: c.app.provider, then: c })
@@ -70,17 +77,31 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
 
   return (
     <section className="catalog">
-      <label className="catalog__search">
-        <Icon name="search" size={14} />
-        <input value={query} placeholder={L('Buscar conectores', 'Search connectors')} aria-label={L('Buscar conectores', 'Search connectors')} onChange={(e) => setQuery(e.target.value)} />
-      </label>
-      {mine.length > 0 && (
+      <div className="catalog__top">
+        <label className="catalog__search">
+          <Icon name="search" size={14} />
+          <input value={query} placeholder={L('Buscar conectores', 'Search connectors')} aria-label={L('Buscar conectores', 'Search connectors')} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+        {counts.length > 1 && (
+          <div className="catalog__cats" role="group" aria-label={L('Categorias', 'Categories')}>
+            <button className={`chip ${only === null ? 'is-on' : ''}`} aria-pressed={only === null} onClick={() => setOnly(null)}>
+              {L('Todos', 'All')}
+            </button>
+            {counts.map((cat) => (
+              <button key={cat.id} className={`chip ${only === cat.id ? 'is-on' : ''}`} aria-pressed={only === cat.id} onClick={() => setOnly(only === cat.id ? null : cat.id)}>
+                {cat.name} <span className="catalog__count">{cat.n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {mineShown.length > 0 && (
         <div className="catalog__group">
           <h3>
-            {L('Conectados', 'Connected')} <span className="muted">{mine.length}</span>
+            {L('Conectados', 'Connected')} <span className="muted">{mineShown.length}</span>
           </h3>
           <div className="catalog__grid">
-            {mine.map((c) => {
+            {mineShown.map((c) => {
               const entry = entryOf(c)
               const using = users.filter((a) => (a.grants[c.id] ?? 'none') !== 'none').length
               const fresh = c.tools.filter((t) => t.isNew).length
@@ -129,11 +150,11 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
           </div>
         </div>
       )}
-      {found.length === 0 && mine.length === 0 && (
+      {shown.length === 0 && mineShown.length === 0 && (
         <p className="muted small">{L(`Nada com “${query}” aqui. Se o serviço tem um servidor MCP, use Adicionar personalizado.`, `Nothing with “${query}” here. If the service has an MCP server, use Add custom.`)}</p>
       )}
       {CATEGORIES().map((cat) => {
-        const entries = found.filter((c) => c.category === cat.id)
+        const entries = shown.filter((c) => c.category === cat.id)
         if (!entries.length) return null
         return (
           <div key={cat.id} className="catalog__group">

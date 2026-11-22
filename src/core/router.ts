@@ -22,7 +22,7 @@ export const routerSystem = (): string =>
       '- "reason": um motivo de até 12 palavras, em português.',
       'Se a mensagem depende de um sistema externo (ex.: Linear, GitHub), prefira quem tem acesso a ele; se ninguém tem, escolha pelo papel.',
       'Uma resposta curta a uma pergunta ou pedido de um agente ("pode", "sim", "pode disparar", "manda ver") vai pra esse agente, mesmo quando a pergunta está numa mensagem anterior do canal ou em outra thread: é ele quem está esperando.',
-      'Um cumprimento nunca fica sem resposta. Lista vazia (e "todos" falso) só quando ninguém precisa responder: agradecimento, recado, conversa já encerrada.'
+      'Um cumprimento nunca fica sem resposta. Fora isso, chame só quem tem algo claro a fazer ou a responder: lista vazia (e "todos" falso) quando a mensagem não pede nada a nenhum agente, como um agradecimento, um recado, uma conversa já encerrada.'
     ].join('\n'),
     [
       'You decide which agents in a work chat should answer the last human message.',
@@ -32,7 +32,7 @@ export const routerSystem = (): string =>
       '- "reason": a reason of up to 12 words, in English.',
       'If the message depends on an external system (e.g. Linear, GitHub), prefer whoever has access to it; if no one does, choose by role.',
       'A short answer to an agent\'s question or request ("yes", "go ahead", "you can run it", "do it") goes to that agent, even when the question is in an earlier message of the channel or in another thread: that agent is the one waiting.',
-      "A greeting never goes unanswered. An empty list (and \"everyone\" false) only when no one needs to answer: a thank-you, a note, a conversation that's already over."
+      "A greeting never goes unanswered. Beyond that, call only who has something clear to do or answer: an empty list (and \"everyone\" false) when the message asks nothing of any agent, like a thank-you, a note, a conversation that's already over."
     ].join('\n')
   )
 
@@ -316,5 +316,97 @@ export async function screenHandoff(opts: {
   if (error) return { error, usage, ms }
   // A reply may mention up to three agents, and each one asked needs the turn.
   const parsed = parseRoute(text, opts.candidates, opts.candidates.length)
+  return parsed ? { ...parsed, usage, ms } : { error: L('resposta do router fora do formato', "the router's answer wasn't in the format"), usage, ms }
+}
+
+// ---------- calling someone in (proactive) ----------
+
+// After an agent's reply that passes the turn to no one, in a channel with others: whether one of them has
+// something concrete to do now, in their own area, because of it. Never to comment or agree: to act.
+export const chimeSystem = (): string =>
+  L(
+    [
+      'Num chat de trabalho, um agente acabou de responder sem passar a vez a ninguém. Você decide se UM outro agente do canal tem uma ação concreta a fazer agora, da área dele, por causa dessa resposta.',
+      'Responda SOMENTE com JSON, sem texto em volta, no formato {"handle": "..." ou null, "reason": "..."}:',
+      '- "handle": no máximo um, só da lista de candidatos; null quando ninguém tem uma ação clara.',
+      '- "reason": por que é dele, em até 8 palavras, em português ("revisão de código é da área dele").',
+      'Chame só pra agir: revisar o que foi feito, testar, publicar, corrigir, completar uma parte que é claramente do papel dele e que ninguém pediu ainda.',
+      'Não chame pra comentar, concordar, agradecer, resumir ou repetir o que já foi dito. Não chame quem já foi chamado nesse assunto. Na dúvida, null.'
+    ].join('\n'),
+    [
+      'In a work chat, an agent just replied without passing the turn to anyone. You decide whether ONE other agent in the channel has a concrete action to take now, in their own area, because of that reply.',
+      'Reply ONLY with JSON, no text around it, in the format {"handle": "..." or null, "reason": "..."}:',
+      '- "handle": at most one, only from the list of candidates; null when no one has a clear action.',
+      '- "reason": why it is theirs, in up to 8 words, in English ("code review is their area").',
+      'Call only to act: review what was done, test, publish, fix, complete a part that is clearly their role and that nobody asked for yet.',
+      'Do not call to comment, agree, thank, summarize or repeat what was said. Do not call someone already called on this subject. When in doubt, null.'
+    ].join('\n')
+  )
+
+export function chimePrompt(opts: { reply: string; author: Agent; candidates: Agent[]; messages: Message[]; members: Agent[]; me: string; people?: People; connectors?: Connector[]; asked?: string }): string {
+  const { reply, author, candidates, messages, members, me, people, connectors = [], asked } = opts
+  const name = speaker(members, me, people)
+  return [
+    L('Candidatos:', 'Candidates:'),
+    ...candidates.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`),
+    '',
+    ...(asked ? [L(`O que ${me} pediu: ${opensAndEnds(asked, 600)}`, `What ${me} asked: ${opensAndEnds(asked, 600)}`), ''] : []),
+    L('Conversa recente:', 'Recent conversation:'),
+    ...messages.filter(said).slice(-ROUTER_HISTORY).map((m) => `[${name(m)}] ${opensAndEnds(m.text, 500)}`),
+    '',
+    L(`Resposta de ${author.name} que acabou de terminar:`, `${author.name}'s reply that just ended:`),
+    '<reply>',
+    opensAndEnds(reply, REPLY_MAX),
+    '</reply>',
+    '',
+    REPLY_JSON()
+  ].join('\n')
+}
+
+export function parseChime(text: string, candidates: Agent[]): { agent?: Agent; reason: string } | null {
+  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
+  if (!json) return null
+  let data: unknown
+  try {
+    data = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (!data || typeof data !== 'object') return null
+  const { handle, reason } = data as { handle?: unknown; reason?: unknown }
+  const why = typeof reason === 'string' ? reason.trim().slice(0, 120) : ''
+  const h = typeof handle === 'string' ? handle.replace(/^@/, '').toLowerCase() : ''
+  const agent = h ? candidates.find((a) => a.handle.toLowerCase() === h) : undefined
+  return { ...(agent ? { agent } : {}), reason: why }
+}
+
+export async function chimeIn(opts: {
+  engine: Engine
+  model: string
+  reply: string
+  author: Agent
+  candidates: Agent[]
+  messages: Message[]
+  members: Agent[]
+  me: string
+  people?: People
+  connectors?: Connector[]
+  asked?: string
+  cwd: string
+}): Promise<{ agent?: Agent; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
+  const started = Date.now()
+  let text = ''
+  let usage: Usage | undefined
+  let error: string | undefined
+  for await (const ev of opts.engine.run({ model: opts.model, effort: 'low', system: chimeSystem(), prompt: chimePrompt(opts), cwd: opts.cwd, signal: AbortSignal.timeout(60_000) })) {
+    if (ev.type === 'text') text += ev.delta
+    else if (ev.type === 'done') {
+      text = ev.text || text
+      usage = ev.usage
+    } else if (ev.type === 'error') error = ev.message
+  }
+  const ms = Date.now() - started
+  if (error) return { error, usage, ms }
+  const parsed = parseChime(text, opts.candidates)
   return parsed ? { ...parsed, usage, ms } : { error: L('resposta do router fora do formato', "the router's answer wasn't in the format"), usage, ms }
 }

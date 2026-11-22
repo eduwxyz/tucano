@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fileOf, linksIn, parsePage, summaryOf, Wiki, WikiConflict, wikiCall } from '../src/core/wiki'
 import { wikiAccess } from '../src/shared/types'
+import { setLang } from '../src/shared/lang'
 
 const fresh = (): Wiki => {
   const root = mkdtempSync(join(tmpdir(), 'tucano-wiki-'))
@@ -67,6 +68,44 @@ describe('the wiki folder', () => {
     expect(w.history('Marcos Lima')[0]).toMatchObject({ by: 'outside', action: 'edit' })
     expect(w.search('obsidian')[0]!.title).toBe('Nova')
     expect(w.scan()).toBe(false) // nothing new the second time
+  })
+
+  it("writes its keys in the workspace's language, and changes the ones a page has in the other", () => {
+    try {
+      const w = fresh()
+      w.save({ title: 'Marcos Lima', kind: 'Pessoa', body: 'Cliente.', ...by })
+      const text = (t: string): string => readFileSync(join(w.dir, 'pages', `${t}.md`), 'utf8')
+      expect(Object.keys(parsePage(text('Marcos Lima')).meta).sort()).toEqual(['atualizada', 'criada', 'tipo'])
+      // The workspace turns English: a Portuguese page keeps its keys, and gets no English ones on top.
+      setLang('en')
+      const p = w.page('Marcos Lima')!
+      w.save({ title: 'Marcos Lima', kind: 'Client', body: 'Client.', expectedHash: p.hash, ...by })
+      expect(parsePage(text('Marcos Lima')).meta).toMatchObject({ tipo: 'Client' })
+      expect(Object.keys(parsePage(text('Marcos Lima')).meta).sort()).toEqual(['atualizada', 'criada', 'tipo'])
+      w.save({ title: 'Ana', kind: 'Person', body: 'Designer.', ...by })
+      expect(Object.keys(parsePage(text('Ana')).meta).sort()).toEqual(['created', 'type', 'updated'])
+      expect(w.page('Ana')!.kind).toBe('Person')
+      // and back in Portuguese, the English page's own keys are the ones changed
+      setLang('pt')
+      w.save({ title: 'Ana', kind: 'Pessoa', body: 'Designer.', expectedHash: w.page('Ana')!.hash, ...by })
+      expect(Object.keys(parsePage(text('Ana')).meta).sort()).toEqual(['created', 'type', 'updated'])
+      expect(w.page('Ana')!.kind).toBe('Pessoa')
+    } finally {
+      setLang('pt')
+    }
+  })
+
+  it("takes a frontmatter block at the top of a body out of the text, keeping the page's own keys", () => {
+    const w = fresh()
+    const p = w.save({ title: 'Shipper', body: '\n---\ntipo: Agente\ncriada: 2020-01-01\ntags:\n  - time\nalias: Ship\n---\n\n# Shipper\n\nInstala.', ...by })
+    expect(p.kind).toBe('Agente')
+    expect(p.body.trimStart().startsWith('# Shipper')).toBe(true)
+    const meta = parsePage(readFileSync(join(w.dir, 'pages', 'Shipper.md'), 'utf8')).meta
+    expect(meta).toMatchObject({ tipo: 'Agente', tags: 'time', alias: 'Ship' })
+    expect(meta['criada']).not.toBe('2020-01-01') // the dates are the ones Tucano keeps
+    // A kind given wins over the block's; a body that only opens with a rule stays as written.
+    expect(w.save({ title: 'Outra', kind: 'Projeto', body: '---\ntipo: Agente\n---\nTexto.', ...by }).kind).toBe('Projeto')
+    expect(w.save({ title: 'Regra', body: '---\nUm parágrafo entre réguas.\n---\nFim.', ...by }).body).toContain('Um parágrafo entre réguas.')
   })
 
   it('renames a page, deletes it, and brings it back from its history', () => {

@@ -106,7 +106,7 @@ export interface ServerNote {
   body: string
   conversationId?: string
   threadId?: string
-  page?: 'skills'
+  page?: 'skills' | 'connectors'
   kind?: 'approval' | 'question' | 'done'
   sound?: boolean
 }
@@ -124,7 +124,7 @@ export function serverNote(raw: unknown): ServerNote | null {
     body: typeof n.body === 'string' ? n.body.slice(0, 500) : '',
     ...(conversationId ? { conversationId } : {}),
     ...(threadId ? { threadId } : {}),
-    ...(n.page === 'skills' ? { page: 'skills' as const } : {}),
+    ...(n.page === 'skills' || n.page === 'connectors' ? { page: n.page } : {}),
     ...(kind ? { kind } : {}),
     ...(typeof n.sound === 'boolean' ? { sound: n.sound } : {})
   }

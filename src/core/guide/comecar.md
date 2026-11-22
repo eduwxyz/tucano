@@ -13,8 +13,8 @@ Depois, balões mostram o app enquanto você usa; **Pular tour** encerra. Na bar
 Quem entra num time por convite vê uma boas-vindas curta: quem convidou, os agentes, o nome e o combinado (o que se fala direto com um agente só a pessoa lê; nos canais, o time todo vê).
 
 ## O Tuca
-O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa, ele faz poucas perguntas e propõe um agente num card. Nada é criado sem você clicar em **Criar** (ou **Editar antes**, ou **Descartar**).
-Várias mudanças pedidas juntas chegam num grupo (**1 de 5**), cada uma com **Aplicar**, mais **Aplicar todos** e **Descartar todos**. A conversa fica guardada ao sair e voltar; **Nova conversa** começa do zero.
+O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa, ele faz poucas perguntas e cria o agente quando termina de responder, com **Desfazer** no card (veja **agentes**). Acesso a conectores espera você confirmar.
+Várias mudanças pedidas juntas chegam num grupo (**1 de 5**), com **Desfazer tudo**. A conversa fica guardada ao sair e voltar; **Nova conversa** começa do zero.
 
 ## A barra lateral
 - **Aprovações** (Approvals), **Memória** (Memory), **Wiki**, **Rotinas** (Routines), **Skills** e **Boletim** (Report).
