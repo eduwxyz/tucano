@@ -559,10 +559,10 @@ export interface Settings {
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
-  // An ad blocker and a cookie-notice remover in the agents' browser (core/chrome-addons.ts): one
-  // download of Chrome for Testing and three extensions, on the switch, never on the start's way.
-  browserAddOns?: boolean
-  addOns?: AddOnsInfo // computed: where that download is, for the switch's own line
+  // The extensions the agents' browser carries (core/chrome-addons.ts), one switch each: what is on is
+  // downloaded and loaded into the next session's browser, what is off leaves the disk.
+  browserAddOns?: BrowserAddOns
+  addOns?: AddOnsInfo // computed: where each of them is, for the rows' own lines
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
@@ -646,12 +646,22 @@ export interface Account {
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
 export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'fill' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
 
-// The ad blocker and cookie-notice removers an agent's browser can carry (core/chrome-addons.ts): one
-// download of Chrome for Testing and three extensions, whose state the settings card shows.
+// The extensions an agent's browser can carry (shared/addons.ts lists them), each with its own switch.
+export type AddOn = 'ads' | 'cookies' | 'consent'
+export type BrowserAddOns = Partial<Record<AddOn, boolean>>
+
+// Where one of them is. On means downloaded and loaded into the browser of the next session; off removes
+// the folder, so the switch is the install. 'waiting' is the moment between the switch and the download.
+export interface AddOnStep {
+  state: 'waiting' | 'preparing' | 'ready' | 'failed'
+  error?: string // why it didn't land: the lane keeps working without it
+}
+
+// What the settings page shows of them: Chrome for Testing, which the three share (the branded build has
+// refused a folder of extensions since version 158), and each switched-on extension.
 export interface AddOnsInfo {
-  state: 'preparing' | 'ready' | 'failed'
-  progress?: { received: number; total: number } // bytes of the browser, while it downloads
-  error?: string // why it didn't land: the lane keeps working without them
+  browser: AddOnStep & { progress?: { received: number; total: number } } // bytes of the browser
+  extensions: Partial<Record<AddOn, AddOnStep>>
 }
 
 // What I do on the agent's browser from the panel, when it has no window of its own

@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JSZip from 'jszip'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import { ADD_ONS, AddOns, CFT_INDEX, crxUrl, crxZip, cftPlatform } from '../src/core/chrome-addons'
+import { addOnOn, addOnsOf } from '../src/shared/addons'
 
 // The extension as a .zip, which is what the store hands out behind a .crx header.
 const zipOf = async (files: Record<string, string>): Promise<Buffer> => {
@@ -83,7 +84,9 @@ describe('which Chrome for Testing a computer takes', () => {
   })
 })
 
-describe('preparing the add-ons, one download and then never again', () => {
+describe('installing them, one switch each', () => {
+  const all = { ads: true, cookies: true, consent: true }
+
   it('unpacks the three extensions and the browser, and the second call fetches nothing', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'addons-'))
     const routes = await shelf()
@@ -94,10 +97,15 @@ describe('preparing the add-ons, one download and then never again', () => {
     }) as unknown as typeof fetch
     let changes = 0
     const addOns = new AddOns(dir, () => changes++, counting, 'win32', 'x64')
+    // Nothing is switched on: no download is anybody's idea of a good time, and no row to speak of.
     expect(addOns.ready).toBe(false)
-    await addOns.prepare()
-    expect(addOns.info?.state).toBe('ready')
+    expect(addOns.info).toBeUndefined()
+    await addOns.set(all)
     expect(addOns.ready).toBe(true)
+    expect(addOns.info?.extensions.ads?.state).toBe('ready')
+    expect(addOns.info?.extensions.cookies?.state).toBe('ready')
+    expect(addOns.info?.extensions.consent?.state).toBe('ready')
+    expect(addOns.info?.browser.state).toBe('ready')
     // Three .crx from the store, the index, and the browser's own zip.
     expect(asked).toEqual([...ADD_ONS.map((e) => crxUrl(e.id)), CFT_INDEX, 'https://example.test/win64.zip'])
     expect(changes).toBeGreaterThan(1)
@@ -119,36 +127,95 @@ describe('preparing the add-ons, one download and then never again', () => {
     const offline = new AddOns(dir, () => {}, (async () => {
       throw new Error('the network must not be asked')
     }) as unknown as typeof fetch, 'win32', 'x64')
+    await offline.set(all)
     expect(offline.ready).toBe(true)
-    await offline.prepare()
-    expect(offline.info?.state).toBe('ready')
     expect(offline.dirs).toEqual(addOns.dirs)
+    expect(offline.info?.browser.state).toBe('ready')
   })
 
-  it('says why it failed, and keeps what it already had', async () => {
+  it('is the install: switching one on downloads that one alone, switching it off takes its folder away', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'addons-'))
+    const asked: string[] = []
+    const counting = (async (url: string | URL | Request) => {
+      asked.push(String(url))
+      return (serve(await shelf()) as unknown as (u: string) => Promise<Response>)(String(url))
+    }) as unknown as typeof fetch
+    const addOns = new AddOns(dir, () => {}, counting, 'win32', 'x64')
+    const ads = ADD_ONS[0]!
+    const consent = ADD_ONS[2]!
+
+    // One switch on: the ad blocker and the browser it needs, and nothing of the other two.
+    await addOns.set({ ads: true })
+    expect(addOns.dirs).toEqual([join(dir, 'extensions', ads.id)])
+    expect(asked).toEqual([crxUrl(ads.id), CFT_INDEX, 'https://example.test/win64.zip'])
+    expect(existsSync(join(dir, 'extensions', consent.id))).toBe(false)
+
+    // A second one on: only its own folder is fetched.
+    asked.length = 0
+    await addOns.set({ ads: true, consent: true })
+    expect(asked).toEqual([crxUrl(consent.id)])
+    expect(addOns.dirs).toHaveLength(2)
+
+    // Off takes the folder away, and the lane stops carrying it: the switch is the removal.
+    asked.length = 0
+    await addOns.set({ consent: true })
+    expect(existsSync(join(dir, 'extensions', ads.id))).toBe(false)
+    expect(addOns.dirs).toEqual([join(dir, 'extensions', consent.id)])
+    expect(asked).toEqual([])
+    expect(addOns.info?.extensions.ads).toBeUndefined()
+
+    // Off, a half-written folder of one that never finished leaves with it.
+    const staging = join(dir, 'extensions', `${ads.id}.part`)
+    await addOns.set({ ads: true, consent: true })
+    mkdirSync(staging, { recursive: true })
+    await addOns.set({ consent: true })
+    expect(existsSync(staging)).toBe(false)
+
+    // All of them off: nothing to download, nothing to carry, and no line to show.
+    await addOns.set({})
+    expect(addOns.dirs).toEqual([])
+    expect(addOns.info).toBeUndefined()
+    // The browser stays where it is: it is the base the three share, not one of them.
+    expect(existsSync(addOns.bin)).toBe(true)
+  })
+
+  it('still reads an older build’s single switch, where true meant all three', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'addons-'))
+    expect(addOnsOf(true)).toEqual({ ads: true, cookies: true, consent: true })
+    expect(addOnsOf(false)).toEqual({})
+    expect(addOnsOf(undefined)).toEqual({})
+    expect(addOnsOf({ cookies: true })).toEqual({ cookies: true })
+    expect(addOnOn(true, 'consent')).toBe(true)
+    expect(addOnOn({ ads: true }, 'consent')).toBe(false)
+    const addOns = new AddOns(dir, () => {}, serve(await shelf()), 'win32', 'x64')
+    await addOns.set(true)
+    expect(addOns.dirs).toHaveLength(3)
+  })
+
+  it('says which one failed, and keeps the ones that landed', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'addons-'))
     const routes = await shelf()
     // The last extension's id is missing from the shelf: the store answers 404.
     delete routes[crxUrl(ADD_ONS[2]!.id)]
     const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64')
-    await addOns.prepare()
-    expect(addOns.info?.state).toBe('failed')
-    expect(addOns.info?.error).toMatch(/404/)
+    await addOns.set(all)
+    expect(addOns.info?.extensions.consent?.state).toBe('failed')
+    expect(addOns.info?.extensions.consent?.error).toMatch(/404/)
+    expect(addOns.info?.extensions.ads?.state).toBe('ready')
     expect(addOns.ready).toBe(false)
-    // The two that did arrive stay: the next try only asks for the one that didn't.
+    // The two that did arrive stay, and the browser still comes: the lane carries what it has.
     expect(existsSync(join(dir, 'extensions', ADD_ONS[0]!.id, 'manifest.json'))).toBe(true)
-    expect(existsSync(addOns.bin)).toBe(false)
+    expect(existsSync(addOns.bin)).toBe(true)
 
-    // With the missing one back, the retry lands, and asks for it and the browser only.
+    // With the missing one back, the retry lands, and asks for it only.
     const asked: string[] = []
     const retry = new AddOns(dir, () => {}, (async (url: string | URL | Request) => {
       asked.push(String(url))
       return (serve(await shelf()) as unknown as (u: string) => Promise<Response>)(String(url))
     }) as unknown as typeof fetch, 'win32', 'x64')
-    await retry.prepare()
-    expect(retry.info?.state).toBe('ready')
-    expect(asked).not.toContain(crxUrl(ADD_ONS[0]!.id))
-    expect(asked).toContain(crxUrl(ADD_ONS[2]!.id))
+    await retry.set(all)
+    expect(retry.ready).toBe(true)
+    expect(asked).toEqual([crxUrl(ADD_ONS[2]!.id)])
   })
 
   it('refuses a store file with no manifest in it, instead of leaving a folder Chrome can’t read', async () => {
@@ -156,20 +223,24 @@ describe('preparing the add-ons, one download and then never again', () => {
     const routes = index(await shelf())
     routes[crxUrl(ADD_ONS[1]!.id)] = crxOf(await zipOf({ 'readme.txt': 'not an extension' }))
     const addOns = new AddOns(dir, () => {}, serve(routes), 'win32', 'x64')
-    await addOns.prepare()
-    expect(addOns.info?.state).toBe('failed')
-    expect(addOns.info?.error).toMatch(/without the file Chrome reads/)
+    await addOns.set(all)
+    expect(addOns.info?.extensions.cookies?.state).toBe('failed')
+    expect(addOns.info?.extensions.cookies?.error).toMatch(/without the file Chrome reads/)
     expect(existsSync(join(dir, 'extensions', ADD_ONS[1]!.id))).toBe(false)
     expect(existsSync(join(dir, 'extensions', `${ADD_ONS[1]!.id}.part`))).toBe(false)
+    expect(addOns.dirs).toHaveLength(2)
   })
 
   it('refuses a browser download with no program inside it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'addons-'))
     const addOns = new AddOns(dir, () => {}, serve(await shelf(['chrome-win64/README.txt'])), 'win32', 'x64')
-    await addOns.prepare()
-    expect(addOns.info?.state).toBe('failed')
-    expect(addOns.info?.error).toMatch(/without the program inside/)
+    await addOns.set(all)
+    expect(addOns.info?.browser.state).toBe('failed')
+    expect(addOns.info?.browser.error).toMatch(/without the program inside/)
     expect(addOns.bin).toBe('')
+    // The extensions landed and are ready: what is missing is the browser that could carry them.
+    expect(addOns.dirs).toHaveLength(3)
+    expect(addOns.ready).toBe(false)
   })
 
   it('leaves nothing half-written when the person switches it off mid-download', async () => {
@@ -189,12 +260,11 @@ describe('preparing the add-ons, one download and then never again', () => {
       return new Response(body)
     }) as unknown as typeof fetch
     const addOns = new AddOns(dir, () => {}, slow, 'win32', 'x64')
-    const p = addOns.prepare()
+    const p = addOns.set(all)
     await new Promise((r) => setTimeout(r, 150))
-    expect(addOns.info?.state).toBe('preparing')
+    expect(addOns.info?.browser.state).toBe('preparing')
     addOns.cancel()
     await p
-    expect(addOns.info).toBeNull()
     expect(readdirSync(dir).filter((f) => f.endsWith('.part'))).toEqual([])
     // What already arrived stays, so switching it on again is not from zero.
     expect(addOns.dirs).toHaveLength(3)

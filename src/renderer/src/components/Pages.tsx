@@ -102,7 +102,8 @@ import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } f
 import { ProposalCard } from './Tuca'
 import { confirmDeleteAgent, confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { Modal } from './Modal'
-import { AgentAvatar, AVATARS, Icon, type IconName, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
+import { AgentAvatar, AVATARS, Icon, type IconName, NumberInput, SleepingToucan, time, Toggle, tokens, UsageBar } from './ui'
+import { AgentAddOns } from './AgentAddOns'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
 import { openFeedback } from './Feedback'
@@ -116,6 +117,7 @@ import { workspaceLabel } from '../../../shared/workspaces'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
+
 
 // Every page's head, the same on all of them: the title big, inside the content and at the same
 // place; the actions on its line, at the right; one line under it. Tabs, when a page has them,
@@ -2753,10 +2755,9 @@ export function ModelSelect(p: { value: string; onChange: (v: string) => void; j
   return <ModelPicker {...p} />
 }
 
-// `label` names it for a screen reader when no text sits next to it (a card's action, say).
-export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }): ReactNode {
-  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
-}
+// The switch itself lives in ui.tsx (its own card's rows and the new ones beside them draw the same one);
+// it is re-exported here because the screens that already draw a card take it from this file.
+export { Toggle }
 
 // ---------- Settings ----------
 
@@ -3682,27 +3683,21 @@ export function SettingsPage(): ReactNode {
                   )}
                 />
               )}
-              <div className="key-row">
-                <Icon name="globe" />
-                <div className="grow">
-                  <strong>{L('Bloqueador de anúncios e avisos de cookies', 'An ad blocker, and consent notices answered')}</strong>
-                  <p className="muted small">
-                    {L(
-                      'Abre o navegador dos agentes com três extensões da Chrome Web Store — um bloqueador de anúncios, um removedor de avisos de cookies e um que responde os diálogos de consentimento —, para que a página que o agente lê seja a página: um aviso por cima dela não parece mais que o site mudou. Baixa uma vez 215 MB do Chrome for Testing e 10 MB das extensões, na pasta de dados do app: o Chrome comum não aceita mais extensão de fora da loja desde a versão 158, e o for Testing é o mesmo Chrome, com outra embalagem. Sem eles o navegador continua exatamente como está.',
-                      'Opens the agents’ browser with three extensions from the Chrome Web Store — an ad blocker, one that dismisses cookie notices and one that answers the consent dialogs — so the page the agent reads is the page: a banner over it no longer reads as the site having changed. Downloads 215 MB of Chrome for Testing and 10 MB of extensions once, into the app’s data folder: the branded Chrome has refused an extension from outside the store since version 158, and Chrome for Testing is the same Chrome in another wrapper. Without them the browser stays exactly as it is.'
-                    )}
-                  </p>
-                  {settings.browserAddOns && settings.addOns?.state === 'preparing' && (
-                    <p className="muted small">
-                      {L('Baixando', 'Downloading')}
-                      {settings.addOns.progress?.total ? ` · ${Math.min(99, Math.round((settings.addOns.progress.received / settings.addOns.progress.total) * 100))}%` : '…'}{' '}
-                      {L('— o navegador continua como está até terminar.', '— the browser works as it is until it lands.')}
-                    </p>
-                  )}
-                  {settings.browserAddOns && settings.addOns?.state === 'failed' && <p className="field__error">{L('Não baixou: ', 'It didn’t download: ')}{settings.addOns.error ?? ''}</p>}
-                </div>
-                <Toggle on={!!settings.browserAddOns} onChange={(v) => updateSettings({ browserAddOns: v })} />
-              </div>
+            </Card>
+          </SectionAnchor>
+        )}
+
+        {on('agentes') && admin && (
+          <SectionAnchor id="agents-addons" sections={structure}>
+            <Card
+              title={L('Bloqueador de anúncios e avisos de cookies', 'An ad blocker, and consent notices answered')}
+              section="agents-addons"
+              lead={L(
+                'Abre o navegador dos agentes com as extensões que você ligar, para a página que ele lê ser a página: um aviso por cima dela não parece mais que o site mudou, e o agente deixa de clicar no mesmo lugar. Cada uma é um interruptor: ligada, é baixada e entra no navegador da próxima sessão; desligada, sai do disco. As três rodam no Chrome for Testing, que baixa uma vez (215 MB, na pasta de dados do app), porque o Chrome comum só aceita extensão da própria loja desde a versão 158.',
+                'Opens the agents’ browser with the extensions you switch on, so the page it reads is the page: a notice over it no longer reads as the site having changed, and the agent stops clicking the same place. Each one is a switch of its own: on, it is downloaded and joins the next session’s browser; off, it leaves the disk. All three run on Chrome for Testing, downloaded once (215 MB, into the app’s data folder), because the branded Chrome has taken only its own store’s extensions since version 158.'
+              )}
+            >
+              <AgentAddOns />
             </Card>
           </SectionAnchor>
         )}

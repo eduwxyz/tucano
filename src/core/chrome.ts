@@ -301,10 +301,10 @@ export class ChromeBrowsers {
     return join(this.dir, agentId)
   }
 
-  // Chrome for Testing once the extensions are in (the branded build ignores --load-extension since
-  // 158), and the browser the app found otherwise.
+  // Chrome for Testing only when it has extensions to carry: the branded build ignores --load-extension
+  // since 158. With none switched on, the browser the app found.
   private get chromeBin(): string {
-    return this.addOns?.bin || this.bin
+    return this.addOns?.bin && this.addOns.dirs.length > 0 ? this.addOns.bin : this.bin
   }
 
   private async launch(agentId: string, headed: boolean, url?: string): Promise<Tab> {

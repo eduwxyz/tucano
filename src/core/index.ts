@@ -316,9 +316,9 @@ const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
 
-// The agents' ad blocker and cookie-notice removers (Settings › Agents › Browser), which need Chrome for
-// Testing and three extensions from the store: one download into the data folder, on the switch, and
-// never on the way of a reply — the lane works as it does today until it lands, and if it never does.
+// The agents' ad blocker and cookie-notice removers (Settings › Agents), one switch each, which need Chrome
+// for Testing and three extensions from the store: a download into the data folder, on the switch, never
+// on the way of a reply — the lane works as it does today until it lands, and if it never does.
 const addOns = new AddOns(join(dataDir, 'navegador-extra'), () => emit({ type: 'settings', settings: settings() }))
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
@@ -803,7 +803,8 @@ const electronHost: BrowserHost = (agentId, op, args) =>
     process.parentPort.postMessage({ type: 'browser', id, agentId, op, args })
     setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error(L('o navegador não respondeu em 60 s', "the browser didn't answer in 60 s")))), 60_000).unref()
   })
-if (!fake && hasChrome() && settings().browserAddOns) bg(addOns.prepare(), 'browserAddOns')
+// Each extension's switch, as they were left: what is on is here already, or downloads on this start.
+if (!fake && hasChrome()) bg(addOns.set(settings().browserAddOns), 'browserAddOns')
 
 // Google Chrome when the Mac has it (Google refuses logins in embedded browsers); Electron's Chromium otherwise.
 const chrome =
@@ -2563,8 +2564,7 @@ const api: Handlers = {
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
-    if (patch.browserAddOns === true) bg(addOns.prepare(), 'browserAddOns')
-    if (patch.browserAddOns === false) addOns.cancel()
+    if (patch.browserAddOns !== undefined) bg(addOns.set(patch.browserAddOns), 'browserAddOns') // on downloads it, off removes it
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })

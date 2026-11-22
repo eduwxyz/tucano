@@ -1,7 +1,11 @@
-// The agent's browser with an ad blocker and a cookie-notice remover in it, so the page it reads is the
+// The agent's browser with an ad blocker and two cookie-notice removers in it, so the page it reads is the
 // page: a consent wall over an article, or a banner that swallows the first screen, reads to an agent as
 // "the site changed its interface", and it clicks the same place again (2026-11-22: one session spent
 // 143 of its 248 browser calls on a single host that way).
+//
+// Each of the three has its own switch (Settings › Agents): on, it is downloaded and loaded into the next
+// session's browser; off, its folder leaves the disk, which is how an extension is removed from a build
+// that takes them from a folder rather than from the store.
 //
 // Chrome takes an extension only from a folder (--load-extension), and the branded build has ignored
 // that flag since version 158 — measured on this machine: branded Chrome loaded its own three built-ins
@@ -16,24 +20,14 @@
 // lane keeps working without any of it while the download runs or if it never lands.
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { ADD_ONS, addOnsOf, type AddOnExtension } from '../shared/addons'
 import { L } from '../shared/lang'
-import type { AddOnsInfo } from '../shared/types'
+import type { AddOn, AddOnStep, AddOnsInfo, BrowserAddOns } from '../shared/types'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 
-export interface Extension {
-  id: string // its id in the Web Store, which is what the update endpoint asks for
-  name: string
-}
-
-// An ad blocker first: it is the one that changes the most pages, and the one that removes most of what
-// a consent dialog was covering. The two notice removers answer different designs: one clicks the
-// banner away, the other answers the dialog's own questions (the "legitimate interest" lists GDPR pages
-// put in front of an article).
-export const ADD_ONS: readonly Extension[] = [
-  { id: 'ddkjiahejlhfcafbddmgiahcphecmpfh', name: 'uBlock Origin Lite' },
-  { id: 'edibdbjcniadpccecjdfdjjppcpchdlm', name: "I still don't care about cookies" },
-  { id: 'mdjildafknihdffpkfmmpnpoiajfjnjd', name: 'Consent-O-Matic' }
-]
+// The three are declared once, in shared/addons.ts, with the name the settings page draws: what is
+// installed and what a row says cannot drift apart.
+export { ADD_ONS }
 
 // The browser version the store is asked for. It only decides which build of the .crx comes back; an
 // extension's own updates are its business, and the folder is fetched once and then left alone.
@@ -134,78 +128,154 @@ async function download(fetcher: typeof fetch, url: string, to: string, signal: 
   }
 }
 
-// The three extensions, one folder each, fetched from the store once and then left as they are: the
-// stamp is the unpacked manifest itself, so a folder someone deleted comes back and one that is there
-// is never asked for twice.
+// Each of the three in its own folder under extensions/, fetched from the store once and then left as it
+// is: the stamp is the unpacked manifest itself, so a folder someone deleted comes back and one that is
+// there is never asked for twice. The folder's presence is also the switch's answer: off means it leaves
+// the disk, and a lane started afterwards does not carry it.
 export class AddOns {
-  info: AddOnsInfo | null = null
-  dirs: string[] = []
   bin = '' // Chrome for Testing, when it's here: the build that still takes a folder of extensions
+  dirs: string[] = [] // the folders of the ones switched on and downloaded, in the store's own order
+  private want: readonly AddOn[] = []
+  private failed = new Map<AddOn, string>()
+  private browserError = ''
+  private progress?: { received: number; total: number }
   private running?: Promise<void>
   private abort?: AbortController
+  private again = false
 
   constructor(
     private dir: string, // <dataDir>/navegador-extra
-    private changed: () => void, // re-read the settings snapshot: the card shows where the download is
+    private changed: () => void, // re-read the settings snapshot: each row shows where its own download is
     private fetcher: typeof fetch = fetch,
     private os: NodeJS.Platform = process.platform,
     private arch: string = process.arch
   ) {
     // What a previous run left is ready before anyone asks: no download on this start.
-    this.dirs = ADD_ONS.map((e) => this.folder(e.id)).filter((d) => existsSync(join(d, 'manifest.json')))
     this.bin = this.stamp()
-    if (this.dirs.length === ADD_ONS.length && this.bin) this.info = { state: 'ready' }
   }
 
-  get ready(): boolean {
-    return this.dirs.length === ADD_ONS.length && !!this.bin
-  }
-
-  // Idempotent: two presses of the switch, or a start and a press, are one download.
-  prepare(): Promise<void> {
-    if (this.ready) return Promise.resolve()
-    if (this.running) return this.running
-    this.info = { state: 'preparing' }
+  // The switches as the settings say: what is on is downloaded, what is off leaves the disk (and so does a
+  // half-written folder of it). A run already downloading for another set is given up on, and the set
+  // that holds starts its own, so a switch turned on mid-download is not left waiting for the old one.
+  set(next: BrowserAddOns | boolean | null | undefined): Promise<void> {
+    const wanted = addOnsOf(next)
+    const want = ADD_ONS.map((e) => e.key).filter((k) => !!wanted[k])
+    const same = want.length === this.want.length && want.every((k) => this.want.includes(k))
+    this.want = want
+    for (const e of ADD_ONS) {
+      if (want.includes(e.key)) continue
+      rmSync(this.folder(e.id), { recursive: true, force: true })
+      rmSync(`${this.folder(e.id)}.part`, { recursive: true, force: true })
+      this.failed.delete(e.key)
+    }
+    this.pick()
     this.changed()
-    this.running = this.fetchAll().finally(() => {
-      this.running = undefined
-      this.abort = undefined
-      this.changed()
-    })
-    return this.running
+    if (this.running) {
+      if (!same) {
+        this.cancel()
+        this.again = true
+      }
+      return this.running
+    }
+    return this.begin()
   }
 
-  // The switch went off while it was downloading: what landed stays on disk (it is the next switch-on's
-  // head start), and a half-written file does not.
+  // Everything that is switched on is here, next to the browser that can load it.
+  get ready(): boolean {
+    return this.want.length > 0 && this.dirs.length === this.want.length && !!this.bin
+  }
+
+  // A switch went off while it was downloading: what landed stays on disk (it is the next switch-on's head
+  // start), and a half-written file does not.
   cancel(): void {
     this.abort?.abort()
   }
 
-  private async fetchAll(): Promise<void> {
+  // What the settings page draws: nothing while all three are off (no switch was touched, so there is no
+  // download to speak of), otherwise the browser the three share and each extension that is on.
+  get info(): AddOnsInfo | undefined {
+    if (!this.want.length) return undefined
+    const extensions: Partial<Record<AddOn, AddOnStep>> = {}
+    for (const e of ADD_ONS) {
+      if (!this.want.includes(e.key)) continue
+      const here = existsSync(join(this.folder(e.id), 'manifest.json'))
+      const error = this.failed.get(e.key)
+      extensions[e.key] = here ? { state: 'ready' } : error ? { state: 'failed', error } : { state: this.running ? 'preparing' : 'waiting' }
+    }
+    const browser: AddOnStep & { progress?: { received: number; total: number } } = this.bin
+      ? { state: 'ready' }
+      : this.browserError
+        ? { state: 'failed', error: this.browserError }
+        : { state: this.running ? 'preparing' : 'waiting', ...(this.running && this.progress ? { progress: this.progress } : {}) }
+    return { browser, extensions }
+  }
+
+  private begin(): Promise<void> {
+    if (this.running) return this.running
+    if (!this.missing().length && (!this.want.length || this.bin)) return Promise.resolve()
+    const run = this.downloadAll().finally(() => {
+      this.running = undefined
+      this.abort = undefined
+      this.progress = undefined
+      this.changed()
+      if (this.again) {
+        this.again = false
+        void this.begin()
+      }
+    })
+    this.running = run
+    return run
+  }
+
+  private missing(): AddOnExtension[] {
+    return ADD_ONS.filter((e) => this.want.includes(e.key) && !existsSync(join(this.folder(e.id), 'manifest.json')))
+  }
+
+  private pick(): void {
+    this.dirs = ADD_ONS.filter((e) => this.want.includes(e.key)).map((e) => this.folder(e.id)).filter((d) => existsSync(join(d, 'manifest.json')))
+    if (!this.bin) this.bin = this.stamp()
+  }
+
+  private async downloadAll(): Promise<void> {
     const abort = new AbortController()
     this.abort = abort
-    try {
-      for (const e of ADD_ONS) {
-        const folder = this.folder(e.id)
-        if (existsSync(join(folder, 'manifest.json'))) continue
-        await this.fetchExtension(e, folder, abort.signal)
+    this.browserError = ''
+    for (const e of ADD_ONS) {
+      if (!this.want.includes(e.key)) continue
+      const folder = this.folder(e.id)
+      if (existsSync(join(folder, 'manifest.json'))) {
+        this.failed.delete(e.key)
+        continue
       }
-      this.dirs = ADD_ONS.map((e) => this.folder(e.id)).filter((d) => existsSync(join(d, 'manifest.json')))
-      this.bin = this.bin || (await this.fetchBrowser(abort.signal))
-      this.info = { state: 'ready' }
-    } catch (e) {
-      // The lane keeps working without them (wall.ts still names a bot check, and a failed one here is
-      // never a reason to lose the browser an agent is using), so this is a message, not a throw.
-      if (!abort.signal.aborted) this.info = { state: 'failed', error: e instanceof Error ? e.message : String(e) }
-      else this.info = null
+      try {
+        await this.fetchExtension(e, folder, abort.signal)
+        this.failed.delete(e.key)
+        this.pick()
+        this.changed()
+      } catch (err) {
+        // One of them failing is not the other two: each row carries its own reason, and the lane keeps
+        // whatever arrived (wall.ts still names a bot check, and a missing extension is never a reason to
+        // lose the browser an agent is using).
+        if (abort.signal.aborted) return
+        this.failed.set(e.key, err instanceof Error ? err.message : String(err))
+        this.changed()
+      }
     }
+    if (this.want.length && !this.bin) {
+      try {
+        this.bin = await this.fetchBrowser(abort.signal)
+      } catch (err) {
+        if (!abort.signal.aborted) this.browserError = err instanceof Error ? err.message : String(err)
+      }
+    }
+    this.pick()
   }
 
   private folder(id: string): string {
     return join(this.dir, 'extensions', id)
   }
 
-  private async fetchExtension(e: Extension, folder: string, signal: AbortSignal): Promise<void> {
+  private async fetchExtension(e: AddOnExtension, folder: string, signal: AbortSignal): Promise<void> {
     const res = await this.fetcher(crxUrl(e.id), { signal, redirect: 'follow' })
     if (!res.ok) throw new Error(L(`A Chrome Web Store respondeu ${res.status} para ${e.name}.`, `The Chrome Web Store answered ${res.status} for ${e.name}.`))
     const zip = zipFromBuffer(crxZip(Buffer.from(await res.arrayBuffer())))
@@ -213,18 +283,19 @@ export class AddOns {
     rmSync(staging, { recursive: true, force: true })
     try {
       mkdirSync(staging, { recursive: true })
-      extractZip(zip, staging, { file: 64 * 1024 * 1024, total: 256 * 1024 * 1024 })
-    } finally {
-      zip.close()
-    }
-    if (!existsSync(join(staging, 'manifest.json'))) {
+      try {
+        extractZip(zip, staging, { file: 64 * 1024 * 1024, total: 256 * 1024 * 1024 })
+      } finally {
+        zip.close()
+      }
+      if (!existsSync(join(staging, 'manifest.json'))) throw new Error(L(`${e.name} veio sem o arquivo que o Chrome lê.`, `${e.name} came without the file Chrome reads.`))
+    } catch (err) {
       rmSync(staging, { recursive: true, force: true })
-      throw new Error(L(`${e.name} veio sem o arquivo que o Chrome lê.`, `${e.name} came without the file Chrome reads.`))
+      throw err
     }
     rmSync(folder, { recursive: true, force: true })
     renameSync(staging, folder)
   }
-
   // The browser Chrome for Testing last left in the data folder, if it is still there.
   private stamp(): string {
     try {
@@ -235,7 +306,6 @@ export class AddOns {
     }
     return ''
   }
-
   private async fetchBrowser(signal: AbortSignal): Promise<string> {
     const index = await this.fetcher(CFT_INDEX, { signal, redirect: 'follow' })
     if (!index.ok) throw new Error(L(`A lista do Chrome for Testing respondeu ${index.status}.`, `The Chrome for Testing list answered ${index.status}.`))
@@ -247,10 +317,8 @@ export class AddOns {
     const zipPath = join(this.dir, 'chrome-for-testing.zip')
     mkdirSync(this.dir, { recursive: true })
     await download(this.fetcher, url, zipPath, signal, (received, total) => {
-      if (this.info?.state === 'preparing') {
-        this.info = { state: 'preparing', progress: { received, total } }
-        this.changed()
-      }
+      this.progress = { received, total }
+      this.changed()
     })
     const into = join(this.dir, 'chrome-for-testing')
     rmSync(into, { recursive: true, force: true })
