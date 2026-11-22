@@ -16112,3 +16112,55 @@ button.agent-card__now:hover {
     display: none;
   }
 }
+
+/* The agent card: a computer lent to the server that the agent uses, and whether it's on now. */
+.agent-card__lent {
+  display: grid;
+  gap: 2px;
+}
+.agent-card__lent > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-card__live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.6;
+  flex: none;
+}
+.agent-card__live.is-on {
+  background: var(--ok);
+  opacity: 1;
+}
+
+/* Above a DM's field, while a computer its agent uses is off: one quiet line, tucked against the field. */
+.computer-off {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px -8px;
+  padding: 8px 12px 14px;
+  border-radius: 12px 12px 0 0;
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.computer-off .icon {
+  flex: none;
+  color: var(--text-3);
+}
+.computer-off b {
+  font-weight: 500;
+  color: var(--text);
+}
+.computer-off .text-btn {
+  white-space: nowrap;
+  color: var(--text-3);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
