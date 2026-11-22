@@ -16,6 +16,7 @@ import { CUT, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
+import { WorkDrawer } from './WorkDrawer'
 import { FeedbackDraftCard } from './Feedback'
 import { lentComputersOf } from '../lent'
 import { canEditChannel,
@@ -2892,6 +2893,16 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
 
   return (
     <div className="composer-wrap">
+      {/* The work this conversation is carrying, attached to the field it belongs to. A thread has
+          no drawer of its own: what runs inside one is a row of its conversation's. */}
+      {!threadId && (
+        <WorkDrawer
+          key={conversationId}
+          conversationId={conversationId}
+          {...(onJump ? { onJump } : {})}
+          onThread={(rootId) => openThread(rootId)}
+        />
+      )}
       {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">

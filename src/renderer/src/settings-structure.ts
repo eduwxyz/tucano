@@ -105,7 +105,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'app-dictation': [L('Modelo do ditado', 'Dictation model'), L('Microfone', 'Microphone'), L('Detectar o idioma', 'Detect the language'), 'whisper'],
     'app-conversation': [L('Mostrar os passos do agente', 'Show the agent’s steps'), L('O que o modelo pensa', "Show reasoning"), L('Raciocínio', 'Reasoning'), L('Pesquisas', 'Surveys'), L('Enviar feedback', 'Send feedback')],
     'agents-permissions': [L('Aprovações', 'Approvals'), L('Cuidadoso, normal ou sem travas', 'Careful, normal or no locks'), L('Ajustar ação por ação', 'Adjust action by action'), L('Pedir antes depois de ler algo de fora', 'Ask first after reading something from outside')],
-    'agents-replies': [L('Respostas ao mesmo tempo numa conversa', 'Replies at once in a conversation'), L('Em paralelo', 'Parallel'), L('Fila', 'Queue'), L('Uma por vez', 'One at a time'), L('Ao mesmo tempo', 'At once')],
+    'agents-replies': [L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation"), L('Em paralelo', 'Parallel'), L('Fila', 'Queue'), L('Uma por vez', 'One at a time'), L('Ao mesmo tempo', 'At once')],
     'agents-limits': [L('Limite por agente', 'Limit per agent'), L('Limite por resposta', 'Limit per reply'), L('Tokens por mês', 'Tokens per month'), L('Considerar travado', 'Treat as stuck'), L('Expiração das aprovações', 'Approvals expire'), L('Continuar sozinho', 'Keep going on its own')],
     'agents-routines': [L('Abrir ao ligar o computador', 'Open when the computer starts'), L('Horário de silêncio', 'Quiet hours')],
     'agents-tuca': [L('Aplicar mudanças do Tuca na hora', 'Apply Tuca’s changes right away'), L('Desfazer', 'Undo')],
