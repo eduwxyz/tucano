@@ -80,6 +80,29 @@ describe('setting an extension up for an agent', () => {
     expect(note).toContain('background/sentry.js')
   })
 
+  it('finishes setting up a folder an earlier revision already touched, without a word', () => {
+    // Revision 1 wrote the ad blocker's complete list but left its optimal list naming every url, so the
+    // mode it reads first kept winning. A folder in that state has the second edit's result and not its
+    // line: it is set up, not broken, and says nothing to the person.
+    const dir = mkdtempSync(join(tmpdir(), 'tune-ads-rev1-'))
+    mkdirSync(join(dir, 'js'), { recursive: true })
+    // The vendor file as revision 1 left it: both lists naming every url.
+    const modes = `export const defaultFilteringModes = {
+    none: [],
+    basic: [],
+    optimal: [ 'all-urls' ],
+    complete: [ 'all-urls' ],
+};
+`
+    writeFileSync(join(dir, 'js', 'mode-manager.js'), modes)
+    expect(tune(dir, 'ads')).toBeUndefined()
+    const text = readFileSync(join(dir, 'js', 'mode-manager.js'), 'utf8')
+    // Complete is the only list naming every url: that is the mode its own lookup answers with.
+    expect(text).toContain('    optimal: [],')
+    expect(text).toContain("    complete: [ 'all-urls' ],")
+    expect(stampOf(dir)).toBe(String(TUNE_REVISION))
+  })
+
   it('stamps an extension with no edits, so its folder is not looked at again', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tune-cookies-'))
     expect(tune(dir, 'cookies')).toBeUndefined()
