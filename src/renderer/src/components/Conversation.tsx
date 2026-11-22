@@ -16,6 +16,7 @@ import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
 import { FeedbackDraftCard } from './Feedback'
+import { lentComputersOf } from '../lent'
 import { canEditChannel,
   agentById,
   askerIn,
@@ -290,10 +291,41 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {gone ? (
           <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
         ) : (
-          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
         )}
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+    </div>
+  )
+}
+
+// In a DM, while a computer lent to the server that its agent uses is off (the Tucano app is closed there): the
+// agent still answers, but can't reach that computer until it's back. Nothing while every one is on.
+export function ComputerOff({ agent }: { agent: Agent }): ReactNode {
+  const connectors = useStore((s) => s.connectors)
+  const people = useStore((s) => s.people)
+  const you = useStore((s) => s.you)
+  const off = lentComputersOf({ connectors, people, you }, agent).filter((c) => !c.on)
+  if (!off.length) return null
+  const names = off.map((c) => c.name)
+  const which = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} ${L('e', 'and')} ${names.at(-1)}`
+  const one = names.length === 1
+  return (
+    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', 'Off: the Tucano app is closed there. Opening it brings it back.')}>
+      <Icon name="laptop" size={14} />
+      <span className="grow">
+        {L(`${one ? '' : 'Os computadores '}`, `${one ? '' : 'The computers '}`)}
+        <b>{which}</b>
+        {L(
+          ` ${one ? 'está desligado' : 'estão desligados'}. ${agent.name} responde, mas só usa ${one ? 'esse computador' : 'eles'} quando ${one ? 'ele ligar' : 'ligarem'}.`,
+          ` ${one ? 'is' : 'are'} off. ${agent.name} answers, but only uses ${one ? 'it' : 'them'} once ${one ? "it's" : "they're"} back on.`
+        )}
+      </span>
+      {off.some((c) => c.mine) && (
+        <button className="text-btn small" onClick={() => navigate({ kind: 'connectors' })}>
+          {L('Ver computadores', 'See computers')}
+        </button>
+      )}
     </div>
   )
 }
@@ -2367,7 +2399,8 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
 // `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
-export function Composer({ conversationId, threadId, members, placeholder, tools }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode }): ReactNode {
+// notice: one quiet line tucked above the field (a computer its agent uses is off).
+export function Composer({ conversationId, threadId, members, placeholder, tools, notice }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode; notice?: ReactNode }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2649,6 +2682,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           )}
         </div>
       )}
+      {notice}
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
