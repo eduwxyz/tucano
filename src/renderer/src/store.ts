@@ -381,10 +381,12 @@ export const workingIds = (s: State, conversationId: string, threadId?: string):
     .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
 // The approvals still waiting on this person here, oldest first: what the reminder over the field
-// counts, and what Review goes back to. In the thread it counts only the ones asked in it.
+// counts, and what Review goes back to. In the thread it counts only the ones asked in it. Whose
+// decision it is comes from the inbox, the core's own answer: a command on someone's lent computer
+// is theirs alone, even for an admin.
 export const approvalsIn = (s: State, conversationId: string, threadId?: string): Approval[] =>
   s.approvals
-    .filter((a) => a.state === 'pending' && a.conversationId === conversationId && canDecide(s, a))
+    .filter((a) => a.state === 'pending' && a.conversationId === conversationId && s.inbox.approvals.some((i) => i.id === a.id))
     .filter((a) => (s.messages[conversationId]?.find((m) => m.id === a.messageId)?.threadId ?? undefined) === threadId)
     .sort((a, b) => a.createdAt - b.createdAt)
 export const lastBrowserIn = (s: State, conversationId: string, agentId: string): string | undefined => conversationIndex(s, conversationId).browser.get(agentId)

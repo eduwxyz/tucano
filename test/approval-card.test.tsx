@@ -40,12 +40,34 @@ const approval = (extra: Partial<Approval> = {}): Approval => ({
 })
 
 const card = (a: Approval = approval()): string => renderToStaticMarkup(<ApprovalCard approval={a} />)
+// What the core would put in this person's inbox: everything pending here is theirs in these tests.
+const inboxed = (s: State): State => ({ ...s, inbox: { ...s.inbox, approvals: s.approvals.filter((a) => a.state === 'pending') } })
 
 beforeEach(() => {
   fake = { ...getState(), ready: true, people: [ana, bia], agents: [lia], you: 'ana' }
 })
 
 describe('the approval card', () => {
+  it('names the page a browser click lands on, and a command in one sentence', () => {
+    const click = card(approval({ connectorId: 'navegador', connectorName: 'Navegador', tool: 'navegador_clicar', args: { alvo: 'Pagar', url: 'https://loja.example/checkout' } }))
+    expect(click).toContain('“Pagar” em loja.example/checkout')
+    const command = card(approval({ connectorId: 'computador', connectorName: 'Computador', tool: 'bash', args: { command: 'git commit -m x && git push' } }))
+    expect(command).toMatch(/approval__title[^>]*>Fazer commit e subir commits \(push\)/)
+  })
+
+  it('an old row, a grant or an app the agent still has to use never reads as waiting or completed', () => {
+    const old = card(approval({ state: 'approved', outcome: 'Executou.', decidedBy: 'ana' }))
+    expect(old).toContain('Aprovado')
+    expect(old).not.toContain('esperando o resultado')
+    expect(old).not.toContain('Concluído')
+    // A row from before the field whose call failed: its outcome is all that says so.
+    const oldFailed = card(approval({ state: 'approved', outcome: 'Rodou, com erro.', decidedBy: 'ana' }))
+    expect(oldFailed).toContain('Falhou')
+    expect(oldFailed).not.toContain('Concluído')
+    const app = card(approval({ connectorId: 'apps', connectorName: 'Apps', tool: 'app_clicar', args: { app: 'Mail', alvo: 'Enviar' }, state: 'approved', outcome: 'Liberado: o agente faz agora.', decidedBy: 'ana' }))
+    expect(app).not.toContain('Concluído')
+  })
+
   it('leads with the action and its target, its status a quiet row above', () => {
     const html = card()
     expect(html).toMatch(/approval__title[^>]*>Delete task <strong>“Demo task”<\/strong>/)
@@ -124,9 +146,9 @@ describe('the reminder over the field', () => {
       approvals: [newer, approval({ createdAt: 5 }), older, approval({ id: 'ap3', state: 'approved' })],
       messages: { ch: [msg('m0'), msg('m1'), msg('m2')] }
     }
-    expect(approvalsIn(fake, 'ch').map((a) => a.id)).toEqual(['ap0', 'ap1', 'ap2'])
+    expect(approvalsIn(inboxed(fake), 'ch').map((a) => a.id)).toEqual(['ap0', 'ap1', 'ap2'])
     // Another conversation's requests are not counted here.
-    expect(approvalsIn(fake, 'other')).toEqual([])
+    expect(approvalsIn(inboxed(fake), 'other')).toEqual([])
   })
 
   it('in a thread, only the approvals asked in that thread', () => {
@@ -135,12 +157,13 @@ describe('the reminder over the field', () => {
       approvals: [approval({ id: 'ap1', messageId: 'm1' }), approval({ id: 'ap2', messageId: 'm2' })],
       messages: { ch: [msg('m1'), msg('m2', 't1')] }
     }
-    expect(approvalsIn(fake, 'ch').map((a) => a.id)).toEqual(['ap1'])
-    expect(approvalsIn(fake, 'ch', 't1').map((a) => a.id)).toEqual(['ap2'])
+    expect(approvalsIn(inboxed(fake), 'ch').map((a) => a.id)).toEqual(['ap1'])
+    expect(approvalsIn(inboxed(fake), 'ch', 't1').map((a) => a.id)).toEqual(['ap2'])
   })
 
   it('what I cannot decide is not counted as mine to decide', () => {
-    fake = { ...fake, you: 'bia' }
+    // The core leaves it out of the inbox: another person's agent, or a command on their lent computer.
+    fake = { ...fake, you: 'bia', approvals: [approval()], messages: { ch: [msg('m1')] }, inbox: { approvals: [], questions: [] } }
     expect(approvalsIn(fake, 'ch')).toEqual([])
   })
 })

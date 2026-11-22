@@ -3398,7 +3398,6 @@ ${note}`,
       const where = onde === 'menu de contexto' ? L(', no menu que abre com o clique direito (app_clicar com botao_direito)', ', in the menu a right click opens (app_clicar with botao_direito)') : onde === 'barra de menus' ? L(', na barra de menus (app_menu)', ', in the menu bar (app_menu)') : ''
       const what = typeof ap.args['texto'] === 'string' ? L(`confirmar "${ap.args['texto']}" no ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `clique em "${String(ap.args['alvo'] ?? '')}"`})`, `confirming "${ap.args['texto']}" in ${String(ap.args['app'])} (${typeof ap.args['tecla'] === 'string' ? ap.args['tecla'] : `click on "${String(ap.args['alvo'] ?? '')}"`})`) : typeof ap.args['tecla'] === 'string' ? L(`apertar ${ap.args['tecla']} no ${String(ap.args['app'])}`, `pressing ${ap.args['tecla']} in ${String(ap.args['app'])}`) : L(`clicar em "${String(ap.args['alvo'] ?? '')}" no ${String(ap.args['app'])}${where}`, `clicking "${String(ap.args['alvo'] ?? '')}" in ${String(ap.args['app'])}${where}`)
       if (decision === 'approved' && agent?.apps?.length && this.deps.apps) {
-        attempted = true
         const r = await this.deps.apps.approved(agent, ap.args)
         ok = r.ok
         outcome = r.ok ? L('Liberado: o agente faz agora.', 'Allowed: the agent does it now.') : L(`Não executou: ${r.text}`, `Didn't run: ${r.text}`)
@@ -3533,8 +3532,12 @@ ${note}`,
     }
     // What became of the call, for the receipt the card keeps: it went through, it ran and came
     // back an error, or nothing ran (a refusal, a computer that was off, an access that changed).
-    // Never read out of the outcome text, which is prose.
-    db.setApprovalResult(id, ok ? 'done' : attempted ? 'error' : 'not_run')
+    // Never read out of the outcome text, which is prose. Only a call the app made has one: a grant
+    // or a key is just given, and an app's action is only let through here (the agent makes it on
+    // its next turn), so none of those may ever read "completed".
+    const letThrough = ok && (ap.connectorId === APPS || (ap.tool === NODE_APPROVED && ap.args['kind'] === 'apps'))
+    const noCall = ap.tool === ACCESS_REQUEST || ap.connectorId === COFRE || letThrough
+    if (!noCall) db.setApprovalResult(id, ok ? 'done' : attempted ? 'error' : 'not_run')
     db.setApprovalOutcome(id, outcome)
     emit({ type: 'approval', approval: db.approval(id)! })
 
@@ -3695,6 +3698,13 @@ ${note}`,
         }
       })
       n++
+      this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
+    }
+    // A call the app was making when it quit never said how it went: without this its card would
+    // read "waiting for result" for good. What it did is unknown, so that's what the card says.
+    for (const ap of db.approvals()) {
+      if (ap.state !== 'approved' || ap.outcome || ap.result) continue
+      db.setApprovalOutcome(ap.id, L('O app fechou antes de saber o resultado.', 'The app closed before it knew the result.'))
       this.deps.emit({ type: 'approval', approval: db.approval(ap.id)! })
     }
     return n

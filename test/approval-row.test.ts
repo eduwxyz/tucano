@@ -6,7 +6,7 @@
 // ends in an ellipsis. Below 560px the three take the card's own line, one above the next.
 import { existsSync, readFileSync } from 'node:fs'
 import { chromium, type Browser } from 'playwright'
-import { afterAll, expect, it } from 'vitest'
+import { afterAll, expect, it, vi } from 'vitest'
 
 const css = readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
 
@@ -25,14 +25,16 @@ const launch = async (): Promise<Browser | undefined> => {
   return undefined
 }
 const browser = await launch()
+// A real browser: on a busy machine a new page alone can pass the default 5 s.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 })
 afterAll(async () => {
   await browser?.close()
 })
 
-const markup = (label: string, width: number): string => `
+const markup = (label: string, width: number, inCard: boolean): string => `
   <style>${css}</style>
   <style>body { margin: 0 }</style>
-  <div style="width: ${width}px">
+  <div ${inCard ? 'class="approval" ' : ''}style="width: ${width}px">
     <div class="approval__actions">
       <button class="btn btn--primary approval__approve">Approve</button>
       <button class="btn approval__allow"><span class="approval__allow-label">${label}</span></button>
@@ -42,10 +44,10 @@ const markup = (label: string, width: number): string => `
 
 // What the row does with a given amount of it, at a given window width. Nothing here asserts a
 // font's own metrics: the numbers that matter are relations (one line, same height, no overflow).
-const room = async (label: string, width: number, viewport: number) => {
+const room = async (label: string, width: number, viewport: number, inCard = false) => {
   const page = await browser!.newPage({ viewport: { width: viewport, height: 400 } })
   try {
-    await page.setContent(markup(label, width))
+    await page.setContent(markup(label, width, inCard))
     return await page.locator('.approval__actions').evaluate((actions) => {
       const buttons = [...actions.querySelectorAll('button')]
       const label = actions.querySelector('.approval__allow-label')!
@@ -111,4 +113,15 @@ it.skipIf(!browser)('gives each decision the card line when the row cannot hold 
   expect(narrow.direction).toBe('column')
   expect(narrow.rows).toBe(3)
   expect(narrow.buttons.map((b) => b.width)).toEqual([275, 275, 275])
+})
+
+it.skipIf(!browser)('stacks in a narrow card too, in a wide window (a thread panel)', async () => {
+  const panel = await room('Approve and always allow', 351, 1280, true)
+  expect(panel.direction).toBe('column')
+  expect(panel.rows).toBe(3)
+  expect(panel.label.wanted).toBeLessThanOrEqual(panel.label.shown)
+  // With room for the three, the same card keeps them on one line.
+  const wide = await room('Approve and always allow', 480, 1280, true)
+  expect(wide.direction).toBe('row')
+  expect(wide.rows).toBe(1)
 })

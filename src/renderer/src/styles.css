@@ -1851,7 +1851,9 @@ h3 {
 /* The card leads with the action and its target (issue #252, direction A): the status is a quiet
    row, the title is the largest thing in it, and the decisions are one line at the bottom. */
 .approval {
+  container: approval / inline-size;
   position: relative;
+  width: 100%;
   margin: 10px 0 4px;
   max-width: 560px;
   border: 1px solid var(--border-strong);
@@ -1913,8 +1915,9 @@ h3 {
 }
 .approval__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
   margin-bottom: 2px;
 }
 .approval__grow {
@@ -1931,12 +1934,21 @@ h3 {
 }
 /* Whose request it is: quiet, and only there to keep the card readable outside its conversation. */
 .approval__who {
+  min-width: 0;
   font-size: 12px;
   line-height: 18px;
   color: var(--text-3);
+  overflow-wrap: anywhere;
 }
 .approval--approved .approval__badge {
   color: var(--ok);
+}
+/* Approved, and nothing ran: not the green of something that went through. */
+.approval--not-run {
+  border-left-color: var(--border-strong);
+}
+.approval--not-run .approval__badge {
+  color: var(--text-2);
 }
 .approval--refused .approval__badge,
 .approval--error .approval__badge {
@@ -1960,6 +1972,7 @@ h3 {
   font-size: 14px;
   line-height: 20px;
   color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 /* The connector and the exact target, as a row of their own rather than inside the title. */
 .approval__meta {
@@ -2039,10 +2052,26 @@ h3 {
     min-width: 0;
   }
 }
+/* The same, for a card narrower than its window: a thread's side panel at any window size. Below
+   this the long label would be squeezed to a sliver instead of reading on two lines. */
+@container approval (max-width: 379px) {
+  .approval__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .approval__actions .btn {
+    width: 100%;
+    min-width: 0;
+  }
+  .approval__actions .approval__approve:not(.btn--hold) {
+    max-width: none;
+  }
+}
 .approval__call {
   background: var(--code-bg);
   border-radius: var(--radius);
   padding: 8px 10px;
+  overflow-wrap: anywhere;
 }
 .approval__call code {
   font-weight: 600;

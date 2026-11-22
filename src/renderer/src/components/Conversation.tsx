@@ -104,6 +104,7 @@ import { askWay } from './OrgSectors'
 import { runStep } from '../board'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { KeyRequestCard } from './Vault'
+import { historyStatus } from '../approval-history'
 import { COFRE } from '../../../shared/vault'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
@@ -977,13 +978,14 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
   const [open, setOpen] = useState(false)
   const by = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : undefined))
   const team = useStore(teamMode)
-  const state = approval.state === 'approved' ? L('Aprovada', 'Approved') : approval.state === 'refused' ? L('Recusada', 'Refused') : L('Expirou', 'Expired')
+  // The same words as the card it opens: a call that failed never reads as a green "approved".
+  const status = approvalStatus(approval, false)
   const what = approval.connectorId === COFRE ? (typeof approval.args['nome'] === 'string' ? L(`a chave ${approval.args['nome']}`, `the ${approval.args['nome']} key`) : L(`o login de ${String(approval.args['site'] ?? '')}`, `the login for ${String(approval.args['site'] ?? '')}`)) : approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
   return (
-    <div className={`approval-line approval-line--${approval.state} ${open ? 'is-open' : ''}`}>
+    <div className={`approval-line approval-line--${status.tone === 'error' ? 'refused' : status.tone === 'muted' ? 'expired' : approval.state} ${open ? 'is-open' : ''}`}>
       <button className="approval-line__head" aria-expanded={open} title={`${approval.connectorName} · ${approval.tool}`} onClick={() => setOpen(!open)}>
-        <Icon name={approval.state === 'approved' ? 'check' : approval.state === 'refused' ? 'x' : 'clock'} size={12} />
-        <span className="approval-line__state">{state}</span>
+        <Icon name={status.tone === 'error' ? 'x' : status.tone === 'muted' ? 'clock' : 'check'} size={12} />
+        <span className="approval-line__state">{status.text}</span>
         <span className="approval-line__what">
           · {what}
           {team && by ? ` · ${by}` : ''}
@@ -2050,7 +2052,7 @@ function approvalFace(approval: Approval): { action: string; target?: string } {
   }
   if (approval.connectorId === COMPUTADOR) {
     const kinds = shellActions(s('command'))
-    return { action: kinds.length ? kinds.map((k) => capital(actionVerb(k))).join(L(' e ', ' and ')) : L('Rodar um comando', 'Run a command') }
+    return { action: kinds.length ? capital(kinds.map(actionVerb).join(L(' e ', ' and '))) : L('Rodar um comando', 'Run a command') }
   }
   if (approval.tool === 'abrir_pr') return { action: L('Abrir um pull request em', 'Open a pull request in'), target: s('repo') || undefined }
   if (approval.connectorId === 'apps') {
@@ -2061,8 +2063,10 @@ function approvalFace(approval: Approval): { action: string; target?: string } {
     return { action: L('Clicar em', 'Click'), target: `${alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen')}${app ? ` ${L('no', 'in')} ${app}` : ''}` }
   }
   if (approval.connectorId === 'navegador') {
+    // The page it lands on is part of what's being approved: the card has no other line that says it.
     const alvo = s('alvo')
-    return { action: s('tecla') ? L('Apertar', 'Press') : L('Clicar em', 'Click'), target: alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen') }
+    const page = s('url').replace(/^https?:\/\//, '').slice(0, 60)
+    return { action: s('tecla') ? L('Apertar', 'Press') : L('Clicar em', 'Click'), target: `${alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen')}${page ? ` ${L('em', 'on')} ${page}` : ''}` }
   }
   // A connector's own tool names the action; the first argument that names a thing is the target.
   const named = ['title', 'name', 'subject', 'repo', 'query', 'path', 'to'].map(s).find((v) => v.trim())
@@ -2076,7 +2080,10 @@ function approvalStatus(approval: Approval, mayDecide: boolean): { text: string;
   if (approval.state === 'pending') return { text: mayDecide ? L('Esperando você', 'Waiting for you') : L('Esperando aprovação', 'Waiting for approval'), tone: 'wait' }
   if (approval.state === 'refused') return { text: L('Recusado', 'Refused'), tone: 'error' }
   if (approval.state === 'expired') return { text: L('Expirado', 'Expired'), tone: 'muted' }
-  if (!approval.result) return { text: L('Aprovado · esperando o resultado', 'Approved · waiting for result'), tone: 'ok' }
+  // No result but an outcome: a grant, a key, an app's action the agent makes next, or a row from
+  // before this field (whose failures only its outcome can tell). Without either, it's on its way.
+  if (!approval.result && historyStatus(approval) === 'failed') return { text: L('Falhou', 'Failed'), tone: 'error' }
+  if (!approval.result) return { text: approval.outcome ? L('Aprovado', 'Approved') : L('Aprovado · esperando o resultado', 'Approved · waiting for result'), tone: 'ok' }
   if (approval.result === 'done') return { text: L('Concluído', 'Completed'), tone: 'ok' }
   if (approval.result === 'error') return { text: L('Falhou', 'Failed'), tone: 'error' }
   return { text: L('Aprovado · não rodou', 'Approved · didn’t run'), tone: 'muted' }
@@ -2129,15 +2136,18 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const [holding, setHolding] = useState(false)
   const startHold = (): void => setHolding(true)
   const cancelHold = (): void => setHolding(false)
+  // Decided on another device mid-hold: the button is gone, so its release never comes.
+  const pendingNow = approval.state === 'pending'
   useEffect(() => {
     if (!holding) return
+    if (!pendingNow) return setHolding(false)
     const t = setTimeout(() => {
       setHolding(false)
       decide('approved')
     }, 1500)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holding, approval.id])
+  }, [holding, pendingNow, approval.id])
 
   const decided = approval.state !== 'pending'
   // A command on the agent's computer: what it does, in words.
@@ -2152,10 +2162,10 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const status = approvalStatus(approval, mayDecide)
   const idArg = typeof approval.args['id'] === 'string' || typeof approval.args['id'] === 'number' ? String(approval.args['id']) : ''
   // The same target without the quotation marks, with its id: "what exactly" in the metadata row.
-  const targetMeta = [face.target?.replace(/^“|”$/g, ''), idArg ? `ID ${idArg}` : ''].filter(Boolean).join(', ')
+  const targetMeta = [face.target?.replace(/[“”]/g, ''), idArg ? `ID ${idArg}` : ''].filter(Boolean).join(', ')
 
   return (
-    <div className={`approval approval--${approval.state} ${status.tone === 'error' ? 'approval--error' : ''} ${compact ? 'approval--compact' : ''}`} data-approval={approval.id}>
+    <div className={`approval approval--${approval.state} ${status.tone === 'error' ? 'approval--error' : ''} ${approval.result === 'not_run' ? 'approval--not-run' : ''} ${compact ? 'approval--compact' : ''}`} data-approval={approval.id}>
       <div className="approval__head">
         <span className="approval__badge">
           <Icon name="shield" size={13} />
@@ -2265,6 +2275,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
               {asking ? L('Enviando…', 'Submitting…') : L('Recusar', 'Refuse')}
             </button>
           </div>
+          {unconfirmed && <span className="approval__unconfirmed">{L('Não deu pra confirmar a decisão. Tente de novo.', 'Couldn’t confirm the decision. Try again.')}</span>}
         </form>
       ) : (
         <div className="approval__actions">
