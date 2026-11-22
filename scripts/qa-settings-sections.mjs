@@ -1,6 +1,7 @@
-// The settings section strip, measured in the built app: every tab's strip wraps instead of
-// scrolling, every section it names has a card on the page, and a click parks that card 16 px under
-// the strip with the section itself focused. Run after `npm run build`:
+// The settings groups and jump row, measured in the built app: at every width the groups bar and the
+// jump row fit without scrolling sideways, every subject the row names is on the page, and a click on
+// a jump parks that subject 16 px under the groups bar with the subject itself focused. Run after
+// `npm run build`:
 //   node scripts/qa-settings-sections.mjs [output dir]
 // A scratch data directory, seeded content and the fake engines keep the daily instance untouched.
 import { _electron as electron } from 'playwright'
@@ -17,79 +18,56 @@ const app = await electron.launch({ args: ['.'], env })
 const win = await app.firstWindow()
 await win.waitForSelector('.sidebar')
 await win.locator('.sidebar [aria-label="Settings"]').click()
-await win.waitForSelector('.settings-layout', { timeout: 20000 })
+await win.waitForSelector('.settings-groups__bar', { timeout: 20000 })
 await win.waitForTimeout(600)
 
 const failures = []
 const measurements = []
-const tabs = async () => win.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
-  .filter(tab => tab.closest('.tabs') && !tab.closest('.tabs--sections'))
-  .map(tab => tab.textContent.trim()))
+const groups = await win.locator('.settings-groups__bar [role="tab"]').allTextContents()
 
 for (const width of WIDTHS) {
   await win.setViewportSize({ width, height: 900 })
-  await win.waitForTimeout(300)
-  for (const name of await tabs()) {
-    await win.getByRole('tab', { name, exact: true }).click()
-    await win.waitForTimeout(250)
-    const row = await win.evaluate(() => {
-      const strip = document.querySelector('.settings-sections')
-      const style = getComputedStyle(strip)
+  for (const group of groups) {
+    await win.locator('.settings-groups__bar [role="tab"]', { hasText: group }).click()
+    await win.waitForTimeout(350)
+    const state = await win.evaluate(() => {
+      const scroller = document.querySelector('.page__scroll')
+      const bar = document.querySelector('.settings-groups__bar')
+      const jumps = document.querySelector('.settings-jumps')
+      const links = [...document.querySelectorAll('.settings-jumps a')].map(link => link.getAttribute('href').slice(1))
       return {
-        links: [...strip.querySelectorAll('a')].map(link => link.getAttribute('href').replace('#settings-', '')),
-        anchors: [...document.querySelectorAll('[data-settings-section]')].map(card => card.dataset.settingsSection),
-        clientW: strip.clientWidth,
-        scrollW: strip.scrollWidth,
-        clientH: strip.clientHeight,
-        scrollH: strip.scrollHeight,
-        overflowX: style.overflowX,
-        overflowY: style.overflowY,
-        position: style.position,
-        hidden: [...strip.children].filter(child => child.offsetParent === null).length
+        pageSideways: scroller.scrollWidth > scroller.clientWidth + 1,
+        barSideways: bar.scrollWidth > bar.clientWidth + 1,
+        jumpsSideways: jumps ? jumps.scrollWidth > jumps.clientWidth + 1 : false,
+        links,
+        missing: links.filter(id => !document.getElementById(id))
       }
     })
-    measurements.push({ width, tab: name, ...row, links: row.links.length, anchors: row.anchors.length })
-    const label = `${width}px ${name}`
-    if (row.scrollW > row.clientW) failures.push(`${label}: strip scrolls sideways (${row.scrollW} > ${row.clientW})`)
-    if (row.scrollH > row.clientH + 1) failures.push(`${label}: strip scrolls down (${row.scrollH} > ${row.clientH})`)
-    if (['auto', 'scroll'].includes(row.overflowX) || ['auto', 'scroll'].includes(row.overflowY)) failures.push(`${label}: overflow is ${row.overflowX}/${row.overflowY}`)
-    if (row.position !== 'sticky') failures.push(`${label}: the strip is ${row.position}, not sticky`)
-    if (row.hidden) failures.push(`${label}: ${row.hidden} of ${row.links.length} links are not painted`)
-    if (row.links.join('|') !== row.anchors.join('|')) failures.push(`${label}: links ${row.links.join(',')} do not match the ${row.anchors.join(',')} cards`)
-    if (await win.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) failures.push(`${label}: the page overflows sideways`)
-    if (width === 1280 || width === 900) {
-      await win.screenshot({ path: join(output, `${width}-${name.toLowerCase().replace(/[^a-z]+/g, '-')}.png`) })
+    if (state.pageSideways) failures.push(`${width} ${group}: the page scrolls sideways`)
+    if (state.barSideways) failures.push(`${width} ${group}: the groups bar scrolls sideways`)
+    if (state.jumpsSideways) failures.push(`${width} ${group}: the jump row scrolls sideways`)
+    for (const id of state.missing) failures.push(`${width} ${group}: ${id} is named but not on the page`)
+    if (width === WIDTHS[0]) {
+      for (const id of state.links) {
+        await win.locator(`.settings-jumps a[href="#${id}"]`).press('Enter')
+        await win.waitForTimeout(120)
+        const landed = await win.evaluate((target) => {
+          const scroller = document.querySelector('.page__scroll')
+          const subject = document.getElementById(target)
+          const bar = document.querySelector('.settings-groups').getBoundingClientRect()
+          const gap = subject.getBoundingClientRect().top - bar.bottom
+          const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1
+          return { gap: Math.round(gap), atEnd, focused: document.activeElement === subject }
+        }, id)
+        if (!landed.focused) failures.push(`${group}: ${id} did not take the focus`)
+        if (!landed.atEnd && Math.abs(landed.gap - 16) > 2) failures.push(`${group}: ${id} parked ${landed.gap}px under the groups, not 16`)
+      }
     }
-    if (width !== 1280) continue
-    // Every link on every tab, at the width the app opens in: the card lands under the strip, or as
-    // far as the pane goes when the card is the last one it can reach.
-    for (const id of row.links) {
-      await win.locator(`.settings-sections a[href="#settings-${id}"]`).click()
-      await win.waitForFunction(target => {
-        const card = document.getElementById(`settings-${target}`)
-        const strip = document.querySelector('.settings-sections')
-        if (!card || !strip) return false
-        if (document.querySelector('.settings-layout')?.hasAttribute('data-settings-scrolling')) return false
-        const scroller = document.querySelector('.page__scroll')
-        const atEnd = scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2
-        const offset = card.getBoundingClientRect().top - strip.getBoundingClientRect().bottom
-        return Math.abs(offset - 16) < 3 || (atEnd && offset > 0)
-      }, id, { timeout: 5000 })
-      const state = await win.evaluate(target => ({
-        active: document.activeElement.id,
-        current: document.querySelector('.settings-sections [aria-current="location"]')?.getAttribute('href')?.replace('#settings-', ''),
-        stripTop: document.querySelector('.settings-sections').getBoundingClientRect().top,
-        tabsBottom: document.querySelector('.tabs:not(.tabs--sections)').getBoundingClientRect().bottom,
-        target
-      }), id)
-      if (state.active !== `settings-${id}`) failures.push(`${name}: ${id} is not the focused section after its link (${state.active})`)
-      if (state.current !== id) failures.push(`${name}: the strip names ${state.current} after ${id}`)
-      if (Math.abs(state.stripTop - state.tabsBottom) > 2) failures.push(`${name}: the strip sits at ${state.stripTop.toFixed(1)} under tabs ending at ${state.tabsBottom.toFixed(1)}`)
-    }
+    measurements.push({ width, group, links: state.links.length })
+    await win.screenshot({ path: join(output, `${width}-${group.toLowerCase()}.png`) })
   }
 }
 
+console.log(JSON.stringify({ measurements, failures }, null, 2))
 await app.close()
-console.log(JSON.stringify({ failures, measurements }, null, 2))
-console.log(failures.length ? `\n${failures.length} settings strip problem(s)` : '\nthe settings strip holds at every tested width')
-process.exit(failures.length ? 1 : 0)
+if (failures.length) process.exitCode = 1

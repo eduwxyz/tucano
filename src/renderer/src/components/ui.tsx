@@ -143,7 +143,23 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />,
-  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />
+  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />,
+  bell: <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0" />,
+  gauge: <path d="M12 14l4-4M3.3 19a10 10 0 1 1 17.4 0" />,
+  server: (
+    <>
+      <rect x="3.5" y="4" width="17" height="7" rx="2" />
+      <rect x="3.5" y="13" width="17" height="7" rx="2" />
+      <path d="M7.5 7.5h.01M7.5 16.5h.01" />
+    </>
+  ),
+  route: (
+    <>
+      <circle cx="6" cy="18.5" r="2" />
+      <circle cx="18" cy="5.5" r="2" />
+      <path d="M8 18.5h8a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h8" />
+    </>
+  )
 }
 
 export type IconName = keyof typeof PATHS

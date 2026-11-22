@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PERSONAL_SETTINGS } from '../src/core/policy-people'
-import { settingsStructure, settingsTabStructure } from '../src/renderer/src/settings-structure'
+import { settingsStructure, settingsTabAliases, settingsTabStructure } from '../src/renderer/src/settings-structure'
 import { inspectSettingsPlacement } from '../scripts/lib/settings-placement.mjs'
 
 const all = { admin: true, owner: true, team: true, servers: true }
@@ -17,22 +17,33 @@ describe('settings ownership and visibility', () => {
     expect(result.passed).toBe(true)
   })
 
-  it('gives every section one tab, and every tab only the sections that exist', () => {
+  it('puts every subject in one group, and every group only the subjects that exist', () => {
     const sections = settingsStructure(all)
     const ids = sections.map(section => section.id)
     expect(new Set(ids).size).toBe(ids.length)
-    const tabs = ['geral', 'modelos', 'agentes', 'integracoes', 'pessoas', 'atividade', 'servidores', 'harnesses']
-    const listed = tabs.flatMap(tab => settingsTabStructure(tab, sections).map(section => section.id))
+    const groups = ['geral', 'agentes', 'modelos', 'conexoes', 'workspace']
+    const listed = groups.flatMap(group => settingsTabStructure(group, sections).map(section => section.id))
     expect(new Set(listed).size).toBe(listed.length)
     for (const section of sections) expect(listed).toContain(section.id)
+    for (const group of groups) for (const section of settingsTabStructure(group, sections)) expect(section.page).toBe(group)
     expect(settingsTabStructure('modelos', sections).map(section => section.id).slice(0, 2)).toEqual(['models-agents', 'models-runtimes'])
+  })
+
+  it('sends a link written for an old tab to its subject', () => {
+    const sections = settingsStructure(all)
+    for (const [tab, id] of Object.entries(settingsTabAliases)) {
+      const section = sections.find(s => s.id === id)
+      expect(section, tab).toBeDefined()
+    }
+    expect(sections.find(s => s.id === settingsTabAliases.servidores)!.page).toBe('conexoes')
+    expect(sections.find(s => s.id === settingsTabAliases.pessoas)!.page).toBe('workspace')
   })
 
   it('keeps a member to their own preferences, and every personal key on the backend’s list', () => {
     const member = settingsStructure({ admin: false, owner: false, team: true, servers: true })
     const visible = member.filter(section => section.visible)
-    // The Agents tab and the servers tab are an admin's; the Harnesses tab is everyone's.
-    expect(new Set(visible.map(section => section.page))).toEqual(new Set(['geral', 'pessoas', 'harnesses']))
+    // The Agents and Models groups are an admin's; MCP access and People are everyone's.
+    expect(new Set(visible.map(section => section.page))).toEqual(new Set(['geral', 'conexoes', 'workspace']))
     expect(visible.map(section => section.id)).not.toContain('models-agents')
     expect(visible.map(section => section.id)).not.toContain('agents-permissions')
     for (const section of visible.filter(section => section.scope === 'personal')) {
