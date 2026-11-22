@@ -611,7 +611,8 @@ describe('ask_user through the gateway', () => {
     expect(() => r.answerDecision(asked.id, 1, { text: 'x' }, db.owner())).toThrow()
     await r.send('c1', '@lia seguindo sem isso')
     await r.idle()
-    expect(claude.turns.at(-1)?.prompt).toContain('a pergunta foi cancelada')
+    // Lia's own turn (the router reads the conversation after her, too).
+    expect(claude.turns.some((t) => t.prompt.includes('a pergunta foi cancelada') && t.prompt.includes('seguindo sem isso'))).toBe(true)
   })
 
   it('clears an answer with null', async () => {

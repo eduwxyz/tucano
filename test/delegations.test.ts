@@ -507,6 +507,44 @@ describe('work handed down the tree', () => {
     expect(db.message(relay.id)?.run?.status).toBe('waiting_input')
   })
 
+  it('goes on without the answer when I cancel the question taken to me: whoever does the work assumes and says so', async () => {
+    const r = runner()
+    await r.send('dm', 'delegue a clara: pergunte o que faltar')
+    await r.idle()
+    const relay = by('orion', 'dm').at(-1)!
+    const [root] = by('orion', dmOf('clara'))
+    const claras = by('clara', dmOf('clara'))[0]!
+    const before = claude.turns.length
+    r.cancelQuestion(relay.id, db.owner())
+    await r.idle()
+    expect(db.message(relay.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.question(relay.id)?.state).toBe('closed')
+    expect(db.message(claras.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    // Clara is woken, once, to go on without it; the work doesn't hang on a question nobody will answer.
+    const woken = claude.turns.slice(before).filter((t) => t.system.includes('Você é Clara'))
+    expect(woken).toHaveLength(1)
+    expect(woken[0]!.prompt).toContain('A pessoa preferiu não responder a sua pergunta')
+    expect(db.delegationAt(root!.id)?.asking).toBeUndefined()
+    expect(db.delegationAt(root!.id)?.state).toBe('done')
+    expect(db.openQuestions()).toEqual([])
+  })
+
+  it('goes on without the answer when I cancel the question right in the thread it was left in, and closes the one taken to me', async () => {
+    const r = runner()
+    await r.send('dm', 'delegue a clara: pergunte o que faltar')
+    await r.idle()
+    const relay = by('orion', 'dm').at(-1)!
+    const [root] = by('orion', dmOf('clara'))
+    const claras = by('clara', dmOf('clara'))[0]!
+    r.cancelQuestion(claras.id, db.owner())
+    await r.idle()
+    expect(db.message(claras.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.message(relay.id)?.run?.status).toBe('done')
+    expect(db.question(relay.id)?.state).toBe('closed')
+    expect(db.delegationAt(root!.id)?.state).toBe('done')
+    expect(by('clara', dmOf('clara'))).toHaveLength(2)
+  })
+
   it('tells whoever asked when the work stops short', async () => {
     const r = runner()
     // Clara's reply fails on something that doesn't pass by itself: no waiting to try again.
