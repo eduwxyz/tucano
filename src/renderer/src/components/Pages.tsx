@@ -3744,11 +3744,11 @@ export function SettingsWhere(): ReactNode {
     <div className="settings-where" role="note">
       <Icon name="laptop" size={16} />
       <span className="grow">
-        {L('Estes ajustes são do servidor ', "Settings apply to server ")}
+        {L('Estes ajustes são do servidor ', "Settings for server ")}
         <b>{host}</b>
         {L(
           ' e valem lá, de qualquer computador. O que é só do seu computador, como emprestá-lo aos agentes, fica no app do Tucano nele.',
-          " from any computer. Manage computer-specific settings, including lending it to agents, in that computer’s Tucano app."
+          ". Manage local settings and agent lending in each computer’s Tucano app."
         )}
       </span>
       {open && (

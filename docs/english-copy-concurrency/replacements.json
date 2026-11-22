@@ -66,7 +66,7 @@
       "attribute": null,
       "source": "Estes ajustes são do servidor ",
       "before": "These are the settings of the server ",
-      "after": "Settings apply to server ",
+      "after": "Settings for server ",
       "reason": "Shorten the prefix while retaining the separately rendered host and sentence continuity."
     },
     {
@@ -77,7 +77,7 @@
       "attribute": null,
       "source": " e valem lá, de qualquer computador. O que é só do seu computador, como emprestá-lo aos agentes, fica no app do Tucano nele.",
       "before": ", and they apply there, from any computer. What belongs to your own computer, like lending it to the agents, is in the Tucano app on it.",
-      "after": " from any computer. Manage computer-specific settings, including lending it to agents, in that computer’s Tucano app.",
+      "after": ". Manage local settings and agent lending in each computer’s Tucano app.",
       "reason": "Distinguish server scope from computer-specific settings and retain lending guidance. Review together with prefix and host."
     },
     {

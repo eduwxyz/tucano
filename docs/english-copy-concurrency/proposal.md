@@ -12,7 +12,9 @@ The agent hint preserves the override’s scope across all conversations and the
 global setting that applies when it is off. The maximum remains six.
 
 The server banner identifies where settings apply and where to manage settings
-for a specific computer, including lending it to agents. The button names the
+for a specific computer, including lending it to agents: “Settings for server
+{host}. Manage local settings and agent lending in each computer’s Tucano app.”
+The button names the
 settings it opens. These edits preserve the existing behavior, permissions,
 defaults, Portuguese strings, localization structure and interpolation.
 [replacements.json](replacements.json) records all nine exact replacements and
