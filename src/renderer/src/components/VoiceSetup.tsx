@@ -2,13 +2,20 @@
 // The same piece in the balloon over the microphone and in Settings.
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { updateSettings, useStore, voiceCancelDownload, voiceDownload, voiceStatus, type VoiceModelId, type VoiceStatus } from '../store'
+import { updateSettings, useStore, voiceCancelDownload, voiceDownload, voiceStatus, windowless, type VoiceModelId, type VoiceStatus } from '../store'
 import { Icon } from './ui'
 
 export const VOICE_CHOICES = (): { id: VoiceModelId; name: string; size: string; about: string }[] => [
   { id: 'recommended', name: L('Recomendado', 'Recommended'), size: '574 MB', about: L('O mais preciso, inclusive em português.', 'The most accurate, in any language.') },
-  { id: 'light', name: L('Leve', 'Light'), size: '190 MB', about: L('Baixa mais rápido e erra um pouco mais.', 'Downloads faster, and gets a bit more wrong.') }
+  { id: 'light', name: L('Leve', 'Light'), size: '190 MB', about: windowless() ? L('Num servidor, transcreve umas 5 vezes mais rápido e erra um pouco mais.', 'On a server, transcription is about 5 times faster but slightly less accurate.') : L('Baixa mais rápido e erra um pouco mais.', 'Downloads faster, and gets a bit more wrong.') }
 ]
+
+// Where the audio becomes text: on a server (Tucano Pro's), the server, on a few shared processors, where the
+// Recommended model takes most of a minute for one sentence (measured: 47 s for 8 s of speech; the Light one, 9 s).
+export const VOICE_WHERE = (): string =>
+  windowless()
+    ? L('O áudio vira texto no servidor deste Tucano, sem passar por nenhum outro serviço. Num servidor, o modelo Leve é bem mais rápido.', "Audio is transcribed only on this server.")
+    : L('O áudio vira texto neste computador, sem internet.', 'The audio becomes text on this computer, offline.')
 
 // Dictation's state, read again whenever the core says it changed.
 export function useVoice(): VoiceStatus | null {
@@ -21,7 +28,7 @@ export function useVoice(): VoiceStatus | null {
 
 const mb = (n: number): string => `${Math.round(n / 1_000_000)} MB`
 
-export function VoiceSetup({ status }: { status: VoiceStatus }): ReactNode {
+export function VoiceSetup({ status, after }: { status: VoiceStatus; after?: ReactNode }): ReactNode {
   const [pick, setPick] = useState<VoiceModelId>('recommended')
   const d = status.downloading
   if (d)
@@ -53,9 +60,12 @@ export function VoiceSetup({ status }: { status: VoiceStatus }): ReactNode {
         ))}
       </div>
       {status.error && <p className="field__error">{status.error}</p>}
-      <button className="btn btn--primary btn--sm" onClick={() => void voiceDownload(pick)}>
-        <Icon name="mic" size={13} /> {status.error ? L('Tentar de novo', 'Try again') : L('Ativar ditado', 'Turn dictation on')}
-      </button>
+      <div className="voice-setup__actions">
+        <button className="btn btn--primary btn--sm" onClick={() => void voiceDownload(pick)}>
+          <Icon name="mic" size={13} /> {status.error ? L('Tentar de novo', 'Try again') : L('Ativar ditado', 'Turn dictation on')}
+        </button>
+        {after}
+      </div>
     </div>
   )
 }
@@ -69,7 +79,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
-  const key = platform === 'mac' ? '⌥ Espaço' : 'Ctrl+Espaço'
+  const key = (space: string): string => (platform === 'mac' ? `⌥ ${space}` : `Ctrl+${space}`)
   return (
     <div className="voice-pop" role="dialog" aria-label={L('Ditar mensagens', 'Dictate messages')}>
       <button className="voice-pop__close icon-btn" aria-label={L('Fechar', 'Close')} onClick={onClose}>
@@ -78,7 +88,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
       {status.ready ? (
         <>
           <b>{L('Pronto para ditar', 'Ready to dictate')}</b>
-          <p className="small muted">{L(`Clique no microfone, ou ${key}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Click the microphone, or ${key.replace('Espaço', 'Space')}, and speak. Click again to finish: the text shows up here to review. The first time, the system asks to allow the microphone.`)}</p>
+          <p className="small muted">{L(`Clique no microfone, ou ${key('Espaço')}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Use the microphone or ${key('Space')} to dictate. Select the microphone again to finish and review the text here. Allow microphone access when first asked.`)}</p>
           <button className="btn btn--sm" onClick={onClose}>
             {L('Entendi', 'Got it')}
           </button>
@@ -86,7 +96,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
       ) : (
         <>
           <b>{L('Ditar mensagens', 'Dictate messages')}</b>
-          <p className="small muted">{L('Fale em vez de digitar. Funciona neste computador, sem internet e sem custo: nada do que você fala sai daqui. Precisa baixar um modelo de voz uma vez.', 'Speak instead of typing. It runs on this computer, offline and free: nothing you say leaves it. It needs a voice model, downloaded once.')}</p>
+          <p className="small muted">{windowless() ? L('Fale em vez de digitar. Funciona no servidor deste Tucano, sem custo e sem passar por nenhum outro serviço. Precisa baixar um modelo de voz uma vez.', "Speak instead of typing. It runs on this Tucano's server, free and through no other service. It needs a voice model, downloaded once.") : L('Fale em vez de digitar. Funciona neste computador, sem internet e sem custo: nada do que você fala sai daqui. Precisa baixar um modelo de voz uma vez.', 'Speak instead of typing. It runs on this computer, offline and free: nothing you say leaves it. It needs a voice model, downloaded once.')}</p>
           <VoiceSetup status={status} />
           <button className="text-btn voice-pop__hide" onClick={() => (onClose(), updateSettings({ voice: { ...voice, hidden: true } }))}>
             {L('Não mostrar o microfone', "Don't show the microphone")}

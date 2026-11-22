@@ -148,6 +148,8 @@ export async function detectEngine(engine: EngineId, codexHome: string, clineLog
       return found(await detectCline(clineLogin))
     case 'hermes':
       return found(await detectHermes())
+    case 'endpoint':
+      return { status: { installed: false, loggedIn: false } } // nothing to find: it's set up in Settings (see the core's settings())
   }
 }
 const found = (r: { status: EngineStatus; models: string[] }): OneFinding => ({ status: r.status, listed: r.models })

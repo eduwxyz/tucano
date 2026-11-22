@@ -1,19 +1,25 @@
 import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
+import { readInstall } from '../core/feedback'
+import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
-import { execFile } from 'node:child_process'
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, normalize, sep } from 'node:path'
+import { execFile, execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFile } from 'node:fs/promises'
+import { basename, dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
-import { serverNote } from '../shared/servers'
+import { thisDevice } from './redeem'
+import { placeOf, serverNote, type DesktopPlaces } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
+import { backgroundOptions } from './background-qa'
 import { homePhone } from './home-phone'
 import { suggestWorkspaceCopyName, workspaceParts, type Workspace, type WorkspaceList, type WorkspaceSummary } from '../shared/workspaces'
 import { autostartEntry, autostartFile, electronPasswordStore, onPath } from '../core/platform'
@@ -21,6 +27,15 @@ import { proxyFromPac } from '../core/network'
 
 const NAME = 'Tucano'
 app.setName(NAME)
+const launch = (() => {
+  try {
+    return backgroundOptions(process.argv, process.env, [app.getPath('userData'), join(app.getPath('appData'), NAME), join(app.getPath('appData'), `${NAME} Dev`)], [47717, 47718])
+  } catch (error) {
+    // Electron's uncaught-error dialog would itself interrupt a background test.
+    console.error(error)
+    process.exit(1)
+  }
+})()
 // Set here and not in the menu entry, so it holds when an update restarts the app. Someone who
 // chose a store with --password-store keeps it.
 const passwordStore = electronPasswordStore()
@@ -62,7 +77,11 @@ let registry: Workspaces
 type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean; wikiFolder: string }
 const cores = new Map<string, Runtime>()
 const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }) })
-const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()) }
+const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()); tellPlaces() }
+// A server's page in this window lists this computer's workspaces and the servers in its own menu
+// (src/preload/server.ts): told when their names or which is on screen change, it asks again.
+let toldPlaces = ''
+let tellPlaces = (): void => {} // set once the servers are (below)
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
@@ -80,14 +99,14 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_MCP_PORT: String(workspace.webhookPort + 100), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
   const ready = new Promise<void>((yes, no) => { resolve = yes; reject = no })
   // Background startup errors are visible in the switcher, not unhandled rejections.
   void ready.catch(() => {})
-  const runtime: Runtime = { child, ready, busy: false, wikiFolder: '', summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`) }
+  const runtime: Runtime = { child, ready, busy: false, wikiFolder: '', summary: { id: workspace.id, name: workspace.name, isDefault: workspace.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }, browsers: new Browsers((agentId, shown) => child.postMessage({ type: 'browser-shown', agentId, shown }), workspace.isDefault ? '' : `${workspace.id}-`, (agentId) => downloadsFolder(workspace.dataDir, agentId)) }
   cores.set(workspace.id, runtime)
   const timer = setTimeout(() => {
     reject(new Error(L('O workspace demorou demais para iniciar.', 'The workspace took too long to start.')))
@@ -105,6 +124,7 @@ function startCore(workspace: Workspace): Runtime {
       runtime.summary.status = 'ready'
       resolve()
       publishWorkspaces()
+      if (workspace.isDefault) lendTo()
     } else if (msg.type === 'workspace-summary') {
       registry.rename(workspace.id, msg.name)
       runtime.summary = { ...runtime.summary, name: msg.name || runtime.summary.name, paused: msg.paused, unread: msg.unread, approvals: msg.approvals }
@@ -167,6 +187,7 @@ type CoreRequest =
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
   | { type: 'open_local'; path: string; how: 'open' | 'reveal' }
+  | { type: 'save_artifact'; path: string }
   | { type: 'wiki_dir'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
@@ -214,6 +235,7 @@ const player = ((): ((file: string) => [string, string[]]) | null => {
   return null
 })()
 function chirp(sound: 'chama' | 'pronto'): void {
+  if (launch.qa) return
   if (!player || Date.now() - chirpedAt < 1500) return
   chirpedAt = Date.now()
   const [bin, args] = player(join(resource('sounds'), `tucano-${sound}.wav`))
@@ -271,7 +293,7 @@ function setTray(): void {
 // Linux shows a notification with the icon it's given (a Mac uses the app's own).
 const noteIcon = (): { icon?: string } => (process.platform === 'linux' ? { icon: resource('icon.png') } : {})
 function stillOpen(): void {
-  if (process.platform === 'darwin' || quitting || toldStillOpen || !Notification.isSupported()) return
+  if (launch.qa || process.platform === 'darwin' || quitting || toldStillOpen || !Notification.isSupported()) return
   toldStillOpen = true
   new Notification({
     ...noteIcon(),
@@ -333,6 +355,14 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     // Never openPath on what isn't a folder or a PDF: that would run an app or a script.
     if (msg.how === 'open') void shell.openPath(msg.path)
     else shell.showItemInFolder(msg.path)
+  } else if (msg.type === 'save_artifact') {
+    // Only a file of what the agents showed, copied to where the person picks (Downloads to start).
+    const path = normalize(msg.path)
+    if (!path.startsWith(join(workspace.dataDir, 'artifacts') + sep)) return
+    const ask = { defaultPath: join(app.getPath('downloads'), basename(path)) }
+    void (mainWindow ? dialog.showSaveDialog(mainWindow, ask) : dialog.showSaveDialog(ask))
+      .then((r) => (r.canceled || !r.filePath ? undefined : copyFile(path, r.filePath)))
+      .catch((e) => console.error('[main] save artifact', e))
   } else if (msg.type === 'wiki_dir') {
     runtime.wikiFolder = normalize(msg.path)
   } else if (msg.type === 'open_path') {
@@ -346,7 +376,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
     if (registry.selected().id === workspace.id && msg.conversationId && msg.conversationId === viewing && mainWindow?.isFocused()) return
     const sound = chirpOf(msg.kind, msg.sound)
     if (sound) chirp(sound)
-    if (!Notification.isSupported()) return
+    if (launch.qa || !Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body, silent: true, ...noteIcon() })
     n.on('click', () => { void switchWorkspace(workspace.id).then(() => showWindow(msg.conversationId, msg.page, msg.threadId)).catch(console.error) })
     n.show()
@@ -388,6 +418,7 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
   if (!/^https?:\/\//.test(o.url)) throw new Error(L('Só dá pra capturar endereços http e https.', 'Only http and https addresses can be captured.'))
   const win = new BrowserWindow({
     show: false,
+    ...(launch.qa ? { focusable: false, skipTaskbar: true } : {}),
     width: o.width,
     height: o.height,
     useContentSize: true,
@@ -608,7 +639,8 @@ ipcMain.handle('workspaces:delete', async (event, id: unknown) => {
 // The app's own window; agents' browsers are windows too, hidden, and never count as it.
 let mainWindow: BrowserWindow | null = null
 
-function showWindow(conversationId?: string, page?: 'skills', threadId?: string): void {
+function showWindow(conversationId?: string, page?: 'skills' | 'servers', threadId?: string): void {
+  if (launch.qa) return
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
@@ -625,6 +657,26 @@ const updates = new Updates((state) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update', state)
   // With a server on screen, its page is what the person sees: it says a version is ready too.
   servers.tell('server:update', state)
+})
+// "Enviar feedback": the app's window as it is, taken before the dialog opens over it. At most 1600
+// pixels wide, a PNG, or a JPEG when the PNG would pass what the feedback bucket takes (core/feedback.ts).
+ipcMain.handle('window:capture', async (e) => {
+  if (!fromApp(e)) return null
+  try {
+    let image = await e.sender.capturePage()
+    const { width } = image.getSize()
+    if (width > 1600) image = image.resize({ width: 1600, quality: 'good' })
+    const png = image.toPNG()
+    if (png.length <= 2_500_000) return { type: 'image/png', data: png.toString('base64') }
+    for (const quality of [80, 60, 40]) {
+      const jpg = image.toJPEG(quality)
+      if (jpg.length <= 2_500_000) return { type: 'image/jpeg', data: jpg.toString('base64') }
+    }
+    return null
+  } catch (err) {
+    console.error('[main] capture:', err instanceof Error ? err.message : err)
+    return null
+  }
 })
 ipcMain.handle('update:state', (e) => (fromApp(e) ? updates.get() : null))
 ipcMain.on('update:check', (e) => fromApp(e) && updates.check())
@@ -671,10 +723,17 @@ ipcMain.on('server:update-install', (e) => {
 })
 
 // The Mac's folder picker, for a folder lent to an agent's computer. The core checks the choice.
-ipcMain.handle('pick-folder', async (event) => {
+// `start`: where it opens, from the home folder (".hermes"); `hidden`: show folders starting with a dot.
+ipcMain.handle('pick-folder', async (event, o?: { start?: string; hidden?: boolean }) => {
   if (!fromApp(event)) return null
   const win = BrowserWindow.fromWebContents(event.sender)
-  const opts = { title: L('Escolher pasta', 'Choose a folder'), buttonLabel: L('Escolher', 'Choose'), properties: ['openDirectory' as const] }
+  const start = typeof o?.start === 'string' ? resolve(homedir(), o.start) : undefined
+  const opts = {
+    title: L('Escolher pasta', 'Choose a folder'),
+    buttonLabel: L('Escolher', 'Choose'),
+    properties: (o?.hidden ? ['openDirectory', 'showHiddenFiles'] : ['openDirectory']) as ('openDirectory' | 'showHiddenFiles')[],
+    ...(start && existsSync(start) ? { defaultPath: start } : {})
+  }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
@@ -686,6 +745,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    ...(launch.qa ? { focusable: false, skipTaskbar: true } : {}),
     title: NAME,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     // Off a Mac the menu lives in the window: hidden until Alt, so the app looks the same.
@@ -702,7 +762,11 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    if (launch.qa) return
+    if (launch.background) win.showInactive()
+    else win.show()
+  })
   mainWindow = win
   // A server on screen keeps the window's size (servers.ts), and comes back in a window made again.
   win.on('resize', () => servers.place())
@@ -767,9 +831,60 @@ const servers = new Servers({
   changed: () => {
     setMenu()
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
+    tellPlaces()
   },
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
-  showLocal: () => showWindow()
+  showLocal: () => showWindow(),
+  lent: (links) => lendTo(links)
+})
+// The servers this computer is lent to go to the default workspace's core, which calls them (core/node-link.ts).
+function lendTo(links = servers.lentLinks()): void {
+  const core = [...cores.entries()].find(([id]) => registry.list().find((w) => w.id === id)?.isDefault)?.[1]
+  if (core?.summary.status === 'ready') core.child.postMessage({ type: 'node-uplinks', name: machineName(), links })
+}
+// This computer's name as people see it: a Mac's from its Sharing settings ("MacBook Pro de Eduardo"), not the hostname.
+let machine = ''
+function machineName(): string {
+  if (machine) return machine
+  if (process.platform === 'darwin') {
+    try {
+      machine = execFileSync('scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim()
+    } catch {
+      // the hostname below
+    }
+  }
+  machine ||= thisDevice(hostname(), process.platform).name.replace(/-/g, ' ')
+  return machine
+}
+// What a server's page lists in its workspace menu: names and ids only, never a token or an address.
+function desktopPlaces(): DesktopPlaces {
+  return {
+    workspaces: workspaceList().workspaces.map((w) => ({ id: w.id, name: w.name })),
+    servers: servers.summary().map((s) => ({ id: s.id, name: s.name, open: s.open }))
+  }
+}
+tellPlaces = () => {
+  const now = JSON.stringify(desktopPlaces())
+  if (now === toldPlaces) return
+  toldPlaces = now
+  servers.tell('server:places', null)
+}
+ipcMain.handle('server:places', (e) => (fromServer(e) ? desktopPlaces() : null))
+// Picked in a server's menu: one of this computer's workspaces (its Tucano on screen, switched to it),
+// or a server. The page only names where; nothing is changed but what's on screen.
+ipcMain.on('server:go', (e, raw: unknown) => {
+  const place = fromServer(e) ? placeOf(raw) : null
+  if (!place) return
+  if (place.kind === 'server') return void servers.show(place.id).catch(console.error)
+  if (!registry.list().some((w) => w.id === place.id)) return
+  servers.showLocal()
+  void switchWorkspace(place.id).catch(console.error)
+})
+// The page draws the way back itself (its workspace menu is on screen), or stopped: the bar goes or comes back.
+ipcMain.on('server:own', (e, on: unknown) => {
+  const frame = e.senderFrame
+  const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
+  if (id && typeof on === 'boolean') servers.own(id, on)
 })
 // Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
 // pasted link, opening and forgetting.
@@ -778,6 +893,9 @@ ipcMain.handle('servers:pair', (e, link: unknown) => (fromApp(e) && typeof link 
 ipcMain.on('servers:open', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.show(id))
 ipcMain.on('servers:local', (e) => fromApp(e) && servers.showLocal())
 ipcMain.handle('servers:forget', (e, id: unknown) => (fromApp(e) && typeof id === 'string' ? servers.forget(id, false) : false))
+ipcMain.on('servers:node', (e, id: unknown, on: unknown) => fromApp(e) && typeof id === 'string' && typeof on === 'boolean' && servers.setNode(id, on))
+// Its server on screen at Connectors, where the person picks the agents that use this computer.
+ipcMain.on('servers:agents', (e, id: unknown) => fromApp(e) && typeof id === 'string' && void servers.openNote(id, { title: '', body: '', page: 'connectors' }).catch(console.error))
 // A server's page in this window hands its notifications here (src/preload/server.ts): the app
 // shows them as its own, and a click puts that server, and what it's about, on screen. The page
 // already left out the conversation being read there; a server can't send more than a few a minute.
@@ -786,7 +904,7 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
   const frame = e.senderFrame
   const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
   const note = id ? serverNote(raw) : null
-  if (!id || !note || !Notification.isSupported()) return
+  if (launch.qa || !id || !note || !Notification.isSupported()) return
   const now = Date.now()
   const recent = (serverNotes.get(id) ?? []).filter((t) => now - t < 60_000)
   if (recent.length >= 20) return
@@ -797,10 +915,16 @@ ipcMain.on('server:notify', (e, raw: unknown) => {
   n.on('click', () => void servers.openNote(id, note).catch(console.error))
   n.show()
 })
+// A server's page asks to lend this computer (its folder picker, an agent's Computer): this computer's Tucano
+// comes on screen on Settings › Servers. Only a server's own page asks, and it changes nothing by itself.
+ipcMain.on('server:lend', (e) => {
+  const frame = e.senderFrame
+  if (frame && frame === e.sender.mainFrame && servers.serverOf(e.sender, frame.url)) showWindow(undefined, 'servers')
+})
 // Settings › General › Notifications: one now, so the system asks about them (a Mac lists the app
 // under Notifications only after its first one), and the person sees whether they come.
 ipcMain.handle('notify:test', (e) => {
-  if (!fromApp(e) || !Notification.isSupported()) return 'unsupported'
+  if (launch.qa || !fromApp(e) || !Notification.isSupported()) return 'unsupported'
   new Notification({ title: NAME, body: L('As notificações estão chegando.', 'Notifications are coming through.'), silent: true, ...noteIcon() }).show()
   return 'shown'
 })
@@ -820,7 +944,7 @@ app.on('second-instance', (_e, argv) => {
   if (argv.includes('--quit')) return app.quit()
   const link = linkIn(argv)
   if (link) openLink(link)
-  else showWindow()
+  else if (!argv.includes('--background') && !argv.includes('--qa-background')) showWindow()
 })
 
 // The app's own menu, in the app's language (Electron's would be in English).
@@ -876,7 +1000,10 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
   })
   setMenu()
   protocol.handle('tucano', serveArtifact)
-  registry = new Workspaces(dataDir())
+  // This computer's install (core/feedback.ts), for every workspace: made once. Nothing here yet is a new
+  // install; a folder with a Tucano in it is one from before the file existed.
+  readInstall(dataDir(), app.getVersion(), !existsSync(join(dataDir(), 'tucano.db')))
+  registry = new Workspaces(dataDir(), launch.ports)
   nativeTheme.themeSource = registry.theme() ?? 'system'
   systemProxyRead = readSystemProxy()
   void systemProxyRead.then(startWorkspaces)
@@ -894,18 +1021,18 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     },
     publish: (state) => mainWindow?.webContents.send('home-phone', state)
   })
-  void phone.restore()
+  if (!launch.qa) void phone.restore()
   // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
   // routines wait for a real wake, so a run doesn't start and freeze mid-way.
   powerMonitor.on('suspend', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: false }) })
   powerMonitor.on('resume', () => { for (const r of cores.values()) r.child.postMessage({ type: 'power', awake: true }) })
   createWindow()
-  setTray()
-  updates.start()
+  if (!launch.qa) setTray()
+  if (!launch.qa) updates.start()
   // Only the installed app takes tucano:// links: a development run would take them from it.
-  if (app.isPackaged) app.setAsDefaultProtocolClient('tucano')
-  servers.restore()
-  if (pendingLink) void servers.pairFromOutside(pendingLink)
+  if (app.isPackaged && !launch.qa) app.setAsDefaultProtocolClient('tucano')
+  if (!launch.qa) servers.restore()
+  if (pendingLink && !launch.qa) void servers.pairFromOutside(pendingLink)
   pendingLink = undefined
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow()

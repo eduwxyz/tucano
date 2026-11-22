@@ -382,7 +382,7 @@ function JoinLink(): ReactNode {
       </label>
       <input id="intro-join" className="intro-input" autoFocus type="password" autoComplete="off" spellCheck={false} placeholder={L('Cole o link do convite ou do servidor', 'Paste the invite or server link')} value={link} onChange={(e) => (setLink(e.target.value), setNote(''))} />
       <button className="intro-btn intro-btn--sm" type="submit" disabled={!link.trim()}>
-        {L('Entrar', 'Join')}
+        {L('Entrar', 'Sign in')}
       </button>
       {note && (
         <p className="intro-note" role="status">
@@ -509,7 +509,7 @@ function ConnectAi({ name, onBack, onNext }: { name: string; onBack: () => void;
         <aside className="intro-side intro-side--teal">
           <TucaHead />
           <Bubble>{L('Opa, você já tem tudo pronto aqui. Achei o que você usa.', 'Oh, you’re all set up already. I found what you use.')}</Bubble>
-          <Bubble>{auto ? L('Já escolhi os modelos rápidos pros bastidores. Se quiser mexer, é ali embaixo.', 'I already picked the quick models for behind the scenes. To change them, it’s down there.') : L('Só falta escolher os modelos rápidos pros bastidores, ali embaixo.', 'Just pick the quick models for behind the scenes, down there.')}</Bubble>
+          <Bubble>{auto ? L('Já escolhi os modelos rápidos pros bastidores. Se quiser mexer, é ali embaixo.', "I picked fast models for the work behind the scenes. You can change them below.") : L('Só falta escolher os modelos rápidos pros bastidores, ali embaixo.', 'Just pick the quick models for behind the scenes, down there.')}</Bubble>
         </aside>
         <section className="intro__main">
           <Top at={1} onBack={onBack} />
@@ -547,7 +547,7 @@ function ConnectAi({ name, onBack, onNext }: { name: string; onBack: () => void;
             <Plans engines={engines} chosen={chosen} setup={setup} begin={begin} cancel={() => (cancelSetup(), setChosen(null))} models={models} listed={listed} onNext={onNext} />
           )}
           <button className="intro-link" onClick={() => setMode('advanced')}>
-            {L('Uso chave de API, gateway da empresa ou outro programa', 'I use an API key, a company gateway or another program')}
+            {L('Uso OpenRouter, Ollama, chave de API, gateway da empresa ou outro programa', 'I use OpenRouter, Ollama, an API key, a company gateway or another program')}
           </button>
         </div>
       </section>
@@ -941,7 +941,7 @@ function BackgroundPickers({ models, setModels }: { models: { router: string; me
     <div className="intro-jobs">
       <JobCard title={L('Escolhe quem responde', 'Picks who replies')} value={m.router} groups={groups} onChange={(v) => setModels({ ...m, router: v })} />
       <JobCard title={L('Cuida da memória', 'Keeps the memory')} value={m.memory} groups={groups} onChange={(v) => setModels({ ...m, memory: v })} />
-      <span className="intro-muted intro-jobs__hint">{L('Quem responde decide, num canal, qual agente fala; a memória resume conversas longas. Um modelo rápido basta. Dá pra trocar depois em Configurações.', 'Who replies decides which agent speaks in a channel; the memory sums up long talks. A quick model is enough. You can change them later in Settings.')}</span>
+      <span className="intro-muted intro-jobs__hint">{L('Quem responde decide, num canal, qual agente fala; a memória resume conversas longas. Um modelo rápido basta. Dá pra trocar depois em Configurações.', "The router chooses who replies in channels. The memory model summarizes long conversations. Use fast models; change them later in Settings.")}</span>
     </div>
   )
 }
@@ -989,7 +989,7 @@ function Advanced({ models, setModels, onBack, onNext }: { models: { router: str
       <aside className="intro-side intro-side--teal">
         <TucaHead />
         <Bubble>{L('Sem problema. O Tucano usa o Claude Code, o Codex, o OpenCode e outros do jeito que você configurou: no plano, no gateway da empresa ou com os seus provedores.', 'No problem. Tucano uses Claude Code, Codex, OpenCode and others the way you set them up: on a plan, your company’s gateway or your providers.')}</Bubble>
-        <Bubble>{L('Ele só lê essa configuração. Nunca vê nem guarda as suas senhas e chaves.', 'It only reads that setup. It never sees or stores your passwords and keys.')}</Bubble>
+        <Bubble>{L('Ele só lê essa configuração. Ou, sem instalar nada, cole o endereço de um endpoint (OpenRouter, OmniRoute, Ollama) e a chave dele: ela fica guardada cifrada aqui.', 'It only reads that setup. Or, with nothing to install, paste the address of an endpoint (OpenRouter, OmniRoute, Ollama) and its key: it’s kept here, encrypted.')}</Bubble>
       </aside>
       <section className="intro__main intro__main--scroll">
         <Top at={1} onBack={onBack} />

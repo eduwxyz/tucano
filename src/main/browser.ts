@@ -2,10 +2,14 @@
 // a session of its own, so its logins stay apart from everything else and last
 // between conversations. The core decides what to do; this file only drives the
 // page and reports back. "Assumir" shows the same window so I can log in.
-import { BrowserWindow, session, type WebContents } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { BrowserWindow, session, type DownloadItem, type WebContents } from 'electron'
 import { L } from '../shared/lang'
-import { POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
-import type { BrowserOp, BrowserReply as Reply } from '../shared/types'
+import { fillRefused, FILL, HIDE_SECRETS, POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
+import { MAX_FILE_BYTES, type BrowserOp, type BrowserReply as Reply } from '../shared/types'
+import { land, partialFolder, refuse } from '../core/downloads'
 
 const W = 1280
 const H = 800
@@ -31,8 +35,14 @@ export class Browsers {
   private reopening = new Map<string, Promise<void>>()
   private titles = new Map<string, string>() // "Lia's browser · close the window to hand it back", from the core
   private quitting = false
+  private wired = new Set<string>() // the sessions whose downloads are already taken care of
 
-  constructor(private onShown: (agentId: string, shown: boolean) => void, private namespace = '') {}
+  constructor(
+    private onShown: (agentId: string, shown: boolean) => void,
+    private namespace = '',
+    // Where each agent's downloads land (core/downloads.ts); without it, nothing downloads.
+    private downloads?: (agentId: string) => string
+  ) {}
 
   // "{page} — Lia's browser · close the window to hand it back".
   private titled(agentId: string, page: string): string {
@@ -57,7 +67,12 @@ export class Browsers {
     // A plain Chrome, as far as sites can tell: some refuse logins in "embedded" browsers.
     ses.setUserAgent(ses.getUserAgent().replace(/\s(agent-desk|Tucano|Electron)\/\S+/g, ''))
     ses.setPermissionRequestHandler((_wc, _perm, done) => done(false)) // no camera, mic, location, notifications
-    ses.on('will-download', (_e, item) => item.cancel())
+    if (!this.wired.has(agentId)) {
+      this.wired.add(agentId)
+      const folder = this.downloads?.(agentId)
+      if (folder) rmSync(partialFolder(folder), { recursive: true, force: true }) // left by a download the app quit in the middle of
+      ses.on('will-download', (_e, item) => this.download(agentId, item))
+    }
     const win = new BrowserWindow({
       show: false,
       width: W,
@@ -179,6 +194,25 @@ export class Browsers {
         await this.settle(wc)
         return { ...here(), point: point(at), frame: await this.frame(win) }
       }
+      case 'fill': {
+        // A saved login (navegador_login): checked in the page right before typing, on that exact origin
+        // and, for a password, in a password field. Errors never carry the text: it may be the password.
+        const ref = Number(args['ref'])
+        const text = String(args['text'] ?? '')
+        const password = args['password'] === true
+        const check = (focus: boolean): string => FILL(ref, String(args['origin'] ?? ''), password, focus, password && focus ? text : '')
+        const at = await iso<{ x: number; y: number } | string>(check(false))
+        if (typeof at === 'string') throw new Error(fillRefused(at))
+        await wait(80)
+        this.click(wc, at.x, at.y)
+        await wait(120)
+        const again = await iso<{ x: number; y: number } | string>(check(true))
+        if (typeof again === 'string') throw new Error(fillRefused(again))
+        await wc.insertText(text)
+        await wait(150)
+        await this.settle(wc)
+        return { ...here(), point: point(at), frame: await this.frame(win) }
+      }
       case 'key': {
         const key = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
         if (!KEYS[key]) throw new Error(L(`Tecla desconhecida. Use uma destas: ${Object.keys(KEYS).join(', ')}.`, `Unknown key. Use one of these: ${Object.keys(KEYS).join(', ')}.`))
@@ -205,6 +239,37 @@ export class Browsers {
     }
   }
 
+  // A download goes to the agent's own folder, through .partial, and never past the size limit:
+  // one that is or grows bigger is cancelled and the agent told (core/downloads.ts).
+  private download(agentId: string, item: DownloadItem): void {
+    const folder = this.downloads?.(agentId)
+    if (!folder) return item.cancel()
+    const name = item.getFilename()
+    if (item.getTotalBytes() > MAX_FILE_BYTES) {
+      refuse(folder, name, item.getTotalBytes())
+      return item.cancel()
+    }
+    const partial = partialFolder(folder)
+    mkdirSync(partial, { recursive: true })
+    const file = join(partial, randomUUID())
+    item.setSavePath(file)
+    let refused = false
+    item.on('updated', () => {
+      if (refused || item.getReceivedBytes() <= MAX_FILE_BYTES) return
+      refused = true
+      refuse(folder, name, item.getReceivedBytes())
+      item.cancel()
+    })
+    item.once('done', (_e, state) => {
+      if (state !== 'completed' || refused) return void rmSync(file, { force: true })
+      try {
+        land(folder, file, name, item.getURL())
+      } catch {
+        rmSync(file, { force: true })
+      }
+    })
+  }
+
   private click(wc: WebContents, x: number, y: number): void {
     const p = { x: Math.round(x), y: Math.round(y) }
     wc.sendInputEvent({ type: 'mouseMove', ...p })
@@ -228,6 +293,8 @@ export class Browsers {
 
   // Never waits more than 5 s: a page that can't be painted gives no frame, not a stuck agent.
   private async frame(win: BrowserWindow): Promise<string | undefined> {
+    // A saved password shown as text ("show password") goes back to dots first.
+    if (win.webContents.getURL()) await Promise.race([(win.webContents.executeJavaScriptInIsolatedWorld(WORLD, [{ code: HIDE_SECRETS }]) as Promise<unknown>).catch(() => {}), wait(1000)])
     let img = await Promise.race([win.webContents.capturePage(undefined, { stayHidden: true }).catch(() => null), wait(5000).then(() => null)])
     if (!img || img.isEmpty()) return undefined
     if (img.getSize().width > W) img = img.resize({ width: W, quality: 'good' })

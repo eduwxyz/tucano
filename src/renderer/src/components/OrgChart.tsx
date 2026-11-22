@@ -6,12 +6,13 @@
 // there is to know and change about it; the box at the bottom asks it something without leaving.
 import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { bossOf, channelsOf, depthBelow, directReports, loops, MAX_LINE, orgTree, overLine, possibleBosses, reportsOf } from '../../../shared/org'
-import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyBoard, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
+import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
+import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyLayout, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
 import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
+import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
 import { Sheet } from './Pages'
 import { Select } from './Select'
-import { ago, AgentAvatar, Icon, MeAvatar } from './ui'
+import { ago, AgentAvatar, Icon, MeAvatar, ownColor } from './ui'
 
 const UNDO_MS = 9000 // how long a change to who answers to whom can be taken back from the board
 const SLOP = 4 // px a pointer moves before a press becomes a drag
@@ -46,25 +47,67 @@ export function OrgPage(): ReactNode {
   const byId = new Map(agents.map((a) => [a.id, a]))
   const { roots, loose } = orgTree(agents)
   const open = delegations.filter((d) => d.state === 'open' && byId.has(d.from) && byId.has(d.to))
-  const base = spotsOf([ME, ...agents.map((a) => a.id)], tidyBoard(roots, loose), saved)
+  // The one the person talks to, when one agent tops teams of their own: the sectors hang from it.
+  const entries = entriesOf(agents)
+  const entry = entries[0]
+  const tidy = tidyLayout(roots, loose, BOARD, entries.map((e) => e.id))
+  const base = spotsOf([ME, ...agents.map((a) => a.id)], tidy.spots, saved)
 
   const board = useRef<HTMLDivElement>(null)
+  const stage = useRef<HTMLDivElement>(null)
+  const zoomLabel = useRef<HTMLButtonElement>(null)
   const gesture = useRef<Gesture | null>(null)
   const hover = useRef<string | null>(null)
   const [room, setRoom] = useState({ w: 0, h: 0 })
   const [stored, setView] = useState<View | null>(null)
+  // While the board is being moved or zoomed, the view lives here and goes straight to the page: the cards,
+  // the lines and the zones aren't drawn again on every step, only once when the move ends.
+  const live = useRef<View | null>(null)
+  const storedNow = useRef<View | null>(null)
+  storedNow.current = stored
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const paint = (v: View): void => {
+    live.current = v
+    const el = board.current
+    if (stage.current) stage.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`
+    if (el) {
+      el.classList.add('is-panning')
+      el.style.backgroundSize = `${24 * v.k}px ${24 * v.k}px`
+      el.style.backgroundPosition = `${v.x}px ${v.y}px`
+    }
+    const pct = `${Math.round(v.k * 100)}%`
+    if (zoomLabel.current && zoomLabel.current.textContent !== pct) zoomLabel.current.textContent = pct // new text lays the page out again
+  }
+  const settle = (): void => {
+    clearTimeout(settleTimer.current)
+    const v = live.current
+    board.current?.classList.remove('is-panning')
+    if (!v) return
+    live.current = null
+    setView(v)
+  }
+  useEffect(() => () => clearTimeout(settleTimer.current), [])
+  // The view right now, even in the middle of a move; and a view set from a button, which ends any move.
+  const current = (): View => live.current ?? storedNow.current ?? NO_VIEW
+  const show = (v: View): void => {
+    clearTimeout(settleTimer.current)
+    live.current = null
+    board.current?.classList.remove('is-panning')
+    setView(v)
+  }
   const [sent, setSent] = useState<string | null>(null) // whoever was just asked something, for a moment
   const mine = useRef(false) // I moved or zoomed the board: it stays where I left it
   const [moved, setMoved] = useState<{ ids: string[]; dx: number; dy: number } | null>(null)
   const [link, setLink] = useState<{ from: string; side: 'out' | 'in'; to: Point } | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
+  const [sector, setSector] = useState<string | null>(null) // the head of the sector picked, instead of a card
   const [edge, setEdge] = useState<string | null>(null) // the one below, of the line picked
   const [error, setError] = useState<string | null>(null)
   const [text, setText] = useState('')
   // The last change to who answers to whom: what it was, in words, and how each one stood before it.
   const [undo, setUndo] = useState<{ text: string; was: [string, string | null][] } | null>(null)
-  const view = stored ?? NO_VIEW
+  const view = live.current ?? stored ?? NO_VIEW
   const spot = (id: string): Point => {
     const p = base[id] ?? { x: 0, y: 0 }
     return moved?.ids.includes(id) ? { x: p.x + moved.dx, y: p.y + moved.dy } : p
@@ -74,10 +117,10 @@ export function OrgPage(): ReactNode {
     if (!room.w) return
     const wide = room.w > 900
     const left = coach && wide ? 380 : 0
-    const right = picked && wide ? SIDE_ROOM : 0
+    const right = (picked || sector) && wide ? SIDE_ROOM : 0
     const v = fitView(boundsOf(Object.values(spots)), { w: room.w - left - right, h: room.h - ASK_ROOM })
     mine.current = false
-    setView({ ...v, x: v.x + left })
+    show({ ...v, x: v.x + left })
   }
   const fit = (): void => fitTo(base)
 
@@ -100,7 +143,7 @@ export function OrgPage(): ReactNode {
     if (stored) fit()
   }, [bare]) // eslint-disable-line react-hooks/exhaustive-deps
   // The agent picked opens at the side: the cards make room, unless the board is where I left it.
-  const sided = !!picked
+  const sided = !!picked || !!sector
   useEffect(() => {
     if (stored && !mine.current) fit()
   }, [sided]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -123,10 +166,11 @@ export function OrgPage(): ReactNode {
       e.preventDefault()
       mine.current = true
       const r = el.getBoundingClientRect()
-      setView((v) => {
-        const now = v ?? NO_VIEW
-        return e.ctrlKey || e.metaKey ? zoomAt(now, { x: e.clientX - r.left, y: e.clientY - r.top }, now.k * Math.exp(-e.deltaY * 0.01)) : { ...now, x: now.x - e.deltaX, y: now.y - e.deltaY }
-      })
+      const now = live.current ?? storedNow.current ?? NO_VIEW
+      paint(e.ctrlKey || e.metaKey ? zoomAt(now, { x: e.clientX - r.left, y: e.clientY - r.top }, now.k * Math.exp(-e.deltaY * 0.01)) : { ...now, x: now.x - e.deltaX, y: now.y - e.deltaY })
+      // The wheel has no end: the move is over when it stops for a moment.
+      clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(settle, 140)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -165,8 +209,6 @@ export function OrgPage(): ReactNode {
     // Latest first, so a line that depended on another is undone before it.
     for (const [id, to] of [...undo.was].reverse()) await put(id, to)
   }
-  // Why a line can't end there, when it's the length of the line and not a loop: worth saying, since nothing on the card shows it.
-  const tooLong = (boss: string, id: string): boolean => boss !== ME && id !== ME && boss !== id && byId.has(boss) && byId.has(id) && byId.get(id)?.reportsTo !== boss && !loops(agents, id, boss) && overLine(agents, id, boss)
   // `id` may answer to `boss` unless it already does or that closes a loop.
   const takes = (boss: string, id: string): boolean => {
     const agent = byId.get(id)
@@ -184,8 +226,8 @@ export function OrgPage(): ReactNode {
   const begin = (g: Gesture): void => {
     gesture.current = g
     const onMove = (e: PointerEvent): void => {
-      if (g.kind === 'pan') (mine.current = true), setView({ ...g.view, x: g.view.x + e.clientX - g.x, y: g.view.y + e.clientY - g.y })
-      else if (g.kind === 'link') setLink({ from: g.from, side: g.side, to: toBoard(view, local(e)) })
+      if (g.kind === 'pan') (mine.current = true), paint({ ...g.view, x: g.view.x + e.clientX - g.x, y: g.view.y + e.clientY - g.y })
+      else if (g.kind === 'link') setLink({ from: g.from, side: g.side, to: toBoard(current(), local(e)) })
       else {
         const dx = e.clientX - g.x
         const dy = e.clientY - g.y
@@ -198,15 +240,15 @@ export function OrgPage(): ReactNode {
       document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerup', onUp)
       gesture.current = null
-      if (g.kind === 'link') {
+      if (g.kind === 'pan') settle()
+      else if (g.kind === 'link') {
         const target = hover.current
         setLink(null)
         setOver(null)
         if (target && lands(g.from, g.side, target)) void (g.side === 'out' ? move(target, g.from) : move(g.from, target === ME ? null : target))
-        else if (target && (g.side === 'out' ? tooLong(g.from, target) : tooLong(target, g.from))) setError(L(`Uma linha tem no máximo ${MAX_LINE} agentes, de cima a baixo. Quem está acima já alcança todos os de baixo, sem precisar de mais um no meio.`, `A line holds at most ${MAX_LINE} agents, top to bottom. Whoever is above already reaches everyone below, with no need for one more in between.`))
       } else if (g.kind === 'card') {
         setMoved(null)
-        if (!g.dragged) return void (g.id !== ME && (setEdge(null), setPicked((p) => (p === g.id ? null : g.id))))
+        if (!g.dragged) return void (g.id !== ME && (setEdge(null), setSector(null), setPicked((p) => (p === g.id ? null : g.id))))
         if (!admin) return
         // Once something is placed by hand, everything stays where it is: the board is mine from then on.
         const dx = (e.clientX - g.x) / g.k
@@ -221,22 +263,24 @@ export function OrgPage(): ReactNode {
   }
   const press = (e: ReactPointerEvent): boolean => (e.button ?? 0) === 0
   const onBoard = (e: ReactPointerEvent): void => {
-    if (!press(e) || (e.target as Element).closest('.org-card, .org-side, .org-ask, .org-coach, .org-tools, .org-edge-x, .orgb__hit')) return
+    if (!press(e) || (e.target as Element).closest('.org-card, .org-side, .org-ask, .org-coach, .org-tools, .org-edge-x, .orgb__hit, .org-zone__tag')) return
     setPicked(null)
+    setSector(null)
     setEdge(null)
-    begin({ kind: 'pan', x: e.clientX, y: e.clientY, view })
+    begin({ kind: 'pan', x: e.clientX, y: e.clientY, view: current() })
   }
   // A card takes everyone below along, like a branch; with ⌥, it goes alone.
   const onCard = (id: string) => (e: ReactPointerEvent): void => {
     if (!press(e)) return
-    begin({ kind: 'card', id, ids: id === ME || e.altKey ? [id] : [id, ...reportsOf(agents, id).map((a) => a.id)], x: e.clientX, y: e.clientY, k: view.k, dragged: false })
+    begin({ kind: 'card', id, ids: id === ME || e.altKey ? [id] : [id, ...reportsOf(agents, id).map((a) => a.id)], x: e.clientX, y: e.clientY, k: current().k, dragged: false })
   }
   const onPort = (id: string, side: 'out' | 'in') => (e: ReactPointerEvent): void => {
     if (!press(e)) return
     e.stopPropagation()
     setPicked(null)
+    setSector(null)
     setEdge(null)
-    setLink({ from: id, side, to: toBoard(view, local(e)) })
+    setLink({ from: id, side, to: toBoard(current(), local(e)) })
     begin({ kind: 'link', from: id, side })
   }
   const enter = (id: string) => (): void => {
@@ -251,7 +295,7 @@ export function OrgPage(): ReactNode {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const typing = (e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable]')
-      if (e.key === 'Escape') (setPicked(null), setEdge(null))
+      if (e.key === 'Escape') (setPicked(null), setSector(null), setEdge(null))
       else if (e.key.toLowerCase() === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey && undo && !typing) (e.preventDefault(), void takeBack())
       else if ((e.key === 'Backspace' || e.key === 'Delete') && edge && admin && !typing) (void move(edge, null), setEdge(null))
     }
@@ -263,7 +307,16 @@ export function OrgPage(): ReactNode {
   // Between colleagues it goes up to the agent both answer to and down the other side.
   const flowing = new Map<string, 'down' | 'up'>()
   const bossId = (id: string): string | undefined => bossOf(agents, byId.get(id)!)?.id
+  const heads = headsOf(agents)
+  const sectorAsks = open.filter((d) => askWay(agents, d) === 'sector')
+  // A request to a sector from the entry point right above its head: down the line between the two.
+  const handedDown = (d: Delegation): boolean => bossId(d.to) === d.from
   for (const d of open) {
+    if (askWay(agents, d) === 'up') {
+      // Up every line between the two: straight to the sector's head it passes whoever is in the middle.
+      for (const [boss, below] of pathBetween(bossId, d.to, d.from)) flowing.set(`${boss}>${below}`, 'up')
+      continue
+    }
     const hops = pathBetween(bossId, d.from, d.to)
     const shared = hops.length ? undefined : bossId(d.from)
     const way: [string, 'down' | 'up'][] = hops.length
@@ -287,14 +340,17 @@ export function OrgPage(): ReactNode {
     ? [
         inTree === 1 ? L('1 agente', '1 agent') : L(`${inTree} agentes`, `${inTree} agents`),
         levels === 1 ? L('1 nível', '1 level') : L(`${levels} níveis`, `${levels} levels`),
-        open.length ? (open.length === 1 ? L('1 pedido em andamento', '1 request under way') : L(`${open.length} pedidos em andamento`, `${open.length} requests under way`)) : L('nenhum pedido em andamento', 'no request under way')
+        ...(heads.length ? [heads.length === 1 ? L('1 setor', '1 sector') : L(`${heads.length} setores`, `${heads.length} sectors`)] : []),
+        open.length ? (open.length === 1 ? L('1 pedido em andamento', '1 request under way') : L(`${open.length} pedidos em andamento`, `${open.length} requests under way`)) : L('nenhum pedido em andamento', 'no request under way'),
+        ...(sectorAsks.length ? [sectorAsks.length === 1 ? L('1 pedido entre setores', '1 request between sectors') : L(`${sectorAsks.length} pedidos entre setores`, `${sectorAsks.length} requests between sectors`)] : [])
       ].join(' · ')
     : L('Quem responde a quem, e o que está andando agora.', 'Who answers to whom, and what is under way right now.')
   const goThread = (d: Delegation): void => (navigate({ kind: 'conversation', id: d.conversationId, message: d.rootId }), openThread(d.rootId))
   const goLive = (m: Message): void => (navigate({ kind: 'conversation', id: m.conversationId, message: m.threadId ?? m.id }), void (m.threadId && openThread(m.threadId)))
   const chosen = picked ? byId.get(picked) : undefined
+  const sectorHead = sector ? heads.find((h) => h.id === sector) : undefined
   // Whoever the box at the bottom talks to: the card picked, or else whoever is at the top.
-  const asked = chosen ?? roots[0]?.agent
+  const asked = chosen ?? entry ?? roots[0]?.agent
   const send = (): void => {
     const what = text.trim()
     if (!asked || !what) return
@@ -304,7 +360,7 @@ export function OrgPage(): ReactNode {
       (e: unknown) => (setText(what), setError(e instanceof Error ? e.message : String(e)))
     )
   }
-  const zoom = (f: number): void => ((mine.current = true), setView(zoomAt(view, { x: room.w / 2, y: room.h / 2 }, view.k * f)))
+  const zoom = (f: number): void => ((mine.current = true), show(zoomAt(current(), { x: room.w / 2, y: room.h / 2 }, current().k * f)))
   const size = { width: BOARD.w, height: BOARD.h }
   const cut = lines.find((l) => l.to === edge && l.from !== ME)
 
@@ -317,7 +373,7 @@ export function OrgPage(): ReactNode {
         admin ? (
           <>
             {saved && (
-              <button className="btn btn--ghost btn--sm org-tidy" title={L('Volta cada cartão pro lugar dele na árvore', 'Puts each card back in its place in the tree')} onClick={() => (updateSettings({ orgLayout: null as unknown as undefined }), fitTo(tidyBoard(roots, loose)))}>
+              <button className="btn btn--ghost btn--sm org-tidy" title={L('Volta cada cartão pro lugar dele na árvore', 'Puts each card back in its place in the tree')} onClick={() => (updateSettings({ orgLayout: null as unknown as undefined }), fitTo(tidy.spots))}>
                 {L('Organizar', 'Tidy up')}
               </button>
             )}
@@ -337,6 +393,8 @@ export function OrgPage(): ReactNode {
               <AgentAvatar agent={byId.get(d.from)!} size={15} />
               <Icon name="back" size={11} />
               <AgentAvatar agent={byId.get(d.to)!} size={15} busy={on.has(d.to)} />
+              {askWay(agents, d) === 'sector' && <b className="org-now__sector">{sectorName(byId.get(d.to)!, L('Setor de', 'Sector of'))}</b>}
+              {askWay(agents, d) === 'up' && <span className="org-now__boss">{L('(chefe)', '(head)')}</span>}
               {snip(d.text, 48)}
               <span className="org-now__when">{d.asking ? L('pergunta esperando', 'a question waits') : ago(d.createdAt)}</span>
             </button>
@@ -347,15 +405,17 @@ export function OrgPage(): ReactNode {
 
       <div
         ref={board}
-        className={`orgb ${moved ? 'is-moving' : ''} ${link ? 'is-linking' : ''} ${chosen ? 'has-side' : ''}`}
+        className={`orgb ${moved ? 'is-moving' : ''} ${link ? 'is-linking' : ''} ${chosen || sectorHead ? 'has-side' : ''}`}
         style={{ backgroundSize: `${24 * view.k}px ${24 * view.k}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
         onPointerDown={onBoard}
       >
-        <div className="orgb__stage" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+        <div ref={stage} className="orgb__stage" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+          <SectorZones agents={agents} spot={spot} admin={admin} picked={sector} onPick={(id) => (setPicked(null), setEdge(null), setSector(sector === id ? null : id))} />
           <svg className="orgb__lines" width="1" height="1" aria-hidden="true">
             {lines.map((l) => {
               const flow = flowing.get(`${l.from}>${l.to}`)
-              const d = curve(l.a, l.b)
+              const routed = base === tidy.spots && !moved ? tidy.routes[`${l.from}>${l.to}`] : undefined
+              const d = routed ?? curve(l.a, l.b)
               const mine = l.from === ME
               return (
                 <g key={`${l.from}>${l.to}`} className={`${mine ? 'is-me' : ''} ${flow ? `is-flow is-${flow}` : ''} ${edge === l.to && !mine ? 'is-picked' : ''}`}>
@@ -369,8 +429,24 @@ export function OrgPage(): ReactNode {
                 </g>
               )
             })}
+            {sectorAsks.filter((d) => !handedDown(d)).map((d) => {
+              const x = sectorLink(spot(d.from), spot(d.to))
+              return <path key={d.id} d={x.d} className="org-xline" />
+            })}
             {link && <path className="orgb__line is-new" d={link.side === 'out' ? curve(under(spot(link.from)), link.to) : curve(link.to, above(spot(link.from)))} />}
           </svg>
+          {sectorAsks.map((d) => {
+            // From an entry point it travels the line already there, lit: the label sits on that line.
+            const a = under(spot(d.from))
+            const b = above(spot(d.to))
+            const x = handedDown(d) ? { mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } } : sectorLink(spot(d.from), spot(d.to))
+            return (
+              <span key={d.id} className="org-xlabel" style={{ left: x.mid.x, top: x.mid.y }}>
+                <Icon name="send" size={12} />
+                {L(`Pedido para ${sectorName(byId.get(d.to)!, L('Setor de', 'Sector of'))}`, `Request to ${sectorName(byId.get(d.to)!, 'Sector of')}`)}
+              </span>
+            )
+          })}
           {cut && admin && (
             <button
               className="org-edge-x"
@@ -416,6 +492,8 @@ export function OrgPage(): ReactNode {
                 doing={open.filter((d) => d.to === a.id)}
                 asked={open.filter((d) => d.from === a.id).length}
                 team={directReports(agents, a.id).length}
+                head={heads.some((h) => h.id === a.id)}
+                entry={entries.some((e) => e.id === a.id)}
                 bossName={a.reportsTo ? byId.get(a.reportsTo)?.name : undefined}
                 moving={!!moved?.ids.includes(a.id)}
                 picked={picked === a.id}
@@ -427,7 +505,7 @@ export function OrgPage(): ReactNode {
                 onPointerEnter={enter(a.id)}
                 onPointerLeave={leave(a.id)}
                 onPort={(side) => onPort(a.id, side)}
-                onPick={() => (setEdge(null), setPicked(picked === a.id ? null : a.id))}
+                onPick={() => (setEdge(null), setSector(null), setPicked(picked === a.id ? null : a.id))}
                 onOpen={() => void openDm(a.id)}
               />
             )
@@ -440,7 +518,7 @@ export function OrgPage(): ReactNode {
           <button className="icon-btn" title={L('Afastar', 'Zoom out')} disabled={view.k <= MIN_K} onClick={() => zoom(1 / 1.2)}>
             −
           </button>
-          <button className="org-tools__k" title={L('Tamanho real', 'Actual size')} onClick={() => setView(zoomAt(view, { x: room.w / 2, y: room.h / 2 }, 1))}>
+          <button ref={zoomLabel} className="org-tools__k" title={L('Tamanho real', 'Actual size')} onClick={() => show(zoomAt(current(), { x: room.w / 2, y: room.h / 2 }, 1))}>
             {Math.round(view.k * 100)}%
           </button>
           <button className="icon-btn" title={L('Aproximar', 'Zoom in')} disabled={view.k >= MAX_K} onClick={() => zoom(1.2)}>
@@ -469,14 +547,15 @@ export function OrgPage(): ReactNode {
         {asked && (
           <form className="org-ask" onSubmit={(e) => (e.preventDefault(), send())}>
             <AgentAvatar agent={asked} size={24} busy={on.has(asked.id)} />
-            <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={sent === asked.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Follow it on the lines.`) : L(`Pedir algo a ${asked.name}…`, `Ask ${asked.name} something…`)} aria-label={L(`Pedir algo a ${asked.name}`, `Ask ${asked.name} something`)} />
+            <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={sent === asked.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Track progress along the lines.`) : L(`Pedir algo a ${asked.name}…`, `Ask ${asked.name} something…`)} aria-label={L(`Pedir algo a ${asked.name}`, `Ask ${asked.name} something`)} />
             <button className="btn btn--primary btn--sm" disabled={!text.trim()} title={L('Enviar na DM dele (Enter)', 'Send in their DM (Enter)')}>
               <Icon name="send" size={14} />
             </button>
           </form>
         )}
 
-        {chosen && (
+        {sectorHead && <SectorPanel key={sectorHead.id} head={sectorHead} agents={agents} admin={admin} asks={sectorAsks.filter((d) => d.to === sectorHead.id)} onClose={() => setSector(null)} />}
+        {chosen && !sectorHead && (
           <Details
             agent={chosen}
             admin={admin}
@@ -493,6 +572,7 @@ export function OrgPage(): ReactNode {
               return !c ? '?' : c.kind === 'dm' ? 'DM' : `#${c.name}`
             }}
             onBoss={(to) => void move(chosen.id, to)}
+            onEntry={(on) => void saveAgent({ ...chosen, entry: on }, channels(chosen.id).map((c) => c.id)).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))}
             onThread={goThread}
             onLive={goLive}
             onClose={() => setPicked(null)}
@@ -513,6 +593,8 @@ function Card({
   doing,
   asked,
   team,
+  head,
+  entry,
   bossName,
   moving,
   picked,
@@ -535,6 +617,8 @@ function Card({
   doing: Delegation[] // open requests it is on
   asked: number // open requests it made
   team: number // how many answer to it
+  head: boolean // it tops a sector
+  entry: boolean // the one the person talks to, with the sectors below it
   bossName?: string
   moving: boolean
   picked: boolean
@@ -577,8 +661,18 @@ function Card({
       onDoubleClick={onOpen}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onPick())}
     >
+      {head && (
+        <span className={`org-card__head c-${agent.color}`} style={ownColor(agent)}>
+          {L('Chefe do setor', 'Sector head')}
+        </span>
+      )}
+      {entry && (
+        <span className={`org-card__head org-card__head--entry c-${agent.color}`} style={ownColor(agent)}>
+          {L('Porta de entrada', 'Entry point')}
+        </span>
+      )}
       {admin && <span className="org-port org-port--in" title={L('Puxe até quem ele vai responder', 'Pull onto whoever it will answer to')} onPointerDown={onPort('in')} />}
-      <AgentAvatar agent={agent} size={40} busy={!!live} />
+      <AgentAvatar agent={agent} size={40} busy={!!live} still />
       <span className="org-card__who">
         <strong>{agent.name}</strong>
         {agent.role && <span>{agent.role}</span>}
@@ -613,6 +707,7 @@ function Details({
   nameOf,
   channelOf,
   onBoss,
+  onEntry,
   onThread,
   onLive,
   onClose
@@ -629,6 +724,7 @@ function Details({
   nameOf: (id: string) => string
   channelOf: (id: string) => string
   onBoss: (to: string | null) => void
+  onEntry: (on: boolean) => void
   onThread: (d: Delegation) => void
   onLive: (m: Message) => void
   onClose: () => void
@@ -673,6 +769,16 @@ function Details({
           placeholder={none}
         />
       </label>
+      {/* Only for one that answers to no agent: an entry point is over the sectors, in none. */}
+      {!boss && (admin || agent.entry) && (
+        <label className="check org-pop__entry">
+          <input type="checkbox" checked={!!agent.entry} disabled={!admin} onChange={(e) => onEntry(e.target.checked)} />
+          <span>
+            <b>{L('Porta de entrada', 'Entry point')}</b>
+            <small>{L('Você fala com ele, e ele passa cada parte ao setor certo. Os times abaixo dele são os setores.', 'Talk to the entry point to send work to the right sector. The teams below it are sectors.')}</small>
+          </span>
+        </label>
+      )}
       <dl className="org-pop__facts">
         <dt>{L('Canais', 'Channels')}</dt>
         <dd>

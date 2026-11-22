@@ -8,7 +8,8 @@ import type { LocalInfo } from '../shared/types'
 
 const IMAGES = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp']
 const VIDEOS = ['.mp4', '.webm', '.mov', '.m4v']
-const NEVER = new Set(['.ssh', '.aws', '.gnupg', '.kube', 'Keychains'])
+// Folders that hold keys and credentials: never reached by name, wherever they are (also a node's file tools).
+export const NEVER = new Set(['.ssh', '.aws', '.gnupg', '.kube', 'Keychains'])
 
 const inside = (path: string, folder: string): boolean => path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep)
 // The native call, so the name comes back as it is on disk: on a Mac "~/.SSH" is "~/.ssh", and

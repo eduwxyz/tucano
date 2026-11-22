@@ -9,7 +9,7 @@ import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { consolidationPrompt, MAX_AFTER, Memories, memorySystem } from '../src/core/memory'
-import { handoffSystem, routerSystem } from '../src/core/router'
+import { chimeSystem, handoffSystem, routerSystem } from '../src/core/router'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -35,7 +35,7 @@ function runner(opts: { reply?: (t: Turn) => string; memory?: boolean; onTurn?: 
       yield* base.run(t)
     }
   }
-  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+  const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
   memory = new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir })
   return new Runner({
@@ -57,7 +57,7 @@ function put(conversationId: string, author: Author, text: string, threadId?: st
   return m
 }
 
-const agentTurns = (): Turn[] => turns.filter((t) => t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== memorySystem())
+const agentTurns = (): Turn[] => turns.filter((t) => t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem() && t.system !== memorySystem())
 const replies = (): Message[] => db.messages().filter((m) => m.author.kind === 'agent')
 const mine = (): Message[] => db.messages().filter((m) => m.author.kind === 'person')
 
@@ -65,7 +65,7 @@ beforeEach(async () => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   turns = []
   notes = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
   db.saveAgent(agent('a2', 'theo', { role: 'Dados' }))
   // Both answer in threads; a conversation that answers in it is made where it's tested.
@@ -420,7 +420,7 @@ describe('what a thread message sets off stays in the thread', () => {
       [2, root.id],
       [3, root.id]
     ])
-    expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, threadId: root.id, text: expect.stringContaining('Parei a conversa entre agentes') as string })
+    expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, threadId: root.id, stop: { job: expect.any(String) as string }, text: expect.stringContaining('Parei este trabalho') as string })
   })
 
   it('the notes for an empty channel and for paused agents', async () => {

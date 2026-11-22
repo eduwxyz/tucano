@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { mineIn, waitingIn, waitingTitle } from '../src/renderer/src/components/waiting'
-import type { Approval, Inbox, Message, RunStatus } from '../src/shared/types'
+import { mineIn, notWentUp, waitingIn, waitingTitle } from '../src/renderer/src/components/waiting'
+import type { Approval, Delegation, Inbox, Message, RunStatus } from '../src/shared/types'
 
 const msg = (id: string, conversationId: string, agentId: string, status: RunStatus): Message => ({ id, conversationId, author: { kind: 'agent', id: agentId }, text: '', at: 0, run: { status, steps: [] } })
 const names: Record<string, string> = { leo: 'Leo', bia: 'Bia', nina: 'Nina' }
@@ -22,6 +22,21 @@ describe('waitingIn', () => {
   it('counts threads too, and nothing that is done', () => {
     const inThread = { ...msg('1', 'c1', 'leo', 'waiting_input'), threadId: 'root' }
     expect(waitingIn([inThread, msg('2', 'c1', 'bia', 'done')], 'c1')).toEqual({ asked: ['leo'], approval: [] })
+  })
+})
+
+describe('waitingIn alone, with work handed down', () => {
+  it('leaves out a question on handed work once it went up to whoever asked: it waits on me there, once', () => {
+    const left = { ...msg('1', 'planning', 'igor', 'waiting_input'), threadId: 'root' }
+    const other = msg('2', 'planning', 'ana', 'waiting_input')
+    const d = (over: Partial<Delegation>): Delegation[] => [{ id: 'd1', from: 'carlos', to: 'igor', conversationId: 'planning', rootId: 'root', originConversationId: 'dm', originMessageId: 'x', requestedBy: 'me', text: '', state: 'open', createdAt: 0, asking: '1', ...over }]
+    const up = d({ askingTold: true })
+    expect(waitingIn([left, other], 'planning', { key: up, test: notWentUp(up) }).asked).toEqual(['ana'])
+    // Not up yet (its asker hasn't heard), or the request no longer open: it still counts here.
+    const notYet = d({ askingTold: false })
+    expect(waitingIn([left, other], 'planning', { key: notYet, test: notWentUp(notYet) }).asked).toEqual(['igor', 'ana'])
+    const ended = d({ askingTold: true, state: 'done' })
+    expect(waitingIn([left, other], 'planning', { key: ended, test: notWentUp(ended) }).asked).toEqual(['igor', 'ana'])
   })
 })
 

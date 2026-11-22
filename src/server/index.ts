@@ -16,10 +16,12 @@ import type { Socket } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { serveArtifact } from './artifact-http'
 import { Forwarder, isPrivate } from './forward'
-import { ARTIFACT_CSP, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
+import { attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
+import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { applyRestore } from '../core/restore'
@@ -113,6 +115,8 @@ function ask<T>(msg: Record<string, unknown>, timeoutMs = 10_000): Promise<T | u
     toCore({ ...msg, id })
   })
 }
+// Computers lent to this server (shared/node-link.ts): each link's port goes to the core, as a page's does.
+const nodeLinks = new NodeLinkHttp((data, port) => toCore(data, [port as unknown as Port]))
 const signins = new Signins((key) => ask<Person | { removed: true } | undefined>({ type: 'auth', key }))
 const grants = new Grants((person, what) => ask<boolean>({ type: 'access', person, ...what }))
 
@@ -132,9 +136,12 @@ function fromCore(msg: CoreRequest): void {
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
-  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'mcp-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
+  // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
+  // computer calls again in a moment, with its key checked anew: a removed one is turned away.
+  if ((msg.type === 'person-removed' || msg.type === 'person-changed') && msg.id) nodeLinks.closeAll(msg.id)
   if (personNotice(msg, { signins, grants, viewers, streams })) return
   // Only to the pages of the people it's for.
   if (msg.type === 'notify') {
@@ -251,6 +258,22 @@ function index(): string {
 }
 
 
+// One MCP request, answered by the core's door (the desktop's is the same door, on 127.0.0.1). A wait for an
+// agent's answer is at most 45 s (mcp.ts), well inside this timeout and a proxy's.
+const MCP_MAX_BODY = 256 * 1024
+function mcpRequest(req: IncomingMessage, res: ServerResponse): void {
+  body(req, MCP_MAX_BODY)
+    .then((text) => ask<{ status: number; headers: Record<string, string>; body: string }>({ type: 'mcp', method: req.method ?? 'GET', auth: req.headers.authorization ?? '', body: text }, 70_000))
+    .then(
+      (out) => {
+        if (res.headersSent) return
+        if (!out) return void res.writeHead(503, { ...BASE_HEADERS, 'retry-after': '5' }).end()
+        res.writeHead(out.status, { ...BASE_HEADERS, ...out.headers }).end(out.body)
+      },
+      () => !res.headersSent && res.writeHead(413, BASE_HEADERS).end()
+    )
+}
+
 function oauthCallback(url: URL, res: ServerResponse): void {
   const id = randomUUID()
   const answer = (r: { ok: boolean; why?: string }): void => {
@@ -297,6 +320,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  // A harness's MCP (src/core/mcp.ts): its own key in the Authorization header, checked by the core.
+  // No cookie and no page: whoever calls is a program, never a browser signed in here.
+  if (url.pathname === '/mcp' || url.pathname === '/mcp/') return mcpRequest(req, res)
   // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,
   // and so does the page a browser's /?code= opens (opening it spends nothing: see pair-http.ts).
   // No sign-in: the code is what counts, and a wrong one counts as a guess.
@@ -428,6 +454,9 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     return
   }
 
+  // A computer lent to this server, calling in with its own key (shared/node-link.ts).
+  if (nodeLinks.handles(url)) return nodeLinks.handle(req, res, url, who, BASE_HEADERS)
+
   if (url.pathname === '/events') {
     // Once the line is closed (the person removed, a device disconnected), a late answer goes nowhere.
     const port = new Port((msg) => void (!res.writableEnded && res.write(`data: ${JSON.stringify(msg)}\n\n`)))
@@ -552,22 +581,14 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
       'content-type': saving ? 'application/octet-stream' : (TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'),
       'content-length': String(size),
       'content-security-policy': 'sandbox',
-      ...(saving ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}` } : {})
+      ...(saving ? { 'content-disposition': attachment(basename(path)) } : {})
     })
     return void createReadStream(path).on('error', () => res.destroy()).pipe(res)
   }
 
-  // What the agents showed in the chat, sandboxed as on the desktop.
-  const art = /^\/artifact\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
-  if (art) {
-    const dir = join(dataDir, 'artifacts', art[1]!)
-    const name = decodedPath(art[2]!)
-    const path = name === undefined ? '' : normalize(join(dir, name))
-    if (!path.startsWith(dir + sep)) return void res.writeHead(404, BASE_HEADERS).end()
-    // Only who sees the conversation it was shown in (someone else's DM: not found).
-    void grants.may(who.person ?? ownerId, { artifact: art[1]! }).then((ok) => (ok ? file(res, path, { 'content-security-policy': ARTIFACT_CSP }) : res.writeHead(404, BASE_HEADERS).end()))
-    return
-  }
+  // What the agents showed in the chat, sandboxed as on the desktop, or saved (?download).
+  // Only who sees the conversation it was shown in (someone else's DM: not found).
+  if (serveArtifact(res, url, { dataDir, may: (id) => grants.may(who.person ?? ownerId, { artifact: id }), type: (path) => TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream' })) return
 
   if (url.pathname === '/tucano-web.js') return void res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES['.js']! }).end(WEB)
   if (url.pathname === '/' || url.pathname === '/index.html') return void res.writeHead(200, { ...PAGE_HEADERS, 'content-type': TYPES['.html']!, 'cache-control': 'no-cache' }).end(index())
@@ -641,7 +662,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
   let toConversation = () => {}
   let toPage = () => {}
   const desktop = window.tucanoDesktop
-  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : n.page === 'skills' && toPage('skills')))
+  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : (n.page === 'skills' || n.page === 'connectors') && toPage(n.page)))
   const notifyState = () =>
     desktop ? 'on' : !('Notification' in window) ? 'unsupported' : !window.isSecureContext ? 'insecure' : Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'blocked' : 'ask'
   const notify = (n) => {
@@ -668,7 +689,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     return 'shown'
   }
   // The server's folders, in the app's own dialog look: a browser can't show the server's disk.
-  const pickFolder = () =>
+  const pickFolder = (o) =>
     new Promise((done) => {
       const pt = document.documentElement.lang !== 'en'
       const t = (a, b) => (pt ? a : b)
@@ -685,13 +706,21 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       const head = el('header', 'modal__head')
       head.append(el('strong', '', t('Escolher pasta no servidor', 'Choose a folder on the server')))
       const where = el('p', 'small muted mono modal__lead')
+      // The person's own folders aren't here: they're lent from the app on their computer.
+      const mine = el('p', 'small muted', t('Estas são as pastas do servidor. Pra uma pasta do seu computador, ligue no app do Tucano nele Configurações › Servidores › Deixar este servidor usar este computador e empreste a pasta por lá.', "These are the server's folders. For a folder on your computer, turn on Settings › Servers › Let this server use this computer in the Tucano app there, and lend the folder from it."))
       const list = el('div', 'folder-pick')
       list.style.cssText = 'max-height:320px;overflow:auto;display:grid;gap:2px;margin:8px 0'
       const foot = el('footer', 'modal__foot')
       const cancel = el('button', 'btn btn--ghost btn--sm', t('Cancelar', 'Cancel'))
       const choose = el('button', 'btn btn--primary btn--sm', t('Escolher esta pasta', 'Choose this folder'))
       foot.append(el('span', 'grow'), cancel, choose)
-      card.append(head, where, list, foot)
+      // In the desktop app, one click there: this computer's Tucano, on Settings › Servers.
+      if (desktop && desktop.openLending) {
+        const lend = el('button', 'btn btn--ghost btn--sm', t('Abrir no Tucano deste computador', "Open in this computer's Tucano"))
+        lend.onclick = () => (close(null), desktop.openLending())
+        foot.prepend(lend)
+      }
+      card.append(head, where, list, mine, foot)
       shade.append(card)
       document.body.append(shade)
       let current = ''
@@ -725,14 +754,16 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
             if (!r.folders.length) list.append(el('p', 'small muted', t('Nenhuma pasta aqui dentro.', 'No folders in here.')))
           })
           .catch(() => (where.textContent = t('Não consegui abrir essa pasta.', "Couldn't open that folder.")))
-      go('')
+      // o.start (from the home folder, like ".hermes"), or the home folder when it is not there
+      if (o && typeof o.start === 'string') fetch('./folders?path=' + encodeURIComponent(o.start)).then((r) => go(r.ok ? o.start : ''), () => go(''))
+      else go('')
       choose.focus()
     })
   if (!desktop && notifyState() === 'ask')
     document.addEventListener('pointerdown', () => void Notification.requestPermission().catch(() => {}), { once: true })
   window.tucano = {
     connect,
-    pickFolder: () => pickFolder(),
+    pickFolder: (o) => pickFolder(o),
     // A file from this computer up to the server; where it landed there.
     upload: (file, purpose) =>
       fetch('./upload?name=' + encodeURIComponent(file.name) + (purpose === 'message' ? '&for=message' : ''), { method: 'POST', body: file }).then((r) =>
@@ -751,7 +782,14 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     updateState: async () => (desktop && desktop.updateState && (await desktop.updateState())) || { version: ${JSON.stringify(version)}, status: 'off' },
     onUpdate: (cb) => { if (desktop && desktop.onUpdate) desktop.onUpdate(cb) },
     checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
-    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() }
+    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() },
+    // In the desktop app: this computer's Tucano, on Settings › Servers, to lend it here.
+    openLending: desktop && desktop.openLending ? () => desktop.openLending() : undefined,
+    // In the desktop app: its workspaces and servers, in this page's own workspace menu (the app's bar
+    // over the page goes away while the menu draws them). An older app has none of it: the bar stays.
+    places: desktop && desktop.places
+      ? { list: () => desktop.places(), onChanged: (cb) => desktop.onPlaces(cb), go: (p) => desktop.go(p), own: (on) => desktop.own(on), os: desktop.os }
+      : undefined
   }
 })()
 `

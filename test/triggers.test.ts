@@ -11,7 +11,7 @@ import { eventItems, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 const pm: Agent = { id: 'a1', name: 'PM', handle: 'pm', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer: false, archived: false }
 const issue = (n: number, title: string) => ({ id: `uuid-${n}`, identifier: `SIM-${n}`, title, description: `detalhes ${n}` })
 
@@ -37,7 +37,7 @@ beforeEach(() => {
   issues = [issue(1, 'Lembrete duplicado')]
   failing = undefined
   const base = fakeEngine('claude', { delayMs: 1 })
-  const engines: Record<EngineId, Engine> = { claude: { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+  const engines: Record<EngineId, Engine> = { claude: { id: 'claude', run: (t) => (turns.push(t), base.run(t)) }, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   const connectors = {
     list: () => [{ id: 'lin', name: 'Linear' } as Connector],
     call: async () => (failing ? textResult(failing, true) : textResult(JSON.stringify({ issues }))) // the shape Linear's MCP answers with
@@ -59,6 +59,39 @@ const create = (trigger: Trigger = poll): Routine =>
 const posted = () => db.messages().filter((m) => m.author.kind === 'routine')
 
 describe('a connector trigger', () => {
+  it('a list longer than what it remembers runs nothing old, check after check', async () => {
+    issues = Array.from({ length: 600 }, (_, i) => issue(i + 1, `Issue ${i + 1}`))
+    const r = create()
+    await settle()
+    for (let i = 0; i < 3; i++) {
+      clock += 5 * 60_000
+      routines.tick()
+      await settle()
+    }
+    expect(posted()).toHaveLength(0)
+    issues = [issue(601, 'Nova de verdade'), ...issues]
+    clock += 5 * 60_000
+    routines.tick()
+    await settle()
+    expect(posted().map((m) => m.routine?.event?.title)).toEqual(['SIM-601 · Nova de verdade'])
+    expect(db.routine(r.id)!.trigger).toMatchObject({ seen: expect.arrayContaining(['uuid-1', 'uuid-600', 'uuid-601']) as string[] })
+  })
+
+  it('remembers what left the list, as long as there is room', async () => {
+    const r = create()
+    await settle()
+    issues = [issue(2, 'Outra')] // SIM-1 closed
+    clock += 5 * 60_000
+    routines.tick()
+    await settle()
+    issues = [issue(1, 'Lembrete duplicado'), issue(2, 'Outra')] // and reopened: not new
+    clock += 5 * 60_000
+    routines.tick()
+    await settle()
+    expect(posted().map((m) => m.routine?.event?.title)).toEqual(['SIM-2 · Outra'])
+    expect(db.routine(r.id)!.trigger).toMatchObject({ seen: ['uuid-1', 'uuid-2'] })
+  })
+
   it('learns what is there when it starts, then runs once for each new item, with the item in the task', async () => {
     const r = create()
     await settle()
@@ -149,7 +182,7 @@ describe('trying a failed routine run again by hand', () => {
         } else yield* base.run(t)
       }
     }
-    runner = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')) })
+    runner = new Runner({ db, engines: { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')) })
   }
   const failedReply = () => db.messages().find((m) => m.author.kind === 'agent')!
 

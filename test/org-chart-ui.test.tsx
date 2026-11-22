@@ -27,7 +27,7 @@ vi.mock('../src/renderer/src/store', () => ({
   openTuca: () => go('tuca'),
   workingOn: () => busy
 }))
-vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, MeAvatar: () => null, Icon: () => null, ago: () => 'há 2 min' }))
+vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, MeAvatar: () => null, Icon: () => null, ago: () => 'há 2 min', ownColor: () => ({}) }))
 vi.mock('../src/renderer/src/components/Select', () => ({ Select: ({ value, onChange, options, disabled }: { value: string | null; onChange: (v: string) => void; options: { value: string; label: string }[]; disabled?: boolean }) => <select aria-label="Responde a" disabled={disabled} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> }))
 vi.mock('../src/renderer/src/components/Pages', () => ({ Sheet: ({ children, lede, actions }: { children: unknown; lede?: unknown; actions?: unknown }) => <main><p>{lede as never}</p>{actions as never}{children as never}</main> }))
 const { createRoot } = await import('react-dom/client')
@@ -183,15 +183,14 @@ it('takes a change back for a moment, from the board or with ⌘Z', async () => 
   expect(document.querySelector('.org-undo')).toBeNull()
 })
 
-it('says why a line that would be too long does not hold', async () => {
-  // Under Nico, the third of its line, Solo would be a fourth.
+it('lets a line be as long as it is drawn, and refuses only a loop', async () => {
+  // Under Nico, the third of its line, Solo is a fourth.
   await pull('nico', 'out', 'solo')
-  expect(save).not.toHaveBeenCalled()
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Uma linha tem no máximo 3 agentes')
-  // A loop says nothing: the card was dimmed, and that is reason enough.
-  await pull('clara', 'out', 'solo')
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'solo', reportsTo: 'nico' })
   expect(document.querySelector('[role="alert"]')).toBeNull()
+  // A loop says nothing: the card was dimmed, and that is reason enough.
   await pull('nico', 'out', 'orion')
+  expect(save).toHaveBeenCalledTimes(1)
   expect(document.querySelector('[role="alert"]')).toBeNull()
 })
 
@@ -224,6 +223,43 @@ it('moves a card with its branch, and keeps the board as I left it', async () =>
   expect(settings.mock.calls[1]![0].orgLayout).toMatchObject({ bento: { x: before.bento!.x + 30, y: before.bento!.y }, nico: before.nico })
 })
 
+it('moves and zooms the board straight on the page, and keeps the view once the move ends', async () => {
+  vi.useFakeTimers()
+  try {
+    const board = document.querySelector('.orgb')!
+    const stage = document.querySelector<HTMLElement>('.orgb__stage')!
+    const label = document.querySelector('.org-tools__k')!
+    const wheel = async (extra: Record<string, unknown>) =>
+      act(async () => {
+        const e = new window.Event('wheel', { bubbles: true, cancelable: true })
+        Object.assign(e, { clientX: 0, clientY: 0, deltaX: 0, deltaY: 0, ...extra })
+        board.dispatchEvent(e)
+      })
+    // Two fingers: the board slides at once, and only while it moves is it a layer of its own.
+    await wheel({ deltaX: 30, deltaY: 10 })
+    expect(stage.style.transform).toBe('translate(-30px, -10px) scale(1)')
+    expect(board.classList.contains('is-panning')).toBe(true)
+    // A pinch zooms where the pointer is, and the zoom reads right away.
+    await wheel({ deltaY: -20, ctrlKey: true })
+    expect(label.textContent).toBe(`${Math.round(Math.exp(0.2) * 100)}%`)
+    // A moment without the wheel ends the move: the view is kept, and the layer goes.
+    await act(async () => void vi.advanceTimersByTime(200))
+    expect(board.classList.contains('is-panning')).toBe(false)
+    expect(stage.getAttribute('style')).toContain(`scale(${Math.exp(0.2)})`)
+    // A drag on the board goes on from there.
+    await ptr(board, 'pointerdown', 100, 100)
+    await ptr(document, 'pointermove', 140, 100)
+    // (the zoom kept the corner under the pointer where it was: the board's origin moved with it)
+    const f = Math.exp(0.2)
+    expect(stage.style.transform).toBe(`translate(${-30 * f + 40}px, ${-10 * f}px) scale(${f})`)
+    await ptr(document, 'pointerup', 140, 100)
+    expect(board.classList.contains('is-panning')).toBe(false)
+    expect(stage.getAttribute('style')).toContain(`translate(${-30 * f + 40}px, ${-10 * f}px)`)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 it('draws the board as it was left, and tidies it up when asked', async () => {
   expect([...document.querySelectorAll('button')].some((b) => b.textContent === 'Organizar')).toBe(false)
   fake = { ...fake, settings: { orgLayout: { me: { x: 0, y: 0 }, orion: { x: 500, y: 40 }, clara: { x: 10, y: 300 }, gone: { x: 9, y: 9 } } } }
@@ -246,8 +282,8 @@ it('opens what there is to know about an agent on a click, and changes whom it a
   expect(side.textContent).toContain('nico')
   // Whom it may answer to: not itself, nor the one below it.
   const select = side.querySelector('select')!
-  // Whom it may answer to: not itself, nor the one below it, nor one that would make its line too long (Clara, with Nico below it).
-  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['Ninguém', 'orion', 'solo'])
+  // Whom it may answer to: not itself, nor the one below it.
+  expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['Ninguém', 'orion', 'clara', 'solo'])
   await act(async () => { Object.defineProperty(select, 'value', { configurable: true, value: 'solo' }); select.dispatchEvent(new window.Event('change', { bubbles: true })) })
   expect(save.mock.calls[0]![0]).toMatchObject({ id: 'bento', reportsTo: 'solo' })
   // Its page and its DM are a click away (twice on the card is the DM too); a press on the board closes it.
@@ -331,4 +367,75 @@ it('starts a tree in a click when no one answers to anyone', async () => {
   expect(document.querySelector('.org-undo span')?.textContent).toBe('Todos respondem a lia agora.')
   await click(document.querySelector('.org-undo button')!)
   expect(save.mock.calls.slice(2).map((c) => [c[0].id, c[0].reportsTo])).toEqual([['nina', undefined], ['theo', undefined]])
+})
+
+it('lets an admin choose an entry point, marks it, hangs the sectors from it and asks it from the box', async () => {
+  // Not chosen yet: Orion heads the one sector, and its panel offers the choice.
+  expect(card('orion').textContent).toContain('Chefe do setor')
+  await pick('orion')
+  const box = document.querySelector('.org-pop__entry input') as HTMLInputElement
+  expect(box.checked).toBe(false)
+  await act(async () => { Object.defineProperty(box, 'checked', { configurable: true, value: true }); box.dispatchEvent(new window.Event('click', { bubbles: true })) })
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'orion', entry: true })
+  // Chosen: orion ← clara, bento; bento ← nico. Bento's team is the sector; Orion is over it, with Mira's beside.
+  fake = { ...fake, agents: [...fake.agents.map((x) => (x.id === 'orion' ? { ...x, entry: true } : x)), bot('mira'), bot('lino', 'mira')], delegations: [ask('e1', 'orion', 'bento')] }
+  await render()
+  expect(card('orion').textContent).toContain('Porta de entrada')
+  expect(card('orion').textContent).not.toContain('Chefe do setor')
+  expect(card('bento').textContent).toContain('Chefe do setor')
+  expect([...document.querySelectorAll('.org-zone__name')].map((z) => z.textContent)).toEqual(['Setor de bento', 'Setor de mira'])
+  // Its request to a sector goes down its own line, lit, and says which sector it is for.
+  expect(document.querySelector('.org-xlabel')?.textContent).toContain('Pedido para Setor de bento')
+  expect(document.querySelectorAll('.org-xline')).toHaveLength(0)
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-down')).toHaveLength(1)
+  expect(document.querySelector('main > p')?.textContent).toContain('1 pedido entre setores')
+  // A card that answers to someone has no such choice.
+  await pick('bento')
+  expect(document.querySelector('.org-pop__entry')).toBeNull()
+})
+
+it('lights every line up to the sector\'s head when a request skips whoever is between', async () => {
+  // Nico answers to Bento, who answers to Orion: Nico passed it straight to Orion, its sector's head.
+  fake = { ...fake, delegations: [ask('u2', 'nico', 'orion')] }
+  await render()
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-up')).toHaveLength(2)
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-down')).toHaveLength(0)
+  expect(document.querySelector('.org-now')?.textContent).toContain('(chefe)')
+})
+
+it('tints each sector behind its branch, names it in its panel, and draws a request between two heads', async () => {
+  // Two trees, two sectors: Orion's (unnamed) and Mira's, named, with Lino below it.
+  fake = { ...fake, agents: [...fake.agents, bot('mira', undefined, { sectorName: 'Financeiro', sectorDoes: 'Cobranças' }), bot('lino', 'mira')], delegations: [ask('x1', 'mira', 'orion'), ask('u1', 'lino', 'mira')] }
+  await render()
+  expect([...document.querySelectorAll('.org-zone__name')].map((z) => z.textContent)).toEqual(['Setor de orion', 'Financeiro'])
+  expect(document.querySelector('.org-zone__does.is-empty')?.textContent).toBe('Diga o que este setor resolve') // wide enough, with nothing written yet; Mira's is too narrow for that line
+  expect(card('orion').textContent).toContain('Chefe do setor')
+  expect(card('lino').textContent).not.toContain('Chefe do setor')
+  const lede = document.querySelector('main > p')?.textContent
+  expect(lede).toContain('2 setores')
+  expect(lede).toContain('1 pedido entre setores')
+  // Mira asked Orion: a dashed line between the two heads, named for the sector it went to.
+  expect(document.querySelectorAll('.org-xline')).toHaveLength(1)
+  expect(document.querySelector('.org-xlabel')?.textContent).toContain('Pedido para Setor de orion')
+  // Lino passed it up to Mira: the line between them flows up.
+  expect(document.querySelectorAll('.orgb__lines g.is-flow.is-up')).toHaveLength(1)
+  // A click on the sector's name opens its panel, with what came from other sectors. A name typed is
+  // saved even when the panel closes before the field is left (a press on the board).
+  await click(document.querySelector('.org-zone__name')!)
+  const side = document.querySelector('.org-side')!
+  expect(side.querySelector('h3')?.textContent).toBe('Setor de orion')
+  expect(side.textContent).toContain('Pedido de mira')
+  await type(side.querySelector('input')!, 'Técnico')
+  expect(document.querySelector('.org-side h3')?.textContent).toBe('Técnico')
+  await ptr(document.querySelector('.orgb')!, 'pointerdown')
+  await ptr(document, 'pointerup')
+  expect(document.querySelector('.org-side')).toBeNull()
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]![0]).toMatchObject({ id: 'orion', sectorName: 'Técnico', sectorDoes: '' })
+  // A member only looks.
+  admin = false
+  await render()
+  await click(document.querySelector('.org-zone__name')!)
+  expect(document.querySelector('.org-side h3')).not.toBeNull()
+  expect(document.querySelector('.org-side input')).toBeNull()
 })

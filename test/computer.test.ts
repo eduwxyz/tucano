@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
@@ -72,6 +72,10 @@ describe('lent folders', () => {
     expect(check('nada')).toMatch(/não existe/)
     expect(checkFolder(tmpdir(), { home, dataDir })).toMatch(/dentro da sua pasta/)
     expect(checkFolder(join(home, 'projetos'), { home, dataDir: join(home, 'projetos/app/.dados') })).toMatch(/dados do próprio/)
+    // Named: the refusal says which folder, as ~/… (~\… on Windows), so a wrong pick in the dialog is plain.
+    expect(checkFolder(join(home, '.ssh'), { home, dataDir, named: true })).toMatch(new RegExp(`^~\\${sep}\\.ssh: .*credenciais`))
+    expect(checkFolder(home, { home, dataDir, named: true })).toMatch(/^~: .*dentro da sua pasta/)
+    expect(checkFolder(join(home, 'projetos/app'), { home, dataDir, named: true })).toBeNull()
   })
 
   it('names each folder after itself, safely and without repeats', () => {
@@ -100,7 +104,7 @@ const hasDocker = ((): boolean => {
 
 describe.skipIf(!hasDocker)('computer (Docker)', () => {
   const ready = { installed: true, loggedIn: true }
-  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   const agent = (id: string, handle: string, computer: boolean): Agent => ({
     id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'read', computer, archived: false
   })
@@ -201,7 +205,7 @@ describe.skipIf(!hasDocker)('computer (Docker)', () => {
   it('only agents with a computer get the tools', async () => {
     const gateway = new Gateway()
     await gateway.start()
-    const engines: Record<EngineId, Engine> = { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }
+    const engines: Record<EngineId, Engine> = { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
     const runner = new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, computers })
     await runner.send('d1', 'rode `echo oi do computador`')
     await runner.send('d2', 'rode `echo oi do computador`')

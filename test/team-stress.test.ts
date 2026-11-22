@@ -16,7 +16,7 @@ import { Gateway } from '../src/core/gateway'
 import { Memories } from '../src/core/memory'
 import { hashSecret, Hub, mayEditChannel, mentionedPeople, People, routineDetail, type PortLike } from '../src/core/people'
 import { can, must } from '../src/core/policy-people'
-import { handoffSystem, routerSystem } from '../src/core/router'
+import { chimeSystem, handoffSystem, routerSystem } from '../src/core/router'
 import { Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 import { exportTeam, importTeam } from '../src/core/team'
@@ -26,7 +26,7 @@ import { WikiCurator } from '../src/core/wiki-curator'
 const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-stress-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const ready = { installed: true, loggedIn: true }
-const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
+const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
 
 class FakePort implements PortLike {
   got: CoreEvent[] = []
@@ -88,7 +88,7 @@ describe("an agent's thread tools, for the person a reply is for (2)", () => {
     const claude: Engine = {
       id: 'claude',
       async *run(t) {
-        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.mcpUrl) {
+        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem() && t.mcpUrl) {
           turns.push(t)
           results.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', { busca: 'plano' })))
           results.push(JSON.stringify(await callTool(t.mcpUrl, 'ler_thread', { id: anas.id })))
@@ -98,7 +98,7 @@ describe("an agent's thread tools, for the person a reply is for (2)", () => {
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') } as Record<EngineId, Engine>
     const routines = new Routines({ db, runner: { runRoutine: async () => undefined }, emit: () => {} })
     const runner = new Runner({ db, engines, settings: async () => settings(), emit: () => {}, workDir: dir(), gateway, routines })
     void team1
@@ -581,7 +581,7 @@ describe('the people who left (18)', () => {
 })
 
 describe('a busy channel (20)', () => {
-  it('each routed reply answers the message that called it; an agent already replying there is called once more, not twice', async () => {
+  it('each message that comes while the agent answers there gets a reply of its own, one per message', async () => {
     const db = new Db(':memory:')
     db.renamePerson(db.ownerId(), 'Ana')
     db.saveAgent(agent('a1', 'lia'))
@@ -595,7 +595,7 @@ describe('a busy channel (20)', () => {
     const claude: Engine = {
       id: 'claude',
       async *run(t) {
-        if (t.system !== routerSystem() && t.system !== handoffSystem()) {
+        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem()) {
           prompts.push(t.prompt)
           if (first) {
             first = false
@@ -605,7 +605,7 @@ describe('a busy channel (20)', () => {
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') } as Record<EngineId, Engine>
     const runner = new Runner({ db, engines, settings: async () => settings(), emit: () => {}, workDir: dir() })
     const wait = async (ok: () => boolean): Promise<void> => {
       for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5))
@@ -614,18 +614,22 @@ describe('a busy channel (20)', () => {
     await wait(() => prompts.length === 1)
     await runner.send('ch', 'SEGUNDA pergunta', [])
     await runner.send('ch', 'TERCEIRA pergunta', [])
-    await new Promise((r) => setTimeout(r, 50))
-    // The first reply, still running, read only up to its message; nothing else started beside it.
-    expect(prompts).toHaveLength(1)
+    // Each of the three is answered by a reply of its own, beside the one still running: none is parked
+    // behind it and none is folded into another. Until #261 this was one reply at a time per agent and
+    // place, the newer message taking over the waiting one (#358); a person's second message looked
+    // unanswered until the first reply ended, which is what #261 replaces.
+    await expect.poll(() => prompts.length, { timeout: 5000 }).toBe(3)
+    // The first reply, still running, read only up to its message.
     expect(prompts[0]).toContain('PRIMEIRA')
     expect(prompts[0]).not.toContain('SEGUNDA')
     release()
     await runner.idle()
-    // One more reply, after it, for what came while it worked.
-    expect(prompts).toHaveLength(2)
-    expect(prompts[1]).toContain('TERCEIRA')
+    expect(prompts).toHaveLength(3) // one per message, never a second one for the same
     const replies = db.messages().filter((m) => m.author.kind === 'agent')
-    expect(replies).toHaveLength(2)
+    expect(replies).toHaveLength(3)
+    // Every message answered, and each by a reply of its own: that is what `replyTo` says it answers.
+    const asked = db.messages().filter((m) => m.author.kind === 'person').map((m) => m.id)
+    expect(replies.map((m) => m.run?.replyTo).sort()).toEqual([...asked].sort())
   })
 
   it('a reply queued for an older message reads it as the last one, even when newer ones came', async () => {
@@ -645,11 +649,11 @@ describe('a busy channel (20)', () => {
           held = true
           await routed // the router takes a while: a newer message arrives meanwhile
         }
-        if (t.system !== routerSystem() && t.system !== handoffSystem()) prompts.push(t.prompt)
+        if (t.system !== routerSystem() && t.system !== handoffSystem() && t.system !== chimeSystem()) prompts.push(t.prompt)
         yield* base.run(t)
       }
     }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') } as Record<EngineId, Engine>
     const runner = new Runner({ db, engines, settings: async () => settings(), emit: () => {}, workDir: dir() })
     await runner.send('ch', 'ANTIGA pergunta', [])
     await new Promise((r) => setTimeout(r, 20))
@@ -668,7 +672,7 @@ describe('a question two people answer (21)', () => {
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })
     const asked = say(db, 'ch', { kind: 'agent', id: 'a1' }, 'Qual o prazo?', { run: { status: 'waiting_input', steps: [], question: 'Qual o prazo?', askedTo: bia.id } })
     db.saveQuestion({ id: asked.id, conversationId: 'ch', agentId: 'a1', text: 'Qual o prazo?', askedTo: bia.id, requestedBy: ana.id, state: 'open', deadlineAt: Date.now() + 3_600_000, createdAt: 1 })
-    const runner = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') }, settings: async () => settings(), emit: () => {}, workDir: dir() })
+    const runner = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 1 }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }, settings: async () => settings(), emit: () => {}, workDir: dir() })
     await runner.answer(asked.id, 'sexta', bia)
     await runner.idle()
     const before = db.messages().length
@@ -701,8 +705,10 @@ describe('calling a person by the whole name (22)', () => {
 describe('what the owner alone sees (23, 24)', () => {
   it("the phone tab and the missions are the owner's", async () => {
     const pages = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Pages.tsx'), 'utf8')
-    expect(pages).toContain("...(owner ? [['integracoes', L('Celular', 'Phone')]] : [])")
     expect(pages).toContain('const tabs = SETTINGS_TABS(team, admin, owner)')
+    expect(pages).toContain("{on('conexoes') && owner && (")
+    const structure = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'settings-structure.ts'), 'utf8')
+    expect(structure).toMatch(/id: 'connections-phone', page: 'conexoes', .*visible: owner \}/)
     const sidebar = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'components', 'Sidebar.tsx'), 'utf8')
     expect(sidebar).toMatch(/const owner = amOwner\(/)
     expect(sidebar).toMatch(/\{owner && settings\.onboarding\?\.done && !settings\.onboarding\.checklistHidden && <MissionsCard \/>\}/)

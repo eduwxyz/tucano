@@ -22,9 +22,10 @@ import { plainCipher, Secrets } from '../src/core/secrets'
 const DEMO = join(import.meta.dirname, '..', 'scripts', 'demo-mcp-server.mjs')
 const ready = { installed: true, loggedIn: true }
 
-type Plan = { tool: string; args: Record<string, unknown> } | null
+type Call = { tool: string; args: Record<string, unknown> }
+type Plan = Call | Call[] | null
 
-// A "model" that, on each turn, lists its tools and makes at most one call.
+// A "model" that, on each turn, lists its tools and makes the calls planned (usually one), in order.
 function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Turn[]; tools: string[][]; results: unknown[]; alwaysLoad: string[][] }): Engine {
   return {
     id: 'claude',
@@ -39,10 +40,10 @@ function scripted(plan: (turn: Turn, tools: string[]) => Plan, seen: { turns: Tu
         seen.tools.push(tools)
         seen.alwaysLoad.push(listed.filter((t) => t._meta?.['anthropic/alwaysLoad'] === true).map((t) => t.name))
         const p = plan(turn, tools)
-        if (p) {
-          const r = await client.callTool({ name: p.tool, arguments: p.args })
+        for (const c of p ? [p].flat() : []) {
+          const r = await client.callTool({ name: c.tool, arguments: c.args })
           seen.results.push(r)
-          reply = `chamei ${p.tool}`
+          reply = `chamei ${c.tool}`
         }
         await client.close()
       }
@@ -71,7 +72,7 @@ const agent = (grant: GrantLevel): Agent => ({
 function runner(plan: (turn: Turn, tools: string[]) => Plan, onDb: Db = db): Runner {
   const r = new Runner({
     db: onDb,
-    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
     settings: async () => settings,
     emit: (e) => events.push(e),
     workDir: join(dir, 'work'),
@@ -103,7 +104,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   events = []
   seen = { turns: [], tools: [], results: [], alwaysLoad: [] }
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: (e) => events.push(e), openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })
@@ -193,6 +194,20 @@ describe('grants', () => {
 
 describe('approvals', () => {
   const askDelete = (turn: Turn): Plan => (turn.prompt.includes('apaga') && !turn.prompt.includes('aprovou') && !turn.prompt.includes('recusou') ? { tool: 'tarefas__delete_task', args: { id: 2, _motivo: 'está duplicada' } } : null)
+
+  it('keeps the approval handed work stopped on with the request, so the person approves it where they asked', async () => {
+    db.saveAgent({ ...agent('read_write'), reportsTo: 'o1' })
+    db.saveAgent({ ...agent('none'), id: 'o1', name: 'Orion', handle: 'orion', modelId: 'gpt-5.6-luna', grants: {} })
+    db.createConversation({ id: 'do', kind: 'dm', name: 'o1', members: ['o1'] })
+    const r = runner(askDelete)
+    await r.send('do', 'delegue a lia: apaga a tarefa 2')
+    await r.idle()
+    const [d] = db.liveDelegations(0)
+    expect(d).toMatchObject({ from: 'o1', to: 'a1', state: 'open' })
+    expect(db.approval(d!.approval!)).toMatchObject({ state: 'pending', tool: 'delete_task', agentId: 'a1' })
+    // Nothing woke Orion to tell me: the approval shows under its message in the DM.
+    expect(db.messages().filter((m) => m.conversationId === 'do' && m.author.kind === 'agent')).toHaveLength(1)
+  })
 
   it('a sensitive call becomes a pending approval and nothing runs', async () => {
     db.saveAgent(agent('read_write'))
@@ -305,7 +320,7 @@ describe('approvals', () => {
     }
     r = new Runner({
       db,
-      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: join(dir, 'work'),
@@ -349,7 +364,7 @@ describe('pause and resume', () => {
         else yield { type: 'done', text: 'feito', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, antigravity: failing, cursor: failing, grok: failing, cline: failing, hermes: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
+    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, antigravity: failing, cursor: failing, grok: failing, cline: failing, hermes: failing, endpoint: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
     runnerRef.current = r
     await r.send('d1', 'oi')
     await r.idle()
@@ -405,6 +420,26 @@ describe('always allow and asking for access', () => {
     expect(last).toBeDefined()
   })
 
+  it('a tool allowed for good runs with other arguments and after reading something from outside, with no guardrails too (#449)', async () => {
+    db.saveAgent({ ...agent('read_write'), autonomy: 'free', autoApprove: [`${connectorId}:delete_task`] })
+    // In one reply it reads the tasks (someone else's text), then deletes one it was never approved for by value.
+    const r = runner((_, tools) => [{ tool: tools.find((t) => t.endsWith('__list_tasks'))!, args: {} }, { tool: 'tarefas__delete_task', args: { id: 3, _motivo: 'duplicada' } }])
+    await r.send('d1', 'lê as tarefas e apaga a duplicada')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(0) // no card, not even from the outside-content guard
+    const last = agentMessages().at(-1)!
+    expect(last.run?.outside).toBe(true)
+    expect(last.run?.steps.some((s) => s.label === 'Executou (sempre permitido)')).toBe(true)
+  })
+
+  it('without "sempre permitir", the guard still asks after reading something from outside', async () => {
+    db.saveAgent({ ...agent('read_write'), autonomy: 'free' })
+    const r = runner((_, tools) => [{ tool: tools.find((t) => t.endsWith('__list_tasks'))!, args: {} }, { tool: 'tarefas__delete_task', args: { id: 3, _motivo: 'duplicada' } }])
+    await r.send('d1', 'lê as tarefas e apaga a duplicada')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(1)
+  })
+
   it('a high-risk tool never becomes a rule', async () => {
     db.saveAgent(agent('read_write'))
     db.updateTool(connectorId, 'delete_task', { highRisk: true })
@@ -452,7 +487,7 @@ describe('pausing and attributing work', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
     const r = new Runner({
       db,
-      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
       settings: async () => settings,
       emit: () => {},
       workDir: join(dir, 'work')
