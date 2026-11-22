@@ -20,6 +20,7 @@ import {
   type ArtifactKind,
   type Author,
   type Connector,
+  type ApprovalResult,
   type ConnectorAuth,
   type ConnectorTool,
   type Conversation,
@@ -688,7 +689,9 @@ const COLUMNS: [string, string, string][] = [
   // A prompt of mine waiting its turn: 'queue' while it waits (src/core/runs.ts, resumeQueued).
   ['messages', 'send_mode', 'TEXT'],
   // An agent whose replies go one at a time (Agent.oneAtATime): 1; unset, as many as the app runs.
-  ['agents', 'one_at_a_time', 'INTEGER']
+  ['agents', 'one_at_a_time', 'INTEGER'],
+  // What became of an approved call: 'done', 'error' or 'not_run' (src/shared/types.ts).
+  ['approvals', 'result', 'TEXT']
 ]
 
 
@@ -1483,6 +1486,14 @@ export class Db {
     return rows.map((r) => this.toMessage(r))
   }
 
+  // The next-steps cards an agent still has open in one place: a conversation's main line, or one thread.
+  openStepsOf(agentId: string, conversationId: string, threadId: string | undefined): Message[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM messages WHERE conversation_id = ? AND thread_id IS ? AND author_kind = 'agent' AND author_id = ? AND run IS NOT NULL AND json_extract(run, '$.status') = 'done' AND json_extract(run, '$.stepsOpen') = 1 ORDER BY at`)
+      .all(conversationId, threadId ?? null, agentId) as Row[]
+    return rows.map((r) => this.toMessage(r))
+  }
+
   // The replies whose run is in one of these states, oldest first. Found in SQL: the rest of
   // the messages are never parsed.
   messagesWithRun(statuses: Run['status'][]): Message[] {
@@ -1694,6 +1705,7 @@ export class Db {
       state: str(r['state']) as ApprovalState,
       reason: r['reason'] ? str(r['reason']) : undefined,
       outcome: r['outcome'] ? str(r['outcome']) : undefined,
+      ...(r['result'] ? { result: str(r['result']) as ApprovalResult } : {}),
       createdAt: Number(r['created_at']),
       expiresAt: Number(r['expires_at']),
       decidedAt: r['decided_at'] ? Number(r['decided_at']) : undefined,
@@ -1744,6 +1756,12 @@ export class Db {
       .prepare("UPDATE approvals SET state = ?, reason = ?, decided_at = ?, decided_by = ? WHERE id = ? AND state = 'pending'")
       .run(state, reason ?? null, Date.now(), by ?? null, id)
     return Number(r.changes) === 1
+  }
+
+  // What became of the call, once it's over: it ran, it ran and failed, or nothing ran. Written
+  // apart from the state so a card can show "approved, waiting for the result" in between.
+  setApprovalResult(id: string, result: ApprovalResult): void {
+    this.db.prepare('UPDATE approvals SET result = ? WHERE id = ?').run(result, id)
   }
 
   setApprovalOutcome(id: string, outcome: string): void {

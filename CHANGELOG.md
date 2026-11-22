@@ -7,11 +7,29 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
 > - **Novo:** **Classificadores**, em Configurações › Modelos: use TypeSafe, OpenRouter, OpenAI ou Google, cada um com a sua chave, e escolha qual decide quem responde num canal e qual acha o que o agente clica numa página.
+> - **Novo:** um agente pode deixar os **próximos passos** num cartão de caixas de marcar, todas vazias. O que você marcar volta como a sua mensagem; se preferir escrever outra coisa, o cartão não atrapalha nem fica esperando você. **Cancelar** fecha o cartão sem acordar o agente, e um cartão novo do mesmo agente no mesmo lugar substitui o anterior.
+> - **Mudou:** o **cartão de aprovação** abre com a ação e o alvo, e diz o que aconteceu depois: **Concluído**, **Falhou** ou **não rodou**, em vez de só "Aprovado". Um aviso acima do campo leva às aprovações que esperam você.
+> - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
+> - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
+> - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
+> - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 
 ### Added
 
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
 - **Classifiers: choose who answers the app's quick questions.** Jev, from TypeSafe, was the only classifier Tucano could use. Settings › Models › **Classifiers** now holds a list of them, from TypeSafe, OpenRouter, OpenAI or Google, each with its own key, checked with that provider and kept encrypted. You pick which one decides who replies in a channel and which one finds what an agent clicks in a page, or leave either off. Each job says what it sends and to which provider, and a failure falls back as before. An install that already uses Jev keeps it, with its key and its choices. Thanks to Apostol Apostolov. (#379)
+- **An agent can leave its next steps in a card of checkboxes.** When a piece of work reaches a point with concrete ways to go on, the agent can propose 1 to 6 of them with the new `next_steps` tool instead of burying them in its text. The card opens with nothing ticked: **Do these** sends what you tick as your next message, **Another step…** takes one written by hand, and **Cancel** closes it without waking the agent. It holds nothing up: the reply is finished, it stays out of For you, it takes no slot in **Replies at once**, and a message written instead is a new request, not an answer to the card. When the same agent proposes a new card in the same conversation and thread, its previous open card closes quietly and reads as replaced. In a team, only the person it was proposed to, whoever covers for them or an admin can answer it. Thanks to Apostol Apostolov. (#298)
+- **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
+- **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
+- **The browser names the wall it landed on.** A Cloudflare check answers 200 with a title and a few words, so an agent read it as a page that had changed and clicked again. After each browser action, the agent now gets one line when the page is a bot check, a refusal, a sign-in, a cookie wall, a failed load or an empty page, with the move that helps. A page that only mentions these things stays silent, and the line never quotes the page's own text. Thanks to Apostol Apostolov. (#620)
+
+### Changed
+
+- **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+
+### Changed
+
+- **The approval card leads with what is being approved, and says what became of it.** The card opens with the action and its target, the status is a quiet row above them, and the decisions sit on one line. Its receipt now tells approved apart from completed: **Approved · waiting for result**, **Completed**, **Failed** with the reason, or **Approved · didn't run**. A row above the message field counts the approvals waiting on you, and **Review** goes back to the oldest one. Thanks to Apostol Apostolov. (#334)
 
 ## [0.2.45] - 2026-11-22
 

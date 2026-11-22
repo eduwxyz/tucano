@@ -14,6 +14,7 @@ export interface Decision {
   question: string
   kind: DecisionKind
   options?: DecisionOption[]
+  nextSteps?: true // a list of next steps, not a question: nothing starts ticked, and the card sends what the person ticks as a to-do
 }
 export interface Answer {
   chosen?: number[] // indexes into the options
@@ -32,6 +33,9 @@ export const MAX_QUESTIONS = 4
 export const MIN_OPTIONS = 1
 // The card always adds "Something else" (a free answer) after the agent's options: 4 rows at most.
 export const MAX_OPTIONS = 3
+// A next-steps list is read as a to-do, not as a menu: it takes more lines than a question's
+// options, and it has no "Something else" row pushing the count down.
+export const MAX_STEPS = 6
 // A decision is read at a glance: the context goes in the reply's text, not here.
 export const MAX_QUESTION_LENGTH = 200
 export const MAX_LABEL_LENGTH = 80
@@ -62,6 +66,14 @@ export function questionsOf(run: Run | undefined): Decision[] {
 export function isNewQuestion(message: Message): boolean {
   return message.run?.status === 'waiting_input' && !message.run.answers && questionsOf(message.run).length > 0
 }
+
+// A list of next steps: the card reads as a to-do. Like a question, it opens with nothing picked:
+// what comes back is what the person chose, never the agent's own list.
+export const isNextSteps = (question: Decision): boolean => question.nextSteps === true
+
+// A next-steps card still open. Unlike a question it holds nothing: the reply is done, the next
+// message is a message of its own, and the card can be answered, or ignored, for as long as it's there.
+export const hasOpenSteps = (run: Run | undefined): boolean => run?.status === 'done' && run.stepsOpen === true
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 const tooLong = (question: string): string =>
@@ -114,6 +126,42 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Deci
   return { questions }
 }
 
+// What an agent proposes with next_steps: one multiple decision, with nothing ticked. Same limits
+// as a decision's options, but more of them; the card's own row takes a step written by hand.
+export function parseNextSteps(args: Record<string, unknown>): { decision: Decision } | { error: string } {
+  const question = trimmed(args['question'])
+  if (question.length > MAX_QUESTION_LENGTH) return { error: tooLong(question) }
+  const list = args['steps']
+  if (!Array.isArray(list) || list.length === 0) return { error: L('Faltaram os próximos passos: mande de 1 a ' + MAX_STEPS + ' em steps.', 'Missing the next steps: send 1 to ' + MAX_STEPS + ' of them in steps.') }
+  if (list.length > MAX_STEPS) return { error: L(`No máximo ${MAX_STEPS} próximos passos: os que não couberem vão no texto da sua resposta.`, `At most ${MAX_STEPS} next steps: the ones that don't fit go in your reply's text.`) }
+  const options: DecisionOption[] = []
+  const seen = new Set<string>()
+  for (const item of list as Record<string, unknown>[]) {
+    const label = trimmed(typeof item === 'string' ? item : item?.['label'])
+    const description = trimmed(typeof item === 'string' ? '' : item?.['description'])
+    if (!label) return { error: L('Todo próximo passo precisa de um label.', 'Every next step needs a label.') }
+    if (label.length > MAX_LABEL_LENGTH || description.length > MAX_DESCRIPTION_LENGTH)
+      return {
+        error: L(
+          `Label de até ${MAX_LABEL_LENGTH} caracteres e description de até ${MAX_DESCRIPTION_LENGTH}; o detalhe vai no texto da sua resposta.`,
+          `Label up to ${MAX_LABEL_LENGTH} characters and description up to ${MAX_DESCRIPTION_LENGTH}; the detail goes in your reply's text.`
+        )
+      }
+    const key = label.toLowerCase()
+    if (seen.has(key)) return { error: L(`"${label}" está duas vezes na lista: junte os dois num só passo.`, `"${label}" is in the list twice: put both in one step.`) }
+    seen.add(key)
+    options.push(description ? { label, description } : { label })
+  }
+  return {
+    decision: {
+      question: question || L('Por onde eu sigo?', 'What comes next?'),
+      kind: 'multiple',
+      options,
+      nextSteps: true
+    }
+  }
+}
+
 export function isAnswered(answer: Answer | null | undefined): boolean {
   return !!answer && (!!answer.chosen?.length || !!answer.other || !!answer.text || !!answer.skipped)
 }
@@ -134,7 +182,8 @@ export function answerLabel(question: Decision, answer: Answer): string {
   if (answer.skipped) return L('(pulou)', '(skipped)')
   if (question.kind === 'text') return answer.text ?? ''
   const chosen = [...(answer.chosen ?? [])].sort((a, b) => a - b).map((i) => question.options?.[i]?.label).filter(Boolean)
-  if (answer.other) chosen.push(`${L('Outra coisa', 'Something else')}: ${answer.other}`)
+  // A step written by hand is one more step, not the "Something else" of a menu.
+  if (answer.other) chosen.push(`${isNextSteps(question) ? L('Outro passo', 'Another step') : L('Outra coisa', 'Something else')}: ${answer.other}`)
   return chosen.join(', ')
 }
 
