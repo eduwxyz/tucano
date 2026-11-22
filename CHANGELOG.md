@@ -13,7 +13,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Mudou:** o **cartão de aprovação** abre com a ação e o alvo, e diz o que aconteceu depois: **Concluído**, **Falhou** ou **não rodou**, em vez de só "Aprovado". Um aviso acima do campo leva às aprovações que esperam você.
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
-> - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 
 ### Added
@@ -25,7 +24,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An agent can leave its next steps in a card of checkboxes.** When a piece of work reaches a point with concrete ways to go on, the agent can propose 1 to 6 of them with the new `next_steps` tool instead of burying them in its text. The card opens with nothing ticked: **Do these** sends what you tick as your next message, **Another step…** takes one written by hand, and **Cancel** closes it without waking the agent. It holds nothing up: the reply is finished, it stays out of For you, it takes no slot in **Replies at once**, and a message written instead is a new request, not an answer to the card. When the same agent proposes a new card in the same conversation and thread, its previous open card closes quietly and reads as replaced. In a team, only the person it was proposed to, whoever covers for them or an admin can answer it. Thanks to Apostol Apostolov. (#298)
 - **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
 - **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
-- **The browser names the wall it landed on.** A Cloudflare check answers 200 with a title and a few words, so an agent read it as a page that had changed and clicked again. After each browser action, the agent now gets one line when the page is a bot check, a refusal, a sign-in, a cookie wall, a failed load or an empty page, with the move that helps. A page that only mentions these things stays silent, and the line never quotes the page's own text. Thanks to Apostol Apostolov. (#620)
 
 ### Changed
 
