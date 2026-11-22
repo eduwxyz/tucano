@@ -80,7 +80,6 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
-  type SendMode,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -293,7 +292,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
         {gone ? (
-          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
+          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation remains available to read.`)}</p>
         ) : (
           <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
         )}
@@ -315,7 +314,7 @@ export function ComputerOff({ agent }: { agent: Agent }): ReactNode {
   const which = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} ${L('e', 'and')} ${names.at(-1)}`
   const one = names.length === 1
   return (
-    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', 'Off: the Tucano app is closed there. Opening it brings it back.')}>
+    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', "Tucano is closed on this computer. Open it to reconnect.")}>
       <Icon name="laptop" size={14} />
       <span className="grow">
         {L(`${one ? '' : 'Os computadores '}`, `${one ? '' : 'The computers '}`)}
@@ -641,11 +640,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             ))}
           </div>
         )}
-        {/* A prompt of mine waiting its turn behind the reply above (the mode on the message, runs.ts):
-            it says so until its own reply starts, and then the mark goes. */}
+        {/* A prompt of mine waiting its turn (the conversation has all its replies at once running, or its
+            agent goes one at a time; runs.ts): it says so until its own reply starts, and then the mark goes. */}
         {message.sendMode === 'queue' && (
-          <span className="tag msg__queued" title={L('Chega quando a resposta acima terminar', 'Goes when the reply above ends')}>
-            {L('Na fila, esperando a resposta acima', 'Queued, waiting for the reply above')}
+          <span className="tag msg__queued" title={L('Começa quando uma resposta em curso terminar (Configurações › Agentes › Respostas)', 'Starts when a running reply ends (Settings › Agents › Replies)')}>
+            {L('Na fila, esperando uma resposta terminar', 'Queued until a reply ends')}
           </span>
         )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
@@ -705,9 +704,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
             With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
         {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
-            {L('Tentar de novo', 'Try again')}
-          </button>
+          <TryAgain messageId={message.id} />
         )}
         {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
           <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
@@ -741,6 +738,56 @@ function AskedFromHere({ message }: { message: Message }): ReactNode {
         <DelegationChip key={d.id} at={{ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) }} from={d.from} asked />
       ))}
     </div>
+  )
+}
+
+// A reply that stopped — by the person, by the app closing, by a failure — has two ways back:
+// "Try again" repeats what was asked, and "Try with instructions" repeats it in a new direction.
+// The direction is written under the buttons and goes into the prompt, not into a new message, so
+// the reply that comes back is the answer to the same ask, steered.
+function TryAgain({ messageId }: { messageId: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const typed = note.trim()
+  const retry = (withNote?: string): void => {
+    retryRun(messageId, withNote)
+    setOpen(false)
+    setNote('')
+  }
+  return (
+    <>
+      <button className="btn btn--xs retry" onClick={() => retry()}>
+        {L('Tentar de novo', 'Try again')}
+      </button>
+      <button className="btn btn--xs retry" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {L('Tentar com instruções', 'Try with instructions')}
+      </button>
+      {open && (
+        <div className="retry-note">
+          <textarea
+            aria-label={L('Instruções para a nova tentativa', 'Instructions for the new try')}
+            placeholder={L('O que deve ser diferente nesta tentativa?', 'What should be different this time?')}
+            rows={2}
+            value={note}
+            autoFocus
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) retry(typed)
+              if (e.key === 'Escape') setOpen(false)
+            }}
+          />
+          <div className="retry-note__row">
+            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => retry(typed)}>
+              {L('Tentar de novo com isso', 'Try again with this')}
+            </button>
+            <button className="link" onClick={() => { setOpen(false); setNote('') }}>
+              {L('Cancelar', 'Cancel')}
+            </button>
+            <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -1229,7 +1276,7 @@ function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies
       at={s?.at}
       ready={since > 0}
       notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
-      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few quiet minutes, this thread is summed up here, and the memories about you come from it.")}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few idle minutes, this thread is summarized here and used to learn memories about you.")}
       hint={L(
         `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
         `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
@@ -1783,7 +1830,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
         <div className="steps__steer">
           <div className="steps__steer-note">
             <textarea
-              aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+              aria-label={L('Orientação para a resposta em curso', "Instructions for the current reply")}
               placeholder={L('Como ele deve seguir?', 'How should it go on?')}
               rows={2}
               value={steerNote}
@@ -1876,7 +1923,7 @@ export function Thought({ message, working }: { message: Message; working: boole
         type="button"
         className="thought__head"
         aria-expanded={open}
-        title={open ? L('Recolher o que ele pensou', 'Fold what it thought') : L('Ler o que ele pensou', 'Read what it thought')}
+        title={open ? L('Recolher o que ele pensou', "Collapse reasoning") : L('Ler o que ele pensou', "Show reasoning")}
         onClick={() => setAsked(!open)}
       >
         <Icon name="chevron" size={11} />
@@ -2040,7 +2087,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
   const alwaysTitle = onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
-    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking, in any call, even after reading something from outside. You can take it back on its page.`)
+    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `Allow ${agent?.name ?? 'the agent'} to use “${toolWords(approval.tool)}” in ${approval.connectorName} without approval on any call, even after reading external content. Revoke this on its page.`)
 
   return (
     <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
@@ -2210,7 +2257,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
                   className="btn approval__always"
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
-                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call, even after reading something from outside. Other actions still ask. You can take it back on its page.`
+                    `Allow ${agent?.name ?? 'the agent'} to run ${forGood.join(', ')} through ${approval.connectorName} without approval on any call, even after reading external content. Other actions still require approval. Revoke this on its page.`
                   )}
                   onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
                 >
@@ -2807,18 +2854,16 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
-  const sendMode = useStore((st) => st.settings?.sendMode ?? 'parallel')
-  // How this one joins a reply that's already running here: the setting says what Enter does, and
-  // the modifier keys say the rest (see `send` in src/core/runs.ts). Nothing running: all the same.
-  const submit = (mode?: SendMode): void => {
+  // A prompt starts its own reply beside what runs here, up to the replies at once the workspace allows;
+  // past them it waits its turn (see `send` in src/core/runs.ts). A running reply is steered from its own pill.
+  const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
       conversationId,
       text,
       images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
       threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data })),
-      mode ?? sendMode
+      images.filter(isFile).map(({ name, data }) => ({ name, data }))
     )
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
@@ -2925,13 +2970,10 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
                 if (e.key === 'Enter' || e.key === 'Tab') return (e.preventDefault(), pick(options[active]!))
                 if (e.key === 'Escape') return setMention(null)
               }
-              // Enter does what the setting says; a modifier picks a mode whatever the setting says. Shift+Enter
-              // alone is the line break it has always been, so the queue sits on Ctrl+Enter (Cmd+Enter on a Mac).
-              if (e.key === 'Enter' && e.nativeEvent.isComposing) return
-              if (e.key !== 'Enter') return
-              if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return // a new line, as it always was
-              e.preventDefault()
-              submit(e.altKey ? (e.shiftKey ? 'interrupt' : 'steer') : e.ctrlKey || e.metaKey ? 'queue' : undefined)
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                submit()
+              }
             }}
           />
         </div>
@@ -2954,18 +2996,6 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
             {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
-          {sendMode !== 'parallel' ? (
-            <button
-              className="btn btn--sm btn--ghost composer__mode"
-              onClick={() => updateSettings({ sendMode: 'parallel' })}
-              title={L(
-                'Enquanto uma resposta corre aqui, o Enter manda assim. Clique para voltar ao normal; os atalhos continuam valendo uma vez cada (Ctrl+Enter põe na fila, Alt+Enter entrega, Shift+Alt+Enter interrompe, Shift+Enter quebra a linha).',
-                'While a reply runs here, Enter sends like this. Click to go back to the plain one; the keys still work once each (Ctrl+Enter queues, Alt+Enter hands it over, Shift+Alt+Enter interrupts, Shift+Enter breaks the line).'
-              )}
-            >
-              {sendMode === 'queue' ? L('Enter: na fila', 'Enter: queued') : sendMode === 'steer' ? L('Enter: entregue à resposta', 'Enter: into the reply') : L('Enter: interrompe', 'Enter: interrupts')}
-            </button>
-          ) : null}
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}

@@ -102,7 +102,7 @@ export function FeedbackDialog({ image, draft, from, onClose }: { image?: Shot; 
   const ask = KINDS.find((k) => k.kind === kind)!.ask()
   const what = L(
     `Além do seu texto, vão só a versão do Tucano${version ? ` (${version})` : ''}, o sistema (${SYSTEMS[platform]}) e o idioma.${image ? ' E a imagem da tela, se estiver marcada.' : ''}`,
-    `Besides your text, only Tucano's version${version ? ` (${version})` : ''}, the system (${SYSTEMS[platform]}) and the language go.${image ? ' And the screen image, if it’s checked.' : ''}`
+    `Along with your text, Tucano sends only its version${version ? ` (${version})` : ''}, the system (${SYSTEMS[platform]}) and the language.${image ? ' The screen image is also sent if selected.' : ''}`
   )
   const send = async (): Promise<void> => {
     if (!text.trim() || sending) return
@@ -114,14 +114,14 @@ export function FeedbackDialog({ image, draft, from, onClose }: { image?: Shot; 
       onClose()
       toast(L('Recebido. Obrigado!', 'Received. Thank you!'))
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : L('Não consegui enviar agora. Tente de novo.', "I couldn't send it right now. Try again."))
+      setError(e instanceof Error && e.message ? e.message : L('Não consegui enviar agora. Tente de novo.', "Couldn't send feedback. Try again."))
       setSending(false)
     }
   }
   return (
     <Modal title={L('Enviar feedback', 'Send feedback')} onClose={onClose} className="feedback">
       <p className="small muted modal__lead">{L('Vai direto pra quem faz o Tucano. Eu leio tudo.', 'It goes straight to the people who make Tucano. I read everything.')}</p>
-      <div className="feedback__kinds" role="radiogroup" aria-label={L('Tipo', 'Kind')}>
+      <div className="feedback__kinds" role="radiogroup" aria-label={L('Tipo', 'Type')}>
         {KINDS.map((k) => (
           <button key={k.kind} type="button" role="radio" aria-checked={kind === k.kind} className={`chip ${kind === k.kind ? 'is-on' : ''}`} onClick={() => setKind(k.kind)}>
             {k.label()}
@@ -141,7 +141,7 @@ export function FeedbackDialog({ image, draft, from, onClose }: { image?: Shot; 
           <button type="button" className="text-btn small" aria-expanded={peek} onClick={() => setPeek((v) => !v)}>
             {peek ? L('esconder a imagem', 'hide the picture') : L('ver a imagem', 'see the picture')}
           </button>
-          {peek && <img className="feedback__preview" src={`data:${image.type};base64,${image.data}`} alt={L('A imagem da tela que vai junto', 'The screen picture that goes along')} />}
+          {peek && <img className="feedback__preview" src={`data:${image.type};base64,${image.data}`} alt={L('A imagem da tela que vai junto', 'Screen image to be sent')} />}
         </div>
       )}
       <p className="feedback__what small">{what}</p>
@@ -222,7 +222,7 @@ export function SurveyLine(): ReactNode {
       await call('answerSurvey', { survey: survey.id, ...p, lang: lang() })
       return true
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : L('Não consegui enviar a resposta. Tente de novo.', "I couldn't send the answer. Try again."))
+      toast(e instanceof Error && e.message ? e.message : L('Não consegui enviar a resposta. Tente de novo.', "Couldn't send the answer. Try again."))
       return false
     } finally {
       setBusy(false)

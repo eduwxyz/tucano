@@ -1220,7 +1220,7 @@ void ready.then(async () => {
   await enginesReady
   routines.start()
   // A prompt of mine that was still queued when the app closed goes now (runs.ts, resumeQueued).
-  runner.resumeQueued()
+  void runner.resumeQueued()
   // A Tucano that had more people (or an invite out) before the heritage existed gets it now.
   if (db.people({ removed: true }).length > 1 || db.invites().length) inherit()
 }).catch((e: unknown) => {
@@ -1938,10 +1938,8 @@ const api: Handlers = {
 
   sendMessage: ({ conversationId, text, images, files, threadId, mode, steerTo }, ctx) => {
     reach(ctx, conversationId)
-    // `mode`: how this one joins a reply already running here (the window sends what Enter or the
-    // modifier keys said); without it, alongside it, as it always was.
-    const how = mode === 'queue' || mode === 'steer' || mode === 'interrupt' ? mode : undefined
-    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(how ? { mode: how } : {}), ...(steerTo ? { steerTo } : {}) }), 'sendMessage')
+    // `mode` 'steer': written in a running reply's own pill, for that reply (`steerTo`), not a prompt.
+    bg(runner.send(conversationId, text, images, threadId, ctx.person.id, { ...(files?.length ? { files } : {}), ...(mode === 'steer' ? { mode } : {}), ...(steerTo ? { steerTo } : {}) }), 'sendMessage')
   },
 
   typing: ({ conversationId, threadId, opened }, ctx) => {
@@ -1951,7 +1949,7 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
-  retryRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId)),
+  retryRun: ({ messageId, note }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId, note ?? undefined)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
   // The note a job left where it stopped on its brakes: Continuar, by whoever can see it.
@@ -2000,6 +1998,7 @@ const api: Handlers = {
     if (!isAutonomy(clean.autonomy)) delete clean.autonomy
     if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
     if (clean.proactive !== false) delete clean.proactive // on unless turned off
+    if (clean.oneAtATime !== true) delete clean.oneAtATime // as many at once unless turned on
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
     // One that already answered to the same agent keeps doing so: only a change is checked.
     if (!clean.reportsTo || clean.kind === 'tuca' || (db.agent(clean.id)?.reportsTo !== clean.reportsTo && !possibleBosses(db.agents(), clean.id).some((a) => a.id === clean.reportsTo))) delete clean.reportsTo

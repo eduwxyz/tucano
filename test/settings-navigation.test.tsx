@@ -177,7 +177,7 @@ describe('settings search and groups', () => {
     expect(hits[0]).toMatchObject({ term: 'Limits', section: { id: 'agents-limits' } })
     expect(hits.filter(hit => hit.section.id === 'agents-limits').length).toBeLessThanOrEqual(3)
     await render(<SettingsResults hits={[]} query="zzz" onPick={() => {}} />)
-    expect(document.querySelector('.settings-results__none')?.textContent).toContain('Nothing for “zzz”')
+    expect(document.querySelector('.settings-results__none')?.textContent).toContain('No results for “zzz”')
   })
 
   it('searches only what this person sees, and shows only the groups they have something in', () => {

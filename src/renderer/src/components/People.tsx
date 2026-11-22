@@ -480,7 +480,7 @@ function MeCard(): ReactNode {
                 ? L(`${covering.name} responde e aprova por você até ${time(me.delegateUntil!)}.`, `${covering.name} answers and approves for you until ${time(me.delegateUntil!)}.`)
                 : L('Enquanto você estiver fora, alguém responde às perguntas e decide as aprovações que seriam suas.', "Choose who handles your questions and approvals while you are away.")}
             </p>
-            {!covering && left && <p className="access-cover-hint small">{L('Quem não vê todo o time não aparece aqui: cobrir você é decidir aprovações de qualquer agente.', 'Who doesn’t see the whole team isn’t listed: covering for you means deciding approvals from any agent.')}</p>}
+            {!covering && left && <p className="access-cover-hint small">{L('Quem não vê todo o time não aparece aqui: cobrir você é decidir aprovações de qualquer agente.', 'Only people who can see the whole team are listed; they may need to approve actions from any agent.')}</p>}
             {!covering && (
               <div className="row row--center cover-row">
                 <select value={to} aria-label={L('Quem', 'Who')} onChange={(e) => setTo(e.target.value)}>
