@@ -35,6 +35,7 @@ export const tucaInstructions = (): string =>
       '- Olhe primeiro com ver_estado (a área que importa) e diga o que achou: o que está errado, por quê, e o próximo passo.',
       '- Você vê configurações, status e mensagens de erro, nunca o que foi dito nas conversas. Não peça pra pessoa colar conversas.',
       '- Login, conectar um serviço e chaves são com a pessoa: diga onde fazer, com o link da tela.',
+      '- Se for um bug do Tucano, ou a pessoa tiver uma ideia pra ele, ofereça mandar pra quem faz o Tucano e escreva com propor_feedback (se a ferramenta estiver aí). Ela revisa e envia pelo card.',
       '',
       'Pra montar um agente novo:',
       '- Pergunte pouco: no máximo três perguntas, uma por vez, curtas. O que o agente faz (peça um exemplo real), com quais sistemas trabalha e em que tom. O que a pessoa já disse, não pergunte de novo.',
@@ -74,6 +75,7 @@ export const tucaInstructions = (): string =>
       "- Look first with ver_estado (the area that matters) and say what you found: what's wrong, why, and the next step.",
       "- You see settings, statuses and error messages, never what was said in conversations. Don't ask the person to paste conversations.",
       '- Signing in, connecting a service and keys are up to the person: say where, with the link to the screen.',
+      "- If it's a bug in Tucano, or the person has an idea for it, offer to pass it on to the people who make Tucano and write it with propor_feedback (if the tool is there). They review it and send it from the card.",
       '',
       'To build a new agent:',
       "- Ask little: three questions at most, one at a time, short. What the agent does (ask for a real example), which systems it works with and in what tone. Don't ask again what the person already said.",
@@ -104,8 +106,9 @@ const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.',
 // Instructions a Tuca was made with, word for word (sha256, base64url), that came out since: one
 // still on them gets the ones of now. The first four: the screen links, which taught a Portuguese id
 // (#abrir/conectores) in an English workspace. The next two: before the rule on several new agents in
-// one reply (one propor_time, never two propor_agente). The last two: when every card waited for a
-// click, before his changes inside the app went in at once, with Desfazer.
+// one reply (one propor_time, never two propor_agente). The next two: when every card waited for a
+// click, before his changes inside the app went in at once, with Desfazer. The last two: before he
+// could write feedback for the people who make Tucano (propor_feedback).
 const OLD_TUCA_INSTRUCTIONS = [
   'GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY',
   't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c',
@@ -114,7 +117,9 @@ const OLD_TUCA_INSTRUCTIONS = [
   'BX29T9SVUHvdO_enbL9UwgWyIb0nAng8cy4-fkcU34I',
   'UiTBaE-bHpjZmJNa-klIjxUdSyEJi63YLU07EMeuA5s',
   'mSSoMbN3ASUDZPz5xVyTExbnAy-uU7zYnvlTZ43rE_M',
-  'OGc6ET18nng7NvpxtZ77XmDclbOm7fShxhyGtC6sWxk'
+  'OGc6ET18nng7NvpxtZ77XmDclbOm7fShxhyGtC6sWxk',
+  'HXDpJv5Ataxdf8OiNNv0T0Tu30mCw_Cx-2swmHoTIHg',
+  'X6w_Gxhrm4j66YtKOwBhDasegImSW9Y85Pih-IcaNLE'
 ]
 
 // A Tuca made before he helped with the app (or since): its role and instructions, as they come now.

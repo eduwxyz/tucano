@@ -15,6 +15,7 @@ import { CUT, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
+import { FeedbackDraftCard } from './Feedback'
 import { canEditChannel,
   agentById,
   askerIn,
@@ -614,6 +615,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           ))}
         {approval && (approval.state === 'pending' ? <ApprovalCard approval={approval} /> : <DecidedApproval approval={approval} />)}
         {(message.run?.agentDraft || proposalsOf(message.run).length > 0) && <Proposals message={message} />}
+        {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.delegations?.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
