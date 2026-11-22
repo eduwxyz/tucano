@@ -503,6 +503,7 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
   const nextStepsLine = (m: Message): string => {
     const steps = questionsOf(m.run).flatMap((q) => (q.options ?? []).map((o) => o.label)).join(' | ')
     if (m.run?.cancelled) return L(`(próximos passos que você propôs e a pessoa dispensou, não faça: ${steps})`, `(next steps you proposed and the person dismissed, don't do them: ${steps})`)
+    if (m.run?.stepsReplaced) return L(`(próximos passos que você propôs num card que um mais novo substituiu, sem escolha da pessoa, não faça sem ela pedir: ${steps})`, `(next steps you proposed on a card that a newer one replaced, not chosen by the person, don't do them unless they ask: ${steps})`)
     if (hasOpenSteps(m.run)) return L(`(próximos passos que você propôs num card, ainda sem escolha da pessoa, não faça sem ela pedir: ${steps})`, `(next steps you proposed on a card, not chosen by the person yet, don't do them unless they ask: ${steps})`)
     return L(`(próximos passos que você propôs num card: ${steps})`, `(next steps you proposed on a card: ${steps})`)
   }

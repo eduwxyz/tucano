@@ -47,6 +47,7 @@ export function AskCard({
   byline,
   answeredInText,
   cancelled,
+  closedAs,
   children
 }: {
   id: string
@@ -57,6 +58,7 @@ export function AskCard({
   byline?: string
   answeredInText?: boolean
   cancelled?: boolean | undefined
+  closedAs?: string // what a closed card says in place of "(cancelled)"
   children?: ReactNode
 }): ReactNode {
   // A next-steps card is a to-do, not a menu: it says so, in every mode.
@@ -65,7 +67,7 @@ export function AskCard({
   return (
     <section className={`ask ask--${mode}${steps ? ' ask--steps' : ''}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} steps={steps} />
-      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} /> : <Asked questions={questions} />}
+      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} closedAs={closedAs} /> : <Asked questions={questions} />}
       {children}
     </section>
   )
@@ -109,7 +111,7 @@ function Asked({ questions }: { questions: Decision[] }): ReactNode {
 }
 
 // Answered: each decision and what was chosen. Answered in writing: the questions, and a note.
-function Summary({ questions, answers, answeredInText, cancelled }: { questions: Decision[]; answers?: (Answer | null)[] | undefined; answeredInText?: boolean | undefined; cancelled?: boolean | undefined }): ReactNode {
+function Summary({ questions, answers, answeredInText, cancelled, closedAs }: { questions: Decision[]; answers?: (Answer | null)[] | undefined; answeredInText?: boolean | undefined; cancelled?: boolean | undefined; closedAs?: string | undefined }): ReactNode {
   const any = !!answers?.some(isAnswered)
   return (
     <>
@@ -119,7 +121,7 @@ function Summary({ questions, answers, answeredInText, cancelled }: { questions:
           return (
             <div key={i} className="ask-summary__row">
               <dt>{isLong(q) ? <Prose className="ask__prose" text={q.question} /> : q.question}</dt>
-              <dd className={cancelled || !a || !isAnswered(a) || a.skipped ? 'is-muted' : ''}>{cancelled ? L('(cancelada)', '(cancelled)') : a && isAnswered(a) ? answerLabel(q, a) : any ? L('respondida em texto', 'answered in text') : L('respondida na mensagem abaixo', 'answered in the message below')}</dd>
+              <dd className={cancelled || !a || !isAnswered(a) || a.skipped ? 'is-muted' : ''}>{cancelled ? (closedAs ?? L('(cancelada)', '(cancelled)')) : a && isAnswered(a) ? answerLabel(q, a) : any ? L('respondida em texto', 'answered in text') : L('respondida na mensagem abaixo', 'answered in the message below')}</dd>
             </div>
           )
         })}
@@ -358,9 +360,12 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
       )}
       <div className="ask__foot">
         <span className="ask__hint">{keyHint}</span>
-        <button className="btn btn--ghost btn--sm" onClick={skip}>
-          {L('Pular', 'Skip')}
-        </button>
+        {/* Skipping would wake the agent just to say so: a next-steps card only has Cancel, which closes it quietly. */}
+        {!steps && (
+          <button className="btn btn--ghost btn--sm" onClick={skip}>
+            {L('Pular', 'Skip')}
+          </button>
+        )}
         {(question.kind !== 'single' || writing) && (
           <button className="btn btn--primary btn--sm" disabled={!typed} onClick={confirm}>
             {steps && last ? L('Fazer estes', 'Do these') : last ? L('Enviar', 'Send') : L('Próxima', 'Next')}
@@ -429,6 +434,11 @@ export function NextStepsCard({ message, agentName }: { message: Message; agentN
   const who = agentName ?? L('O agente', 'The agent')
   const byline = team && target ? (target.id === you ? L(`${who} sugere a você`, `${who} suggests to you`) : L(`${who} sugere a ${target.name}`, `${who} suggests to ${target.name}`)) : undefined
   return <AskCard id={message.id} questions={questionsOf(message.run)} saved={message.run?.answers} mode={mine ? 'answer' : 'view'} badge={L('Opcional', 'Optional')} {...(byline ? { byline } : {})} />
+}
+
+// Next steps a newer card took the place of: closed, and neither answered nor dismissed by anyone.
+export function ReplacedStepsCard({ message }: { message: Message }): ReactNode {
+  return <AskCard id={message.id} questions={questionsOf(message.run)} mode="done" badge={L('Substituído', 'Replaced')} cancelled closedAs={L('(substituído por um card mais novo)', '(replaced by a newer card)')} />
 }
 
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it

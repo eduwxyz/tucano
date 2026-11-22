@@ -112,7 +112,7 @@ import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AnswersSummary, AskCard, asShown, cardAnswers, NextStepsCard } from './Decisions'
+import { AnswersSummary, AskCard, asShown, cardAnswers, NextStepsCard, ReplacedStepsCard } from './Decisions'
 import { hasOpenSteps, questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
@@ -652,6 +652,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {questionsOf(message.run).length > 0 &&
           (hasOpenSteps(message.run) ? (
             <NextStepsCard message={message} agentName={agent?.name} />
+          ) : message.run?.stepsReplaced ? (
+            <ReplacedStepsCard message={message} />
           ) : team && message.run?.askedTo ? (
             <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} cancelled={message.run.cancelled} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
           ) : (

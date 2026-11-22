@@ -1,6 +1,6 @@
 // A next-steps card from the built app: it opens with nothing ticked, holds nothing up when the
-// person writes something else instead, comes back as a message when ticked, fits a narrow window
-// and survives a restart. Usage: node scripts/screens-next-steps.mjs <folder for the frames>
+// person writes something else instead, comes back as a message when ticked, fits a narrow window,
+// survives a restart, gives way to a newer card and closes quietly on Cancel. Usage: node scripts/screens-next-steps.mjs <folder for the frames>
 import { _electron as electron } from 'playwright'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -42,11 +42,11 @@ async function send(text) {
 const openCard = () => win.locator('.ask--steps.ask--answer').last()
 const stored = () => {
   const db = new DatabaseSync(join(data, 'tucano.db'), { readOnly: true })
-  const cards = db.prepare("SELECT json_extract(run, '$.status') AS status, json_extract(run, '$.stepsOpen') AS open FROM messages WHERE json_extract(run, '$.questions[0].nextSteps') = 1 ORDER BY at").all()
+  const cards = db.prepare("SELECT json_extract(run, '$.status') AS status, json_extract(run, '$.stepsOpen') AS open, json_extract(run, '$.stepsReplaced') AS replaced FROM messages WHERE json_extract(run, '$.questions[0].nextSteps') = 1 ORDER BY at").all()
   const asked = db.prepare("SELECT count(*) AS n FROM questions WHERE state = 'open'").get().n
   const waiting = db.prepare("SELECT count(*) AS n FROM messages WHERE json_extract(run, '$.status') = 'waiting_input'").get().n
   db.close()
-  return { cards: cards.map((c) => `${c.status}${c.open ? '+open' : ''}`), openQuestions: asked, waitingReplies: waiting }
+  return { cards: cards.map((c) => `${c.status}${c.open ? '+open' : ''}${c.replaced ? '+replaced' : ''}`), openQuestions: asked, waitingReplies: waiting }
 }
 const log = (label, value) => console.log(`${label}:`, typeof value === 'string' ? value : JSON.stringify(value))
 
@@ -114,10 +114,21 @@ log('after a restart: stored', stored())
 await openCard().scrollIntoViewIfNeeded()
 await shot('06-depois-de-reiniciar')
 
-// 6. Skip still answers.
-await openCard().getByRole('button', { name: /^(Pular|Skip)$/ }).click()
+// 6. No Skip on this card, and a newer card from the same agent takes the place of the open one.
+log('Skip buttons on the card', await openCard().getByRole('button', { name: /^(Pular|Skip)$/ }).count())
+await send('@Lia mais uma vez, os próximos passos')
+await win.waitForTimeout(600)
+log('after a newer card: open cards', await win.locator('.ask--steps.ask--answer').count())
+log('after a newer card: stored', stored())
+await win.locator('.ask--steps.ask--done', { hasText: /Substituído|Replaced/ }).last().scrollIntoViewIfNeeded()
+await shot('07-substituido')
+
+// 7. Cancel closes it, and no one is woken.
+const replies = await win.locator('.msg').count()
+await openCard().getByRole('button', { name: /^(Cancelar|Cancel)$/ }).click()
 await settle()
-log('after Skip: stored', stored())
+log('messages added by Cancel', (await win.locator('.msg').count()) - replies)
+log('after Cancel: stored', stored())
 
 log('page errors', errors.length ? errors : 'none')
 await app.close()

@@ -33,7 +33,7 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
-import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
@@ -286,7 +286,8 @@ const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\
 const ANSWER_TEXT_MAX = 10_000
 function cleanAnswer(question: Decision, raw: Answer): Answer | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
-  if (raw.skipped === true) return { skipped: true }
+  // A next-steps card has no Skip: that would wake the agent to say nothing. Cancel closes it quietly.
+  if (raw.skipped === true) return isNextSteps(question) ? undefined : { skipped: true }
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim().slice(0, ANSWER_TEXT_MAX) : '')
   if (question.kind === 'text') {
     const text = str(raw.text)
@@ -3251,10 +3252,17 @@ ${note}`,
       const text = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
       // A card of next steps goes on a reply that's done: it asks nothing of anyone, so it's no question,
       // no inbox item and no slot. An approval or a question in the same turn is what counts instead.
-      const card = proposed && !questions && !waiting ? { questions: [proposed], stepsOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) } : {}
+      const carded = !!proposed && !questions && !waiting
+      const card = carded ? { questions: [proposed!], stepsOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) } : {}
       const run: Run = { ...base, ...card, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
-      // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
-      save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
+      // The new card and the closing of the one it replaces are written together: a restart finds one open, never two.
+      const replaced = db.tx(() => {
+        const closed = carded ? this.closeOpenSteps(agent.id, msg) : []
+        // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
+        save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
+        return closed
+      })
+      for (const old of replaced) emit({ type: 'message', message: old })
       // What the Tuca proposed inside the app goes in now, for the person he worked for (applyNow checks
       // what they may do); what grants access stays a card.
       // Something going wrong there leaves the cards as cards: never the reply.
@@ -3773,8 +3781,32 @@ ${note}`,
     return asked
   }
 
+  // A newer card took the place of the one this agent had open here. It closes as it was: what was
+  // ticked and never sent goes, nobody is told, and no turn starts. Saved by the caller, with the new card.
+  private closeOpenSteps(agentId: string, card: Message): Message[] {
+    const { db } = this.deps
+    const closed = db
+      .openStepsOf(agentId, card.conversationId, card.threadId)
+      .filter((m) => m.id !== card.id)
+      .map((m) => {
+        const { stepsOpen: _open, answers: _ticked, ...run } = m.run!
+        return { ...m, run: { ...run, stepsReplaced: true as const } }
+      })
+    for (const m of closed) db.saveMessage(m)
+    return closed
+  }
+
+  // A click on a card already replaced, from a window that hadn't heard yet: nothing goes out, and that window hears now.
+  private lateOnReplaced(messageId: string): boolean {
+    const card = this.deps.db.message(messageId)
+    if (!card?.run?.stepsReplaced) return false
+    this.deps.emit({ type: 'message', message: card })
+    return true
+  }
+
   // One decision answered on the card (null clears it): kept on the question until it's sent.
   answerDecision(messageId: string, index: number, answer: Answer | null, by: Person): void {
+    if (this.lateOnReplaced(messageId)) return
     const asked = this.decidable(messageId, by)
     const questions = questionsOf(asked.run)
     const question = questions[index]
@@ -3789,6 +3821,7 @@ ${note}`,
 
   // Sends the decisions answered on the card as the person's message, as if they wrote them.
   async submitDecisions(messageId: string, by: Person): Promise<void> {
+    if (this.lateOnReplaced(messageId)) return
     const asked = this.decidable(messageId, by)
     await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
   }
@@ -3797,6 +3830,7 @@ ${note}`,
   // was cancelled (context.ts). Work handed down the tree waits on it, though: there, cancelling means "I won't answer",
   // not "stop", so whoever does the work goes on without the answer, assuming what it must and saying so.
   cancelQuestion(messageId: string, by: Person): void {
+    if (this.lateOnReplaced(messageId)) return
     const { db, emit } = this.deps
     const asked = this.decidable(messageId, by)
     // Next steps dismissed: the card closes, and that's all. Nothing waited on it.

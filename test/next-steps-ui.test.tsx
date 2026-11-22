@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { Decision } from '../src/shared/questions'
-import { AskCard, cardAnswers } from '../src/renderer/src/components/Decisions'
+import { AskCard, cardAnswers, ReplacedStepsCard } from '../src/renderer/src/components/Decisions'
 import type { Message } from '../src/shared/types'
 
 vi.mock('../src/renderer/src/store', async (original) => {
@@ -35,9 +35,28 @@ describe('the next-steps card', () => {
     expect(html).toContain('ask--steps')
     expect(html).toContain('nada começa marcado')
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Fazer estes/)
-    // Skip still answers, and a step can still be written by hand.
-    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Pular/)
+    // A step can still be written by hand, and Cancel is the only way to wave it off.
     expect(html).toContain('Outro passo…')
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Cancelar/)
+    expect(html).not.toContain('Pular')
+  })
+
+  it('keeps Skip on a plain question', () => {
+    const html = card(question())
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Pular/)
+    expect(html).toContain('Cancelar')
+  })
+
+  it('reads as replaced once a newer card took its place, with nothing to click', () => {
+    const message: Message = { id: 'm1', conversationId: 'c', author: { kind: 'agent', id: 'a1' }, text: '', at: 1, run: { status: 'done', steps: [], depth: 1, questions: steps(), stepsReplaced: true } }
+    const html = renderToStaticMarkup(<ReplacedStepsCard message={message} />)
+    expect(html).toContain('Substituído')
+    expect(html).toContain('substituído por um card mais novo')
+    expect(html).toContain('ask--done')
+    expect(html).not.toContain('Respondida')
+    expect(html).not.toContain('Cancelada')
+    expect(html).not.toContain('role="checkbox"')
+    expect(html).not.toContain('Fazer estes')
   })
 
   it('sends them as a to-do: "Do these", not "Send"', () => {

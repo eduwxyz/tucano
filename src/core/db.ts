@@ -1482,6 +1482,14 @@ export class Db {
     return rows.map((r) => this.toMessage(r))
   }
 
+  // The next-steps cards an agent still has open in one place: a conversation's main line, or one thread.
+  openStepsOf(agentId: string, conversationId: string, threadId: string | undefined): Message[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM messages WHERE conversation_id = ? AND thread_id IS ? AND author_kind = 'agent' AND author_id = ? AND run IS NOT NULL AND json_extract(run, '$.status') = 'done' AND json_extract(run, '$.stepsOpen') = 1 ORDER BY at`)
+      .all(conversationId, threadId ?? null, agentId) as Row[]
+    return rows.map((r) => this.toMessage(r))
+  }
+
   // The replies whose run is in one of these states, oldest first. Found in SQL: the rest of
   // the messages are never parsed.
   messagesWithRun(statuses: Run['status'][]): Message[] {
