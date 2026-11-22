@@ -38,7 +38,7 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
     url = base
     // The same server under another name: a site, for the once-per-site rule, is the host.
     other = base.replace('127.0.0.1', 'localhost') + 'other/'
-    chrome = new ChromeBrowsers(mkdtempSync(join(tmpdir(), 'tucano-chrome-')), (id, s) => shown.push(`${id}:${s}`))
+    chrome = new ChromeBrowsers(mkdtempSync(join(tmpdir(), 'tucano-chrome-')), (id, s) => shown.push(`${id}:${s}`), undefined, undefined, false, undefined, undefined, true)
   })
 
   afterAll(async () => {

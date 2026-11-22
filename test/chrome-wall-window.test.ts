@@ -60,8 +60,8 @@ describe.skipIf(process.platform === 'win32' || !hasChrome())('a lane switching 
   const launches = (): string[] => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [])
   const windows = (lane: string): string[] => launches().filter((l) => l.includes('--new-window') && l.includes(join(root, lane)))
   const pids = (lane: string): number[] => launches().filter((l) => l.includes(join(root, lane))).map((l) => Number(l.split(' ')[0]))
-  const browsers = (dir: string): ChromeBrowsers => {
-    const b = new ChromeBrowsers(join(root, dir), (id, s) => shown.push(`${id}:${s}`), bin)
+  const browsers = (dir: string, wallWindows = true): ChromeBrowsers => {
+    const b = new ChromeBrowsers(join(root, dir), (id, s) => shown.push(`${id}:${s}`), bin, undefined, false, undefined, undefined, wallWindows)
     lanes.push(b)
     return b
   }
@@ -92,6 +92,17 @@ describe.skipIf(process.platform === 'win32' || !hasChrome())('a lane switching 
     await new Promise((r) => server.close(r))
     await new Promise((r) => setTimeout(r, 300))
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  })
+
+
+  // On a Mac the window comes to the front and takes the focus, so a wall opens none there by itself.
+  it('opens no window for a wall where windows are off, and the lane stays as it was', async () => {
+    const lane = browsers('no-wall-windows', false)
+    await lane.run('a', 'open', { url })
+    expect((await lane.run('a', 'headful')).headful).toBe(false)
+    expect(windows('no-wall-windows')).toEqual([])
+    expect(lane.running('a')).toBe(true)
+    await lane.run('a', 'close')
   })
 
   it('keeps the agent driving, keeps the login, comes into view without a reload, and never asks twice', async () => {

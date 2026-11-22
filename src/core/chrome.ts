@@ -288,7 +288,12 @@ export class ChromeBrowsers {
     // same page when next needed: on a server several people share, each costs hundreds of MB.
     private idleMs?: number,
     // Where each agent's downloads land (core/downloads.ts); without it, nothing downloads.
-    private downloads?: (agentId: string) => string
+    private downloads?: (agentId: string) => string,
+    // Whether a wall may open a real window by itself. Not on a Mac for now: Chrome started this way
+    // comes to the front and takes the focus from what the person is doing (measured 2026-11-22, about
+    // 8 s across a run), and macOS won't keep the window off the screen either. There the wall's note
+    // stands: wait, use another source, or ask the person to take the browser over.
+    private wallWindows = process.platform !== 'darwin'
   ) {
     process.on('exit', () => this.quit())
     if (idleMs) setInterval(() => void this.closeIdle(), Math.min(60_000, Math.max(100, idleMs / 2))).unref()
@@ -500,7 +505,7 @@ export class ChromeBrowsers {
     const here = { url: t?.url ?? '', title: '' }
     // A window needs a screen, and nothing here may race a lane that is starting, closing or being
     // handed back: the answer is no, and the page's own note still says what to do.
-    if (this.windowless || !this.bin) return { ...here, headful: false }
+    if (this.windowless || !this.wallWindows || !this.bin) return { ...here, headful: false }
     const going = this.relaunching.get(agentId)
     if (going) return going // two calls that met the same wall get the same window
     if (!t || this.starting.has(agentId) || this.handingBack.has(agentId) || this.closing.has(agentId)) return { ...here, headful: false }
