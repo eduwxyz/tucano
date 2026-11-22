@@ -55,6 +55,11 @@ export const ADD_ON_PINS: AddOnPins = {
       version: '1.7.5',
       url: 'https://clients2.googleusercontent.com/crx/blobs/ARGaeZIWzwtYWH25rBBM1OLZ557z-BJebvHBwk7lVJ3NyezwMu5RXIDQ0fkSBAICJHfwgYovI8NAZcBryu2s0tdfTQ1JFbJINLNXIR_9S_avD_kDaBcixADGUprl-eO_rs2Ze0N_itKWLNJRz_1TV5c/IBCKHPIJBDMDOBHHHODKCEFFDNGNGLPK_1_7_5_0.crx',
       sha256: 'ce92b9df4977fbc9add0cef3dfaaeb99e8d5b0418bfa164ac53659cbec970caf'
+    },
+    defuddle: {
+      version: '0.1.1',
+      url: 'https://clients2.googleusercontent.com/crx/blobs/ARGaeZKkX7L9ZSetM_4FwAGb2_-Rk45gjhqpc-_4DL2HOeM5qfY-1JTPodXce3M_c9f9JsO6ZM0C6dT8HjoKykOwq0PvSKURD5cic_4wDl2ymwQ7ZrIcFOMDHhiE6N9O0d8AxlKa5duo7yjBKr1Vi61doRfEWG9vDmhu/ECDJINKMPHEGLIKJIDCFJIDCNFILJIKC_0_1_1_0.crx',
+      sha256: '1499b3001ff3547367138d984c29b90cca05f45c6b84fcbe2744ed720c124eb3'
     }
   },
   consentRules: {

@@ -1,4 +1,4 @@
-// The five extensions an agent's browser can carry, one row each (Settings › Agents › Extensões do
+// The six extensions an agent's browser can carry, one row each (Settings › Agents › Extensões do
 // navegador), and under them one switch for how that browser behaves. Each row is its own switch: on
 // downloads it, sets it up for an agent and puts it in the next session's browser; off takes its folder
 // off the disk. The catalogue of the five lives in shared/addons.ts, which the core also installs from,
@@ -17,7 +17,8 @@ const LOOK: Record<AddOn, { icon: IconName; fixes: () => string }> = {
   cookies: { icon: 'hide', fixes: () => L('Fecha o aviso de cookies sozinho, e o banner sai da frente do artigo.', 'Closes the cookie notice by itself, and the banner leaves the article alone.') },
   consent: { icon: 'ask', fixes: () => L('Responde o diálogo de consentimento, inclusive as listas de “interesse legítimo”.', 'Answers the consent dialog, including the “legitimate interest” lists.') },
   popups: { icon: 'layers', fixes: () => L('Tira da frente o que fica por cima da página: barras fixas, gavetas, pop-ups.', 'Clears what sits on top of the page: sticky bars, drawers, pop-ups.') },
-  clutter: { icon: 'book', fixes: () => L('Deixa a página só com o que se lê. Muda o desenho da página: o print deixa de ser o do site.', 'Leaves the page as what is readable. It changes how the page looks: a screenshot stops being the site’s.') }
+  clutter: { icon: 'book', fixes: () => L('Deixa a página só com o que se lê. Muda o desenho da página: o print deixa de ser o do site.', 'Leaves the page as what is readable. It changes how the page looks: a screenshot stops being the site’s.') },
+  defuddle: { icon: 'file-text', fixes: () => L('Extrai o artigo da página como texto limpo, sem menus, anúncios ou rodapés. O agente lê o que importa.', 'Pulls the article out of the page as clean text, no menus, ads or footers. The agent reads what matters.') }
 }
 
 export function AgentAddOns(): ReactNode {

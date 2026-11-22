@@ -343,7 +343,7 @@ describe('which Chrome for Testing a computer takes', () => {
 })
 
 describe('installing them, one switch each', () => {
-  const all = { ads: true, cookies: true, consent: true, popups: true, clutter: true }
+  const all = { ads: true, cookies: true, consent: true, popups: true, clutter: true, defuddle: true }
 
   it('unpacks the five extensions and the browser, and the second call fetches nothing', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'addons-'))
@@ -362,11 +362,11 @@ describe('installing them, one switch each', () => {
     expect(addOns.info?.extensions.popups?.state).toBe('ready')
     expect(addOns.info?.extensions.clutter?.state).toBe('ready')
     expect(addOns.info?.browser.state).toBe('ready')
-    // The five pinned .crx, the rules of the one that reads them, and the browser's own zip: no index, no "latest".
+    // The six pinned .crx, the rules of the one that reads them, and the browser's own zip: no index, no "latest".
     expect([...asked].sort()).toEqual([...ADD_ONS.map((e) => storeUrl(e.id)), ...RULE_URLS, BROWSER_URL].sort())
     expect(changes).toBeGreaterThan(1)
     // Each one in its own folder, with the file Chrome reads at the top of it.
-    expect(addOns.dirs).toHaveLength(5)
+    expect(addOns.dirs).toHaveLength(6)
     for (const e of ADD_ONS) expect(existsSync(join(dir, 'extensions', e.id, 'manifest.json'))).toBe(true)
     // These fixtures are zip files with nothing of the vendor's code in them, so the set-up edits find no
     // file to change: each row says so, and the extension still arrives and still works as its store build.
@@ -505,7 +505,7 @@ describe('installing them, one switch each', () => {
     expect(addOns.info?.extensions.cookies?.error).toMatch(/without the file Chrome reads/)
     expect(existsSync(join(dir, 'extensions', ADD_ONS[1]!.id))).toBe(false)
     expect(existsSync(join(dir, 'extensions', `${ADD_ONS[1]!.id}.part`))).toBe(false)
-    expect(addOns.dirs).toHaveLength(4)
+    expect(addOns.dirs).toHaveLength(5)
   })
 
   it('refuses a browser download with no program inside it', async () => {
@@ -516,7 +516,7 @@ describe('installing them, one switch each', () => {
     expect(addOns.info?.browser.error).toMatch(/without the program inside/)
     expect(addOns.bin).toBe('')
     // The extensions landed and are ready: what is missing is the browser that could carry them.
-    expect(addOns.dirs).toHaveLength(5)
+    expect(addOns.dirs).toHaveLength(6)
     expect(addOns.ready).toBe(false)
   })
 
@@ -544,7 +544,7 @@ describe('installing them, one switch each', () => {
     await p
     expect(readdirSync(dir).filter((f) => f.endsWith('.part'))).toEqual([])
     // What already arrived stays, so switching it on again is not from zero.
-    expect(addOns.dirs).toHaveLength(5)
+    expect(addOns.dirs).toHaveLength(6)
     expect(existsSync(join(dir, 'extensions', ADD_ONS[0]!.id, 'manifest.json'))).toBe(true)
   })
 })

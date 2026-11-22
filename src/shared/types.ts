@@ -674,7 +674,7 @@ export type BrowserOp =
 
 
 // The extensions an agent's browser can carry (shared/addons.ts lists them), each with its own switch.
-export type AddOn = 'ads' | 'cookies' | 'consent' | 'popups' | 'clutter'
+export type AddOn = 'ads' | 'cookies' | 'consent' | 'popups' | 'clutter' | 'defuddle'
 export type BrowserAddOns = Partial<Record<AddOn, boolean>>
 
 // Where one of them is. On means downloaded and loaded into the browser of the next session; off removes

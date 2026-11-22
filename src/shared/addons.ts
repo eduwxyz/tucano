@@ -21,7 +21,8 @@ export const ADD_ONS: readonly AddOnExtension[] = [
   { key: 'cookies', id: 'edibdbjcniadpccecjdfdjjppcpchdlm', name: "I still don't care about cookies" },
   { key: 'consent', id: 'mdjildafknihdffpkfmmpnpoiajfjnjd', name: 'Consent-O-Matic' },
   { key: 'popups', id: 'ifnkdbpmgkdbfklnbfidaackdenlmhgh', name: 'PopUpOFF' },
-  { key: 'clutter', id: 'ibckhpijbdmdobhhhodkceffdngnglpk', name: 'Unclutter' }
+  { key: 'clutter', id: 'ibckhpijbdmdobhhhodkceffdngnglpk', name: 'Unclutter' },
+  { key: 'defuddle', id: 'ecdjinkmpheglikjidcfjidcnfiljikc', name: 'Defuddle Clip' }
 ]
 
 // What each extension ships set to, and what the app changes it to (core/chrome-addons.ts writes it into
