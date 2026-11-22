@@ -55,19 +55,22 @@ for more than two lines. Destructive and privacy warnings may need more space;
 record the reason and verify that the full warning remains visible. Text must
 not be clipped, hidden or reduced in size to pass a measurement.
 
-The [evidence package](https://github.com/apoapostolov/tucano/tree/c2b8407b75fc61beea0e1b9f2b8cc473bc882ef6/docs/english-copy-phase2/evidence)
+The [evidence package](https://github.com/apoapostolov/tucano/tree/c548ff8ae7c5c999abf4d174e20d95868721bcb5/docs/english-copy-phase2/evidence)
 contains 16 annotated before/after frames: 12 Settings groups, forgotten memory,
 Vault login validation, feedback with an attachment, and a one-time routine.
 They show actual built components with synthetic data. The attachment fixture is
 synthetic and no feedback was submitted. Original component screenshots appear
 in full at their original size; annotations sit outside the application image.
 
-The baseline is `98554fdd007637409696f98e061973b5ca9338c6`; the measured
-candidate is `3d2f538e5ff6ce4ba1f806da26950bbd02ee8db2`. Headless Edge used
+Frames 02 and 05 compare upstream `2e388641` with candidate `a6f698ed`.
+The remaining 14 compare the initial baseline `98554fdd` with `3d2f538e`;
+their affected components retain those revisions. Each frame names its capture
+SHAs, and the manifest records full source SHAs and image hashes. Headless Edge used
 900- and 1280-pixel viewports, 900 pixels high, with device scale 1. JSON records
 the actual font, available width, character count, line count and overflow.
 There are 116 Settings/Wiki measurements and 12 additional-state measurements
-per version, with no overflow. Changed ordinary hints in the captured states fit
+per version, plus ten new reasoning/reply-mode measurements per version.
+The proposed text has no overflow or failed measurements. Changed ordinary hints in the captured states fit
 within two lines. The complete Tuca application/Undo explanation and destructive
 backup-restore disclosure take three lines; the layout review records why their
 full consequences must remain visible. Three other long measurements are
@@ -85,15 +88,19 @@ certify every conditional tooltip, user-facing error or permission state.
 ## Validation status
 
 `npm run typecheck`, `npm run build`, `git diff --check` and the affected test
-selection pass (9 files, 93 tests). Parsed-source comparison confirms that all
+selections pass (9 files / 86 tests and 4 files / 42 tests) on the verified
+pushed head `a6f698ed`. Parsed-source comparison confirms that all
 195 source changes are English arguments of `L(...)` across 34 files;
 Portuguese and the surrounding application syntax are unchanged. One Settings
 navigation test expectation now matches the revised empty-result text.
 
-The complete suite reports 239 files and 2,381 tests passing, with two failures:
+The initial candidate, before merging the newer upstream commits, reported
+239 files and 2,381 tests passing, with two failures:
 the routine calendar fixture fails identically on the unchanged baseline, and
 the Tuca batch test intermittently reaches its 20-second polling deadline while
 the reply is still working. The unchanged candidate also passed all 11 Tuca
 tests. A diagnostic copy with only that polling deadline extended passed all 11;
 the slow case took 23.3 seconds. No production behavior or test deadline was
-changed to conceal these failures. The full suite is not claimed green.
+changed to conceal these failures. Upstream #619 subsequently corrected the
+calendar fixture and is included here. A full-suite rerun on the current pushed
+head is in progress; the earlier result does not describe a fresh full run.
