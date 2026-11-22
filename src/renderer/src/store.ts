@@ -379,7 +379,20 @@ export const workingIds = (s: State, conversationId: string, threadId?: string):
   conversationIndex(s, conversationId)
     .working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
     .map((m) => m.id)
+export const allWorkingIds = (s: State, conversationId: string): string[] =>
+  conversationIndex(s, conversationId)
+    .working.filter((m) => m.author.kind === 'agent')
+    .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
+// The approvals still waiting on this person here, oldest first: what the reminder over the field
+// counts, and what Review goes back to. In the thread it counts only the ones asked in it. Whose
+// decision it is comes from the inbox, the core's own answer: a command on someone's lent computer
+// is theirs alone, even for an admin.
+export const approvalsIn = (s: State, conversationId: string, threadId?: string): Approval[] =>
+  s.approvals
+    .filter((a) => a.state === 'pending' && a.conversationId === conversationId && s.inbox.approvals.some((i) => i.id === a.id))
+    .filter((a) => (s.messages[conversationId]?.find((m) => m.id === a.messageId)?.threadId ?? undefined) === threadId)
+    .sort((a, b) => a.createdAt - b.createdAt)
 export const lastBrowserIn = (s: State, conversationId: string, agentId: string): string | undefined => conversationIndex(s, conversationId).browser.get(agentId)
 
 // Across conversations, once per change.
@@ -1079,8 +1092,17 @@ export const continueRun = (messageId: string): void => void fire(L('Não conseg
 // The note where a piece of work stopped on its brakes (message.stop): the work goes on from there.
 export const continueJob = (messageId: string): void => void fire(L('Não consegui continuar o trabalho.', "I couldn't continue the work."), 'continueJob', { messageId })
 
-export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
-  void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })
+// Returns whether the core acknowledged the decision: the card keeps its controls disabled until it
+// hears one, and when it doesn't hear one it says so instead of pretending the call went through.
+export const decideApproval = async (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): Promise<boolean> => {
+  try {
+    await call('decideApproval', { id, decision, reason, always })
+    return true
+  } catch (e) {
+    if (!state.coreDown) toast(`${decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it.")} ${e instanceof Error && e.message ? e.message : L('Tente de novo.', 'Try again.')}`)
+    return false
+  }
+}
 
 const memoryFailed = (): string => L('Não consegui salvar a memória.', "I couldn't save the memory.")
 export const addMemory = (scope: MemoryScope, text: string): void => void fire(memoryFailed(), 'addMemory', { scope, text })
@@ -1179,6 +1201,7 @@ export const setJevKey = (key: string | null): Promise<void> => call('setJevKey'
 // An address in OpenAI's format the agents run on with no harness: tried (what it lists), then saved.
 export const probeEndpoint = (baseUrl: string, key?: string): Promise<{ models: string[]; error?: string }> => call('probeEndpoint', { baseUrl, ...(key ? { key } : {}) })
 export const setEndpoint = (baseUrl: string, models: string[], key?: string | null): Promise<void> => call('setEndpoint', { baseUrl, models, ...(key !== undefined ? { key } : {}) })
+export const setClassifierKey = (id: string, key: string | null): Promise<void> => call('setClassifierKey', { id, key })
 export const engineModels = (engine: EngineId): Promise<{ models: string[]; labels?: Record<string, { label: string; hint?: string }>; error?: string }> => call('engineModels', { engine })
 export const testEngine = (model: string): Promise<{ ok: boolean; message: string; seconds?: number }> => call('testEngine', { model })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
