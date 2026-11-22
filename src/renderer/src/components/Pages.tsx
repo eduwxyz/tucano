@@ -3693,8 +3693,8 @@ export function SettingsPage(): ReactNode {
               title={L('Bloqueador de anúncios e avisos de cookies', 'An ad blocker, and consent notices answered')}
               section="agents-addons"
               lead={L(
-                'Abre o navegador dos agentes com as extensões que você ligar, para a página que ele lê ser a página: um aviso por cima dela não parece mais que o site mudou, e o agente deixa de clicar no mesmo lugar. Cada uma é um interruptor: ligada, é baixada e entra no navegador da próxima sessão; desligada, sai do disco. As três rodam no Chrome for Testing, que baixa uma vez (215 MB, na pasta de dados do app), porque o Chrome comum só aceita extensão da própria loja desde a versão 158.',
-                'Opens the agents’ browser with the extensions you switch on, so the page it reads is the page: a notice over it no longer reads as the site having changed, and the agent stops clicking the same place. Each one is a switch of its own: on, it is downloaded and joins the next session’s browser; off, it leaves the disk. All three run on Chrome for Testing, downloaded once (215 MB, into the app’s data folder), because the branded Chrome has taken only its own store’s extensions since version 158.'
+                'O navegador dos agentes roda com as extensões que você ligar, para o agente ler a própria página: nenhum aviso de cookies ou anúncio fica por cima dela. Cada uma é um interruptor; as três dividem 215 MB de Chrome for Testing.',
+                'The agents’ browser runs with the extensions you turn on, so what an agent reads is the page itself: no cookie notice or ad sits over it. Each has its own switch; the three share one 215 MB Chrome for Testing download.'
               )}
             >
               <AgentAddOns />
