@@ -15,7 +15,6 @@ export interface Decision {
   kind: DecisionKind
   options?: DecisionOption[]
   nextSteps?: true // a list of next steps, not a question: every option starts ticked and the card sends them as a to-do
-  ticked?: number[] // which options start ticked when it isn't all of them (Jev said which are worth doing now)
 }
 export interface Answer {
   chosen?: number[] // indexes into the options
@@ -68,15 +67,12 @@ export function isNewQuestion(message: Message): boolean {
   return message.run?.status === 'waiting_input' && !message.run.answers && questionsOf(message.run).length > 0
 }
 
-// A list of next steps: the card reads as a to-do, and it starts with everything ticked (or with
-// the ones Jev found worth doing now) — the opposite of a question, where nothing is picked.
+// A list of next steps: the card reads as a to-do, and it starts with everything ticked — the
+// opposite of a question, where nothing is picked.
 export const isNextSteps = (question: Decision): boolean => question.nextSteps === true
 
 export function startsTicked(question: Decision): number[] {
-  if (!question.nextSteps) return []
-  const all = (question.options ?? []).map((_, i) => i)
-  const picked = question.ticked
-  return picked ? all.filter((i) => picked.includes(i)) : all
+  return question.nextSteps ? (question.options ?? []).map((_, i) => i) : []
 }
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')

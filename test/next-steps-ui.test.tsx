@@ -1,5 +1,4 @@
-// The next-steps card: a to-do, not a menu. Every box starts ticked (or the ones Jev picked), and
-// the card says what it is — while a question keeps opening with nothing chosen.
+// The next-steps card: a to-do, not a menu. The card says what it is.
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { Decision } from '../src/shared/questions'
@@ -10,13 +9,12 @@ vi.mock('../src/renderer/src/store', async (original) => {
   return { ...real, answerDecision: () => {}, submitDecisions: async () => {} }
 })
 
-const steps = (ticked?: number[]): Decision[] => [
+const steps = (): Decision[] => [
   {
     question: 'O que vem agora?',
     kind: 'multiple',
     nextSteps: true,
-    options: [{ label: 'Rodar a suíte inteira' }, { label: 'Traduzir os rótulos novos' }, { label: 'Escrever o teste do card' }, { label: 'Publicar as capturas' }],
-    ...(ticked ? { ticked } : {})
+    options: [{ label: 'Rodar a suíte inteira' }, { label: 'Traduzir os rótulos novos' }, { label: 'Escrever o teste do card' }, { label: 'Publicar as capturas' }]
   }
 ]
 
@@ -34,14 +32,6 @@ describe('the next-steps card', () => {
     expect(html).toContain('Próximos passos')
     expect(html).toContain('ask--steps')
     expect(html).toContain('todas começam marcadas')
-  })
-
-  it('ticks only the steps Jev found worth doing now', () => {
-    const html = card(steps([0, 2]))
-    expect(count(html, 'aria-checked="true"')).toBe(2)
-    expect(html).toMatch(/aria-checked="true"[^>]*>.*?Rodar a suíte inteira/s)
-    expect(html).toMatch(/aria-checked="true"[^>]*>.*?Escrever o teste do card/s)
-    expect(html).toMatch(/aria-checked="false"[^>]*>.*?Traduzir os rótulos novos/s)
   })
 
   it('sends them as a to-do: "Do these", not "Send"', () => {

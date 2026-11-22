@@ -1,6 +1,4 @@
-// Next steps: an agent proposes the work that comes after its reply as a card of checkboxes, every
-// box ticked — the opposite of a question, where nothing is picked. With Jev turned on in the
-// settings, only the steps it would do now keep their tick.
+// Next steps: an agent proposes the work that comes after its reply as a card of checkboxes.
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +9,6 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
-import { stepsWorthDoing } from '../src/core/jev'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -47,29 +44,12 @@ const four = (): Decision => {
   return r.decision
 }
 
-// A stand-in for TypeSafe: one request per step, answering `do` or `later` by the step number the
-// state ends with, and keeping every request so the test can read what was asked.
-function typesafe(picks: ('do' | 'later')[], status?: number) {
-  const bodies: { model: string; state: string; questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> }> }[] = []
-  const f = (async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(init.body as string) as (typeof bodies)[number]
-    bodies.push(body)
-    if (status) return new Response('no', { status })
-    const last = [...body.state.matchAll(/^(\d+)\. /gm)].pop()
-    const i = Number(last?.[1] ?? 1) - 1
-    return Response.json({ answers: { pick: { type: 'choice', choice: picks[i] ?? 'do', probabilities: {} } } })
-  }) as unknown as typeof fetch
-  return { f, bodies }
-}
-
 describe('what next_steps takes', () => {
   it('makes one multiple decision, marked as steps, with the question it was given', () => {
     const d = four()
     expect(d).toMatchObject({ question: 'O que vem agora?', kind: 'multiple', nextSteps: true })
     expect(d.options?.map((o) => o.label)).toEqual(['Rodar a suíte inteira', 'Traduzir os rótulos novos', 'Escrever o teste do card', 'Publicar as capturas'])
     expect(d.options?.[0]?.description).toBe('o que já está escrito')
-    // Nothing says which side of the list is ticked: with no subset, every box starts ticked.
-    expect(d.ticked).toBeUndefined()
   })
 
   it('takes a step as a bare string, and titles the card when it is not told one', () => {
@@ -91,43 +71,6 @@ describe('which boxes start ticked', () => {
   it('all of them on a next-steps list, none on a question', () => {
     expect(startsTicked(four())).toEqual([0, 1, 2, 3])
     expect(startsTicked({ question: 'Qual?', kind: 'multiple', options: [{ label: 'a' }, { label: 'b' }] })).toEqual([])
-  })
-
-  it('only the ones ticked says, when Jev picked a subset', () => {
-    expect(startsTicked({ ...four(), ticked: [0, 2] })).toEqual([0, 2])
-    // An index that no longer exists (a shorter list) is dropped rather than drawn.
-    expect(startsTicked({ ...four(), ticked: [0, 9] })).toEqual([0])
-  })
-})
-
-describe('Jev and the steps', () => {
-  const ask = (picks: ('do' | 'later')[], status?: number) => {
-    const api = typesafe(picks, status)
-    return { api, run: stepsWorthDoing({ key: 'ts-key', decision: four(), context: 'Terminei a issue #286.', fetch: api.f }) }
-  }
-
-  it('asks one question per step, each carrying the whole list and the step itself', async () => {
-    const { api, run } = ask(['do', 'later', 'do', 'later'])
-    const r = await run
-    expect('ticked' in r && r.ticked).toEqual([0, 2])
-    expect(api.bodies).toHaveLength(4)
-    expect(api.bodies.every((b) => b.questions.pick?.type === 'choice')).toBe(true)
-    // The step is in its own request: four calls over one identical state would be four blind guesses.
-    const about = api.bodies.map((b) => [...b.state.matchAll(/^(\d+)\. /gm)].pop()?.[1]).sort()
-    expect(about).toEqual(['1', '2', '3', '4'])
-    expect(api.bodies.some((b) => b.state.includes('Publicar as capturas'))).toBe(true)
-    expect(api.bodies.every((b) => b.questions.pick?.criteria['do'] && b.questions.pick?.criteria['later'])).toBe(true)
-  })
-
-  it('never empties the list: when every step can wait, all of them stay ticked', async () => {
-    const { run } = ask(['later', 'later', 'later', 'later'])
-    const r = await run
-    expect('ticked' in r && r.ticked).toEqual([0, 1, 2, 3])
-  })
-
-  it('a failure is an error the caller can ignore, not a list with nothing ticked', async () => {
-    const { run } = ask(['do', 'do', 'do', 'do'], 500)
-    expect(await run).toMatchObject({ error: expect.any(String) })
   })
 })
 
@@ -160,55 +103,28 @@ describe('the card an agent gets', () => {
     return () => gateway.stop()
   })
 
-  const runner = (api: ReturnType<typeof typesafe>, key: string | undefined): Runner =>
+  const runner = (): Runner =>
     new Runner({
       db,
       engines: engines(fakeEngine('claude', { delayMs: 1 })),
       settings: async () => settings,
       emit: () => {},
       workDir: mkdtempSync(join(tmpdir(), 'steps-work-')),
-      gateway,
-      jev: { key: async () => key, fetch: api.f }
+      gateway
     })
 
-  it('leaves every box ticked when Jev is off, and sends no step to TypeSafe', async () => {
-    const api = typesafe(['do', 'later', 'do', 'later'])
-    const r = runner(api, 'ts-key')
+  it('puts the steps on one card', async () => {
+    const r = runner()
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     const q = asked()
     expect(q?.run?.questions).toHaveLength(1)
     expect(q?.run?.questions?.[0]).toMatchObject({ nextSteps: true, kind: 'multiple' })
     expect(q?.run?.questions?.[0]?.options).toHaveLength(4)
-    expect(q?.run?.questions?.[0]?.ticked).toBeUndefined()
-    expect(api.bodies).toHaveLength(0)
-  })
-
-  it('with Jev on, only the steps worth doing now start ticked', async () => {
-    settings = { ...settings, jevNextSteps: true }
-    const api = typesafe(['do', 'later', 'do', 'later'])
-    const r = runner(api, 'ts-key')
-    await r.send('d1', '@lia me dá os próximos passos')
-    await r.idle()
-    expect(asked()?.run?.questions?.[0]?.ticked).toEqual([0, 2])
-    expect(api.bodies).toHaveLength(4)
-    // The ticks are decided before the card, unlike the pill: there is nothing to redraw afterwards.
-    expect(asked()?.run?.status).toBe('waiting_input')
-  })
-
-  it('a TypeSafe failure leaves every box ticked', async () => {
-    settings = { ...settings, jevNextSteps: true }
-    const api = typesafe(['do', 'later', 'do', 'later'], 500)
-    const r = runner(api, 'ts-key')
-    await r.send('d1', '@lia me dá os próximos passos')
-    await r.idle()
-    expect(asked()?.run?.questions?.[0]?.ticked).toBeUndefined()
   })
 
   it('what stays ticked comes back as the next message, and nothing else does', async () => {
-    settings = { ...settings, jevNextSteps: true }
-    const api = typesafe(['do', 'later', 'do', 'later'])
-    const r = runner(api, 'ts-key')
+    const r = runner()
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     const q = asked()!
@@ -224,7 +140,7 @@ describe('the card an agent gets', () => {
   })
 
   it('a step written by hand comes back as another step, not as something else', async () => {
-    const r = runner(typesafe(['do', 'later', 'do', 'later']), undefined)
+    const r = runner()
     await r.send('d1', '@lia me dá os próximos passos')
     await r.idle()
     const q = asked()!

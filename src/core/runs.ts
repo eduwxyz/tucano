@@ -34,7 +34,7 @@ import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } fro
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, startsTicked, type Answer, type Decision } from '../shared/questions'
-import { JEV_MODEL, routeJev, stepsWorthDoing } from './jev'
+import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -2082,23 +2082,8 @@ ${note}`,
           const parsed = parseNextSteps(args)
           if ('error' in parsed) return textResult(parsed.error, true)
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
-          let decision = parsed.decision
+          const decision = parsed.decision
           const count = decision.options?.length ?? 0
-          // Turned on in the settings: Jev says which of these are worth doing now and only those
-          // start ticked. Unlike the pill on a question, this one waits: the ticks are the card, and
-          // it's a couple of small calls, not a turn.
-          if (settings.jevNextSteps && count > 1) {
-            const key = await this.deps.jev?.key()
-            if (key) {
-              try {
-                const r = await stepsWorthDoing({ key, decision, context: msg.text, fetch: this.deps.jev?.fetch })
-                // None worth doing is not a card with nothing ticked: that would throw the whole list away.
-                if (!('error' in r) && r.ticked.length > 0 && r.ticked.length < count) decision = { ...decision, ticked: r.ticked }
-              } catch {
-                // every step stays ticked
-              }
-            }
-          }
           questions = [decision]
           question = questionsAsText(questions)
           askedTo = requester

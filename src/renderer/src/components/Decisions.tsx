@@ -245,8 +245,8 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
 
 function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
   const options = question.options ?? []
-  // A next-steps card opens with its boxes already ticked (or with the ones Jev found worth doing
-  // now); a question opens with nothing picked. A draft I left here, or an answer saved, wins.
+  // A next-steps card opens with its boxes already ticked; a question opens with nothing picked.
+  // A draft I left here, or an answer saved, wins.
   const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? startsTicked(question), other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
   const edit = (patch: Partial<AnswerDraft>): void => {
