@@ -2169,6 +2169,141 @@ h3 {
   max-width: var(--chat-w);
   margin: 0 auto;
 }
+.work-drawer {
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: rise var(--dur-enter) var(--ease-out);
+}
+.work-drawer__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.work-drawer__head:hover {
+  background: var(--hover);
+}
+.work-drawer__count {
+  flex: 1;
+  text-align: left;
+}
+.work-drawer__more {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.work-drawer__caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-3);
+  transform: rotate(90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.work-drawer__caret.is-open {
+  transform: rotate(-90deg);
+}
+.work-drawer__list {
+  display: grid;
+  gap: 1px;
+  /* Finished rows stay until they're taken off: the list scrolls rather than eating the conversation. */
+  max-height: min(220px, 32vh);
+  overflow-y: auto;
+  padding: 2px 6px 6px;
+  border-top: 1px solid var(--border);
+}
+.work-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.work-row__go {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.work-row__go:hover {
+  background: var(--hover);
+}
+.work-row__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A reply that ended: the glyph says how, and its row stays until the trash takes it off. */
+.work-row__state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--text-3);
+}
+.work-row__state--ok {
+  color: var(--ok);
+}
+.work-row__state--bad {
+  color: var(--danger);
+}
+.work-row--done .work-row__text {
+  color: var(--text-2);
+}
+.work-row__meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* Opening the thread a reply lives in, from its row: the glyph alone, so a row stays one line, and as
+   dim, since it opens a view and doesn't stop anything (the x is the bright one). */
+.work-row__thread-btn {
+  color: var(--text-3);
+}
+.work-row__thread-btn:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.work-row .icon-btn:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.work-row__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: fade-pulse 1.6s ease-in-out infinite;
+}
+/* A row in a thread says so through its thread button's tooltip, in that thread's own words,
+   rather than through a pill: the row stays one line however long the thread's first message is. */
+.work-drawer__group {
+  padding: 4px 6px 2px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .composer {
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -16569,3 +16704,49 @@ button.agent-card__now:hover {
   text-underline-offset: 2px;
 }
 
+
+/* The open question, kept next to the field: in a long reply the card that waits for an answer is
+   pages up behind later steps, so the person needs a way back to it without scrolling. */
+.ask-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  text-align: left;
+  font-size: 13px;
+}
+.ask-strip:hover {
+  border-color: var(--border-strong);
+}
+.ask-strip .icon {
+  color: var(--accent);
+  flex: none;
+}
+.ask-strip__who {
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}
+.ask-strip__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ask-strip__count {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.ask-strip__go {
+  flex: none;
+  color: var(--accent);
+  font-weight: 600;
+}

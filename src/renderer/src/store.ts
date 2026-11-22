@@ -379,6 +379,10 @@ export const workingIds = (s: State, conversationId: string, threadId?: string):
   conversationIndex(s, conversationId)
     .working.filter((m) => m.threadId === threadId && m.author.kind === 'agent')
     .map((m) => m.id)
+export const allWorkingIds = (s: State, conversationId: string): string[] =>
+  conversationIndex(s, conversationId)
+    .working.filter((m) => m.author.kind === 'agent')
+    .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
 // The approvals still waiting on this person here, oldest first: what the reminder over the field
 // counts, and what Review goes back to. In the thread it counts only the ones asked in it. Whose
