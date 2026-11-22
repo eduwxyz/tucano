@@ -429,14 +429,11 @@ export interface Question {
 
 // What's waiting on a person: approvals they can decide and questions to them.
 // A question from someone else's DM comes without where it was asked (they see the question only).
-// A question in the inbox: with the decisions asked (ask_user's options), what was answered on the
-// card so far, and, when Jev is on, the option it suggests for each decision.
-export type InboxQuestion = Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] }
-
 export interface Inbox {
   approvals: Approval[]
-  questions: InboxQuestion[]
-  answered?: InboxQuestion[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  // With the decisions asked (ask_user's options) and what was answered on the card so far.
+  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
+  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
   harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
 }
