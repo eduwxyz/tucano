@@ -79,7 +79,7 @@ it("doesn't pull me back if I moved to another conversation before it came back"
 it('reports a rejected send and does not open a thread for a later unrelated message', async () => {
   store.navigate({ kind: 'conversation', id: 'threads' })
   rejectSend = true
-  expect(await store.sendMessage('threads', 'Keep my draft.', [], undefined, [], { messageId: 'missing' })).toBe(false)
+  expect(await store.sendMessage('threads', 'Keep my draft.', [], undefined, [], undefined, undefined, { messageId: 'missing' })).toBe(false)
   expect(store.getState().toasts.at(-1)?.text).toContain('Choose a message')
   back({ id: 'another-device', conversationId: 'threads' })
   expect(store.getState().panel).toBeNull()

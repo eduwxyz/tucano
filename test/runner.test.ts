@@ -42,7 +42,8 @@ beforeEach(() => {
   events = []
   settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent(agent('a1', 'lia'))
-  db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna' }))
+  // theo never joins on his own: 0.2.45's chime-in router would otherwise add a turn of its own to these counts.
+  db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna', proactive: false }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })
   db.createConversation({ id: 'c1', kind: 'channel', name: 'engenharia', members: ['a1', 'a2'] })
 })

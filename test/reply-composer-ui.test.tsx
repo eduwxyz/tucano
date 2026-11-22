@@ -117,7 +117,8 @@ it('keeps the draft and its quote when the core refuses the reply', async () => 
   await act(async () => onChange({ target: { value: 'Please explain.', selectionStart: 0 } }))
   await act(async () => (document.querySelector('#channel .btn--primary') as HTMLButtonElement).click())
   expect(actions.sendMessage).toHaveBeenCalledTimes(1)
-  expect(actions.sendMessage.mock.calls[0]![5]).toEqual({ messageId: original.id, quote: 'this part' })
+  // The reply target is the call's last argument: `mode` and `steerTo` (0.2.45's steer) sit before it.
+  expect(actions.sendMessage.mock.calls[0]![7]).toEqual({ messageId: original.id, quote: 'this part' })
   expect((document.querySelector('#channel textarea') as HTMLTextAreaElement).value).toBe('Please explain.')
   expect(document.querySelector('#channel .composer__reply')?.textContent).toContain('this part')
 })

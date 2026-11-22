@@ -149,15 +149,17 @@ await shot('r4-quote-navigation')
 // The desktop app keeps its screen in memory, so settings are reached by the button, not the address.
 await win.locator('.sidebar__gear').click()
 await win.waitForSelector('button.toggle')
-const flipped = await win.evaluate(() => {
+// The switch in that row, read by its own row: 0.2.45's page has other toggles before it.
+const replySwitch = () => {
   const strong = [...document.querySelectorAll('strong')].find((s) => /Responder ao trecho|Reply to the excerpt/.test(s.textContent))
-  const sw = strong.closest('.key-row').querySelector('button.toggle')
-  const was = sw.getAttribute('aria-checked')
-  sw.click()
-  return { was, now: sw.getAttribute('aria-checked') }
-})
+  return strong.closest('.key-row').querySelector('button.toggle')
+}
+const was = await win.evaluate(`(${replySwitch.toString()})().getAttribute('aria-checked')`)
+await win.evaluate(`(${replySwitch.toString()})().click()`)
 await win.waitForTimeout(500)
-const settled = await win.evaluate(() => document.querySelector('.key-row button.toggle').getAttribute('aria-checked'))
+const now = await win.evaluate(`(${replySwitch.toString()})().getAttribute('aria-checked')`)
+const flipped = { was, now }
+const settled = now
 await shot('r5-setting-off')
 await win.locator('.section .nav-item').first().click()
 await win.waitForSelector('.composer textarea')
