@@ -1,6 +1,7 @@
 // The same pill on a reply that has ended: there is nothing left to steer, so it reads Follow, and what
 // the person writes makes that reply go on from where it stopped (send mode `steer`, the reply's id).
-// It is one pill in one place, not a second control: the label and the icon are all that change.
+// It is one pill in one place on the reply, not a second control: the label and the icon are all that
+// change. It lives on the reply's own line, under its answer.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -38,7 +39,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 
 const { createRoot } = await import('react-dom/client')
 const { getState } = await import('../src/renderer/src/store')
-const { RunBlock } = await import('../src/renderer/src/components/Conversation')
+const { RunBlock, ReplyPill } = await import('../src/renderer/src/components/Conversation')
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({ id, label: `read ${id}.ts`, status: 'done', ms: 120, ...extra })
 
@@ -61,6 +62,16 @@ afterEach(() => act(() => root.unmount()))
 
 const draw = async (message: Message): Promise<void> => {
   await act(async () => root.render(<RunBlock message={message} />))
+}
+// The pill is on the reply's line under the answer, so it is drawn inside that line's box.
+const drawPill = async (message: Message): Promise<void> => {
+  await act(async () =>
+    root.render(
+      <div className="msg__meta">
+        <ReplyPill message={message} />
+      </div>
+    )
+  )
 }
 const pill = (): HTMLElement | null => document.querySelector('.steps__steer-pill')
 const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__steer-note textarea')
@@ -87,29 +98,27 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the pill on a reply that has ended', () => {
-  it('is the same pill, reading Follow, in the row under the chain', async () => {
+  it('is the same pill, reading Follow, on the reply\'s own line', async () => {
+    // The folded chain holds the steps only: the way on from the reply is on its line, under it.
     await draw(reply('done'))
-    const pills = document.querySelector('.steps__pills')!
-    const follow = pills.querySelector<HTMLElement>('.steps__steer-pill')!
+    expect(pill()).toBeNull()
+    await drawPill(reply('done'))
+    const follow = pill()!
     expect(follow.textContent?.trim()).toMatch(/^(Seguir|Follow)$/)
     expect(follow.getAttribute('title')).toMatch(/seguir daqui|go on from here/)
-    expect(document.querySelectorAll('.steps__pills')).toHaveLength(1) // one row, not a second control
-    expect(document.querySelectorAll('.steps__steer-pill')).toHaveLength(1)
+    expect(document.querySelectorAll('.steps__steer-pill')).toHaveLength(1) // one pill, no second control
+    expect(follow.parentElement!.className).toBe('msg__meta')
     expect(document.querySelector('.steps__steer')).toBeNull() // no field until it is opened
-    // Where the steer sits: inside the box, in the row under the summary line. A finished reply's
-    // chain is folded, so that row is the last thing the box draws.
-    expect(pills.parentElement!.className).toContain('steps')
-    expect(pills.parentElement!.lastElementChild).toBe(pills)
   })
 
   it('still reads Steer while the reply is at work', async () => {
-    await draw(reply('working'))
+    await drawPill(reply('working'))
     expect(pill()!.textContent?.trim()).toMatch(/^(Orientar|Steer)$/)
     expect(pill()!.getAttribute('title')).toMatch(/sem parar|without stopping/)
   })
 
   it('opens a field, sends nothing until something is written, and sends it to that same reply', async () => {
-    await draw(reply('done'))
+    await drawPill(reply('done'))
     await act(async () => pill()!.click())
     expect(field()).not.toBeNull()
     expect(field()!.getAttribute('placeholder')).toMatch(/O que mais\?|What next\?/)
@@ -127,7 +136,7 @@ describe('the pill on a reply that has ended', () => {
   })
 
   it('Ctrl+Enter sends it, and Escape closes it without sending', async () => {
-    await draw(reply('done'))
+    await drawPill(reply('done'))
     await act(async () => pill()!.click())
     await type('pelo caminho mais curto')
     await key('Enter', { ctrlKey: true })
@@ -142,7 +151,7 @@ describe('the pill on a reply that has ended', () => {
 
   it('carries no pill on a reply that stopped, failed or waits for an answer', async () => {
     for (const status of ['stopped', 'failed', 'waiting_input', 'waiting_approval'] as const) {
-      await draw(reply(status))
+      await drawPill(reply(status))
       expect(pill()).toBeNull()
     }
   })

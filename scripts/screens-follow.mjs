@@ -1,7 +1,8 @@
-// Frames for Follow (#631): the pill under a finished reply's chain, reading Follow where it read
-// Steer while the reply worked. It opens the same field, and what the person writes goes to that
-// reply: the reply goes on in the same row, keeping its text and its steps, with the instruction as a
-// row of its own in the chain. Nothing of it is posted as a message in the conversation.
+// Frames for Follow and for where its pill sits: on the reply's own line under the answer, next to the
+// receipt and the way into the wiki, reading Follow where it read Steer while the reply worked. It
+// opens the same field under that line, and what the person writes goes to that reply: the reply goes
+// on in the same row, keeping its text and its steps, with the instruction as a row of its own in the
+// chain. Nothing of it is posted as a message in the conversation.
 // The fake engine answers quickly, so the reply has ended before anything is shot: this is the state
 // the feature exists for.
 import { _electron as electron } from 'playwright'
@@ -67,24 +68,21 @@ const settled = async (win) => {
   return false
 }
 
-// The pill on the reply that ended: what it says, where it sits, and that the chain it belongs to is
-// the reply's own folded one.
+// The pill on the reply that ended: what it says, and where it sits on the reply's own line.
 const pillLook = (win) =>
   win.evaluate(() => {
     const msgs = [...document.querySelectorAll('.msg--agent')]
     const msg = msgs[msgs.length - 1]
-    const steps = msg?.querySelector('.steps')
-    const pill = steps?.querySelector('.steps__steer-pill')
-    if (!steps || !pill) return { pill: false, steps: !!steps }
+    const meta = msg?.querySelector('.msg__meta')
+    const pill = meta?.querySelector('.steps__steer-pill')
+    if (!meta || !pill) return { pill: false, line: !!meta }
     const p = pill.getBoundingClientRect()
-    const b = steps.getBoundingClientRect()
-    const summary = steps.querySelector('.steps__summary')
-    const s = summary?.getBoundingClientRect()
-    const list = steps.querySelector('.steps__list')
-    const thought = steps.querySelector('.thought')
+    const m = meta.getBoundingClientRect()
+    const receipt = meta.querySelector('.receipt')?.getBoundingClientRect()
+    const wiki = meta.querySelector('.wiki-keep')?.getBoundingClientRect()
+    const text = msg?.querySelector('.md')?.getBoundingClientRect()
+    const steps = msg?.querySelector('.steps')?.getBoundingClientRect()
     const st = getComputedStyle(pill)
-    const text = msg?.querySelector('.md')
-    const t = text?.getBoundingClientRect()
     return {
       pill: true,
       tag: pill.tagName,
@@ -95,17 +93,16 @@ const pillLook = (win) =>
       radius: st.borderRadius,
       fontSize: st.fontSize,
       color: st.color,
-      inChain: steps.contains(pill),
-      chainSummary: summary?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
-      underTheSummary: s ? Math.round(p.top - s.bottom) : null,
-      aboveTheAnswer: t ? Math.round(t.top - p.bottom) : null,
-      leftAgainstTheChain: Math.round(p.left - b.left),
-      // The chain's foot: under the steps it acts on, and under the reasoning that explains them.
-      belowTheList: list ? Math.round(p.top - list.getBoundingClientRect().bottom) : null,
-      belowTheThought: thought ? Math.round(p.top - thought.getBoundingClientRect().bottom) : null,
-      lastInTheBox: steps.lastElementChild === pill.parentElement,
-      working: !!steps.querySelector('.steps__stop'),
-      rows: steps.querySelectorAll('.step').length,
+      line: meta.className,
+      onTheLine: meta.contains(pill),
+      firstOnTheLine: meta.firstElementChild === pill,
+      underTheAnswer: text ? Math.round(p.top - text.bottom) : null,
+      underTheChain: steps ? Math.round(p.top - steps.bottom) : null,
+      leftAgainstTheLine: Math.round(p.left - m.left),
+      receiptAfterIt: receipt ? Math.round(receipt.left - p.right) : null,
+      wikiAfterIt: wiki ? Math.round(wiki.left - p.right) : null,
+      lineWidth: Math.round(m.width),
+      working: !!msg.querySelector('.steps__stop'),
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     }
   })
@@ -118,7 +115,7 @@ const fieldLook = (win) =>
     const send = [...note.querySelectorAll('button')].find((b) => b.className.includes('btn--primary'))
     const t = ta.getBoundingClientRect()
     // The pill of the same reply: the first one in the page belongs to the reply above it.
-    const pill = note.closest('.msg')?.querySelector('.steps__steer-pill')?.getBoundingClientRect()
+    const pill = note.closest('.msg__meta')?.querySelector('.steps__steer-pill')?.getBoundingClientRect()
     return {
       open: true,
       placeholder: ta.getAttribute('placeholder'),
@@ -126,6 +123,7 @@ const fieldLook = (win) =>
       width: Math.round(t.width),
       height: Math.round(t.height),
       underThePill: pill ? Math.round(t.top - pill.bottom) : null,
+      lineWidth: Math.round(note.closest('.msg__meta')?.getBoundingClientRect().width ?? 0),
       sendDisabled: !!send?.disabled,
       sendText: send?.textContent?.trim(),
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -177,7 +175,7 @@ const mineBefore = await mineCount(win)
 await win.screenshot({ path: `${out}/follow-01-follow-under-a-finished-reply.png` })
 
 // 02: what it opens. Empty, and the send asleep.
-await win.locator('.steps__steer-pill').last().click()
+await win.locator('.msg__meta .steps__steer-pill').last().click()
 await win.waitForTimeout(250)
 console.log('the field it opens:', JSON.stringify(await fieldLook(win)))
 const stillNothingSent = { replies: await replies(win), mine: await mineCount(win) }
@@ -225,7 +223,7 @@ for (let i = 0; i < 200; i++) {
 await settled(win)
 await win.waitForTimeout(400)
 const narrowPill = await pillLook(win)
-await win.locator('.steps__steer-pill').last().click()
+await win.locator('.msg__meta .steps__steer-pill').last().click()
 await win.waitForTimeout(250)
 console.log('at 420:', JSON.stringify({ pill: narrowPill, field: await fieldLook(win) }))
 await win.screenshot({ path: `${out}/follow-06-at-420.png` })
