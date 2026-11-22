@@ -62,7 +62,8 @@ describe('the extensions an agent’s browser can carry', () => {
       "I still don't care about cookies",
       'Consent-O-Matic',
       'PopUpOFF',
-      'Unclutter'
+      'Unclutter',
+      'Defuddle Clip'
     ])
     expect(rowOf('uBlock Origin Lite').textContent).toContain('Takes the ads off the page')
     expect(rowOf("I still don't care about cookies").textContent).toContain('Closes the cookie notice by itself')
@@ -70,6 +71,8 @@ describe('the extensions an agent’s browser can carry', () => {
     expect(rowOf('PopUpOFF').textContent).toContain('Clears what sits on top of the page')
     // The one that restyles pages says so where it is chosen, not after someone wonders why a page changed.
     expect(rowOf('Unclutter').textContent).toContain('a screenshot stops being the site’s')
+    // The one that hands over the article says what an agent gets, not what the extension is called.
+    expect(rowOf('Defuddle Clip').textContent).toContain('Pulls the article out of the page as clean text')
     for (const row of extensionRows()) expect(row.querySelector('button.toggle')?.getAttribute('aria-checked')).toBe('false')
     // Nothing is downloading, so nothing says it is.
     expect(document.body.textContent).not.toContain('Downloading')
@@ -100,7 +103,8 @@ describe('the extensions an agent’s browser can carry', () => {
       ["I still don't care about cookies", 'true'],
       ['Consent-O-Matic', 'true'],
       ['PopUpOFF', 'false'],
-      ['Unclutter', 'false']
+      ['Unclutter', 'false'],
+      ['Defuddle Clip', 'false']
     ])
   })
 
