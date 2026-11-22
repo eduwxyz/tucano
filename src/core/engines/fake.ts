@@ -5,7 +5,7 @@ import { memorySystem } from '../memory'
 import { titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
-import { handoffSystem, routerSystem } from '../router'
+import { chimeSystem, handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
@@ -35,7 +35,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const back = /(?:Voltou do que você pediu ao seu time|Back from what you asked of your team):[\s\S]*$/.exec(turn.prompt)?.[0]
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
       // harness, or another account of Claude, whose limit is still there).
-      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== memorySystem()) {
+      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== chimeSystem() && turn.system !== memorySystem()) {
         yield { type: 'error', message: "You've hit your limit · resets 5pm" }
         return
       }
@@ -45,6 +45,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeRoute(turn.prompt))
       } else if (turn.system === handoffSystem()) {
         reply = JSON.stringify(fakeHandoff(turn.prompt))
+      } else if (turn.system === chimeSystem()) {
+        // Someone is called in only when the reply says so, as "[entra rev]" (with no @, which would be a
+        // mention and hand the turn on by itself): otherwise no one.
+        const reply_ = /<reply>[\s\S]*?<\/reply>/.exec(turn.prompt)?.[0] ?? ''
+        const h = /\[entra @?([\w-]+)\]/.exec(reply_)?.[1]
+        reply = JSON.stringify({ handle: h ?? null, reason: h ? L('é da área dele', 'it is their area') : '' })
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
       } else if (turn.system === titleSystem()) {

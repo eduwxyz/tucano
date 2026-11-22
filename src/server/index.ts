@@ -136,7 +136,7 @@ function fromCore(msg: CoreRequest): void {
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
-  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'mcp-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
@@ -258,6 +258,22 @@ function index(): string {
 }
 
 
+// One MCP request, answered by the core's door (the desktop's is the same door, on 127.0.0.1). A wait for an
+// agent's answer is at most 45 s (mcp.ts), well inside this timeout and a proxy's.
+const MCP_MAX_BODY = 256 * 1024
+function mcpRequest(req: IncomingMessage, res: ServerResponse): void {
+  body(req, MCP_MAX_BODY)
+    .then((text) => ask<{ status: number; headers: Record<string, string>; body: string }>({ type: 'mcp', method: req.method ?? 'GET', auth: req.headers.authorization ?? '', body: text }, 70_000))
+    .then(
+      (out) => {
+        if (res.headersSent) return
+        if (!out) return void res.writeHead(503, { ...BASE_HEADERS, 'retry-after': '5' }).end()
+        res.writeHead(out.status, { ...BASE_HEADERS, ...out.headers }).end(out.body)
+      },
+      () => !res.headersSent && res.writeHead(413, BASE_HEADERS).end()
+    )
+}
+
 function oauthCallback(url: URL, res: ServerResponse): void {
   const id = randomUUID()
   const answer = (r: { ok: boolean; why?: string }): void => {
@@ -304,6 +320,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  // A harness's MCP (src/core/mcp.ts): its own key in the Authorization header, checked by the core.
+  // No cookie and no page: whoever calls is a program, never a browser signed in here.
+  if (url.pathname === '/mcp' || url.pathname === '/mcp/') return mcpRequest(req, res)
   // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,
   // and so does the page a browser's /?code= opens (opening it spends nothing: see pair-http.ts).
   // No sign-in: the code is what counts, and a wrong one counts as a guess.

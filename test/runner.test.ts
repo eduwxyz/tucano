@@ -159,8 +159,8 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Mencione um agente')
   })
 
-  it('an agent mentioning another hands it the turn, and the chain stops at depth 3', async () => {
-    // Every reply mentions the other agent: a ping-pong that must stop.
+  it('an agent mentioning another hands it the turn, and a ping-pong that moves nothing stops after 3 replies', async () => {
+    // Every reply mentions the other agent and does nothing: a ping-pong that must stop.
     const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
     const r = runner(pingPong)
     settings.engines.codex = ready
@@ -173,44 +173,27 @@ describe('Runner', () => {
       ['a2', 2],
       ['a1', 3]
     ])
-    expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
-    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas')
+    expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, stop: { job: replies[0]!.run!.job } })
+    expect(db.messages().at(-1)?.text).toContain('Parei este trabalho')
+    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas sem nada novo')
   })
 
-  it('the chain goes as far as the limit set in Settings', async () => {
-    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
-    const r = runner(pingPong)
-    settings.engines.codex = ready
-    settings.chainDepth = 5
+  it('a chain where each reply delivers something new goes on past 3 replies, until one passes the turn to no one', async () => {
+    let n = 0
+    const delivering = fakeEngine('claude', {
+      delayMs: 1,
+      reply: (t) => {
+        n++
+        const part = `Parte ${n}: ${Array.from({ length: 60 }, (_, i) => `item${n}x${i}`).join(' ')}.` // long and new each time
+        return n >= 6 ? part : `${part} ${t.system.startsWith('Você é lia') ? '@theo' : '@lia'}, sua vez`
+      }
+    })
+    const r = runner(delivering)
     db.saveAgent(agent('a2', 'theo'))
     await r.send('c1', '@lia começa')
     await r.idle()
-    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5])
-    expect(db.messages().at(-1)?.text).toContain('foram 5 respostas seguidas')
-  })
-
-  it('a limit below 1 is raised to 1', async () => {
-    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
-    const r = runner(pingPong)
-    settings.engines.codex = ready
-    settings.chainDepth = 0
-    db.saveAgent(agent('a2', 'theo'))
-    await r.send('c1', '@lia começa')
-    await r.idle()
-    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1])
-    expect(db.messages().at(-1)?.text).toContain('foi 1 resposta seguida')
-  })
-
-  it('a limit above 10 is brought down to 10', async () => {
-    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
-    const r = runner(pingPong)
-    settings.engines.codex = ready
-    settings.chainDepth = 50
-    db.saveAgent(agent('a2', 'theo'))
-    await r.send('c1', '@lia começa')
-    await r.idle()
-    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-    expect(db.messages().at(-1)?.text).toContain('foram 10 respostas seguidas')
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(db.messages().some((m) => m.stop)).toBe(false)
   })
 
   describe('screening a hand-off', () => {

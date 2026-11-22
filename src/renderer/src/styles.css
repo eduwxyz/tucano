@@ -2,6 +2,9 @@
 /* Warm neutrals and the toucan's orange, from the logo. Primary actions are ink
    (cream in the dark); the orange marks focus, links, mentions and what's alive. */
 :root {
+  /* The conversation's column: messages, their lines and the field. A little wider on big screens,
+     never so wide that a line gets hard to follow. */
+  --chat-w: 860px;
   --bg: #f3f0ea;
   --panel: #fffefb;
   --sidebar: #f3f0ea;
@@ -1321,7 +1324,7 @@ h3 {
   grid-template-columns: 34px 1fr;
   gap: 12px;
   padding: 7px 28px;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
 }
 /* What just arrived comes in, lightly. */
@@ -1491,7 +1494,7 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 6px 24px 6px 70px;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   color: var(--text-2);
   font-size: 12.5px;
@@ -1674,6 +1677,18 @@ h3 {
 .step__error.is-whole {
   display: block;
   cursor: text;
+}
+.step__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--mono, ui-monospace, monospace);
+  color: var(--text-2);
+  background: var(--panel-2, rgba(127, 127, 127, 0.12));
 }
 .step__ms {
   margin-left: auto;
@@ -1909,7 +1924,7 @@ h3 {
   padding: 6px 28px 18px;
   flex: none;
   width: 100%;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
 }
 .composer {
@@ -2764,6 +2779,21 @@ h3 {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+.ask-option__tag {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.ask-chip .ask-option__tag {
+  margin-left: 4px;
+  font-size: 10.5px;
+  padding: 0 5px;
+}
+/* "Pode seguir com a recomendação": the agent's recommended option on every decision, in one click. */
+.ask__recommend {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 .ask-option__detail {
   font-size: 12px;
   color: var(--text-3);
@@ -3088,6 +3118,27 @@ h3 {
   flex: 1;
   min-width: 0;
 }
+/* Big screens: the column grows a little (a maximized window on a 24" or 27" monitor). */
+@media (min-width: 1600px) {
+  :root {
+    --chat-w: 940px;
+  }
+}
+@media (min-width: 2000px) {
+  :root {
+    --chat-w: 1020px;
+  }
+}
+/* A panel expanded over the whole page: the conversation steps aside until it's shrunk or closed. */
+.split.is-wide > .conversation {
+  display: none;
+}
+.side-panel.is-wide {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  border-left: 0;
+}
 /* The side panel slides in from its edge. */
 .side-panel {
   --rise: 0;
@@ -3342,6 +3393,11 @@ body.is-resizing webview {
 .side-panel--thread .composer-wrap {
   padding-inline: 16px;
 }
+.side-panel--thread.is-wide .thread__lead {
+  width: 100%;
+  max-width: var(--chat-w);
+  margin-inline: auto;
+}
 /* The root sits on the panel's paper, like the conversation it came from. */
 .thread__lead {
   display: grid;
@@ -3420,6 +3476,28 @@ body.is-resizing webview {
 .system-line > .muted {
   margin-left: auto;
   flex-shrink: 0;
+}
+/* Where a piece of work stopped: the whole note, a few lines, and Continuar under it. */
+.system-line--stop {
+  align-items: flex-start;
+}
+.system-line--stop > .icon {
+  margin-top: 3px;
+}
+.system-line__body {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.5;
+}
+.system-line__body p,
+.system-line__body ul {
+  margin: 0 0 6px;
+}
+.system-line__body ul {
+  padding-left: 18px;
+}
+.system-line__body .retry {
+  margin-top: 2px;
 }
 
 /* A reply's receipt and "Guardar na wiki", on one quiet line that shows on hover. */
@@ -5366,6 +5444,10 @@ table.csv th {
 .menu__item:hover .icon {
   color: var(--accent-text);
 }
+.menu__check {
+  margin-left: auto;
+  display: inline-flex;
+}
 .menu__item.is-danger {
   color: var(--danger);
 }
@@ -7104,6 +7186,21 @@ kbd {
   box-shadow: inset 2.5px 0 0 var(--agent), 0 0 0 2px var(--text);
   z-index: 4;
 }
+/* A routine that's off keeps its place in the week, in monochrome: it can be turned back on from its own panel. */
+.cal__ev.is-off {
+  background: var(--hover);
+  color: var(--text-3);
+  box-shadow: inset 2.5px 0 0 var(--border-strong);
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.cal__ev.is-off strong {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.cal__ev.is-off .cal__ev-sub {
+  color: var(--text-3);
+}
 .cal__ev.is-dim {
   opacity: 0.25;
 }
@@ -8302,6 +8399,65 @@ kbd {
 .channel-drop {
   height: 6px;
 }
+/* Sorting the sidebar by hand (reorder.ts): the row held dims, and an orange line shows where it
+   lands, above the row it would come before. The places that only take a drop (a list's end) take no
+   room at rest, and only listen while a row of their list is carried. */
+/* Positioned only while it shows the line, so a row at rest paints exactly as it always has. */
+.channel-row.is-over,
+.agent-sector__head.is-over,
+.channel-drop.is-over,
+.drop-zone.is-live {
+  position: relative;
+}
+.top-row.is-picked,
+.channel-row.is-picked,
+.agent-row.is-picked,
+.agent-sector__head.is-picked {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.top-row.is-over::after,
+.channel-row.is-over::after,
+.agent-row.is-over::after,
+.agent-sector__head.is-over::after,
+.channel-drop.is-over::after,
+.drop-zone.is-over::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.channel-drop.is-over::after {
+  top: 2px;
+}
+/* Let go on a group's name, a channel goes into the group: the name lights up instead of a line. */
+.channel-group__head.is-over {
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.drop-zone {
+  height: 0;
+}
+.drop-zone.is-live {
+  z-index: 1;
+}
+.drop-zone.is-live::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  height: 14px;
+}
+.is-folded .drop-zone {
+  display: none;
+}
 
 /* The wiki: what you and the team know, as linked pages */
 
@@ -8328,8 +8484,12 @@ kbd {
 .wk-kinds button.is-dim { opacity: 0.45; }
 
 .wk-panel { position: absolute; z-index: 3; top: 12px; right: 12px; bottom: 12px; width: 560px; max-width: calc(100% - 24px); overflow-y: auto; background: var(--panel); border-radius: 18px; box-shadow: 0 0 0 1px var(--border), 0 24px 60px -20px rgba(40, 25, 10, 0.28), 0 8px 20px -12px rgba(40, 25, 10, 0.18); --rise: 0; --rise-x: 24px; animation: rise var(--dur-slow) var(--ease-out) both; }
-.wk-panel__close { position: sticky; top: 14px; float: right; margin: 14px 14px -44px 0; z-index: 2; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; border: 0; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(6px); color: var(--text-3); cursor: pointer; }
-.wk-panel__close:hover { background: var(--hover); color: var(--text); }
+.wk-panel__tools { position: sticky; top: 14px; float: right; margin: 14px 14px -44px 0; z-index: 2; display: flex; gap: 2px; border-radius: 9px; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: blur(6px); }
+.wk-panel__btn { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; border: 0; background: none; color: var(--text-3); cursor: pointer; }
+.wk-panel__btn:hover { background: var(--hover); color: var(--text); }
+/* Expanded: over the whole map, the page in a reading column. */
+.wk-panel.is-wide { left: 12px; width: auto; max-width: none; }
+.wk-panel.is-wide .wk-page { max-width: 900px; margin-inline: auto; }
 
 .wk-drop { position: absolute; inset: 12px; z-index: 5; display: grid; place-items: center; border-radius: 18px; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(4px); pointer-events: none; animation: rise var(--dur-fast) var(--ease-out) both; }
 .wk-drop div { display: grid; justify-items: center; gap: 8px; color: var(--accent); }
@@ -8739,11 +8899,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   }
 }
 /* A group's channels sit a step in, along a thin line, so it's clear where the group ends. */
-.channel-group > [draggable] {
+.channel-group > .channel-row {
   position: relative;
   padding-left: 14px;
 }
-.channel-group > [draggable]::before {
+.channel-group > .channel-row::before {
   content: '';
   position: absolute;
   left: 15px;
@@ -8752,7 +8912,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   width: 1px;
   background: var(--border-strong);
 }
-.channel-group > [draggable] .nav-item {
+.channel-group > .channel-row .nav-item {
   padding-left: 12px;
 }
 
@@ -8792,6 +8952,28 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .catalog {
   display: grid;
   gap: 18px;
+}
+.catalog__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.catalog__cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.catalog__cats .chip {
+  cursor: pointer;
+}
+.catalog__cats .chip:not(.is-on):hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.catalog__count {
+  opacity: 0.6;
+  margin-left: 2px;
 }
 .catalog__search {
   display: flex;
@@ -12448,7 +12630,7 @@ button.agent-card__now:hover {
   flex-wrap: wrap;
   row-gap: 4px;
   /* In line with what the messages say: their column, past the face. */
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   padding: 6px 28px 6px 74px;
 }
@@ -13147,7 +13329,7 @@ button.agent-card__now:hover {
 /* Runs in a row of one routine that found nothing new: one line in the text column, a row per run when open. */
 .no-news {
   width: 100%;
-  max-width: 860px;
+  max-width: var(--chat-w);
   margin: 0 auto;
   padding: 3px 28px 3px 74px;
 }
@@ -13645,6 +13827,26 @@ button.agent-card__now:hover {
 .agent-row.is-archived > .nav-item {
   opacity: 0.6;
 }
+.agent-row.is-deleted .nav-item__label,
+.msg__author.is-deleted {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+}
+.msg__face.is-deleted {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+.composer-off {
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  text-align: center;
+}
+.member .member__delete {
+  color: var(--danger);
+}
 .nav-item > .nav-item__mac,
 .nav-item > .dot,
 .nav-item > .waiting-pill,
@@ -13919,6 +14121,17 @@ button.agent-card__now:hover {
 }
 .cal__allday.is-selected {
   box-shadow: inset 2.5px 0 0 var(--agent), 0 0 0 2px var(--text);
+}
+/* Off, in the strip: the same grey read as in the hours. */
+.cal__allday.is-off {
+  background: var(--hover);
+  box-shadow: inset 2.5px 0 0 var(--border-strong);
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.cal__allday.is-off .cal__allday-name {
+  color: var(--text-2);
+  font-weight: 500;
 }
 .cal__allday.is-dim {
   opacity: 0.25;
@@ -15494,23 +15707,153 @@ button.agent-card__now:hover {
 }
 
 /* The logins saved for an agent's browser, in its browser card. */
-.saved-logins {
+/* An agent's page: the Cofre's logins, under its browser's switch. */
+.lrow--stack {
   display: grid;
   gap: 8px;
+  align-items: start;
 }
-.saved-logins__row {
-  display: flex;
+
+/* The card pedir_chave leaves in the chat: paste into the Cofre, or give one already there. */
+.key-request__form {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.key-request__form input[type='password'],
+.key-request__form input:not([type]) {
+  width: 100%;
+}
+.key-request__saved {
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  margin-top: 6px;
 }
-.saved-logins__site {
-  overflow-wrap: anywhere;
+
+/* Configurações › Harnesses: the snippet to paste into a harness, and a row of buttons that wraps. */
+.row--wrap {
+  flex-wrap: wrap;
 }
-.saved-logins__form {
-  display: grid;
+.harness-snippet {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--code-bg);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* ---------- the Cofre (components/Vault.tsx) ---------- */
+.vault-keys,
+.vault-log,
+.vault-import__lines {
+  margin-top: 12px;
+}
+.vault-key__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.vault-key__name {
+  font: 600 13px/1.4 var(--mono);
+}
+.vault-key__hint {
+  font-family: var(--mono);
+}
+.vault-key__note {
+  flex-basis: 100%;
+}
+.vault-key__agents {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.vault-key__used,
+.vault-log__at {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.vault-drawer {
+  margin-top: 20px;
+}
+.vault-drawer__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.vault-drawer__head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.vault-drawer__head .link {
+  margin-left: auto;
+}
+.vault-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.vault-editor__agents {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
-.saved-logins .hint {
+.vault-editor__agents .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.vault-editor__agents .chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.vault-editor__agents .chip:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+.vault-editor__agents .chip:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vault-editor__agents .chip.is-on .muted {
+  color: inherit;
+  opacity: 0.8;
+}
+.vault-import__text {
+  width: 100%;
+  font: 12.5px/1.5 var(--mono);
+}
+.vault-agent .hint {
+  margin-top: 8px;
+}
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 28px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  color: var(--text-2);
+}
+.empty-card p {
+  max-width: 460px;
   margin: 0;
+}
+@media (max-width: 640px) {
+  .vault-key {
+    flex-wrap: wrap;
+  }
+  .vault-key__used {
+    display: none;
+  }
 }

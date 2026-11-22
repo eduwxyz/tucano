@@ -4,7 +4,9 @@ import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, SavedLogin } from './types'
+import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
+import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
+import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from './vault'
 
 export interface Snapshot {
   webhookPort?: number
@@ -47,11 +49,13 @@ export interface Api {
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
+  continueJob(p: { messageId: string }): void // the note where a job stopped on its brakes: its work goes on (src/core/jobs.ts)
   setAgentModels(p: { agentIds: string[]; modelId: string }): number
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string; threads?: boolean }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
   archiveAgent(p: { id: string; archived: boolean }): void // out of the sidebar, its replies stopped and routines off; back with archived: false
+  deleteAgent(p: { id: string }): void // an archived agent, for good: its messages stay under its name, struck out; the rest goes
   setTopic(p: { id: string; topic: string }): void
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages and routines
@@ -125,9 +129,17 @@ export interface Api {
   summarizeThreadNow(p: { rootId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
-  browserLogins(p: { agentId: string }): Promise<SavedLogin[]> // the logins saved for an agent's browser: sites and usernames, never a password
-  saveBrowserLogin(p: { agentId: string; site: string; username: string; password: string }): Promise<void> // password: the value or an op:// reference
-  removeBrowserLogin(p: { agentId: string; origin: string }): Promise<void>
+  vaultKeys(): VaultKey[] // the Cofre's keys this person sees: the team's and their own, never a value
+  vaultUses(): VaultUse[] // the latest uses of those keys
+  saveVaultKey(p: { key: VaultKeyInput }): Promise<VaultKey> // value left out keeps the saved one
+  removeVaultKey(p: { id: string }): Promise<void>
+  setVaultKeyAgent(p: { id: string; agentId: string; on: boolean }): VaultKey // gives a key to an agent, or takes it back
+  importVaultKeys(p: { lines: EnvPair[]; mine?: boolean; replace: string[] }): Promise<{ saved: number }> // an .env read on the page; replace: names to put over keys already saved
+  vaultLogins(): VaultLogin[] // the Cofre's site logins this person sees: sites and usernames, never a password
+  saveVaultLogin(p: { login: VaultLoginInput }): Promise<VaultLogin> // password: the value or an op:// reference; left out keeps the saved one
+  removeVaultLogin(p: { id: string }): Promise<void>
+  setVaultLoginAgent(p: { id: string; agentId: string; on: boolean }): VaultLogin // one per site per agent: giving this one takes it off the others
+  answerKeyRequest(p: { answer: KeyRequestAnswer }): Promise<void> // pedir_chave's card: the key or login pasted, or one in the Cofre given
   browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void
   browserInput(p: { agentId: string; input: BrowserInput }): Promise<void> // a server's taken-over browser, driven from the panel // show: I take over the agent's browser; clear: logins and history go
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
@@ -211,6 +223,7 @@ export interface Api {
   wikiImport(p: { dir: string }): WikiImport // an Obsidian vault copied in, as it is
   wikiImportZip(p: { path: string }): WikiImport // the same, from a .zip sent to a server (src/server's /upload)
   setWikiCapture(p: { conversationId: string; on: boolean }): void
+  setProactive(p: { conversationId: string; on: boolean }): void // off: no agent is called in here on its own
   setThreads(p: { conversationId: string; on: boolean }): void
   setWikiDir(p: { dir: string | null }): Promise<string> // null: back to the app's own folder; returns where it is now
   // The wiki's folder kept in a git repository (owner and admins): a deploy key, a test, then the folder becomes the clone.
@@ -230,6 +243,13 @@ export interface Api {
   myDevices(): Device[] // my own keys: the browsers and phones signed in as me
   setPush(p: { handle: string | null; tag?: string }): { on: boolean } // this phone's push handle (the relay's), or none; on: this Tucano sends pushes
   removeDevice(p: { id: string }): void // one of mine signs out now (Device.id)
+  // Harnesses connected over MCP (src/core/mcp.ts): my keys, a new one (the key is shown once), one gone.
+  harnessKeys(): HarnessKey[]
+  createHarnessKey(p: { name: string; level: HarnessLevel }): { key: string; harness: HarnessKey }
+  removeHarnessKey(p: { id: string }): void
+  mcpInfo(): McpInfo // where this Tucano answers MCP
+  connectHarness(p: { harness: Connectable; replace?: boolean }): Promise<HarnessConnect> // the desktop: a new key, written into that harness's config
+  harnessNoticeSeen(): void // the inbox's "Claude Code criou…" read
   removePerson(p: { id: string }): void // their access ends at once: keys gone, open connections closed; what they owned goes to the owner
   setRole(p: { id: string; role: Exclude<Role, 'owner'> }): void
   setPersonAccess(p: { id: string; access: PersonAccess }): void // what a member sees; admins and the owner always see everything

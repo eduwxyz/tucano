@@ -6,7 +6,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { ENGINES } from '../../../shared/types'
-import { agentById, canDecide, modelById, navigate, openDialog, openDm, personName, useStore } from '../store'
+import { agentById, canDecide, modelById, navigate, openDialog, openDm, personName, useStore, windowless } from '../store'
 import { agentChannels, agentNow, cardState, placeCard, scrollMovesAnchor, type AgentNow, type CardOpen, type CardOptions } from '../agent-card'
 import { AgentAvatar, Icon, ago, ownColor } from './ui'
 
@@ -192,7 +192,13 @@ function AgentCard({ open }: { open: Open }): ReactNode {
         {agent.computer && (
           <div>
             <dt>{L('Computador', 'Computer')}</dt>
-            <dd>{agent.computerKind === 'mac' ? L('Roda no seu computador', 'Runs on your computer') : L('Um computador só dele, isolado', 'One of its own, isolated')}</dd>
+            <dd>
+              {agent.computerKind !== 'mac'
+                ? L('Um computador só dele, isolado', 'One of its own, isolated')
+                : windowless()
+                  ? L('Roda direto no servidor', 'Runs right on the server')
+                  : L('Roda no seu computador', 'Runs on your computer')}
+            </dd>
           </div>
         )}
         {!tuca && (

@@ -6,9 +6,11 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
-import { BrowserLogins } from './BrowserLogins'
+import { AgentVaultKeys, AgentVaultLogins } from './Vault'
+import { COFRE } from '../../../shared/vault'
 import {
   agentById,
+  harnessNoticeSeen,
   getState,
   navigate,
   newAgentDraft,
@@ -45,8 +47,6 @@ import {
   EFFORTS,
   ENGINES,
   MAX_AGENT_ROUTINES,
-  MAX_CHAIN_DEPTH,
-  chainDepthCap,
   RUN_BUDGET_PCT,
   AUTO_CONTINUES,
   routineCap,
@@ -86,6 +86,7 @@ import {
   type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
+import { HarnessesPane } from './HarnessKeys'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VOICE_WHERE, VoiceSetup } from './VoiceSetup'
@@ -100,7 +101,7 @@ import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
 import { accountLabel, ApprovalCard, QuestionCard, questionDrafts, toolWords } from './Conversation'
 import { ProposalCard } from './Tuca'
-import { confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
+import { confirmDeleteAgent, confirmDialog, ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
@@ -666,12 +667,24 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
     >
       <span ref={below} aria-hidden />
       {!isNew && <Tabs page="agent" tabs={AGENT_TABS()} aside={admin && headAway ? saveLine : undefined} />}
-      {archived && (
+      {existing?.deleted ? (
+        <div className="archived-banner">
+          <Icon name="trash" size={15} />
+          <span className="grow">
+            <strong>{L(`${draft.name} foi excluído.`, `${draft.name} was deleted.`)}</strong> {L('As mensagens que escreveu continuam nas conversas; o resto foi embora.', 'The messages it wrote stay in the conversations; everything else is gone.')}
+          </span>
+        </div>
+      ) : archived && (
         <div className="archived-banner">
           <Icon name="archive" size={15} />
           <span className="grow">
             <strong>{L(`${draft.name} está arquivado.`, `${draft.name} is archived.`)}</strong> {L('Não responde, não roda rotinas e não é escolhido pra responder nos canais.', 'It doesn’t reply, doesn’t run routines and isn’t picked to answer in channels.')}
           </span>
+          {admin && existing?.kind !== 'tuca' && (
+            <button className="btn btn--sm btn--ghost" onClick={() => void confirmDeleteAgent(draft)}>
+              {L('Excluir para sempre', 'Delete for good')}
+            </button>
+          )}
           {admin && (
             <button className="btn btn--sm btn--primary" onClick={() => void archiveAgent(draft.id, false)}>
               {L('Reativar', 'Reactivate')}
@@ -680,7 +693,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
         </div>
       )}
       {!admin && <div className="admin-only--lead"><AdminOnly>{L('Só um admin muda os agentes. Você pode conversar com eles e ver como estão configurados.', 'Only an admin changes the agents. You can chat with them and see how they’re set up.')}</AdminOnly></div>}
-      <fieldset className="member-lock" disabled={!admin}>
+      <fieldset className="member-lock" disabled={!admin || !!existing?.deleted}>
         <div className="agent-sections">
           {pane('perfil') && (
             <Section title={L('Identidade', 'Identity')} help={L('Como você chama e reconhece o agente no chat. O papel, numa linha, ajuda a decidir quem responde nos canais.', 'How you call and recognize the agent in chat. The role, in one line, helps decide who replies in channels.')}>
@@ -804,6 +817,15 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   <Toggle label={`#${c.name}`} on={chosen.includes(c.id)} onChange={(on) => pickChannels(on ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))} />
                 </Row>
               ))}
+              {/* Off: the router never calls it in on its own (src/core/router.ts chimeIn); stored only when off. */}
+              {draft.kind !== 'tuca' && (
+                <Row
+                  label={L('Entra sozinho quando algo é da área dele', 'Joins on its own when something is in its area')}
+                  sub={L('Num canal, depois da resposta de outro agente, ele pode entrar pra fazer a parte dele, com o motivo na conversa.', 'In a channel, after another agent’s reply, it may join to do its part, with the reason shown in the conversation.')}
+                >
+                  <Toggle label={L('Entra sozinho quando algo é da área dele', 'Joins on its own when something is in its area')} on={draft.proactive !== false} onChange={(v) => patch({ proactive: v ? undefined : false }, true)} />
+                </Row>
+              )}
             </Section>
           )}
 
@@ -966,7 +988,14 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               >
                 <Toggle label={L('Navegador próprio', 'Own browser')} on={!!draft.browser} onChange={(v) => patch({ browser: v }, true)} />
               </Row>
-              {!isNew && draft.browser && admin && <BrowserLogins agentId={draft.id} agentName={draft.name} />}
+              {!isNew && draft.browser && (
+                <div className="lrow lrow--stack">
+                  <span className="lrow__label">
+                    <span className="lrow__name">{L('Logins do Cofre', 'Vault logins')}</span>
+                  </span>
+                  <AgentVaultLogins agentId={draft.id} name={draft.name} />
+                </div>
+              )}
             </Section>
           )}
 
@@ -996,6 +1025,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 else shareComputer(id, agentsWith(id, draft.id, on))
               }}
             />
+          )}
+          {!isNew && pane('ferramentas') && draft.computer && (
+            <Section title={L('Chaves do Cofre', 'Vault keys')} help={L(`As chaves que ${name} pode usar nos comandos. Cada uso fica no registro do Cofre.`, `The keys ${name} may use in its commands. Each use goes in the Vault’s log.`)}>
+              <AgentVaultKeys agentId={draft.id} name={draft.name} />
+            </Section>
           )}
 
           {pane('memoria') && (
@@ -1781,6 +1815,7 @@ function NothingWaiting({ why }: { why: string }): ReactNode {
 // What an approval was for, in a few words: "Rodar um comando", "Abrir pull request", "Send email".
 export function approvalWhat(a: Approval): string {
   const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+  if (a.connectorId === COFRE) return typeof a.args['nome'] === 'string' ? L(`Chave ${a.args['nome']}`, `Key ${a.args['nome']}`) : L('Login de site', 'Site login')
   if (a.tool === ACCESS_REQUEST) return L('Pedir acesso', 'Ask for access')
   if (a.connectorId === COMPUTADOR) return shellActions(String(a.args['command'] ?? '')).map(kindLabel).join(', ') || L('Rodar um comando', 'Run a command')
   if (a.tool === 'abrir_pr') return L('Abrir pull request', 'Open a pull request')
@@ -1884,6 +1919,34 @@ function ApprovalHistory({ approvals }: { approvals: Approval[] }): ReactNode {
   )
 }
 
+// What the person's harnesses did over MCP since they last looked (src/core/mcp.ts), one line each.
+function HarnessNotices(): ReactNode {
+  const harness = useStore((s) => s.inbox.harness) ?? []
+  if (!harness.length) return null
+  return (
+    <>
+      <div className="caps-title">{L('Feito pelos seus harnesses', 'Done by your harnesses')}</div>
+      <div className="stack-list">
+        {harness.map((h) => (
+          <div key={h.name} className="card row row--between">
+            <span>
+              {h.text} <span className="muted small">· {time(h.at)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="row">
+        <button className="btn btn--ghost btn--sm" onClick={() => void harnessNoticeSeen()}>
+          {L('Visto', 'Seen')}
+        </button>
+        <button className="link small" onClick={() => (setTab('settings', 'harnesses'), navigate({ kind: 'settings' }))}>
+          {L('Ver as chaves', 'See the keys')}
+        </button>
+      </div>
+    </>
+  )
+}
+
 function MyApprovals(): ReactNode {
   const approvals = useStore((s) => s.approvals)
   const pending = approvals.filter((a) => a.state === 'pending')
@@ -1897,6 +1960,7 @@ function MyApprovals(): ReactNode {
 
   return (
     <Page title={L('Aprovações', 'Approvals')} subtitle={L('Nada sensível acontece sem você. Cada aprovação cobre uma ação exata.', 'Nothing sensitive happens without you. Each approval covers one exact action.')} actions={<AlwaysRulesLink />}>
+      <HarnessNotices />
       {pending.length === 0 ? (
         <NothingWaiting why={L('Quando um agente quiser publicar, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.', 'When an agent wants to publish, delete or send something out, the request shows up here and in the conversation.')} />
       ) : (
@@ -1929,7 +1993,7 @@ export function InboxPage(): ReactNode {
   // One answered by someone else while I was typing stays, with what I typed and who answered.
   const gone = (inbox.answered ?? []).filter((q) => questionDrafts.get(q.id)?.trim() && !inbox.questions.some((x) => x.id === q.id))
   const questions = [...inbox.questions.map((q) => ({ q, done: false })), ...gone.map((q) => ({ q, done: true }))]
-  const nothing = inbox.approvals.length + questions.length + proposals.length === 0
+  const nothing = inbox.approvals.length + questions.length + proposals.length + (inbox.harness?.length ?? 0) === 0
   const where = (conversationId: string | undefined, agentId: string): string => {
     const conv = conversations.find((c) => c.id === conversationId)
     const who = agents.find((x) => x.id === agentId)?.name
@@ -1950,6 +2014,7 @@ export function InboxPage(): ReactNode {
   return (
     <Page title={L('Pra você', 'For you')} subtitle={L('O que espera por você: aprovações que você decide e perguntas dos agentes a você.', 'What waits on you: approvals you decide and the agents’ questions to you.')} actions={<AlwaysRulesLink />}>
       {nothing && <NothingWaiting why={L('Quando um agente precisar da sua aprovação ou te fizer uma pergunta, aparece aqui e na conversa.', 'When an agent needs your approval or asks you something, it shows up here and in the conversation.')} />}
+      <HarnessNotices />
       {inbox.approvals.length > 0 && (
         <>
           <div className="caps-title">{L(`Aprovações · ${inbox.approvals.length}`, `Approvals · ${inbox.approvals.length}`)}</div>
@@ -2475,7 +2540,8 @@ export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList
     : []),
   ...(team ? [['pessoas', L('Pessoas', 'People')] as [string, string]] : []),
   ...(team && admin ? [['atividade', L('Atividade', 'Activity')] as [string, string]] : []),
-  ...(admin && hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : [])
+  ...(admin && hasServers() ? [['servidores', L('Servidores', 'Servers')] as [string, string]] : []),
+  ['harnesses', 'Harnesses']
 ]
 const AGENT_TABS = (): TabList => [
   ['perfil', L('Perfil', 'Profile')],
@@ -2517,8 +2583,8 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
     <Section
       title={L('Time', 'Team')}
       help={L(
-        'Quem está acima passa trabalho a quem está abaixo, no canal de cada um, e recebe a resposta de volta. Sem ninguém marcado, tudo funciona como sempre.',
-        'Whoever is above hands work to those below, in each one’s channel, and gets the answer back. With no one set, everything works as it always did.'
+        'Quem está acima divide o trabalho com quem está abaixo e recebe a resposta de volta. O desenho organiza, mas não cerca: qualquer agente pode perguntar ou pedir uma parte pequena a qualquer outro.',
+        'Whoever is above splits the work with those below and gets the answer back. The chart organizes but doesn’t fence: any agent may ask any other a question or a small part.'
       )}
     >
       <Row
@@ -2526,8 +2592,8 @@ function ReportsTo({ draft, patch }: { draft: Agent; patch: (p: Partial<Agent>, 
         sub={
           boss
             ? L(
-                `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}. O pedido vira uma thread no primeiro canal ligado acima, e a resposta volta pra ${boss.name}.`,
-                `${boss.name} can ask ${draft.name || 'this agent'} for work. The request becomes a thread in the first channel turned on above, and the answer goes back to ${boss.name}.`
+                `${boss.name} pode pedir trabalho a ${draft.name || 'este agente'}: na mesma conversa, se os dois estão nela, ou numa conversa privada dele. A resposta volta pra ${boss.name}.`,
+                `${boss.name} can ask ${draft.name || 'this agent'} for work: in the same conversation, when both are in it, or in a private conversation of its own. The answer goes back to ${boss.name}.`
               )
             : undefined
         }
@@ -3132,7 +3198,7 @@ function VoiceCard(): ReactNode {
             <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
           </Field>
           <Field label={L('Caminho do modelo', 'Path to the model')} hint={status?.model && !voice?.model ? L(`Em uso: ${status.model}`, `In use: ${status.model}`) : L('Opcional: um modelo ggml (.bin) que você já tenha.', 'Optional: a ggml model (.bin) you already have.')} error={error}>
-            <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
+            <input defaultValue={voice?.model ?? ''} placeholder={L('/caminho/para/ggml-large-v3-turbo.bin', '/path/to/ggml-large-v3-turbo.bin')} onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
           </Field>
         </details>
       </div>
@@ -3157,6 +3223,7 @@ export function SettingsPage(): ReactNode {
       <Tabs page="settings" tabs={tabs} />
       <div className="agent-form">
         {pane('pessoas') && <PeoplePane />}
+        {pane('harnesses') && <HarnessesPane />}
         {pane('atividade') && admin && <ActivityPane />}
         {/* A member's own: the language, the theme and the sounds (their name is in Pessoas). */}
         {pane('geral') && !admin && (
@@ -3458,14 +3525,6 @@ export function SettingsPage(): ReactNode {
                   min={5}
                   value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
                   onChange={(n) => updateSettings({ runStallMinutes: Math.max(5, Math.round(n)) })}
-                />
-              </Field>
-              <Field label={L('Respostas seguidas entre agentes', 'Agent replies in a row')} hint={L('Quantas respostas os agentes podem dar em sequência, passando a vez entre si, antes de parar e esperar você. De 1 a 10.', 'How many replies agents can give in a row, passing the turn between them, before they stop and wait for you. From 1 to 10.')}>
-                <NumberInput
-                  min={1}
-                  max={MAX_CHAIN_DEPTH}
-                  value={chainDepthCap(settings.chainDepth)}
-                  onChange={(n) => updateSettings({ chainDepth: chainDepthCap(n) })}
                 />
               </Field>
               <Field label={L('Expiração de aprovações', 'Approvals expire after')}>

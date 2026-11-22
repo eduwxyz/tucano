@@ -118,8 +118,18 @@ export const reachOf = <T extends Node>(agents: T[], id: string): T[] => {
   return all.filter((a, i) => all.findIndex((b) => b.id === a.id) === i)
 }
 
-// How `from` asking `to` goes: down its branch, to a colleague, up (to its own boss or its sector's head), or to another sector's head.
-export type AskKind = 'down' | 'peer' | 'up' | 'sector'
+// Everyone `id` may ask: the tree organizes who divides the work and whom to think of first, but it fences
+// no one in. Those it reaches by the tree come first (reachOf), then everyone else, each once. Not the Tuca
+// (it builds the others), nor an archived agent.
+export const anyoneOf = <T extends Node>(agents: T[], id: string): T[] => {
+  const near = reachOf(agents, id)
+  const rest = agents.filter((a) => a.id !== id && !a.archived && a.kind !== 'tuca' && !near.some((n) => n.id === a.id))
+  return [...near.filter((a) => !a.archived && a.kind !== 'tuca'), ...rest]
+}
+
+// How `from` asking `to` goes: down its branch, to a colleague, up (to its own boss or its sector's head), to
+// another sector's head, or to someone out of its way in the tree ('other': another sector's member, a loose agent).
+export type AskKind = 'down' | 'peer' | 'up' | 'sector' | 'other'
 export function askKind(agents: Node[], from: string, to: string): AskKind {
   if (from === to) return 'peer' // a head and itself are not two sectors
   if (looseColleaguesOf(agents, from).some((a) => a.id === to)) return 'peer' // two agents in no tree
@@ -130,11 +140,11 @@ export function askKind(agents: Node[], from: string, to: string): AskKind {
   if (peersOf(agents, from).some((a) => a.id === to)) return 'peer'
   const me = agents.find((a) => a.id === from)
   if (me && (bossOf(agents, me)?.id === to || (to !== from && sectorOf(agents, from)?.id === to))) return 'up'
-  return 'sector'
+  return heads.some((h) => h.id === to) ? 'sector' : 'other'
 }
 
 // The most requests one piece of work stacks up, each made inside the thread of the one before.
-export const MAX_CHAIN = 3
+export const MAX_CHAIN = 5
 
 // Whether `id` answering to `boss` would close a loop (or is itself, or is below itself).
 export const loops = (agents: Node[], id: string, boss: string): boolean => id === boss || reportsOf(agents, id).some((a) => a.id === boss)

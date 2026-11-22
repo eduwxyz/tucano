@@ -8,6 +8,7 @@ export type DecisionKind = 'single' | 'multiple' | 'text'
 export interface DecisionOption {
   label: string
   description?: string
+  recommended?: true // the one the agent recommends: the card can go on with it in one click
 }
 export interface Decision {
   question: string
@@ -37,6 +38,19 @@ export const MAX_LABEL_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 200
 
 const KINDS: DecisionKind[] = ['single', 'multiple', 'text']
+
+// "Pode seguir com a recomendação": every decision answered with the option the agent recommends. Only when
+// each one has such an option (a free-text decision has none, so the card asks for it as usual).
+export function recommendedAnswers(decisions: Decision[]): Answer[] | undefined {
+  if (!decisions.length) return undefined
+  const answers: Answer[] = []
+  for (const d of decisions) {
+    const i = d.kind === 'text' ? -1 : (d.options ?? []).findIndex((o) => o.recommended)
+    if (i < 0) return undefined
+    answers.push({ chosen: [i] })
+  }
+  return answers
+}
 
 // Messages saved before decisions existed have a question string: it reads as one text decision.
 export function questionsOf(run: Run | undefined): Decision[] {
@@ -91,7 +105,9 @@ export function parseQuestions(args: Record<string, unknown>): { questions: Deci
             `"${question}": label up to ${MAX_LABEL_LENGTH} characters and description up to ${MAX_DESCRIPTION_LENGTH}; the detail goes in your reply's text.`
           )
         }
-      options.push(description ? { label, description } : { label })
+      // One recommended option per decision: the first one marked.
+      const recommended = (o['recommended'] === true || o['recomendada'] === true) && !options.some((x) => x.recommended)
+      options.push({ label, ...(description ? { description } : {}), ...(recommended ? { recommended: true as const } : {}) })
     }
     questions.push({ question, kind, options })
   }
