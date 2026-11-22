@@ -194,7 +194,7 @@ export function SidebarFoot(): ReactNode {
     <div className="sidebar__tools">
       <button className={`sidebar__tool ${onVault ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'vault' })}>
         <Icon name="key" size={15} />
-        <span className="grow">{L('Cofre', 'Cofre')}</span>
+        <span className="grow">{L('Cofre', 'Vault')}</span>
       </button>
       <button className={`icon-btn sidebar__gear ${onSettings ? 'is-active' : ''}`} title={L(`Configurações (${shortcut(platform, ',')})`, `Settings (${shortcut(platform, ',')})`)} aria-label={L('Configurações', 'Settings')} onClick={() => navigate({ kind: 'settings' })}>
         <Icon name="gear" size={16} />

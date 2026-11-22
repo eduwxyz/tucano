@@ -15,6 +15,8 @@ import { CUT, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
+import { FeedbackDraftCard } from './Feedback'
+import { lentComputersOf } from '../lent'
 import { canEditChannel,
   agentById,
   askerIn,
@@ -45,6 +47,9 @@ import { canEditChannel,
   navigate,
   openDm,
   openPanel,
+  widenPanel,
+  getState,
+  windowless,
   openThread,
   seeThread,
   openTuca,
@@ -99,7 +104,7 @@ import { COFRE } from '../../../shared/vault'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
-import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
+import { ArtifactCard, BrowserCard, ServiceCard, SidePanel, WidenButton } from './Panel'
 import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
@@ -177,6 +182,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     if (focus && !focusHere) void loadOlder(id, focus)
   }, [id, focus, focusHere])
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
+  const wide = useStore((s) => s.panelWide)
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
   // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
@@ -206,13 +212,23 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
   // Who here runs its commands right on this computer: said once, up top, not on every message.
   const onMac = members.filter(isMac)
+  // On a server an agent's "own computer" is the server: said as that, never as the person's laptop.
+  const onServer = windowless()
+  const names = onMac.map((a) => a.name).join(', ')
+  const macTitle = onServer
+    ? { one: L('Os comandos deste agente rodam direto no servidor', 'This agent’s commands run right on the server'), many: L(`Os comandos de ${names} rodam direto no servidor`, `${names}’s commands run right on the server`) }
+    : { one: L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer'), many: L(`Os comandos de ${names} rodam direto no seu computador`, `${names}’s commands run right on your computer`) }
+  const first = onMac[0]?.name ?? ''
+  const macLabel = onServer
+    ? { dm: L('roda no servidor', 'runs on the server'), one: L(`${first} roda no servidor`, `${first} runs on the server`), many: L(`${onMac.length} rodam no servidor`, `${onMac.length} run on the server`) }
+    : { dm: L('roda no seu computador', 'runs on your computer'), one: L(`${first} roda no seu computador`, `${first} runs on your computer`), many: L(`${onMac.length} rodam no seu computador`, `${onMac.length} run on your computer`) }
 
   return (
-    <div className="split">
+    <div className={`split ${wide ? 'is-wide' : ''}`}>
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
+            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card. In a DM the gear on the right opens the agent's page. */}
             {dmAgent ? (
               <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
                 <AgentAvatar agent={dmAgent} size={22} />
@@ -230,20 +246,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               </span>
             )}
             {onMac.length > 0 && (
-              <span
-                className="tag tag--warn topbar__mac"
-                title={
-                  dmAgent
-                    ? L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')
-                    : L(`Os comandos de ${onMac.map((a) => a.name).join(', ')} rodam direto no seu computador`, `${onMac.map((a) => a.name).join(', ')}’s commands run right on your computer`)
-                }
-              >
-                <Icon name="laptop" size={12} />
-                {dmAgent
-                  ? L('roda no seu computador', 'runs on your computer')
-                  : onMac.length === 1
-                    ? L(`${onMac[0]!.name} roda no seu computador`, `${onMac[0]!.name} runs on your computer`)
-                    : L(`${onMac.length} rodam no seu computador`, `${onMac.length} run on your computer`)}
+              <span className="tag tag--warn topbar__mac" title={dmAgent ? macTitle.one : macTitle.many}>
+                <Icon name={onServer ? 'globe' : 'laptop'} size={12} />
+                {dmAgent ? macLabel.dm : onMac.length === 1 ? macLabel.one : macLabel.many}
               </span>
             )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
@@ -273,7 +278,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              <button className="icon-btn" title={L(`Configurações de ${dmAgent.name}`, `${dmAgent.name}’s settings`)} aria-label={L(`Configurações de ${dmAgent.name}`, `${dmAgent.name}’s settings`)} onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
                 <Icon name="gear" size={16} />
               </button>
             )}
@@ -286,10 +291,41 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {gone ? (
           <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
         ) : (
-          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+          <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
         )}
       </section>
       {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+    </div>
+  )
+}
+
+// In a DM, while a computer lent to the server that its agent uses is off (the Tucano app is closed there): the
+// agent still answers, but can't reach that computer until it's back. Nothing while every one is on.
+export function ComputerOff({ agent }: { agent: Agent }): ReactNode {
+  const connectors = useStore((s) => s.connectors)
+  const people = useStore((s) => s.people)
+  const you = useStore((s) => s.you)
+  const off = lentComputersOf({ connectors, people, you }, agent).filter((c) => !c.on)
+  if (!off.length) return null
+  const names = off.map((c) => c.name)
+  const which = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} ${L('e', 'and')} ${names.at(-1)}`
+  const one = names.length === 1
+  return (
+    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', 'Off: the Tucano app is closed there. Opening it brings it back.')}>
+      <Icon name="laptop" size={14} />
+      <span className="grow">
+        {L(`${one ? '' : 'Os computadores '}`, `${one ? '' : 'The computers '}`)}
+        <b>{which}</b>
+        {L(
+          ` ${one ? 'está desligado' : 'estão desligados'}. ${agent.name} responde, mas só usa ${one ? 'esse computador' : 'eles'} quando ${one ? 'ele ligar' : 'ligarem'}.`,
+          ` ${one ? 'is' : 'are'} off. ${agent.name} answers, but only uses ${one ? 'it' : 'them'} once ${one ? "it's" : "they're"} back on.`
+        )}
+      </span>
+      {off.some((c) => c.mine) && (
+        <button className="text-btn small" onClick={() => navigate({ kind: 'connectors' })}>
+          {L('Ver computadores', 'See computers')}
+        </button>
+      )}
     </div>
   )
 }
@@ -605,12 +641,13 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
           (team && message.run?.askedTo ? (
-            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} cancelled={message.run.cancelled} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
           ) : (
             <AnswersSummary message={message} />
           ))}
         {approval && (approval.state === 'pending' ? <ApprovalCard approval={approval} /> : <DecidedApproval approval={approval} />)}
         {(message.run?.agentDraft || proposalsOf(message.run).length > 0) && <Proposals message={message} />}
+        {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.delegations?.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
@@ -1066,7 +1103,9 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal, .menu, .mention-menu, .lightbox')) return
-      openPanel(null)
+      // Over the whole page, the first Esc brings the conversation back; the next one closes it.
+      if (getState().panelWide) widenPanel(false)
+      else openPanel(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -1085,9 +1124,10 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       </div>
     </div>
   )
+  const wide = useStore((s) => s.panelWide)
   return (
-    <aside className="side-panel side-panel--thread">
-      <PanelResize />
+    <aside className={`side-panel side-panel--thread ${wide ? 'is-wide' : ''}`}>
+      {!wide && <PanelResize />}
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
@@ -1104,6 +1144,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
             <Icon name="book" size={14} />
           </button>
         )}
+        <WidenButton />
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>
@@ -1177,7 +1218,7 @@ function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies
       at={s?.at}
       ready={since > 0}
       notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
-      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', 'Once the thread is quiet for a few minutes, what was said becomes a summary here, and the memories about you come from it.')}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few quiet minutes, this thread is summed up here, and the memories about you come from it.")}
       hint={L(
         `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
         `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
@@ -1256,7 +1297,7 @@ function MemoryChip({ id }: { id: string }): ReactNode {
       <Icon name="book" size={13} />
       <span className="memory-chip__label">{label}:</span>
       <span className="memory-chip__text">{memory.text}</span>
-      {!scopePerson(memory.scope) && <span className="tag">{L('nota dele', 'its own note')}</span>}
+      {!scopePerson(memory.scope) && <span className="tag">{L('nota dele', "agent note")}</span>}
       {memory.state === 'active' && (
         <button className="link" onClick={() => forgetMemory(id)}>
           {L('Desfazer', 'Undo')}
@@ -1285,7 +1326,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
     ? null
     : d.state === 'open'
       ? d.asking
-        ? { tone: 'is-warn', text: L('esperando uma resposta', 'waiting on an answer') }
+        ? { tone: 'is-warn', text: L('esperando uma resposta', "waiting for an answer") }
         : { tone: 'is-live', text: L('em andamento', 'under way') }
       : d.state === 'done'
         ? { tone: 'is-done', text: L('terminado', 'done') }
@@ -1302,7 +1343,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
           {state.text}
         </span>
       )}
-      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', 'what this thread ends with goes back to whoever asked')}</span>
+      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', "the final answer goes back to whoever asked")}</span>
     </div>
   )
 }
@@ -1453,7 +1494,7 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
 }
 
@@ -1549,7 +1590,7 @@ function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, 
 // A question with decisions, with a team: whom it's for and who asked; answered on the card by
 // whoever may (the person, whoever covers for them or, past the deadline, the requester: those
 // who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
-function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, cancelled, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
@@ -1559,6 +1600,7 @@ function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, a
   const [answering, setAnswering] = useState(false)
   const who = agentName ?? L('O agente', 'The agent')
   const card = { id, questions: decisions, saved: answers }
+  if (cancelled) return <AskCard {...card} mode="done" badge={L('Cancelada', 'Cancelled')} cancelled />
   if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
   const toMe = target.id === you
   const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
@@ -1801,7 +1843,7 @@ function StepRow({ step }: { step: Step }): ReactNode {
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
       {step.keys?.map((k) => (
-        <span key={k} className="step__key" title={L('Chave do Cofre usada neste comando', 'Cofre key used in this command')}>
+        <span key={k} className="step__key" title={L('Chave do Cofre usada neste comando', 'Vault key used in this command')}>
           <Icon name="key" size={11} />
           {k}
         </span>
@@ -1928,7 +1970,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
           </>
         ) : approval.tool === 'abrir_pr' ? (
           <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer abrir uma', 'wants to open a')} <strong>pull request</strong> {L('em', 'in')} {String(approval.args['repo'])}
+            {agent?.name ?? L('Agente', 'Agent')} {L('quer abrir uma', 'wants to open a')} <strong>pull request</strong> {L('em', 'on')} {String(approval.args['repo'])}
           </>
         ) : approval.connectorId === 'apps' ? (
           <>
@@ -2445,7 +2487,8 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
 // `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
-export function Composer({ conversationId, threadId, members, placeholder, tools }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode }): ReactNode {
+// notice: one quiet line tucked above the field (a computer its agent uses is off).
+export function Composer({ conversationId, threadId, members, placeholder, tools, notice }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode; notice?: ReactNode }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2727,6 +2770,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           )}
         </div>
       )}
+      {notice}
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">

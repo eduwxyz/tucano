@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import type { Message, Routine, RunStatus } from '../src/shared/types'
-import { allDay, chipOcc, failedWords, firstLine, listSections, markOf, nextWords, routineWords, scheduleWords, splitWeek, stripDay, type Occ } from '../src/renderer/src/components/routines-view'
+import { allDay, chipOcc, failedWords, firstLine, isOff, listSections, markOf, nextWords, routineWords, scheduleWords, splitWeek, stripDay, type Occ } from '../src/renderer/src/components/routines-view'
 
 const at = (d: number, h = 0, mi = 0): number => new Date(2026, 10, d, h, mi).getTime() // November 2026; the 16th is a Monday
 const WEEKDAYS = [1, 2, 3, 4, 5]
@@ -37,7 +37,7 @@ describe('the strip: routines that run several times a day', () => {
     expect(allDay(routine('hook', { trigger: { kind: 'webhook', token: 't' }, schedule: { days: WEEKDAYS, time: '09:00', times: hourly } }))).toBe(false)
   })
 
-  it('splits the week: one-time runs in the grid, several-a-day in the strip, a deleted routine’s run in the grid', () => {
+  it('splits the week: one-time runs in the grid, several-a-day in the strip, and an occurrence with no routine still in the grid', () => {
     const gone: Occ = { key: 'x', name: 'Apagada', agentId: 'a1', at: at(16, 10), conversationId: 'c1', status: 'done' }
     const occs = [run(vigia, at(16, 9), 'done'), run(briefing, at(16, 8, 30), 'done'), upcoming(vigia, at(16, 14)), gone]
     const { grid, strip } = splitWeek(occs)
@@ -55,6 +55,17 @@ describe('the strip: routines that run several times a day', () => {
     expect(chipOcc(chips[1]!).at).toBe(at(16, 10))
     expect(stripDay(occs, at(17))[0]!.ticks).toHaveLength(1)
     expect(chipOcc(stripDay(occs, at(17))[0]!).upcoming).toBe(true)
+  })
+
+  it('reads a routine that’s off as off, not as still to come, and keeps what it did', () => {
+    const off = routine('Desligada', { enabled: false })
+    expect(isOff(upcoming(off, at(16, 18)))).toBe(true)
+    expect(markOf(upcoming(off, at(16, 18)))).toBe('off')
+    expect(markOf(upcoming(routine('Ligada'), at(16, 18)))).toBe('todo')
+    expect(markOf(run(off, at(16, 9), 'done'))).toBe('ok')
+    expect(markOf(run(off, at(16, 9), 'failed'))).toBe('bad')
+    // A one-off that already ran is off by itself, done — not a routine someone turned off.
+    expect(isOff({ routine: routine('Feita', { enabled: false, schedule: { days: [1], time: '09:00', once: true }, lastAt: at(16, 9) }) })).toBe(false)
   })
 
   it('marks a run: waiting on me amber, running live, stopped as off', () => {
