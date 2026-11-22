@@ -82,7 +82,7 @@ function status(u: UpdateState): string {
       return u.errorKind === 'other'
         ? L('Não deu pra atualizar sozinho. Baixe a versão nova em Releases.', "Couldn’t update on its own. Download the latest version from Releases.")
         : u.errorKind === 'offline'
-          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', "No internet to check for updates. Tucano tries again on its own later.")
+          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', "No internet connection. Tucano will try checking for updates again later.")
           : L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Couldn’t check for updates. Try again later.')
     default:
       return u.checkedAt

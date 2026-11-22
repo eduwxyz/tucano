@@ -1488,7 +1488,7 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
         )}
         <div className={`wiki-diff__new${added.trim() ? '' : ' wiki-diff__new--none'}`}>
           {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', "Added")}</span>}
-          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', "This passage leaves the page, with nothing in its place.")}</p>}
+          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', "This passage will be removed from the page without a replacement.")}</p>}
         </div>
       </div>
       {long && (
@@ -1682,7 +1682,7 @@ function WikiReviewPane(): ReactNode {
       {r.at && !r.running && sorted.length === 0 && (
         <div className="wk-calm">
           <Icon name="check" size={18} />
-          <span>{L('Tudo em ordem. Nada pra cuidar agora.', "All in order. Nothing to look after now.")}</span>
+          <span>{L('Tudo em ordem. Nada pra cuidar agora.', "Nothing needs attention.")}</span>
         </div>
       )}
       {sorted.map((f) => (

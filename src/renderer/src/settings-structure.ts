@@ -108,7 +108,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'agents-routines': [L('Abrir ao ligar o computador', 'Open when the computer starts'), L('Horário de silêncio', 'Quiet hours')],
     'agents-tuca': [L('Aplicar mudanças do Tuca na hora', 'Apply Tuca’s changes right away'), L('Desfazer', 'Undo')],
     'agents-browser': [L('Navegador dos agentes', 'Agents’ browser'), 'Jev', 'TypeSafe'],
-    'models-agents': [L('Modelo de cada agente', 'Each agent’s model'), L('Trocar o modelo de vários agentes', 'Change several agents’ model')],
+    'models-agents': [L('Modelo de cada agente', 'Each agent’s model'), L('Trocar o modelo de vários agentes', 'Change models for several agents')],
     'models-runtimes': ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', L('Endpoint', 'Endpoint')],
     'models-accounts': [L('Login', 'Sign-in'), L('Conta do trabalho e pessoal', 'Work and personal account')],
     'models-router': [L('Modelo do roteador', 'Router model'), L('Quem responde nos canais', 'Who replies in channels')],

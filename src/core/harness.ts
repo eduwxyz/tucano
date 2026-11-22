@@ -35,7 +35,7 @@ export function cleanEndpoint(raw: string): string {
   try {
     u = new URL(s)
   } catch {
-    throw new Error(L('Esse endereço não parece uma URL. Algo como https://openrouter.ai/api/v1.', "That address doesn't look like a URL. Something like https://openrouter.ai/api/v1."))
+    throw new Error(L('Esse endereço não parece uma URL. Algo como https://openrouter.ai/api/v1.', "Enter a valid URL, such as https://openrouter.ai/api/v1."))
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(L('O endereço precisa começar com http:// ou https://.', 'The address must start with http:// or https://.'))
   if (u.username || u.password) throw new Error(L('Ponha a chave no campo dela, não no endereço.', 'Put the key in its own field, not in the address.'))
