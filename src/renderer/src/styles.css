@@ -15868,6 +15868,41 @@ button.agent-card__now:hover {
 .lgroup__aside {
   margin-left: auto;
 }
+.lgroup__lead {
+  margin: -2px 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+/* "Onde trabalha": one row per place an agent may work, the server and each lent computer. */
+.where-row__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--text-2);
+}
+.where-row__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 1px 1px 2px;
+  border-radius: 50%;
+  background: var(--text-3);
+  vertical-align: middle;
+}
+.where-row__dot.is-on {
+  background: var(--ok);
+}
+.where-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+}
 .lgroup__box {
   border: 1px solid var(--border);
   border-radius: 12px;
