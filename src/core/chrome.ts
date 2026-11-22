@@ -31,6 +31,14 @@ export const commandDeadline = (starting: boolean): number => (starting ? OPEN_T
 const FRAME_MS = 150 // at most ~6 frames a second while someone watches
 const IDLE_MS = 2000 // and one every 2 s otherwise: an animated page left open costs little
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+// The site of an address, for "this one was already tried": '' when there isn't one yet.
+const siteOf = (url: string): string => {
+  try {
+    return new URL(url).host
+  } catch {
+    return ''
+  }
+}
 const alive = (pid: number): boolean => {
   try {
     process.kill(pid, 0)
@@ -247,6 +255,11 @@ export class ChromeBrowsers {
   private busy = new Map<string, number>() // what it's doing right now
   private resumeAt = new Map<string, string>() // the page a Chrome closed for idling was on
   private closing = new Map<string, Promise<void>>() // a Chrome closed for idling, still writing its cookies
+  // Sites that only let a real browser through: which one each agent's lane is drawn in a window for
+  // right now, and which ones it was already tried on. The second set is what ends the loop: a wall a
+  // window doesn't get past is never asked for again in that lane.
+  private wallHeaded = new Map<string, string>()
+  private wallTried = new Map<string, Set<string>>()
 
   constructor(
     private dir: string, // profiles live in <dir>/<agentId>
@@ -297,7 +310,7 @@ export class ChromeBrowsers {
     return join(this.dir, agentId)
   }
 
-  private async launch(agentId: string, headed: boolean, url?: string): Promise<Tab> {
+  private async launch(agentId: string, headed: boolean, url?: string, offscreen = false): Promise<Tab> {
     const profile = this.profile(agentId)
     mkdirSync(profile, { recursive: true })
     const downloads = agentId.startsWith('.shot-') ? undefined : this.downloads?.(agentId)
@@ -320,7 +333,11 @@ export class ChromeBrowsers {
       '--deny-permission-prompts',
       ...chromeKeyringFlags(),
       `--window-size=${W},${H}`,
-      ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
+      // A window opened to get past a bot check is off the screen: it is a real window, drawn by the
+      // real renderer, which is what these walls let through (measured 2026-11-22: at -24000,-24000
+      // Cloudflare, idealo's 403 and google all cleared exactly as in the middle of the screen), but
+      // it never takes the focus from me. Taking the lane over opens it in front of me instead.
+      ...(headed ? ['--new-window', ...(offscreen ? ['--window-position=-24000,-24000'] : [])] : ['--headless=new', '--mute-audio']),
       url && /^https?:/.test(url) ? url : 'about:blank'
     ]
     const proc = spawn(this.bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
@@ -429,6 +446,7 @@ export class ChromeBrowsers {
     this.handingBack.add(agentId)
     const t = this.tabs.get(agentId)
     if (t?.headed) this.tabs.delete(agentId)
+    this.wallHeaded.delete(agentId) // back to a headless lane: a wall can ask for a window again
     const p = (t?.headed ? this.shutDown(t) : Promise.resolve())
       .then(() => this.launch(agentId, false, url))
       .then(async (tab) => {
@@ -444,11 +462,44 @@ export class ChromeBrowsers {
     this.onShown(agentId, false)
   }
 
+  // The page is a bot check the headless lane can't pass: the same profile, in a real window, off the
+  // screen. Once per site in a lane, and never a retry of one that didn't work: an agent that met a
+  // wall it couldn't read spent 143 of its 248 browser calls on that host (measured 2026-11-22), and
+  // the point of this is the page, not another thing to try.
+  private async headful(agentId: string): Promise<BrowserReply> {
+    const t = this.tabs.get(agentId)
+    const here = { url: t?.url ?? '', title: '' }
+    // A window needs a screen, and nothing here may race a lane that is starting, closing or being
+    // handed back: the answer is no, and the page's own note still says what to do.
+    if (this.windowless || !this.bin) return { ...here, headful: false }
+    if (this.starting.has(agentId) || this.handingBack.has(agentId) || this.closing.has(agentId)) return { ...here, headful: false }
+    if (t?.headed) return this.wallHeaded.get(agentId) === siteOf(t.url) ? { ...here, headful: true, shown: t.remote } : { ...here, headful: false }
+    const site = siteOf(t?.url ?? '')
+    const tried = this.wallTried.get(agentId) ?? new Set<string>()
+    if (site && tried.has(site)) return { ...here, headful: false }
+    if (site) {
+      tried.add(site)
+      this.wallTried.set(agentId, tried)
+    }
+    if (t) {
+      this.tabs.delete(agentId)
+      await this.shutDown(t)
+    }
+    const tab = await this.launch(agentId, true, here.url, true)
+    await this.settle(tab)
+    if (site) this.wallHeaded.set(agentId, site)
+    return { url: tab.url, title: '', headful: true }
+  }
+
   async run(agentId: string, op: BrowserOp, args: Record<string, unknown> = {}): Promise<BrowserReply> {
     this.used.set(agentId, Date.now())
     this.busy.set(agentId, (this.busy.get(agentId) ?? 0) + 1)
     try {
-      return await this.runOp(agentId, op, args)
+      const reply = await this.runOp(agentId, op, args)
+      // Every answer from a lane that is in a window for a wall says so, so the note the agent reads
+      // (shared/wall.ts) stops advising a wait or a takeover that can't help.
+      const site = siteOf(this.tabs.get(agentId)?.url ?? '')
+      return site && this.wallHeaded.get(agentId) === site ? { ...reply, headful: true } : reply
     } finally {
       this.busy.set(agentId, (this.busy.get(agentId) ?? 1) - 1)
       this.used.set(agentId, Date.now())
@@ -458,6 +509,8 @@ export class ChromeBrowsers {
   private async runOp(agentId: string, op: BrowserOp, args: Record<string, unknown>): Promise<BrowserReply> {
     if (op === 'close' || op === 'clear') {
       this.resumeAt.delete(agentId)
+      this.wallHeaded.delete(agentId)
+      this.wallTried.delete(agentId)
       const t = this.tabs.get(agentId)
       this.tabs.delete(agentId)
       if (t && op === 'close') await this.shutDown(t)
@@ -490,8 +543,22 @@ export class ChromeBrowsers {
       await this.input(t, args as BrowserInput)
       return { url: t.url, title: '', shown: true }
     }
+    if (op === 'headful') return this.headful(agentId)
     if (op === 'show') {
       const current = this.tabs.get(agentId) ?? (await this.starting.get(agentId))
+      // A window opened to get past a wall is off the screen: asked to take the lane over, it comes
+      // into view on the page it is on. Moved, not restarted: a challenge half solved on it stays
+      // half solved, which is the one thing I asked to see it for.
+      if (current?.headed && this.wallHeaded.has(agentId)) {
+        // Moved with the DevTools window bounds, not restarted: a challenge half solved on it stays
+        // half solved, which is the one thing I asked to see it for. (On Windows the page's own
+        // screenX does not follow a moved window; the browser's bounds are what is true.)
+        const { windowId } = await current.send('Browser.getWindowForTarget', { targetId: current.target }).catch(() => ({ windowId: undefined }))
+        if (typeof windowId === 'number') await current.send('Browser.setWindowBounds', { windowId, bounds: { left: 60, top: 60, width: W, height: H } }).catch(() => {})
+        await current.send('Page.bringToFront').catch(() => {})
+        this.onShown(agentId, true)
+        return { url: current.url, title: '', shown: true }
+      }
       if (current?.headed) return { url: current.url, title: '', shown: true }
       const url = current?.url
       if (current) {

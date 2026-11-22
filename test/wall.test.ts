@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { describePage } from '../src/core/browser'
 import type { BrowserReply } from '../src/shared/types'
-import { readWall, wallNote, type PageSigns } from '../src/shared/wall'
+import { readWall, wallNote, windowGetsPast, type PageSigns } from '../src/shared/wall'
 
 // A page's own signs, as shared/page.ts brings them back: what the wall reader gets to work with.
 const signs = (extra: Partial<PageSigns> = {}): PageSigns => ({
@@ -122,5 +122,45 @@ describe('the line the agent reads', () => {
     const plain = describePage({ url: 'https://x.com/a', title: 'A', elements: [{ ref: 1, role: 'botão', label: 'Buscar', inView: true }], signs: signs() })
     expect(plain).not.toContain('Barreira:')
     expect(plain.split('\n').slice(0, 4)).toEqual(['Página: A', 'https://x.com/a', '', 'Na tela:'])
+  })
+})
+
+describe('which wall a real window can get past', () => {
+  // Measured 2026-11-22 on the same Chrome and profile over 11 sites: headless was hard-blocked on 4
+  // (Cloudflare on backerkit and linkedin, a 403 on idealo and x.com) and a real window on 1 (reddit,
+  // a login). So a bot check and a refusal are worth a window; nothing else reads differently in one.
+  it('asks for a window on a bot check and a refusal, and on nothing else', () => {
+    expect(windowGetsPast({ kind: 'challenge', why: 'performing security verification' })).toBe(true)
+    expect(windowGetsPast({ kind: 'blocked', why: 'http error 403' })).toBe(true)
+    expect(windowGetsPast({ kind: 'login', why: 'campo de senha' })).toBe(false)
+    expect(windowGetsPast({ kind: 'consent', why: 'we use cookies' })).toBe(false)
+    expect(windowGetsPast({ kind: 'failed', why: 'err_connection_reset' })).toBe(false)
+    expect(windowGetsPast({ kind: 'empty', why: '0 caracteres' })).toBe(false)
+    expect(windowGetsPast(undefined)).toBe(false)
+  })
+
+  it('stops advising a wait or a takeover once the lane is already a real window', () => {
+    const challenge = wallNote({ kind: 'challenge', why: 'g-recaptcha' }, 'Edu', { headful: true })
+    expect(challenge).toContain('já é uma janela de verdade')
+    expect(challenge).toContain('esperar não muda nada')
+    expect(challenge).toContain('Edu')
+    expect(challenge).not.toContain('Não clique de novo')
+    const refused = wallNote({ kind: 'blocked', why: 'http error 403' }, 'Edu', { headful: true })
+    expect(refused).toContain('mesmo numa janela de verdade')
+    expect(refused).toContain('Use outra fonte')
+    // Without that, the advice is the one it always was.
+    expect(wallNote({ kind: 'challenge', why: 'g-recaptcha' }, 'Edu')).toContain('Não clique de novo')
+  })
+
+  it('gives that line when the lane is in a window for a wall', () => {
+    const walled: BrowserReply = {
+      url: 'https://www.reddit.com/r/Pathfinder2e/',
+      title: 'Reddit - Prove your humanity',
+      headful: true,
+      signs: signs({ chars: 240, words: 'reddit - prove your humanity', marks: [] })
+    }
+    const lines = describePage(walled, { me: 'Edu' }).split('\n')
+    expect(lines[2]).toContain('já é uma janela de verdade')
+    expect(describePage({ ...walled, headful: false }, { me: 'Edu' }).split('\n')[2]).toContain('Não clique de novo')
   })
 })
