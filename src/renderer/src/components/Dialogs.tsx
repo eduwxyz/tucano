@@ -106,8 +106,9 @@ function DialogBody(): ReactNode {
 function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () => void }): ReactNode {
   const dmName = useStore((s) => (conv?.kind === 'dm' && conv.members[0] ? agentById(s, conv.members[0])?.name : undefined))
   const channel = conv?.kind !== 'dm'
-  // Its name and topic are its maker's and the admins'; anyone else only sees them.
-  const editable = useStore((s) => !conv || canEditChannel(s, conv))
+  // A channel's name and topic are its maker's and the admins'; anyone else only sees them.
+  // Where a DM's agent answers is up to whoever is in it.
+  const editable = useStore((s) => !conv || conv.kind === 'dm' || canEditChannel(s, conv))
   const [name, setName] = useState(conv?.name ?? '')
   const [topic, setTopicText] = useState(conv?.topic ?? '')
   const [threads, setThreadsOn] = useState(!!conv?.threads)

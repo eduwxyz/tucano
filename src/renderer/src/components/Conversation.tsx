@@ -212,7 +212,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
+            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card. In a DM the gear on the right opens the agent's page. */}
             {dmAgent ? (
               <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
                 <AgentAvatar agent={dmAgent} size={22} />
@@ -273,7 +273,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              <button className="icon-btn" title={L(`Configurações de ${dmAgent.name}`, `${dmAgent.name}’s settings`)} aria-label={L(`Configurações de ${dmAgent.name}`, `${dmAgent.name}’s settings`)} onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
                 <Icon name="gear" size={16} />
               </button>
             )}

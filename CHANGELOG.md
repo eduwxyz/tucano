@@ -11,9 +11,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **A routine that's off keeps its place in the week.** Turning a routine off made it leave the timetable, so the week stopped showing when it would run and there was nothing there to turn back on. It now stays at its times, dimmed and in monochrome, and its own panel still turns it back on; only a routine that was deleted leaves the timetable.
+- **In a DM, the gear at the top right opens the agent's settings.** It opened a "Conversation with …" window that had nothing in it. It now takes you to the agent's page, where its model, instructions and tools are. Thanks to Apostol Apostolov for pointing it out.
 
 ### Fixed
 
+- **A DM's settings show where the agent answers again.** Since teams came in, the "Conversation with …" window (from a DM's menu in the sidebar, or the gear on the agent's card) showed only Cancel and Save. It shows the choice between answers in the conversation and answers in threads again.
 - **In English, the Vault is the Vault.** With the app in English, the sidebar, the search, the Vault page, an agent's page, the step that used a key, the activity log and the card that asks for a key all said "Cofre". They say "Vault" now, and so do the errors and the outcome a person reads when a key is missing or saved. The few other spots that stayed in Portuguese in English are English too: the dictation shortcut ("⌥ Space"), the placeholder for a Whisper model's path, "Invalid URL" on a screenshot and "Error" on a connector's sign-in page. A test now reads the screen's code and fails on Portuguese in an English string, or on Portuguese shown with no English beside it.
 
 ## [0.2.44] - 2026-11-21
