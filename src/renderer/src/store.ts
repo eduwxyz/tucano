@@ -1,12 +1,16 @@
+import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from '../../shared/vault'
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { ThoughtCache, type RetainedThought } from './thoughts'
+import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from '../../shared/harness-keys'
 import { L, setLang } from '../../shared/lang'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
 import type { AppProvider } from '../../shared/connector-catalog'
 import {
+  artifactUrl,
   asSaid,
   type Account,
   type AccountEngine,
@@ -60,7 +64,8 @@ import {
   type VoiceStatus,
   type ProposalsResult,
   type BackupSummary,
-  type NodeInfo
+  type NodeInfo,
+  type FeedbackDraft
 } from '../../shared/types'
 import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
@@ -76,6 +81,7 @@ export type View =
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
+  | { kind: 'vault'; tab?: 'keys' | 'logins' | 'log' } // the Cofre (components/Vault.tsx)
   | { kind: 'memory' }
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
@@ -106,7 +112,7 @@ export interface State {
   models: Model[]
   agents: Agent[]
   connectors: Connector[]
-  lightbox: { items: { url: string; title: string; video?: boolean }[]; index: number } | null
+  lightbox: { items: LightboxItem[]; index: number } | null
   conversations: Conversation[]
   messages: Record<string, Message[]> // per conversation, oldest first; read through messagesIn and the indexes below
   history: Record<string, number> // per conversation with older messages still in the core: from when it's here whole
@@ -123,6 +129,7 @@ export interface State {
   packaged: boolean
   isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
+  panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
@@ -137,7 +144,7 @@ export interface Toast {
   leaving?: boolean // fading out
 }
 
-export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string } } // image: the window, taken before it opened
+export type Dialog = { kind: 'members' | 'settings'; id: string } | { kind: 'archived' | 'new-channel' | 'search' } | { kind: 'workspaces'; create?: boolean } | { kind: 'oauth'; id: string; url: string } | { kind: 'feedback'; image?: { type: 'image/png' | 'image/jpeg'; data: string }; draft?: FeedbackDraft; from?: string } // image: the window, taken before it opened; draft: what the Tuca wrote, from his message `from`
 
 // `thread`: the replies to a message (its id), next to the conversation.
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string } | { kind: 'thread'; id: string }
@@ -208,6 +215,7 @@ let state: State = {
   packaged: false,
   isolatedComputers: true,
   panel: null,
+  panelWide: false,
   dialog: null,
   tabs: {},
   toasts: [],
@@ -460,6 +468,7 @@ export async function loadThread(rootId: string): Promise<void> {
 
 const live = new Map<string, string>()
 const liveListeners = new Map<string, Set<() => void>>()
+const thoughtListeners = new Map<string, Set<() => void>>()
 
 function listen(map: Map<string, Set<() => void>>, key: string, l: () => void): () => void {
   let ls = map.get(key)
@@ -478,6 +487,45 @@ function stream(id: string, text: string): void {
 }
 
 export const liveText = (id: string): string | undefined => live.get(id)
+
+// What the model is thinking, streamed apart from the reply: kept here, in memory, because it is
+// something to watch as it goes and not part of what the agent said.
+const thoughts = new ThoughtCache((id) => wake(thoughtListeners, id))
+
+function streamThought(id: string, text: string): void {
+  thoughts.append(id, text)
+}
+
+export const liveThought = (id: string): string | undefined => thoughts.get(id)
+
+// The thinking as it is now, woken as it arrives. `every`: wake at most that often (ms).
+export function useLiveThought(id: string, every = 0): string | undefined {
+  return useLiveThoughtState(id, every)?.text
+}
+
+export function useLiveThoughtState(id: string, every = 0): RetainedThought | undefined {
+  const subscribe = useCallback(
+    (l: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const off = listen(thoughtListeners, id, () => {
+        if (!every) return l()
+        if (timer) return
+        timer = setTimeout(() => {
+          timer = undefined
+          l()
+        }, every)
+      })
+      return () => {
+        if (timer) clearTimeout(timer)
+        off()
+      }
+    },
+    [id, every]
+  )
+  // No thoughts before the window exists: a reply drawn to markup (a test, a server-side first
+  // frame) has none, and asking for them there would throw instead of drawing the steps.
+  return useSyncExternalStore(subscribe, () => thoughts.snapshot(id), () => undefined)
+}
 
 // The message's text as it is now. `every`: wake at most that often (ms), for what is costly to draw.
 export function useLiveText(m: Message, every = 0): string {
@@ -535,6 +583,7 @@ function withMe(s: State): State {
 }
 
 function withSettings(s: State, settings: Settings): State {
+  if (settings.showThinking !== true) thoughts.clear()
   setLang(settings.language)
   return withMe({ ...s, settings })
 }
@@ -542,6 +591,9 @@ function withSettings(s: State, settings: Settings): State {
 function apply(e: CoreEvent): void {
   // Streamed words and the browser's screen come many times a second: they wake only what shows them.
   if (e.type === 'delta') return stream(e.id, e.text)
+  // The model's reasoning is kept only when this person asked for it (Settings › General): off, the
+  // text never lands in memory, so nothing of it can be drawn or read back later.
+  if (e.type === 'thinking') return state.settings.showThinking === true ? streamThought(e.id, e.text) : undefined
   if (e.type === 'browser_frame') return showFrame(e.agentId, e.frame)
   if (e.type === 'tasks') return void (state.tasks && loadTasks())
   set((s) => {
@@ -549,6 +601,7 @@ function apply(e: CoreEvent): void {
       case 'node':
         return { ...s, node: e.info }
       case 'message': {
+        if (e.attemptStart) thoughts.clear([e.message.id])
         const id = e.message.conversationId
         const messages = { ...s.messages, [id]: upsertMessage(messagesIn(s, id), e.message) }
         // What I just wrote in a conversation that answers in threads opens its thread, where the
@@ -567,6 +620,8 @@ function apply(e: CoreEvent): void {
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
+      case 'agent_removed':
+        return { ...s, agents: s.agents.filter((a) => a.id !== e.id) }
       case 'conversation': {
         return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
@@ -595,6 +650,7 @@ function apply(e: CoreEvent): void {
       case 'routine':
         return { ...s, routines: upsert(s.routines, e.routine) }
       case 'conversation_removed': {
+        thoughts.clear(messagesIn(s, e.id).map((message) => message.id))
         const left = s.conversations.filter((c) => c.id !== e.id)
         const here = s.view?.kind === 'conversation' && s.view.id === e.id
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
@@ -606,7 +662,8 @@ function apply(e: CoreEvent): void {
           messages,
           history,
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
-          panel: here ? null : s.panel
+          panel: here ? null : s.panel,
+          panelWide: here ? false : s.panelWide
         }
       }
       case 'routine_removed':
@@ -641,7 +698,10 @@ export async function start(): Promise<void> {
     navigate({ kind: 'conversation', id })
     if (thread) openThread(thread)
   })
-  window.tucano.onNavigatePage?.((page) => navigate({ kind: page }))
+  window.tucano.onNavigatePage?.((page) => {
+    if (page === 'servers') setTab('settings', 'servidores')
+    navigate({ kind: page === 'servers' ? 'settings' : page })
+  })
   window.tucano.onCoreDown?.(() => {
     disconnect()
     set((s) => ({ ...s, coreDown: true }))
@@ -674,6 +734,7 @@ export async function start(): Promise<void> {
   }
   await connect(apply)
   const snap = await call('snapshot')
+  thoughts.clear() // A replacement snapshot may no longer grant access to previously shown replies.
   for (const b of snap.browsers) showFrame(b.agentId, b.frame)
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
@@ -719,6 +780,16 @@ export const modelById = (s: State, id: string): Model | undefined => s.models.f
 export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a) => a.state === 'pending')
 export const computerOf = (s: State, agentId: string): ComputerInfo | undefined => s.computers.find((c) => c.agentId === agentId)
 export const browserOf = (s: State, agentId: string): BrowserView | undefined => s.browsers.find((b) => b.agentId === agentId)
+// The browser shows big and live on an agent's latest message that used it, while there is something to
+// watch there: that reply still at work (or held on an approval), or a person in control of it. Otherwise,
+// and while it's open on the side, the small card: an idle browser doesn't take half the screen.
+export const liveBrowserOn = (s: State, message: Message): boolean => {
+  const agentId = message.author.kind === 'agent' ? message.author.id : undefined
+  if (!agentId || !message.run?.browser || lastBrowserIn(s, message.conversationId, agentId) !== message.id) return false
+  if (s.panel?.kind === 'browser' && s.panel.agentId === agentId) return false
+  const status = message.run.status
+  return status === 'working' || status === 'waiting_approval' || !!browserOf(s, agentId)?.shown
+}
 export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
 // A message of this window's person (one from before people has no id to compare, and was the owner's: theirs too).
 export const isMine = (s: Pick<State, 'you'>, a: Message['author']): boolean => a.kind === 'person' && (!s.you || a.id === s.you)
@@ -813,7 +884,7 @@ export const navigate = (view: View): void =>
     ...s,
     view,
     navOpen: false,
-    panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
+    ...(s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? {} : { panel: null, panelWide: false }),
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
   }))
@@ -921,6 +992,8 @@ export const applyProposal = (messageId: string, index = 0): Promise<{ id: strin
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
 export const applyProposals = (messageId: string, draft: boolean): Promise<ProposalsResult> => call('applyProposals', { messageId, draft })
 export const dismissProposals = (messageId: string, draft: boolean): void => void call('dismissProposals', { messageId, draft }).catch(() => {})
+export const undoProposal = (messageId: string, index?: number, draft?: boolean): Promise<void> => call('undoProposal', { messageId, ...(index !== undefined ? { index } : {}), ...(draft ? { draft } : {}) })
+export const undoProposals = (messageId: string): Promise<ProposalsResult> => call('undoProposals', { messageId })
 export const settleDraft = (messageId: string, agentId?: string): void => void fire(L('Não consegui salvar o cartão.', "I couldn't save the card."), 'settleDraft', { messageId, agentId })
 
 export async function openDm(agentId: string): Promise<void> {
@@ -944,6 +1017,9 @@ export const updateTool = (connectorId: string, name: string, patch: Partial<Pic
   void fire(L('Não consegui salvar a ferramenta.', "I couldn't save the tool."), 'updateTool', { connectorId, name, patch })
 
 export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
+// A computer lent to this server: exactly these agents use it (its person decides, even without being an admin).
+export const shareComputer = (connectorId: string, agentIds: string[]): void =>
+  void fire(L('Não consegui mudar quem usa o computador.', "I couldn't change who uses the computer."), 'shareComputer', { connectorId, agentIds })
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
@@ -961,6 +1037,7 @@ export const importHarnessMcp = (key: string): Promise<string> => call('importHa
 
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
 export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
+export const deleteAgent = (id: string): Promise<void> => call('deleteAgent', { id })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 // Where a conversation's answers go: each in the thread of what it answers, or in the conversation.
 export const setThreads = (conversationId: string, on: boolean): Promise<void> => call('setThreads', { conversationId, on })
@@ -971,16 +1048,17 @@ export const markRead = (id: string): void => { void call('markRead', { conversa
 // A message sent outside threads, in a conversation that answers in them: its thread opens when it
 // comes back from the core (a while at most, so one that never does doesn't open a later one).
 let openNext: { conversationId: string; until: number } | null = null
-// `threadId`: a reply in the thread that message started.
-export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = []): void => {
+// `threadId`: a reply in the thread that message started. `mode` 'steer': from a running reply's own pill, for it (`steerTo`).
+export const sendMessage = (conversationId: string, text: string, images: ImageUpload[] = [], threadId?: string, files: FileUpload[] = [], mode?: 'steer', steerTo?: string): void => {
   if (!(text.trim() || images.length || files.length)) return
   const threads = !threadId && state.conversations.find((c) => c.id === conversationId)?.threads
   openNext = threads ? { conversationId, until: Date.now() + 15_000 } : null
-  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}) })
+  void fire(L('Não consegui enviar a mensagem.', "I couldn't send the message."), 'sendMessage', { conversationId, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(threadId ? { threadId } : {}), ...(mode ? { mode } : {}), ...(steerTo ? { steerTo } : {}) })
 }
 
 export const answerDecision = (messageId: string, index: number, answer: Answer | null): void =>
   void fire(L('Não consegui guardar a resposta.', "I couldn't save the answer."), 'answerDecision', { messageId, index, answer })
+export const cancelQuestion = (messageId: string): Promise<void> => fire(L('Não consegui cancelar a pergunta.', "I couldn't cancel the question."), 'cancelQuestion', { messageId })
 export const submitDecisions = (messageId: string): Promise<void> => fire(L('Não consegui enviar as respostas.', "I couldn't send the answers."), 'submitDecisions', { messageId })
 
 // The person is writing: the core gets what will answer ready. Once in a while per place, and
@@ -995,8 +1073,11 @@ export const typing = (conversationId: string, threadId?: string, opened = false
 }
 
 export const stopRun = (messageId: string): void => void fire(L('Não consegui parar a resposta.', "I couldn't stop the reply."), 'stopRun', { messageId })
-export const retryRun = (messageId: string): void => void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId })
+export const retryRun = (messageId: string, note?: string): void =>
+  void fire(L('Não consegui tentar de novo.', "I couldn't try again."), 'retryRun', { messageId, ...(note ? { note } : {}) })
 export const continueRun = (messageId: string): void => void fire(L('Não consegui continuar a resposta.', "I couldn't continue the reply."), 'continueRun', { messageId })
+// The note where a piece of work stopped on its brakes (message.stop): the work goes on from there.
+export const continueJob = (messageId: string): void => void fire(L('Não consegui continuar o trabalho.', "I couldn't continue the work."), 'continueJob', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
   void fire(decision === 'approved' ? L('Não consegui aprovar.', "I couldn't approve it.") : L('Não consegui recusar.', "I couldn't refuse it."), 'decideApproval', { id, decision, reason, always })
@@ -1023,8 +1104,22 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 
 export const localPath = (messageId: string, path: string): Promise<LocalInfo | null> => call('localPath', { messageId, path })
 export const revealArtifact = (id: string): void => void fire(L('Não consegui mostrar o arquivo.', "I couldn't show the file."), 'revealArtifact', { id })
+// A copy of what an agent sent, on this computer. In a browser (Tucano as a server) the file is on
+// the server: it comes down under its own name (src/server/artifact-http.ts). On the desktop the
+// app asks where to put it; that's the owner's, at the computer's own window, like revealArtifact.
+export const canSaveArtifact = (s: Pick<State, 'people' | 'you'>): boolean => windowless() || amOwner(s)
+export const saveLabel = (): string => (windowless() ? L('Baixar', 'Download') : L('Salvar…', 'Save…'))
+export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
+  if (!windowless()) return void fire(L('Não consegui salvar o arquivo.', "I couldn't save the file."), 'saveArtifact', { id: a.id })
+  const link = document.createElement('a')
+  link.href = `${artifactUrl(a)}?download=1`
+  link.download = a.name
+  link.click()
+}
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
-export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
+// The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
+export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
 // I've seen this thread up to now (it's open, or was just closed).
 export const seeThread = (rootId: string): void =>
@@ -1035,7 +1130,9 @@ export const seeThread = (rootId: string): void =>
     } catch {}
     return { ...s, threadSeen }
   })
-export const openLightbox = (items: { url: string; title: string; video?: boolean }[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
+// `artifact`: an image an agent sent, which can be saved from there.
+export type LightboxItem = { url: string; title: string; video?: boolean; artifact?: Pick<Artifact, 'id' | 'name'> }
+export const openLightbox = (items: LightboxItem[], index: number): void => set((s) => ({ ...s, lightbox: { items, index } }))
 export const closeLightbox = (): void => set((s) => ({ ...s, lightbox: null }))
 export const moveLightbox = (by: number): void =>
   set((s) => (s.lightbox ? { ...s, lightbox: { ...s.lightbox, index: (s.lightbox.index + by + s.lightbox.items.length) % s.lightbox.items.length } } : s))
@@ -1045,9 +1142,23 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void fire(L('Não consegui mexer no computador do agente.', "I couldn't act on the agent's computer."), 'computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void fire(L('Não consegui parar o serviço.', "I couldn't stop the service."), 'stopService', { agentId, name })
 export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void fire(L('Não consegui mexer no navegador do agente.', "I couldn't act on the agent's browser."), 'browserAction', { agentId, action })
+// The Cofre (src/core/vault.ts): keys by name, never their values.
+export const vaultKeys = (): Promise<VaultKey[]> => call('vaultKeys')
+export const vaultUses = (): Promise<VaultUse[]> => call('vaultUses')
+export const saveVaultKey = (key: VaultKeyInput): Promise<VaultKey> => call('saveVaultKey', { key })
+export const removeVaultKey = (id: string): Promise<void> => call('removeVaultKey', { id })
+export const setVaultKeyAgent = (id: string, agentId: string, on: boolean): Promise<VaultKey> => call('setVaultKeyAgent', { id, agentId, on })
+export const importVaultKeys = (lines: EnvPair[], replace: string[], mine?: boolean): Promise<{ saved: number }> => call('importVaultKeys', { lines, replace, ...(mine ? { mine } : {}) })
+// Its site logins: sites and usernames, never a password.
+export const vaultLogins = (): Promise<VaultLogin[]> => call('vaultLogins')
+export const saveVaultLogin = (login: VaultLoginInput): Promise<VaultLogin> => call('saveVaultLogin', { login })
+export const removeVaultLogin = (id: string): Promise<void> => call('removeVaultLogin', { id })
+export const setVaultLoginAgent = (id: string, agentId: string, on: boolean): Promise<VaultLogin> => call('setVaultLoginAgent', { id, agentId, on })
+// pedir_chave's card in the chat: the key or the login pasted, or one in the Cofre given to the agent.
+export const answerKeyRequest = (answer: KeyRequestAnswer): Promise<void> => call('answerKeyRequest', { answer })
 // Tucano as a server: the page is in a browser and the agent's has no window, so I
 // drive it from its picture in the panel.
-export const windowless = (): boolean => !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__
+export const windowless = (): boolean => typeof window !== 'undefined' && !!(window as { __TUCANO_WEB__?: boolean }).__TUCANO_WEB__ // no window: a page rendered to text (tests)
 // A page an agent serves, as this browser reaches it: on a server, at the server's
 // address (it passes running services through on a private network).
 // A page an agent serves on the server's loopback, from here. Behind https it has an address of its
@@ -1110,6 +1221,13 @@ export const removedPeople = (): Promise<(Person & { removedAt: number })[]> => 
 export const removePerson = (id: string): Promise<void> => call('removePerson', { id })
 export const myDevices = (): Promise<Device[]> => call('myDevices')
 export const removeDevice = (id: string): Promise<void> => call('removeDevice', { id })
+// Harnesses over MCP (Configurações › Harnesses).
+export const harnessKeys = (): Promise<HarnessKey[]> => call('harnessKeys')
+export const createHarnessKey = (name: string, level: HarnessLevel): Promise<{ key: string; harness: HarnessKey }> => call('createHarnessKey', { name, level })
+export const removeHarnessKey = (id: string): Promise<void> => call('removeHarnessKey', { id })
+export const mcpInfo = (): Promise<McpInfo> => call('mcpInfo')
+export const connectHarness = (harness: Connectable, replace?: boolean): Promise<HarnessConnect> => call('connectHarness', { harness, ...(replace ? { replace } : {}) })
+export const harnessNoticeSeen = (): Promise<void> => call('harnessNoticeSeen')
 export const setRole = (id: string, role: 'admin' | 'member'): Promise<void> => call('setRole', { id, role })
 export const purgePerson = (id: string): Promise<void> => call('purgePerson', { id })
 export const loadActivity = (f: { personId?: string; kind?: string; before?: number }): Promise<ActivityEntry[]> => call('activity', f)

@@ -16,7 +16,7 @@ export function AgentModelsPanel(): ReactNode {
   const saving = useRef(false)
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
-  const scope = agents.filter((a) => archived || !a.archived)
+  const scope = agents.filter((a) => !a.deleted && (archived || !a.archived))
   const visible = scope.filter((a) => `${a.name} ${a.handle}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   const targets = scope.filter((a) => selected.includes(a.id))
   const allVisible = visible.length > 0 && visible.every((a) => selected.includes(a.id))
@@ -49,7 +49,7 @@ export function AgentModelsPanel(): ReactNode {
         <div className="agent-models__bulk">
           <strong>{L('Alterar em lote', 'Bulk change')}</strong>
           <ModelPicker value={model} onChange={setModel} />
-          <p className="hint">{L('Ao trocar de harness, o agente passa a usar o login padrão dele. O modelo reserva continua igual.', 'When switching harnesses, the agent uses its default login. The reserve model stays the same.')}</p>
+          <p className="hint">{L('Ao trocar de harness, o agente passa a usar o login padrão dele. O modelo reserva continua igual.', "Switching harnesses uses the default login. The fallback model stays the same.")}</p>
           <div className="row">
             <button type="button" className="btn btn--primary btn--sm" disabled={!targets.length || !modelInfo(model)?.id} onClick={() => void save(targets.map((a) => a.id), model)}>
               {L(`Aplicar aos selecionados (${targets.length})`, `Apply to selected (${targets.length})`)}

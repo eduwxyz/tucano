@@ -29,6 +29,8 @@ vi.mock('../src/renderer/src/store', async (original) => {
     applyProposals: vi.fn(async () => ({ applied: [{ index: 0, id: 'lia' }, { index: 2, id: 'r1' }], failed: [{ index: 1, error: 'Já existe o canal #financeiro.' }], forwarded: [], draft: { agentId: 'leo' } })),
     dismissProposal: vi.fn(),
     dismissProposals: vi.fn(),
+    undoProposal: vi.fn(async () => {}),
+    undoProposals: vi.fn(async () => ({ applied: [], failed: [{ index: 1, error: 'Já tem conversa em #financeiro.' }], forwarded: [] })),
     createFromDraft: vi.fn(async () => ({ agentId: 'rafa', conversationId: 'd1' })),
     sendMessage: vi.fn(),
     settleDraft: vi.fn(),
@@ -170,6 +172,28 @@ describe('several proposals in one reply, on screen', () => {
     expect(text()).toContain('Ajustar Lia')
   })
 
+  it('what applied by itself is a receipt with Desfazer; the limit left to confirm is a card; "Desfazer tudo" says what it could not', async () => {
+    const undo = { until: Date.now() + 3_600_000 }
+    const [limit, channel, routine] = migration()
+    const m = reply([{ ...limit! }, { ...channel!, state: 'applied', auto: true, appliedId: 'c9', undo }, { ...routine!, state: 'applied', auto: true, appliedId: 'r9', undo }], { agentDraft: { ...draft, state: 'created', agentId: 'leo', auto: true, undo: { ...undo, stamps: {} } } })
+    fake = state({ messages: { t1: [m] }, agents: [tuca, lia, nina, agent('leo', 'Léo')] })
+    await render(<Proposals message={m} />)
+    expect(text()).toContain('Criei Léo.')
+    expect(text()).toContain('feito por Tuca')
+    await click(/^Desfazer$/)
+    expect(store.undoProposal).toHaveBeenCalledWith('m1', undefined, true)
+    await click(/^→$/)
+    expect(text()).toContain('Isso dá acesso ou mexe no gasto')
+    expect(button(/^Aplicar$/)).toBeTruthy()
+    await click(/^→$/)
+    expect(text()).toContain('Criei o canal #financeiro.')
+    await click(/^Desfazer$/)
+    expect(store.undoProposal).toHaveBeenCalledWith('m1', 1)
+    await click(/Desfazer tudo \(3\)/)
+    expect(store.undoProposals).toHaveBeenCalledWith('m1')
+    expect(text()).toContain('Uma não foi desfeita: Já tem conversa em #financeiro.')
+  })
+
   it('a reply from before (one `proposal`) still shows its card', async () => {
     const old = { ...reply([]), run: { status: 'done', steps: [], proposal: migration()[0] } } as Message
     fake = state({ messages: { t1: [old] } })
@@ -239,10 +263,16 @@ describe('the builder screen, after the debloat: steps, ideas and the proposal b
     expect(rows().slice(0, 4)).toEqual(['Nome=—', 'O que faz=—', 'Quando=—', 'Acesso=—'])
     expect(button(/Prefiro montar eu mesmo/)).toBeTruthy()
     expect([...document.querySelectorAll('button')].find((b) => b.textContent === 'Criar agente')?.disabled).toBe(true)
-    // "Nada é criado sem você" once, under the field (not in it too).
-    expect(text().split('Nada é criado sem você').length - 1).toBe(1)
+    // What happens to what he proposes, once, under the field (not in it too): made at once, with Desfazer.
+    expect(text().split('O que ele cria entra na hora, e dá pra desfazer.').length - 1).toBe(1)
     await click(/Triar os tickets de suporte toda manhã/)
     expect(store.sendMessage).toHaveBeenCalledWith('t1', 'Quero alguém pra triar os tickets de suporte toda manhã.')
+    // Turned off in the settings: nothing is made without a click, as before.
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root')!)
+    fake = { ...state({ messages: { t1: [hello] } }), settings: { ...state().settings, tucaApplyNow: false } }
+    await render(<Onboarding build />)
+    expect(text().split('Nada é criado sem você').length - 1).toBe(1)
   })
 
   it('a proposal fills the card ("Quando" from its routine) and "Criar agente" makes it and tries its first task', async () => {

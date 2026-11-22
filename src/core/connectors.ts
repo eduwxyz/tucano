@@ -20,6 +20,7 @@ import { floorOf, saysHighRisk } from '../shared/classify'
 import { nodeOf } from '../shared/node-link'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
+import { VAULT_REF } from '../shared/vault'
 
 const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
@@ -193,7 +194,11 @@ export interface ConnectorDeps {
   emit: (e: CoreEvent) => void
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
+  // Where the browser goes back to for a provider that takes only a loopback address (Canva's) when
+  // oauthCallbackUrl isn't one (a server on its https address): there, the person pastes where the page ended.
+  localCallbackUrl?: () => string
   readOp?: (ref: string) => Promise<string> // a 1Password reference's value (the op CLI; tests fake it)
+  vaultValue?: (name: string) => Promise<string | undefined> // a team key of the Cofre, for a variable that says cofre:NAME
   callTimeoutMs?: number // how long a tool call may take; tests shorten it
   // Where a sign-in with the person's own app comes back: Slack takes only the address registered in the
   // app, port and all, which the gateway's (new on each launch) can't be.
@@ -285,6 +290,18 @@ const CLIENT_ID: Record<AppProvider, { re: RegExp; pt: string; en: string }> = {
 // redirect without the port keeps the registration — and the refresh token, which
 // belongs to the client that got it — across restarts, instead of signing in again.
 // Only an http loopback address loses its port; anything else must match whole.
+// Whether an authorization page turns its redirect address away: an error page that names it ("Invalid redirect
+// URI.", redirect_uri_mismatch) instead of the sign-in. No answer, or any other, isn't a no.
+export async function refusesRedirect(page: string): Promise<boolean> {
+  try {
+    const r = await fetch(page, { redirect: 'manual', signal: AbortSignal.timeout(8_000) })
+    if (r.status < 400 || r.status >= 500) return false
+    return /redirect/i.test((await r.text()).slice(0, 4_000))
+  } catch {
+    return false
+  }
+}
+
 export const sameLoopbackRedirect = (a: string, b: string): boolean => {
   const shape = (u: string): string => {
     try {
@@ -299,9 +316,27 @@ export const sameLoopbackRedirect = (a: string, b: string): boolean => {
 }
 
 export class ConnectorManager {
+  // A variable that says cofre:NAME takes the team key of that name from the Cofre (src/core/vault.ts), read
+  // on each connection, so changing the key there changes it here too.
+  private async fromVault(env: Record<string, string>): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(env)) {
+      const name = v.trim().startsWith(VAULT_REF) ? v.trim().slice(VAULT_REF.length).trim() : undefined
+      if (name === undefined) {
+        out[k] = v
+        continue
+      }
+      const value = await this.deps.vaultValue?.(name)
+      if (value === undefined) throw new Error(L(`A variável ${k} aponta pra ${VAULT_REF}${name}, que não está entre as chaves do time no Cofre.`, `The ${k} variable points to ${VAULT_REF}${name}, which isn't among the team's keys in the Vault.`))
+      out[k] = value
+    }
+    return out
+  }
+
   private live = new Map<string, Live>()
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
   private authUrls = new Map<string, string>() // a connector's last authorization page
+  private loopbackOnly = new Set<string>() // connectors whose authorization page turned the server's own address away
   private doneStates = new Set<string>() // finished already (the callback got there first): not an expired one
   private closing = false // the app is quitting: nothing reconnects
   // Renewals under way or just done, by token endpoint and refresh token. A server that rotates refresh tokens
@@ -516,7 +551,7 @@ export class ConnectorManager {
           }
         }
       } else {
-        const env = await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp)
+        const env = await this.fromVault(await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp))
         transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
       }
     } catch (e) {
@@ -776,6 +811,16 @@ export class ConnectorManager {
       if (this.live.get(id)?.client) return undefined
     }
     await this.connect(id, true).catch(() => {})
+    // A provider that takes only a loopback address back (Canva's) answers the server's own with an error page:
+    // the sign-in starts again with the loopback one, and the person pastes where the page ended.
+    const page = this.authUrls.get(id)
+    const local = this.deps.localCallbackUrl?.()
+    if (page && local && !this.loopbackOnly.has(id) && new URL(page).searchParams.get('redirect_uri') !== local && (await refusesRedirect(page))) {
+      this.oauthStates.delete(new URL(page).searchParams.get('state') ?? '')
+      this.authUrls.delete(id)
+      this.loopbackOnly.add(id)
+      await this.connect(id, true).catch(() => {})
+    }
     return this.authUrls.get(id)
   }
 
@@ -870,7 +915,8 @@ export class ConnectorManager {
   // `own`: a server that signs in with the person's own app (Google's, Slack's) instead of registering one.
   private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app'], renewal?: Renewal): OAuthClientProvider {
     const { secrets } = this.deps
-    const redirectUrl = own ? this.redirectFor(own.provider) : this.deps.oauthCallbackUrl()
+    const local = this.deps.localCallbackUrl?.()
+    const redirectUrl = own ? this.redirectFor(own.provider) : local && this.loopbackOnly.has(id) ? local : this.deps.oauthCallbackUrl()
     // Signing in again (someone clicked Authorize) goes on past a saved value the system's key won't open:
     // the new sign-in takes its place. In the background it stops the attempt, and the value stays.
     const read = async <T>(k: string): Promise<T | undefined> => {
@@ -909,7 +955,8 @@ export class ConnectorManager {
           return app && { client_id: app.clientId, client_secret: app.clientSecret }
         }
         const info = await read<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
-        const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl))
+        // A renewal sends no address: the app registered with the loopback one (above) renews after a restart too.
+        const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl) || (!!local && sameLoopbackRedirect(u, local)))
         return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
       saveClientInformation: (info) => (own ? undefined : secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] })),
