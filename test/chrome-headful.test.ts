@@ -14,9 +14,13 @@ const PAGE = `<!doctype html><title>page</title>
 <p>the site</p>
 <script>document.title = 'x:' + screenX + '|c:' + document.cookie.includes('seen')</script>`
 
+// A real window needs a screen. On a runner with none (ubuntu-latest, no Xvfb) Chrome exits before its
+// first command, so these skip there the way the other Chrome tests skip where there is no Chrome.
+const screen = (): boolean => process.platform !== 'linux' || !!process.env['DISPLAY']
+
 // A site that only lets a real browser through: the lane goes to a window on the page it is on, once
 // per site, and never again for that site — the loop this ends is 143 calls on one host (2026-11-22).
-describe.skipIf(!hasChrome())('a real window, for a site that only lets a real browser through', () => {
+describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only lets a real browser through', () => {
   let server: Server
   let url = ''
   let other = ''
