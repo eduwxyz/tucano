@@ -427,6 +427,20 @@ export function SidePanel(): ReactNode {
             <Icon name="down" size={14} /> {saveLabel()}
           </button>
         )}
+        {artifact && (artifact.kind === 'markdown' || artifact.kind === 'text' || artifact.kind === 'csv') && (
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            title={artifact.name}
+            onClick={() =>
+              void call('artifactText', { id: artifact.id }).then((t) => {
+                if (t) void navigator.clipboard.writeText(t)
+              })
+            }
+          >
+            <Icon name="copy" size={14} /> {L('Copiar', 'Copy')}
+          </button>
+        )}
         {service?.url && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
