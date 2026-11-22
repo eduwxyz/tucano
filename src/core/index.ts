@@ -74,7 +74,7 @@ import { COFRE } from '../shared/vault'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
-import { ChromeBrowsers, hasChrome } from './chrome'
+import { ChromeBrowsers, assistFlags, hasChrome } from './chrome'
 import { AddOns } from './chrome-addons'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -817,7 +817,8 @@ const chrome =
         serverMode,
         serverMode ? 10 * 60_000 : undefined, // on a server, an idle agent's Chrome gives its memory back
         (agentId) => downloadsFolder(dataDir, agentId),
-        addOns
+        addOns,
+        () => assistFlags(settings().browserAccessibility) // Settings › Agents › Additional accessibility
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost

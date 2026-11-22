@@ -239,6 +239,15 @@ class Tab {
   }
 }
 
+// Settings › Agents › Additional accessibility: two of Chrome's own switches, so there is no script in the
+// page. One asks every page for less motion, which is what stops a carousel sliding the element the agent
+// was about to click; the other makes a video wait for a press, so a page cannot start talking over the
+// reply being written. Measured on this build (Chrome for Testing 158.0.8127.36, 2026-11-22): with the
+// first, prefers-reduced-motion matches "reduce" in the page. The second is Chrome's documented switch;
+// its own navigator.getAutoplayPolicy is missing from this build, so it is not proved from inside a page.
+export const assistFlags = (on: boolean | undefined): string[] =>
+  on ? ['--force-prefers-reduced-motion', '--autoplay-policy=user-gesture-required'] : []
+
 export class ChromeBrowsers {
   private tabs = new Map<string, Tab>()
   // What each lane was started with (browser and extension folders), so a switch turned on under an open
@@ -268,7 +277,10 @@ export class ChromeBrowsers {
     // The browser's own extensions, when they're here (core/chrome-addons.ts): Chrome for Testing, the
     // only build that still takes a folder of them, and where they are. Read at every launch, so one
     // that lands while a lane is running is in the next lane, without closing the page an agent is on.
-    private addOns?: { bin: string; dirs: string[]; launchFailed?: (why: string) => void }
+    private addOns?: { bin: string; dirs: string[]; launchFailed?: (why: string) => void },
+    // Chrome switches that are the person's own choice (Settings › Agents › Additional accessibility),
+    // read at every launch like the extensions above, so a change reaches the next lane and not this one.
+    private flags?: () => string[]
   ) {
     process.on('exit', () => this.quit())
     if (idleMs) setInterval(() => void this.closeIdle(), Math.min(60_000, Math.max(100, idleMs / 2))).unref()
@@ -319,6 +331,13 @@ export class ChromeBrowsers {
     return set === this.brokenWith ? '' : set
   }
 
+  // Everything a lane is started with that a switch can change: what it carries and how its Chrome
+  // behaves. Kept apart from wanted() above, which also decides the profile: a switch that changes how a
+  // page behaves must not send the lane to the other profile and sign the agent out of every site.
+  private fingerprint(): string {
+    return `${this.wanted()}|${(this.flags?.() ?? []).join(' ')}`
+  }
+
   private async launch(agentId: string, headed: boolean): Promise<Tab> {
     // Never in a throwaway screenshot ('.shot-'): that one draws the person's own page as the page is.
     const carried = agentId.startsWith('.shot-') ? '' : this.wanted()
@@ -347,6 +366,10 @@ export class ChromeBrowsers {
       `--window-size=${W},${H}`,
       // The ad blocker and the two cookie-notice removers, as folders.
       ...(load.length ? [`--load-extension=${load.join(',')}`] : []),
+      // A page that stops moving on its own, and a video that waits for a click: the agent's click lands
+      // where the element was, and nothing starts talking over it. Both are Chrome's own switches, so
+      // there is no script in the page for a site to notice or for us to keep up to date.
+      ...(this.flags?.() ?? []),
       ...(headed ? ['--new-window'] : ['--headless=new', '--mute-audio']),
       // Never a page on this line: Chrome can drop what it's handed at startup, and a blank page is what an
       // agent then reads. The page comes from navigate() below, once the lane is answering.
@@ -390,7 +413,7 @@ export class ChromeBrowsers {
     })
     if (headed) tab.closedAll = () => this.handBack(agentId, tab.url)
     this.tabs.set(agentId, tab)
-    this.launchedWith.set(agentId, carried)
+    this.launchedWith.set(agentId, this.fingerprint())
     return tab
   }
 
@@ -448,7 +471,7 @@ export class ChromeBrowsers {
     const t = this.tabs.get(agentId)
     if (t) {
       // A window the person took over is theirs until they hand it back: nothing restarts under it.
-      if (t.headed || agentId.startsWith('.shot-') || this.launchedWith.get(agentId) === this.wanted()) return t
+      if (t.headed || agentId.startsWith('.shot-') || this.launchedWith.get(agentId) === this.fingerprint()) return t
       // This one was started with a different set of extensions: a switch was turned on (or off) while it
       // was open, or the download landed. Without this it keeps the old set for as long as it lives — on a
       // Mac with no idle close, for the whole session. It closes the way an idle one does (cookies are
