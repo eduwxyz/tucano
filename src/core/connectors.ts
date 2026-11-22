@@ -327,7 +327,7 @@ export class ConnectorManager {
         continue
       }
       const value = await this.deps.vaultValue?.(name)
-      if (value === undefined) throw new Error(L(`A variável ${k} aponta pra ${VAULT_REF}${name}, que não está entre as chaves do time no Cofre.`, `The ${k} variable points to ${VAULT_REF}${name}, which isn't among the team's keys in the Cofre.`))
+      if (value === undefined) throw new Error(L(`A variável ${k} aponta pra ${VAULT_REF}${name}, que não está entre as chaves do time no Cofre.`, `The ${k} variable points to ${VAULT_REF}${name}, which isn't among the team's keys in the Vault.`))
       out[k] = value
     }
     return out

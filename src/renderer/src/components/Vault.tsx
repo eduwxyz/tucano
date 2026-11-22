@@ -106,7 +106,7 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
   )
   return (
     <Page
-      title={L('Cofre', 'Cofre')}
+      title={L('Cofre', 'Vault')}
       subtitle={L(
         'Chaves e logins que os agentes usam sem nunca ver: uma chave pelo nome, só no comando que pede (no que ele imprime, aparece como [cofre:NOME]); um login, digitado pelo app no site exato.',
         'Keys and logins the agents use without ever seeing them: a key by name, only in the command that asks for it (in what it prints, it shows as [cofre:NAME]); a login, typed by the app on the exact site.'
@@ -250,7 +250,7 @@ export function LoginEditor({ l, mine, agentId, onClose, onSaved }: { l?: VaultL
             {L('Cancelar', 'Cancel')}
           </button>
           <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !site.trim() || !!siteError || (!l && (!username.trim() || !password))}>
-            {l ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Cofre')}
+            {l ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Vault')}
           </button>
         </footer>
       </form>
@@ -361,7 +361,7 @@ function KeyEditor({ k, mine, onClose, onSaved }: { k?: VaultKey; mine: boolean;
             {L('Cancelar', 'Cancel')}
           </button>
           <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !name.trim() || !!nameError || (!k && !value)}>
-            {k ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Cofre')}
+            {k ? L('Salvar', 'Save') : L('Guardar no Cofre', 'Keep in the Vault')}
           </button>
         </footer>
       </form>
@@ -437,7 +437,7 @@ function UsesLog(): ReactNode {
   const s = useStore((st) => ({ agents: st.agents, people: st.people }))
   useEffect(() => void vaultUses().then(setUses, () => setUses([])), [])
   if (!uses) return null
-  if (!uses.length) return <p className="muted">{L('Nada do Cofre foi usado ainda. Cada uso aparece aqui: qual chave ou login, qual agente, pra quem e onde.', 'Nothing in the Cofre was used yet. Each use shows here: which key or login, which agent, for whom and where.')}</p>
+  if (!uses.length) return <p className="muted">{L('Nada do Cofre foi usado ainda. Cada uso aparece aqui: qual chave ou login, qual agente, pra quem e onde.', 'Nothing in the Vault was used yet. Each use shows here: which key or login, which agent, for whom and where.')}</p>
   const via = { bash: L('comando', 'command'), service: L('serviço', 'service'), connector: L('conector', 'connector'), login: L('login no navegador', 'browser sign-in') }
   return (
     <div className="table vault-log">
@@ -485,9 +485,9 @@ export function AgentVaultKeys({ agentId, name }: { agentId: string; name: strin
     <div className="vault-agent">
       {keys.length === 0 ? (
         <p className="muted small">
-          {L('Nenhuma chave no Cofre ainda.', 'No keys in the Cofre yet.')}{' '}
+          {L('Nenhuma chave no Cofre ainda.', 'No keys in the Vault yet.')}{' '}
           <button type="button" className="link" onClick={() => navigate({ kind: 'vault' })}>
-            {L('Abrir o Cofre', 'Open the Cofre')}
+            {L('Abrir o Cofre', 'Open the Vault')}
           </button>
         </p>
       ) : (
@@ -596,7 +596,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
       <div className="approval__head">
         <span className="approval__badge">
           <Icon name={nome ? 'key' : 'lock'} size={13} />
-          {pending ? L('Esperando uma chave', 'Waiting for a key') : approval.state === 'approved' ? L('No Cofre', 'In the Cofre') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
+          {pending ? L('Esperando uma chave', 'Waiting for a key') : approval.state === 'approved' ? L('No Cofre', 'In the Vault') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
         </span>
       </div>
       <div className="approval__title">
@@ -609,7 +609,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
             (k.owner ? k.owner === you : admin) ? (
               <div key={k.id} className="row key-request__saved">
                 <span className="grow small">
-                  {k.owner ? L('Você já tem uma no Cofre', 'You already have one in the Cofre') : L('Já tem uma do time no Cofre', 'There’s a team one in the Cofre')} <span className="muted">({k.label})</span>
+                  {k.owner ? L('Você já tem uma no Cofre', 'You already have one in the Vault') : L('Já tem uma do time no Cofre', 'There’s a team one in the Vault')} <span className="muted">({k.label})</span>
                 </span>
                 <button className="btn btn--sm" disabled={busy} onClick={() => send({ existing: k.id })}>
                   {L(`Liberar pra ${who}`, `Give it to ${who}`)}
@@ -617,7 +617,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
               </div>
             ) : (
               <p key={k.id} className="muted small">
-                {L('Já tem uma do time no Cofre: só um admin libera.', 'There’s a team one in the Cofre: only an admin gives it out.')}
+                {L('Já tem uma do time no Cofre: só um admin libera.', 'There’s a team one in the Vault: only an admin gives it out.')}
               </p>
             )
           )}
@@ -643,7 +643,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
             )}
             <div className="row approval__buttons">
               <button type="submit" className="btn btn--primary btn--sm" disabled={busy || !ready}>
-                {L('Guardar no Cofre e liberar', 'Keep in the Cofre and give')}
+                {L('Guardar no Cofre e liberar', 'Keep in the Vault and give')}
               </button>
               {mayRefuse && (
                 <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => decideApproval(approval.id, 'refused')}>
@@ -653,7 +653,7 @@ export function KeyRequestCard({ approval, compact }: { approval: Approval; comp
             </div>
           </form>
           <p className="approval__bound">
-            {L(`Vai direto pro Cofre, cifrado: não aparece na conversa, e ${who} nunca vê.`, `It goes straight into the Cofre, encrypted: it doesn’t show in the conversation, and ${who} never sees it.`)} {ownWords}
+            {L(`Vai direto pro Cofre, cifrado: não aparece na conversa, e ${who} nunca vê.`, `It goes straight into the Vault, encrypted: it doesn’t show in the conversation, and ${who} never sees it.`)} {ownWords}
           </p>
           {error && <p className="note note--error">{error}</p>}
         </>

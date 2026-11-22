@@ -2079,9 +2079,9 @@ ${note}`,
           // The keys of the Cofre this command asked for, checked before anything runs (src/core/vault.ts).
           const wanted = (name === 'bash' || name === 'start_service') && Array.isArray(args['keys']) ? args['keys'].filter((k): k is string => typeof k === 'string' && !!k.trim()) : []
           const vault = this.deps.vault
-          const picked = wanted.length ? (vault ? vault.pick(agent.id, wanted, requester.id) : { error: L('O Cofre não está disponível aqui.', "The Cofre isn't available here.") }) : { keys: [] }
+          const picked = wanted.length ? (vault ? vault.pick(agent.id, wanted, requester.id) : { error: L('O Cofre não está disponível aqui.', "The Vault isn't available here.") }) : { keys: [] }
           if ('error' in picked) {
-            addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${wanted.join(', ')}`, `Cofre key: ${wanted.join(', ')}`), status: 'error' })
+            addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${wanted.join(', ')}`, `Vault key: ${wanted.join(', ')}`), status: 'error' })
             return textResult(picked.error, true)
           }
           const strict = picked.keys.filter((k) => k.approve).map((k) => k.name)
@@ -2156,7 +2156,7 @@ ${note}`,
               env = await vault!.open(picked.keys, { agentId: agent.id, conversationId: conv.id, messageId: msg.id, personId: requester.id, via: name === 'start_service' ? 'service' : 'bash' })
             } catch (e) {
               const why = e instanceof Error ? e.message : String(e)
-              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${why}`, `Cofre key: ${why}`), status: 'error' })
+              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${why}`, `Vault key: ${why}`), status: 'error' })
               return textResult(L(`Não rodei: ${why}`, `Not run: ${why}`), true)
             }
           }
@@ -2390,7 +2390,7 @@ ${note}`,
             conversationId: conv.id,
             messageId: msg.id,
             connectorId: COFRE,
-            connectorName: 'Cofre',
+            connectorName: L('Cofre', 'Vault'),
             tool: PEDIR_CHAVE,
             args: what,
             why: typeof args['motivo'] === 'string' ? args['motivo'].trim() : '',
@@ -3066,7 +3066,7 @@ ${note}`,
       // The Cofre's keys it asked for are checked again now: one taken back meanwhile doesn't go in.
       const wanted = Array.isArray(ap.args['keys']) ? ap.args['keys'].filter((k): k is string => typeof k === 'string') : []
       const vault = this.deps.vault
-      const picked = wanted.length && agent ? (vault ? vault.pick(agent.id, wanted, ap.requestedBy) : { error: L('O Cofre não está disponível aqui.', "The Cofre isn't available here.") }) : { keys: [] }
+      const picked = wanted.length && agent ? (vault ? vault.pick(agent.id, wanted, ap.requestedBy) : { error: L('O Cofre não está disponível aqui.', "The Vault isn't available here.") }) : { keys: [] }
       let env: Record<string, string> | undefined
       let keyError = 'error' in picked ? picked.error : undefined
       if (decision === 'approved' && agent?.computer && this.deps.computers && 'keys' in picked && picked.keys.length) {
@@ -3154,7 +3154,7 @@ ${note}`,
       const has = !!agent && !!vault && (nome ? vault.usable(agent.id, ap.requestedBy).some((k) => k.name === nome) : vault.loginSites(agent.id, ap.requestedBy).includes(site))
       if (decision === 'approved' && has) {
         ok = true
-        outcome = L('Salvo no Cofre e liberado.', 'Saved in the Cofre and given.')
+        outcome = L('Salvo no Cofre e liberado.', 'Saved in the Vault and given.')
         task = nome
           ? L(
               `${me} salvou ${what} no Cofre e liberou pra você. Use no bash (ou no start_service) com keys: ["${nome}"]: o valor entra só naquele comando, e você nunca o vê. Continue de onde parou.`,

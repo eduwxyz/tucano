@@ -7198,6 +7198,21 @@ kbd {
   box-shadow: inset 2.5px 0 0 var(--agent), 0 0 0 2px var(--text);
   z-index: 4;
 }
+/* A routine that's off keeps its place in the week, in monochrome: it can be turned back on from its own panel. */
+.cal__ev.is-off {
+  background: var(--hover);
+  color: var(--text-3);
+  box-shadow: inset 2.5px 0 0 var(--border-strong);
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.cal__ev.is-off strong {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.cal__ev.is-off .cal__ev-sub {
+  color: var(--text-3);
+}
 .cal__ev.is-dim {
   opacity: 0.25;
 }
@@ -14101,6 +14116,17 @@ button.agent-card__now:hover {
 }
 .cal__allday.is-selected {
   box-shadow: inset 2.5px 0 0 var(--agent), 0 0 0 2px var(--text);
+}
+/* Off, in the strip: the same grey read as in the hours. */
+.cal__allday.is-off {
+  background: var(--hover);
+  box-shadow: inset 2.5px 0 0 var(--border-strong);
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.cal__allday.is-off .cal__allday-name {
+  color: var(--text-2);
+  font-weight: 500;
 }
 .cal__allday.is-dim {
   opacity: 0.25;

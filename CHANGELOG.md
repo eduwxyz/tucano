@@ -12,6 +12,16 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Sort the whole sidebar by hand: hold a row, see where it lands, or move it with the keyboard.** Press and hold a row for a moment to pick it up: it dims, and an orange line shows where it will land as you move. Let go there and the order is saved; let go where it was and it just opens, like a click. It works for the items at the top (Aprovações, Quadro, Conhecimento, Operação; the Tuca stays first), the channels (let go on a group's name to put a channel in that group), the agents, and the sectors. An agent moves only within its sector. With the keyboard, **Alt+↑** and **Alt+↓** move the row you're on. Before, only channels could be moved, by dragging. An item you took out of the sidebar stays out, and keeps its place for when it comes back. In a team, the order is yours alone, like the channel groups. Thanks to Apostol Apostolov.
 
+### Changed
+
+- **A routine that's off keeps its place in the week.** Turning a routine off made it leave the timetable, so the week stopped showing when it would run and there was nothing there to turn back on. It now stays at its times, dimmed and in monochrome, and its own panel still turns it back on; only a routine that was deleted leaves the timetable.
+- **In a DM, the gear at the top right opens the agent's settings.** It opened a "Conversation with …" window that had nothing in it. It now takes you to the agent's page, where its model, instructions and tools are. Thanks to Apostol Apostolov for pointing it out.
+
+### Fixed
+
+- **A DM's settings show where the agent answers again.** Since teams came in, the "Conversation with …" window (from a DM's menu in the sidebar, or the gear on the agent's card) showed only Cancel and Save. It shows the choice between answers in the conversation and answers in threads again.
+- **In English, the Vault is the Vault.** With the app in English, the sidebar, the search, the Vault page, an agent's page, the step that used a key, the activity log and the card that asks for a key all said "Cofre". They say "Vault" now, and so do the errors and the outcome a person reads when a key is missing or saved. The few other spots that stayed in Portuguese in English are English too: the dictation shortcut ("⌥ Space"), the placeholder for a Whisper model's path, "Invalid URL" on a screenshot and "Error" on a connector's sign-in page. A test now reads the screen's code and fails on Portuguese in an English string, or on Portuguese shown with no English beside it.
+
 ## [0.2.44] - 2026-11-21
 
 > **Em português:**

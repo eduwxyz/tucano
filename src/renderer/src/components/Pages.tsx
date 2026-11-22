@@ -992,7 +992,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
               {!isNew && draft.browser && (
                 <div className="lrow lrow--stack">
                   <span className="lrow__label">
-                    <span className="lrow__name">{L('Logins do Cofre', 'Cofre logins')}</span>
+                    <span className="lrow__name">{L('Logins do Cofre', 'Vault logins')}</span>
                   </span>
                   <AgentVaultLogins agentId={draft.id} name={draft.name} />
                 </div>
@@ -1028,7 +1028,7 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
             />
           )}
           {!isNew && pane('ferramentas') && draft.computer && (
-            <Section title={L('Chaves do Cofre', 'Cofre keys')} help={L(`As chaves que ${name} pode usar nos comandos. Cada uso fica no registro do Cofre.`, `The keys ${name} may use in its commands. Each use goes in the Cofre’s log.`)}>
+            <Section title={L('Chaves do Cofre', 'Vault keys')} help={L(`As chaves que ${name} pode usar nos comandos. Cada uso fica no registro do Cofre.`, `The keys ${name} may use in its commands. Each use goes in the Vault’s log.`)}>
               <AgentVaultKeys agentId={draft.id} name={draft.name} />
             </Section>
           )}
@@ -3209,7 +3209,7 @@ function VoiceCard(): ReactNode {
               <input defaultValue={voice?.bin ?? ''} placeholder="/opt/homebrew/bin/whisper-cli" onBlur={(e) => save({ bin: e.target.value.trim() || undefined })} />
             </Field>
             <Field label={L('Caminho do modelo', 'Path to the model')} hint={status?.model && !voice?.model ? L(`Em uso: ${status.model}`, `In use: ${status.model}`) : L('Opcional: um modelo ggml (.bin) que você já tenha.', 'Optional: a ggml model (.bin) you already have.')} error={error}>
-              <input defaultValue={voice?.model ?? ''} placeholder="/caminho/para/ggml-large-v3-turbo.bin" onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
+              <input defaultValue={voice?.model ?? ''} placeholder={L('/caminho/para/ggml-large-v3-turbo.bin', '/path/to/ggml-large-v3-turbo.bin')} onBlur={(e) => save({ model: e.target.value.trim() || undefined })} />
             </Field>
           </div>
         )}

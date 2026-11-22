@@ -79,7 +79,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
-  const key = platform === 'mac' ? '⌥ Espaço' : 'Ctrl+Espaço'
+  const key = (space: string): string => (platform === 'mac' ? `⌥ ${space}` : `Ctrl+${space}`)
   return (
     <div className="voice-pop" role="dialog" aria-label={L('Ditar mensagens', 'Dictate messages')}>
       <button className="voice-pop__close icon-btn" aria-label={L('Fechar', 'Close')} onClick={onClose}>
@@ -88,7 +88,7 @@ export function VoicePopover({ status, onClose }: { status: VoiceStatus; onClose
       {status.ready ? (
         <>
           <b>{L('Pronto para ditar', 'Ready to dictate')}</b>
-          <p className="small muted">{L(`Clique no microfone, ou ${key}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Click the microphone, or ${key.replace('Espaço', 'Space')}, and speak. Click again to finish: the text shows up here to review. The first time, the system asks to allow the microphone.`)}</p>
+          <p className="small muted">{L(`Clique no microfone, ou ${key('Espaço')}, e fale. Clique de novo para terminar: o texto aparece aqui para você revisar. Na primeira vez, o sistema pede para liberar o microfone.`, `Click the microphone, or ${key('Space')}, and speak. Click again to finish: the text shows up here to review. The first time, the system asks to allow the microphone.`)}</p>
           <button className="btn btn--sm" onClick={onClose}>
             {L('Entendi', 'Got it')}
           </button>
