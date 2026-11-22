@@ -114,6 +114,7 @@ import { useWorkspaceList } from './Workspaces'
 import { SettingsGroups, SettingsJumps, SettingsResults, SettingsSubject, SettingsSubjectTitle, glideTo } from './SettingsLayout'
 import { searchSettings, settingsGroups, settingsGroupLabel, settingsStructure, settingsTabAliases, settingsTabStructure, type SettingsPageId, type SettingsSection, type SettingsSectionId } from '../settings-structure'
 import { workspaceLabel } from '../../../shared/workspaces'
+import { STEPS_LATEST_MAX, STEPS_LATEST_MIN, stepsKeep, stepsModeFor, type StepsMode } from '../../../shared/steps'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
@@ -287,6 +288,24 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'auto', label: L('Grava sozinho', 'Saves on its own'), hint: L('Guarda e avisa na mensagem, com Desfazer.', 'Keeps it and says so in the message, with Undo.') },
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
+]
+// How a long reply's steps read: every one, or the newest few in a window. The label carries the
+// number the person chose, since that is what "the newest few" means on this computer.
+const STEPS_CHOICES = (keep = stepsKeep(undefined)): { value: StepsMode; label: string; hint: string }[] => [
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Show every step.') },
+  {
+    value: 'latest',
+    label: L(`Últimos ${keep}`, `Last ${keep}`),
+    hint: L('A resposta mostra só os mais novos; os mais antigos saem da lista.', 'Show recent steps only; older steps leave the list.')
+  }
+]
+// How tall the reasoning preview is before it scrolls, chosen in Settings › Conversations. A function
+// because `L()` reads the language when it is called: a table built at import kept the Portuguese
+// labels in an English window.
+export const THINKING_SIZES = (): { value: 'sm' | 'md' | 'lg'; label: string; hint: string }[] => [
+  { value: 'sm', label: L('Pequeno', 'Small'), hint: L('6 linhas, o resto rolando.', '6 lines before scrolling.') },
+  { value: 'md', label: L('Médio', 'Medium'), hint: L('12 linhas, o resto rolando.', '12 lines before scrolling.') },
+  { value: 'lg', label: L('Grande', 'Large'), hint: L('18 linhas, o resto rolando.', '18 lines before scrolling.') }
 ]
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
@@ -3768,6 +3787,32 @@ export function SettingsPage(): ReactNode {
                 <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
               </div>
               <div className="key-row">
+                <Icon name="menu" />
+                <div className="grow">
+                  <strong>{L('Os passos de uma resposta longa', 'Steps in a long reply')}</strong>
+                  <p className="muted small">{STEPS_CHOICES(stepsKeep(settings.stepsLatest)).find((c) => c.value === stepsModeFor(settings))!.hint}</p>
+                  <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Como a resposta mostra os passos', 'Step display')}>
+                    {STEPS_CHOICES(stepsKeep(settings.stepsLatest)).map((c) => (
+                      <button key={c.value} type="button" role="radio" aria-checked={stepsModeFor(settings) === c.value} className={stepsModeFor(settings) === c.value ? 'is-active' : ''} onClick={() => updateSettings({ steps: c.value })}>
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                  {stepsModeFor(settings) === 'latest' && (
+                    <label className="row row--center">
+                      <span className="muted small">{L('Quantos passos mostrar', 'Steps shown')}</span>
+                      <NumberInput
+                        min={STEPS_LATEST_MIN}
+                        max={STEPS_LATEST_MAX}
+                        value={stepsKeep(settings.stepsLatest)}
+                        aria-label={L('Quantos passos mostrar na janela', 'Number of visible steps')}
+                        onChange={(n) => updateSettings({ stepsLatest: stepsKeep(n) })}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+              <div className="key-row">
                 <Icon name="spark" />
                 <div className="grow">
                   <strong>{L('O que o modelo pensa', "Show reasoning")}</strong>
@@ -3779,6 +3824,20 @@ export function SettingsPage(): ReactNode {
                   </p>
                 </div>
                 <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
+              </div>
+              <div className="key-row">
+                <Icon name="expand" />
+                <div className="grow">
+                  <strong>{L('O tamanho do raciocínio', 'Reasoning panel height')}</strong>
+                  <p className="muted small">{THINKING_SIZES().find((c) => c.value === (settings.thinkingSize ?? 'sm'))!.hint}</p>
+                </div>
+                <div className="segmented" role="radiogroup" aria-label={L('Tamanho do raciocínio', 'Reasoning panel height')}>
+                  {THINKING_SIZES().map((c) => (
+                    <button key={c.value} type="button" role="radio" aria-checked={(settings.thinkingSize ?? 'sm') === c.value} className={(settings.thinkingSize ?? 'sm') === c.value ? 'is-active' : ''} onClick={() => updateSettings({ thinkingSize: c.value })}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="key-row">
                 <Icon name="reply" />

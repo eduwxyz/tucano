@@ -1,4 +1,5 @@
 import { captureThoughtLine, restoreThoughtLine, type ThoughtLine } from '../thought-reading'
+import { stepsModeFor, stepsWindow } from '../../../shared/steps'
 import { L, lang, locale } from '../../../shared/lang'
 import { isReplyShortcut } from '../../../shared/reply-shortcut'
 import { overMonthlyLimit } from '../../../shared/limits'
@@ -1910,6 +1911,11 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
+  // A run that goes on for a while keeps only its newest steps, in a window, when the person asked
+  // for that in Settings › Conversations: the count still names every step the reply took.
+  const mode = useStore((s) => stepsModeFor(s.settings))
+  const keep = useStore((s) => s.settings.stepsLatest)
+  const shown = stepsWindow(run.steps, mode, keep)
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
   // The steer is a pill in the row under this chain: it opens a field under the box, still held by
@@ -1996,7 +2002,10 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
         )}
         {open && (
           <ol className="steps__list">
-            {run.steps.map((st) => (
+            {shown.hidden > 0 && (
+              <li className="steps__more">{L(`${shown.hidden} passo${shown.hidden === 1 ? '' : 's'} mais antigo${shown.hidden === 1 ? '' : 's'} fora da lista`, `${shown.hidden} older step${shown.hidden === 1 ? '' : 's'} out of the list`)}</li>
+            )}
+            {shown.shown.map((st) => (
               <StepRow key={st.id} step={st} />
             ))}
           </ol>
@@ -2061,6 +2070,9 @@ export function followsTheEnd(box: { scrollHeight: number; scrollTop: number; cl
 // people want the answer.
 export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
   const on = useStore((s) => s.settings.showThinking === true)
+  // How much of it shows before it scrolls (Settings › Conversations): a hint's worth, or most of
+  // the window when the reasoning is the thing being read. Unset: the height the block always had.
+  const size = useStore((s) => s.settings.thinkingSize ?? 'sm')
   const retained = useLiveThoughtState(message.id, STREAM_MS)
   const thought = retained?.text
   // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
@@ -2095,7 +2107,7 @@ export function Thought({ message, working }: { message: Message; working: boole
   // Folded, it carries the line it is on now: what it is thinking, cut to the width of the block.
   const last = thought.trimEnd().split(/\r?\n/).filter((l) => l.trim() !== '').pop() ?? ''
   return (
-    <div className={`thought${open ? ' is-open' : ''}${working ? ' is-working' : ''}`} aria-label={L('O que o agente está pensando', 'What the agent is thinking')}>
+    <div className={`thought${open ? ' is-open' : ''}${working ? ' is-working' : ''}`} data-size={size} aria-label={L('O que o agente está pensando', 'What the agent is thinking')}>
       <button
         type="button"
         className="thought__head"

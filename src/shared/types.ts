@@ -153,6 +153,10 @@ export const channelName = (s: string): string =>
     .slice(0, 60)
 
 export type StepStatus = 'running' | 'done' | 'error'
+// How a reply's steps read while it works and after: every one, or only the newest few, with the
+// older ones out of the list (src/shared/steps.ts).
+export type StepsMode = 'all' | 'latest'
+
 export interface Step {
   id: string
   label: string
@@ -617,9 +621,16 @@ export interface Settings {
   sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
+  // How a long reply's steps read: every one, or the newest few in a window that scrolls (steps.ts).
+  // Unset: every step, which is what the app has always done.
+  steps?: StepsMode
+  stepsLatest?: number // how many `latest` keeps, clamped to STEPS_LATEST_MIN..STEPS_LATEST_MAX
   // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
   // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
   showThinking?: boolean
+  // How much of that reasoning shows before it scrolls (Conversation.tsx, `Thought`). Unset: the
+  // height the block always had.
+  thinkingSize?: 'sm' | 'md' | 'lg'
   replyShortcut?: boolean // ⌘L (Ctrl+L off a Mac) replies to the text I selected in a message; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
