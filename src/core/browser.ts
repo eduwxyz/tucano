@@ -475,7 +475,7 @@ export class Browser {
     const snap = await this.deps.host(agentId, 'snapshot')
     if (snap.headful || !windowGetsPast(readWall(snap.signs, snap))) return snap
     const w = await this.deps.host(agentId, 'headful').catch(() => undefined)
-    return w?.headful ? this.deps.host(agentId, 'snapshot') : snap
+    return w?.headful ? this.deps.host(agentId, 'snapshot').catch(() => snap) : snap
   }
 
   async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: Ctx): Promise<BrowserOutcome> {

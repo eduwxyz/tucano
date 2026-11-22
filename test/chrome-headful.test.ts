@@ -15,8 +15,10 @@ const PAGE = `<!doctype html><title>page</title>
 <script>document.title = 'x:' + screenX + '|c:' + document.cookie.includes('seen')</script>`
 
 // A real window needs a screen. On a runner with none (ubuntu-latest, no Xvfb) Chrome exits before its
-// first command, so these skip there the way the other Chrome tests skip where there is no Chrome.
-const screen = (): boolean => process.platform !== 'linux' || !!process.env['DISPLAY']
+// first command, so these skip there the way the other Chrome tests skip where there is no Chrome. On a
+// person's computer they would put windows in front of what they're doing, so they run in CI, or when
+// asked with TUCANO_TEST_WINDOWS=1. test/chrome-wall-window.test.ts covers the lane without a window.
+const screen = (): boolean => (process.platform !== 'linux' || !!process.env['DISPLAY']) && !!(process.env['CI'] || process.env['TUCANO_TEST_WINDOWS'])
 
 // A site that only lets a real browser through: the lane goes to a window on the page it is on, once
 // per site, and never again for that site — the loop this ends is 143 calls on one host (2026-11-22).
@@ -46,8 +48,8 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
   })
 
   // Where the window is, as the page sees it: headless is always 0. A real window is asked to sit at
-  // -24000,-24000, which Windows clamps to the edge of the desktop and keeps off the screen; macOS
-  // refuses to place a window off screen at all, so there it opens on screen — the one platform where
+  // -24000,-24000, which Windows clamps to the edge of the desktop and keeps off the screen. macOS
+  // opens it on the screen and, moved, stops with 40 px still showing (measured 2026-11-22), so there
   // an agent's window can be in the way, and it is why this is read and not assumed.
   const where = (title: string): number => Number(/^x:(-?\d+)\|/.exec(title)?.[1] ?? '0')
   const outside = (title: string): boolean => where(title) < 0
@@ -67,7 +69,9 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
     if (offScreen) expect(outside(inWindow.title)).toBe(true)
     expect(inWindow.title).toContain('c:true')
     // Every answer from that lane says it is in a window, not only the one that opened it.
-    expect((await chrome.run('a', 'snapshot')).headful).toBe(true)
+    const driving = await chrome.run('a', 'snapshot')
+    expect(driving.headful).toBe(true)
+    expect(driving.shown).toBe(false) // nobody took it over: the agent keeps driving
 
     // Asking to see it brings that same window into view, on the page it is on: an off-screen window
     // is no use, and a challenge half solved on it stays half solved. (The page's screenX does not
