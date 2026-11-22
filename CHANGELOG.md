@@ -6,10 +6,12 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
+> - **Novo:** **Classificadores**, em Configurações › Modelos: use TypeSafe, OpenRouter, OpenAI ou Google, cada um com a sua chave, e escolha qual decide quem responde num canal e qual acha o que o agente clica numa página.
 
 ### Added
 
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
+- **Classifiers: choose who answers the app's quick questions.** Jev, from TypeSafe, was the only classifier Tucano could use. Settings › Models › **Classifiers** now holds a list of them, from TypeSafe, OpenRouter, OpenAI or Google, each with its own key, checked with that provider and kept encrypted. You pick which one decides who replies in a channel and which one finds what an agent clicks in a page, or leave either off. Each job says what it sends and to which provider, and a failure falls back as before. An install that already uses Jev keeps it, with its key and its choices. Thanks to Apostol Apostolov. (#379)
 
 ## [0.2.45] - 2026-11-22
 

@@ -18,7 +18,7 @@ its scope and who can see it.
 | --- | --- |
 | You | General · Appearance · Notifications · Dictation · Conversations |
 | Agents | Autonomy · Limits · Routines · Tuca · Browser |
-| Models | Agent models · Harnesses · Accounts · Router · Memory |
+| Models | Agent models · Harnesses · Accounts · Classifiers · Router · Memory |
 | Connections | Phone and Telegram · Servers · MCP access |
 | Workspace | People · Activity · Move the team · Backups · Updates · Data and deletion |
 
