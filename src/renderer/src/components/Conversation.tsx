@@ -292,7 +292,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
         {gone ? (
-          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation stays here to read.`)}</p>
+          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation remains available to read.`)}</p>
         ) : (
           <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
         )}
@@ -314,7 +314,7 @@ export function ComputerOff({ agent }: { agent: Agent }): ReactNode {
   const which = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} ${L('e', 'and')} ${names.at(-1)}`
   const one = names.length === 1
   return (
-    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', 'Off: the Tucano app is closed there. Opening it brings it back.')}>
+    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', "Tucano is closed on this computer. Open it to reconnect.")}>
       <Icon name="laptop" size={14} />
       <span className="grow">
         {L(`${one ? '' : 'Os computadores '}`, `${one ? '' : 'The computers '}`)}
@@ -1228,7 +1228,7 @@ function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies
       at={s?.at}
       ready={since > 0}
       notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
-      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few quiet minutes, this thread is summed up here, and the memories about you come from it.")}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few idle minutes, this thread is summarized here and used to learn memories about you.")}
       hint={L(
         `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
         `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
@@ -1782,7 +1782,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
         <div className="steps__steer">
           <div className="steps__steer-note">
             <textarea
-              aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+              aria-label={L('Orientação para a resposta em curso', "Instructions for the current reply")}
               placeholder={L('Como ele deve seguir?', 'How should it go on?')}
               rows={2}
               value={steerNote}
@@ -1875,7 +1875,7 @@ export function Thought({ message, working }: { message: Message; working: boole
         type="button"
         className="thought__head"
         aria-expanded={open}
-        title={open ? L('Recolher o que ele pensou', 'Fold what it thought') : L('Ler o que ele pensou', 'Read what it thought')}
+        title={open ? L('Recolher o que ele pensou', "Collapse reasoning") : L('Ler o que ele pensou', "Show reasoning")}
         onClick={() => setAsked(!open)}
       >
         <Icon name="chevron" size={11} />
@@ -2039,7 +2039,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
   const alwaysTitle = onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
-    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking, in any call, even after reading something from outside. You can take it back on its page.`)
+    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `Allow ${agent?.name ?? 'the agent'} to use “${toolWords(approval.tool)}” in ${approval.connectorName} without approval on any call, even after reading external content. Revoke this on its page.`)
 
   return (
     <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
@@ -2209,7 +2209,7 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
                   className="btn approval__always"
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
-                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call, even after reading something from outside. Other actions still ask. You can take it back on its page.`
+                    `Allow ${agent?.name ?? 'the agent'} to run ${forGood.join(', ')} through ${approval.connectorName} without approval on any call, even after reading external content. Other actions still require approval. Revoke this on its page.`
                   )}
                   onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
                 >

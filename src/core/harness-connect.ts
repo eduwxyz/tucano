@@ -49,7 +49,7 @@ function readJsonFile(path: string): { data: Obj; comments: boolean } | undefine
 function jsonEntry(path: string, field: string, o: ConnectOpts, entry: Obj): HarnessConnect {
   const where = shown(path, o.home ?? homedir())
   const file = readJsonFile(path)
-  if (!file) return { done: false, where, name: o.name, error: L(`Não consegui ler ${where} (o JSON está quebrado). Cole a configuração à mão.`, `Couldn't read ${where} (the JSON is broken). Paste the configuration by hand.`) }
+  if (!file) return { done: false, where, name: o.name, error: L(`Não consegui ler ${where} (o JSON está quebrado). Cole a configuração à mão.`, `Couldn't read ${where} because the configuration is invalid. Paste the configuration manually.`) }
   const servers = isObj(file.data[field]) ? (file.data[field] as Obj) : {}
   if (servers[o.name] !== undefined && !o.replace) return { done: false, exists: true, where, name: o.name }
   if (file.comments) return { done: false, where, name: o.name, error: L(`${where} tem comentários, que se perderiam ao reescrever. Cole a configuração à mão.`, `${where} has comments, which rewriting would lose. Paste the configuration by hand.`) }

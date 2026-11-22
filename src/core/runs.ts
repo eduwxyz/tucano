@@ -850,7 +850,7 @@ export class Runner {
   // place is the chain it was given to, not a prompt of its own.
   private steerLeftovers(control: Control, reply: Message): void {
     for (const note of control.steer?.splice(0) ?? [])
-      this.markSteer(reply, note.id, 'error', L('A resposta terminou antes de ler isto', 'The reply ended before reading this instruction.'))
+      this.markSteer(reply, note.id, 'error', L('A resposta terminou antes de ler isto', "The reply ended before the agent read this instruction."))
   }
 
   // An image I attached, kept in the artifact store with my message (no agent made it).

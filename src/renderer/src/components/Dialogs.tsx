@@ -314,7 +314,7 @@ export function confirmDeleteAgent(agent: Pick<Agent, 'id' | 'name'>): Promise<b
     title: L(`Excluir ${agent.name} para sempre?`, `Delete ${agent.name} for good?`),
     body: L(
       `As mensagens que ${agent.name} escreveu continuam nas conversas, com o nome riscado, e os recibos continuam em Uso e limites. Vão embora as instruções, as permissões, as memórias dele, as rotinas, o computador, os logins do navegador e os arquivos da pasta dele.\n\nNão dá pra desfazer.`,
-      `The messages ${agent.name} wrote stay in the conversations, with the name struck out, and its receipts stay in Usage and limits. Its instructions, permissions, memories, routines, computer, browser logins and folder go.\n\nThis can’t be undone.`
+      `Messages written by ${agent.name} remain in conversations with the name struck out; receipts remain in Usage and limits. Its instructions, permissions, memories, routines, computer, browser logins and folder are deleted.\n\nThis cannot be undone.`
     ),
     confirm: L(`Excluir ${agent.name}`, `Delete ${agent.name}`),
     danger: true,

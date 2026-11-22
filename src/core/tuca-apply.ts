@@ -67,7 +67,7 @@ const list = (xs: string[]): string => (xs.length < 2 ? (xs[0] ?? '') : `${xs.sl
 
 // Why it can't be taken back, said so instead of undoing blindly, with what to do instead.
 export const undoErrors = {
-  expired: (): string => L(`Passou o prazo pra desfazer (${UNDO_HOURS} horas). Dá pra mudar à mão.`, `The time to undo has passed (${UNDO_HOURS} hours). You can still change it by hand.`),
+  expired: (): string => L(`Passou o prazo pra desfazer (${UNDO_HOURS} horas). Dá pra mudar à mão.`, `The ${UNDO_HOURS}-hour undo period has expired. You can still change it manually.`),
   nothing: (): string => L('Não tem nada pra desfazer aqui.', "There's nothing to undo here."),
   changed: (name: string, fields: string[]): string =>
     L(
@@ -75,7 +75,7 @@ export const undoErrors = {
       `${name}'s ${list(fields.map((f) => (FIELDS()[f] ?? f).replace(/^the /, '')))} changed since. Undoing now would throw that away: change it on their page.`
     ),
   edited: (name: string): string => L(`${name} foi ajustado depois de criado. Desfazer agora apagaria esses ajustes: se não quiser mais, arquive na página dele.`, `${name} was adjusted after it was made. Undoing now would throw that away: if you don't want it any more, archive it on its page.`),
-  archived: (name: string): string => L(`${name} foi arquivado depois disso: reative na lista de agentes, se quiser.`, `${name} was archived since: bring it back from the agents list if you want.`),
+  archived: (name: string): string => L(`${name} foi arquivado depois disso: reative na lista de agentes, se quiser.`, `${name} has since been archived. Reactivate it from the agents list if needed.`),
   worked: (name: string): string => L(`${name} já começou a trabalhar. Desfazer apagaria o que foi feito: se não quiser mais, arquive na página dele.`, `${name} has already started working. Undoing would delete what was done: if you don't want it any more, archive it on its page.`),
   boss: (name: string): string => L(`Já tem agentes respondendo a ${name} no organograma. Mude isso antes, ou arquive ${name} na página dele.`, `Agents already answer to ${name} in the org chart. Change that first, or archive ${name} on its page.`),
   routine: (name: string, routine: string): string => L(`${name} já tem a rotina “${routine}”, criada depois. Apague ela em Rotinas antes.`, `${name} already has the routine “${routine}”, made since. Delete it in Routines first.`),

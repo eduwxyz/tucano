@@ -143,7 +143,7 @@ export function SectorPanel({ head, agents, admin, asks, onClose }: { head: Agen
           <label className="field">
             <span className="field__label">{L('O que este setor resolve', 'What this sector solves')}</span>
             <textarea rows={3} value={does} maxLength={200} onChange={(e) => ((draft.current.does = e.target.value), setDoes(e.target.value))} onBlur={save} />
-            <span className="hint">{L('Os outros chefes leem isto para saber quando mandar algo pra cá.', 'The other heads read this to know when to send something here.')}</span>
+            <span className="hint">{L('Os outros chefes leem isto para saber quando mandar algo pra cá.', 'Other sector heads use this to decide when to send work here.')}</span>
           </label>
           <span className={`org-sector__saved ${saved ? 'is-on' : ''}`} role="status">
             {saved && (
@@ -170,7 +170,7 @@ export function SectorPanel({ head, agents, admin, asks, onClose }: { head: Agen
             {head.role && ` · ${head.role}`}
           </span>
         </span>
-        <span className="hint">{L('É quem fica no topo do ramo. Ele decide quem do setor faz.', 'They are at the top of the branch. They decide who in the sector does it.')}</span>
+        <span className="hint">{L('É quem fica no topo do ramo. Ele decide quem do setor faz.', 'The sector head leads the branch and assigns requests within the sector.')}</span>
       </div>
       <div className="field">
         <span className="field__label">{L('Pedidos de outros setores', 'Requests from other sectors')}</span>
