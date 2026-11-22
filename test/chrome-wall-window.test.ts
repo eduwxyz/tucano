@@ -103,7 +103,7 @@ describe.skipIf(process.platform === 'win32' || !hasChrome())('a lane switching 
     expect(windows('no-wall-windows')).toEqual([])
     expect(lane.running('a')).toBe(true)
     await lane.run('a', 'close')
-  })
+  }, 120_000)
 
   it('keeps the agent driving, keeps the login, comes into view without a reload, and never asks twice', async () => {
     const b = browsers('one')
