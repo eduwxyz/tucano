@@ -3,12 +3,13 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MAX_STEPS, parseNextSteps, type Decision } from '../src/shared/questions'
-import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { hasOpenSteps, MAX_STEPS, parseNextSteps, type Decision } from '../src/shared/questions'
+import type { Agent, EngineId, Message, Person, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
+import { People } from '../src/core/people'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -84,7 +85,7 @@ describe('the card an agent gets', () => {
     hermes: fakeEngine('hermes'),
     endpoint: fakeEngine('endpoint')
   })
-  const asked = (): Message | undefined => db.messages().find((m) => m.author.kind === 'agent' && m.run?.status === 'waiting_input')
+  const asked = (): Message | undefined => db.messages().find((m) => m.author.kind === 'agent' && hasOpenSteps(m.run))
 
   beforeEach(async () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'steps-')), 'test.db'))
@@ -144,5 +145,93 @@ describe('the card an agent gets', () => {
     expect(mine?.text).toContain('Rodar a suíte inteira')
     expect(mine?.text).toContain('Outro passo: Escrever a nota de lançamento')
     expect(mine?.text).not.toContain('Outra coisa')
+  })
+
+  it('holds nothing: the reply is done, with no question, no inbox item and nothing in the field', async () => {
+    const r = runner()
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const q = asked()!
+    expect(q.run?.status).toBe('done')
+    expect(q.run?.question).toBeUndefined()
+    expect(db.question(q.id)).toBeUndefined()
+    expect(db.openQuestions()).toHaveLength(0)
+    expect(db.waitingQuestion('d1', null)).toBeUndefined()
+    expect(new People(db).inbox(db.owner()).questions).toHaveLength(0)
+  })
+
+  it('a message written instead is a new request: the card is not answered by it', async () => {
+    const r = runner()
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const q = asked()!
+    // Something ticked on the card and not sent stays out of what the person wrote.
+    r.answerDecision(q.id, 0, { chosen: [1] }, db.owner())
+    await r.send('d1', 'outra coisa: qual a capital da França?')
+    await r.idle()
+    const mine = db.messages().filter((m) => m.author.kind === 'person').pop()
+    expect(mine?.text).toBe('outra coisa: qual a capital da França?')
+    const card = db.message(q.id)!
+    expect(hasOpenSteps(card.run)).toBe(true)
+    expect(card.run?.answerMessage).toBeUndefined()
+    expect(card.run?.answeredInText).toBeUndefined()
+    // And it can still be answered afterwards.
+    await r.submitDecisions(q.id, db.owner())
+    await r.idle()
+    expect(hasOpenSteps(db.message(q.id)!.run)).toBe(false)
+    expect(db.messages().filter((m) => m.author.kind === 'person').pop()?.text).toContain('Traduzir os rótulos novos')
+  })
+
+  it('takes no slot: with one reply at a time, the next prompt starts right away', async () => {
+    settings = { ...settings, repliesAtOnce: 1 }
+    db.saveAgent({ ...agent('a1', 'lia'), oneAtATime: true })
+    const r = runner()
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const before = db.messages().filter((m) => m.author.kind === 'agent').length
+    await r.send('d1', 'segue com outra coisa')
+    await r.idle()
+    const replies = db.messages().filter((m) => m.author.kind === 'agent')
+    expect(replies.length).toBe(before + 1)
+    expect(replies.at(-1)?.run?.status).toBe('done')
+    expect(db.queuedMessages()).toHaveLength(0)
+  })
+
+  it('in a team, only whoever it was proposed to, or an admin, may answer it', async () => {
+    const ana: Person = { id: 'p-ana', name: 'Ana', about: '', role: 'member' }
+    const bia: Person = { id: 'p-bia', name: 'Bia', about: '', role: 'member' }
+    db.addPerson(ana)
+    db.addPerson(bia)
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'geral', members: ['a1'] })
+    const r = runner()
+    await r.send('c1', '@lia me dá os próximos passos', [], undefined, ana.id)
+    await r.idle()
+    const q = asked()!
+    expect(q.run?.askedTo).toBe(ana.id)
+    expect(() => r.answerDecision(q.id, 0, { chosen: [0] }, bia)).toThrow()
+    await expect(r.submitDecisions(q.id, bia)).rejects.toThrow()
+    expect(() => r.cancelQuestion(q.id, bia)).toThrow()
+    expect(hasOpenSteps(db.message(q.id)!.run)).toBe(true)
+    r.answerDecision(q.id, 0, { chosen: [0] }, ana)
+    await r.submitDecisions(q.id, ana)
+    await r.idle()
+    expect(db.message(q.id)!.run).toMatchObject({ status: 'done', answeredBy: ana.id })
+    expect(hasOpenSteps(db.message(q.id)!.run)).toBe(false)
+  })
+
+  it('survives a restart, and dismissing it wakes no one', async () => {
+    const r = runner()
+    await r.send('d1', '@lia me dá os próximos passos')
+    await r.idle()
+    const q = asked()!
+    const again = runner()
+    await again.resumeQueued()
+    expect(hasOpenSteps(db.message(q.id)!.run)).toBe(true)
+    const replies = db.messages().filter((m) => m.author.kind === 'agent').length
+    again.cancelQuestion(q.id, db.owner())
+    await again.idle()
+    expect(db.message(q.id)!.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(hasOpenSteps(db.message(q.id)!.run)).toBe(false)
+    expect(db.messages().filter((m) => m.author.kind === 'agent')).toHaveLength(replies)
   })
 })

@@ -33,7 +33,7 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
-import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
@@ -250,8 +250,8 @@ export const NEXT_STEPS: ToolDef = {
   name: 'next_steps',
   get description() {
     return L(
-      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas vazias, pra ninguém perder no meio do texto o que você sugeriu. Use quando a sua resposta termina propondo de 1 a ${MAX_STEPS} caminhos de continuação: um label curto por passo e, quando ajudar, uma description. A pessoa marca o que quer e manda de volta como a próxima mensagem; o que ela marcar é o que você faz em seguida. Não use pra perguntar uma decisão (isso é ask_user) nem pra uma coisa só. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
-      `Puts what you propose as the next step into a card of checkboxes, all clear, so nothing you suggested gets lost in the middle of the text. Use it when your reply ends by proposing 1 to ${MAX_STEPS} ways to go on: a short label per step and, when it helps, a description. The person ticks what they want and sends it back as the next message; whatever they tick is what you do next. Don't use it to ask a decision (that's ask_user) or for a single thing. After calling it, end your reply with one sentence at most, without repeating the steps.`
+      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas vazias, pra ninguém perder no meio do texto o que você sugeriu. Use raramente: só quando o trabalho chegou num ponto em que há de 1 a ${MAX_STEPS} continuações concretas que você faria e que dependem da pessoa querer. Um label curto por passo e, quando ajudar, uma description. Não use na maioria das respostas: nem quando a resposta já resolve o pedido, nem numa conversa ou pergunta simples, nem pra oferecer ajuda genérica ("quer que eu explique mais?"), nem pra algo que o pedido já cobre (isso você faz). Não use pra perguntar uma decisão: isso é ask_user. O card não prende ninguém: a pessoa marca o que quer e isso volta como uma mensagem, ou ignora e escreve outra coisa, e aí você segue o que ela escreveu. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
+      `Puts what you propose as the next step into a card of checkboxes, all clear, so nothing you suggested gets lost in the middle of the text. Use it rarely: only when the work has reached a point with 1 to ${MAX_STEPS} concrete ways to go on that you would do and that depend on the person wanting them. A short label per step and, when it helps, a description. Don't use it on most replies: not when the reply already settles the request, not in a simple chat or question, not to offer general help ("want me to explain more?"), and not for something the request already covers (do that instead). Don't use it to ask a decision: that's ask_user. The card holds no one up: the person ticks what they want and it comes back as a message, or ignores it and writes something else, and then you follow what they wrote. After calling it, end your reply with one sentence at most, without repeating the steps.`
     )
   },
   get inputSchema() {
@@ -639,7 +639,8 @@ export class Runner {
     // for them; past its deadline, the requester's). One waiting on a DM's yes takes a yes or a no.
     const named = opts.answers ? db.message(opts.answers) : undefined
     let asked = opts.answers ? (named?.conversationId === conv.id ? named : undefined) : this.pendingQuestion(conv.id, thread)
-    if (asked?.run?.status !== 'waiting_input') asked = undefined
+    // An open next-steps card is answered only from the card (`named`): what's written in the field is a new message.
+    if (asked?.run?.status !== 'waiting_input' && !hasOpenSteps(asked?.run)) asked = undefined
     const q = asked ? db.question(asked.id) : undefined
     let confirmed: boolean | undefined
     if (q && !named) {
@@ -690,7 +691,8 @@ export class Runner {
       // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
       // what it had beyond them), so the conversation shows them once. With images, it shows whole.
       const link = fromCard && pictures.length === 0 && docs.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
-      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
+      const { stepsOpen, ...askedRun } = asked.run!
+      this.update(asked, { run: { ...askedRun, status: 'done', ...(q || stepsOpen ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       // A question on handed work that a person answered right there: whoever asked for the work has nothing left to answer.
       const handed = asked.run?.handed ? db.delegation(asked.run.handed) : asked.threadId ? db.delegationAt(asked.threadId) : undefined
       if (handed?.asking === asked.id) {
@@ -1715,6 +1717,7 @@ export class Runner {
     let question: string | undefined // what ask_user asked, as text (every decision)
     let questions: Decision[] | undefined // the same, structured
     let askedTo: Person = requester // whom the question is for
+    let proposed: Decision | undefined // the card of next_steps: it goes on the reply only if the reply ends well and waits on nothing
     let confirming = false // in a DM, a question to someone else waits for the DM's person's yes first
     let approval: Approval | undefined
     const memoryIds: string[] = []
@@ -1863,7 +1866,8 @@ ${note}`,
     const others = db.people()
     const ownTools: ToolDef[] = [
       askUserFor(others.map((p) => (p.id === db.ownerId() ? ownerName || p.name : p.name))),
-      NEXT_STEPS,
+      // Only where a person reads the reply: a routine's run has no one there, and handed work goes back to an agent.
+      ...(boss || opts.routine || routineAskId ? [] : [NEXT_STEPS]),
       ...(accessTool ? [accessTool] : []),
       ...(keyTool ? [keyTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
@@ -2084,14 +2088,12 @@ ${note}`,
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
           const decision = parsed.decision
           const count = decision.options?.length ?? 0
-          questions = [decision]
-          question = questionsAsText(questions)
-          askedTo = requester
+          proposed = decision
           addSteps({ id: randomUUID(), label: L('Propôs os próximos passos', 'Proposed the next steps'), detail: L(`${count} no card`, `${count} on the card`), status: 'done' })
           return textResult(
             L(
-              `Os próximos passos estão no card, com as caixas em branco pra pessoa marcar o que quer. Encerre sua resposta agora com no máximo uma frase, sem repetir os passos. O que ela marcar volta como a sua próxima tarefa, na próxima mensagem.`,
-              `The next steps are in the card, with the boxes clear for the person to tick what they want. End your reply now with one sentence at most, without repeating the steps. Whatever they tick comes back as your next task, in the next message.`
+              `Os próximos passos estão no card, com as caixas em branco pra pessoa marcar o que quer. Encerre sua resposta agora com no máximo uma frase, sem repetir os passos. O que ela marcar volta como uma mensagem; se ela escrever outra coisa, siga o que ela escreveu.`,
+              `The next steps are in the card, with the boxes clear for the person to tick what they want. End your reply now with one sentence at most, without repeating the steps. Whatever they tick comes back as a message; if they write something else, follow what they wrote.`
             )
           )
         }
@@ -3247,7 +3249,10 @@ ${note}`,
       if (question && !up) this.asked(agent, msg, question, askedTo, requester, confirming, settings)
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       const text = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
-      const run: Run = { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+      // A card of next steps goes on a reply that's done: it asks nothing of anyone, so it's no question,
+      // no inbox item and no slot. An approval or a question in the same turn is what counts instead.
+      const card = proposed && !questions && !waiting ? { questions: [proposed], stepsOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) } : {}
+      const run: Run = { ...base, ...card, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
       // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
       save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
       // What the Tuca proposed inside the app goes in now, for the person he worked for (applyNow checks
@@ -3751,6 +3756,15 @@ ${note}`,
   private decidable(messageId: string, by: Person): Message {
     const { db } = this.deps
     const asked = db.message(messageId)
+    // An open next-steps card keeps no question: whoever it was proposed to answers it (or whoever may
+    // answer for them), as long as they can see the conversation.
+    if (asked?.author.kind === 'agent' && hasOpenSteps(asked.run)) {
+      const people = new People(db)
+      const to = asked.run!.askedTo
+      const mayAnswer = !people.conversationError(by, asked.conversationId) && (!to || people.canAnswer(by, { id: asked.id, conversationId: asked.conversationId, agentId: asked.author.id, text: '', askedTo: to, requestedBy: to, state: 'open', deadlineAt: Number.MAX_SAFE_INTEGER, createdAt: asked.at }))
+      if (!mayAnswer) throw new Error(L('Essa pergunta não é pra você.', "That question isn't for you."))
+      return asked
+    }
     const q = db.question(messageId)
     if (q && q.state !== 'open') throw new Error(L('Essa pergunta já foi respondida.', 'That question was already answered.'))
     const mayAnswer = q ? q.confirm !== 'pending' && new People(db).canAnswer(by, q) : !!asked && !new People(db).conversationError(by, asked.conversationId)
@@ -3785,6 +3799,11 @@ ${note}`,
   cancelQuestion(messageId: string, by: Person): void {
     const { db, emit } = this.deps
     const asked = this.decidable(messageId, by)
+    // Next steps dismissed: the card closes, and that's all. Nothing waited on it.
+    if (hasOpenSteps(asked.run)) {
+      const { stepsOpen: _open, ...run } = asked.run!
+      return this.update(asked, { run: { ...run, cancelled: true } })
+    }
     const q = db.question(messageId)
     if (q?.state === 'open') {
       db.saveQuestion({ ...q, state: 'closed' })

@@ -8,7 +8,8 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
 import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
-import { answerDecision, cancelQuestion, submitDecisions, type Message } from '../store'
+import { covers } from '../../../shared/access'
+import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
 
@@ -413,6 +414,21 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   const waiting = message.run?.status === 'waiting_input'
   const cancelled = !!message.run?.cancelled
   return <AskCard id={message.id} questions={questions} saved={message.run?.answers} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : cancelled ? L('Cancelada', 'Cancelled') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} cancelled={cancelled} />
+}
+
+// Next steps still open, under a reply that's done: a suggestion, so it says "optional" and never
+// "waiting for you". In a team, whoever it was proposed to (or may answer for them) ticks it;
+// anyone else reads it. The core checks the same when it's sent.
+export function NextStepsCard({ message, agentName }: { message: Message; agentName?: string | undefined }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const target = useStore((s) => personById(s, message.run?.askedTo))
+  const me = useStore((s) => personById(s, s.you))
+  const mine = !team || !target || target.id === you || admin || covers(target, me)
+  const who = agentName ?? L('O agente', 'The agent')
+  const byline = team && target ? (target.id === you ? L(`${who} sugere a você`, `${who} suggests to you`) : L(`${who} sugere a ${target.name}`, `${who} suggests to ${target.name}`)) : undefined
+  return <AskCard id={message.id} questions={questionsOf(message.run)} saved={message.run?.answers} mode={mine ? 'answer' : 'view'} badge={L('Opcional', 'Optional')} {...(byline ? { byline } : {})} />
 }
 
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it

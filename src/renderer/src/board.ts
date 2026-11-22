@@ -6,6 +6,7 @@
 import { L } from '../../shared/lang'
 import { isTeam, type Agent, type Delegation, type Inbox, type Message, type Run } from '../../shared/types'
 import { canContinue } from '../../shared/run-progress'
+import { isNextSteps, questionsOf } from '../../shared/questions'
 import { shortTitle } from '../../shared/titles'
 import { mineIn } from './components/waiting'
 
@@ -110,7 +111,8 @@ export function boardCards(input: BoardInput, now = Date.now()): BoardCard[] {
         const before = lastAgent.get(place(m))
         const k = before && cardOf.get(before.id)
         // What a person writes right after an agent asked there is the answer: the reply to it goes on the same card.
-        if (k && asked(before)) answers.set(m.id, k)
+        // After a next-steps card, only what was sent from that card: anything else is new work.
+        if (k && (questionsOf(before.run).some(isNextSteps) ? before.run?.answerMessage === m.id : asked(before))) answers.set(m.id, k)
       }
       if (m.author.kind !== 'agent' || !m.run) continue
       // What opens a part in its agent's channel, an answer given there in the asker's name, what brings
