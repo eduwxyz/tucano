@@ -308,7 +308,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
     question.kind === 'text'
       ? L('Enter confirma · Shift+Enter quebra a linha', 'Enter confirms · Shift+Enter for a new line')
       : steps
-        ? L(`Marque quantos quiser com 1 a ${options.length + 1} · nada começa marcado`, `Tick as many as you like with 1 to ${options.length + 1} · nothing starts ticked`)
+        ? L(`Marque com 1 a ${options.length + 1} · nada começa marcado`, `Tick with 1 to ${options.length + 1} · nothing starts ticked`)
         : multiple
           ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
           : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)
@@ -439,7 +439,13 @@ export function cardAnswers(all: Message[]): Map<string, string> {
   const had = linked.get(all)
   if (had) return had
   const map = new Map<string, string>()
-  for (const m of all) if (m.run?.answerMessage) map.set(m.run.answerMessage, m.run.answerTyped ?? '')
+  all.forEach((m, i) => {
+    if (!m.run?.answerMessage) return
+    // Next steps sent after the conversation moved on: the message stays, or the reply to it would
+    // land at the bottom answering nothing anyone can see.
+    if (questionsOf(m.run).some(isNextSteps) && all[i + 1]?.id !== m.run.answerMessage) return
+    map.set(m.run.answerMessage, m.run.answerTyped ?? '')
+  })
   linked.set(all, map)
   return map
 }

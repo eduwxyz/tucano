@@ -2,7 +2,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { Decision } from '../src/shared/questions'
-import { AskCard } from '../src/renderer/src/components/Decisions'
+import { AskCard, cardAnswers } from '../src/renderer/src/components/Decisions'
+import type { Message } from '../src/shared/types'
 
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
@@ -58,6 +59,14 @@ describe('the next-steps card', () => {
     expect(html).toContain('Rodar a suíte inteira')
     expect(html).toContain('Publicar as capturas')
     expect(html).toContain('Próximos passos')
+  })
+
+  it('hides the message a card sent only when it comes right after the card', () => {
+    const at = (id: string, kind: 'agent' | 'person', run?: Message['run']): Message => ({ id, conversationId: 'c', author: { kind, id: 'x' }, text: id, at: 1, ...(run ? { run } : {}) })
+    const answered = (answerMessage: string): Message['run'] => ({ status: 'done', steps: [], depth: 1, questions: steps(), answerMessage })
+    expect(cardAnswers([at('card', 'agent', answered('sent')), at('sent', 'person')]).has('sent')).toBe(true)
+    // The person wrote something else first: what the card sent stays visible, with its reply under it.
+    expect(cardAnswers([at('card', 'agent', answered('sent')), at('other', 'person'), at('reply', 'agent'), at('sent', 'person')]).has('sent')).toBe(false)
   })
 
   it('reads a step written by hand as another step, on the card as in the message', () => {
