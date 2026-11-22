@@ -28,7 +28,7 @@ export interface ProviderSpec {
   model: string // the model a new classifier of this provider starts with
   models: string[] // the ones worth offering, the default first
   box: boolean // can find a place on a screenshot (only TypeSafe does)
-  keyHint: { pt: string; en: string }
+  keyHint: () => string
 }
 
 export const PROVIDERS: readonly ProviderSpec[] = [
@@ -39,10 +39,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'jev-latest',
     models: ['jev-latest', 'jev-1.14.0', 'jev-1.13.0'],
     box: true,
-    keyHint: {
-      pt: 'A chave do console do TypeSafe. Também acha o elemento pelo print da tela.',
-      en: 'The key from the TypeSafe console. It also finds an element from the screenshot.'
-    }
+    keyHint: () => L('A chave do console do TypeSafe. Também acha o elemento pelo print da tela.', 'The key from the TypeSafe console. It also finds an element from the screenshot.')
   },
   {
     provider: 'openrouter',
@@ -51,10 +48,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'typesafe/jev-1.13',
     models: ['typesafe/jev-1.13'],
     box: false,
-    keyHint: {
-      pt: 'A chave do OpenRouter serve para o Jev, cobrado na mesma fatura dos outros modelos.',
-      en: 'An OpenRouter key serves Jev, billed on the same invoice as the other models.'
-    }
+    keyHint: () => L('A chave do OpenRouter serve para o Jev, cobrado na mesma fatura dos outros modelos.', 'An OpenRouter key serves Jev, billed on the same invoice as the other models.')
   },
   {
     provider: 'openai',
@@ -63,10 +57,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'gpt-6-luna',
     models: ['gpt-6-luna'],
     box: false,
-    keyHint: {
-      pt: 'A chave da OpenAI, com a Decisions API liberada na organização.',
-      en: 'The OpenAI key, with the Decisions API enabled for the organization.'
-    }
+    keyHint: () => L('A chave da OpenAI, com a Decisions API liberada na organização.', 'The OpenAI key, with the Decisions API enabled for the organization.')
   },
   {
     provider: 'gemini',
@@ -75,10 +66,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'gemini-decision-1',
     models: ['gemini-decision-1'],
     box: false,
-    keyHint: {
-      pt: 'A chave do Google AI Studio, com a Decisions API liberada.',
-      en: 'The Google AI Studio key, with the Decisions API enabled.'
-    }
+    keyHint: () => L('A chave do Google AI Studio, com a Decisions API liberada.', 'The Google AI Studio key, with the Decisions API enabled.')
   }
 ]
 
@@ -92,23 +80,19 @@ const MAX_CLASSIFIERS = 20
 // The jobs the Classifier Uses card offers, one selector each.
 export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser']
 
-export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
-  ({
-    routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
-    browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
-  })[job]
+export const jobLabel = (job: ClassifierJob): string =>
+  job === 'routing' ? L('Quem responde no canal', 'Who replies in a channel') : L('O que o agente clica na página', 'What an agent clicks in a page')
 
-export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
-  ({
-    routing: {
-      pt: 'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador. Cada mensagem sem @menção vai pro provedor escolhido.',
-      en: 'Reads the conversation and picks who replies, in place of the router’s small model. Every message without an @mention goes to the chosen provider.'
-    },
-    browser: {
-      pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
-      en: 'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
-    }
-  })[job]
+export const jobAbout = (job: ClassifierJob): string =>
+  job === 'routing'
+    ? L(
+        'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador.',
+        'Reads the conversation and picks who replies, in place of the router’s small model.'
+      )
+    : L(
+        'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
+        'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
+      )
 
 type ClassifierSettings = Pick<Settings, 'classifiers' | 'classifierJobs' | 'jevKey' | 'routerModel' | 'browserJev'>
 

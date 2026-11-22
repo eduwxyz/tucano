@@ -1,5 +1,5 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
-import { L, lang, locale, type Lang } from '../../../shared/lang'
+import { L, locale, type Lang } from '../../../shared/lang'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -3201,7 +3201,7 @@ function ClassifierKey({ classifier, saved }: { classifier: ClassifierConfig; sa
           </button>
         </div>
       ) : (
-        <Field label={L(`Chave do ${spec.label}`, `${spec.label} key`)} hint={`${spec.keyHint[lang()]} ${L('O app confere antes de guardar.', 'The app checks it before saving.')}`}>
+        <Field label={L(`Chave do ${spec.label}`, `${spec.label} key`)} hint={`${spec.keyHint()} ${L('O app confere antes de guardar.', 'The app checks it before saving.')}`}>
           <div className="row">
             <input className="grow" type="password" value={key} placeholder={L('Cole a chave aqui', 'Paste the key here')} onChange={(e) => setKey(e.target.value)} />
             <button className="btn" disabled={busy || !key.trim()} onClick={() => save(key)}>
@@ -3292,7 +3292,7 @@ export function ClassifiersCard(): ReactNode {
   }
   const serves = (id: string): string =>
     CLASSIFIER_JOBS.filter((j) => jobs[j] === id)
-      .map((j) => jobLabel(j)[lang()])
+      .map((j) => jobLabel(j))
       .join(', ')
 
   return (
@@ -3352,7 +3352,7 @@ export function ClassifiersCard(): ReactNode {
                   >
                     {L('Salvar chave', 'Save key')}
                   </button>
-                  <span className="muted small grow">{spec.keyHint[lang()]}</span>
+                  <span className="muted small grow">{spec.keyHint()}</span>
                 </div>
               )}
             </div>
@@ -3400,7 +3400,7 @@ export function ClassifiersCard(): ReactNode {
 
       {error && <p className="note note--error">{error}</p>}
       <p className="hint">
-        <Icon name="shield" size={13} /> {L('Um classificador não escreve texto: devolve uma escolha, um sim/não ou uma nota, com a probabilidade de cada opção. A chave fica no cofre do sistema e nunca volta pra tela.', 'A classifier writes no text: it returns a choice, a yes/no or a score, with each option’s probability. The key stays in the system’s vault and never comes back to the screen.')}
+        <Icon name="shield" size={13} /> {L('Um classificador não escreve texto: devolve uma escolha, um sim ou não, ou uma nota, com a probabilidade de cada opção. A chave fica no cofre do sistema e nunca volta pra tela.', 'A classifier writes no text: it returns a choice, a yes or no, or a score, with each option’s probability. The key stays in the system’s vault and never comes back to the screen.')}
       </p>
     </>
   )
@@ -3413,7 +3413,7 @@ export function ClassifierUsesCard(): ReactNode {
   const work = onGateway(settings)
   const list = settings.classifiers ?? []
   const jobs = settings.classifierJobs ?? {}
-  const assign = (job: ClassifierJob, id: string): void => {
+  const assign = (job: ClassifierJob, id: string | null): void => {
     const next = { ...jobs }
     if (id) next[job] = id
     else delete next[job]
@@ -3425,10 +3425,10 @@ export function ClassifierUsesCard(): ReactNode {
       {list.length > 0 && (
         <>
           {CLASSIFIER_JOBS.map((job) => (
-            <Field key={job} label={jobLabel(job)[lang()]} hint={jobAbout(job)[lang()]}>
+            <Field key={job} label={jobLabel(job)} hint={jobAbout(job)}>
               <Select
                 value={jobs[job] ?? ''}
-                onChange={(v) => assign(job, v ?? '')}
+                onChange={(v) => assign(job, v)}
                 options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
               />
             </Field>
@@ -3441,7 +3441,7 @@ export function ClassifierUsesCard(): ReactNode {
                 <ClassifierNotice job={job} classifier={c} work={work} />
                 {!settings.classifierKeys?.[c.id] && (
                   <p className="hint hint--warn">
-                    {L(`${jobLabel(job).pt}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${jobLabel(job).en}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
+                    {L(`${jobLabel(job)}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${jobLabel(job)}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
                   </p>
                 )}
               </div>
