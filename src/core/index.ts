@@ -75,6 +75,7 @@ import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
+import { AddOns } from './chrome-addons'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Titles } from './titles'
@@ -315,10 +316,14 @@ const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
 
+// The agents' ad blocker and cookie-notice removers (Settings › Agents › Browser), which need Chrome for
+// Testing and three extensions from the store: one download into the data folder, on the switch, and
+// never on the way of a reply — the lane works as it does today until it lands, and if it never does.
+const addOns = new AddOns(join(dataDir, 'navegador-extra'), () => emit({ type: 'settings', settings: settings() }))
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
+  return { ...s, engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses), ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}), jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), ...(addOns.info ? { addOns: addOns.info } : {}), accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) })) }
 }
 
 // More logins of Claude Code, Codex and Antigravity (Settings › Accounts): each in its own folder, checked with
@@ -798,6 +803,8 @@ const electronHost: BrowserHost = (agentId, op, args) =>
     process.parentPort.postMessage({ type: 'browser', id, agentId, op, args })
     setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error(L('o navegador não respondeu em 60 s', "the browser didn't answer in 60 s")))), 60_000).unref()
   })
+if (!fake && hasChrome() && settings().browserAddOns) bg(addOns.prepare(), 'browserAddOns')
+
 // Google Chrome when the Mac has it (Google refuses logins in embedded browsers); Electron's Chromium otherwise.
 const chrome =
   !fake && hasChrome()
@@ -808,7 +815,8 @@ const chrome =
         (agentId, jpeg) => browser.frame(agentId, jpeg),
         serverMode,
         serverMode ? 10 * 60_000 : undefined, // on a server, an idle agent's Chrome gives its memory back
-        (agentId) => downloadsFolder(dataDir, agentId)
+        (agentId) => downloadsFolder(dataDir, agentId),
+        addOns
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -2522,7 +2530,7 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, addOns: _addOns, ...all } }, ctx) => {
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)
@@ -2555,6 +2563,8 @@ const api: Handlers = {
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
+    if (patch.browserAddOns === true) bg(addOns.prepare(), 'browserAddOns')
+    if (patch.browserAddOns === false) addOns.cancel()
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })
