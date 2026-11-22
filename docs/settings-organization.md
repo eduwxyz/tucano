@@ -1,60 +1,61 @@
 # Settings, organized by task
 
-The Settings page kept the order its controls were built in. What a person changes about themselves
-(language, theme, notifications), about the workspace (its name, the shared context, the team) and
-about this computer (launching at login, updating) stood in the same column, and a new control could
-find several plausible homes.
+The Settings page kept the order its controls were built in, across eight tabs. What a person changes
+about themselves (language, theme, notifications), about the agents, about the models, about what
+connects to Tucano and about the workspace stood side by side, and a new control could find several
+plausible homes.
 
-This changes where the controls stand and how the page is walked. It adds no setting, changes no
-value, default, permission or scope, and keeps every tab's id and name, so a link to `Configurações ›
-Modelos` still lands there.
+This changes where the controls stand and how the page is walked. It adds no setting and changes no
+value, default, permission or scope.
 
-## One declaration per setting
+## Five groups, one subject at a time
 
-`src/renderer/src/settings-structure.ts` declares every section once: its id, the tab it belongs to,
-the settings keys it owns, its scope and who can see it. The page renders each card inside the
-section it declares (`<Card section="app-notifications">`, or `SectionAnchor` around a card that
-lives in another file), and the strip under the tabs is built from the same declaration.
+`src/renderer/src/settings-structure.ts` declares every subject once: its id, the group it belongs
+to, its name, its tile (an icon from `ui.tsx` on one of the app's colours), the settings keys it owns,
+its scope and who can see it.
 
-| Tab | Sections |
+| Group | Subjects |
 | --- | --- |
-| General | Appearance · Workspace context · Dictation · Notifications · Conversations · Talk to the people who make Tucano · Updates · Team · Backups · Data and deletion |
+| You | General · Appearance · Notifications · Dictation · Conversations |
+| Agents | Autonomy · Limits · Routines · Tuca · Browser |
 | Models | Agent models · Harnesses · Accounts · Router · Memory |
-| Agents | Permissions · Tuca · Agents browser · Routines · Limits |
-| Phone | Phone and Telegram |
-| People | People |
-| Activity | Activity |
-| Servers | Servers |
-| Harnesses | Harnesses (MCP) |
+| Connections | Phone and Telegram · Servers · MCP access |
+| Workspace | People · Activity · Move the team · Backups · Updates · Data and deletion |
 
-Order inside a tab is the reading order of its cards: what most people change first, destructive
-actions last. A section that a role or a capability leaves out is not rendered, and the strip does not
-link to it, so there are no dead anchors.
+Order inside a group is reading order: what most people change first, what can't be undone last. A
+group shows only when this person has a subject in it, so a member never sees an empty Agents group.
+
+The page renders each subject with `SectionAnchor`, which draws the subject's tile and name over its
+cards. A `Card` inside a subject is one of its groups of rows: a small heading (left out when it only
+repeats the subject's name), its lead, and the rows in one rounded box.
 
 ## Walking the page
 
-Under the page's own tabs, a second row names the sections of the open tab. It stays under the tabs
-while the page scrolls, follows the reading position, and takes the pane to a section. It is links,
-not a second tab list: the sections stay visible together and all belong to one scrolling document, so
-the active link carries `aria-current="location"`.
+The five groups sit at the top as one segmented control, and stay there while the page scrolls. Under
+them, a row of links names the subjects of the open group and takes the page to one. A pointer click
+glides over an interruptible 280 ms ease-in-out; a keyboard activation and a reduced-motion preference
+move at once; wheel, touch, pointer or key input, or another link, stops a glide. The subject lands
+16 px under the groups and takes the focus without a second scroll. A subject the page did not draw
+gets no link.
 
-A pointer selection scrolls with an interruptible 280 ms ease-in-out. A keyboard activation and a
-reduced-motion preference move at once. Wheel, touch, pointer or key input, a new selection, or
-unmounting cancels a running animation. The section the pane lands on takes focus without a second
-scroll. The row wraps instead of scrolling sideways at narrow widths, so at 900 px the last sections
-stay reachable.
+The search at the top right finds a subject by its name or by any of its terms (`settingsTerms`: the
+controls in it, as a person would call them), ignoring accents and case, among the subjects this
+person sees. Picking a result opens its group at that subject. Esc clears the search.
+
+The old tab ids still work: a link written for `servidores`, `pessoas`, `atividade`, `integracoes` or
+`harnesses` opens the group of that subject, at it (`settingsTabAliases`).
 
 ## Adding a control
 
-1. Declare the section, or extend the existing one, in `settings-structure.ts`, with the settings keys
-   it writes.
-2. List that section in `tabSections` for the tab whose cards show it.
-3. Render the card in `Pages.tsx` with `section="<id>"`, or wrap it in `SectionAnchor`.
+1. Declare the subject, or extend the existing one, in `settings-structure.ts`, with the settings
+   keys it writes, and add the words a person would search it by to `settingsTerms`.
+2. List that subject in `tabSections` for its group.
+3. Render it in `Pages.tsx` inside `<SectionAnchor id="<id>">`, with its cards.
 
-`npm run check:settings` checks the three against each other and fails when a declared section has no
-card, a card belongs to no section, two sections own the same key, or a key is not in `Settings`. The
-placement judgement itself — which section a control belongs to, and its scope — stays the review in
-the pull request.
+`npm run check:settings` checks the three against each other and fails when a declared subject is not
+rendered, something rendered belongs to no subject, two subjects own the same key, or a key is not in
+`Settings`. The placement judgement itself — which subject a control belongs to, and its scope — stays
+the review in the pull request.
 
 Settings that live on their own surface stay there: a channel's Wiki controls stay on the Wiki page, a
 person's name stays in People, and the per-agent overrides stay on the agent's page.
@@ -64,5 +65,5 @@ person's name stays in People, and the per-agent overrides stay on the agent's p
 - `npm run check:settings` — the placement check plus `test/settings-structure.test.ts` and
   `test/settings-navigation.test.tsx`.
 - `npm run build && node scripts/qa-settings-sections.mjs` — the built app, at 1280, 1024, 900 and
-  760 CSS pixels, on every tab: the strip does not scroll, every link has its card, and a click parks
-  that card 16 px under the strip with the section focused.
+  760 CSS pixels, on every group: nothing scrolls sideways, every link has its subject, and a jump parks
+  that subject 16 px under the groups with the subject focused.

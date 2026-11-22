@@ -1,186 +1,173 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import type { SettingsSection } from '../settings-structure'
+import { settingsGroupLabel, type SettingsHit, type SettingsPageId, type SettingsSection } from '../settings-structure'
+import { Icon, type IconName } from './ui'
 
 export const SETTINGS_SCROLL_MS = 280
 export const settingsEase = (t: number): number => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 
-// The strip under a page's own tabs: the sections of the open tab, in the order their cards read,
-// sticking under the tabs while the page scrolls, and taking the pane to a section. It is a second
-// row of links and not another tab list — the sections stay visible together and are all part of one
-// scrolling document, so the links carry `aria-current="location"` instead of a selected tab. The
-// strip is its own container: a wrapper around it would end at its own edge, and a sticky row cannot
-// leave the block it is in, so it would scroll away with the page.
-export function SettingsLayout({ sections }: { sections: readonly SettingsSection[] }): ReactNode {
-  // The cards belong to the page, so the strip lists the sections that were really rendered, in the
-  // order they read: a section whose card is missing, or one this person's role leaves out, gets no
-  // link and no dead anchor.
+// The name of the subject a card is drawn in. A card inside a subject is one of its groups: its
+// title is the small heading over the group, and a title that only repeats the subject's is left out.
+export const SettingsSubjectTitle = createContext<string | null>(null)
+
+// The tile by a subject's name, the same in its heading, the jump row and a search result.
+export function SettingsTile({ section, size = 'md' }: { section: SettingsSection; size?: 'sm' | 'md' }): ReactNode {
+  return (
+    <span className={`settings-tile settings-tile--${size}`} style={{ background: section.color }} aria-hidden>
+      <Icon name={section.icon as IconName} size={size === 'sm' ? 11 : 15} />
+    </span>
+  )
+}
+
+// One subject of a group: its tile and name, then its cards as groups of rows. The page scrolls to
+// it from the jump row and from a search result, so it carries the anchor and takes the focus.
+export function SettingsSubject({ section, children }: { section: SettingsSection; children: ReactNode }): ReactNode {
+  return (
+    <section className="settings-subject" id={`settings-${section.id}`} data-settings-section={section.id} aria-labelledby={`settings-${section.id}-title`} tabIndex={-1}>
+      <header className="settings-subject__head">
+        <SettingsTile section={section} />
+        <h2 id={`settings-${section.id}-title`}>{section.label}</h2>
+      </header>
+      <SettingsSubjectTitle.Provider value={section.label}>{children}</SettingsSubjectTitle.Provider>
+    </section>
+  )
+}
+
+// The five groups, as one segmented control: picking one shows its subjects in place of the others.
+export function SettingsGroups({ groups, current, onPick }: { groups: readonly SettingsPageId[]; current: string | null; onPick: (group: SettingsPageId) => void }): ReactNode {
+  return (
+    <div className="settings-groups">
+      <div className="settings-groups__bar" role="tablist" aria-label={L('Grupos de configurações', 'Settings groups')}>
+        {groups.map((group) => (
+          <button key={group} type="button" role="tab" aria-selected={current === group} className={current === group ? 'is-active' : ''} onClick={() => onPick(group)}>
+            {settingsGroupLabel(group)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Under the groups, one link per subject of the open group, to go straight to it. A pointer click
+// glides there over an interruptible 280 ms ease-in-out; a keyboard activation and a reduced-motion
+// preference move at once; wheel, touch, pointer or key input, or another link, stops a glide. The
+// subject it lands on takes the focus without a second scroll. Only subjects the page really drew get
+// a link, so a subject this person's role leaves out is never a dead anchor.
+export function SettingsJumps({ sections }: { sections: readonly SettingsSection[] }): ReactNode {
   const [present, setPresent] = useState<readonly string[] | null>(null)
-  const listed = sections.filter(section => section.visible)
-  const available = present
-    ? present.map(id => listed.find(section => section.id === id)).filter((section): section is SettingsSection => section !== undefined)
-    : listed
-  const [current, setCurrent] = useState<string>(listed[0]?.id ?? '')
-  const currentId = available.some(section => section.id === current) ? current : available[0]?.id ?? ''
+  const listed = sections.filter((section) => section.visible)
+  const available = present ? listed.filter((section) => present.includes(section.id)) : listed
   const root = useRef<HTMLElement>(null)
   const frame = useRef<number | null>(null)
-  const movingTo = useRef<string | null>(null)
-  // The reading-position check, so a move that ends can name what it really landed on.
-  const track = useRef<() => void>(() => {})
-  // A tab opens at its first section, whatever scroll position the page was left at.
-  const opened = useRef(false)
-  // How far the page's own tab bar reaches down: the strip parks under it instead of over it.
-  const above = useRef(0)
-  const ids = listed.map(section => section.id).join('|')
+  const ids = listed.map((section) => section.id).join('|')
 
   const cancel = (): void => {
     if (frame.current !== null) cancelAnimationFrame(frame.current)
     frame.current = null
-    movingTo.current = null
     root.current?.removeAttribute('data-settings-scrolling')
   }
 
-  const showSection = (id: string, animated: boolean, focus: boolean): void => {
-    cancel()
-    const scroller = root.current?.closest<HTMLElement>('.page__scroll')
-    const target = scroller?.querySelector<HTMLElement>(`[data-settings-section="${id}"]`)
-    if (!scroller || !target) return
-    setCurrent(id)
-    const inset = (root.current?.getBoundingClientRect().height ?? 0) + above.current + 16
-    const destinationTop = (): number => Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight,
-      scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - inset))
-    const top = destinationTop()
-    if (focus) target.focus({ preventScroll: true })
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    const start = scroller.scrollTop
-    if (!animated || reduced || Math.abs(top - start) < 1) {
-      scroller.scrollTop = top
-      track.current()
-      return
-    }
-    movingTo.current = id
-    root.current?.setAttribute('data-settings-scrolling', id)
-    let began: number | null = null
-    const step = (at: number): void => {
-      began ??= at
-      const progress = Math.min(1, (at - began) / SETTINGS_SCROLL_MS)
-      scroller.scrollTop = start + (destinationTop() - start) * settingsEase(progress)
-      if (progress < 1) frame.current = requestAnimationFrame(step)
-      else {
-        frame.current = null
-        movingTo.current = null
-        root.current?.removeAttribute('data-settings-scrolling')
-        track.current()
-      }
-    }
-    frame.current = requestAnimationFrame(step)
-  }
-
-  useLayoutEffect(() => {
-    const element = root.current
-    const scroller = element?.closest<HTMLElement>('.page__scroll')
-    if (!element || !scroller) return
-    // The strip sticks right below the page's own tabs, whose height changes with the window, and
-    // the page keeps room under its last card so that card can reach the line like every other one.
-    const size = (): void => {
-      above.current = scroller.querySelector<HTMLElement>('.tabs:not(.tabs--sections)')?.getBoundingClientRect().height ?? 0
-      element.style.setProperty('--settings-nav-top', `${above.current}px`)
-      const tail = Math.max(0, scroller.clientHeight - above.current - element.getBoundingClientRect().height - 32)
-      scroller.style.setProperty('--settings-tail', `${tail}px`)
-    }
-    size()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(size)
-    observer?.observe(scroller)
-    observer?.observe(element)
-    return () => observer?.disconnect()
-  }, [ids])
-
   useLayoutEffect(() => {
     const scroller = root.current?.closest<HTMLElement>('.page__scroll')
     if (!scroller) return
-    const wanted = new Set<string>(listed.map(section => section.id))
-    const seen: string[] = []
-    for (const element of Array.from(scroller.querySelectorAll<HTMLElement>('[data-settings-section]'))) {
-      const id = element.dataset.settingsSection
-      if (id && wanted.has(id) && !seen.includes(id)) seen.push(id)
-    }
-    setPresent(previous => previous && previous.join('|') === seen.join('|') ? previous : seen)
-    if (!opened.current) {
-      opened.current = true
-      // The strip mounts with its tab: the page above it may still be scrolled where the previous
-      // tab left it, and a section nobody asked for would be named there.
-      scroller.scrollTop = 0
-      setCurrent(seen[0] ?? listed[0]?.id ?? '')
-      return
-    }
-    if (seen.length > 0) setCurrent(current => seen.includes(current) ? current : seen[0]!)
+    const drawn = new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[data-settings-section]')).map((element) => element.dataset.settingsSection))
+    const seen = listed.map((section) => section.id).filter((id) => drawn.has(id))
+    setPresent((previous) => (previous && previous.join('|') === seen.join('|') ? previous : seen))
   }, [ids])
 
   useEffect(() => {
     const scroller = root.current?.closest<HTMLElement>('.page__scroll')
     if (!scroller) return
-    let tracking: number | null = null
-    // The reading position: the last section whose card has reached the line under the strip, or the
-    // last one of all once the pane is at its end.
-    const read = (): void => {
-      if (tracking !== null) return
-      tracking = requestAnimationFrame(() => {
-        tracking = null
-        if (movingTo.current) return
-        const targets = [...scroller.querySelectorAll<HTMLElement>('[data-settings-section]')]
-        const line = scroller.getBoundingClientRect().top + (root.current?.getBoundingClientRect().height ?? 0) + above.current + 24
-        const selected = targets.filter(element => element.getBoundingClientRect().top <= line).at(-1) ?? targets[0]
-        if (selected?.dataset.settingsSection) setCurrent(selected.dataset.settingsSection)
-      })
-    }
-    track.current = read
-    const interrupt = (): void => { cancel(); read() }
     const interruptKey = (event: KeyboardEvent): void => {
-      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ', 'Escape'].includes(event.key)) interrupt()
+      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ', 'Escape'].includes(event.key)) cancel()
     }
-    read()
-    scroller.addEventListener('scroll', read, { passive: true })
-    scroller.addEventListener('wheel', interrupt, { passive: true })
-    scroller.addEventListener('touchstart', interrupt, { passive: true })
-    scroller.addEventListener('pointerdown', interrupt, { passive: true })
+    scroller.addEventListener('wheel', cancel, { passive: true })
+    scroller.addEventListener('touchstart', cancel, { passive: true })
+    scroller.addEventListener('pointerdown', cancel, { passive: true })
     scroller.addEventListener('keydown', interruptKey)
-    window.addEventListener('resize', interrupt)
+    window.addEventListener('resize', cancel)
     return () => {
       cancel()
-      if (tracking !== null) cancelAnimationFrame(tracking)
-      track.current = () => {}
-      scroller.removeEventListener('scroll', read)
-      scroller.removeEventListener('wheel', interrupt)
-      scroller.removeEventListener('touchstart', interrupt)
-      scroller.removeEventListener('pointerdown', interrupt)
+      scroller.removeEventListener('wheel', cancel)
+      scroller.removeEventListener('touchstart', cancel)
+      scroller.removeEventListener('pointerdown', cancel)
       scroller.removeEventListener('keydown', interruptKey)
-      window.removeEventListener('resize', interrupt)
+      window.removeEventListener('resize', cancel)
     }
   }, [ids])
 
-  // The active link follows the selection sideways, without scrolling the page itself.
-  useEffect(() => {
-    const link = root.current?.querySelector<HTMLElement>('[aria-current="location"]')
-    const strip = link?.parentElement
-    if (!link || !strip) return
-    if (link.offsetLeft < strip.scrollLeft) strip.scrollLeft = link.offsetLeft
-    else if (link.offsetLeft + link.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = link.offsetLeft + link.offsetWidth - strip.clientWidth
-  }, [currentId])
-
-  const chooseSection = (event: MouseEvent<HTMLAnchorElement>, id: string): void => {
-    // A modified click belongs to the person's browser, not to this strip.
+  const go = (event: MouseEvent<HTMLAnchorElement>, id: string): void => {
+    // A modified click belongs to the person's browser, not to this row.
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
     event.preventDefault()
+    cancel()
+    const scroller = root.current?.closest<HTMLElement>('.page__scroll')
+    if (!scroller) return
     // A keyboard activation arrives with no click count, and it moves at once.
-    showSection(id, event.detail > 0, true)
+    glideTo(scroller, id, event.detail > 0, frame, () => root.current?.setAttribute('data-settings-scrolling', id), () => root.current?.removeAttribute('data-settings-scrolling'))
   }
 
+  if (available.length < 2) return null
   return (
-    <nav className="settings-layout tabs tabs--sections settings-sections" aria-label={L('Seções de configurações', 'Settings sections')} ref={root}>
-      {available.map(section => (
-        <a key={section.id} href={`#settings-${section.id}`} aria-current={currentId === section.id ? 'location' : undefined}
-          onClick={event => chooseSection(event, section.id)}>{section.label}</a>
+    <nav className="settings-jumps" aria-label={L('Ir para', 'Go to')} ref={root}>
+      {available.map((section) => (
+        <a key={section.id} href={`#settings-${section.id}`} onClick={(event) => go(event, section.id)}>
+          <SettingsTile section={section} size="sm" />
+          {section.label}
+        </a>
       ))}
     </nav>
+  )
+}
+
+// Takes the page to a subject: it parks under the groups bar, which stays at the top while the page
+// scrolls, and the subject takes the focus without a second scroll.
+export function glideTo(scroller: HTMLElement, id: string, animated: boolean, frame: { current: number | null }, began?: () => void, ended?: () => void): void {
+  const target = scroller.querySelector<HTMLElement>(`[data-settings-section="${id}"]`)
+  if (!target) return
+  const bar = scroller.querySelector<HTMLElement>('.settings-groups')?.getBoundingClientRect().height ?? 0
+  const destination = (): number => Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight,
+    scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - bar - 16))
+  target.focus({ preventScroll: true })
+  const start = scroller.scrollTop
+  const top = destination()
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  if (!animated || reduced || Math.abs(top - start) < 1) {
+    scroller.scrollTop = top
+    return
+  }
+  began?.()
+  let first: number | null = null
+  const step = (at: number): void => {
+    first ??= at
+    const progress = Math.min(1, (at - first) / SETTINGS_SCROLL_MS)
+    scroller.scrollTop = start + (destination() - start) * settingsEase(progress)
+    if (progress < 1) frame.current = requestAnimationFrame(step)
+    else {
+      frame.current = null
+      ended?.()
+    }
+  }
+  frame.current = requestAnimationFrame(step)
+}
+
+// The search's answer, in place of the group: one row per place a word was found, with the group and
+// subject it is in. Picking one opens that group at that subject.
+export function SettingsResults({ hits, query, onPick }: { hits: readonly SettingsHit[]; query: string; onPick: (section: SettingsSection) => void }): ReactNode {
+  if (hits.length === 0)
+    return <p className="settings-results__none">{L(`Nada com “${query.trim()}”. Tente outra palavra, como “limite”, “modelo” ou “som”.`, `Nothing for “${query.trim()}”. Try another word, like “limit”, “model” or “sound”.`)}</p>
+  return (
+    <div className="settings-results" role="list" aria-label={L('Resultados da busca', 'Search results')}>
+      {hits.map((hit, i) => (
+        <button key={`${hit.section.id}-${i}`} type="button" role="listitem" className="settings-results__row" onClick={() => onPick(hit.section)}>
+          <SettingsTile section={hit.section} />
+          <span className="grow">
+            <strong>{hit.term}</strong>
+            <span>{settingsGroupLabel(hit.section.page)} › {hit.section.label}</span>
+          </span>
+          <Icon name="chevron" size={14} />
+        </button>
+      ))}
+    </div>
   )
 }

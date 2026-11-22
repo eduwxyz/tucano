@@ -174,6 +174,13 @@ export interface Receipt {
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
 
+// What the Tuca wrote for the people who make Tucano (propor_feedback). Never sent by him: the card opens
+// the "Enviar feedback" window with it, and the person sends it from there.
+export interface FeedbackDraft {
+  kind: 'bug' | 'idea' | 'other'
+  message: string
+}
+
 export interface Run {
   status: RunStatus
   steps: Step[]
@@ -190,6 +197,7 @@ export interface Run {
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
   answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
   answerTyped?: string // what that message had beyond them, written in the message box
@@ -208,6 +216,7 @@ export interface Run {
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
+  feedbackDraft?: FeedbackDraft // a bug or an idea for the people who make Tucano, written by the Tuca with propor_feedback: the person reviews and sends it
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back

@@ -95,7 +95,7 @@ function DialogBody(): ReactNode {
   if (dialog?.kind === 'search') return <Search onClose={close} />
   if (dialog?.kind === 'archived') return <Archived onClose={close} />
   if (dialog?.kind === 'oauth') return <OAuthDialog id={dialog.id} url={dialog.url} onClose={close} />
-  if (dialog?.kind === 'feedback') return <FeedbackDialog image={dialog.image} onClose={close} />
+  if (dialog?.kind === 'feedback') return <FeedbackDialog {...(dialog.image ? { image: dialog.image } : {})} {...(dialog.draft ? { draft: dialog.draft } : {})} {...(dialog.from ? { from: dialog.from } : {})} onClose={close} />
   if (dialog?.kind === 'new-channel') return <SettingsDialog onClose={() => getState().dialog?.kind === 'new-channel' && close()} />
   if (!dialog || !conv) return null
   if (dialog.kind === 'members') return <MembersDialog id={conv.id} name={conv.name} members={conv.members} onClose={close} />
@@ -106,8 +106,9 @@ function DialogBody(): ReactNode {
 function SettingsDialog({ conv, onClose }: { conv?: Conversation; onClose: () => void }): ReactNode {
   const dmName = useStore((s) => (conv?.kind === 'dm' && conv.members[0] ? agentById(s, conv.members[0])?.name : undefined))
   const channel = conv?.kind !== 'dm'
-  // Its name and topic are its maker's and the admins'; anyone else only sees them.
-  const editable = useStore((s) => !conv || canEditChannel(s, conv))
+  // A channel's name and topic are its maker's and the admins'; anyone else only sees them.
+  // Where a DM's agent answers is up to whoever is in it.
+  const editable = useStore((s) => !conv || conv.kind === 'dm' || canEditChannel(s, conv))
   const [name, setName] = useState(conv?.name ?? '')
   const [topic, setTopicText] = useState(conv?.topic ?? '')
   const [threads, setThreadsOn] = useState(!!conv?.threads)
@@ -396,7 +397,7 @@ const PAGES = (admin = true): { label: string; view: View; icon: IconName }[] =>
       ] as const)
     : []),
   { label: L('Conectores', 'Connectors'), view: { kind: 'connectors' }, icon: 'plug' },
-  { label: L('Cofre', 'Cofre'), view: { kind: 'vault' }, icon: 'key' },
+  { label: L('Cofre', 'Vault'), view: { kind: 'vault' }, icon: 'key' },
   { label: L('Configurações', 'Settings'), view: { kind: 'settings' }, icon: 'gear' }
 ]
 

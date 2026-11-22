@@ -25,7 +25,7 @@ import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
-import { pendingAgents, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
+import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
@@ -293,6 +293,7 @@ export interface RunnerDeps {
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'outOfReach'> // without it, agents have no wiki
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
+  feedbackOn?: () => boolean // feedback to the people who make Tucano can be sent from here (core/feedback.ts); without it, the Tuca can't write one
 }
 
 // What the runner needs from the connector manager.
@@ -1577,7 +1578,7 @@ ${note}`,
       ...(canSeeImages ? [VER_IMAGEM] : []),
       ...(canReadFiles ? [LER_ANEXO] : []),
       ...(proposes ? [PROPOR_AGENTE, PROPOR_TIME, ...PROPOSAL_TOOLS()] : []),
-      ...(helps ? [LER_GUIA, VER_ESTADO] : []),
+      ...(helps ? [LER_GUIA, VER_ESTADO, ...(this.deps.feedbackOn?.() ? [PROPOR_FEEDBACK] : [])] : []),
       ...(team.length ? DELEGATION_TOOLS : []),
       ...(computers ? computerTools(agent).map((t) => withKeys(t.name === 'bash' ? withRules(t) : t)) : []),
       ...(browser ? browserTools() : []),
@@ -1836,6 +1837,19 @@ ${note}`,
           return textResult(page.text, page.error)
         }
 
+        if (name === PROPOR_FEEDBACK.name && helps && this.deps.feedbackOn?.()) {
+          const r = feedbackFrom(args)
+          if (!r.draft) return textResult(r.error!, true)
+          msg.run = { ...msg.run!, feedbackDraft: r.draft }
+          addSteps({ id: randomUUID(), label: L('Escreveu um feedback', 'Wrote feedback'), detail: r.draft.kind, status: 'done' })
+          return textResult(
+            L(
+              'O card com o feedback está na sua resposta. A pessoa revisa e envia por ele: diga isso em uma linha, sem repetir o texto.',
+              'The card with the feedback is in your reply. The person reviews it and sends it from there: say so in one line, without repeating the text.'
+            )
+          )
+        }
+
         if (name === VER_ESTADO.name && helps) {
           const seen = new People(db)
           addSteps({ id: randomUUID(), label: L('Olhou o workspace', 'Looked at the workspace'), detail: String(args['area'] ?? L('tudo', 'all')), status: 'done' })
@@ -2079,9 +2093,9 @@ ${note}`,
           // The keys of the Cofre this command asked for, checked before anything runs (src/core/vault.ts).
           const wanted = (name === 'bash' || name === 'start_service') && Array.isArray(args['keys']) ? args['keys'].filter((k): k is string => typeof k === 'string' && !!k.trim()) : []
           const vault = this.deps.vault
-          const picked = wanted.length ? (vault ? vault.pick(agent.id, wanted, requester.id) : { error: L('O Cofre não está disponível aqui.', "The Cofre isn't available here.") }) : { keys: [] }
+          const picked = wanted.length ? (vault ? vault.pick(agent.id, wanted, requester.id) : { error: L('O Cofre não está disponível aqui.', "The Vault isn't available here.") }) : { keys: [] }
           if ('error' in picked) {
-            addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${wanted.join(', ')}`, `Cofre key: ${wanted.join(', ')}`), status: 'error' })
+            addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${wanted.join(', ')}`, `Vault key: ${wanted.join(', ')}`), status: 'error' })
             return textResult(picked.error, true)
           }
           const strict = picked.keys.filter((k) => k.approve).map((k) => k.name)
@@ -2156,7 +2170,7 @@ ${note}`,
               env = await vault!.open(picked.keys, { agentId: agent.id, conversationId: conv.id, messageId: msg.id, personId: requester.id, via: name === 'start_service' ? 'service' : 'bash' })
             } catch (e) {
               const why = e instanceof Error ? e.message : String(e)
-              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${why}`, `Cofre key: ${why}`), status: 'error' })
+              addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`chave do Cofre: ${why}`, `Vault key: ${why}`), status: 'error' })
               return textResult(L(`Não rodei: ${why}`, `Not run: ${why}`), true)
             }
           }
@@ -2390,7 +2404,7 @@ ${note}`,
             conversationId: conv.id,
             messageId: msg.id,
             connectorId: COFRE,
-            connectorName: 'Cofre',
+            connectorName: L('Cofre', 'Vault'),
             tool: PEDIR_CHAVE,
             args: what,
             why: typeof args['motivo'] === 'string' ? args['motivo'].trim() : '',
@@ -2856,7 +2870,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
+    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -3066,7 +3080,7 @@ ${note}`,
       // The Cofre's keys it asked for are checked again now: one taken back meanwhile doesn't go in.
       const wanted = Array.isArray(ap.args['keys']) ? ap.args['keys'].filter((k): k is string => typeof k === 'string') : []
       const vault = this.deps.vault
-      const picked = wanted.length && agent ? (vault ? vault.pick(agent.id, wanted, ap.requestedBy) : { error: L('O Cofre não está disponível aqui.', "The Cofre isn't available here.") }) : { keys: [] }
+      const picked = wanted.length && agent ? (vault ? vault.pick(agent.id, wanted, ap.requestedBy) : { error: L('O Cofre não está disponível aqui.', "The Vault isn't available here.") }) : { keys: [] }
       let env: Record<string, string> | undefined
       let keyError = 'error' in picked ? picked.error : undefined
       if (decision === 'approved' && agent?.computer && this.deps.computers && 'keys' in picked && picked.keys.length) {
@@ -3154,7 +3168,7 @@ ${note}`,
       const has = !!agent && !!vault && (nome ? vault.usable(agent.id, ap.requestedBy).some((k) => k.name === nome) : vault.loginSites(agent.id, ap.requestedBy).includes(site))
       if (decision === 'approved' && has) {
         ok = true
-        outcome = L('Salvo no Cofre e liberado.', 'Saved in the Cofre and given.')
+        outcome = L('Salvo no Cofre e liberado.', 'Saved in the Vault and given.')
         task = nome
           ? L(
               `${me} salvou ${what} no Cofre e liberou pra você. Use no bash (ou no start_service) com keys: ["${nome}"]: o valor entra só naquele comando, e você nunca o vê. Continue de onde parou.`,
@@ -3431,6 +3445,52 @@ ${note}`,
   async submitDecisions(messageId: string, by: Person): Promise<void> {
     const asked = this.decidable(messageId, by)
     await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
+  }
+
+  // Dismissed with the card's Cancelar button: the question closes and the agent isn't woken. Its next turn reads that it
+  // was cancelled (context.ts). Work handed down the tree waits on it, though: there, cancelling means "I won't answer",
+  // not "stop", so whoever does the work goes on without the answer, assuming what it must and saying so.
+  cancelQuestion(messageId: string, by: Person): void {
+    const { db, emit } = this.deps
+    const asked = this.decidable(messageId, by)
+    const q = db.question(messageId)
+    if (q?.state === 'open') {
+      db.saveQuestion({ ...q, state: 'closed' })
+      emit({ type: 'inbox' })
+    }
+    this.update(asked, { run: { ...asked.run!, status: 'done', cancelled: true } })
+    // The question of whoever does handed work, cancelled right where it was asked.
+    const handed = asked.run?.handed ? db.delegation(asked.run.handed) : asked.threadId ? db.delegationAt(asked.threadId) : undefined
+    if (handed?.state === 'open' && handed.asking === asked.id) {
+      if (handed.askingTold) this.closeRelay(handed, asked)
+      return this.goOnWithout(handed)
+    }
+    // The question the asker took up to the person, from that work: each request it was waiting on goes on.
+    if (asked.author.kind !== 'agent') return
+    for (const d of db.delegationsFrom(asked.author.id, asked.conversationId, asked.threadId)) {
+      const below = d.state === 'open' && d.asking && d.askingTold ? db.message(d.asking) : undefined
+      if (below && below.at <= asked.at) this.goOnWithout(d)
+    }
+  }
+
+  // A question on handed work nobody will answer: it closes, and whoever does the work goes on without it.
+  private goOnWithout(d: Delegation): void {
+    const { db } = this.deps
+    const q = d.asking ? db.message(d.asking) : undefined
+    if (q?.run?.status === 'waiting_input') this.update(q, { run: { ...q.run, status: 'done', cancelled: true } })
+    this.keep({ ...d, asking: undefined, askingTold: false })
+    const to = db.agent(d.to)
+    const conv = db.conversation(d.conversationId)
+    if (!to || to.archived || !conv || this.paused) return
+    void this.startReply(to, conv, {
+      depth: 1,
+      threadId: workThread(d),
+      handed: d.id,
+      task: L(
+        'A pessoa preferiu não responder a sua pergunta. Siga com o pedido sem a resposta: assuma o que for mais razoável e diga o que assumiu.',
+        "The person chose not to answer your question. Go on with the request without the answer: assume what's most reasonable and say what you assumed."
+      )
+    })
   }
 
   // The user took over the agent's browser ("Assumir") and handed it back

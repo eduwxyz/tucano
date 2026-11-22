@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L, lang } from '../../../shared/lang'
 import type { SurveyView } from '../../../shared/rpc'
+import type { FeedbackDraft, Message } from '../../../shared/types'
 import { amOwner, openDialog, toast, useStore, windowless } from '../store'
 import { call } from '../rpc'
 import { Modal } from './Modal'
@@ -24,15 +25,74 @@ const SYSTEMS = { mac: 'macOS', windows: 'Windows', linux: 'Linux' } as const
 // The picture first (the window as the person sees it), then the dialog over it. In a browser there's
 // no picture to take: the dialog opens without the option. The picture waits two frames, so a menu or
 // a popover the click just closed is off the screen and out of it.
-export async function openFeedback(): Promise<void> {
+// draft: what the Tuca wrote (propor_feedback), from his message `from`: the window opens with it, to review.
+export async function openFeedback(draft?: FeedbackDraft, from?: string): Promise<void> {
   if (typeof requestAnimationFrame === 'function') await new Promise<void>((y) => requestAnimationFrame(() => requestAnimationFrame(() => y())))
   const shot = windowless() || !window.tucano?.capture ? null : await window.tucano.capture().catch(() => null)
-  openDialog({ kind: 'feedback', ...(shot ? { image: shot } : {}) })
+  openDialog({ kind: 'feedback', ...(shot ? { image: shot } : {}), ...(draft ? { draft } : {}), ...(from ? { from } : {}) })
 }
 
-export function FeedbackDialog({ image, onClose }: { image?: Shot; onClose: () => void }): ReactNode {
-  const [kind, setKind] = useState<Kind>('bug')
-  const [text, setText] = useState('')
+// What the Tuca's cards already sent, on this device: the card says so instead of offering it again.
+const SENT_KEY = 'tucano.feedback-sent'
+function sentFrom(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SENT_KEY) ?? '[]') as unknown
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+function markSent(id: string): void {
+  try {
+    localStorage.setItem(SENT_KEY, JSON.stringify([...sentFrom().filter((x) => x !== id), id].slice(-50)))
+  } catch {
+    // Storage off: the card offers it again, and the person sees it went from the toast.
+  }
+  window.dispatchEvent(new Event(SENT_KEY))
+}
+
+// Under the Tuca's reply: the feedback he wrote, to review in the "Enviar feedback" window and send from there.
+export function FeedbackDraftCard({ message }: { message: Message }): ReactNode {
+  const draft = message.run?.feedbackDraft
+  const [sent, setSent] = useState(() => sentFrom().includes(message.id))
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const seen = (): void => setSent(sentFrom().includes(message.id))
+    window.addEventListener(SENT_KEY, seen)
+    return () => window.removeEventListener(SENT_KEY, seen)
+  }, [message.id])
+  if (!draft) return null
+  const kind = KINDS.find((k) => k.kind === draft.kind) ?? KINDS[0]!
+  return (
+    <div className={`draft-card feedback-card ${sent ? 'is-settled' : ''}`}>
+      <div className="draft-card__head">
+        <span className="proposal-icon">
+          <Icon name="ask" size={18} />
+        </span>
+        <div className="grow">
+          <strong>{L('Feedback pra quem faz o Tucano', 'Feedback for the people who make Tucano')}</strong>
+          <span className="muted small">{kind.label()}</span>
+        </div>
+      </div>
+      <p className={`draft-card__instructions ${open ? 'is-open' : ''}`} onClick={() => setOpen(!open)} title={open ? undefined : L('Ver tudo', 'Show all')}>
+        {draft.message}
+      </p>
+      <div className="draft-card__actions">
+        {sent ? (
+          <span className="tag tag--ok">{L('enviado', 'sent')}</span>
+        ) : (
+          <button className="btn btn--primary btn--sm" onClick={() => void openFeedback(draft, message.id)}>
+            {L('Revisar e enviar', 'Review and send')}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function FeedbackDialog({ image, draft, from, onClose }: { image?: Shot; draft?: FeedbackDraft; from?: string; onClose: () => void }): ReactNode {
+  const [kind, setKind] = useState<Kind>(draft?.kind ?? 'bug')
+  const [text, setText] = useState(draft?.message ?? '')
   const [attach, setAttach] = useState(!!image)
   const [peek, setPeek] = useState(false)
   const [sending, setSending] = useState(false)
@@ -50,6 +110,7 @@ export function FeedbackDialog({ image, onClose }: { image?: Shot; onClose: () =
     setError('')
     try {
       await call('sendFeedback', { kind, message: text, ...(attach && image ? { image: image.data } : {}), lang: lang() })
+      if (from) markSent(from)
       onClose()
       toast(L('Recebido. Obrigado!', 'Received. Thank you!'))
     } catch (e) {

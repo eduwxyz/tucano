@@ -597,6 +597,24 @@ describe('ask_user through the gateway', () => {
     expect(mine()).toHaveLength(2)
   })
 
+  it('cancels the question on its card: it closes, nothing is sent, the agent is not woken and reads it was cancelled', async () => {
+    const { r, asked } = await askDecisions()
+    const turns = claude.turns.length
+    r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())
+    r.cancelQuestion(asked.id, db.owner())
+    await r.idle()
+    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.question(asked.id)?.state).not.toBe('open')
+    expect(mine()).toHaveLength(1) // only the message that asked, none sent from the card
+    expect(claude.turns).toHaveLength(turns)
+    expect(() => r.cancelQuestion(asked.id, db.owner())).toThrow('Essa pergunta já foi respondida.')
+    expect(() => r.answerDecision(asked.id, 1, { text: 'x' }, db.owner())).toThrow()
+    await r.send('c1', '@lia seguindo sem isso')
+    await r.idle()
+    // Lia's own turn (the router reads the conversation after her, too).
+    expect(claude.turns.some((t) => t.prompt.includes('a pergunta foi cancelada') && t.prompt.includes('seguindo sem isso'))).toBe(true)
+  })
+
   it('clears an answer with null', async () => {
     const { r, asked } = await askDecisions()
     r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())

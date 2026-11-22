@@ -692,6 +692,9 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   useEffect(() => void Promise.all([call('wikiChanges', { state: 'pending' }), call('wikiChanges', { state: 'conflict' })]).then(([a, b]) => setPending([...a, ...b].filter((c) => c.by !== 'review'))), [rev])
   useEffect(() => void call('wikiSources').then((l) => setReading(l.filter((s) => s.status === 'reading'))), [rev])
   const panel = !!(view.title || view.source || view.tab)
+  // The panel over the whole map, to read a long page; it stays wide from page to page until it's shrunk or closed.
+  const [wide, setWide] = useState(false)
+  useEffect(() => void (!panel && setWide(false)), [panel])
   const close = (): void => navigate({ kind: 'wiki' })
   const [imported, setImported] = useState<WikiImport | { error: string } | 'busy' | null>(null)
   const startImport = (): void => {
@@ -730,6 +733,7 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
       if (e.key === '/') setSearching(true)
       else if (e.key.toLowerCase() === 'n') navigate({ kind: 'wiki', edit: true, title: '' })
       else if (e.key.toLowerCase() === 'e' && view.title) navigate({ kind: 'wiki', title: view.title, edit: true })
+      else if (e.key === 'Escape' && wide) setWide(false)
       else if (e.key === 'Escape' && panel) close()
       else return
       e.preventDefault()
@@ -838,10 +842,20 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
       <div className="wk-stage" {...drop}>
         {data && count === 0 && !panel ? <WikiEmpty onImport={startImport} /> : data && <WikiCanvas graph={data.graph} selected={view.title} pending={touched} only={only} panel={panel} />}
         {panel && content && (
-          <aside className="wk-panel" key={JSON.stringify([view.title, view.tab, view.source])}>
-            <button className="wk-panel__close" title={L('Fechar (Esc)', 'Close (Esc)')} onClick={close}>
-              <Icon name="x" size={15} />
-            </button>
+          <aside className={`wk-panel ${wide ? 'is-wide' : ''}`} key={JSON.stringify([view.title, view.tab, view.source])}>
+            <div className="wk-panel__tools">
+              <button
+                className="wk-panel__btn"
+                title={wide ? L('Voltar pro lado do mapa', 'Back beside the map') : L('Expandir', 'Expand')}
+                aria-pressed={wide}
+                onClick={() => setWide(!wide)}
+              >
+                <Icon name={wide ? 'shrink' : 'expand'} size={14} />
+              </button>
+              <button className="wk-panel__btn" title={L('Fechar (Esc)', 'Close (Esc)')} onClick={close}>
+                <Icon name="x" size={15} />
+              </button>
+            </div>
             {content}
           </aside>
         )}
