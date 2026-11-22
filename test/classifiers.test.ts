@@ -55,17 +55,6 @@ describe('the classifiers a workspace has', () => {
     const s = settingsWith({ classifiers: [luna], routerModel: 'jev' })
     expect(classifierFor(s, 'routing')).toBeUndefined()
   })
-
-  it('the recommended option is a job like the others, and a legacy switch still lands on Jev', () => {
-    expect(CLASSIFIER_JOBS).toContain('recommend')
-    expect(CLASSIFIER_JOBS[CLASSIFIER_JOBS.length - 1]).toBe('recommend')
-    expect(classifierFor(settingsWith({ classifiers: [luna, gemini], classifierJobs: { recommend: 'gem' } }), 'recommend')).toEqual(gemini)
-    expect(classifierFor(settingsWith({ classifiers: [luna], classifierJobs: {} }), 'recommend')).toBeUndefined()
-    // A legacy install that had the switch on keeps marking options on the same Jev.
-    expect(classifierJobsOf(settingsWith({ jevKey: true, jevRecommend: true }))).toEqual({ recommend: 'jev' })
-    expect(classifierFor(settingsWith({ jevKey: true, jevRecommend: true }), 'recommend')).toEqual(JEV_CLASSIFIER)
-    expect(classifierFor(settingsWith({ jevKey: true }), 'recommend')).toBeUndefined()
-  })
 })
 
 describe('the four providers, one question shape', () => {

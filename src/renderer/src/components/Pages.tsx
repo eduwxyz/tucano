@@ -2119,7 +2119,7 @@ export function InboxPage(): ReactNode {
             {questions.map(({ q, done }) => (
               <div key={q.id}>
                 {meta(q.conversationId, q.agentId, q.createdAt)}
-                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}), ...(q.recommended ? { recommended: q.recommended } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
+                <QuestionCard id={q.id} agentName={agents.find((x) => x.id === q.agentId)?.name} askedTo={q.askedTo} question={q.text} {...(q.decisions ? { decisions: q.decisions, ...(q.answers ? { answers: q.answers } : {}) } : {})} answered={done} {...(q.answeredBy ? { answeredBy: q.answeredBy } : {})} inbox />
               </div>
             ))}
           </div>
@@ -3397,8 +3397,7 @@ export function ClassifiersCard(): ReactNode {
   )
 }
 
-// Which job each classifier serves: who replies in a channel, the option it suggests on an agent's
-// question, and what an agent clicks in a page. It sits in its own card, apart from the list, because
+// Which job each classifier serves: who replies in a channel, and what an agent clicks in a page. It sits in its own card, apart from the list, because
 // an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.
 export function ClassifierUsesCard(): ReactNode {
   const settings = useStore((s) => s.settings)
@@ -3433,9 +3432,7 @@ export function ClassifierUsesCard(): ReactNode {
                 what={
                   job === 'routing'
                     ? L(`cada mensagem sem @menção vai pro ${providerSpec(c.provider).label} escolher quem responde.`, `every message without an @mention goes to ${providerSpec(c.provider).label} to pick who replies.`)
-                    : job === 'recommend'
-                      ? L(`o texto da pergunta e as opções vão pro ${providerSpec(c.provider).label} sugerir uma delas.`, `the question's text and options go to ${providerSpec(c.provider).label} to suggest one of them.`)
-                      : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
+                    : L(`a lista de elementos das páginas, e às vezes o print delas, vai pro ${providerSpec(c.provider).label}.`, `the pages’ element list, and sometimes their screenshot, goes to ${providerSpec(c.provider).label}.`)
                 }
               />
             )

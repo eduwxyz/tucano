@@ -149,9 +149,10 @@ describe('who finds the click, on the Browser Use card', () => {
 describe('the settings page', () => {
   const pages = readFileSync(join(__dirname, '../src/renderer/src/components/Pages.tsx'), 'utf8')
 
-  it('renders the card in the Agents pane, with no hint sending the choice elsewhere alone', () => {
-    expect(pages).toContain("{pane('agentes') && <BrowserClickCard />}")
-    const card = pages.slice(pages.indexOf('export function BrowserClickCard'), pages.indexOf('function QuotasCard'))
+  it('renders the card in the Browser subject, with no hint sending the choice elsewhere alone', () => {
+    const subject = pages.slice(pages.indexOf('<SectionAnchor id="agents-browser"'), pages.indexOf('</SectionAnchor>', pages.indexOf('<SectionAnchor id="agents-browser"')))
+    expect(subject).toContain('<BrowserClickCard />')
+    const card = pages.slice(pages.indexOf('export function BrowserClickCard'), pages.indexOf('function VoiceCard'))
     expect(card).toContain("updateSettings({ classifierJobs: next })")
     expect(card).toContain("browser: id")
     expect(card).not.toContain('is chosen in Classifiers')

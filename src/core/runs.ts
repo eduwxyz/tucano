@@ -35,7 +35,7 @@ import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
 import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
-import { JEV_MODEL, recommendOptions, routeJev } from './jev'
+import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
@@ -288,8 +288,7 @@ export interface RunnerDeps {
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
   // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
-  // `target` are asked per job, so the same seam serves the jobs Apo's own branches add (listening,
-  // the recommended option, the next steps): a job with no classifier is off.
+  // `target` are asked per job: a job with no classifier is off.
   jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
@@ -1116,25 +1115,6 @@ export class Runner {
 
   private members(conv: Conversation): Agent[] {
     return conv.members.map((id) => this.deps.db.agent(id)).filter((a): a is Agent => !!a && !a.archived)
-  }
-
-  // Assigned in Settings › Classifier Uses: one cheap Jev question per decision with options, and the
-  // pick is written on the reply after the card is already on screen — so asking never waits on TypeSafe.
-  // A failure, or no pick at all, leaves the card exactly as it was: a suggestion is a nice-to-have.
-  private async recommend(msg: Message, questions: Decision[], settings: Settings): Promise<void> {
-    if (!classifierFor(settings, 'recommend') || !questions.some((q) => (q.options?.length ?? 0) >= 2)) return
-    const key = await this.deps.jev?.key('recommend')
-    if (!key) return
-    try {
-      const r = await recommendOptions({ key, questions, context: msg.text, fetch: this.deps.jev?.fetch })
-      if ('error' in r || !r.picks.some((p) => p !== null)) return
-      // Answered while TypeSafe thought: the pill has nowhere to go, and the card is closed.
-      const now = this.deps.db.message(msg.id)
-      if (!now || now.run?.status !== 'waiting_input' || now.run.answers) return
-      this.update(now, { run: { ...now.run, recommended: r.picks } })
-    } catch {
-      // the card works without a suggestion
-    }
   }
 
   // The question waiting for me where I write: in a thread, that thread's; outside, one outside threads.
@@ -3242,8 +3222,6 @@ ${note}`,
         this.keep({ ...handedNow, approval: approval.id })
         this.tellAsker(handedNow.from, handedNow.originConversationId, handedNow.originThreadId)
       }
-      // Turned on in the settings: Jev's pick lands on the card afterwards, so asking never waits on it.
-      if (questions) void this.recommend(msg, questions, settings)
       // The Mac tells you when it's your turn: a question, or the end of the work (once, when no other agent takes it on).
       if (!question && !approval) {
         const finished = (): void => {
