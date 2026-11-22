@@ -87,6 +87,8 @@ export const providerSpec = (p: ClassifierProvider): ProviderSpec => PROVIDERS.f
 // The classifier an install from before this section had: one TypeSafe Jev.
 export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provider: 'typesafe', model: 'jev-latest' }
 
+const MAX_CLASSIFIERS = 20
+
 // The jobs the Classifier Uses card offers, one selector each.
 export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser']
 
@@ -136,14 +138,58 @@ export function classifierFor(s: ClassifierSettings, job: ClassifierJob): Classi
   return id ? classifierList(s).find((c) => c.id === id) : undefined
 }
 
+// A settings patch's rows, checked: real providers, sane text, no id twice. A row keeps the provider
+// it was saved with, because its key was checked against that provider and must never be sent to
+// another one by editing the row.
+export function cleanClassifiers(raw: unknown, before: readonly ClassifierConfig[]): ClassifierConfig[] {
+  if (!Array.isArray(raw) || raw.length > MAX_CLASSIFIERS) throw new Error('Invalid classifiers')
+  const seen = new Set<string>()
+  return raw.map((row: unknown) => {
+    const { id, name, provider, model } = (row ?? {}) as Record<string, unknown>
+    if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id) || seen.has(id)) throw new Error('Invalid classifier id')
+    if (!PROVIDERS.some((p) => p.provider === provider)) throw new Error('Invalid classifier provider')
+    if (typeof name !== 'string' || !name.trim() || name.length > 80) throw new Error('Invalid classifier name')
+    if (typeof model !== 'string' || !model.trim() || model.length > 120) throw new Error('Invalid classifier model')
+    const saved = before.find((c) => c.id === id)
+    if (saved && saved.provider !== provider) throw new Error('A classifier keeps its provider')
+    seen.add(id)
+    return { id, name: name.trim(), provider: provider as ClassifierProvider, model: model.trim() }
+  })
+}
+
+// Only the jobs that exist, each pointing at a row the list holds.
+export function cleanClassifierJobs(raw: unknown, list: readonly ClassifierConfig[]): Partial<Record<ClassifierJob, string>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid classifier jobs')
+  const jobs: Partial<Record<ClassifierJob, string>> = {}
+  for (const job of CLASSIFIER_JOBS) {
+    const id = (raw as Record<string, unknown>)[job]
+    if (typeof id === 'string' && list.some((c) => c.id === id)) jobs[job] = id
+  }
+  return jobs
+}
+
 // A row's name, with the provider's when the person renamed it to something of their own.
 export function classifierLabel(c: ClassifierConfig): string {
   const spec = providerSpec(c.provider)
   return c.name === spec.label ? `${spec.label} · ${c.model}` : `${c.name} · ${spec.label}`
 }
 
-// What is sent where, for the notice before a job is switched on.
-export const providerNote = (c: ClassifierConfig): string => {
+// What a job sends out and to whom, in a phrase that reads after "Outside the gateway:" too. Only a
+// provider that reads screenshots is ever sent one.
+export function jobNotice(job: ClassifierJob, c: ClassifierConfig): string {
   const spec = providerSpec(c.provider)
-  return L(`o provedor ${spec.label} (${c.model})`, `the ${spec.label} provider (${c.model})`)
+  if (job === 'routing')
+    return L(
+      `cada mensagem sem @menção manda as mensagens recentes do canal para ${spec.label} escolher quem responde, cobrado na sua conta de lá. Se falhar, o modelo do roteador decide.`,
+      `every message without an @mention sends the channel’s recent messages to ${spec.label} to pick who replies, billed to your account there. If it fails, the router’s model decides.`
+    )
+  return spec.box
+    ? L(
+        `cada clique que o texto não resolve manda para ${spec.label} a lista de elementos da página e, às vezes, o print dela, inclusive em áreas logadas.`,
+        `every click text can’t resolve sends ${spec.label} the page’s element list and sometimes its screenshot, including signed-in areas.`
+      )
+    : L(
+        `cada clique que o texto não resolve manda para ${spec.label} a lista de elementos da página, inclusive em áreas logadas. O print da tela não vai.`,
+        `every click text can’t resolve sends ${spec.label} the page’s element list, including signed-in areas. The screenshot isn’t sent.`
+      )
 }

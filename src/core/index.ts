@@ -52,7 +52,7 @@ import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
-import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+import { classifierFor, classifierJobsOf, classifierList, cleanClassifierJobs, cleanClassifiers, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
 import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
@@ -323,15 +323,41 @@ const classifierKeySaved = (c: ClassifierConfig): boolean =>
   db.getSecret(classifierSecret(c.id)) !== undefined || (c.id === JEV_CLASSIFIER.id && db.getSecret(JEV_SECRET) !== undefined)
 const classifierKeyOf = async (c: ClassifierConfig): Promise<string | undefined> =>
   (await secrets.get(classifierSecret(c.id))) ?? (c.id === JEV_CLASSIFIER.id ? await secrets.get(JEV_SECRET) : undefined)
+// The stored settings as the classifier helpers read them: whether Jev has a key lives in the secret
+// store, and an install whose only trace of Jev is that key still gets its row.
+const classifierSettings = (s: Omit<Settings, 'engines'> = db.getSettings(DEFAULTS)): Omit<Settings, 'engines'> => ({ ...s, jevKey: classifierKeySaved(JEV_CLASSIFIER) })
+// A key removed takes the router off that classifier, as removing Jev's always has: the channel goes
+// back to the router's model instead of failing on every message. Other jobs stay chosen, and idle.
+const stopRoutingOn = (id: string): void => {
+  const s = classifierSettings()
+  const { routing, ...others } = classifierJobsOf(s)
+  if (routing === id) db.setSettings({ classifierJobs: others, ...(s.routerModel === JEV_MODEL ? { routerModel: 'haiku' } : {}) })
+}
+// Checks a patch's classifiers and returns the rows it removes, whose keys go with them. A router
+// left on the old 'jev' value with no classifier serving it goes back to a model it can run.
+const settleClassifiers = (patch: Partial<Settings>): ClassifierConfig[] => {
+  if (patch.classifiers === undefined && patch.classifierJobs === undefined) return []
+  const stored = classifierSettings()
+  const before = classifierList(stored)
+  const list = patch.classifiers === undefined ? before : cleanClassifiers(patch.classifiers, before)
+  if (patch.classifiers !== undefined) patch.classifiers = list
+  const gone = before.filter((c) => !list.some((x) => x.id === c.id))
+  if (patch.classifierJobs !== undefined) patch.classifierJobs = cleanClassifierJobs(patch.classifierJobs, list)
+  else if (gone.length && stored.classifierJobs) patch.classifierJobs = cleanClassifierJobs(stored.classifierJobs, list)
+  const next = { ...stored, ...patch }
+  if (next.routerModel === JEV_MODEL && !classifierFor(next, 'routing')) patch.routerModel = 'haiku'
+  return gone
+}
 
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
-  const classifiers = classifierList(s)
+  const stored = classifierSettings(s)
+  const classifiers = classifierList(stored)
   return {
     ...s,
     classifiers,
-    classifierJobs: classifierJobsOf(s),
+    classifierJobs: classifierJobsOf(stored),
     classifierKeys: Object.fromEntries(classifiers.map((c) => [c.id, classifierKeySaved(c)])),
     engines: withChoice({ ...engines, endpoint: endpointStatus(s.endpoint) }, s.harnesses),
     ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}),
@@ -2467,7 +2493,7 @@ const api: Handlers = {
     if (k) await checkJevKey(k)
     await secrets.set(classifierSecret(JEV_CLASSIFIER.id), k || undefined)
     await secrets.set(JEV_SECRET, undefined) // the old name is retired the first time the key is saved here
-    if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
+    if (!k) stopRoutingOn(JEV_CLASSIFIER.id)
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2504,12 +2530,13 @@ const api: Handlers = {
   // A classifier's key, checked with its own provider before it's saved; null removes it. Each
   // classifier keeps its own key, so two accounts of one provider never share one.
   setClassifierKey: async ({ id, key }) => {
-    const c = classifierList(db.getSettings(DEFAULTS)).find((x) => x.id === id)
+    const c = classifierList(classifierSettings()).find((x) => x.id === id)
     if (!c) throw new Error(L('Esse classificador não existe mais.', 'That classifier no longer exists.'))
     const k = key?.trim()
     if (k) await checkClassifierKey(c, k)
     await secrets.set(classifierSecret(c.id), k || undefined)
     if (c.id === JEV_CLASSIFIER.id) await secrets.set(JEV_SECRET, undefined) // one home for the key
+    if (!k) stopRoutingOn(c.id)
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -2568,7 +2595,7 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)
@@ -2592,7 +2619,12 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    const removedClassifiers = settleClassifiers(patch)
     db.setSettings(patch)
+    for (const c of removedClassifiers) {
+      db.setSecret(classifierSecret(c.id), undefined)
+      if (c.id === JEV_CLASSIFIER.id) db.setSecret(JEV_SECRET, undefined)
+    }
     // The settings' name is the owner's: what the agents call them.
     if (patch.workspaceName && cleanName(patch.workspaceName)) {
       db.renamePerson(db.ownerId(), cleanName(patch.workspaceName))

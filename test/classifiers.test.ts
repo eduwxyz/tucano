@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, type ClassifierConfig } from '../src/shared/classifiers'
+import { classifierFor, classifierJobsOf, classifierList, JEV_CLASSIFIER, jobNotice, PROVIDERS, type ClassifierConfig } from '../src/shared/classifiers'
+import { setLang } from '../src/shared/lang'
 import type { Settings } from '../src/shared/types'
 import { ask, checkClassifierKey } from '../src/core/classifiers'
 import { jevBox, routeJev } from '../src/core/jev'
@@ -132,6 +133,41 @@ describe('the four providers, one question shape', () => {
     expect(g.headers()).toMatchObject({ 'x-goog-api-key': 'g' })
     const denied = (async () => new Response('', { status: 401 })) as unknown as typeof fetch
     await expect(checkClassifierKey(luna, 'bad', denied)).rejects.toThrow('OpenAI recusou essa chave.')
+  })
+})
+
+describe('an answer that makes no sense', () => {
+  const answering = (answers: unknown) => provider({ answers }).f
+  const asked = (answers: unknown, target: ClassifierConfig = luna) => ask({ target, key: 'k', state: 'x', questions: [choiceQuestion], timeoutMs: 1000, fetch: answering(answers) })
+
+  it('comes back as an error, never as a throw', async () => {
+    setLang('pt')
+    for (const junk of [[null], [1, 'x'], { who: null }, { who: 3 }, 7, 'nope', []]) await expect(asked(junk)).resolves.toEqual({ error: 'resposta do OpenAI fora do formato' })
+  })
+
+  it('survives junk inside the probabilities', async () => {
+    await expect(asked([{ name: 'who', choice: 'lia', probabilities: [null, { value: 'lia', probability: 0.9 }] }])).resolves.toEqual({ who: { choice: 'lia', probabilities: { lia: 0.9 } } })
+  })
+
+  it('reads an unnamed OpenAI answer by the order asked', async () => {
+    await expect(asked([{ type: 'choice', choice: 'nina' }])).resolves.toEqual({ who: { choice: 'nina' } })
+  })
+})
+
+describe('what each job says it sends', () => {
+  it('names every provider, on both jobs', () => {
+    setLang('en')
+    for (const spec of PROVIDERS) {
+      const c: ClassifierConfig = { id: 'x', name: 'X', provider: spec.provider, model: spec.model }
+      expect(jobNotice('routing', c)).toContain(`recent messages to ${spec.label}`)
+      expect(jobNotice('browser', c)).toContain(`sends ${spec.label} the page’s element list`)
+    }
+  })
+
+  it('mentions a screenshot only for the provider that gets one', () => {
+    setLang('en')
+    expect(jobNotice('browser', JEV_CLASSIFIER)).toContain('sometimes its screenshot')
+    for (const c of [luna, gemini, router]) expect(jobNotice('browser', c)).toContain('The screenshot isn’t sent')
   })
 })
 

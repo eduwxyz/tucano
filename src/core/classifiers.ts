@@ -46,7 +46,7 @@ const vendorOf = (p: ClassifierProvider): string => providerSpec(p).label
 export const noAnswer = (p: ClassifierProvider): string => L(`o ${vendorOf(p)} não respondeu`, `${vendorOf(p)} didn't answer`)
 
 export const badFormat = (p: ClassifierProvider): string =>
-  L(`resposta do ${vendorOf(p)} fora do formato`, `${vendorOf(p)}'s answer wasn't in the format`)
+  L(`resposta do ${vendorOf(p)} fora do formato`, `${vendorOf(p)}'s response was not in the expected format`)
 
 export function failure(status: number, p: ClassifierProvider): string {
   const v = vendorOf(p)
@@ -134,7 +134,7 @@ const probabilitiesOf = (raw: unknown): Record<string, number> | undefined => {
   // TypeSafe, OpenRouter and Google: { option: probability }. OpenAI: [ { value, probability } ].
   if (Array.isArray(raw)) {
     const out: Record<string, number> = {}
-    for (const e of raw as { value?: unknown; probability?: unknown }[]) if (typeof e.value === 'string' && typeof e.probability === 'number') out[e.value] = e.probability
+    for (const e of raw as ({ value?: unknown; probability?: unknown } | null)[]) if (typeof e?.value === 'string' && typeof e.probability === 'number') out[e.value] = e.probability
     return Object.keys(out).length ? out : undefined
   }
   if (typeof raw !== 'object') return undefined
@@ -174,10 +174,14 @@ export async function ask(opts: {
   if (!answers) return { error: badFormat(target.provider) }
   const out: ClassifierAnswers = {}
   if (Array.isArray(answers)) {
-    // OpenAI: one answer per question, in the order asked, each carrying its name.
-    for (const raw of answers as RawAnswer[]) if (typeof raw.name === 'string') out[raw.name] = answerOf(raw)
+    // OpenAI: one answer per question, in the order asked; its name when it carries one.
+    ;(answers as (RawAnswer | null)[]).forEach((raw, i) => {
+      if (!raw || typeof raw !== 'object') return
+      const name = typeof raw.name === 'string' ? raw.name : opts.questions[i]?.name
+      if (name) out[name] = answerOf(raw)
+    })
   } else if (typeof answers === 'object') {
-    for (const [name, raw] of Object.entries(answers as Record<string, RawAnswer>)) out[name] = answerOf(raw ?? {})
+    for (const [name, raw] of Object.entries(answers as Record<string, RawAnswer | null>)) if (raw && typeof raw === 'object') out[name] = answerOf(raw)
   }
   return Object.keys(out).length ? out : { error: badFormat(target.provider) }
 }
