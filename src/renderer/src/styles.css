@@ -5716,6 +5716,252 @@ table.csv th {
   border-color: var(--accent);
 }
 
+/* ---------- Settings: five groups, subjects with a tile, rows in boxes ---------- */
+/* The page is one reading column, like the subjects inside it. */
+.page-body:has(> .settings-page) {
+  max-width: calc(720px + 64px);
+}
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--active);
+  color: var(--text-2);
+  -webkit-app-region: no-drag;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.settings-search:focus-within {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft);
+}
+.settings-search input[type='search'] {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  padding: 0;
+}
+.settings-search input[type='search']::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.settings-search__clear {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-3);
+  color: var(--panel);
+}
+/* The groups stay at the top while the page scrolls, on the page's own background. */
+.settings-groups {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  margin: -8px 0 0;
+  padding: 8px 0 12px;
+  background: var(--panel);
+  -webkit-app-region: no-drag;
+}
+.settings-groups__bar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--active);
+}
+.settings-groups__bar button {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.settings-groups__bar button:hover {
+  color: var(--text);
+}
+.settings-groups__bar button.is-active {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(60, 40, 20, 0.1), 0 0 0 1px rgba(60, 40, 20, 0.05);
+}
+.settings-jumps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  margin: 2px 0 6px;
+}
+.settings-jumps > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.settings-jumps > a:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.settings-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: #fff;
+}
+.settings-tile .icon {
+  stroke-width: 2.1;
+}
+.settings-tile--md {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+.settings-tile--sm {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+}
+.settings-subject {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 40px;
+  outline: none;
+  scroll-margin-top: 72px;
+}
+.settings-subject__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-subject__head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+/* A card in a subject: a small heading, its lead, and the rows in one box. */
+.settings-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 4px 6px;
+}
+.settings-group__head h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.settings-group__lead {
+  margin: 0 4px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.settings-group__box,
+.settings-subject > .card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 4px 16px;
+  box-shadow: 0 1px 2px rgba(60, 40, 20, 0.03);
+}
+.settings-group__box > * {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.settings-group__box > * + * {
+  border-top: 1px solid var(--border);
+}
+.settings-group__box > .key-row {
+  border-bottom: 0;
+}
+/* A card with nothing under its heading (the iPhone's, before one is connected) draws no empty box,
+   and a part that renders nothing draws no line. */
+.settings-group__box:empty,
+.settings-group__box > :empty {
+  display: none;
+}
+/* A card drawn by another component without a settings group keeps its head, not a second title. */
+.settings-subject > .card > .card__head h2 {
+  display: none;
+}
+.settings-subject > .card {
+  padding: 16px;
+}
+.settings-results {
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.settings-results__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.settings-results__row + .settings-results__row {
+  border-top: 1px solid var(--border);
+}
+.settings-results__row:hover {
+  background: var(--hover);
+}
+.settings-results__row .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.settings-results__row strong {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.settings-results__row .grow > span {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.settings-results__row > .icon {
+  color: var(--text-3);
+}
+.settings-results__none {
+  margin: 24px 4px 0;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
 /* archived agents */
 .archived-banner {
   display: flex;
@@ -8928,6 +9174,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-pop__hide { justify-self: start; font-size: 12px; color: var(--text-3); }
 .voice-setup { display: grid; gap: 10px; justify-items: start; }
 .voice-setup__choices, .choices { display: grid; gap: 6px; width: 100%; }
+/* The two dictation model choices sit side by side until the card gets narrow. */
+.voice-setup__choices { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+/* The workspace's name and the name the agents use share one line, each with its own label. */
+.settings-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.settings-pair > .field { min-width: 0; margin-bottom: 0; }
 .voice-choice, .choice { display: grid; gap: 2px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
 .voice-choice small, .choice small { color: var(--text-2); font-size: 12px; }
 .voice-choice:hover, .choice:hover { border-color: var(--border-strong); }
@@ -8939,9 +9190,13 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .voice-on p { margin: 0; display: flex; align-items: center; gap: 6px; }
 /* The card doesn't space its children: the model's line, the microphone and Avançado get a gap here. */
 .voice-prefs { display: grid; gap: 14px; }
-/* Closed, the folded part keeps no room: the gap only between what shows when it's open. */
-.voice-advanced[open] { display: grid; gap: 10px; }
-.voice-advanced summary { cursor: pointer; }
+.voice-setup__actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; width: 100%; }
+.voice-setup__actions > .row { margin: 0; }
+/* The microphone switch and Avançado share the line under the model choices. */
+.voice-prefs__row { display: flex; align-items: center; gap: 14px; }
+.voice-advanced__toggle { margin-left: auto; border: 0; background: none; padding: 0; cursor: pointer; }
+.voice-advanced__toggle::before { content: "› "; }
+.voice-advanced__body { display: grid; gap: 10px; }
 .voice-pop > .btn { justify-self: start; }
 .voice-btn.is-recording { animation: voice-pulse 1.6s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 22%, transparent); } }
