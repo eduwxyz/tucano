@@ -225,6 +225,18 @@ function Answering({ id, questions, saved, badge, byline, steps, extra, onSend }
       </div>
     ) : undefined
 
+  // Every decision with the option the agent recommends, sent at once. Only when each one has such an option.
+  const autoRecommended = recommendedAnswers(questions)
+  const goRecommended = (): void => {
+    if (!autoRecommended || sending) return
+    autoRecommended.forEach((a, i) => {
+      drafts.delete(draftKey(id, i))
+      answerDecision(id, i, a)
+    })
+    setAnswers(autoRecommended)
+    send()
+  }
+
   return (
     <section className={`ask ask--answer${steps ? ' ask--steps' : ''}`} aria-label={badge}>
       <Head badge={badge} byline={byline} nav={nav} steps={steps} />
@@ -236,7 +248,7 @@ function Answering({ id, questions, saved, badge, byline, steps, extra, onSend }
         </div>
       )}
       {step === 'review' ? (
-        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} />
+        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} onGoRecommended={autoRecommended ? goRecommended : undefined} />
       ) : (
         <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
       )}
@@ -385,7 +397,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
   )
 }
 
-function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean }): ReactNode {
+function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending, onGoRecommended }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean; onGoRecommended?: () => void }): ReactNode {
   // Reached from the last decision, Send has the keyboard; on a card that just showed up, nothing does.
   const sendButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -406,6 +418,12 @@ function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sendi
         ))}
       </ol>
       <div className="ask__foot">
+        {onGoRecommended && (
+          <label className="ask__recommend ask__recommend--inline">
+            <input type="checkbox" disabled={sending} onChange={(e) => { if (e.target.checked) onGoRecommended() }} />
+            <Icon name="check" size={12} /> {L('Pode seguir com a recomenda��o', 'Go with the recommendation')}
+          </label>
+        )}
         <span className="ask__hint">{L('Clique numa resposta pra mudar', 'Click an answer to change it')}</span>
         <button ref={sendButton} className="btn btn--primary btn--sm" disabled={sending} onClick={onSend}>
           <Icon name="send" size={12} /> {L('Enviar', 'Send')}

@@ -3280,6 +3280,14 @@ h3 {
   gap: 8px;
   margin-top: 10px;
 }
+.ask__recommend--inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
 .ask__hint {
   margin-right: auto;
   font-size: 11.5px;
