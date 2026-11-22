@@ -613,10 +613,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
               <div className="msg__anchor-pin">
                 <ThreadButton message={message} />
               </div>
-              <RunSteps message={message} />
+              <RunBlock message={message} />
             </div>
           ) : (
-            <RunSteps message={message} />
+            <RunBlock message={message} />
           )
         ) : null}
         {text && quiet && !showSaid ? (
@@ -1679,6 +1679,16 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
+  // The steer is a pill in the row under this chain: it opens a field under the box, still held by
+  // this reply's id so it cannot direct another reply of the same agent.
+  const [steerOpen, setSteerOpen] = useState(false)
+  const [steerNote, setSteerNote] = useState('')
+  const steerTyped = steerNote.trim()
+  const steer = (text: string): void => {
+    sendMessage(message.conversationId, text, [], message.threadId, [], 'steer', message.id)
+    setSteerOpen(false)
+    setSteerNote('')
+  }
   const open = toggled ?? (working && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
@@ -1690,60 +1700,113 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
 
   return (
-    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
-      <button className="steps__toggle" onClick={() => setOpen(!open)}>
-        {working ? (
-          <span className="steps__pulse" />
-        ) : justDone ? (
-          <span className="steps__done">
-            <Icon name="check" size={12} />
-          </span>
-        ) : (
-          <span className="steps__chev">
-            <Icon name="chevron" size={12} />
-          </span>
-        )}
-        {working ? (
-          <span className="shimmer">
-            {current
-              ? `${current.label}…`
-              : now - message.at > 60_000
-                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
-                : run.steps.length === 0
-                  ? L('Lendo o pedido…', 'Reading the request…')
-                  : L('Pensando…', 'Thinking…')}
-          </span>
-        ) : (
-          <span className="steps__summary">
-            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-            {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
-            {total > 0 && ` · ${duration(total)}`}
-          </span>
-        )}
-        {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
-        {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+    <>
+      <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
+        <button className="steps__toggle" onClick={() => setOpen(!open)}>
+          {working ? (
+            <span className="steps__pulse" />
+          ) : justDone ? (
+            <span className="steps__done">
+              <Icon name="check" size={12} />
+            </span>
+          ) : (
+            <span className="steps__chev">
+              <Icon name="chevron" size={12} />
+            </span>
+          )}
+          {working ? (
+            <span className="shimmer">
+              {current
+                ? `${current.label}…`
+                : now - message.at > 60_000
+                  ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+                  : run.steps.length === 0
+                    ? L('Lendo o pedido…', 'Reading the request…')
+                    : L('Pensando…', 'Thinking…')}
+            </span>
+          ) : (
+            <span className="steps__summary">
+              {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
+              {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
+              {total > 0 && ` · ${duration(total)}`}
+            </span>
+          )}
+          {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
+          {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+          {working && (
+            <span
+              className="btn btn--xs btn--ghost steps__stop"
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                stopRun(message.id)
+              }}
+            >
+              <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
+            </span>
+          )}
+        </button>
+        {/* One row of pills under the chain, not one row per control: the steer opens here, and the
+            pause pill of a held reply joins the same row instead of drawing a second one. */}
         {working && (
-          <span
-            className="btn btn--xs btn--ghost steps__stop"
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              stopRun(message.id)
-            }}
-          >
-            <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
-          </span>
+          <div className="steps__pills">
+            <span
+              className="steps__steer-pill"
+              role="button"
+              aria-expanded={steerOpen}
+              title={L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply')}
+              onClick={() => setSteerOpen((v) => !v)}
+            >
+              <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+            </span>
+          </div>
         )}
-      </button>
-      {open && (
-        <ol className="steps__list">
-          {run.steps.map((st) => (
-            <StepRow key={st.id} step={st} />
-          ))}
-        </ol>
+        {open && (
+          <ol className="steps__list">
+            {run.steps.map((st) => (
+              <StepRow key={st.id} step={st} />
+            ))}
+          </ol>
+        )}
+        <Thought message={message} working={working} />
+      </div>
+      {working && steerOpen && (
+        <div className="steps__steer">
+          <div className="steps__steer-note">
+            <textarea
+              aria-label={L('Orientação para a resposta em curso', 'A steer for the reply running now')}
+              placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+              rows={2}
+              value={steerNote}
+              autoFocus
+              onChange={(e) => setSteerNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && steerTyped) steer(steerTyped)
+                if (e.key === 'Escape') {
+                  setSteerOpen(false)
+                  setSteerNote('')
+                }
+              }}
+            />
+            <div className="steps__steer-row">
+              <button className="btn btn--primary btn--xs" disabled={!steerTyped} onClick={() => steer(steerTyped)}>
+                {L('Orientar', 'Steer')}
+              </button>
+              <button
+                className="link"
+                onClick={() => {
+                  setSteerOpen(false)
+                  setSteerNote('')
+                }}
+              >
+                {L('Cancelar', 'Cancel')}
+              </button>
+              <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+            </div>
+          </div>
+        </div>
       )}
-      <Thought message={message} working={working} />
-    </div>
+    </>
   )
 }
 
@@ -1827,9 +1890,34 @@ export function Thought({ message, working }: { message: Message; working: boole
   )
 }
 
+// One reply's run as the conversation draws it: its steps, the steer sub-button beside Stop in
+// the steps row, and the steer's field under the box. Anything the run says about itself — its steps
+// and the thinking under them — still sits above the field.
+export function RunBlock({ message }: { message: Message }): ReactNode {
+  return <RunSteps message={message} />
+}
+
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
+  // A steer is not a prompt and not a tool: it is the person's direction for this reply, handed over
+  // between two calls. In the chain it reads as a call of its own — the row a call gets — and what it
+  // carries is their words, whole, two lines at a time and all of it on a click (runs.ts, `steerIn`).
+  if (step.kind === 'steer')
+    return (
+      <li className={`step step--steer step--why step--${step.status}`}>
+        <span className="step__icon">
+          {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'error' ? 'x' : 'pointer'} size={12} />}
+        </span>
+        <span className="step__label">{step.label}</span>
+        {step.input && (
+          <code className={`step__input${allInput ? ' is-whole' : ''}`} title={allInput ? undefined : L('Ver tudo', 'See all')} onClick={() => setAllInput(!allInput)}>
+            <span className="step__clamp">{step.input}</span>
+          </code>
+        )}
+        {step.error && <span className="step__output">{step.error}</span>}
+      </li>
+    )
   return (
     <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
       <span className="step__icon">

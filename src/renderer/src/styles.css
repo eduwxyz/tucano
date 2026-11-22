@@ -1587,6 +1587,71 @@ h3 {
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
 }
+/* One row of pills under the chain: a control is a pill in this row, not a row of its own, so the
+   steer and a held reply's pause sit side by side. It lines up with the steps' own text. */
+.steps__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0 3px;
+  padding-left: 14px;
+}
+/* Steer opens from its pill in that row. Its field sits under the box, starting where the steps'
+   text starts and ending where the chain ends. */
+.steps__steer {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 4px;
+  padding-left: 17px;
+  max-width: 600px;
+}
+.steps__steer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-ui);
+}
+.steps__steer-pill:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover);
+}
+.steps__steer-note {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: none;
+}
+.steps__steer-note textarea {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+}
+.steps__steer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+/* What the person steered, in the chain: a call's own row, carrying their words whole. */
+.step--steer .step__icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* Their words, not a tool's arguments: the same row, in the font people read in. */
+.step--steer .step__input {
+  font-family: var(--font);
+  font-size: 12.5px;
+}
 .step {
   display: flex;
   align-items: center;
