@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, startsTicked, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { answerDecision, cancelQuestion, submitDecisions, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
@@ -245,9 +245,7 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
 
 function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
   const options = question.options ?? []
-  // A next-steps card opens with its boxes already ticked; a question opens with nothing picked.
-  // A draft I left here, or an answer saved, wins.
-  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? startsTicked(question), other: answer?.other ?? '', text: answer?.text ?? '' })
+  const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
   const edit = (patch: Partial<AnswerDraft>): void => {
     const next = { ...draft, ...patch }
@@ -309,7 +307,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
     question.kind === 'text'
       ? L('Enter confirma · Shift+Enter quebra a linha', 'Enter confirms · Shift+Enter for a new line')
       : steps
-        ? L(`Marque ou desmarque com 1 a ${options.length + 1} · todas começam marcadas`, `Tick or untick with 1 to ${options.length + 1} · all start ticked`)
+        ? L(`Marque quantos quiser com 1 a ${options.length + 1} · nada começa marcado`, `Tick as many as you like with 1 to ${options.length + 1} · nothing starts ticked`)
         : multiple
           ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
           : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)

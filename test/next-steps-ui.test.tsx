@@ -26,12 +26,17 @@ const card = (questions: Decision[], mode: 'answer' | 'view' | 'done' = 'answer'
 const count = (html: string, text: string): number => html.split(text).length - 1
 
 describe('the next-steps card', () => {
-  it('opens with every box ticked, and says so', () => {
+  it('opens with nothing ticked and Do these disabled, and says so', () => {
     const html = card(steps())
-    expect(count(html, 'aria-checked="true"')).toBe(4)
+    expect(count(html, 'aria-checked="true"')).toBe(0)
+    expect(count(html, 'aria-checked="false"')).toBe(4)
     expect(html).toContain('Próximos passos')
     expect(html).toContain('ask--steps')
-    expect(html).toContain('todas começam marcadas')
+    expect(html).toContain('nada começa marcado')
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Fazer estes/)
+    // Skip still answers, and a step can still be written by hand.
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Pular/)
+    expect(html).toContain('Outro passo…')
   })
 
   it('sends them as a to-do: "Do these", not "Send"', () => {

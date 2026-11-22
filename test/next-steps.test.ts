@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MAX_STEPS, parseNextSteps, startsTicked, type Decision } from '../src/shared/questions'
+import { MAX_STEPS, parseNextSteps, type Decision } from '../src/shared/questions'
 import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
@@ -64,13 +64,6 @@ describe('what next_steps takes', () => {
     expect(parseNextSteps({ steps: ['Rodar os testes', 'rodar OS testes'] })).toMatchObject({ error: expect.any(String) })
     expect(parseNextSteps({ steps: [{ label: 'x'.repeat(81) }] })).toMatchObject({ error: expect.any(String) })
     expect(parseNextSteps({ steps: [{ description: 'sem label' }] })).toMatchObject({ error: expect.any(String) })
-  })
-})
-
-describe('which boxes start ticked', () => {
-  it('all of them on a next-steps list, none on a question', () => {
-    expect(startsTicked(four())).toEqual([0, 1, 2, 3])
-    expect(startsTicked({ question: 'Qual?', kind: 'multiple', options: [{ label: 'a' }, { label: 'b' }] })).toEqual([])
   })
 })
 
