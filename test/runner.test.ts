@@ -127,7 +127,7 @@ describe('Runner', () => {
     const replies = agentMessages()
     expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a2'])
     // Who answers is said on the reply it started, and the channel keeps no note of its own.
-    expect(replies[0]!.run?.routed).toMatchObject({ by: 'router' })
+    expect(replies[0]!.run?.routed).toMatchObject({ by: 'Haiku' })
     expect(db.messages().filter((m) => m.author.kind === 'system')).toEqual([])
     // The router's read is charged to the prompt it read, not to an agent's month.
     const asked = db.messages().find((m) => m.author.kind === 'person')!

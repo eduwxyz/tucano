@@ -7,11 +7,12 @@ import { randomUUID } from 'node:crypto'
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
 import { L } from '../shared/lang'
 import type { CoreEvent } from '../shared/rpc'
 import { MAX_FILE_BYTES, type Agent, type Artifact, type BrowserElement, type BrowserOp, type BrowserReply, type BrowserView } from '../shared/types'
 import { pageOrigin } from '../shared/vault'
-import { readWall, wallNote } from '../shared/wall'
+import { readWall, wallNote, windowGetsPast } from '../shared/wall'
 import { artifactKind } from './computer'
 import type { Db } from './db'
 import { downloaded, downloadsFolder, downloadsSince, listDownloads, pendingDownloads } from './downloads'
@@ -219,7 +220,7 @@ export function describePage(p: BrowserReply, opts: { all?: boolean; max?: numbe
   // What it landed on, above the elements: a challenge or a refusal reads as a page full of nothing,
   // and an agent that isn't told so clicks it again (shared/wall.ts).
   const wall = readWall(p.signs, p)
-  const head = [`${L('Página', 'Page')}: ${p.title || L('(sem título)', '(no title)')}`, p.url, ...(wall ? [wallNote(wall, opts.me)] : [])]
+  const head = [`${L('Página', 'Page')}: ${p.title || L('(sem título)', '(no title)')}`, p.url, ...(wall ? [wallNote(wall, opts.me, { headful: p.headful })] : [])]
   const body = [
     shown.length ? `${opts.all ? L('Elementos', 'Elements') : `${L('Na tela', 'On screen')}${where}`}:\n${shown.slice(0, max).map(line).join('\n')}` : L('Nada clicável na tela.', 'Nothing clickable on screen.'),
     rest > 0
@@ -301,7 +302,7 @@ export interface BrowserDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   me: () => string
-  jev?: { key(): Promise<string | undefined>; on(): boolean; fetch?: typeof fetch } // finds what to click, when chosen
+  jev?: { key(): Promise<string | undefined>; on(): boolean; target?(): ClassifierConfig | undefined; fetch?: typeof fetch } // finds what to click, when chosen
   onHandback?: (agentId: string) => void // the user handed the browser back; the runner resumes a pending ask_user
   // The Cofre's site logins (vault.ts): which sites this agent has one for in work for that person, and
   // the login itself for navegador_login (each use goes in the Cofre's log).
@@ -431,15 +432,16 @@ export class Browser {
     if (hit) return { ref: hit.ref, el: hit, via: 'texto' }
     if (/^#?\s*\d+$/.test(target.trim())) return { error: L(`Não existe o elemento ${target.trim()} na última lista. Leia a página de novo.`, `There's no element ${target.trim()} in the last list. Read the page again.`) }
 
-    const key = this.deps.jev?.on() ? await this.deps.jev.key() : undefined
+    const classifier = this.deps.jev?.on() ? (this.deps.jev.target?.() ?? JEV_CLASSIFIER) : undefined
+    const key = classifier ? await this.deps.jev!.key() : undefined
     let why = ''
-    if (key) {
+    if (key && classifier) {
       const ordered = [...els.filter((e) => e.inView), ...els.filter((e) => !e.inView)].slice(0, 300)
-      const j = await jevElement({ key, target, page, elements: ordered, fetch: this.deps.jev?.fetch })
+      const j = await jevElement({ key, target, classifier, page, elements: ordered, fetch: this.deps.jev?.fetch })
       if ('ref' in j && j.p >= 0.4) return { ref: j.ref, el: els.find((e) => e.ref === j.ref)!, via: 'jev' }
       why = 'error' in j ? j.error : L('sem certeza', 'not sure')
       if (page.frame && page.w && page.h) {
-        const b = await jevBox({ key, target, jpeg: page.frame, fetch: this.deps.jev?.fetch })
+        const b = await jevBox({ key, target, classifier, jpeg: page.frame, fetch: this.deps.jev?.fetch })
         if ('x' in b && b.confidence >= 0.5) return { x: b.x * page.w, y: b.y * page.h, via: 'jev-tela' }
       }
     }
@@ -464,7 +466,18 @@ export class Browser {
   // After an action: the screen for the panel, and the page for the agent.
   private async after(agentId: string, r: BrowserReply, log: { label: string; detail: string }): Promise<CallToolResult> {
     this.seen(agentId, r, log)
-    return textResult(describePage(await this.deps.host(agentId, 'snapshot'), { me: this.deps.me() }))
+    return textResult(describePage(await this.pageAfterWall(agentId), { me: this.deps.me() }))
+  }
+
+  // The page as the agent gets it, with the one wall a window gets past tried first: a bot check or a
+  // refusal (shared/wall.ts) is what a real browser passes and a headless one doesn't, so the lane
+  // goes to a real window once per site and the page is read again. If that didn't work, the page is
+  // the wall with the note that says a window didn't help — instead of the looping.
+  private async pageAfterWall(agentId: string): Promise<BrowserReply> {
+    const snap = await this.deps.host(agentId, 'snapshot')
+    if (snap.headful || !windowGetsPast(readWall(snap.signs, snap))) return snap
+    const w = await this.deps.host(agentId, 'headful').catch(() => undefined)
+    return w?.headful ? this.deps.host(agentId, 'snapshot').catch(() => snap) : snap
   }
 
   async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: Ctx): Promise<BrowserOutcome> {

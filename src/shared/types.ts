@@ -2,6 +2,7 @@
 import type { UplinkStatus } from './node-link'
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
+import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
 import type { PageSigns } from './wall'
@@ -189,7 +190,7 @@ export interface FeedbackDraft {
 // Who picked this agent for the message it answers, and what the classifier said about it. It rides on
 // the reply, not on a message of its own: the pick opens the session it started (src/core/runs.ts).
 export interface Routed {
-  by: 'jev' | 'router' // the classifier that picked, or the plain router when Jev could not answer
+  by: string // who picked, by the name a person knows it: the classifier's, or the router model's
   reason?: string // a few words about the message, as the picker said them
 }
 
@@ -210,6 +211,8 @@ export interface Run {
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
   answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  stepsOpen?: true // its next-steps card can still be answered; the reply itself is done and waits on no one
+  stepsReplaced?: true // the same agent proposed a newer card in the same place: this one closed unanswered, and nobody dismissed it
   cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
@@ -558,8 +561,11 @@ export interface Settings {
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
-  routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
-  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
+  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
+  classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
+  classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
+  classifierKeys?: Record<string, boolean> // computed: which classifiers have a key saved (never the key itself)
   // An address in OpenAI's format the agents run on with no harness: its base URL and the models picked
   // from what it lists. The key is a secret (ENDPOINT_SECRET); `hasKey` only says one is saved.
   endpoint?: EndpointSettings
@@ -648,7 +654,23 @@ export interface Account {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'fill' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+export type BrowserOp =
+  | 'open'
+  | 'snapshot'
+  | 'click'
+  | 'type'
+  | 'fill'
+  | 'key'
+  | 'scroll'
+  | 'back'
+  | 'text'
+  | 'frame'
+  | 'show'
+  | 'hide'
+  | 'close'
+  | 'clear'
+  | 'input'
+  | 'headful' // the page is a bot check: the same lane, in a real window (chrome.ts)
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -678,6 +700,7 @@ export interface BrowserReply {
   elements?: BrowserElement[]
   text?: string
   shown?: boolean // the window is open for me
+  headful?: boolean // drawn in a real window because this site only lets a real browser through (not a takeover)
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
   signs?: PageSigns // what the page is when it isn't the page: a bot check, a refusal, a wall (shared/wall.ts)
 }

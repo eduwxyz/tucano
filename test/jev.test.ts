@@ -93,7 +93,7 @@ describe('in a channel', () => {
     const r = runner(typesafe({ lia: 0.9, nina: 0.05, __ninguem: 0.05 }).f, 'ts-key')
     await r.send('c1', 'o build quebrou')
     await r.idle()
-    expect(picks()).toEqual([{ by: 'jev', reason: expect.stringMatching(/^Jev, 90%, \d+,\d s$/) as unknown as string }])
+    expect(picks()).toEqual([{ by: 'Jev', reason: expect.stringMatching(/^Jev, 90%, \d+,\d s$/) as unknown as string }])
     expect(notes()).toEqual([]) // the pick is on the reply: nothing is left under the prompt
     expect(routerTurns).toBe(0)
     expect(db.messages().filter((m) => m.author.kind === 'agent')).toHaveLength(1)
@@ -104,8 +104,8 @@ describe('in a channel', () => {
     await r.send('c1', 'o build quebrou, e alguém avisa os clientes')
     await r.idle()
     expect(picks().map((p) => [p?.by, p?.reason?.startsWith('Jev')])).toEqual([
-      ['jev', true],
-      ['jev', true]
+      ['Jev', true],
+      ['Jev', true]
     ])
     expect(seen.map((t) => (t.system.includes('Você é Lia') ? 'lia' : t.system.includes('Você é Nina') ? 'nina' : '?'))).toEqual(['lia', 'nina'])
     const lia = db.messages().find((m) => m.author.kind === 'agent' && m.author.id === 'a1')!
@@ -118,7 +118,7 @@ describe('in a channel', () => {
     const r = runner(typesafe(429).f, 'ts-key')
     await r.send('c1', 'o build quebrou')
     await r.idle()
-    expect(picks()[0]).toMatchObject({ by: 'router', reason: expect.stringContaining('o Jev falhou (o TypeSafe pediu pra esperar (limite de uso)), o Haiku decidiu') as unknown as string })
+    expect(picks()[0]).toMatchObject({ by: 'Haiku', reason: expect.stringContaining('o Jev falhou (o TypeSafe pediu pra esperar (limite de uso)), o Haiku decidiu') as unknown as string })
     expect(routerTurns).toBe(1)
 
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-jev-')), 'test.db'))
@@ -128,6 +128,6 @@ describe('in a channel', () => {
     const r2 = runner(typesafe({ lia: 1 }).f, undefined)
     await r2.send('c1', 'o build quebrou')
     await r2.idle()
-    expect(picks()[0]).toMatchObject({ by: 'router', reason: expect.stringContaining('o Jev falhou (falta a chave do TypeSafe)') as unknown as string })
+    expect(picks()[0]).toMatchObject({ by: 'Haiku', reason: expect.stringContaining('o Jev falhou (falta a chave do TypeSafe)') as unknown as string })
   })
 })

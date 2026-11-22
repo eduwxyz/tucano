@@ -117,9 +117,9 @@ import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
+import { AnswersSummary, AskCard, asShown, cardAnswers, NextStepsCard, ReplacedStepsCard } from './Decisions'
 import { AskStrip } from './AskStrip'
-import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
+import { hasOpenSteps, questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -670,7 +670,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
-          (team && message.run?.askedTo ? (
+          (hasOpenSteps(message.run) ? (
+            <NextStepsCard message={message} agentName={agent?.name} />
+          ) : message.run?.stepsReplaced ? (
+            <ReplacedStepsCard message={message} />
+          ) : team && message.run?.askedTo ? (
             <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} cancelled={message.run.cancelled} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
           ) : (
             <AnswersSummary message={message} />
@@ -1400,7 +1404,7 @@ function MemoryChip({ id }: { id: string }): ReactNode {
 // head of the session, before anything it did or said, and it goes up with the session instead of staying
 // under the prompt as a row of its own. The reason is cut to the line and whole in the title.
 function RoutedLine({ routed }: { routed: Routed }): ReactNode {
-  const who = routed.by === 'jev' ? L('Escolhido pelo Jev', 'Picked by Jev') : L('Escolhido pelo roteador', 'Picked by the router')
+  const who = routed.by ? L(`Escolhido por ${routed.by}`, `Picked by ${routed.by}`) : L('Escolhido', 'Picked')
   const why = routed.reason?.replace(/\*\*/g, '').trim() ?? ''
   return (
     <div className="msg__routed" title={why || undefined}>

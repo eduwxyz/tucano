@@ -126,7 +126,7 @@ describe('a conversation that answers in it', () => {
     const here = db.messages().filter((m) => m.conversationId === 'p1')
     expect(here.map((m) => m.author.kind)).toEqual(['person', 'agent'])
     expect(here.every((m) => m.threadId === undefined)).toBe(true)
-    expect(here[1]!.run?.routed?.by).toBe('router')
+    expect(here[1]!.run?.routed?.by).toBe('Haiku')
     expect(notes.at(-1)).toEqual({ conversationId: 'p1', kind: 'done', threadId: undefined })
   })
 
@@ -290,7 +290,7 @@ describe('who answers in a thread', () => {
     expect(routed).toContain('qual a média da semana?')
     expect(replies().map((m) => [(m.author as { id: string }).id, m.threadId])).toEqual([['a2', root.id]])
     // Who was picked is said on the reply itself, in the thread it answers in, and not in a row of its own.
-    expect(replies().map((m) => m.run?.routed?.by)).toEqual(['router'])
+    expect(replies().map((m) => m.run?.routed?.by)).toEqual(['Haiku'])
     expect(db.messages().filter((m) => m.author.kind === 'system')).toEqual([])
   })
 

@@ -33,7 +33,8 @@ import { outOfQuota } from './engines/cli'
 import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
-import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MIN_OPTIONS, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
+import { classifierFor, providerSpec, type ClassifierJob, type ClassifierConfig } from '../shared/classifiers'
 import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
@@ -243,6 +244,41 @@ export const askUserFor = (names: string[]): ToolDef =>
         }
       }
 
+// What the agent proposes as the work that comes after this reply: a card with a box per step, all
+// clear, so nobody has to go hunting for the follow-up inside the text and nothing goes ahead
+// unless the person ticks it.
+export const NEXT_STEPS: ToolDef = {
+  name: 'next_steps',
+  get description() {
+    return L(
+      `Põe o que você propõe como próximo passo num card de caixas de marcar, todas vazias, pra ninguém perder no meio do texto o que você sugeriu. Use raramente: só quando o trabalho chegou num ponto em que há de 1 a ${MAX_STEPS} continuações concretas que você faria e que dependem da pessoa querer. Um label curto por passo e, quando ajudar, uma description. Não use na maioria das respostas: nem quando a resposta já resolve o pedido, nem numa conversa ou pergunta simples, nem pra oferecer ajuda genérica ("quer que eu explique mais?"), nem pra algo que o pedido já cobre (isso você faz). Não use pra perguntar uma decisão: isso é ask_user. O card não prende ninguém: a pessoa marca o que quer e isso volta como uma mensagem, ou ignora e escreve outra coisa, e aí você segue o que ela escreveu. Depois de chamar, encerre a resposta com no máximo uma frase, sem repetir os passos.`,
+      `Puts what you propose as the next step into a card of checkboxes, all clear, so nothing you suggested gets lost in the middle of the text. Use it rarely: only when the work has reached a point with 1 to ${MAX_STEPS} concrete ways to go on that you would do and that depend on the person wanting them. A short label per step and, when it helps, a description. Don't use it on most replies: not when the reply already settles the request, not in a simple chat or question, not to offer general help ("want me to explain more?"), and not for something the request already covers (do that instead). Don't use it to ask a decision: that's ask_user. The card holds no one up: the person ticks what they want and it comes back as a message, or ignores it and writes something else, and then you follow what they wrote. After calling it, end your reply with one sentence at most, without repeating the steps.`
+    )
+  },
+  get inputSchema() {
+    return {
+      type: 'object' as const,
+      properties: {
+        steps: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_STEPS,
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', maxLength: MAX_LABEL_LENGTH, description: L('Curto: o passo, como aparece na caixa.', 'Short: the step, as it shows on the box.') },
+              description: { type: 'string', maxLength: MAX_DESCRIPTION_LENGTH, description: L('Opcional: o que esse passo faz, em uma linha.', 'Optional: what that step does, in one line.') }
+            },
+            required: ['label']
+          }
+        },
+        question: { type: 'string', maxLength: MAX_QUESTION_LENGTH, description: L('Opcional: o título do card. Sem ele: "Por onde eu sigo?".', 'Optional: the card’s title. Without it: "What comes next?".') }
+      },
+      required: ['steps']
+    }
+  }
+}
+
 // A DM's person saying the agent may ask someone else ("sim", "pode", "yes"); anything else is a no.
 const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\b/i
 
@@ -251,7 +287,8 @@ const YES = /^\s*(sim|s|pode( sim)?|ok(ay)?|claro|autorizo|yes|y|sure|go ahead)\
 const ANSWER_TEXT_MAX = 10_000
 function cleanAnswer(question: Decision, raw: Answer): Answer | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
-  if (raw.skipped === true) return { skipped: true }
+  // A next-steps card has no Skip: that would wake the agent to say nothing. Cancel closes it quietly.
+  if (raw.skipped === true) return isNextSteps(question) ? undefined : { skipped: true }
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim().slice(0, ANSWER_TEXT_MAX) : '')
   if (question.kind === 'text') {
     const text = str(raw.text)
@@ -286,7 +323,9 @@ export interface RunnerDeps {
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
-  jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
+  // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
+  // `target` are asked per job: a job with no classifier is off.
+  jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
   onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
@@ -568,7 +607,7 @@ export class Runner {
       const id = this.sessions.idOf(replyKey(lastAgent.id, conv.id, threadId))
       if (id && ready(engine)) engines[engine].rewarm?.(id)
     }
-    if (opened || settings.routerModel === JEV_MODEL) return
+    if (opened || settings.routerModel === JEV_MODEL || classifierFor(settings, 'routing')) return
     const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
     if (!ready(model.engine)) return
     const cwd = join(this.deps.workDir, '_router')
@@ -604,7 +643,8 @@ export class Runner {
     // for them; past its deadline, the requester's). One waiting on a DM's yes takes a yes or a no.
     const named = opts.answers ? db.message(opts.answers) : undefined
     let asked = opts.answers ? (named?.conversationId === conv.id ? named : undefined) : this.pendingQuestion(conv.id, thread)
-    if (asked?.run?.status !== 'waiting_input') asked = undefined
+    // An open next-steps card is answered only from the card (`named`): what's written in the field is a new message.
+    if (asked?.run?.status !== 'waiting_input' && !hasOpenSteps(asked?.run)) asked = undefined
     const q = asked ? db.question(asked.id) : undefined
     let confirmed: boolean | undefined
     if (q && !named) {
@@ -655,7 +695,8 @@ export class Runner {
       // The message keeps the answers for the agent; the card, which shows them, says which one it is (and
       // what it had beyond them), so the conversation shows them once. With images, it shows whole.
       const link = fromCard && pictures.length === 0 && docs.length === 0 ? { answerMessage: mine.id, ...(typed ? { answerTyped: typed } : {}) } : {}
-      this.update(asked, { run: { ...asked.run!, status: 'done', ...(q ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
+      const { stepsOpen, ...askedRun } = asked.run!
+      this.update(asked, { run: { ...askedRun, status: 'done', ...(q || stepsOpen ? { answeredBy: writer.id } : {}), ...(typed ? { answeredInText: true as const } : {}), ...link } })
       // A question on handed work that a person answered right there: whoever asked for the work has nothing left to answer.
       const handed = asked.run?.handed ? db.delegation(asked.run.handed) : asked.threadId ? db.delegationAt(asked.threadId) : undefined
       if (handed?.asking === asked.id) {
@@ -1168,13 +1209,16 @@ export class Runner {
         team: db.people().length > 1
       }
 
-      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+      // A classifier first when one is chosen for this job; if it fails, Haiku decides, so the
+      // channel never goes quiet.
       let fellBack = ''
-      if (settings.routerModel === JEV_MODEL) {
-        const key = await this.deps.jev?.key()
-        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: L('falta a chave do TypeSafe', 'the TypeSafe key is missing') }
-        if (!('error' in j)) return this.routed(conv, threadId, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, 'jev', parallel)
-        fellBack = L(` · o Jev falhou (${j.error}), o Haiku decidiu`, ` · Jev failed (${j.error}), Haiku decided`)
+      const routing = classifierFor(settings, 'routing')
+      if (routing) {
+        const key = await this.deps.jev?.key('routing')
+        const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
+        const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
+        if (!('error' in j)) return this.routed(conv, threadId, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, routing.name, parallel)
+        fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
       }
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
@@ -1187,7 +1231,7 @@ export class Runner {
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: trigger, agentId: 'router', engine: model.engine, at: Date.now() })
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
-      this.routed(conv, threadId, r.agents, trigger, `${r.reason}${fellBack}`, 'router', parallel)
+      this.routed(conv, threadId, r.agents, trigger, `${r.reason}${fellBack}`, model.label, parallel)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1697,6 +1741,7 @@ export class Runner {
     let question: string | undefined // what ask_user asked, as text (every decision)
     let questions: Decision[] | undefined // the same, structured
     let askedTo: Person = requester // whom the question is for
+    let proposed: Decision | undefined // the card of next_steps: it goes on the reply only if the reply ends well and waits on nothing
     let confirming = false // in a DM, a question to someone else waits for the DM's person's yes first
     let approval: Approval | undefined
     const memoryIds: string[] = []
@@ -1704,7 +1749,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, PEDIR_CHAVE, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, NEXT_STEPS.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, PEDIR_CHAVE, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -1845,6 +1890,8 @@ ${note}`,
     const others = db.people()
     const ownTools: ToolDef[] = [
       askUserFor(others.map((p) => (p.id === db.ownerId() ? ownerName || p.name : p.name))),
+      // Only where a person reads the reply: a routine's run has no one there, and handed work goes back to an agent.
+      ...(boss || opts.routine || routineAskId ? [] : [NEXT_STEPS]),
       ...(accessTool ? [accessTool] : []),
       ...(keyTool ? [keyTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
@@ -2055,6 +2102,22 @@ ${note}`,
             L(
               `Pedido [${codeOf(d)}] entregue a ${to.name} ${inPlace(channel)}${before ? ', na mesma thread' : ''}: ele já começou. A resposta volta pra você e você é chamado. Não espere nem confira: se não há mais nada a pedir, encerre agora, sem texto: o que você escrever depois de pedir fica recolhido. ${settings.workspaceName} vê embaixo da mensagem a quem você pediu e como está, e você fala quando o trabalho voltar.`,
               `Request [${codeOf(d)}] delivered to ${to.name} ${inPlace(channel)}${before ? ', in the same thread' : ''}: they have started. The answer comes back to you and you are called. Do not wait or check: if there is nothing else to ask, end now, with no text: whatever you write after asking stays folded away. ${settings.workspaceName} sees under the message whom you asked and how it stands, and you speak when the work comes back.`
+            )
+          )
+        }
+
+        if (name === NEXT_STEPS.name) {
+          const parsed = parseNextSteps(args)
+          if ('error' in parsed) return textResult(parsed.error, true)
+          if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
+          const decision = parsed.decision
+          const count = decision.options?.length ?? 0
+          proposed = decision
+          addSteps({ id: randomUUID(), label: L('Propôs os próximos passos', 'Proposed the next steps'), detail: L(`${count} no card`, `${count} on the card`), status: 'done' })
+          return textResult(
+            L(
+              `Os próximos passos estão no card, com as caixas em branco pra pessoa marcar o que quer. Encerre sua resposta agora com no máximo uma frase, sem repetir os passos. O que ela marcar volta como uma mensagem; se ela escrever outra coisa, siga o que ela escreveu.`,
+              `The next steps are in the card, with the boxes clear for the person to tick what they want. End your reply now with one sentence at most, without repeating the steps. Whatever they tick comes back as a message; if they write something else, follow what they wrote.`
             )
           )
         }
@@ -3210,9 +3273,19 @@ ${note}`,
       if (question && !up) this.asked(agent, msg, question, askedTo, requester, confirming, settings)
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       const text = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
-      const run: Run = { ...base, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
-      // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
-      save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
+      // A card of next steps goes on a reply that's done: it asks nothing of anyone, so it's no question,
+      // no inbox item and no slot. An approval or a question in the same turn is what counts instead.
+      const carded = !!proposed && !questions && !waiting
+      const card = carded ? { questions: [proposed!], stepsOpen: true as const, ...(db.people().length > 1 ? { askedTo: requester.id } : {}) } : {}
+      const run: Run = { ...base, ...card, status: questions ? 'waiting_input' : waiting ? 'waiting_approval' : 'done', steps: closeThinking('done', L('Respondeu', 'Replied')) }
+      // The new card and the closing of the one it replaces are written together: a restart finds one open, never two.
+      const replaced = db.tx(() => {
+        const closed = carded ? this.closeOpenSteps(agent.id, msg) : []
+        // A routine's run that answered only the no-news phrase is marked, so the conversation folds it.
+        save({ text, run: routineAskId && noNewsRun(text, run) ? { ...run, noNews: true } : run })
+        return closed
+      })
+      for (const old of replaced) emit({ type: 'message', message: old })
       // What the Tuca proposed inside the app goes in now, for the person he worked for (applyNow checks
       // what they may do); what grants access stays a card.
       // Something going wrong there leaves the cards as cards: never the reply.
@@ -3733,6 +3806,15 @@ ${note}`,
   private decidable(messageId: string, by: Person): Message {
     const { db } = this.deps
     const asked = db.message(messageId)
+    // An open next-steps card keeps no question: whoever it was proposed to answers it (or whoever may
+    // answer for them), as long as they can see the conversation.
+    if (asked?.author.kind === 'agent' && hasOpenSteps(asked.run)) {
+      const people = new People(db)
+      const to = asked.run!.askedTo
+      const mayAnswer = !people.conversationError(by, asked.conversationId) && (!to || people.canAnswer(by, { id: asked.id, conversationId: asked.conversationId, agentId: asked.author.id, text: '', askedTo: to, requestedBy: to, state: 'open', deadlineAt: Number.MAX_SAFE_INTEGER, createdAt: asked.at }))
+      if (!mayAnswer) throw new Error(L('Essa pergunta não é pra você.', "That question isn't for you."))
+      return asked
+    }
     const q = db.question(messageId)
     if (q && q.state !== 'open') throw new Error(L('Essa pergunta já foi respondida.', 'That question was already answered.'))
     const mayAnswer = q ? q.confirm !== 'pending' && new People(db).canAnswer(by, q) : !!asked && !new People(db).conversationError(by, asked.conversationId)
@@ -3741,8 +3823,32 @@ ${note}`,
     return asked
   }
 
+  // A newer card took the place of the one this agent had open here. It closes as it was: what was
+  // ticked and never sent goes, nobody is told, and no turn starts. Saved by the caller, with the new card.
+  private closeOpenSteps(agentId: string, card: Message): Message[] {
+    const { db } = this.deps
+    const closed = db
+      .openStepsOf(agentId, card.conversationId, card.threadId)
+      .filter((m) => m.id !== card.id)
+      .map((m) => {
+        const { stepsOpen: _open, answers: _ticked, ...run } = m.run!
+        return { ...m, run: { ...run, stepsReplaced: true as const } }
+      })
+    for (const m of closed) db.saveMessage(m)
+    return closed
+  }
+
+  // A click on a card already replaced, from a window that hadn't heard yet: nothing goes out, and that window hears now.
+  private lateOnReplaced(messageId: string): boolean {
+    const card = this.deps.db.message(messageId)
+    if (!card?.run?.stepsReplaced) return false
+    this.deps.emit({ type: 'message', message: card })
+    return true
+  }
+
   // One decision answered on the card (null clears it): kept on the question until it's sent.
   answerDecision(messageId: string, index: number, answer: Answer | null, by: Person): void {
+    if (this.lateOnReplaced(messageId)) return
     const asked = this.decidable(messageId, by)
     const questions = questionsOf(asked.run)
     const question = questions[index]
@@ -3757,6 +3863,7 @@ ${note}`,
 
   // Sends the decisions answered on the card as the person's message, as if they wrote them.
   async submitDecisions(messageId: string, by: Person): Promise<void> {
+    if (this.lateOnReplaced(messageId)) return
     const asked = this.decidable(messageId, by)
     await this.send(asked.conversationId, '', [], asked.threadId, by.id, { answers: asked.id })
   }
@@ -3765,8 +3872,14 @@ ${note}`,
   // was cancelled (context.ts). Work handed down the tree waits on it, though: there, cancelling means "I won't answer",
   // not "stop", so whoever does the work goes on without the answer, assuming what it must and saying so.
   cancelQuestion(messageId: string, by: Person): void {
+    if (this.lateOnReplaced(messageId)) return
     const { db, emit } = this.deps
     const asked = this.decidable(messageId, by)
+    // Next steps dismissed: the card closes, and that's all. Nothing waited on it.
+    if (hasOpenSteps(asked.run)) {
+      const { stepsOpen: _open, ...run } = asked.run!
+      return this.update(asked, { run: { ...run, cancelled: true } })
+    }
     const q = db.question(messageId)
     if (q?.state === 'open') {
       db.saveQuestion({ ...q, state: 'closed' })

@@ -54,6 +54,7 @@ import type { Job } from './jobs'
 import { isHarnessLevel, type HarnessKey, type HarnessLevel } from '../shared/harness-keys'
 
 const JEV_KEY = 'typesafe:key' // jev.ts's JEV_SECRET: the router's key goes with the general settings
+const CLASSIFIER_KEYS = 'classifier:%:key' // classifiers.ts's classifierSecret: each row's key, the same way
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 export const MIGRATIONS = [
@@ -826,10 +827,10 @@ export class Db {
     if (WORKSPACE_PARTS.every((p) => parts[p])) return
     const kept = new Set(['seenVersion', 'theme', 'onboarding', ...(parts.general ? GENERAL_SETTINGS : []), ...(parts.context ? ['context'] : []), ...(parts.channels ? ['channelLayout', 'folded', 'navOrder', 'agentOrder', 'sectorOrder'] : [])])
     for (const { key } of this.db.prepare('SELECT key FROM settings').all() as { key: string }[]) if (!kept.has(key)) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
-    if (!parts.general) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(JEV_KEY)
+    if (!parts.general) this.db.prepare('DELETE FROM secrets WHERE key = ? OR key LIKE ?').run(JEV_KEY, CLASSIFIER_KEYS)
     if (!parts.connectors) {
       this.db.exec('DELETE FROM connectors; UPDATE agents SET grants = \'{}\', auto_approve = \'[]\'')
-      this.db.prepare('DELETE FROM secrets WHERE key <> ?').run(JEV_KEY) // the connectors' keys and logins, and GitHub's
+      this.db.prepare('DELETE FROM secrets WHERE key <> ? AND key NOT LIKE ?').run(JEV_KEY, CLASSIFIER_KEYS) // the connectors' keys and logins, and GitHub's
     }
     if (!parts.agents) this.db.exec("DELETE FROM members; DELETE FROM conversations WHERE kind = 'dm'; DELETE FROM agents")
     if (!parts.channels) this.db.exec("DELETE FROM conversations WHERE kind <> 'dm'")
@@ -1482,6 +1483,14 @@ export class Db {
   // Found through messages_retry: every minute, without reading every message.
   retriesDue(now: number): Message[] {
     const rows = this.db.prepare("SELECT * FROM messages WHERE run IS NOT NULL AND json_extract(run, '$.status') = 'failed' AND json_extract(run, '$.retryAt') <= ? ORDER BY at").all(now) as Row[]
+    return rows.map((r) => this.toMessage(r))
+  }
+
+  // The next-steps cards an agent still has open in one place: a conversation's main line, or one thread.
+  openStepsOf(agentId: string, conversationId: string, threadId: string | undefined): Message[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM messages WHERE conversation_id = ? AND thread_id IS ? AND author_kind = 'agent' AND author_id = ? AND run IS NOT NULL AND json_extract(run, '$.status') = 'done' AND json_extract(run, '$.stepsOpen') = 1 ORDER BY at`)
+      .all(conversationId, threadId ?? null, agentId) as Row[]
     return rows.map((r) => this.toMessage(r))
   }
 

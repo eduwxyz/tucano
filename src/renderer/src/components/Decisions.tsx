@@ -7,8 +7,9 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
-import { answerDecision, cancelQuestion, submitDecisions, type Message } from '../store'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { covers } from '../../../shared/access'
+import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
 import { decisionKey } from './decision-keys'
 
@@ -46,6 +47,7 @@ export function AskCard({
   byline,
   answeredInText,
   cancelled,
+  closedAs,
   children
 }: {
   id: string
@@ -56,25 +58,29 @@ export function AskCard({
   byline?: string
   answeredInText?: boolean
   cancelled?: boolean | undefined
+  closedAs?: string // what a closed card says in place of "(cancelled)"
   children?: ReactNode
 }): ReactNode {
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} extra={children} />
+  // A next-steps card is a to-do, not a menu: it says so, in every mode.
+  const steps = questions.some(isNextSteps)
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} steps={steps} extra={children} />
   return (
-    <section className={`ask ask--${mode}`} aria-label={badge}>
-      <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} />
-      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} /> : <Asked questions={questions} />}
+    <section className={`ask ask--${mode}${steps ? ' ask--steps' : ''}`} aria-label={badge}>
+      <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} steps={steps} />
+      {mode === 'done' ? <Summary questions={questions} answers={saved} answeredInText={answeredInText} cancelled={cancelled} closedAs={closedAs} /> : <Asked questions={questions} />}
       {children}
     </section>
   )
 }
 
-function Head({ badge, byline, done, cancelled, nav }: { badge: string; byline?: string | undefined; done?: boolean; cancelled?: boolean | undefined; nav?: ReactNode }): ReactNode {
+function Head({ badge, byline, done, cancelled, nav, steps }: { badge: string; byline?: string | undefined; done?: boolean; cancelled?: boolean | undefined; nav?: ReactNode; steps?: boolean }): ReactNode {
   return (
     <div className="ask__head">
       <span className="ask__badge">
         <Icon name={cancelled ? 'x' : done ? 'check' : 'ask'} size={13} />
         {badge}
       </span>
+      {steps && <span className="ask-option__pill">{L('Próximos passos', 'Next steps')}</span>}
       {byline && <span className="ask__byline">{byline}</span>}
       {nav}
     </div>
@@ -105,7 +111,7 @@ function Asked({ questions }: { questions: Decision[] }): ReactNode {
 }
 
 // Answered: each decision and what was chosen. Answered in writing: the questions, and a note.
-function Summary({ questions, answers, answeredInText, cancelled }: { questions: Decision[]; answers?: (Answer | null)[] | undefined; answeredInText?: boolean | undefined; cancelled?: boolean | undefined }): ReactNode {
+function Summary({ questions, answers, answeredInText, cancelled, closedAs }: { questions: Decision[]; answers?: (Answer | null)[] | undefined; answeredInText?: boolean | undefined; cancelled?: boolean | undefined; closedAs?: string | undefined }): ReactNode {
   const any = !!answers?.some(isAnswered)
   return (
     <>
@@ -115,7 +121,7 @@ function Summary({ questions, answers, answeredInText, cancelled }: { questions:
           return (
             <div key={i} className="ask-summary__row">
               <dt>{isLong(q) ? <Prose className="ask__prose" text={q.question} /> : q.question}</dt>
-              <dd className={cancelled || !a || !isAnswered(a) || a.skipped ? 'is-muted' : ''}>{cancelled ? L('(cancelada)', '(cancelled)') : a && isAnswered(a) ? answerLabel(q, a) : any ? L('respondida em texto', 'answered in text') : L('respondida na mensagem abaixo', 'answered in the message below')}</dd>
+              <dd className={cancelled || !a || !isAnswered(a) || a.skipped ? 'is-muted' : ''}>{cancelled ? (closedAs ?? L('(cancelada)', '(cancelled)')) : a && isAnswered(a) ? answerLabel(q, a) : any ? L('respondida em texto', 'answered in text') : L('respondida na mensagem abaixo', 'answered in the message below')}</dd>
             </div>
           )
         })}
@@ -125,7 +131,7 @@ function Summary({ questions, answers, answeredInText, cancelled }: { questions:
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -214,12 +220,8 @@ function Answering({ id, questions, saved, badge, byline, extra }: { id: string;
     ) : undefined
 
   return (
-    <section className="ask ask--answer" aria-label={badge}>
-      <Head
-        badge={badge}
-        byline={byline}
-        nav={nav}
-      />
+    <section className={`ask ask--answer${steps ? ' ask--steps' : ''}`} aria-label={badge}>
+      <Head badge={badge} byline={byline} nav={nav} steps={steps} />
       {questions.length > 1 && (
         <div className="ask__progress" aria-hidden>
           {questions.map((_, i) => (
@@ -303,12 +305,15 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
     else body.current?.focus()
   }
 
+  const steps = isNextSteps(question)
   const keyHint =
     question.kind === 'text'
       ? L('Enter confirma · Shift+Enter quebra a linha', 'Enter confirms · Shift+Enter for a new line')
-      : multiple
-        ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
-        : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)
+      : steps
+        ? L(`Marque com 1 a ${options.length + 1} · nada começa marcado`, `Tick with 1 to ${options.length + 1} · nothing starts ticked`)
+        : multiple
+          ? L(`Marque quantas quiser com 1 a ${options.length + 1}`, `Tick as many as you like with 1 to ${options.length + 1}`)
+          : L(`Escolha com 1 a ${options.length + 1}`, `Pick with 1 to ${options.length + 1}`)
 
   return (
     <div className="ask__body" ref={body} tabIndex={-1} onKeyDown={keys}>
@@ -344,7 +349,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
             <button className={`ask-option ask-option--other ${focus === options.length ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(options.length)} onClick={openOther}>
               <span className="ask-option__key">{options.length + 1}</span>
               <span className="ask-option__text">
-                <span className="ask-option__label">{L('Outra coisa…', 'Something else…')}</span>
+                <span className="ask-option__label">{steps ? L('Outro passo…', 'Another step…') : L('Outra coisa…', 'Something else…')}</span>
               </span>
               <span className="ask-option__mark" aria-hidden>
                 <Icon name="edit" size={12} />
@@ -355,12 +360,15 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
       )}
       <div className="ask__foot">
         <span className="ask__hint">{keyHint}</span>
-        <button className="btn btn--ghost btn--sm" onClick={skip}>
-          {L('Pular', 'Skip')}
-        </button>
+        {/* Skipping would wake the agent just to say so: a next-steps card only has Cancel, which closes it quietly. */}
+        {!steps && (
+          <button className="btn btn--ghost btn--sm" onClick={skip}>
+            {L('Pular', 'Skip')}
+          </button>
+        )}
         {(question.kind !== 'single' || writing) && (
           <button className="btn btn--primary btn--sm" disabled={!typed} onClick={confirm}>
-            {last ? L('Enviar', 'Send') : L('Próxima', 'Next')}
+            {steps && last ? L('Fazer estes', 'Do these') : last ? L('Enviar', 'Send') : L('Próxima', 'Next')}
           </button>
         )}
         <button className="btn btn--ghost btn--sm" onClick={onCancel}>
@@ -413,6 +421,26 @@ export function AnswersSummary({ message }: { message: Message }): ReactNode {
   return <AskCard id={message.id} questions={questions} saved={message.run?.answers} mode={waiting ? 'answer' : 'done'} badge={waiting ? L('Esperando você', 'Waiting for you') : cancelled ? L('Cancelada', 'Cancelled') : L('Respondida', 'Answered')} answeredInText={!!message.run?.answeredInText} cancelled={cancelled} />
 }
 
+// Next steps still open, under a reply that's done: a suggestion, so it says "optional" and never
+// "waiting for you". In a team, whoever it was proposed to (or may answer for them) ticks it;
+// anyone else reads it. The core checks the same when it's sent.
+export function NextStepsCard({ message, agentName }: { message: Message; agentName?: string | undefined }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const target = useStore((s) => personById(s, message.run?.askedTo))
+  const me = useStore((s) => personById(s, s.you))
+  const mine = !team || !target || target.id === you || admin || covers(target, me)
+  const who = agentName ?? L('O agente', 'The agent')
+  const byline = team && target ? (target.id === you ? L(`${who} sugere a você`, `${who} suggests to you`) : L(`${who} sugere a ${target.name}`, `${who} suggests to ${target.name}`)) : undefined
+  return <AskCard id={message.id} questions={questionsOf(message.run)} saved={message.run?.answers} mode={mine ? 'answer' : 'view'} badge={L('Opcional', 'Optional')} {...(byline ? { byline } : {})} />
+}
+
+// Next steps a newer card took the place of: closed, and neither answered nor dismissed by anyone.
+export function ReplacedStepsCard({ message }: { message: Message }): ReactNode {
+  return <AskCard id={message.id} questions={questionsOf(message.run)} mode="done" badge={L('Substituído', 'Replaced')} cancelled closedAs={L('(substituído por um card mais novo)', '(replaced by a newer card)')} />
+}
+
 // The message that sent a card's answers says nothing the card doesn't: in the conversation it
 // shows only what was written beyond them, or not at all. It stays as it is everywhere else (the
 // agent, the wiki, search, Telegram). Found by the link the card keeps, never by the text.
@@ -421,7 +449,13 @@ export function cardAnswers(all: Message[]): Map<string, string> {
   const had = linked.get(all)
   if (had) return had
   const map = new Map<string, string>()
-  for (const m of all) if (m.run?.answerMessage) map.set(m.run.answerMessage, m.run.answerTyped ?? '')
+  all.forEach((m, i) => {
+    if (!m.run?.answerMessage) return
+    // Next steps sent after the conversation moved on: the message stays, or the reply to it would
+    // land at the bottom answering nothing anyone can see.
+    if (questionsOf(m.run).some(isNextSteps) && all[i + 1]?.id !== m.run.answerMessage) return
+    map.set(m.run.answerMessage, m.run.answerTyped ?? '')
+  })
   linked.set(all, map)
   return map
 }
