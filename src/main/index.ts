@@ -882,13 +882,27 @@ ipcMain.handle('artifact:copy', async (event, arg: unknown) => {
       /* fall through */
     }
   }
-  if (process.platform === 'win32') {
-    try {
-      ;(clipboard as unknown as { writeBuffer: (format: string, buffer: Buffer) => void }).writeBuffer('FileNameW', Buffer.from(`${path}\0`, 'ucs2'))
+  // Copy the file itself so it can be pasted in a file manager (Explorer/Finder/Nautilus).
+  try {
+    // SAFETY: Electron's Clipboard exposes writeBuffer at runtime; the public TS type omits it in this version.
+    const cb = clipboard as unknown as { writeBuffer: (format: string, buffer: Buffer) => void }
+    if (process.platform === 'win32') {
+      cb.writeBuffer('FileNameW', Buffer.from(`${path}\0`, 'ucs2'))
       return { ok: true as const, kind: 'file' as const }
-    } catch {
-      /* fall through */
     }
+    if (process.platform === 'darwin') {
+      const esc = path.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+      const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><array><string>${esc}</string></array></plist>`
+      cb.writeBuffer('NSFilenamesPboardType', Buffer.from(plist, 'utf8'))
+      return { ok: true as const, kind: 'file' as const }
+    }
+    if (process.platform === 'linux') {
+      const uri = `file://${path.split(/[/\\]/).map((p) => encodeURIComponent(p)).join('/')}`
+      cb.writeBuffer('text/uri-list', Buffer.from(`${uri}\n`, 'utf8'))
+      return { ok: true as const, kind: 'file' as const }
+    }
+  } catch {
+    /* fall through */
   }
   try {
     clipboard.writeText(path)
