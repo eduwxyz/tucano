@@ -510,6 +510,11 @@ export function SidePanel(): ReactNode {
         {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
         <span className="grow" />
         {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
+        {artifact && (
+          <button className="btn btn--sm btn--ghost" title={L('Copiar para a área de transferência', 'Copy to clipboard')} onClick={() => void copyArtifact(artifact)}>
+            <Icon name="copy" size={14} /> {L('Copiar', 'Copy')}
+          </button>
+        )}
         {artifact && canSave && (
           <button className="btn btn--sm btn--ghost" title={artifact.name} onClick={() => saveArtifact(artifact)}>
             <Icon name="down" size={14} /> {saveLabel()}
