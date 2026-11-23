@@ -5851,17 +5851,19 @@ table.csv th {
   background: var(--text-3);
   color: var(--panel);
 }
-/* The groups stay at the top while the page scrolls, on the page's own background. */
-.settings-groups {
+/* The groups and subject jumps stay at the top while the page scrolls, on the page's own background. */
+.settings-sticky {
   position: sticky;
   top: 0;
   z-index: 3;
-  display: flex;
-  justify-content: center;
   margin: -8px 0 0;
-  padding: 8px 0 12px;
+  padding: 8px 0 8px;
   background: var(--panel);
   -webkit-app-region: no-drag;
+}
+.settings-groups {
+  display: flex;
+  justify-content: center;
 }
 .settings-groups__bar {
   display: inline-flex;
@@ -5894,7 +5896,7 @@ table.csv th {
   flex-wrap: wrap;
   justify-content: center;
   gap: 2px;
-  margin: 2px 0 6px;
+  margin: 4px 0 0;
 }
 .settings-jumps > a {
   display: inline-flex;

@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings tabs and subject jumps stay visible while scrolling.** In Settings, the group tabs stayed at the top when scrolling down, but the subject jump links scrolled away. Both rows now stay pinned so section navigation remains available deep in the page.
+
 ## [0.2.45] - 2026-11-22
 
 > **Em português:**

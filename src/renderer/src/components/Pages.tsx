@@ -3363,8 +3363,11 @@ export function SettingsPage(): ReactNode {
   return (
     <Page title={L('Configurações', 'Settings')} actions={<SettingsSearchField value={query} onChange={setQuery} />}>
       <div className="settings-page" ref={body}>
-        <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
-        {searching ? <SettingsResults hits={searchSettings(structure, query)} query={query} onPick={pickHit} /> : <SettingsJumps key={tab} sections={settingsTabStructure(tab, structure)} />}
+        <div className="settings-sticky">
+          <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
+          {!searching && <SettingsJumps key={tab} sections={settingsTabStructure(tab, structure)} />}
+        </div>
+        {searching && <SettingsResults hits={searchSettings(structure, query)} query={query} onPick={pickHit} />}
         {windowless() && <SettingsWhere />}
 
         {/* ---------- You ---------- */}
