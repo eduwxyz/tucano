@@ -12,8 +12,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** um agente pode deixar os **próximos passos** num cartão de caixas de marcar, todas vazias. O que você marcar volta como a sua mensagem; se preferir escrever outra coisa, o cartão não atrapalha nem fica esperando você. **Cancelar** fecha o cartão sem acordar o agente, e um cartão novo do mesmo agente no mesmo lugar substitui o anterior.
 > - **Mudou:** o **cartão de aprovação** abre com a ação e o alvo, e diz o que aconteceu depois: **Concluído**, **Falhou** ou **não rodou**, em vez de só "Aprovado". Um aviso acima do campo leva às aprovações que esperam você.
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
-> - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
+> - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, clique duas vezes no **x** pra parar só aquela, e duas vezes no lixo pra tirar uma que terminou.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
+> - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
+> - **Mudou:** ao expandir um arquivo Markdown no painel, o texto fica numa coluna central de até 960 px, e tabelas e blocos de código usam a largura toda.
+> - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo enquanto a página rola.
+> - **Mudou:** **Continuar**, **Tentar de novo** e **Tentar com instruções** viraram botões discretos na linha de baixo da resposta e aparecem ao passar o mouse. Em telas de toque ficam sempre visíveis.
+> - **Corrigido:** **Enviar feedback** e **Conectores** agora têm a mesma altura de **Cofre** no pé da barra lateral.
 
 ### Added
 
@@ -23,15 +28,23 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **Classifiers: choose who answers the app's quick questions.** Jev, from TypeSafe, was the only classifier Tucano could use. Settings › Models › **Classifiers** now holds a list of them, from TypeSafe, OpenRouter, OpenAI or Google, each with its own key, checked with that provider and kept encrypted. You pick which one decides who replies in a channel and which one finds what an agent clicks in a page, or leave either off. Each job says what it sends and to which provider, and a failure falls back as before. An install that already uses Jev keeps it, with its key and its choices. Thanks to Apostol Apostolov. (#379)
 - **An agent can leave its next steps in a card of checkboxes.** When a piece of work reaches a point with concrete ways to go on, the agent can propose 1 to 6 of them with the new `next_steps` tool instead of burying them in its text. The card opens with nothing ticked: **Do these** sends what you tick as your next message, **Another step…** takes one written by hand, and **Cancel** closes it without waking the agent. It holds nothing up: the reply is finished, it stays out of For you, it takes no slot in **Replies at once**, and a message written instead is a new request, not an answer to the card. When the same agent proposes a new card in the same conversation and thread, its previous open card closes quietly and reads as replaced. In a team, only the person it was proposed to, whoever covers for them or an admin can answer it. Thanks to Apostol Apostolov. (#298)
 - **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
-- **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
+- **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** twice to stop only that one, and press the trash twice to take a finished row off. Thanks to Apostol Apostolov. (#558, #647)
 
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+- **The computer icon on an agent's row comes in on hover.** The laptop or globe that says where an agent runs now appears with the settings gear, so the sidebar is quieter at rest. On a touch screen, where nothing hovers, it stays in sight. Thanks to Apostol Apostolov. (#640)
+- **An expanded Markdown file uses the room.** Its text reads in a centered column up to 960 px, and wide tables and code blocks can take the full width of the panel. Thanks to Apostol Apostolov. (#645)
+- **A reply's way back sits on its footer line.** **Continue**, **Try again** and **Try with instructions** are now small pills on the line with the reply's numbers. They come in when the pointer or the keyboard focus is on the message, and stay in sight on a touch screen. Thanks to Apostol Apostolov. (#641)
 
 ### Changed
 
 - **The approval card leads with what is being approved, and says what became of it.** The card opens with the action and its target, the status is a quiet row above them, and the decisions sit on one line. Its receipt now tells approved apart from completed: **Approved · waiting for result**, **Completed**, **Failed** with the reason, or **Approved · didn't run**. A row above the message field counts the approvals waiting on you, and **Review** goes back to the oldest one. Thanks to Apostol Apostolov. (#334)
+
+### Fixed
+
+- **Settings tabs and subject jumps stay in sight while scrolling.** The group tabs stayed at the top, but the subject links scrolled away. Both rows now stay pinned, so moving between sections works from deep in the page. Thanks to Apostol Apostolov. (#643)
+- **The sidebar's foot rows are one height.** **Send feedback** and **Connectors** sat at 20 px next to **Vault** at 30 px. All three now line up. Thanks to Apostol Apostolov. (#639)
 
 ## [0.2.45] - 2026-11-22
 

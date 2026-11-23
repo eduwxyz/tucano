@@ -751,8 +751,7 @@ const AgentRow = memo(function AgentRow({ id, dm, unread, owner }: { id: string;
             {unread}
           </span>
         ) : null}
-        {/* Last, so what comes and goes (working, waiting, unread) shows before it and it never moves. */}
-        {/* On a server, "this computer" is the server's own: said as that, not as the person's laptop. */}
+        {/* On a server, "this computer" is the server's own: said as that, not as the person's laptop. Revealed on hover with the gear. */}
         {agent.computer && agent.computerKind === 'mac' && (
           <span className="nav-item__mac" title={windowless() ? L('Roda direto no servidor', 'Runs right on the server') : L('Roda no seu computador', 'Runs on your computer')}>
             <Icon name={windowless() ? 'globe' : 'laptop'} size={12} />

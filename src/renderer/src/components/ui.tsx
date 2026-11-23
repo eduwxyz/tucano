@@ -53,6 +53,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   edit: <path d="M4 20h4L19 9l-4-4L4 16v4Z" />,
+  retry: <path d="M4 12a8 8 0 1 0 2.5-5.8L4 8.5M4 4v4.5h4.5" />,
   book: <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15ZM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6" />,
   key: (
     <>
