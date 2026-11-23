@@ -1,5 +1,6 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
 import { L, locale, type Lang } from '../../../shared/lang'
+import { JobWatchSettingsCard } from './JobWatch'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -1006,6 +1007,17 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   <AgentVaultLogins agentId={draft.id} name={draft.name} />
                 </div>
               )}
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
+              title={L('Acompanhar jobs', 'Follow jobs')}
+              help={L('Acompanha runs do Databricks pela CLI, com um cartão ao vivo na conversa. Só usa os comandos permitidos em Configurações › Agentes. Essas regras não valem pra um agente em Este computador, que roda comandos como você: use um perfil só de leitura, ou deixe ele em Linux isolado ou sem computador.', 'Follows Databricks runs through the CLI, with a live card in the conversation. It only uses the commands allowed in Settings › Agents. Those rules don’t bind an agent on This computer, which runs commands as you: use a read-only profile, or keep it on isolated Linux or with no computer.')}
+            >
+              <Row label={L('Acompanhar jobs', 'Follow jobs')}>
+                <Toggle label={L('Acompanhar jobs', 'Follow jobs')} on={!!draft.jobWatch} onChange={(v) => patch({ jobWatch: v }, true)} />
+              </Row>
             </Section>
           )}
 
@@ -3960,6 +3972,12 @@ export function SettingsPage(): ReactNode {
         {on('agentes') && admin && (
           <SectionAnchor id="agents-browser" sections={structure}>
             <BrowserClickCard />
+          </SectionAnchor>
+        )}
+
+        {on('agentes') && admin && (
+          <SectionAnchor id="agents-jobs" sections={structure}>
+            <JobWatchSettingsCard />
           </SectionAnchor>
         )}
 

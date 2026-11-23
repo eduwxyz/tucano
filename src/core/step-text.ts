@@ -2,6 +2,7 @@
 // what was asked (the SQL, the path, the search) and the result in a few words ("120 rows").
 // Everything here is for the screen, so it passes through maskSecrets: the agent still gets the real text.
 import { L, locale } from '../shared/lang'
+import type { ResultTable } from '../shared/types'
 
 const INPUT_MAX = 4_000 // the step keeps this much of the argument; the row shows a few lines of it
 const LINE_MAX = 120
@@ -84,6 +85,123 @@ export function resultSummary(text: string): string {
   const one = maskSecrets(lines.join(' · '))
   return (one.length > LINE_MAX ? `${one.slice(0, LINE_MAX)}…` : one) + cut
 }
+
+// ---------- a query's rows, as a table ----------
+
+const TABLE_ROWS = 100
+const TABLE_COLUMNS = 30
+const CELL_MAX = 200
+const NUMBER = /^-?(?:\d+(?:[.,]\d+)*|\d*[.,]\d+)(?:e[-+]?\d+)?$/i
+
+const cell = (v: unknown): string | null => {
+  if (v === null || v === undefined) return null
+  const s = maskSecrets(typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v))
+  return s.length > CELL_MAX ? `${s.slice(0, CELL_MAX)}…` : s
+}
+
+function shape(columns: string[], rows: unknown[][], total: number, cut: boolean): ResultTable | undefined {
+  if (!columns.length || !rows.length) return undefined
+  const cols = columns.slice(0, TABLE_COLUMNS).map((c) => cell(c) ?? '')
+  const kept = rows.slice(0, TABLE_ROWS).map((r) => cols.map((_, i) => cell(r[i])))
+  const numeric = cols.map((_, i) => {
+    const values = kept.map((r) => r[i]).filter((v): v is string => v !== null && v !== '')
+    return values.length > 0 && values.every((v) => NUMBER.test(v.trim()))
+  })
+  return { columns: cols, numeric, rows: kept, total: Math.max(total, rows.length), ...(cut ? { cut: true } : {}) }
+}
+
+function fromObjects(list: unknown[], total: number, cut: boolean): ResultTable | undefined {
+  const objects = list.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+  if (!objects.length || objects.length !== list.length) return undefined
+  const columns = [...new Set(objects.slice(0, TABLE_ROWS).flatMap((o) => Object.keys(o)))]
+  return shape(columns, objects.map((o) => columns.map((c) => o[c])), total, cut)
+}
+
+function fromJson(v: unknown, cut: boolean): ResultTable | undefined {
+  if (Array.isArray(v)) return fromObjects(v, v.length, cut)
+  if (!v || typeof v !== 'object') return undefined
+  const o = v as Record<string, unknown>
+  const at = (path: string[]): unknown => path.reduce<unknown>((acc, k) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[k] : undefined), o)
+  // Databricks' statement API: the columns in the manifest, the rows as arrays.
+  const schema = at(['manifest', 'schema', 'columns']) ?? at(['schema', 'columns']) ?? at(['columns'])
+  const data = at(['result', 'data_array']) ?? at(['data_array']) ?? at(['rows']) ?? at(['data'])
+  const total = [at(['manifest', 'total_row_count']), at(['result', 'row_count']), at(['row_count']), at(['total_row_count'])].find((n): n is number => typeof n === 'number')
+  if (Array.isArray(schema) && Array.isArray(data) && data.every(Array.isArray)) {
+    const columns = schema.map((c) => (c && typeof c === 'object' ? String((c as Record<string, unknown>)['name'] ?? '') : String(c)))
+    return shape(columns, data as unknown[][], total ?? data.length, cut)
+  }
+  for (const list of [data, at(['results']), at(['items'])]) if (Array.isArray(list)) return fromObjects(list, total ?? list.length, cut)
+  return undefined
+}
+
+// A line of CSV: commas or another separator, with fields in quotes.
+function splitLine(line: string, sep: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let quoted = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') (cur += '"'), i++
+      else if (ch === '"') quoted = false
+      else cur += ch
+    } else if (ch === '"' && !cur) quoted = true
+    else if (ch === sep) out.push(cur), (cur = '')
+    else cur += ch
+  }
+  out.push(cur)
+  return out.map((s) => s.trim())
+}
+
+const bars = (line: string): string[] => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((s) => s.trim())
+
+function fromText(lines: string[], cut: boolean): ResultTable | undefined {
+  if (lines.length < 2) return undefined
+  // A box: +---+ / | a | b | / +---+, as the databricks CLI and MySQL draw it.
+  if (/^\+[-+]+\+$/.test(lines[0]!.trim())) {
+    const body = lines.filter((l) => /^\|.*\|$/.test(l.trim())).map(bars)
+    return body.length > 1 ? shape(body[0]!, body.slice(1), body.length - 1, cut) : undefined
+  }
+  // Markdown: | a | b | / |---|---|
+  if (/^\|.*\|$/.test(lines[0]!.trim()) && /^\|?[\s:|-]+\|?$/.test(lines[1]!.trim())) {
+    const body = lines.slice(2).map(bars)
+    return shape(bars(lines[0]!), body, body.length, cut)
+  }
+  // psql: a | b / ---+--- / (3 rows)
+  if (/^[-+]+$/.test(lines[1]!.trim()) && lines[0]!.includes('|')) {
+    const body = lines.slice(2).filter((l) => !/^\(\d+ rows?\)$/i.test(l.trim())).map((l) => l.split('|').map((s) => s.trim()))
+    return shape(lines[0]!.split('|').map((s) => s.trim()), body, body.length, cut)
+  }
+  for (const sep of ['\t', ',', ';']) {
+    const head = splitLine(lines[0]!, sep)
+    if (head.length < 2) continue
+    const body = lines.slice(1).map((l) => splitLine(l, sep))
+    if (body.every((r) => r.length === head.length)) return shape(head, body, body.length, cut)
+  }
+  return undefined
+}
+
+// What a query brought back, when it reads as a table: rows of JSON (Databricks' statement API among
+// them), a box, Markdown, psql's output, or CSV/TSV. Undefined for anything else.
+export function resultTable(text: string): ResultTable | undefined {
+  const t = text.replace(/\n\[… (resultado cortado|result cut)[^\]]*\]$/, '').trim()
+  const cut = t.length < text.trim().length
+  if (!t) return undefined
+  if (/^[[{]/.test(t)) {
+    try {
+      return fromJson(JSON.parse(t), cut)
+    } catch {
+      // not JSON after all
+    }
+  }
+  return fromText(t.split(/\r?\n/).filter((l) => l.trim()), cut)
+}
+
+// A tool argument or a command that reads like SQL.
+export const isSql = (text: string | undefined): boolean => !!text && SQLISH.test(text)
+
+// The stdout of the computer's "exit code N / --- stdout --- / --- stderr ---" text.
+export const stdoutOf = (text: string): string => /--- stdout ---\n([\s\S]*?)(?=\n--- stderr ---\n|$)/.exec(text)?.[1]?.trim() ?? ''
 
 // ---------- secrets ----------
 
