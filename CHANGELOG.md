@@ -15,6 +15,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 > - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
+> - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo enquanto a página rola.
 > - **Mudou:** **Continuar**, **Tentar de novo** e **Tentar com instruções** viraram botões discretos na linha de baixo da resposta e aparecem ao passar o mouse. Em telas de toque ficam sempre visíveis.
 > - **Corrigido:** **Enviar feedback** e **Conectores** agora têm a mesma altura de **Cofre** no pé da barra lateral.
 
@@ -40,6 +41,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **Settings tabs and subject jumps stay in sight while scrolling.** The group tabs stayed at the top, but the subject links scrolled away. Both rows now stay pinned, so moving between sections works from deep in the page. Thanks to Apostol Apostolov. (#643)
 - **The sidebar's foot rows are one height.** **Send feedback** and **Connectors** sat at 20 px next to **Vault** at 30 px. All three now line up. Thanks to Apostol Apostolov. (#639)
 
 ## [0.2.45] - 2026-11-22
