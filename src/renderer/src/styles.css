@@ -3561,6 +3561,10 @@ h3 {
   min-width: 0;
   border-left: 0;
 }
+.side-panel.is-wide .side-panel__doc,
+.side-panel.is-wide .side-panel__text {
+  max-width: none;
+}
 /* The side panel slides in from its edge. */
 .side-panel {
   --rise: 0;
