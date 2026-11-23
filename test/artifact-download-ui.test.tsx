@@ -116,4 +116,23 @@ describe('on the desktop', () => {
     expect(fire).toHaveBeenCalledWith('saveArtifact', { id: 'a1' })
     expect(links).toEqual([])
   })
+
+  it('stacks Open and Save below the subline when the text is taller than 3 rows', async () => {
+    const cbs: ResizeObserverCallback[] = []
+    class RO {
+      constructor(cb: ResizeObserverCallback) { cbs.push(cb) }
+      observe() {}
+      disconnect() {}
+    }
+    ;(globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver = RO as unknown as typeof ResizeObserver
+    await render(art({ title: 'A very long title that wraps across several lines in a narrow card' }))
+    const card = document.querySelector('.artifact-card') as HTMLElement
+    const text = document.querySelector('.artifact-card__text') as HTMLElement
+    Object.defineProperty(text, 'offsetHeight', { configurable: true, get: () => 80 })
+    for (const cb of cbs) await act(async () => cb([], [] as unknown as ResizeObserver))
+    expect(card.className).toContain('is-stacked')
+    const actions = document.querySelector('.artifact-card__actions')
+    expect(actions?.querySelectorAll('button').length).toBe(2)
+    delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver
+  })
 })

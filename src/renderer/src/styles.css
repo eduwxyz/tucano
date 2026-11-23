@@ -3790,6 +3790,25 @@ button.artifact-card__open:hover {
   min-width: 0;
   text-align: left;
 }
+.artifact-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+/* A tall card (more than 3 rows of text): the actions drop below, aligned under the subline. */
+.artifact-card.is-stacked {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  row-gap: 6px;
+}
+.artifact-card.is-stacked .artifact-card__main {
+  flex: 1 1 100%;
+  align-items: flex-start;
+}
+.artifact-card.is-stacked .artifact-card__actions {
+  padding-left: 40px;
+}
 .browser-card__thumb {
   width: 72px;
   height: 45px;

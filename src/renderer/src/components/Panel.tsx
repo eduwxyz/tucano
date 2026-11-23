@@ -1,7 +1,7 @@
 // What agents make on their computers, in the chat: artifact cards and
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
@@ -35,6 +35,23 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   const a = useStore((s) => s.artifacts.find((x) => x.id === id))
   const open = useStore((s) => s.panel?.kind === 'artifact' && s.panel.id === id)
   const canSave = useStore(canSaveArtifact)
+  const textRef = useRef<HTMLSpanElement>(null)
+  const [stacked, setStacked] = useState(false)
+  useLayoutEffect(() => {
+    const el = textRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const check = (): void => {
+      // More than 3 rows worth of text: drop the actions below, aligned under the subline.
+      const view = el.ownerDocument.defaultView
+      const line = parseFloat(view?.getComputedStyle?.(el)?.lineHeight ?? '')
+      const row = Number.isFinite(line) && line > 0 ? line : 20
+      setStacked(el.offsetHeight > row * 3)
+    }
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [a?.title, a?.name, a?.kind, a?.size])
   if (!a) return null
   const save = canSave && (
     <button className="artifact-card__open" title={a.name} onClick={() => saveArtifact(a)}>
@@ -64,25 +81,30 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   // On a server, a file no browser shows (a .docx, a .zip) is only good downloaded: the panel would be empty.
   const onlySave = windowless() && a.kind === 'file'
   const show = (): void => (onlySave ? saveArtifact(a) : openPanel({ kind: 'artifact', id }))
-  return (
-    <div className={`artifact-card ${open ? 'is-open' : ''}`}>
-      <button className="artifact-card__main" onClick={show}>
-        <span className="artifact-card__icon">
-          <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
-        </span>
-        <span className="artifact-card__text">
-          <strong>{a.title}</strong>
-          <span className="muted small">
-            {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
-          </span>
-        </span>
-      </button>
+  const actions = (
+    <>
       {!onlySave && (
         <button className="artifact-card__open" onClick={show}>
           {L('Abrir', 'Open')}
         </button>
       )}
       {save}
+    </>
+  )
+  return (
+    <div className={`artifact-card ${open ? 'is-open' : ''}${stacked ? ' is-stacked' : ''}`}>
+      <button className="artifact-card__main" onClick={show}>
+        <span className="artifact-card__icon">
+          <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
+        </span>
+        <span className="artifact-card__text" ref={textRef}>
+          <strong>{a.title}</strong>
+          <span className="muted small">
+            {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
+          </span>
+        </span>
+      </button>
+      <div className="artifact-card__actions">{actions}</div>
     </div>
   )
 }
