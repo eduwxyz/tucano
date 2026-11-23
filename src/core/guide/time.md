@@ -11,7 +11,7 @@ Em **Configurações › Pessoas**, **Convidar**: escolha o papel e o que a pess
 - **Admin**: agentes, conectores, skills, configurações, convidar e remover membros, aprovar qualquer ação.
 - **Membro**: conversa, cria canais e rotinas pra si, aprova as ações dos agentes de que é dono e responde o que perguntam a ele.
 
-Quem cria um canal ou um agente fica dono dele. Só o dono do canal e os admins mudam nome, tema e agentes do canal.
+Quem cria um canal ou um agente fica dono dele. Só o dono do canal e os admins mudam nome, tema e agentes do canal. O dono também escolhe quem responde ali: **Modo menção** deixa o agente só ser chamado com @, e **Modo escuta** deixa o Jev trazê-lo quando o pedido é da área dele (veja **conversas**).
 
 ## O que é de cada um
 - **Mensagens diretas** com um agente: só a pessoa lê, nem o dono do Tucano.
