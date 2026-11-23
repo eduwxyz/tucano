@@ -4,7 +4,6 @@ import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry, QuotasSnapshot } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
-<<<<<<< HEAD
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
 import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp, ProviderQuota } from './types'
 import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from './vault'
