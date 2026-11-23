@@ -205,7 +205,7 @@ export class NodeUplink {
       res = await f(url, { headers: this.headers({ accept: 'text/event-stream' }), signal: abort.signal, redirect: 'error' }) // never on to another address, key and all
     } catch (e) {
       if (this.stopped) return
-      this.set('error', L(`Não alcancei o servidor (${(e as Error).message}). Tento de novo sozinho.`, `Couldn't reach the server (${(e as Error).message}). I'll try again by myself.`))
+      this.set('error', L(`Não alcancei o servidor (${(e as Error).message}). Tento de novo sozinho.`, `Couldn't reach the server (${(e as Error).message}). Retrying automatically.`))
       return this.again()
     }
     if (res.status === 401 || res.status === 403) {
@@ -220,7 +220,7 @@ export class NodeUplink {
     }
     if (!res.ok || !res.body) {
       void res.body?.cancel()
-      this.set('error', L(`O servidor respondeu ${res.status}. Tento de novo sozinho.`, `The server answered ${res.status}. I'll try again by myself.`))
+      this.set('error', L(`O servidor respondeu ${res.status}. Tento de novo sozinho.`, `The server returned ${res.status}. Retrying automatically.`))
       return this.again()
     }
     await this.serve(res.body, abort)

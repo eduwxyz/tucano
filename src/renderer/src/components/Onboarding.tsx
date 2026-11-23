@@ -493,7 +493,7 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
               className="btn btn--ghost btn--sm"
               disabled={!said || starting}
               onClick={() => (unsettled ? setConfirmNew(true) : void startOver())}
-              title={L('Começa outra conversa com o Tuca, do zero. Esta fica aqui quando você sai e volta.', 'Starts another conversation with Tuca, from scratch. This one stays here when you leave and come back.')}
+              title={L('Começa outra conversa com o Tuca, do zero. Esta fica aqui quando você sai e volta.', 'Starts a new conversation with Tuca, replacing this one. Leaving this page keeps the current conversation.')}
             >
               <Icon name="plus" size={13} /> {L('Nova conversa', 'New conversation')}
             </button>
@@ -537,7 +537,7 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
           )}
         </div>
         <div className="onb-tc__foot">
-          <span>{applyNow ? L('O que ele cria entra na hora, e dá pra desfazer.', 'What he makes goes in right away, and can be undone.') : L('Nada é criado sem você.', 'Nothing is created without you.')}</span>
+          <span>{applyNow ? L('O que ele cria entra na hora, e dá pra desfazer.', 'What Tuca creates takes effect immediately and can be undone.') : L('Nada é criado sem você.', 'Nothing is created without you.')}</span>
           {modelError && <span className="hint hint--warn">{modelError}</span>}
           <button className="onb-tc__manual" onClick={onManual}>
             {L('Prefiro montar eu mesmo', 'I’d rather build it myself')}
@@ -615,7 +615,7 @@ function ProposalSide({ message, model, onUse }: { message?: Message; model: str
       label: L('Modelo', 'Model'),
       value: d ? `${modelName(d.modelId)} · ${EFFORT()[d.effort]}` : model ? modelName(model) : '—',
       quiet: !d,
-      title: d ? undefined : L('Se ele não escolher outro, o agente usa o modelo do Tuca.', 'Unless he picks another, the agent uses Tuca’s model.')
+      title: d ? undefined : L('Se ele não escolher outro, o agente usa o modelo do Tuca.', 'Unless Tuca chooses another model, the agent uses Tuca’s model.')
     }
   ]
 
@@ -626,7 +626,7 @@ function ProposalSide({ message, model, onUse }: { message?: Message; model: str
         <div className="grow">
           <strong>{created?.name ?? d?.name ?? L('Proposta', 'Proposal')}</strong>
           <span className="muted small">
-            {stage === 'done' ? L('Entrou no time', 'Joined the team') : d ? L('Proposta do Tuca, pronta pra criar', 'Tuca’s proposal, ready to create') : L('Vai se montando enquanto vocês conversam', 'Fills in as you two talk')}
+            {stage === 'done' ? L('Entrou no time', 'Joined the team') : d ? L('Proposta do Tuca, pronta pra criar', 'Tuca’s proposal, ready to create') : L('Vai se montando enquanto vocês conversam', 'Updates as you talk to Tuca')}
           </span>
         </div>
       </div>

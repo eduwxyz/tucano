@@ -25,7 +25,7 @@ export function History({ skill }: { skill: Skill }): ReactNode {
               {showing === v.id ? L('esconder', 'hide') : L('o que mudou', 'what changed')}
             </button>
             <button className="btn btn--xs" onClick={() => restoreSkill(skill.id, v.id)}>
-              {L('Voltar a esta', 'Restore this one')}
+              {L('Voltar a esta', 'Restore version')}
             </button>
           </div>
           {showing === v.id && <Diff before={`${v.description}\n\n${v.body}`} after={`${skill.description}\n\n${skill.body}`} />}
