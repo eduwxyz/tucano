@@ -364,6 +364,7 @@ interface Host {
   key: string
   home: string
   server: AppServer
+  login: number // the login file's time when this process started
   loaded: Set<string> // threads loaded in it
   turns: number
   timer?: NodeJS.Timeout
@@ -425,8 +426,9 @@ export class CodexApp {
     if (had && this.servers.get(key)?.alive !== false && this.logins.get(key) === loginAt(l.home)) return had
     const server = new AppServer({ bin, args: l.args, cwd: l.cwd, env: l.env })
     this.servers.set(key, server)
-    this.logins.set(key, loginAt(l.home))
-    const host: Host = { bin, key, home: l.home, server, loaded: new Set(), turns: 0 }
+    const login = loginAt(l.home)
+    this.logins.set(key, login)
+    const host: Host = { bin, key, home: l.home, server, login, loaded: new Set(), turns: 0 }
     const ready = server.ready.then(
       () => host,
       (e: unknown) => {
@@ -673,9 +675,10 @@ export class CodexApp {
     for (const x of idle.slice(0, Math.max(0, idle.length - MAX_IDLE))) this.unpark(x)
   }
 
-  // A process that started before the login file was last written (see loginAt).
+  // A process that started before the login file was last written (see loginAt). Read from the process
+  // itself: the time by key moves to its replacement, and threads still on this one would look current.
   private stale(host: Host): boolean {
-    return this.logins.get(host.key) !== loginAt(host.home)
+    return host.login !== loginAt(host.home)
   }
 
   // Unloaded; what comes next for the thread waits for that (a resume, its deletion).

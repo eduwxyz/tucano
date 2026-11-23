@@ -273,6 +273,21 @@ describe('Codex app-server process', () => {
     expect(again).toMatch(/resumed=true/)
   }, 20_000)
 
+  it('moves every kept thread off the old process after a new login, not only the first to reply', async () => {
+    const auth = oldLogin()
+    const e = make()
+    const first = reply(await collect(e.run(turn('s1', false))))
+    const second = reply(await collect(e.run(turn('s2', false))))
+    expect(field(second, 'pid')).toBe(field(first, 'pid'))
+    writeFileSync(auth, '{"tokens":{"access_token":"novo"}}')
+    const firstAgain = reply(await collect(e.run(turn('s1', true))))
+    const secondAgain = reply(await collect(e.run(turn('s2', true))))
+    expect(field(firstAgain, 'pid')).not.toBe(field(first, 'pid'))
+    expect(field(secondAgain, 'pid')).toBe(field(firstAgain, 'pid'))
+    expect(field(secondAgain, 'thread')).toBe(field(second, 'thread'))
+    expect(secondAgain).toMatch(/resumed=true/)
+  }, 20_000)
+
   it('interrupts a stopped turn and lets its thread go', async () => {
     const e = make()
     const stop = new AbortController()
