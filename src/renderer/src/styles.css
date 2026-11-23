@@ -2283,10 +2283,15 @@ h3 {
   color: var(--accent);
   background: var(--accent-soft);
 }
-.work-row .icon-btn:hover,
-.work-row .icon-btn.is-armed {
+.work-row .icon-btn:hover {
   color: var(--danger);
   background: var(--danger-soft);
+}
+/* The pointer is already on it, so armed has to look different from hovered. */
+.work-row .icon-btn.is-armed,
+.work-row .icon-btn.is-armed:hover {
+  color: #fff;
+  background: var(--danger);
 }
 .work-row__dot {
   flex: none;

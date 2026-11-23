@@ -163,7 +163,7 @@ export function WorkDrawer({
               </button>
               <button type="button"
                 className={`icon-btn icon-btn--sm work-row__stop ${armed === `stop:${m.id}` ? 'is-armed' : ''}`}
-                title={L('Parar esta resposta', 'Stop this reply')}
+                title={armed === `stop:${m.id}` ? L('Clique de novo para parar', 'Click again to stop') : L('Parar esta resposta', 'Stop this reply')}
                 aria-label={L('Parar esta resposta', 'Stop this reply')}
                 onClick={() => arm(`stop:${m.id}`, () => stopRun(m.id))}
                 onBlur={disarm}
@@ -197,7 +197,7 @@ export function WorkDrawer({
                     </button>
                     <button type="button"
                       className={`icon-btn icon-btn--sm work-row__remove ${armed === `remove:${m.id}` ? 'is-armed' : ''}`}
-                      title={L('Tirar da lista', 'Remove from the list')}
+                      title={armed === `remove:${m.id}` ? L('Clique de novo para tirar', 'Click again to remove') : L('Tirar da lista', 'Remove from the list')}
                       aria-label={L('Tirar da lista', 'Remove from the list')}
                       onClick={() => arm(`remove:${m.id}`, () => keep(remember.done.filter((x) => x !== m.id)))}
                       onBlur={disarm}
