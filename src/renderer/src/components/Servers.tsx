@@ -13,7 +13,7 @@ import type { NodeInfo, NodeLogEntry } from '../../../shared/types'
 import type { UplinkStatus } from '../../../shared/node-link'
 import { FoldToggle } from './Fold'
 
-type Server = { id: string; name: string; origin: string; open: boolean; node: boolean }
+type Server = { id: string; name: string; origin: string; open: boolean; node: boolean; own?: boolean }
 
 export const hasServers = (): boolean => !!window.tucano?.servers
 
@@ -50,7 +50,7 @@ export function ServersCard(): ReactNode {
   const forget = async (s: Server): Promise<void> => {
     const ok = await confirmDialog({
       title: L(`Esquecer o Tucano em ${s.name}?`, `Forget the Tucano at ${s.name}?`),
-      body: L('Só este computador esquece o acesso. O Tucano do servidor continua lá, com tudo.', 'Only this computer forgets the access. The Tucano on the server stays there, with everything.'),
+      body: L('Só este computador esquece o acesso. O Tucano do servidor continua lá, com tudo.', "Remove access from this computer. The server and its data stay unchanged."),
       confirm: L('Esquecer', 'Forget'),
       danger: true
     })
@@ -63,7 +63,7 @@ export function ServersCard(): ReactNode {
         title={L('Servidores', 'Servers')}
         lead={L(
           'Um Tucano que roda num servidor, ligado o tempo todo, aberto aqui mesmo: escolha na lista do topo da barra lateral, e volte pela faixa de cima. Os agentes e as conversas são os de lá; nada deste computador vai pra ele.',
-          'A Tucano running on a server, always on, opened right here: pick it in the list at the top of the sidebar, and come back from the bar above it. The agents and conversations are the server’s; nothing on this computer goes to it.'
+          "Open a server workspace from the sidebar switcher; return with the bar above it. Its data stays on the server. Your local workspace is not uploaded."
         )}
       >
         <div className="key-row">
@@ -98,7 +98,7 @@ export function ServersCard(): ReactNode {
         title={L('Conectar a um servidor', 'Connect to a server')}
         lead={L(
           'Cole o link de conexão que o servidor deu (tucano://connect…, ou o link de entrada do navegador, com ?code=). Quem tem o link controla os agentes de lá: cole só links seus ou de quem você confia.',
-          'Paste the connection link the server gave you (tucano://connect…, or the browser sign-in link, with ?code=). Whoever has the link controls the agents there: paste only links of your own or from someone you trust.'
+          "Paste a trusted tucano://connect… or ?code= sign-in link. Anyone with it can control the server’s agents."
         )}
       >
         <form
@@ -138,11 +138,13 @@ export function useServers(): Server[] {
 }
 
 // Over a server's page, which fills the rest of the window: which Tucano it is, the other
-// servers, and the way back to this computer's (src/main/servers.ts keeps BAR px for it).
+// servers, and the way back to this computer's (src/main/servers.ts keeps BAR px for it). Only
+// while its page doesn't draw that in its own workspace menu (an older server, a page not drawn yet).
 export function ServerBar(): ReactNode {
   const servers = useServers()
   const on = servers.find((s) => s.open)
-  if (!on) return null
+  // A page that draws the way back in its own menu fills the window: no bar over it.
+  if (!on || on.own) return null
   const api = window.tucano.servers!
   return (
     <div className="server-bar">
@@ -201,7 +203,7 @@ function Lend({ server, status, main, folders }: { server: Server; status?: Upli
         title: L(`Deixar o Tucano em ${server.name} usar este computador?`, `Let the Tucano at ${server.name} use this computer?`),
         body: L(
           'Os agentes de lá passam a usar o terminal, as pastas que você emprestar, o navegador e os apps deste computador, só quando trabalham pra você, com as aprovações configuradas lá. Funciona enquanto este app estiver aberto. Desligue aqui a qualquer hora.',
-          'Its agents get to use this computer’s terminal, the folders you lend, its browser and apps, only when they work for you, under the approvals set there. It works while this app is open. Turn it off here any time.'
+          'Its agents can use this computer’s terminal, shared folders, browser and apps only when working for you, under the server’s approvals. Access lasts while this app is open. Turn it off here at any time.'
         ),
         confirm: L('Deixar usar', 'Let it')
       })
@@ -218,7 +220,7 @@ function Lend({ server, status, main, folders }: { server: Server; status?: Upli
       <Toggle on={server.node} label={L(`Deixar ${server.name} usar este computador`, `Let ${server.name} use this computer`)} onChange={(on) => void turn(on)} />
       <div className="grow">
         <span className="small">{L('Deixar este servidor usar este computador', 'Let this server use this computer')}</span>
-        {server.node && !main && <p className="muted small">{L('Quem empresta é o workspace principal: as pastas e os apps estão nas Configurações dele.', 'The main workspace lends it: the folders and apps are in its Settings.')}</p>}
+        {server.node && !main && <p className="muted small">{L('Quem empresta é o workspace principal: as pastas e os apps estão nas Configurações dele.', 'The main workspace shares this computer. Its folders and apps are in Settings.')}</p>}
         {shown && (
           <p className={`small server-lend__state ${shown.tone}`} role={shown.tone === 'is-bad' ? 'alert' : undefined}>
             {status!.error ?? L(shown.pt, shown.en)}
@@ -241,7 +243,7 @@ function Lend({ server, status, main, folders }: { server: Server; status?: Upli
             </div>
             <div className="server-lend__step">
               <Icon name="users" size={14} />
-              <span className="small grow">{L('Escolha, no servidor, os agentes que usam este computador.', 'Pick, on the server, the agents that use this computer.')}</span>
+              <span className="small grow">{L('Escolha, no servidor, os agentes que usam este computador.', 'On the server, choose the agents that can use this computer.')}</span>
               {api.openAgents && (
                 <button className="btn btn--sm btn--primary" disabled={!connected} title={connected ? undefined : L('Assim que conectar', 'Once it connects')} onClick={() => api.openAgents!(server.id)}>
                   {L('Escolher os agentes', 'Pick the agents')}
@@ -274,7 +276,7 @@ export function NodeCard(): ReactNode {
       title={L('O que este computador empresta', 'What this computer lends')}
       lead={L(
         `Pra ${lent.map((s) => s.name).join(', ')}: o terminal, o navegador e os conectores deste computador vão junto; as pastas e os apps, só os de baixo. Tudo segue as aprovações configuradas no servidor.`,
-        `To ${lent.map((s) => s.name).join(', ')}: this computer’s terminal, browser and connectors come along; folders and apps, only the ones below. Everything follows the approvals set on the server.`
+        `Shared with ${lent.map((s) => s.name).join(', ')}: this computer’s terminal, browser and connectors, plus only the folders and apps listed below. All access follows the approvals set on the server.`
       )}
     >
       {!paused && (
@@ -325,8 +327,8 @@ function NodeFolders({ info, onChange }: { info: NodeInfo; onChange: (info: Node
       <span className="field__label">{L('Pastas que ele empresta', 'Folders it lends')}</span>
       <p className="muted small">
         {folders.length
-          ? L('As ferramentas de arquivo do servidor só alcançam estas pastas. O terminal alcança o que você alcança, com as mesmas aprovações de um agente neste computador.', "The server's file tools only reach these folders. The terminal reaches what you reach, under the same approvals as an agent on this computer.")
-          : L('Nenhuma pasta ainda: as ferramentas de arquivo do servidor não leem nem gravam nada aqui. Empreste as pastas dos seus projetos. O terminal alcança o que você alcança, com as mesmas aprovações de um agente neste computador.', "No folders yet: the server's file tools don't read or write anything here. Lend your projects' folders. The terminal reaches what you reach, under the same approvals as an agent on this computer.")}
+          ? L('As ferramentas de arquivo do servidor só alcançam estas pastas. O terminal alcança o que você alcança, com as mesmas aprovações de um agente neste computador.', "The server’s file tools can access only these folders. The terminal can access what you can, under the same approvals as an agent on this computer.")
+          : L('Nenhuma pasta ainda: as ferramentas de arquivo do servidor não leem nem gravam nada aqui. Empreste as pastas dos seus projetos. O terminal alcança o que você alcança, com as mesmas aprovações de um agente neste computador.', "No folders shared. The server’s file tools cannot read or write files here until you share folders. The terminal can access what you can, under the same approvals as an agent on this computer.")}
       </p>
       {folders.length > 0 && (
         <div className="apps-list">

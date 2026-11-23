@@ -37,7 +37,7 @@ Object.assign(window, {
 })
 
 beforeEach(async () => {
-  fake = { view: { kind: 'conversation', id: 'dm' }, messages: {}, conversations: [] } as unknown as typeof fake
+  fake = { view: { kind: 'conversation', id: 'dm' }, messages: {}, conversations: [], connectors: [], people: [], you: '' } as unknown as typeof fake
   root = createRoot(document.getElementById('root')!)
   await act(async () => root.render(<AgentCardLayer />))
 })

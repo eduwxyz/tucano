@@ -1,12 +1,14 @@
 // One reply at a time per agent and thread. Two replies of the same agent in the same conversation would
 // each run on a context the other is about to change, so a hand-off that reaches an agent already replying
 // there is noted instead, and the agent answers it once, after the reply it's in. Other conversations and
-// other threads stay parallel: the key is agent + conversation + thread.
+// other threads stay parallel: the key is agent + conversation + thread. The one exception is a person
+// asking for it outright (send mode 'parallel'): that reply goes beside the running one, and the pair
+// simply counts on the same slot until both end.
 
 // Also the key of an agent's kept session: same agent, same conversation, same thread.
 export const replyKey = (agentId: string, convId: string, threadId?: string): string => `${agentId}:${convId}:${threadId ?? ''}`
 
-export type Followup = { depth: number; work?: string; goal?: string } // goal: the goal the hand-off works on (src/core/goals.ts)
+export type Followup = { depth: number; work?: string; job?: string } // job: the job the hand-off is part of (src/core/jobs.ts)
 
 type Slot = { running: number; reserved: number; pending?: Followup }
 
@@ -51,7 +53,7 @@ export class Followups {
   // Several hand-offs while it replies become one follow-up: the deepest chain, the latest work.
   add(key: string, f: Followup): void {
     const s = this.slot(key)
-    s.pending = { depth: Math.max(s.pending?.depth ?? 0, f.depth), work: f.work ?? s.pending?.work, ...((f.goal ?? s.pending?.goal) ? { goal: f.goal ?? s.pending?.goal } : {}) }
+    s.pending = { depth: Math.max(s.pending?.depth ?? 0, f.depth), work: f.work ?? s.pending?.work, ...((f.job ?? s.pending?.job) ? { job: f.job ?? s.pending?.job } : {}) }
   }
 
   // Only once the agent is free: whoever finishes last in a crowded key is the one that gets it.
