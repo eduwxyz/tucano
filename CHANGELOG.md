@@ -15,6 +15,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 > - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
+> - **Mudou:** ao expandir um arquivo Markdown no painel, o texto fica numa coluna central de até 960 px, e tabelas e blocos de código usam a largura toda.
 
 ### Added
 
@@ -30,6 +31,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
 - **The computer icon on an agent's row comes in on hover.** The laptop or globe that says where an agent runs now appears with the settings gear, so the sidebar is quieter at rest. On a touch screen, where nothing hovers, it stays in sight. Thanks to Apostol Apostolov. (#640)
+- **An expanded Markdown file uses the room.** Its text reads in a centered column up to 960 px, and wide tables and code blocks can take the full width of the panel. Thanks to Apostol Apostolov. (#645)
 
 ### Changed
 

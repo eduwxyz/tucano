@@ -3561,13 +3561,8 @@ h3 {
   min-width: 0;
   border-left: 0;
 }
-/* Expanded: wider reading column, not edge-to-edge. Text stays readable;
-   tables/images can break out wider than the text column without a horizontal scrollbar. */
-.side-panel.is-wide .side-panel__text {
-  max-width: min(100%, 960px);
-  margin-inline: auto;
-  width: 100%;
-}
+/* Expanded Markdown: a wider reading column, not edge-to-edge. Text stays readable;
+   tables and code can break out wider than the text column without a horizontal scrollbar. */
 .side-panel.is-wide .side-panel__doc.md {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, min(960px, 100%)) minmax(0, 1fr);
