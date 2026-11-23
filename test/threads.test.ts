@@ -166,6 +166,80 @@ describe('a conversation that answers in it', () => {
     expect(replies().at(-1)?.threadId).toBeUndefined()
   })
 
+  it('asked from the conversation about a thread, the search finds the thread: not the question, nor short messages with the same words', async () => {
+    const root = put('p1', { kind: 'person', id: db.ownerId() }, 'RAIZ: migração do banco')
+    put('p1', { kind: 'agent', id: 'a2' }, `DENTRO: ${'rodando o backfill das tabelas, '.repeat(30)}status da migração: metade`, root.id)
+    put('p1', { kind: 'person', id: db.ownerId() }, 'status da thread migração, alguém viu?')
+    const found: string[] = []
+    const r = runner({
+      onTurn: async (t) => {
+        if (!t.mcpUrl) return
+        found.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', { busca: 'status thread migração', limite: 1 })))
+        found.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', { busca: 'status thread migração' })))
+      }
+    })
+    await r.send('p1', '@lia qual o status da thread migração?')
+    await r.idle()
+
+    expect(found[0]).toContain(`[${root.id}]`)
+    expect(found[0]).not.toContain('alguém viu')
+    expect(found[1]).toContain('alguém viu')
+    expect(found[1]).not.toContain('@lia qual o status')
+  })
+
+  it('buscar_threads with no words lists the latest threads', async () => {
+    const first = put('p1', { kind: 'person', id: db.ownerId() }, 'RAIZ UM')
+    put('p1', { kind: 'agent', id: 'a2' }, 'resposta um', first.id)
+    const second = put('p1', { kind: 'person', id: db.ownerId() }, 'RAIZ DOIS')
+    put('p1', { kind: 'agent', id: 'a2' }, 'resposta dois', second.id)
+    put('p1', { kind: 'person', id: db.ownerId() }, 'MENSAGEM SOLTA')
+    const found: string[] = []
+    const r = runner({
+      onTurn: async (t) => {
+        if (t.mcpUrl) found.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', {})))
+      }
+    })
+    await r.send('p1', '@lia como estão as threads?')
+    await r.idle()
+
+    expect(found[0]!.indexOf('RAIZ DOIS')).toBeGreaterThan(-1)
+    expect(found[0]!.indexOf('RAIZ DOIS')).toBeLessThan(found[0]!.indexOf('RAIZ UM'))
+    expect(found[0]).not.toContain('MENSAGEM SOLTA')
+  })
+
+  it('a thread with a reply still running says who is on it and what it is doing', async () => {
+    const root = put('p1', { kind: 'person', id: db.ownerId() }, 'RAIZ: migração do banco')
+    db.saveMessage({ ...put('p1', { kind: 'agent', id: 'a2' }, '', root.id), run: { status: 'working', depth: 1, steps: [{ id: 's1', label: 'Rodou os testes', status: 'done' }] } })
+    const results: string[] = []
+    const r = runner({
+      onTurn: async (t) => {
+        if (!t.mcpUrl) return
+        results.push(JSON.stringify(await callTool(t.mcpUrl, 'buscar_threads', { busca: 'migração' })))
+        results.push(JSON.stringify(await callTool(t.mcpUrl, 'ler_thread', { id: root.id })))
+      }
+    })
+    await r.send('p1', '@lia e a banco?')
+    await r.idle()
+
+    expect(results[0]).toContain('agora: Theo trabalhando (Rodou os testes)')
+    expect(results[1]).toContain('Agora: Theo trabalhando (Rodou os testes)')
+  })
+
+  it('the router reads who answered each thread, so a question about one goes to whoever handled it', async () => {
+    put('p1', { kind: 'person', id: db.ownerId() }, 'CANAL: bom dia')
+    const root = put('p1', { kind: 'person', id: db.ownerId() }, 'RAIZ: migração do banco')
+    put('p1', { kind: 'agent', id: 'a2' }, 'RESPOSTA DENTRO', root.id)
+    const r = runner()
+    await r.send('p1', 'como está a migração?')
+    await r.idle()
+
+    const routed = turns.find((t) => t.system === routerSystem())!.prompt
+    const list = routed.slice(routed.indexOf('Threads recentes do canal'), routed.indexOf('Conversa ('))
+    expect(list).toContain('- [Edu] RAIZ: migração do banco → Theo')
+    expect(list).toContain('por último [Theo] RESPOSTA DENTRO')
+    expect(list).not.toContain('CANAL: bom dia')
+  })
+
   it('with no thread in it, an answer there is given no thread tools nor the note about them', async () => {
     put('p1', { kind: 'person', id: db.ownerId() }, 'CANAL: bom dia')
     const r = runner()
