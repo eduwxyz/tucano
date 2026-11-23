@@ -22,15 +22,15 @@ export const PEDIR: ToolDef = {
   name: 'pedir',
   get description() {
     return L(
-      'Passa um trabalho a um agente do seu time (os que respondem a você: veja "Seu time"), a um colega (veja "Seus colegas"), ao seu chefe ou ao chefe do seu setor (só o que você não consegue fazer ou que não é do seu setor: veja "Seu chefe" e "Chefe do seu setor") ou, se você chefia um setor, ao chefe de outro setor (veja "Outros setores"). Vira uma thread no canal dele, ou na DM dele, em seu nome, e ele começa na hora. Quando terminar, a resposta dele volta pra esta conversa e você é chamado de novo, sem precisar esperar nem conferir. Escreva o pedido inteiro: quem recebe não lê esta conversa. Um pedido por agente e por assunto; pode chamar mais de uma vez na mesma resposta pra dividir um trabalho. Se isto continua ou completa um pedido seu, em aberto ou que já voltou, passe o código dele em "continuar": segue na mesma thread, sem abrir outra. Depois de pedir, encerre a resposta sem texto: quem pediu vê, embaixo da mensagem, a quem você pediu e como está.',
-      'Hands a piece of work to an agent of your team (those who answer to you: see "Your team"), to a colleague (see "Your colleagues"), to your boss or to your sector\'s head (only what you cannot do or what is not your sector\'s job: see "Your boss" and "Your sector\'s head") or, if you head a sector, to the head of another sector (see "Other sectors"). It becomes a thread in their channel, or in their DM, in your name, and they start right away. When they finish, their answer comes back to this conversation and you are called again, with no need to wait or check. Write the whole request: whoever gets it does not read this conversation. One request per agent and subject; you may call it more than once in the same reply to split a job. If this continues or adds to a request of yours, open or already back, pass its code in "continuar": it goes on in the same thread, without opening another. After asking, end your reply with no text: whoever asked sees, under their message, whom you asked and how it stands.'
+      'Passa um trabalho, uma parte dele ou uma pergunta a qualquer agente do Tucano (veja "Seu time", "Seus colegas", "Seu chefe", os setores e "Outros agentes"). O organograma diz a quem pensar primeiro, mas não trava ninguém: pergunta ou parte pequena vai direto a quem sabe; trabalho grande de outro setor, prefira o chefe dele, que sabe a fila do time. Quem está nesta conversa trabalha aqui mesmo, embaixo da mensagem; quem não está trabalha numa conversa privada, que a pessoa abre pela linha do pedido. Ele começa na hora. Quando terminar, a resposta dele volta pra esta conversa e você é chamado de novo, sem precisar esperar nem conferir. Escreva o pedido inteiro: quem recebe não lê esta conversa (o app manda junto o que a pessoa pediu e a divisão do trabalho). Partes que não dependem uma da outra, peça todas na mesma resposta: elas andam ao mesmo tempo. A parte que precisa do resultado de outra, peça quando ela voltar. Se isto continua ou completa um pedido seu, em aberto ou que já voltou, passe o código dele em "continuar": segue na mesma thread, sem abrir outra. Depois de pedir, encerre a resposta sem texto: quem pediu vê, embaixo da mensagem, a quem você pediu e como está.',
+      'Hands a piece of work, a part of it or a question to any agent in this Tucano (see "Your team", "Your colleagues", "Your boss", the sectors and "Other agents"). The org chart says whom to think of first, but fences no one in: a question or a small part goes straight to whoever knows; for a big job of another sector, prefer its head, who knows the team\'s queue. Whoever is in this conversation works right here, under the message; whoever isn\'t works in a private conversation the person opens from the request\'s line. They start right away. When they finish, their answer comes back to this conversation and you are called again, with no need to wait or check. Write the whole request: whoever gets it does not read this conversation (the app sends along what the person asked and how the work is split). Parts that don\'t depend on each other, ask them all in the same reply: they run at the same time. A part that needs another\'s result, ask when that one comes back. If this continues or adds to a request of yours, open or already back, pass its code in "continuar": it goes on in the same thread, without opening another. After asking, end your reply with no text: whoever asked sees, under their message, whom you asked and how it stands.'
     )
   },
   get inputSchema() {
     return {
       type: 'object' as const,
       properties: {
-        para: { type: 'string', description: L('O agente que faz: o @handle ou o nome, como em "Seu time", "Seus colegas", "Seu chefe", "Chefe do seu setor" ou "Outros setores".', 'The agent who does it: the @handle or the name, as in "Your team", "Your colleagues", "Your boss", "Your sector\'s head" or "Other sectors".') },
+        para: { type: 'string', description: L('O agente que faz: o @handle ou o nome, de qualquer lista abaixo de "Seu time" até "Outros agentes".', 'The agent who does it: the @handle or the name, from any list from "Your team" to "Other agents".') },
         pedido: { type: 'string', maxLength: TEXT_MAX, description: L('O que fazer, com tudo o que ele precisa saber pra fazer sem perguntar.', 'What to do, with everything they need to know to do it without asking.') },
         pronto: { type: 'string', maxLength: DONE_MAX, description: L('Opcional, só quando não for óbvio pelo pedido: o que conta como terminado, em uma frase ("PR aberto com teste"). Quem recebe lê; não aparece na conversa.', 'Optional, only when the request doesn\'t make it obvious: what counts as finished, in one sentence ("PR open with a test"). Whoever gets it reads it; it doesn\'t show in the conversation.') },
         continuar: {
@@ -44,8 +44,8 @@ export const PEDIR: ToolDef = {
         canal: {
           type: 'string',
           description: L(
-            'Onde o pedido fica. O nome de um canal dele, quando o assunto é o tema desse canal. "dm" quando o assunto não é de nenhum canal dele (algo sobre ele mesmo, um recado, uma coisa pessoal de quem pediu): vai pra DM dele com quem pediu. Na dúvida, ou sem dizer nada: o primeiro canal dele.',
-            'Where the request stays. The name of one of their channels, when the subject is that channel\'s topic. "dm" when the subject belongs to none of their channels (something about themselves, a message to pass on, something personal to whoever asked): it goes to their DM with whoever asked. In doubt, or with nothing said: their first channel.'
+            'Opcional. Sem dizer nada: se ele está nesta conversa, o trabalho fica aqui, embaixo da mensagem; se não está, vai numa conversa privada dele com quem pediu (a DM). Diga o nome de um canal dele só quando o assunto é claramente o tema desse canal e o time de lá deve acompanhar.',
+            'Optional. With nothing said: if they are in this conversation, the work stays here, under the message; if not, it goes to a private conversation of theirs with whoever asked (the DM). Name one of their channels only when the subject is clearly that channel\'s topic and the team there should follow it.'
           )
         }
       },
@@ -138,7 +138,7 @@ export function askMessage(to: Agent, ask: { text: string; done?: string; dueAt?
 }
 
 // What the one doing it is told beyond the thread: whose request it is, and where its answer and its doubts go.
-export function askTask(from: Agent, me: string, done?: string, kind: AskKind = 'down', sector?: string, head = true): string {
+export function askTask(from: Agent, me: string, done?: string, kind: AskKind = 'down', sector?: string, head = true, context?: AskContext): string {
   const until = done ? ` ${L(`Conta como terminado: ${done.replace(/[.\s]+$/, '')}.`, `It counts as finished when: ${done.replace(/[.\s]+$/, '')}.`)}` : ''
   // How the message above is introduced: whose it is, and what is expected of whoever gets it.
   const intro = {
@@ -148,12 +148,41 @@ export function askTask(from: Agent, me: string, done?: string, kind: AskKind = 
     up: head
       ? L(`de ${from.name}, do seu time, que passou isto a você: resolva, ou leve ao setor certo.`, `from ${from.name}, of your team, who passed this up to you: solve it, or take it to the right sector.`)
       : L(`de ${from.name}, do seu time, que passou isto a você: resolva, ou responda dizendo o que falta.`, `from ${from.name}, of your team, who passed this up to you: solve it, or answer saying what is left.`),
-    sector: L(`um pedido do ${sector ?? 'outro setor'}, via ${from.name}: decida quem do seu setor faz; se não for do seu setor, responda dizendo por quê.`, `a request from ${sector ?? 'another sector'}, via ${from.name}: decide who in your sector does it; if it is not your sector's, answer saying why.`)
+    sector: L(`um pedido do ${sector ?? 'outro setor'}, via ${from.name}: decida quem do seu setor faz; se não for do seu setor, responda dizendo por quê.`, `a request from ${sector ?? 'another sector'}, via ${from.name}: decide who in your sector does it; if it is not your sector's, answer saying why.`),
+    other: L(`um pedido de ${from.name}, de fora do seu time. Faça o que ela pede. Se for grande a ponto de atrapalhar o que o seu chefe te passou, diga isso na resposta, com o que já deu pra fazer.`, `a request from ${from.name}, from outside your team. Do what it asks. If it is big enough to get in the way of what your boss gave you, say so in the reply, with what you could already do.`)
   }[kind]
   return L(
     `A mensagem acima é ${intro} Quando terminar, sua resposta final nesta thread volta sozinha pra ${from.name}, que não leu o resto daqui: escreva nela o resultado inteiro, com o que fez, o que achou e o que falta. Não mencione ${from.name} pra avisar, nem deixe um recado à parte pra ele: a resposta é uma só, e ${me} também a lê. Não pare pra confirmar o que dá pra decidir: o que estiver em aberto e tiver um jeito sensato de fazer, decida, siga e diga na resposta o que escolheu. Pergunte só o que impede de continuar de verdade. Aí use ask_user: a pergunta vai pra ${from.name}, não pra ${me}; uma pergunta só, com a sua recomendação, e escreva na resposta o que você já tem antes de perguntar, porque isso volta junto com a pergunta. O que pedir aprovação continua pedindo, como sempre.`,
     `The message above is ${intro} When you finish, your final reply in this thread goes back to ${from.name} by itself, and they did not read the rest of it: write the whole result there, with what you did, what you found and what is left. Do not mention ${from.name} to let them know, nor leave a separate note for them: there is one answer, and ${me} reads it too. Don't stop to confirm what you can decide: what is open and has a sensible way of doing it, decide, go on and say in the reply what you chose. Ask only what really keeps you from going on. Then use ask_user: the question goes to ${from.name}, not to ${me}; one question, with your recommendation, and write what you already have in the reply before asking, because it goes back with the question. What asks for approval still asks, as always.`
-  ) + until
+  ) + until + (context ? askContext(context) : '')
+}
+
+// What goes with a request so whoever does a part doesn't lose the whole: what the person asked to begin
+// with, how the work was split (who does what, how each stands) and what the others already delivered.
+export interface AskContext {
+  asked?: { by: string; text: string }
+  split?: { to: string; text: string; state: Delegation['state']; code: string; mine?: boolean }[]
+  delivered?: { to: string; text: string }[]
+}
+const DELIVERED_MAX = 2_000
+
+export function askContext(c: AskContext): string {
+  const parts: string[] = []
+  if (c.asked?.text.trim()) parts.push(`${L(`O que ${c.asked.by} pediu no começo`, `What ${c.asked.by} asked to begin with`)}:\n${quoted(c.asked.text.slice(0, TEXT_MAX))}`)
+  const others = (c.split ?? []).filter((x) => !x.mine)
+  if (others.length) {
+    const state = (x: { state: Delegation['state'] }): string => (x.state === 'open' ? L('em andamento', 'under way') : x.state === 'done' ? L('pronto', 'done') : x.state === 'failed' ? L('não terminou', 'did not finish') : L('parado', 'stopped'))
+    parts.push(`${L('Como o trabalho foi dividido (o resto, além do seu)', 'How the work was split (the rest, besides yours)')}:\n${others.map((x) => `- ${x.to} [${x.code}], ${state(x)}: ${x.text.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n')}\n${L('Não faça a parte de outro. Se a sua depende de uma delas, use o que já foi entregue; se ainda não foi, faça o que der e diga o que espera.', 'Do not do another\'s part. If yours depends on one of them, use what was delivered; if it wasn\'t yet, do what you can and say what you are waiting for.')}`)
+  }
+  if (c.delivered?.length) parts.push(`${L('Já entregue', 'Already delivered')}:\n${c.delivered.map((x) => `- ${x.to}:\n${quoted(x.text.slice(0, DELIVERED_MAX))}`).join('\n')}`)
+  return parts.length ? `\n\n${parts.join('\n\n')}` : ''
+}
+
+// The note a reply under way gets at its next step, when a part of the same work is delivered or added.
+export function teammateNote(what: 'done' | 'asked', to: string, text: string): string {
+  return what === 'done'
+    ? L(`[Enquanto você trabalhava, ${to} terminou a parte dele: ${text.replace(/\s+/g, ' ').trim().slice(0, 600)}]`, `[While you were working, ${to} finished their part: ${text.replace(/\s+/g, ' ').trim().slice(0, 600)}]`)
+    : L(`[A divisão do trabalho ganhou mais uma parte: ${to} vai fazer ${text.replace(/\s+/g, ' ').trim().slice(0, 300)}. Não faça essa parte.]`, `[The split of the work got one more part: ${to} will do ${text.replace(/\s+/g, ' ').trim().slice(0, 300)}. Don't do that part.]`)
 }
 
 const cut = (text: string): string =>
@@ -188,7 +217,11 @@ export function returnTask(returned: Returned[], open: { d: Delegation; to: stri
     const head = `- [${codeOf(r.d)}] ${r.to}, ${r.channel}`
     if (r.what === 'done')
       return `${head}: ${L('terminou. O que respondeu', 'finished. What they answered')}${r.text?.trim() ? `:\n${quoted(r.text)}` : ` ${L('está na thread do pedido', 'is in the request\'s thread')}.`}`
-    if (r.what === 'failed') return `${head}: ${L(`não terminou${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}. Diga isso a ${me}, e peça de novo se fizer sentido`, `did not finish${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}. Tell ${me} so, and ask again if it makes sense`)}.`
+    if (r.what === 'failed')
+      return `${head}: ${L(
+        `não terminou${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}${r.text?.trim() ? `. O que ficou pronto:\n${quoted(r.text)}\n` : '. '}Decida você o caminho: passe pra outro agente que faz a mesma coisa, faça de outro jeito, ou, se só ${me} resolve (um login, o limite do mês, uma decisão), leve a ${me} numa pergunta só, com a sua recomendação`,
+        `did not finish${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}${r.text?.trim() ? `. What got done:\n${quoted(r.text)}\n` : '. '}Decide the way yourself: hand it to another agent who does the same, do it another way, or, if only ${me} can solve it (a sign-in, the month's limit, a decision), take it to ${me} in one question, with your recommendation`
+      )}.`
     if (r.what === 'cancelled') return `${head}: ${L('foi parado antes de terminar', 'was stopped before it finished')}.`
     if (r.what === 'late') return `${head}: ${L(`passou do prazo e ainda não terminou. Diga a ${me}; pra desistir, use cancelar_pedido`, `is past its deadline and has not finished. Tell ${me}; to give up, use cancelar_pedido`)}.`
     const so = r.text?.trim() ? `\n${L('O que escreveu até agora', 'What it wrote so far')}:\n${quoted(r.text)}` : ''
@@ -222,13 +255,18 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
   const peers = peersOf(agents, agent.id).filter((p) => !team.some((t) => t.id === p.id) && !(isHead && heads.some((h) => h.id === p.id)))
   // In no tree: the others in none are its colleagues, with no one over any of them.
   const loose = looseColleaguesOf(agents, agent.id)
-  if (!team.length && !peers.length && !loose.length && !boss && !isHead) return undefined
+  // Everyone else: out of its way in the tree, but no fence. A question or a small part goes to them directly.
+  const near = new Set([agent.id, ...team.map((a) => a.id), ...peers.map((a) => a.id), ...loose.map((a) => a.id), ...(boss ? [boss.id] : []), ...(isHead || isEntry ? heads.map((h) => h.id) : [])])
+  const top0 = boss && !isHead ? sectorOf(agents, agent.id) : undefined
+  if (top0) near.add(top0.id)
+  const others = agents.filter((a) => !near.has(a.id) && !a.archived && a.kind !== 'tuca')
+  if (!team.length && !peers.length && !loose.length && !boss && !isHead && !others.length) return undefined
   const direct = new Set(directReports(agents, agent.id).map((a) => a.id))
   const name = (id: string): string => agents.find((a) => a.id === id)?.name ?? L('agente removido', 'removed agent')
   const channel = (id: string): string => placeOf(conversations.find((c) => c.id === id))
   const row = (a: Agent, mine: boolean): string => {
     const channels = channelsOf(conversations, a.id)
-    const where = channels.length ? channels.map((c) => `#${c.name}${c.topic ? ` (${c.topic.replace(/\s+/g, ' ').slice(0, 100)})` : ''}`).join(', ') : L('nenhum: o pedido chega na DM dele', 'none: a request arrives in their DM')
+    const where = channels.length ? channels.map((c) => `#${c.name}${c.topic ? ` (${c.topic.replace(/\s+/g, ' ').slice(0, 100)})` : ''}`).join(', ') : L('nenhum', 'none')
     const under = !mine || direct.has(a.id) ? '' : ` · ${L('abaixo de', 'under')} ${name(a.reportsTo!)}`
     return `- @${a.handle} · ${describeAgent(a, connectors)}${under} · ${L('canais', 'channels')}: ${where}`
   }
@@ -239,8 +277,8 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
         .join('\n')}`
     : ''
   const place = L(
-    `O pedido fica no canal dele onde o assunto mora (o tema de cada canal diz). Se o assunto não é de nenhum canal dele (algo sobre ele mesmo, um recado, uma coisa pessoal de ${me}), peça com canal "dm": vai pra DM dele com ${me}. Na dúvida, o canal.`,
-    `The request stays in their channel where the subject lives (each channel's topic says). If the subject belongs to none of their channels (something about themselves, a message to pass on, something personal to ${me}), ask with canal "dm": it goes to their DM with ${me}. In doubt, the channel.`
+    `Quem está nesta conversa trabalha aqui mesmo; quem não está, numa conversa privada dele com ${me}. Só diga um canal em "canal" quando o assunto é claramente o tema dele e o time de lá deve acompanhar.`,
+    `Whoever is in this conversation works right here; whoever isn't, in a private conversation of theirs with ${me}. Only name a channel in "canal" when the subject is clearly its topic and the team there should follow it.`
   )
   const mine = team.length
     ? `${L(
@@ -268,8 +306,8 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
     ? `${
         far
           ? L(
-              `## Seu chefe\n${who(boss)}. Passe a ele com pedir só o que você não consegue fazer, dizendo por quê. Nunca passe pra cima o que o próprio chefe pediu a você: responda a ele.\n\n## Chefe do seu setor\n${who(far)}. O que não é do trabalho do seu setor vai direto a ele com pedir, dizendo por quê, sem passar por quem está no meio: só ele pede a outro setor.`,
-              `## Your boss\n${who(boss)}. Pass to them with pedir only what you can't do, saying why. Never pass up what your boss itself asked you: answer it.\n\n## Your sector's head\n${who(far)}. What isn't your sector's job goes straight to them with pedir, saying why, past whoever is in between: only they ask another sector.`
+              `## Seu chefe\n${who(boss)}. Passe a ele com pedir só o que você não consegue fazer, dizendo por quê. Nunca passe pra cima o que o próprio chefe pediu a você: responda a ele.\n\n## Chefe do seu setor\n${who(far)}. Trabalho grande que não é do seu setor vai direto a ele com pedir, dizendo por quê, sem passar por quem está no meio: ele sabe a quem levar. Uma pergunta ou uma parte pequena de outro setor, peça direto a quem sabe.`,
+              `## Your boss\n${who(boss)}. Pass to them with pedir only what you can't do, saying why. Never pass up what your boss itself asked you: answer it.\n\n## Your sector's head\n${who(far)}. A big job that isn't your sector's goes straight to them with pedir, saying why, past whoever is in between: they know where to take it. A question or a small part of another sector, ask whoever knows directly.`
             )
           : L(
               `## Seu chefe\n${who(boss)}. Passe a ele com pedir só o que não é do trabalho do seu setor ou que você não consegue fazer, dizendo por quê. Nunca passe pra cima o que o próprio chefe pediu a você: responda a ele.`,
@@ -285,8 +323,8 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
       )}${
         heads.some((h) => h.id !== agent.id)
           ? `\n\n${L(
-              `## Outros setores\nSó o chefe de um setor pede a outro setor, e sempre ao chefe dele. Peça só o que é claramente deles. Se um pedido de outro setor não é do seu, responda dizendo por quê. Se nenhum setor cuida do assunto, pergunte a ${me} com ask_user.`,
-              `## Other sectors\nOnly a sector's head asks another sector, and always its head. Ask only what is clearly theirs. If a request from another sector isn't yours, answer saying why. If no sector handles the subject, ask ${me} with ask_user.`
+              `## Outros setores\nTrabalho grande de outro setor vai ao chefe dele, que sabe a fila do time. Peça só o que é claramente deles. Se um pedido de outro setor não é do seu, responda dizendo por quê. Se nenhum setor cuida do assunto, pergunte a ${me} com ask_user.`,
+              `## Other sectors\nA big job of another sector goes to its head, who knows the team's queue. Ask only what is clearly theirs. If a request from another sector isn't yours, answer saying why. If no sector handles the subject, ask ${me} with ask_user.`
             )}\n${heads.filter((h) => h.id !== agent.id).map((h) => `- @${h.handle} · ${sectorName(h, L('Setor de', 'Sector of'))} · ${L('resolve', 'solves')}: ${does(h)}`).join('\n')}`
           : ''
       }`
@@ -294,8 +332,8 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
   // The entry point: the person talks to it, and each team below it is a sector with a head of its own.
   const below = isEntry
     ? `${L(
-        `## Os setores\nVocê é a porta de entrada: ${me} fala com você, e você passa cada parte ao setor certo. Cada time é um setor, com um chefe. O que é de um setor, peça ao chefe dele, que decide quem do setor faz; não peça direto a quem está abaixo dele. Quando um pedido envolve mais de um setor, passe as partes ao mesmo tempo.`,
-        `## The sectors\nYou are the entry point: ${me} talks to you, and you pass each part to the sector it belongs to. Each team is a sector, with a head. What is a sector's, ask its head, who decides who in the sector does it; do not ask those below the head directly. When a request involves more than one sector, pass the parts at the same time.`
+        `## Os setores\nVocê é a porta de entrada: ${me} fala com você, e você passa cada parte ao setor certo. Cada time é um setor, com um chefe. O que é de um setor, peça ao chefe dele, que decide quem do setor faz; só uma pergunta ou uma parte pequena vai direto a quem sabe. Quando um pedido envolve mais de um setor, passe as partes ao mesmo tempo.`,
+        `## The sectors\nYou are the entry point: ${me} talks to you, and you pass each part to the sector it belongs to. Each team is a sector, with a head. What is a sector's, ask its head, who decides who in the sector does it; only a question or a small part goes straight to whoever knows. When a request involves more than one sector, pass the parts at the same time.`
       )}\n${heads.map((h) => `- @${h.handle} · ${sectorName(h, L('Setor de', 'Sector of'))} · ${L('resolve', 'solves')}: ${does(h)}`).join('\n')}`
     : ''
   // What came back to this very place: a follow-up on one of these goes on in its thread, with what was done there in view.
@@ -306,5 +344,11 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
         `## Requests that came back here\nIf what ${me} asks now continues one of these subjects, with the same agent, ask with pedir and "continuar" set to its code: it goes on in the same thread, and they see what they already did. A new subject, a new request.`
       )}\n${back.map((d) => `- [${codeOf(d)}] ${name(d.to)}, ${channel(d.conversationId)}, ${d.state === 'done' ? L('terminou', 'finished') : d.state === 'failed' ? L('não terminou', 'did not finish') : L('foi parado', 'was stopped')}: ${d.text.replace(/\s+/g, ' ').slice(0, 140)}`).join('\n')}`
     : ''
-  return `${[mine, beside, side, up, sectors, below].filter(Boolean).join('\n\n')}${going}${again}`
+  const rest = others.length
+    ? `${L(
+        `## Outros agentes\nFora do seu caminho no organograma, mas ninguém é cercado: uma pergunta ou uma parte pequena que é do trabalho de um deles, peça direto com pedir. Trabalho grande de outro setor, prefira o chefe dele.`,
+        `## Other agents\nOut of your way in the org chart, but no one is fenced in: a question or a small part that is one of theirs to do, ask them directly with pedir. For a big job of another sector, prefer its head.`
+      )}\n${others.map((a) => row(a, false)).join('\n')}`
+    : ''
+  return `${[mine, beside, side, up, sectors, below, rest].filter(Boolean).join('\n\n')}${going}${again}`
 }

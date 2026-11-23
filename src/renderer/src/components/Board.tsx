@@ -10,7 +10,7 @@ import { headsOf, sectorName, sectorOf } from '../../../shared/org'
 import { canContinue } from '../../../shared/run-progress'
 import { boardCards, costOf, dayStart, liveStep, stepsOf, storyOf, tasksOf, type BoardCard, type BoardTask, type CrewMember } from '../board'
 import { call } from '../rpc'
-import { answerDecision, continueRun, isTeam, loadTasks, navigate, openThread, personName, retryRun, sendMessage, stopRun, submitDecisions, toast, useStore, type Agent, type Conversation } from '../store'
+import { answerDecision, cancelQuestion, continueRun, isTeam, loadTasks, navigate, openThread, personName, retryRun, sendMessage, stopRun, submitDecisions, toast, useStore, type Agent, type Conversation } from '../store'
 import { ApprovalCard, QuestionCard, ReplyText } from './Conversation'
 import { ArtifactCard } from './Panel'
 import { ago, AgentAvatar, tokens as tokenWords } from './ui'
@@ -216,7 +216,7 @@ export function BoardPage(): ReactNode {
     try {
       return await call('saveTask', { task })
     } catch (e) {
-      toast(e instanceof Error ? e.message : L('Não consegui salvar a tarefa.', "I couldn't save the task."))
+      toast(e instanceof Error ? e.message : L('Não consegui salvar a tarefa.', "Couldn't save the task."))
       return undefined
     }
   }
@@ -231,7 +231,7 @@ export function BoardPage(): ReactNode {
       if (open === `t:${t.id}`) setOpen(null)
       toast(L(`${agents.get(t.agentId)?.name ?? 'O agente'} começou.`, `${agents.get(t.agentId)?.name ?? 'The agent'} started.`))
     } catch (e) {
-      toast(e instanceof Error ? e.message : L('Não consegui começar.', "I couldn't start it."))
+      toast(e instanceof Error ? e.message : L('Não consegui começar.', "Couldn't start the task."))
     }
   }
   const create = async (text: string): Promise<boolean> => {
@@ -448,8 +448,8 @@ export function BoardPage(): ReactNode {
   // ---------- actions on cards ----------
   const decide = (id: string, decision: 'approved' | 'refused'): void => {
     void call('decideApproval', { id, decision }).then(
-      () => toast(decision === 'approved' ? L('Aprovado. O agente continua.', 'Approved. The agent goes on.') : L('Recusado. Nada foi feito.', 'Refused. Nothing was done.')),
-      (e: unknown) => toast(e instanceof Error ? e.message : L('Não consegui decidir.', "I couldn't decide."))
+      () => toast(decision === 'approved' ? L('Aprovado. O agente continua.', 'Approved. The agent continues.') : L('Recusado. Nada foi feito.', 'Refused. Nothing was done.')),
+      (e: unknown) => toast(e instanceof Error ? e.message : L('Não consegui decidir.', "Couldn't record the decision."))
     )
   }
   const answerOne = (messageId: string, index: number): void => {
@@ -458,7 +458,7 @@ export function BoardPage(): ReactNode {
   }
 
   const renderCard = (c: BoardTask): ReactNode => (
-    <CardView key={c.id} c={c} ctx={ctx} focus={focus === c.id} fresh={fresh.has(c.id)} fam={!!hover?.has(c.id)} onOpen={() => (justDragged.current ? undefined : openCard(c.id))} onDecide={decide} onAnswer={answerOne} />
+    <CardView key={c.id} c={c} ctx={ctx} focus={focus === c.id} fresh={fresh.has(c.id)} fam={!!hover?.has(c.id)} onOpen={() => (justDragged.current ? undefined : openCard(c.id))} onDecide={decide} onCancel={(id) => void cancelQuestion(id)} onAnswer={answerOne} />
   )
   const renderTask = (t: Task): ReactNode => {
     const a = t.agentId ? agents.get(t.agentId) : undefined
@@ -568,7 +568,7 @@ export function BoardPage(): ReactNode {
                 <div key={c.id} className={`bd-stuck-row ${paused ? 'paused' : ''}`}>
                   <span className="bd-bang">{paused ? '‖' : '!'}</span>
                   <Face agent={a} />
-                  <span className="msg"><b>{a?.name}</b> {paused ? L('pausou em', 'paused on') : L('parou em', 'stopped on')} “{c.title}” {c.last?.run?.error && <em>· {firstLine(c.last.run.error)}</em>}</span>
+                  <span className="bd-stuck-msg"><b>{a?.name}</b> {paused ? L('pausou em', 'paused on') : L('parou em', 'stopped on')} “{c.title}” {c.last?.run?.error && <em>· {firstLine(c.last.run.error)}</em>}</span>
                   <span className="bd-grow" />
                   <button className="bd-btn quiet sm" onClick={() => openCard(c.id)}>{L('Ver', 'See')}</button>
                   {c.last && (paused || canContinue(c.last.run!) ? <button className="bd-btn ink sm" onClick={() => continueRun(c.last!.id)}>{L('Continuar', 'Continue')}</button> : RETRYABLE.has(c.last.run!.status) && <button className="bd-btn ink sm" onClick={() => retryRun(c.last!.id)}>{L('Tentar de novo', 'Try again')}</button>)}
@@ -624,7 +624,7 @@ export function BoardPage(): ReactNode {
       }} />}
       {openTask && <TaskPanel key={openTask.id} t={openTask} team={team} conversations={conversations} onClose={() => setOpen(null)} save={save} onStart={(t) => void start(t)} onRemove={async (t) => {
         setOpen(null)
-        await call('removeTask', { id: t.id }).catch(() => toast(L('Não consegui apagar a tarefa.', "I couldn't delete the task.")))
+        await call('removeTask', { id: t.id }).catch(() => toast(L('Não consegui apagar a tarefa.', "Couldn't delete the task.")))
       }} />}
 
       {pop && (
@@ -635,7 +635,7 @@ export function BoardPage(): ReactNode {
               {([[L('Navegar', 'Move'), ['←', '↑', '↓', '→']], [L('Abrir o cartão', 'Open the card'), ['Enter']], [L('Aprovar', 'Approve'), ['A']], [L('Responder', 'Answer'), ['1', '2', '3']], [L('Começar', 'Start'), ['S']], [L('Nova tarefa', 'New task'), ['N']], [L('Buscar', 'Search'), ['/']], [L('Fechar', 'Close'), ['Esc']]] as [string, string[]][]).map(([what, keys]) => (
                 <div key={what}><span>{what}</span><span>{keys.map((k) => <kbd key={k}>{k}</kbd>)}</span></div>
               ))}
-              <p style={{ margin: '10px 0 0' }}>{L('Arraste uma tarefa de “A fazer” pra “Fazendo”, ou pra cima de um agente lá no topo. Passe o mouse num pedido dividido pra ver as partes dele.', 'Drag a task from “To do” to “Doing”, or onto an agent at the top. Hover a split request to see its parts.')}</p>
+              <p style={{ margin: '10px 0 0' }}>{L('Arraste uma tarefa de “A fazer” pra “Fazendo”, ou pra cima de um agente lá no topo. Passe o mouse num pedido dividido pra ver as partes dele.', 'Drag a task from “To do” to “Doing” or onto an agent above. Hover over a split request to see its parts.')}</p>
             </div>
           ) : (
             <>
@@ -750,7 +750,7 @@ function QuickAdd({ team, inputRef, onCreate }: { team: Agent[]; inputRef: RefOb
 
 // Where a card is, in a few words (a part in the open card's team, an agent's line on top).
 function statusOf(k: BoardCard, ctx: Ctx): string {
-  if (k.column === 'done') return k.state === 'stopped' ? L('parado', 'stopped') : firstLine(k.last?.text ?? '') || L('pronto', 'done')
+  if (k.column === 'done') return k.last?.run?.cancelled ? L('pergunta cancelada', 'question cancelled') : k.state === 'stopped' ? L('parado', 'stopped') : firstLine(k.last?.text ?? '') || L('pronto', 'done')
   if (k.column === 'you') return k.state === 'approval' ? L('quer sua aprovação', 'wants your approval') : L('perguntou pra você', 'asked you')
   if (k.column === 'stuck') return firstLine(k.last?.run?.error ?? '') || L('parou', 'stopped')
   if (k.state === 'asked-up') return L(`perguntou pra ${k.waitingOn}`, `asked ${k.waitingOn}`)
@@ -787,7 +787,7 @@ function Crew({ c, ctx, live }: { c: BoardTask; ctx: Ctx; live?: boolean }): Rea
   )
 }
 
-function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTask; ctx: Ctx; focus: boolean; fresh: boolean; fam: boolean; onOpen: () => void; onDecide: (id: string, d: 'approved' | 'refused') => void; onAnswer?: (messageId: string, i: number) => void }): ReactNode {
+function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide, onCancel }: { c: BoardTask; ctx: Ctx; focus: boolean; fresh: boolean; fam: boolean; onOpen: () => void; onDecide: (id: string, d: 'approved' | 'refused') => void; onCancel: (messageId: string) => void; onAnswer?: (messageId: string, i: number) => void }): ReactNode {
   const a = ctx.agents.get(c.agentId)
   const conv = ctx.convs.get(c.conversationId)
   const live = c.column === 'doing' && c.crew.some((m) => m.state === 'working')
@@ -797,11 +797,12 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTas
   const ready = c.family.slice(1).filter((k) => k.column === 'done').length
   let body: ReactNode
   if (c.column === 'done') {
-    const result = c.state === 'stopped' ? L('Parado antes de terminar', 'Stopped before finishing') : firstLine(c.last?.text ?? '') || (c.parts.length ? L('O time entregou', 'The team delivered') : L('Pronto', 'Done'))
+    const cancelled = !!c.last?.run?.cancelled // the person dismissed its question: not a result, so grey like a stop
+    const result = cancelled ? L('Pergunta cancelada', 'Question cancelled') : c.state === 'stopped' ? L('Parado antes de terminar', 'Stopped before finishing') : firstLine(c.last?.text ?? '') || (c.parts.length ? L('O time entregou', 'The team delivered') : L('Pronto', 'Done'))
     body = (
       <>
         <div className="bd-done-row"><Face agent={a} /><div className="bd-c-title">{c.title}</div><span className="time">{c.endedAt ? new Date(c.endedAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
-        <div className={`bd-res ${c.state === 'stopped' ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
+        <div className={`bd-res ${c.state === 'stopped' || cancelled ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
       </>
     )
   } else if (c.column === 'you') {
@@ -823,7 +824,10 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide }: { c: BoardTas
               <button className="bd-btn quiet sm" onClick={() => onDecide(approval.id, 'refused')}>{L('Recusar', 'Refuse')}</button>
             </>
           ) : (
-            <button className="bd-btn ink sm" onClick={onOpen}>{L('Responder', 'Answer')}</button>
+            <>
+              <button className="bd-btn ink sm" onClick={onOpen}>{L('Responder', 'Answer')}</button>
+              {question?.decisions?.length ? <button className="bd-btn quiet sm" onClick={() => onCancel(question.id)}>{L('Cancelar', 'Cancel')}</button> : null}
+            </>
           )}
           {parts > 0 && <span className="bd-of">{L(`pedido a ${a?.name ?? ''} · ${ready} de ${parts} prontas`, `asked of ${a?.name ?? ''} · ${ready} of ${parts} done`)}</span>}
         </div>
@@ -879,7 +883,7 @@ function Story({ task, ctx, onNav }: { task: BoardTask; ctx: Ctx; onNav: (id: st
         const to = ctx.agents.get(task.agentId)?.name ?? ''
         const what =
           b.kind === 'asked' ? (b.by?.kind === 'routine' ? L(`rodou pro ${to}`, `ran for ${to}`) : L(`pediu a ${to}`, `asked ${to}`))
-          : b.kind === 'split' ? L(`dividiu em ${b.title}`, `split it in ${b.title}`)
+          : b.kind === 'split' ? L(`dividiu em ${b.title}`, `split it into ${b.title}`)
           : b.kind === 'delivered' ? L('juntou as partes e entregou', 'put the parts together and delivered')
           : b.title
         const opens = b.kind === 'part'
@@ -946,7 +950,7 @@ function CardPanel({ c, ctx, onNav, onClose, onAgain }: { c: BoardCard; ctx: Ctx
     ...(request && request.text.trim() ? [{ me: request.author.kind === 'person', text: request.text, id: request.id }] : []),
     ...c.replies.filter((r) => r.text.trim() && !(c.column === 'done' && r === last)).map((r) => ({ me: false, text: r.text, id: r.id }))
   ]
-  const by = c.by.kind === 'routine' ? L(`Rodou pela rotina “${c.by.name}”`, `Ran by the routine “${c.by.name}”`) : c.by.kind === 'agent' ? L(`Pedido por ${c.by.name}`, `Asked by ${c.by.name}`) : L(`Pedido por ${c.by.name}`, `Asked by ${c.by.name}`)
+  const by = c.by.kind === 'routine' ? L(`Rodou pela rotina “${c.by.name}”`, `Run by the routine “${c.by.name}”`) : c.by.kind === 'agent' ? L(`Pedido por ${c.by.name}`, `Asked by ${c.by.name}`) : L(`Pedido por ${c.by.name}`, `Asked by ${c.by.name}`)
   const where = conv ? (conv.kind === 'channel' ? L(`em #${conv.name}`, `in #${conv.name}`) : L('na DM', 'in the DM')) : ''
   const working = c.column === 'doing' && c.state === 'working'
   return (
@@ -1054,7 +1058,7 @@ function CardPanel({ c, ctx, onNav, onClose, onAgain }: { c: BoardCard; ctx: Ctx
               <textarea ref={area} rows={1} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }} placeholder={plainQuestion ? L(`Responder pra ${a.name}…`, `Answer ${a.name}…`) : L(`Escrever pra ${a.name}…`, `Write to ${a.name}…`)} aria-label={L('Escrever pro agente', 'Write to the agent')} />
               <button onClick={send} disabled={!draft.trim()} aria-label={L('Enviar', 'Send')}><Send /></button>
             </div>
-            <div className="bd-hint">{plainQuestion && !people ? L('A sua resposta vai pra conversa, e o agente continua.', 'Your answer goes to the conversation, and the agent goes on.') : c.threadId ? (c.column === 'done' ? L('Pede um ajuste: vai pra mesma thread.', 'Ask for a change: it goes to the same thread.') : L('Muda o rumo sem parar o trabalho: vai pra mesma thread.', 'Change course without stopping: it goes to the same thread.')) : L(`Vai pra ${where.replace(/^(em|na|in) /, '') || 'conversa'}, como uma mensagem sua.`, `Goes to ${where.replace(/^in (the )?/, '') || 'the conversation'}, as your message.`)}</div>
+            <div className="bd-hint">{plainQuestion && !people ? L('A sua resposta vai pra conversa, e o agente continua.', 'Your answer goes to the conversation and the agent continues.') : c.threadId ? (c.column === 'done' ? L('Pede um ajuste: vai pra mesma thread.', 'Ask for a change: it goes to the same thread.') : L('Muda o rumo sem parar o trabalho: vai pra mesma thread.', 'Change course without stopping: it goes to the same thread.')) : L(`Vai pra ${where.replace(/^(em|na|in) /, '') || 'conversa'}, como uma mensagem sua.`, `Goes to ${where.replace(/^in (the )?/, '') || 'the conversation'}, as your message.`)}</div>
           </>
         )}
       </div>
@@ -1098,7 +1102,7 @@ function TaskPanel({ t, team, conversations, onClose, save, onStart, onRemove }:
           <input className="title-in" value={title} maxLength={MAX_TASK_TITLE} onChange={(e) => setTitle(e.target.value)} onBlur={() => void words()} aria-label={L('Título', 'Title')} />
           <label>
             {L('Detalhes pro agente', 'Details for the agent')}
-            <textarea value={notes} maxLength={MAX_TASK_NOTES} onChange={(e) => setNotes(e.target.value)} onBlur={() => void words()} placeholder={L('O que ele precisa saber: contexto, o que conta como pronto, onde estão as coisas.', 'What it needs to know: context, what counts as done, where things are.')} />
+            <textarea value={notes} maxLength={MAX_TASK_NOTES} onChange={(e) => setNotes(e.target.value)} onBlur={() => void words()} placeholder={L('O que ele precisa saber: contexto, o que conta como pronto, onde estão as coisas.', 'Include context, completion criteria and relevant locations.')} />
           </label>
           <label>
             {L('Quem faz', 'Who does it')}

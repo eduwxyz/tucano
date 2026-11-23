@@ -1,6 +1,7 @@
 // Uso e limites: this month at a glance (by day, by agent, by model), the
 // Claude and Codex subscriptions' windows, and where each agent will end the month.
 import { L, locale } from '../../../shared/lang'
+import { windowNow } from '../../../shared/quota-window'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, messageById, modelInfo, navigate, receipts, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
 import { Sheet } from './Pages'
@@ -26,6 +27,12 @@ const shortTime = (at: number): string => {
   const d = new Date(at)
   const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
   return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })} ${hm}`
+}
+
+// When a window that's over started over: the time today, the date before that.
+const resetAt = (at: number): string => {
+  const today = new Date(at).toDateString() === new Date().toDateString()
+  return today ? L(`zerou às ${shortTime(at)}`, `reset at ${shortTime(at)}`) : L(`zerou em ${shortTime(at)}`, `reset on ${shortTime(at)}`)
 }
 
 // The app's own turns go under one name; agents keep theirs.
@@ -288,7 +295,15 @@ const windowLabel = (minutes: number): string =>
         : L(`Janela de ${minutes} min`, `${minutes}-minute window`)
 
 function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt: number } }): ReactNode {
-  const pct = Math.min(1, Math.max(0, w.utilization))
+  // Draw again when the window resets, so a page left open doesn't keep the old window's share.
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const left = w.resetsAt - Date.now()
+    if (left <= 0 || left > 2 ** 31 - 1) return
+    const t = setTimeout(() => tick((n) => n + 1), left + 1000)
+    return () => clearTimeout(t)
+  }, [w.resetsAt])
+  const { used: pct, reset } = windowNow(w)
   const r = 22
   const c = 2 * Math.PI * r
   const tone = pct >= 0.9 ? 'is-danger' : pct >= 0.7 ? 'is-warn' : ''
@@ -301,7 +316,7 @@ function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt:
       <div>
         <span className="muted small">{label}</span>
         <strong>{L(`${Math.round(pct * 100)}% usado`, `${Math.round(pct * 100)}% used`)}</strong>
-        <span className="muted small">{L('zera', 'resets')} {until(w.resetsAt)}</span>
+        <span className="muted small">{reset ? resetAt(w.resetsAt) : `${L('zera', 'resets')} ${until(w.resetsAt)}`}</span>
       </div>
     </div>
   )

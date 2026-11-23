@@ -92,7 +92,7 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
   return (
     <div className="access">
       <div className="access-modes" role="radiogroup" aria-label={L('O que a pessoa vê', 'What they see')}>
-        {mode('all', L('Vê tudo', 'Sees everything'), L('Todos os agentes e canais, como hoje.', 'All agents and channels, as today.'))}
+        {mode('all', L('Vê tudo', 'Sees everything'), L('Todos os agentes e canais, como hoje.', 'All agents and channels.'))}
         {mode('picked', L('Só o que eu escolher', 'Only what I pick'), L(`${who ? firstName(who) : 'A pessoa'} vê só o que você marcar.`, who ? `${firstName(who)} sees only what you mark.` : 'They see only what you mark.'))}
       </div>
 
@@ -100,9 +100,9 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
         <>
           <section>
             <div className="access-label">{L('Setores e agentes', 'Sectors and agents')}</div>
-            <div className="access-hint">{L('Marque o setor inteiro, ou só alguns agentes dele. Quem entrar depois num setor marcado aparece sozinho.', 'Mark a whole sector, or just some of its agents. Whoever joins a marked sector later shows up on their own.')}</div>
+            <div className="access-hint">{L('Marque o setor inteiro, ou só alguns agentes dele. Quem entrar depois num setor marcado aparece sozinho.', 'Select sectors or individual agents. New agents in selected sectors are included automatically.')}</div>
             {agents.length === 0 ? (
-              <p className="access-empty">{L('Ainda não há agentes. Eles aparecem aqui quando você montar o time.', 'There are no agents yet. They show up here once you build the team.')}</p>
+              <p className="access-empty">{L('Ainda não há agentes. Eles aparecem aqui quando você montar o time.', 'No agents yet. Build the team to see them here.')}</p>
             ) : (
               <>
                 {sectors.map(({ head, members }) => {
@@ -177,7 +177,7 @@ export function AccessChoice({ value, onChange, who }: { value: PersonAccess; on
             </span>
             {hiddenText.length > 0 && (
               <span className="access-no">
-                {L('Não vai ver:', "Won't see:")} {sentence(hiddenText)}. {L(`Os agentes que ficam de fora também não são chamados a pedido dessa pessoa.`, 'The agents left out are not called on this person’s behalf either.')} {L('Na wiki, também não vê as páginas que vieram desses canais.', 'In the wiki, they also won’t see the pages that came from these channels.')}
+                {L('Não vai ver:', "Won't see:")} {sentence(hiddenText)}. {L(`Os agentes que ficam de fora também não são chamados a pedido dessa pessoa.`, 'Excluded agents cannot be called on this person’s behalf.')} {L('Na wiki, também não vê as páginas que vieram desses canais.', 'They also cannot see wiki pages derived from excluded channels.')}
               </span>
             )}
           </>

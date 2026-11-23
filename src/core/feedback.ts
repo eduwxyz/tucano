@@ -106,11 +106,11 @@ export function surveyOf(raw: unknown): SurveyView | null {
 // The picture: base64 of a PNG or a JPEG (by its first bytes), within the bucket's size.
 export function imageError(base64: string): string | undefined {
   const bytes = Math.floor((base64.length * 3) / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0)
-  if (bytes > MAX_FEEDBACK_IMAGE) return L('A imagem da tela é grande demais. Desmarque e envie só o texto.', 'The screen image is too big. Uncheck it and send just the text.')
+  if (bytes > MAX_FEEDBACK_IMAGE) return L('A imagem da tela é grande demais. Desmarque e envie só o texto.', 'The screenshot is too large. Deselect it and send only the text.')
   const head = Buffer.from(base64.slice(0, 16), 'base64')
   const png = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47
   const jpg = head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff
-  return png || jpg ? undefined : L('A imagem da tela não deu certo. Desmarque e envie só o texto.', "The screen image didn't work. Uncheck it and send just the text.")
+  return png || jpg ? undefined : L('A imagem da tela não deu certo. Desmarque e envie só o texto.', "The screenshot could not be processed. Deselect it and send only the text.")
 }
 
 export class Feedback {
@@ -164,8 +164,8 @@ export class Feedback {
     }
     if (r.ok) return
     // The worker's error is a code for logs; the person reads ours, in their language.
-    if (r.status === 429) throw new Error(L('Muitos envios seguidos. Espere um minuto e tente de novo.', 'Too many in a row. Wait a minute and try again.'))
-    if (r.status === 413) throw new Error(L('Ficou grande demais. Desmarque a imagem e envie só o texto.', 'It got too big. Uncheck the image and send just the text.'))
+    if (r.status === 429) throw new Error(L('Muitos envios seguidos. Espere um minuto e tente de novo.', 'Too many submissions. Wait a minute and try again.'))
+    if (r.status === 413) throw new Error(L('Ficou grande demais. Desmarque a imagem e envie só o texto.', 'The submission is too large. Deselect the image and send only the text.'))
     throw new Error(L('Não consegui enviar agora. Tente de novo em um minuto.', "I couldn't send it right now. Try again in a minute."))
   }
 

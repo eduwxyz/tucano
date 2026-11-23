@@ -99,3 +99,22 @@ describe("the window's messages", () => {
     expect(store.messagesIn(store.getState(), 'c2').map((m) => m.id)).toEqual(['x1'])
   })
 })
+
+describe('the side panel over the whole page', () => {
+  it('widens only while a panel is open, and closing or leaving brings the conversation back', () => {
+    store.navigate({ kind: 'conversation', id: 'c2' })
+    store.widenPanel(true)
+    expect(store.getState().panelWide).toBe(false) // nothing to widen
+    store.openThread('x1')
+    store.widenPanel(true)
+    expect(store.getState().panelWide).toBe(true)
+    store.openPanel({ kind: 'artifact', id: 'f1' }) // another panel in its place stays wide
+    expect(store.getState().panelWide).toBe(true)
+    store.openPanel(null)
+    expect(store.getState().panelWide).toBe(false)
+    store.openThread('x1')
+    store.widenPanel(true)
+    store.navigate({ kind: 'routines' })
+    expect(store.getState()).toMatchObject({ panel: null, panelWide: false })
+  })
+})

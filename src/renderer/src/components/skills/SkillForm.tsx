@@ -29,17 +29,17 @@ export function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onC
           </p>
         ) : (
           <>
-            <Field label={L('Receita', 'Recipe')} hint={L('Os passos, em Markdown: comandos exatos, armadilhas, como conferir.', 'The steps, in Markdown: exact commands, pitfalls, how to check.')}>
+            <Field label={L('Receita', 'Instructions')} hint={L('Os passos, em Markdown: comandos exatos, armadilhas, como conferir.', 'The steps, in Markdown: exact commands, pitfalls, how to check.')}>
               <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
             </Field>
             {draft.body.length > RECOMMENDED_SKILL_BODY_LENGTH && <p className="hint hint--warn" role="status">{skillLengthNote(draft.body.length)}</p>}
           </>
         )}
-        <Field label={L('Quem usa', 'Who uses it')}>
+        <Field label={L('Quem usa', 'Assigned agents')}>
           <AgentPicker value={draft.agents} onChange={(agents) => set({ agents })} />
         </Field>
         <div className="row row--between">
-          <span className="hint">{draft.id ? L('A versão de agora fica no histórico: dá pra voltar.', 'The current version stays in the history: you can go back.') : ''}</span>
+          <span className="hint">{draft.id ? L('A versão de agora fica no histórico: dá pra voltar.', 'The current version stays in History for restoration.') : ''}</span>
           <div className="row">
             {error && <span className="field__error">{error}</span>}
             <button className="btn btn--sm btn--ghost" onClick={onClose}>
