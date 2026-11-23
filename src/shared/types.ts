@@ -153,6 +153,10 @@ export const channelName = (s: string): string =>
     .slice(0, 60)
 
 export type StepStatus = 'running' | 'done' | 'error'
+// How a reply's steps read while it works and after: every one, or only the newest few, with the
+// older ones out of the list (src/shared/steps.ts).
+export type StepsMode = 'all' | 'latest'
+
 export interface Step {
   id: string
   label: string
@@ -477,6 +481,9 @@ export interface Invite {
 
 // A person's own memories ("about me") live in this scope.
 export const personScope = (personId: string): string => `person:${personId}`
+
+// What the composer answers: a message, or the excerpt of it the person selected.
+export type ReplyTarget = { messageId: string; quote?: string }
 export const scopePerson = (scope: string): string | undefined => (scope.startsWith('person:') ? scope.slice('person:'.length) : undefined)
 
 export interface Message {
@@ -496,6 +503,9 @@ export interface Message {
   // goes one at a time): 'queue' while it waits, unset once its reply goes. Kept in the database, so it
   // outlives a restart (runs.ts, resumeQueued).
   sendMode?: 'queue'
+  // The message this one answers, kept with the quote it showed: the agent still reads it when the
+  // original has left the history it sees.
+  reply?: { messageId: string; author: string; agentId?: string; text: string; at: number; excerpt?: boolean }
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
@@ -580,6 +590,7 @@ export interface Settings {
   outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
+  clock?: '24' | '12' // times as 15:05 or 3:05 PM; unset keeps the app's own reading, by language
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
@@ -611,9 +622,17 @@ export interface Settings {
   sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
+  // How a long reply's steps read: every one, or the newest few in a window that scrolls (steps.ts).
+  // Unset: every step, which is what the app has always done.
+  steps?: StepsMode
+  stepsLatest?: number // how many `latest` keeps, clamped to STEPS_LATEST_MIN..STEPS_LATEST_MAX
   // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
   // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
   showThinking?: boolean
+  // How much of that reasoning shows before it scrolls (Conversation.tsx, `Thought`). Unset: the
+  // height the block always had.
+  thinkingSize?: 'sm' | 'md' | 'lg'
+  replyShortcut?: boolean // ⌘L (Ctrl+L off a Mac) replies to the text I selected in a message; unset: on
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on

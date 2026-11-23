@@ -12,7 +12,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   artifactText: { id: 's' },
   revealArtifact: { id: 's' },
   saveArtifact: { id: 's' },
-  sendMessage: { conversationId: 's', text: 's', images: 'a?', files: 'a?', threadId: 's?', mode: 's?', steerTo: 's?' },
+  sendMessage: { conversationId: 's', text: 's', images: 'a?', files: 'a?', threadId: 's?', mode: 's?', steerTo: 's?', reply: 'o?' },
   typing: { conversationId: 's', threadId: 's?', opened: 'b?' },
   olderMessages: { conversationId: 's', before: 'n', through: 's?' },
   threadMessages: { rootId: 's' },

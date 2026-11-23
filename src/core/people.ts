@@ -276,7 +276,7 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, stepsOpen: _so, showThinking: _t, channelLayout: _c, folded: _f, sidebarHidden: _h, navOrder: _no, agentOrder: _ao, sectorOrder: _so2, onboarding: _o, wikiDir: _w, ...rest } = s
+    const { sounds: _s, stepsOpen: _so, steps: _st, stepsLatest: _sl, showThinking: _t, thinkingSize: _tz, replyShortcut: _r, clock: _clk, channelLayout: _c, folded: _f, sidebarHidden: _h, navOrder: _no, agentOrder: _ao, sectorOrder: _so2, onboarding: _o, wikiDir: _w, ...rest } = s
     // Which classifiers exist and which have a key is for those who manage them.
     const { classifiers: _cl, classifierJobs: _cj, classifierKeys: _ck, ...forMember } = rest
     return { ...(person.role === 'admin' ? rest : forMember), onboarding: { done: true }, ...this.db.prefs(person.id) }

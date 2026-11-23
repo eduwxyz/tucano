@@ -10,6 +10,7 @@ import { basename, dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
+import { setClock, type Clock } from '../shared/clock'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
 import { isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
@@ -57,6 +58,7 @@ const systemLocale = ((): string | undefined => {
   }
 })()
 setLang(langOf(systemLocale))
+setClock(undefined) // until a workspace says which clock it reads
 
 // Run from the code (npm run dev), the app keeps its own data, apart from an installed Tucano.
 if (!app.isPackaged && !process.env['TUCANO_DATA']) app.setPath('userData', join(app.getPath('appData'), `${NAME} Dev`))
@@ -192,7 +194,7 @@ type CoreRequest =
   | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean }
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
-  | { type: 'lang'; lang: Lang }
+  | { type: 'lang'; lang: Lang; clock?: Clock }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
   | { type: 'icons'; id: string; paths: string[] }
   | { type: 'browser'; id: string; agentId: string; op: BrowserOp; args?: Record<string, unknown> }
@@ -386,6 +388,7 @@ function handleCore(child: UtilityProcess, msg: CoreRequest, workspace: Workspac
   } else if (msg.type === 'lang') {
     if (registry.selected().id !== workspace.id) return
     setLang(msg.lang)
+    setClock(msg.clock)
     setMenu()
   } else if (msg.type === 'login_item') {
     // Only the installed app: in dev this would register the bare Electron binary.

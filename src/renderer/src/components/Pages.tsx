@@ -1,5 +1,6 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
-import { L, locale, type Lang } from '../../../shared/lang'
+import { L, lang, locale, type Lang } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -114,6 +115,7 @@ import { useWorkspaceList } from './Workspaces'
 import { SettingsGroups, SettingsJumps, SettingsResults, SettingsSubject, SettingsSubjectTitle, glideTo } from './SettingsLayout'
 import { searchSettings, settingsGroups, settingsGroupLabel, settingsStructure, settingsTabAliases, settingsTabStructure, type SettingsPageId, type SettingsSection, type SettingsSectionId } from '../settings-structure'
 import { workspaceLabel } from '../../../shared/workspaces'
+import { STEPS_LATEST_MAX, STEPS_LATEST_MIN, stepsKeep, stepsModeFor, type StepsMode } from '../../../shared/steps'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
@@ -287,6 +289,24 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'auto', label: L('Grava sozinho', 'Saves on its own'), hint: L('Guarda e avisa na mensagem, com Desfazer.', 'Keeps it and says so in the message, with Undo.') },
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
+]
+// How a long reply's steps read: every one, or the newest few in a window. The label carries the
+// number the person chose, since that is what "the newest few" means on this computer.
+const STEPS_CHOICES = (keep = stepsKeep(undefined)): { value: StepsMode; label: string; hint: string }[] => [
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Show every step.') },
+  {
+    value: 'latest',
+    label: L(`Últimos ${keep}`, `Last ${keep}`),
+    hint: L('A resposta mostra só os mais novos; os mais antigos saem da lista.', 'Show recent steps only; older steps leave the list.')
+  }
+]
+// How tall the reasoning preview is before it scrolls, chosen in Settings › Conversations. A function
+// because `L()` reads the language when it is called: a table built at import kept the Portuguese
+// labels in an English window.
+export const THINKING_SIZES = (): { value: 'sm' | 'md' | 'lg'; label: string; hint: string }[] => [
+  { value: 'sm', label: L('Pequeno', 'Small'), hint: L('6 linhas, o resto rolando.', '6 lines before scrolling.') },
+  { value: 'md', label: L('Médio', 'Medium'), hint: L('12 linhas, o resto rolando.', '12 lines before scrolling.') },
+  { value: 'lg', label: L('Grande', 'Large'), hint: L('18 linhas, o resto rolando.', '18 lines before scrolling.') }
 ]
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
@@ -1919,7 +1939,7 @@ const STATUS_WORD = (): Record<HistoryStatus, string> => ({
 
 // The times of a folded row: all of them up to four; past that, the first three and the last.
 const timesOf = (items: Approval[]): string => {
-  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))
+  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' })))
   return hm.length > 4 ? `${hm.slice(0, 3).join(', ')} … ${hm.at(-1)}` : hm.join(', ')
 }
 
@@ -2761,6 +2781,15 @@ export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChang
 
 // ---------- Settings ----------
 
+// The two clocks, with the one in force marked: unset follows the language, which is what the app
+// did before there was a choice, so a person who never chose still sees the right one lit.
+const CLOCK_CHOICES = (chosen: '24' | '12' | undefined): { value: '24' | '12'; label: string; hint: string; on: boolean }[] => {
+  const inForce = chosen ?? (lang() === 'en' ? '12' : '24')
+  return [
+    { value: '24', label: '24 h', hint: L('15:05, do jeito que sempre foi.', '24-hour time, e.g. 15:05.'), on: inForce === '24' },
+    { value: '12', label: '12 h', hint: L('3:05 PM, com AM e PM.', '12-hour time, e.g. 3:05 PM.'), on: inForce === '12' }
+  ]
+}
 // Português or English: the app's, and the language agents answer in. Labeled in both, so anyone finds it.
 export function LanguagePicker({ className = '' }: { className?: string }): ReactNode {
   const language = useStore((s) => s.settings.language)
@@ -3609,6 +3638,8 @@ function SettingsSearchField({ value, onChange }: { value: string; onChange: (va
 
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
+  // The shortcut as the person's own keyboard writes it: the reply key, not a Mac's glyph elsewhere.
+  const key = useStore((s) => (s.platform === 'mac' ? '⌘L' : 'Ctrl+L'))
   const packaged = useStore((s) => s.packaged)
   const defaultWorkspace = useStore((s) => s.defaultWorkspace)
   // At work, Jev and Telegram stay: the person decides, told what leaves the gateway.
@@ -3731,6 +3762,20 @@ export function SettingsPage(): ReactNode {
                   <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', 'Your app language. Agents reply in the workspace language.')}</span>
                 </div>
               )}
+              <div className="key-row">
+                <Icon name="clock" />
+                <div className="grow">
+                  <strong>{L('Formato da hora', 'Time format')}</strong>
+                  <p className="muted small">{L('Como os horários aparecem na conversa, nas rotinas e no que os agentes leem.', 'How times appear in chats, routines, and agent context.')}</p>
+                </div>
+                <div className="segmented" role="radiogroup" aria-label={L('Formato da hora', 'Time format')}>
+                  {CLOCK_CHOICES(settings.clock).map((c) => (
+                    <button key={c.value} type="button" role="radio" aria-checked={c.on} className={c.on ? 'is-active' : ''} title={c.hint} onClick={() => updateSettings({ clock: c.value })}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {!admin && <AdminOnly>{L('Só um admin muda os modelos, os agentes, o contexto e as outras configurações do Tucano.', 'Only an admin changes the models, the agents, the context and the Tucano’s other settings.')}</AdminOnly>}
             </Card>
           </SectionAnchor>
@@ -3766,6 +3811,32 @@ export function SettingsPage(): ReactNode {
                 <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
               </div>
               <div className="key-row">
+                <Icon name="menu" />
+                <div className="grow">
+                  <strong>{L('Os passos de uma resposta longa', 'Steps in a long reply')}</strong>
+                  <p className="muted small">{STEPS_CHOICES(stepsKeep(settings.stepsLatest)).find((c) => c.value === stepsModeFor(settings))!.hint}</p>
+                  <div className="segmented segmented--wide" role="radiogroup" aria-label={L('Como a resposta mostra os passos', 'Step display')}>
+                    {STEPS_CHOICES(stepsKeep(settings.stepsLatest)).map((c) => (
+                      <button key={c.value} type="button" role="radio" aria-checked={stepsModeFor(settings) === c.value} className={stepsModeFor(settings) === c.value ? 'is-active' : ''} onClick={() => updateSettings({ steps: c.value })}>
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                  {stepsModeFor(settings) === 'latest' && (
+                    <label className="row row--center">
+                      <span className="muted small">{L('Quantos passos mostrar', 'Steps shown')}</span>
+                      <NumberInput
+                        min={STEPS_LATEST_MIN}
+                        max={STEPS_LATEST_MAX}
+                        value={stepsKeep(settings.stepsLatest)}
+                        aria-label={L('Quantos passos mostrar na janela', 'Number of visible steps')}
+                        onChange={(n) => updateSettings({ stepsLatest: stepsKeep(n) })}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+              <div className="key-row">
                 <Icon name="spark" />
                 <div className="grow">
                   <strong>{L('O que o modelo pensa', "Show reasoning")}</strong>
@@ -3777,6 +3848,33 @@ export function SettingsPage(): ReactNode {
                   </p>
                 </div>
                 <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
+              </div>
+              <div className="key-row">
+                <Icon name="expand" />
+                <div className="grow">
+                  <strong>{L('O tamanho do raciocínio', 'Reasoning panel height')}</strong>
+                  <p className="muted small">{THINKING_SIZES().find((c) => c.value === (settings.thinkingSize ?? 'sm'))!.hint}</p>
+                </div>
+                <div className="segmented" role="radiogroup" aria-label={L('Tamanho do raciocínio', 'Reasoning panel height')}>
+                  {THINKING_SIZES().map((c) => (
+                    <button key={c.value} type="button" role="radio" aria-checked={(settings.thinkingSize ?? 'sm') === c.value} className={(settings.thinkingSize ?? 'sm') === c.value ? 'is-active' : ''} onClick={() => updateSettings({ thinkingSize: c.value })}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="key-row">
+                <Icon name="reply" />
+                <div className="grow">
+                  <strong>{L(`Responder ao trecho com ${key}`, `Reply to the excerpt with ${key}`)}</strong>
+                  <p className="muted small">
+                    {L(
+                      `Com um trecho selecionado numa mensagem, ${key} começa uma resposta a ele, sem procurar o botão. Desligado, o atalho não faz nada e o botão da mensagem responde ao trecho do mesmo jeito.`,
+                      `With text selected in a message, ${key} starts a reply to that excerpt without hunting for the button. Off, the shortcut does nothing and the message’s own button still replies to it.`
+                    )}
+                  </p>
+                </div>
+                <Toggle on={settings.replyShortcut !== false} onChange={(v) => updateSettings({ replyShortcut: v })} />
               </div>
             </Card>
             <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>

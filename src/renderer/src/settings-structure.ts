@@ -29,10 +29,10 @@ type Section = {
 export function settingsStructure({ admin, owner, team, servers }: SettingsAccess) {
   return [
     { id: 'workspace-context', page: 'geral', label: L('Geral', 'General'), icon: 'gear', color: 'var(--c-graphite)', keys: ['workspaceLabel', 'workspaceName', 'context', 'onboarding'], scope: 'workspace', visible: admin },
-    { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'language'], scope: 'mixed', visible: true },
+    { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'language', 'clock'], scope: 'mixed', visible: true },
     { id: 'app-notifications', page: 'geral', label: L('Notificações', 'Notifications'), icon: 'bell', color: 'var(--c-rose)', keys: ['sounds'], scope: 'personal', visible: true },
     { id: 'app-dictation', page: 'geral', label: L('Ditado', 'Dictation'), icon: 'mic', color: 'var(--c-sky)', keys: ['voice'], scope: 'mixed', visible: admin },
-    { id: 'app-conversation', page: 'geral', label: L('Conversas', 'Conversations'), icon: 'thread', color: 'var(--c-indigo)', keys: ['stepsOpen', 'showThinking'], scope: 'personal', visible: true },
+    { id: 'app-conversation', page: 'geral', label: L('Conversas', 'Conversations'), icon: 'thread', color: 'var(--c-indigo)', keys: ['stepsOpen', 'steps', 'stepsLatest', 'showThinking', 'thinkingSize', 'replyShortcut'], scope: 'personal', visible: true },
     { id: 'agents-permissions', page: 'agentes', label: L('Autonomia', 'Autonomy'), icon: 'shield', color: 'var(--accent)', keys: ['autonomy', 'actionRules', 'outsideGuard'], scope: 'workspace', visible: admin },
     { id: 'agents-replies', page: 'agentes', label: L('Respostas', 'Replies'), icon: 'send', color: 'var(--c-sky)', keys: ['repliesAtOnce'], scope: 'workspace', visible: admin },
     { id: 'agents-limits', page: 'agentes', label: L('Limites', 'Limits'), icon: 'gauge', color: 'var(--c-amber)', keys: ['defaultLimit', 'runBudgetPct', 'runStallMinutes', 'approvalTtlHours', 'autoContinue'], scope: 'workspace', visible: admin },
@@ -101,10 +101,10 @@ export const settingsTabAliases: Readonly<Record<string, SettingsSectionId>> = {
 function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>> {
   return {
     'workspace-context': [L('Nome do workspace', 'Workspace name'), L('Como os agentes te chamam', 'What the agents call you'), L('Idioma', 'Language'), L('Contexto', 'Context'), L('Rever a introdução', 'See the introduction again'), L('Mostrar as missões', 'Show the missions'), L('Mostrar a barra lateral inteira', 'Show the whole sidebar')],
-    'app-appearance': [L('Tema claro ou escuro', 'Light or dark theme'), L('Idioma', 'Language')],
+    'app-appearance': [L('Tema claro ou escuro', 'Light or dark theme'), L('Idioma', 'Language'), L('Relógio', 'Time format'), L('24 horas', '24-hour'), L('12 horas', '12-hour')],
     'app-notifications': [L('Sons', 'Sounds'), L('Testar uma notificação', 'Test a notification')],
     'app-dictation': [L('Modelo do ditado', 'Dictation model'), L('Microfone', 'Microphone'), L('Detectar o idioma', 'Detect the language'), 'whisper'],
-    'app-conversation': [L('Mostrar os passos do agente', 'Show the agent’s steps'), L('O que o modelo pensa', "Show reasoning"), L('Raciocínio', 'Reasoning'), L('Pesquisas', 'Surveys'), L('Enviar feedback', 'Send feedback')],
+    'app-conversation': [L('Mostrar os passos do agente', 'Show the agent’s steps'), L('O que o modelo pensa', "Show reasoning"), L('Raciocínio', 'Reasoning'), L('Tamanho do raciocínio', 'Reasoning panel height'), L('Quantos passos mostrar', 'Steps shown'), L('Passos antigos', 'Older steps'), L('Pesquisas', 'Surveys'), L('Enviar feedback', 'Send feedback')],
     'agents-permissions': [L('Aprovações', 'Approvals'), L('Cuidadoso, normal ou sem travas', 'Careful, normal or no locks'), L('Ajustar ação por ação', 'Adjust action by action'), L('Pedir antes depois de ler algo de fora', 'Ask first after reading something from outside')],
     'agents-replies': [L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation"), L('Em paralelo', 'Parallel'), L('Fila', 'Queue'), L('Uma por vez', 'One at a time'), L('Ao mesmo tempo', 'At once')],
     'agents-limits': [L('Limite por agente', 'Limit per agent'), L('Limite por resposta', 'Limit per reply'), L('Tokens por mês', 'Tokens per month'), L('Considerar travado', 'Treat as stuck'), L('Expiração das aprovações', 'Approvals expire'), L('Continuar sozinho', 'Keep going on its own')],

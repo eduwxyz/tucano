@@ -1355,6 +1355,109 @@ h3 {
 .msg__body {
   min-width: 0;
 }
+.msg__text {
+  min-width: 0;
+  max-width: 100%;
+}
+.msg__text {
+  min-width: 0;
+  max-width: 100%;
+}
+.msg__actions {
+  display: flex;
+  margin-top: 4px;
+}
+/* The reply button under a message (and "Reply to selection" once text in it is selected). */
+.msg__replyto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: var(--radius);
+  color: var(--text-3);
+}
+.msg__replyto:hover,
+.msg__replyto:focus-visible,
+.msg__replyto--excerpt {
+  background: var(--bubble);
+  color: var(--text);
+}
+.msg__replyto--excerpt {
+  padding: 0 8px;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  .msg__replyto {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border-left: 2px solid var(--border-strong);
+  text-align: left;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.reply-quote span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--text-3);
+}
+/* On my own message the bubble is the text, not the body, so the quote carries one of its own:
+   same corner, same tint, so it reads as part of what I sent instead of something floating above it. */
+.msg--me .reply-quote {
+  background: var(--bubble);
+  border: 0;
+  border-left: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+.composer__reply {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+.composer__reply .reply-quote {
+  flex: 1;
+  margin: 0;
+}
+.forward-preview {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.agent-dialog__identity {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.agent-dialog__identity .grow {
+  min-width: 0;
+}
+.agent-dialog__identity p {
+  margin: 3px 0 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
   grid-template-columns: 1fr;
@@ -1605,6 +1708,14 @@ h3 {
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--border);
   animation: rise var(--dur-base) var(--ease-out) both;
+}
+/* The line that says how many steps the window left out: where the list starts, not a step of its
+   own — no dot on the rail, dim, and it never carries a row's hover. */
+.steps__more {
+  margin: 0 0 2px;
+  color: var(--text-3);
+  font-size: 11px;
+  opacity: 0.8;
 }
 /* One row of pills under the chain: a control is a pill in this row, not a row of its own, so the
    steer and a held reply's pause sit side by side. It lines up with the steps' own text. */
@@ -3933,6 +4044,14 @@ body.is-resizing webview {
 .msg__meta .receipt,
 .msg__meta .wiki-keep {
   margin: 0;
+}
+/* The reply-to icon is the right end of the footer line, not a row under it. */
+.msg__meta .msg__actions {
+  margin: 0 0 0 auto;
+}
+.msg__meta .msg__replyto {
+  min-width: 0;
+  min-height: 0;
 }
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */
@@ -13585,8 +13704,20 @@ button.agent-card__now:hover {
   text-overflow: ellipsis;
   opacity: 0.8;
 }
+/* The size is a setting, so it rides on the block as data-size rather than as a class: the class
+   list stays `thought` plus the lifecycle's own, which is what the tests read. The default is the
+   height the block always had: six lines, at its own 1.55 line-height. */
+.thought[data-size='sm'] {
+  --thought-lines: 6;
+}
+.thought[data-size='md'] {
+  --thought-lines: 12;
+}
+.thought[data-size='lg'] {
+  --thought-lines: 18;
+}
 .thought__text {
-  max-height: 9.5em;
+  max-height: calc(var(--thought-lines, 6) * 1.55em);
   overflow-y: auto;
   /* Down, never sideways: with only `overflow-y` set the browser computed a horizontal scrollbar
      on the box whenever a line of reasoning had nowhere to wrap. */
