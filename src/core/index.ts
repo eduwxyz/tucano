@@ -2007,6 +2007,11 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
+  // A reply put on hold keeps its session and its place; the next work starts when it's let go.
+  pauseRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.pause(messageId)),
+
+  resumeRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.resume(messageId)),
+
   retryRun: ({ messageId, note }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId, note ?? undefined)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),

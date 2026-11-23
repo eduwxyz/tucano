@@ -25,6 +25,7 @@ import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
+import { Hold } from './hold'
 import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
@@ -949,6 +950,34 @@ export class Runner {
     c.ctl.abort()
   }
 
+  // A reply the person puts on hold keeps everything it has (its session, its steps, the text so far)
+  // and stops at the boundary between turns, where nothing of the model's is in flight. The next work
+  // starts when they let it go, on the same model and the same session: a quota window passing, say,
+  // without the reserve model taking the reply over. Inside a turn there is nothing to hold.
+  pause(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c || !c.msg.run || c.reason) return
+    c.hold.request()
+    this.update(c.msg, { run: { ...c.msg.run, held: true } })
+  }
+
+  resume(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c) return
+    c.hold.release()
+    if (c.msg.run?.held) this.update(c.msg, { run: { ...c.msg.run, held: undefined } })
+  }
+
+  // Where a held reply waits, before a tool call and before the next turn. Stopping it is the way out
+  // of a hold nobody lets go of: the abort wakes it, and the run goes on to be stopped like any other.
+  private async heldBetweenTurns(c: Control): Promise<void> {
+    if (!c.hold.held) return
+    if (c.msg.run && c.msg.run.status !== 'paused') this.update(c.msg, { run: { ...c.msg.run, status: 'paused' } })
+    await c.hold.wait(c.ctl.signal)
+    if (c.reason) return
+    if (c.msg.run && c.msg.run.status === 'paused') this.update(c.msg, { run: { ...c.msg.run, status: 'working' } })
+  }
+
   // Runs the same agent again in place of a reply that didn't finish. Beside whatever replies there,
   // not after it: asking again is an answer to what the person did, and waiting made it look lost.
   // `note`: the person's own direction for the new try. It is added to the prompt after what was
@@ -1659,7 +1688,7 @@ export class Runner {
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
 
-    const control: Control = { ctl: new AbortController(), msg }
+    const control: Control = { ctl: new AbortController(), msg, hold: new Hold() }
     control.flush = () => flush() // a steer's row goes in after the words streamed so far
     this.controllers.set(msg.id, control)
     const halt = (reason: NonNullable<Control['reason']>): void => {
@@ -2946,6 +2975,10 @@ ${note}`,
     const tools: Session = {
       tools: toolDefs,
       call: async (name, args) => {
+        // A held reply serves no further call: the model's next step waits with the session, so a limit
+        // that resets later is waited out here instead of on another model.
+        await this.heldBetweenTurns(control)
+        if (control.reason) return textResult(L('Parei aqui.', 'Stopped here.'), true)
         if (overBudget) {
           if (++refusedOver > OVER_CALLS_GRACE) halt('budget')
           return textResult(
@@ -3100,6 +3133,9 @@ ${note}`,
     let input = plan?.resume ? since(plan) : whole
     try {
       for (;;) {
+        // A reply the person put on hold waits here, between the turn that just ended and the next one.
+        await this.heldBetweenTurns(control)
+        if (control.reason) break
         try {
           const events = engines[engineId].run({
             model: modelName,
