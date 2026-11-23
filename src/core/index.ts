@@ -31,11 +31,12 @@ import { opencodeEngine } from './engines/opencode'
 import { piEngine } from './engines/pi'
 import { antigravityAppDir, antigravityEngine } from './engines/antigravity'
 import { cursorAppDir, cursorEngine } from './engines/cursor'
-import { grokEngine } from './engines/grok'
+import { grokAccountEnv, grokEngine } from './engines/grok'
 import { clineAppDir, clineEngine, clineLoginDir, clineLoginEnv } from './engines/cline'
 import { hermesAppDir, hermesEngine } from './engines/hermes'
 import { endpointEngine, type EndpointTarget } from './engines/endpoint'
 import { accountDir, accountStatus, adoptLoginShellPath, detectEngines } from './engines/detect'
+import { dropAccountDir, sweepAccountDirs } from './account-folders'
 import { detectEngine, EngineCheck, type EngineFindings } from './engine-check'
 import { EngineSetup, SETUP_ENGINES, type SetupEngine, type SetupState } from './engine-setup'
 import { asdfEnv, codexEnv } from './engines/codex'
@@ -278,7 +279,13 @@ const loginTerminal = new LoginTerminal({
   env: (e, account) => {
     if (account) {
       const dir = accountDir(dataDir, account)
-      return e === 'claude' ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' } : e === 'antigravity' ? { ...process.env, HOME: dir } : codexEnv(dir, engines.codex.path)
+      return e === 'claude'
+        ? { ...process.env, CLAUDE_CONFIG_DIR: dir, DISABLE_AUTOUPDATER: '1' }
+        : e === 'antigravity'
+          ? { ...process.env, HOME: dir }
+          : e === 'grok'
+            ? { ...grokAccountEnv(dir), DISABLE_AUTOUPDATER: '1' }
+            : codexEnv(dir, engines.codex.path)
     }
     return e === 'codex' ? codexEnv(codexHome, engines.codex.path) : e === 'cline' ? { ...process.env, ...clineLoginEnv(clineLogin) } : { ...process.env, DISABLE_AUTOUPDATER: '1' }
   },
@@ -367,10 +374,13 @@ const settings = (): Settings => {
   }
 }
 
-// More logins of Claude Code, Codex and Antigravity (Settings › Accounts): each in its own folder, checked with
-// the CLI's own status when the harnesses are, and every few seconds after a sign-in.
+// More logins of a harness (Settings › Accounts): each in its own folder, checked with the CLI's own
+// status when the harnesses are, and every few seconds after a sign-in.
 const accountLogins = new Map<string, { loggedIn: boolean; detail?: string }>(Object.entries(engineCheck.current.accounts ?? {}))
 const savedAccounts = (): Account[] => (db.getSettings(DEFAULTS).accounts ?? []).map(({ id, engine, name }) => ({ id, engine, name }))
+// Whatever a removal could not delete while its CLI was open: an account the settings no longer
+// know, so nobody's login. It goes here, at the next launch, before anything reads these folders.
+sweepAccountDirs(join(dataDir, 'accounts'), savedAccounts().map((a) => a.id))
 // `only`: that account; `engine`: that harness's accounts.
 async function checkAccounts(only?: string, engine?: EngineId): Promise<void> {
   await Promise.all(
@@ -3247,12 +3257,13 @@ const api: Handlers = {
     engineSetup.cancel()
   },
 
-  // Another login of Claude Code, Codex or Antigravity: a folder of its own, signed into in a terminal like the first.
+  // Another login of a harness: a folder of its own, signed into in a terminal like the first.
   addAccount: ({ engine, name }) => {
-    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code, do Codex ou do Antigravity.', 'Only Claude Code, Codex or Antigravity can have another account.'))
+    if (!ACCOUNT_ENGINES.includes(engine)) throw new Error(L('Só dá pra ter outra conta do Claude Code, do Codex, do Antigravity ou do Grok.', 'Only Claude Code, Codex, Antigravity or Grok can have another account.'))
     if (!accountsOn(engine, osOf())) throw new Error(L('Outra conta do Antigravity, por enquanto, só no Mac: no Linux e no Windows o login dele fica no cofre do sistema, um só pra todas.', 'Another Antigravity account is Mac-only for now: on Linux and Windows its login lives in the system store, one for all.'))
     const account: Account = { id: randomUUID().slice(0, 8), engine, name: name.trim() || ENGINES[engine].label }
-    mkdirSync(join(accountDir(dataDir, account.id), '.codex'), { recursive: true })
+    // Codex keeps its login in .codex inside the folder; the others in the folder itself.
+    mkdirSync(engine === 'codex' ? join(accountDir(dataDir, account.id), '.codex') : accountDir(dataDir, account.id), { recursive: true })
     db.setSettings({ accounts: [...savedAccounts(), account] })
     bg(
       checkAccounts(account.id).then(() => {
@@ -3271,10 +3282,23 @@ const api: Handlers = {
     if (shown) return { opened: true, command: ENGINES[a.engine].login, screen: shown }
     const dir = accountDir(dataDir, a.id)
     watchAccount(a.id)
-    return openLogin(a.engine, a.engine === 'claude' ? { CLAUDE_CONFIG_DIR: dir } : a.engine === 'antigravity' ? { HOME: dir } : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) })
+    return openLogin(
+      a.engine,
+      a.engine === 'claude'
+        ? { CLAUDE_CONFIG_DIR: dir }
+        : a.engine === 'antigravity'
+          ? { HOME: dir }
+          : a.engine === 'grok'
+            ? { GROK_HOME: dir, GROK_AUTH_PATH: join(dir, 'auth.json') }
+            : { HOME: dir, CODEX_HOME: join(dir, '.codex'), ...asdfEnv(engines.codex.path) }
+    )
   },
   // Its agents go back to the harness's usual login; the folder, with the login in it, goes away.
+  // The settings change first, so an account the person removed never comes back because its folder
+  // was busy: a CLI left open on that login holds the folder on Windows, and that is reported rather
+  // than thrown, with the folder swept at the next launch.
   removeAccount: ({ id }) => {
+    const dir = accountDir(dataDir, id)
     db.setSettings({ accounts: savedAccounts().filter((a) => a.id !== id) })
     accountLogins.delete(id)
     for (const agent of db.agents().filter((x) => x.accountId === id || x.fallbackAccountId === id)) {
@@ -3284,8 +3308,10 @@ const api: Handlers = {
       db.saveAgent(rest)
       emit({ type: 'agent', agent: db.agent(agent.id)! })
     }
-    rmSync(accountDir(dataDir, id), { recursive: true, force: true })
+    // A sign-in screen still showing this account has nothing left to sign into.
+    if (loginTerminal.current()?.account === id) loginTerminal.stop()
     emit({ type: 'settings', settings: settings() })
+    return { folder: dropAccountDir(dir) }
   },
 
   // The harness's own installer, in a terminal the person sees: its progress, its
