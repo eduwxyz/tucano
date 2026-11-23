@@ -19,7 +19,7 @@ const env = {
 
 const app = await electron.launch({ args: ['.'], env })
 const win = await app.firstWindow()
-await win.setViewportSize({ width: 1280, height: 860 })
+await win.setViewportSize({ width: 1280, height: 960 })
 await win.waitForSelector('.sidebar')
 const errors = []
 win.on('pageerror', (e) => errors.push(String(e)))
@@ -32,23 +32,28 @@ const shot = async (name) => {
 const log = (label, value) => console.log(`${label}:`, typeof value === 'string' ? value : JSON.stringify(value))
 
 async function openSettings() {
-  await win.locator('.nav-item:has-text("Settings")').first().click()
+  const gear = win.locator('.sidebar__gear[aria-label="Settings"]').first()
+  if (await gear.count()) {
+    await gear.click()
+  } else {
+    await win.locator('.nav-item:has-text("Settings")').first().click()
+  }
   await win.waitForSelector('.page')
-  await win.waitForTimeout(300)
+  await win.waitForTimeout(400)
 }
 
 async function scrollToConversations() {
-  const card = win.locator('.card', { hasText: 'Show the steps while the agent works' }).first()
-  await card.scrollIntoViewIfNeeded()
+  const section = win.locator('[data-settings-section="app-conversation"]').first()
+  await section.scrollIntoViewIfNeeded()
   await win.waitForTimeout(200)
-  return card
+  return section
 }
 
 async function readConversationState() {
   return win.evaluate(() => {
-    const card = [...document.querySelectorAll('.card')].find((c) => c.textContent?.includes('Show the steps while the agent works'))
-    if (!card) return { found: false }
-    const rows = [...card.querySelectorAll('.key-row')].map((row) => {
+    const section = document.querySelector('[data-settings-section="app-conversation"]')
+    if (!section) return { found: false }
+    const rows = [...section.querySelectorAll('.key-row')].map((row) => {
       const strong = row.querySelector('strong')?.textContent?.trim() ?? ''
       const hint = row.querySelector('.muted.small')?.textContent?.trim() ?? ''
       const toggle = row.querySelector('.toggle')
@@ -69,19 +74,19 @@ log('default', await readConversationState())
 await shot('01-conversations-default')
 
 // 2. Switch to "Last 20" and reveal the step count field.
-const convCard = win.locator('.card', { hasText: 'Show the steps while the agent works' }).first()
-await convCard.locator('[role="radiogroup"][aria-label="Step display"] [role="radio"]', { hasText: 'Last 20' }).click()
+const conv = win.locator('[data-settings-section="app-conversation"]').first()
+await conv.locator('[role="radiogroup"][aria-label="Step display"] [role="radio"]', { hasText: 'Last 20' }).click()
 await win.waitForTimeout(300)
 log('latest', await readConversationState())
 await shot('02-steps-latest')
 
 // 3. Turn on reasoning and set height to Large.
-const toggles = convCard.locator('.toggle')
+const toggles = conv.locator('.toggle')
 const toggleCount = await toggles.count()
 // Show reasoning is the second toggle in this card (after "Show the steps while the agent works")
 if (toggleCount >= 2) await toggles.nth(1).click()
 await win.waitForTimeout(300)
-await convCard.locator('[role="radiogroup"][aria-label="Reasoning panel height"] [role="radio"]', { hasText: 'Large' }).click()
+await conv.locator('[role="radiogroup"][aria-label="Reasoning panel height"] [role="radio"]', { hasText: 'Large' }).click()
 await win.waitForTimeout(300)
 log('reasoning-large', await readConversationState())
 await shot('03-reasoning-large')
@@ -140,10 +145,17 @@ const folded = await win.evaluate(() => {
 log('thinking-folded', folded)
 await shot('05-reasoning-folded')
 
-// 6. Back to settings to show medium/small comparison? Capture Large selected.
+// 6. Back to settings: capture the full Conversations card (includes reply shortcut row).
 await openSettings()
 await scrollToConversations()
+await win.waitForTimeout(300)
 await shot('06-conversations-configured')
+
+// 7. Appearance: clock format setting.
+const appearance = win.locator('[data-settings-section="app-appearance"]').first()
+await appearance.scrollIntoViewIfNeeded()
+await win.waitForTimeout(300)
+await shot('07-appearance-clock')
 
 log('page errors', errors.filter((e) => !/ResizeObserver|favicon/i.test(e)))
 await app.close()
