@@ -10,7 +10,7 @@ import type { Readable, Writable } from 'node:stream'
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { L } from '../shared/lang'
-import { chromeKeyringFlags, findChrome, userAgentPlatform } from './platform'
+import { chromeKeyringFlags, findChrome, spawnable, userAgentPlatform } from './platform'
 import { fillRefused, FILL, HIDE_SECRETS, POINT, PICK, SNAPSHOT, TEXT } from '../shared/page'
 import { MAX_FILE_BYTES, type BrowserInput, type BrowserOp, type BrowserReply } from '../shared/types'
 import { land, partialFolder, refuse } from './downloads'
@@ -441,7 +441,10 @@ export class ChromeBrowsers {
       // agent then reads. A caller that names a page gets it from navigate() below, once the lane is answering.
       'about:blank'
     ]
-    const proc = spawn(carried ? this.addOns!.bin : this.bin, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
+    // The browser named here can be a script on Windows (a Chrome for Testing folder unpacked with one, a
+    // wrapper that adds switches), and Node runs neither a .cmd nor a .bat on its own: spawnable() starts it.
+    const s = spawnable(carried ? this.addOns!.bin : this.bin, args)
+    const proc = spawn(s.file, s.args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], windowsVerbatimArguments: s.verbatim })
     this.procs.add(proc)
     proc.once('exit', () => this.procs.delete(proc))
     const onFrame = this.onFrame

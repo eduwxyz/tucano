@@ -2,12 +2,13 @@
 // page in a browser that carries one. This runs the real ChromeBrowsers and the real navegador_login over a
 // stand-in Chrome: a small program that speaks the DevTools pipe and writes down, for every process, whether
 // it was started with extensions and every text typed into it. It runs on any computer, with no Chrome.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Browser } from '../src/core/browser'
 import { ChromeBrowsers } from '../src/core/chrome'
+import { findOnPath } from '../src/core/platform'
 import type { Db } from '../src/core/db'
 import { setLang } from '../src/shared/lang'
 import { SNAPSHOT } from '../src/shared/page'
@@ -76,7 +77,7 @@ const agent = { id: 'lia-0001', name: 'Lia', browser: true } as Agent
 const ctx = { conversationId: 'c1', messageId: 'm1' }
 const text = (r: { content: unknown[] }): string => (r.content as { type: string; text?: string }[]).map((c) => c.text ?? '').join('\n')
 
-describe.skipIf(process.platform === 'win32')('a Cofre login and the browser’s extensions', () => {
+describe('a Cofre login and the browser’s extensions', () => {
   let dir = ''
   let bin = ''
   let log = ''
@@ -108,9 +109,28 @@ describe.skipIf(process.platform === 'win32')('a Cofre login and the browser’s
     const program = join(dir, 'stand-in.cjs')
     writeFileSync(program, STAND_IN)
     writeFileSync(join(dir, 'snapshot.txt'), SNAPSHOT)
-    bin = join(dir, 'chrome')
-    writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${program}" "$@"\n`)
-    chmodSync(bin, 0o755)
+    // The stand-in is started the way the app starts Chrome. On a Mac and Linux that is a shell script. On
+    // Windows Node runs neither a .cmd nor a .bat itself, and the app starts the browser through
+    // core/platform.ts's spawnable(): a shim in npm's own shape, node with this script and the switches, is
+    // unwrapped there into that node and script directly, not through cmd.exe, so the DevTools pipe reaches
+    // the program on fd 3 and 4 as it does on the other two systems. It names `node`, which spawnable()
+    // finds on the PATH; one beside the shim (a hard link, never a 105 MB copy) is the fallback for a
+    // computer whose PATH has none.
+    if (process.platform === 'win32') {
+      bin = join(dir, 'chrome.cmd')
+      if (!findOnPath('node')) {
+        try {
+          linkSync(process.execPath, join(dir, 'node.exe'))
+        } catch {
+          copyFileSync(process.execPath, join(dir, 'node.exe')) // another volume: a link is impossible
+        }
+      }
+      writeFileSync(bin, `@"%~dp0\\node.exe" "%~dp0\\stand-in.cjs" %*\r\n`)
+    } else {
+      bin = join(dir, 'chrome')
+      writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${program}" "$@"\n`)
+      chmodSync(bin, 0o755)
+    }
     process.env['FAKE_CHROME_LOG'] = log
     process.env['FAKE_CHROME_SNAPSHOT'] = join(dir, 'snapshot.txt')
     addOns.bin = bin
