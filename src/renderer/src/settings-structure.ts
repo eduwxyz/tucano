@@ -42,7 +42,8 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'models-agents', page: 'modelos', label: L('Modelos dos agentes', 'Agent models'), icon: 'layers', color: 'var(--c-indigo)', keys: [], scope: 'workspace', visible: admin },
     { id: 'models-runtimes', page: 'modelos', label: L('Harnesses', 'Harnesses'), icon: 'terminal', color: 'var(--c-graphite)', keys: ['harnesses', 'endpoint'], scope: 'mixed', visible: admin },
     { id: 'models-accounts', page: 'modelos', label: L('Contas', 'Accounts'), icon: 'key', color: 'var(--c-green)', keys: ['accounts'], scope: 'mixed', visible: admin },
-    { id: 'models-router', page: 'modelos', label: L('Roteador', 'Router'), icon: 'route', color: 'var(--c-teal)', keys: ['routerModel', 'jevKey'], scope: 'workspace', visible: admin },
+    { id: 'models-classifiers', page: 'modelos', label: L('Classificadores', 'Classifiers'), icon: 'spark', color: 'var(--c-sky)', keys: ['classifiers', 'classifierJobs', 'classifierKeys', 'jevKey'], scope: 'workspace', visible: admin },
+    { id: 'models-router', page: 'modelos', label: L('Roteador', 'Router'), icon: 'route', color: 'var(--c-teal)', keys: ['routerModel'], scope: 'workspace', visible: admin },
     { id: 'knowledge-memory', page: 'modelos', label: L('Memória', 'Memory'), icon: 'book', color: 'var(--c-violet)', keys: ['memoryModel', 'memoryLearning'], scope: 'workspace', visible: admin },
     { id: 'connections-phone', page: 'conexoes', label: L('Celular e Telegram', 'Phone and Telegram'), icon: 'phone', color: 'var(--c-green)', keys: ['telegram'], scope: 'mixed', visible: owner },
     { id: 'connections-servers', page: 'conexoes', label: L('Servidores', 'Servers'), icon: 'server', color: 'var(--c-graphite)', keys: ['paused', 'node'], scope: 'computer', visible: admin && servers },
@@ -65,7 +66,7 @@ export type SettingsPageId = SettingsSection['page']
 const tabSections: Readonly<Record<string, readonly SettingsSectionId[]>> = {
   geral: ['workspace-context', 'app-appearance', 'app-notifications', 'app-dictation', 'app-conversation'],
   agentes: ['agents-permissions', 'agents-replies', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser'],
-  modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-router', 'knowledge-memory'],
+  modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-classifiers', 'models-router', 'knowledge-memory'],
   conexoes: ['connections-phone', 'connections-servers', 'harnesses-keys'],
   workspace: ['workspace-people', 'workspace-activity', 'workspace-team', 'workspace-backups', 'app-updates', 'workspace-danger']
 }
@@ -105,7 +106,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'app-dictation': [L('Modelo do ditado', 'Dictation model'), L('Microfone', 'Microphone'), L('Detectar o idioma', 'Detect the language'), 'whisper'],
     'app-conversation': [L('Mostrar os passos do agente', 'Show the agent’s steps'), L('O que o modelo pensa', "Show reasoning"), L('Raciocínio', 'Reasoning'), L('Pesquisas', 'Surveys'), L('Enviar feedback', 'Send feedback')],
     'agents-permissions': [L('Aprovações', 'Approvals'), L('Cuidadoso, normal ou sem travas', 'Careful, normal or no locks'), L('Ajustar ação por ação', 'Adjust action by action'), L('Pedir antes depois de ler algo de fora', 'Ask first after reading something from outside')],
-    'agents-replies': [L('Respostas ao mesmo tempo numa conversa', 'Replies at once in a conversation'), L('Em paralelo', 'Parallel'), L('Fila', 'Queue'), L('Uma por vez', 'One at a time'), L('Ao mesmo tempo', 'At once')],
+    'agents-replies': [L('Respostas ao mesmo tempo numa conversa', "Concurrent replies per conversation"), L('Em paralelo', 'Parallel'), L('Fila', 'Queue'), L('Uma por vez', 'One at a time'), L('Ao mesmo tempo', 'At once')],
     'agents-limits': [L('Limite por agente', 'Limit per agent'), L('Limite por resposta', 'Limit per reply'), L('Tokens por mês', 'Tokens per month'), L('Considerar travado', 'Treat as stuck'), L('Expiração das aprovações', 'Approvals expire'), L('Continuar sozinho', 'Keep going on its own')],
     'agents-routines': [L('Abrir ao ligar o computador', 'Open when the computer starts'), L('Horário de silêncio', 'Quiet hours')],
     'agents-tuca': [L('Aplicar mudanças do Tuca na hora', 'Apply Tuca’s changes right away'), L('Desfazer', 'Undo')],
@@ -113,6 +114,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'models-agents': [L('Modelo de cada agente', 'Each agent’s model'), L('Trocar o modelo de vários agentes', 'Change models for several agents')],
     'models-runtimes': ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', L('Endpoint', 'Endpoint')],
     'models-accounts': [L('Login', 'Sign-in'), L('Conta do trabalho e pessoal', 'Work and personal account')],
+    'models-classifiers': [L('Usos dos classificadores', 'Classifier Uses'), 'Jev', 'TypeSafe', 'OpenRouter', 'OpenAI', 'Luna', 'Google', 'Gemini', L('Chave do classificador', 'Classifier key')],
     'models-router': [L('Modelo do roteador', 'Router model'), L('Quem responde nos canais', 'Who replies in channels')],
     'knowledge-memory': [L('Modelo da memória', 'Memory model'), L('O que ele aprende sobre você', 'What it learns about you')],
     'connections-phone': ['Telegram', L('Celular', 'Phone'), 'iPhone'],
