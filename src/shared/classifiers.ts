@@ -5,14 +5,14 @@
 // Luna (Decisions API), Google's Gemini Decision 1, and Jev itself through OpenRouter.
 //
 // One classifier is chosen per job (src/shared/classifiers.ts `ClassifierJob`): who replies in a
-// channel, and what an agent should click in a page.
+// channel, what an agent should click in a page, and the ones Apo's own branches add on top.
 import { L } from './lang'
 import type { Settings } from './types'
 
 export type ClassifierProvider = 'typesafe' | 'openrouter' | 'openai' | 'gemini'
 
 // Where a classifier is used. A job has at most one classifier, and unassigned means off.
-export type ClassifierJob = 'routing' | 'browser'
+export type ClassifierJob = 'routing' | 'listen' | 'recommend' | 'smart' | 'browser'
 
 export interface ClassifierConfig {
   id: string
@@ -28,7 +28,7 @@ export interface ProviderSpec {
   model: string // the model a new classifier of this provider starts with
   models: string[] // the ones worth offering, the default first
   box: boolean // can find a place on a screenshot (only TypeSafe does)
-  keyHint: () => string
+  keyHint: { pt: string; en: string }
 }
 
 export const PROVIDERS: readonly ProviderSpec[] = [
@@ -39,7 +39,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'jev-latest',
     models: ['jev-latest', 'jev-1.14.0', 'jev-1.13.0'],
     box: true,
-    keyHint: () => L('A chave do console do TypeSafe. Também acha o elemento pelo print da tela.', 'The key from the TypeSafe console. It also finds an element from the screenshot.')
+    keyHint: {
+      pt: 'A chave do console do TypeSafe. Também acha o elemento pelo print da tela.',
+      en: 'The key from the TypeSafe console. It also finds an element from the screenshot.'
+    }
   },
   {
     provider: 'openrouter',
@@ -48,7 +51,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'typesafe/jev-1.13',
     models: ['typesafe/jev-1.13'],
     box: false,
-    keyHint: () => L('A chave do OpenRouter serve para o Jev, cobrado na mesma fatura dos outros modelos.', 'An OpenRouter key serves Jev, billed on the same invoice as the other models.')
+    keyHint: {
+      pt: 'A chave do OpenRouter serve para o Jev, cobrado na mesma fatura dos outros modelos.',
+      en: 'An OpenRouter key serves Jev, billed on the same invoice as the other models.'
+    }
   },
   {
     provider: 'openai',
@@ -57,7 +63,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'gpt-6-luna',
     models: ['gpt-6-luna'],
     box: false,
-    keyHint: () => L('A chave da OpenAI, com a Decisions API liberada na organização.', 'The OpenAI key, with the Decisions API enabled for the organization.')
+    keyHint: {
+      pt: 'A chave da OpenAI, com a Decisions API liberada na organização.',
+      en: 'The OpenAI key, with the Decisions API enabled for the organization.'
+    }
   },
   {
     provider: 'gemini',
@@ -66,7 +75,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     model: 'gemini-decision-1',
     models: ['gemini-decision-1'],
     box: false,
-    keyHint: () => L('A chave do Google AI Studio, com a Decisions API liberada.', 'The Google AI Studio key, with the Decisions API enabled.')
+    keyHint: {
+      pt: 'A chave do Google AI Studio, com a Decisions API liberada.',
+      en: 'The Google AI Studio key, with the Decisions API enabled.'
+    }
   }
 ]
 
@@ -78,23 +90,42 @@ export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provid
 const MAX_CLASSIFIERS = 20
 
 // The jobs the Classifier Uses card offers, one selector each.
-export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'browser']
+export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'listen', 'smart', 'browser', 'recommend']
 
-export const jobLabel = (job: ClassifierJob): string =>
-  job === 'routing' ? L('Quem responde no canal', 'Who replies in a channel') : L('O que o agente clica na página', 'What an agent clicks in a page')
+export const jobLabel = (job: ClassifierJob): { pt: string; en: string } =>
+  ({
+    routing: { pt: 'Quem responde no canal', en: 'Who replies in a channel' },
+    listen: { pt: 'Quem escuta entra', en: 'Which listener joins' },
+    recommend: { pt: 'Marcar a opção recomendada', en: 'Mark the recommended option' },
+    smart: { pt: 'Qual modelo responde', en: 'Which model answers' },
+    browser: { pt: 'O que o agente clica na página', en: 'What an agent clicks in a page' }
+  })[job]
 
-export const jobAbout = (job: ClassifierJob): string =>
-  job === 'routing'
-    ? L(
-        'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador.',
-        'Reads the conversation and picks who replies, in place of the router’s small model.'
-      )
-    : L(
-        'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
-        'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
-      )
+export const jobAbout = (job: ClassifierJob): { pt: string; en: string } =>
+  ({
+    routing: {
+      pt: 'Lê a conversa e escolhe quem responde, no lugar do modelo pequeno do roteador. Cada mensagem sem @menção vai pro provedor escolhido.',
+      en: 'Reads the conversation and picks who replies, in place of the router’s small model. Every message without an @mention goes to the chosen provider.'
+    },
+    listen: {
+      pt: 'Antes de escolher quem responde, lê a mensagem e diz se ela pede o agente que está só escutando no canal. Sem ninguém no canal, ele entra quando o pedido é da área dele.',
+      en: 'Before picking who replies, reads the message and says whether it needs the agent that is only listening in the channel. With nobody else in the channel, it joins when the request is its own work.'
+    },
+    recommend: {
+      pt: 'Sugere uma opção na pergunta do agente; você escolhe.',
+      en: 'Suggests an option on an agent question; you still choose.'
+    },
+    smart: {
+      pt: 'Lê o pedido e diz que tipo de trabalho é e quanta capacidade merece; os pools e as correntes da aba Roteamento escolhem o modelo a partir disso. Sem leitura, o agente segue com o modelo dele.',
+      en: 'Reads the request and says what kind of work it is and how much capability it deserves; the Routing tab’s pools and chains pick the model from that. With no reading, the agent stays on its own model.'
+    },
+    browser: {
+      pt: 'Acha o elemento que o agente pediu (“o botão Buscar”). O print da tela, que resolve os casos sem texto, só o TypeSafe lê.',
+      en: 'Finds the element the agent asked for (“the Search button”). The screenshot, which handles the cases without text, only TypeSafe reads.'
+    }
+  })[job]
 
-type ClassifierSettings = Pick<Settings, 'classifiers' | 'classifierJobs' | 'jevKey' | 'routerModel' | 'browserJev'>
+type ClassifierSettings = Pick<Settings, 'classifiers' | 'classifierJobs' | 'jevKey' | 'routerModel' | 'browserJev' | 'jevRecommend'>
 
 // What is configured. An install from before the section has no list: it had one Jev, if it was
 // ever switched on anywhere, and that is what it keeps.
@@ -113,6 +144,8 @@ export function classifierJobsOf(s: ClassifierSettings): Partial<Record<Classifi
   const jobs: Partial<Record<ClassifierJob, string>> = {}
   if (known && s.routerModel === 'jev') jobs.routing = JEV_CLASSIFIER.id
   if (known && s.browserJev) jobs.browser = JEV_CLASSIFIER.id
+  // A legacy install that switched the recommended option on keeps marking options on the same Jev.
+  if (known && s.jevRecommend) jobs.recommend = JEV_CLASSIFIER.id
   return jobs
 }
 
@@ -158,22 +191,24 @@ export function classifierLabel(c: ClassifierConfig): string {
   return c.name === spec.label ? `${spec.label} · ${c.model}` : `${c.name} · ${spec.label}`
 }
 
-// What a job sends out and to whom, in a phrase that reads after "Outside the gateway:" too. Only a
-// provider that reads screenshots is ever sent one.
+// What is sent where, for the notice before a job is switched on.
+export const providerNote = (c: ClassifierConfig): string => {
+  const spec = providerSpec(c.provider)
+  return L(`o provedor ${spec.label} (${c.model})`, `the ${spec.label} provider (${c.model})`)
+}
+
+
 export function jobNotice(job: ClassifierJob, c: ClassifierConfig): string {
   const spec = providerSpec(c.provider)
   if (job === 'routing')
-    return L(
-      `cada mensagem sem @menção manda as mensagens recentes do canal para ${spec.label} escolher quem responde, cobrado na sua conta de lá. Se falhar, o modelo do roteador decide.`,
-      `every message without an @mention sends the channel’s recent messages to ${spec.label} to pick who replies, billed to your account there. If it fails, the router’s model decides.`
-    )
+    return `every message without an @mention sends the channel's recent messages to ${spec.label} to pick who replies, billed to your account there. If it fails, the router's model decides.`
+  if (job === 'listen')
+    return `each channel message is sent to ${spec.label} to decide whether a listening agent should join, billed to your account there.`
+  if (job === 'recommend')
+    return `each question with options is sent to ${spec.label} to pick a recommended option, billed to your account there.`
+  if (job === 'smart')
+    return `each reply may send its prompt to ${spec.label} to pick a model, billed to your account there.`
   return spec.box
-    ? L(
-        `cada clique que o texto não resolve manda para ${spec.label} a lista de elementos da página e, às vezes, o print dela, inclusive em áreas logadas.`,
-        `every click text can’t resolve sends ${spec.label} the page’s element list and sometimes its screenshot, including signed-in areas.`
-      )
-    : L(
-        `cada clique que o texto não resolve manda para ${spec.label} a lista de elementos da página, inclusive em áreas logadas. O print da tela não vai.`,
-        `every click text can’t resolve sends ${spec.label} the page’s element list, including signed-in areas. The screenshot isn’t sent.`
-      )
+    ? `every click text can't resolve sends ${spec.label} the page's element list and sometimes its screenshot, including signed-in areas.`
+    : `every click text can't resolve sends ${spec.label} the page's element list, including signed-in areas. The screenshot isn't sent.`
 }

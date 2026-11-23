@@ -10,7 +10,7 @@ Na primeira vez, o app guia em poucos passos: o seu nome; conectar a IA (o que j
 
 Depois, balões mostram o app enquanto você usa; **Pular tour** encerra. Na barra lateral ficam as **Missões** (Missions), que se marcam sozinhas. Numa instalação nova, a barra começa curta e cada missão libera uma parte (Conectores, Canais, Rotinas, Memória e Wiki); **Mostrar tudo de uma vez** mostra tudo. Escondidas, voltam em **Configurações › Geral** › **Mostrar as missões**.
 
-Quem entra num time por convite vê uma boas-vindas curta: quem convidou, os agentes, o nome e o combinado (o que se fala direto com um agente só a pessoa lê; nos canais, o time todo vê).
+Quem entra num time por convite vê uma boas-vindas curta: quem convidou, os agentes, o nome e o combinado (o que se fala direto com um agente só a pessoa lê; nos canais, o time todo vê). Num canal, cada agente escolhe entre o **Modo menção** e o **Modo escuta** (veja **conversas**).
 
 ## O Tuca
 O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa, ele faz poucas perguntas e cria o agente quando termina de responder, com **Desfazer** no card (veja **agentes**). Acesso a conectores espera você confirmar.

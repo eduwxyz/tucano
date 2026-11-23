@@ -4,6 +4,7 @@ import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
 import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
+import type { RouteTrace, RoutingConfig } from './routing'
 import type { Answer, Decision } from './questions'
 import type { PageSigns } from './wall'
 import { L, lang, locale, type Lang } from './lang'
@@ -78,6 +79,9 @@ export interface Agent {
   fallbackAccountId?: string
   accountId?: string // one of settings.accounts, for its harness; unset: the harness's own login
   effort: Effort
+  // Jev reads each prompt and picks from the person's pools instead of modelId, which stays
+  // here as the baseline (what the agent runs on when routing is off, or decides nothing).
+  smartRouting?: boolean
   limit: number // tokens per month
   maxRoutines?: number // routines on at once; unset: MAX_AGENT_ROUTINES
   used: number // tokens used this month, computed from receipts
@@ -130,6 +134,8 @@ export interface Conversation {
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
+  mentionOnly?: string[] // agents of a channel in mention mode: they read it, and answer only when mentioned
+  listen?: string[] // agents of a channel in listen mode: they read it, and Jev says when the message is for them
   summary?: string // what the conversation covered before its recent messages
   summaryUntil?: number // `at` of the last message the summary covers
   summaryAt?: number
@@ -206,6 +212,7 @@ export interface Run {
   stepsOpen?: true // its next-steps card can still be answered; the reply itself is done and waits on no one
   stepsReplaced?: true // the same agent proposed a newer card in the same place: this one closed unanswered, and nobody dismissed it
   cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
+  recommended?: (number | null)[] // Jev's pick per decision, by index into its options (null: none is clearly better); unset when it's off or still thinking
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
   answerTyped?: string // what that message had beyond them, written in the message box
@@ -221,6 +228,7 @@ export interface Run {
   autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   retryAt?: number // 'failed' on something that passes (a network, a plan's window, a computer off): when it tries again by itself
   retries?: number // how many times it already tried again by itself
+  route?: RouteTrace // what smart routing decided for this reply, drawn as the thin line over it
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
@@ -432,11 +440,14 @@ export interface Question {
 
 // What's waiting on a person: approvals they can decide and questions to them.
 // A question from someone else's DM comes without where it was asked (they see the question only).
+// A question in the inbox: with the decisions asked (ask_user's options), what was answered on the
+// card so far, and, when Jev is on, the option it suggests for each decision.
+export type InboxQuestion = Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[]; recommended?: (number | null)[] }
+
 export interface Inbox {
   approvals: Approval[]
-  // With the decisions asked (ask_user's options) and what was answered on the card so far.
-  questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
-  answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
+  questions: InboxQuestion[]
+  answered?: InboxQuestion[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
   harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
 }
@@ -558,6 +569,7 @@ export interface Settings {
   classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
   classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
   classifierKeys?: Record<string, boolean> // computed: which classifiers have a key saved (never the key itself)
+  routing?: RoutingConfig // Settings › Routing: pools, role chains and the switch that turns routing on (src/shared/routing.ts)
   // An address in OpenAI's format the agents run on with no harness: its base URL and the models picked
   // from what it lists. The key is a secret (ENDPOINT_SECRET); `hasKey` only says one is saved.
   endpoint?: EndpointSettings
@@ -565,6 +577,7 @@ export interface Settings {
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
+  jevRecommend?: boolean // legacy: the recommended option used to be one switch, now the `recommend` classifier job; read only when migrating (classifierJobsOf)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
@@ -584,6 +597,7 @@ export interface Settings {
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
+  chainDepth?: number // max handoffs in a row (default CHAIN_DEPTH, cap MAX_CHAIN_DEPTH)
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off

@@ -22,6 +22,7 @@ import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnC
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
 import { cleanRules, isAutonomy } from '../shared/actions'
 import { possibleBosses } from '../shared/org'
+import { defaultRouting, normalizeRouting, validateRouting } from '../shared/routing'
 import { cleanEndpoint, listModels, quietClaude, quietCodex, withChoice } from './harness'
 import { cleanLook } from './agent-look'
 import { Db, MIGRATIONS } from './db'
@@ -52,9 +53,10 @@ import { ConnectorManager, notAuthorized } from './connectors'
 import { harnessMcps, publicMcp, type FoundMcp } from './harness-mcp'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
-import { classifierFor, classifierJobsOf, classifierList, cleanClassifierJobs, cleanClassifiers, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers'
+import { classifierFor, classifierJobsOf, classifierList, cleanClassifierJobs, cleanClassifiers, JEV_CLASSIFIER, type ClassifierConfig } from '../shared/classifiers' 
 import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
+import { LISTEN_STUB_KEY, listenStub } from './jev-fake'
 import { report } from './report'
 import { usage } from './usage'
 import { Skills } from './skills'
@@ -106,6 +108,10 @@ companyNetwork()
 const deletedError = (name: string): string => L(`${name} foi excluído e não volta.`, `${name} was deleted and can’t come back.`)
 const dataDir = process.env['TUCANO_DATA'] ?? join(process.cwd(), '.tucano')
 const fake = process.env['TUCANO_FAKE_ENGINES'] === '1'
+// Who Jev brings in when there is no TypeSafe key to ask with: a stand-in for the listen question
+// and the router's, so the built app and a test can drive a listening channel on a machine that
+// has no key. Off unless asked for: TUCANO_FAKE_LISTEN=<handle> brings that agent in, `none` never.
+const fakeListen = fake ? process.env['TUCANO_FAKE_LISTEN'] : undefined
 // Run by the server (src/server): no window, and the screens are in a browser elsewhere.
 const serverMode = process.env['TUCANO_SERVER'] === '1'
 const publicUrl = process.env['TUCANO_URL']?.replace(/\/+$/, '')
@@ -341,7 +347,7 @@ const settleClassifiers = (patch: Partial<Settings>): ClassifierConfig[] => {
   const before = classifierList(stored)
   const list = patch.classifiers === undefined ? before : cleanClassifiers(patch.classifiers, before)
   if (patch.classifiers !== undefined) patch.classifiers = list
-  const gone = before.filter((c) => !list.some((x) => x.id === c.id))
+  const gone = before.filter((c) => !list.some((x: ClassifierConfig) => x.id === c.id))
   if (patch.classifierJobs !== undefined) patch.classifierJobs = cleanClassifierJobs(patch.classifierJobs, list)
   else if (gone.length && stored.classifierJobs) patch.classifierJobs = cleanClassifierJobs(stored.classifierJobs, list)
   const next = { ...stored, ...patch }
@@ -1166,15 +1172,17 @@ const runner = new Runner({
     toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
     void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
-  jev: {
-    key: (job) => {
-      // A job reads the classifier chosen for it; with no job, Jev's own classifier, which is also
-      // what an install from before the classifiers keeps using.
-      const c = job ? classifierFor(settings(), job) : JEV_CLASSIFIER
-      return c ? classifierKeyOf(c) : Promise.resolve(undefined)
-    },
-    target: (job) => classifierFor(settings(), job ?? 'routing')
-  },
+  jev: fakeListen
+    ? { key: async (_job?: any) => LISTEN_STUB_KEY, target: (job?: any) => classifierFor(settings(), job ?? 'routing'), fetch: listenStub(fakeListen) }
+    : {
+        key: (job?: any) => {
+          // A job reads the classifier chosen for it; with no job, Jev's own classifier, which is also
+          // what an install from before the classifiers keeps using.
+          const c = job ? classifierFor(settings(), job) : JEV_CLASSIFIER
+          return c ? classifierKeyOf(c) : Promise.resolve(undefined)
+        },
+        target: (job?: any) => classifierFor(settings(), job ?? 'routing')
+      },
   onBusy: (busy) => toMain({ type: 'busy', busy }),
   onQuota: (quota) => {
     db.setSettings({ quota })
@@ -2072,6 +2080,9 @@ const api: Handlers = {
     const doesNext = typeof sectorDoes === 'string' ? sectorDoes.replace(/\s+/g, ' ').trim().slice(0, 200) : ''
     if (doesNext) clean.sectorDoes = doesNext
     else delete clean.sectorDoes
+    // On, off, or inherit (absent): anything else, a cleared switch included, goes back to following the
+    // global one instead of turning into an off that reads as a choice.
+    if (clean.smartRouting !== true && clean.smartRouting !== false) delete clean.smartRouting
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -2153,13 +2164,20 @@ const api: Handlers = {
     db.setTopic(id, topic.trim() || undefined)
     emitConversations([id])
   },
-  setChannelMembers: ({ id, agentIds }, ctx) => {
+  setChannelMembers: ({ id, agentIds, mentionOnly, listen }, ctx) => {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
     if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
     assertChannelVisible(db, ctx.person, conv)
     const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
-    db.setMembers(id, membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a))))
+    const roster = membersFor(db, ctx.person, conv.members, agentIds.filter((a) => known.has(a)))
+    // A mode is only for whoever is in the channel: an agent taken out can't stay in one.
+    db.setMembers(
+      id,
+      roster,
+      mentionOnly === undefined ? undefined : mentionOnly.filter((a) => roster.includes(a)),
+      listen === undefined ? undefined : listen.filter((a) => roster.includes(a))
+    )
     emitConversations([id])
   },
   // Everything that only made sense there goes too: replies still running stop,
@@ -2619,6 +2637,23 @@ const api: Handlers = {
     const why = voiceRefusal(patch.voice)
     if (why) throw new Error(why)
     if (patch.actionRules) patch.actionRules = cleanRules(patch.actionRules)
+    // A routing setup is judged, not cleaned: an entry this build can't run (a harness it doesn't have,
+    // a thinking level it doesn't support) is refused with where it is, so nothing is quietly turned
+    // into something else. Reading an old or hand-edited setup stays tolerant, inside normalizeRouting.
+    if (patch.routing !== undefined) {
+      if (patch.routing === null && typeof defaultRouting === "function") patch.routing = defaultRouting()
+      else if (typeof validateRouting === "function") {
+        const checked = validateRouting(patch.routing)
+        if (!checked.ok) {
+          const where = checked.problems
+            .slice(0, 4)
+            .map((p: any) => `${p.path || 'routing'}: ${p.message}`)
+            .join(' · ')
+          throw new Error(L(`Rotas não salvas — ${where}`, `Routing not saved — ${where}`))
+        }
+        patch.routing = checked.value
+      } else if (typeof normalizeRouting === "function") patch.routing = normalizeRouting(patch.routing)
+    }
     const removedClassifiers = settleClassifiers(patch)
     db.setSettings(patch)
     for (const c of removedClassifiers) {

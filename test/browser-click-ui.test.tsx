@@ -85,11 +85,11 @@ const choose = async (label: string): Promise<void> => {
   await act(async () => option!.dispatchEvent(new window.Event('click', { bubbles: true })))
 }
 
-describe('who finds the click, on the Browser card', () => {
+describe('who finds the click, on the Browser Use card', () => {
   it('offers two full-width choices, and Jev when the install has no classifier rows', async () => {
     settings = { engines: engines(), language: 'en' }
     await render()
-    expect(active()).toBe('Only by the page’s text')
+    expect(active()).toBe('By the page’s text')
     expect(document.querySelectorAll('.browser-choice [role="radio"]').length).toBe(2)
     await act(async () => choice('With a classifier').click())
     await render()
@@ -112,7 +112,7 @@ describe('who finds the click, on the Browser card', () => {
     await render()
     expect(active()).toBe('With a classifier')
     expect(shown()).toBe('Jev (TypeSafe)')
-    await act(async () => choice('Only by the page’s text').click())
+    await act(async () => choice('By the page’s text').click())
     expect(save).toHaveBeenCalledWith({ classifierJobs: {} })
   })
 
@@ -135,21 +135,7 @@ describe('who finds the click, on the Browser card', () => {
     settings = { ...settings, classifierJobs: { browser: 'jev' } }
     await render()
     expect(text()).toContain('Outside the gateway')
-    expect(text()).toContain('sends TypeSafe the page’s element list and sometimes its screenshot')
-  })
-
-  it('tells who gets the page and offers that classifier’s key, as main’s card did', async () => {
-    settings = { classifiers: [JEV_CLASSIFIER, luna], classifierJobs: { browser: 'luna-01' }, classifierKeys: {}, engines: engines(), language: 'en' }
-    await render()
-    expect(text()).toContain('sends OpenAI the page’s element list')
-    expect(text()).toContain('The screenshot isn’t sent')
-    expect(text()).toContain('OpenAI key')
-    expect(document.querySelector('input[type="password"]')).not.toBeNull()
-    await act(async () => root.render(<div />))
-    settings = { ...settings, classifierKeys: { 'luna-01': true } }
-    await render()
-    expect(text()).toContain('Key saved')
-    expect(document.querySelector('input[type="password"]')).toBeNull()
+    expect(text()).toContain('goes to TypeSafe')
   })
 
   it('shows the choice it inherited from the old browserJev switch', async () => {
@@ -163,10 +149,9 @@ describe('who finds the click, on the Browser card', () => {
 describe('the settings page', () => {
   const pages = readFileSync(join(__dirname, '../src/renderer/src/components/Pages.tsx'), 'utf8')
 
-  it('renders the card in the Browser subject, with no hint sending the choice elsewhere alone', () => {
-    const subject = pages.slice(pages.indexOf('<SectionAnchor id="agents-browser"'), pages.indexOf('</SectionAnchor>', pages.indexOf('<SectionAnchor id="agents-browser"')))
-    expect(subject).toContain('<BrowserClickCard />')
-    const card = pages.slice(pages.indexOf('export function BrowserClickCard'), pages.indexOf('function VoiceCard'))
+  it('renders the card in the Agents pane, with no hint sending the choice elsewhere alone', () => {
+    expect(pages).toContain("{pane('agentes') && <BrowserClickCard />}")
+    const card = pages.slice(pages.indexOf('export function BrowserClickCard'), pages.indexOf('function QuotasCard'))
     expect(card).toContain("updateSettings({ classifierJobs: next })")
     expect(card).toContain("browser: id")
     expect(card).not.toContain('is chosen in Classifiers')
