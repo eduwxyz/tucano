@@ -16,6 +16,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 > - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
 > - **Mudou:** **Continuar**, **Tentar de novo** e **Tentar com instruções** viraram botões discretos na linha de baixo da resposta e aparecem ao passar o mouse. Em telas de toque ficam sempre visíveis.
+> - **Corrigido:** **Enviar feedback** e **Conectores** agora têm a mesma altura de **Cofre** no pé da barra lateral.
 
 ### Added
 
@@ -36,6 +37,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **The approval card leads with what is being approved, and says what became of it.** The card opens with the action and its target, the status is a quiet row above them, and the decisions sit on one line. Its receipt now tells approved apart from completed: **Approved · waiting for result**, **Completed**, **Failed** with the reason, or **Approved · didn't run**. A row above the message field counts the approvals waiting on you, and **Review** goes back to the oldest one. Thanks to Apostol Apostolov. (#334)
+
+### Fixed
+
+- **The sidebar's foot rows are one height.** **Send feedback** and **Connectors** sat at 20 px next to **Vault** at 30 px. All three now line up. Thanks to Apostol Apostolov. (#639)
 
 ## [0.2.45] - 2026-11-22
 
