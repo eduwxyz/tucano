@@ -2283,7 +2283,8 @@ h3 {
   color: var(--accent);
   background: var(--accent-soft);
 }
-.work-row .icon-btn:hover {
+.work-row .icon-btn:hover,
+.work-row .icon-btn.is-armed {
   color: var(--danger);
   background: var(--danger-soft);
 }
