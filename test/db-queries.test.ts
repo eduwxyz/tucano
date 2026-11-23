@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
-import type { Agent, Approval, Message, Run } from '../src/shared/types'
+import { wikiAccess, type Agent, type Approval, type Message, type Run, type WikiAccess } from '../src/shared/types'
 
 const agent = (id: string): Agent => ({ id, name: id, handle: id, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
 const run = (status: Run['status']): Run => ({ status, steps: [{ id: 's1', label: 'lendo', status: 'running' }] })
@@ -119,5 +119,26 @@ describe('indexes for what runs often', () => {
     expect(inner.isTransaction).toBe(false)
     db.tx(() => db.saveMessage(msg('m5', 'c1', 5))) // a write right after a get still goes through
     expect(db.message('m5')?.text).toBe('m5')
+  })
+})
+
+describe('an agent kept and read back', () => {
+  // The wiki's third access, 'read_write', was in the save but not in the read: it came back as 'read' on
+  // the next launch, so the card fell to "no agent writes" and the picker emptied itself.
+  it('gives back the wiki access it was saved with, write included, across a reopen', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'tucano-wiki-access-')), 'tucano.db')
+    const db = new Db(file)
+    for (const [id, wiki] of [['a1', 'read_write'], ['a2', 'read'], ['a3', 'none'], ['a4', undefined]] as [string, WikiAccess | undefined][]) db.saveAgent({ ...agent(id), ...(wiki ? { wiki } : {}) })
+    expect(db.agent('a1')?.wiki).toBe('read_write')
+    db.close()
+
+    const again = new Db(file)
+    expect(again.agent('a1')?.wiki).toBe('read_write')
+    expect(again.agent('a2')?.wiki).toBe('read')
+    expect(again.agent('a3')?.wiki).toBe('none')
+    expect(again.agent('a4')?.wiki).toBeUndefined() // unset stays unset: it reads as 'read'
+    expect(wikiAccess(again.agent('a1')!)).toBe('read_write')
+    expect(wikiAccess(again.agent('a4')!)).toBe('read')
+    again.close()
   })
 })
