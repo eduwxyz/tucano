@@ -442,7 +442,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
           <Icon name="check" size={12} /> {receipt()} {L(`Dá pra desfazer por ${UNDO_HOURS} horas, enquanto ninguém mexer.`, `It can be undone for ${UNDO_HOURS} hours, as long as no one changes it.`)}
         </p>
       )}
-      {accessOnly && !p.state && <p className="hint">{L('Isso dá acesso ou mexe no gasto: só vale quando você confirmar.', 'This grants access or changes spending: it only counts once you confirm it.')}</p>}
+      {accessOnly && !p.state && <p className="hint">{L('Isso dá acesso ou mexe no gasto: só vale quando você confirmar.', 'This grants access or changes spending. It takes effect only after you confirm it.')}</p>}
       {body}
       {p.reason && <p className="hint">{p.reason}</p>}
       {p.needs?.length && !p.state ? (

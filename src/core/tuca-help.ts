@@ -44,6 +44,30 @@ export const VER_ESTADO: ToolDef = {
   }
 }
 
+// ---------- propor_feedback ----------
+
+export const FEEDBACK_MAX = 5_000 // what the "Enviar feedback" window takes (core/feedback.ts)
+
+export const PROPOR_FEEDBACK: ToolDef = {
+  name: 'propor_feedback',
+  get description() {
+    return L(
+      'Escreve um feedback pra quem faz o Tucano: um bug do app, ou uma ideia pra ele. Aparece como um card; a pessoa revisa e envia ela mesma, você nunca envia. Só sobre o Tucano, não sobre o trabalho dos agentes dela. Escreva no idioma da pessoa, curto e concreto: o que ela fez, o que esperava, o que aconteceu (ou a ideia e pra quê). Sem o conteúdo das conversas, nomes ou dados pessoais.',
+      "Writes feedback for the people who make Tucano: a bug in the app, or an idea for it. It shows as a card; the person reviews and sends it themselves, you never send it. Only about Tucano, not about her agents' work. Write in the person's language, short and concrete: what they did, what they expected, what happened (or the idea and what it's for). No conversation content, names or personal data."
+    )
+  },
+  get inputSchema() {
+    return { type: 'object' as const, properties: { tipo: { type: 'string', enum: ['bug', 'idea', 'other'] }, texto: { type: 'string' } }, required: ['tipo', 'texto'] }
+  }
+}
+
+export function feedbackFrom(args: Record<string, unknown>): { draft?: { kind: 'bug' | 'idea' | 'other'; message: string }; error?: string } {
+  const kind = args['tipo'] === 'idea' || args['tipo'] === 'other' ? args['tipo'] : 'bug'
+  const message = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
+  if (!message) return { error: L('Escreva o texto do feedback em `texto`.', 'Write the feedback in `texto`.') }
+  return { draft: { kind, message: message.slice(0, FEEDBACK_MAX) } }
+}
+
 export interface StateInput {
   settings: Settings
   connectors: Connector[]
@@ -92,7 +116,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
     out.push(`## ${L('Conectores', 'Connectors')}\n${lines.join('\n') || L('nenhum adicionado', 'none added')}`)
   }
   if (show('agents')) {
-    const lines = x.agents.map((a) => {
+    const lines = x.agents.filter((a) => !a.deleted).map((a) => {
       const m = modelInfo(a.modelId)
       const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
       // With no monthly limit (0) there is no month to be a percentage of: say so, rather than "0%".

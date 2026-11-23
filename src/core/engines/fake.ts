@@ -5,7 +5,7 @@ import { memorySystem } from '../memory'
 import { titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
-import { handoffSystem, routerSystem } from '../router'
+import { chimeSystem, handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
@@ -35,7 +35,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const back = /(?:Voltou do que você pediu ao seu time|Back from what you asked of your team):[\s\S]*$/.exec(turn.prompt)?.[0]
       // "acabou o limite": Claude's usual login is out, to see an agent's reserve take over (another
       // harness, or another account of Claude, whose limit is still there).
-      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== memorySystem()) {
+      if (id === 'claude' && !turn.account && /acabou o limite|out of quota/i.test(last) && turn.system !== routerSystem() && turn.system !== handoffSystem() && turn.system !== chimeSystem() && turn.system !== memorySystem()) {
         yield { type: 'error', message: "You've hit your limit · resets 5pm" }
         return
       }
@@ -45,6 +45,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = JSON.stringify(fakeRoute(turn.prompt))
       } else if (turn.system === handoffSystem()) {
         reply = JSON.stringify(fakeHandoff(turn.prompt))
+      } else if (turn.system === chimeSystem()) {
+        // Someone is called in only when the reply says so, as "[entra rev]" (with no @, which would be a
+        // mention and hand the turn on by itself): otherwise no one.
+        const reply_ = /<reply>[\s\S]*?<\/reply>/.exec(turn.prompt)?.[0] ?? ''
+        const h = /\[entra @?([\w-]+)\]/.exec(reply_)?.[1]
+        reply = JSON.stringify({ handle: h ?? null, reason: h ? L('é da área dele', 'it is their area') : '' })
       } else if (turn.system === memorySystem()) {
         reply = JSON.stringify(fakeConsolidation(turn.prompt))
       } else if (turn.system === titleSystem()) {
@@ -65,6 +71,11 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           const one = (nome: string, funcao: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao, instrucoes: L(`Você é ${nome}, de ${funcao}.\nEntrega em tópicos.`, `You're ${nome}, in ${funcao}.\nDeliver in bullet points.`), ...extra })
           const r = await callTool(turn.mcpUrl, 'propor_time', { agentes: [one('Duda', L('Dados', 'Data'), { responde_a: 'lia' }), one('Caio', L('Análise', 'Analysis'), { responde_a: 'Duda' })], motivo: L('Um time de dados sob a Lia.', 'A data team under Lia.') })
           reply = textOf(r)
+        } else if (/(?:mande|send) (?:um |a )?feedback: (.+)/i.test(last)) {
+          // "mande um feedback: …": he writes it as a card for the person to review and send.
+          const texto = /(?:mande|send) (?:um |a )?feedback: (.+)/i.exec(last)![1]!.trim()
+          const r = await callTool(turn.mcpUrl, 'propor_feedback', { tipo: /bug|erro|quebr/i.test(texto) ? 'bug' : 'idea', texto })
+          reply = textOf(r).includes('card') ? L('Escrevi o feedback no card: revise e envie por ele.', 'I wrote the feedback on the card: review it and send it from there.') : textOf(r)
         } else if (/time de conte[uú]do/i.test(last)) {
           // A team with a channel, one of them with a connector to write to, and a routine for the other.
           const each = (nome: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ nome, funcao: L('Conteúdo', 'Content'), cor: 'violet', instrucoes: L(`Você é ${nome}.\nCuida do conteúdo do time.\nResponde curto.`, `You are ${nome}.\nLook after the team's content.\nAnswer briefly.`), esforco: 'low', web: false, ...extra })
@@ -114,6 +125,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           })
           reply = textOf(r).includes('card') ? L('Montei o Rafa. Dá pra criar, editar antes ou me pedir ajustes.', 'I put Rafa together. You can create it, edit it first or ask me for changes.') : textOf(r)
         } else reply = L('Legal! Que tipo de tarefa você quer delegar? Me dá um exemplo de algo que você fez essa semana.', 'Nice! What kind of task do you want to delegate? Give me an example of something you did this week.')
+      } else if (turn.mcpUrl && /proponha o time (\p{L}+) e (\p{L}+)/iu.test(last)) {
+        // Any agent proposing a team (not only the Tuca). "de novo em N s": proposes the same team again
+        // that much later, in the same reply, to see what it's told once the first card was applied.
+        const [, a, b] = /proponha o time (\p{L}+) e (\p{L}+)/iu.exec(last)!
+        const team = { agentes: [a!, b!].map((nome) => ({ nome, funcao: 'Ops', cor: 'amber', instrucoes: `Você é ${nome}.\nCuida da entrega.\nResponde curto.`, esforco: 'low', web: false })) }
+        const told = [textOf(await callTool(turn.mcpUrl, 'propor_time', team))]
+        const again = /de novo em (\d+) ?s/i.exec(last)
+        if (again) {
+          await new Promise((r) => setTimeout(r, Number(again[1]) * 1000))
+          told.push(textOf(await callTool(turn.mcpUrl, 'propor_time', team)))
+        }
+        reply = told.join('\n---\n')
       } else if (turn.mcpUrl && back) {
         // What came back from its team: a question left there is answered ("responda a dúvida com `x`", in
         // what the person wrote first) or taken to the person; an end is told in a line.
@@ -176,6 +199,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           'Rodei o SQL pela skill: Sudeste lidera, depois Sul e Nordeste. O segundo comando falhou: o token foi recusado.',
           'I ran the SQL through the skill: Southeast leads, then South and Northeast. The second command failed: the token was refused.'
         )
+      } else if (turn.mcpUrl && /sem pressa com a skill `([\w-]+)`/i.test(last)) {
+        // A run that is still working when the person steers it: a step, a pause long enough to write
+        // in (TUCANO_FAKE_HOLD_MS), then a second call, which is where the steer is handed over. Only
+        // the fake engine holds: it is how the steer pill can be shown at all (screens-steer-pill.mjs).
+        const [, nome] = /sem pressa com a skill `([\w-]+)`/i.exec(last)!
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        await new Promise((ok) => setTimeout(ok, Number(process.env['TUCANO_FAKE_HOLD_MS'] ?? 6000)))
+        await callTool(turn.mcpUrl, 'ler_skill', { nome })
+        reply = L('Segui a orientação e terminei.', 'I followed the steer and finished.')
       } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
         const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
         reply = `Saída:\n\n${textOf(r)}`
@@ -225,6 +257,9 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
         reply = 'Anotado.'
+      } else if (/A pessoa preferiu não responder|The person chose not to answer/.test(turn.prompt)) {
+        // Its question was cancelled (Cancelar on the card): it goes on without the answer, and says what it assumed.
+        reply = L('Segui sem a resposta: assumi que é pra sexta.', 'Went on without the answer: I assumed Friday.')
       } else if (turn.mcpUrl && /pergunte em (\d+) ?s/i.test(last)) {
         // "pergunte em 3 s": asks after a delay, so a test can leave the thread while it's still working.
         await new Promise((r) => setTimeout(r, Number(/pergunte em (\d+) ?s/i.exec(last)![1]) * 1000))
@@ -245,6 +280,18 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           ...(para ? { para } : {})
         })
         reply = textOf(r).includes('autorizar') || textOf(r).includes('allow') ? 'Vou perguntar se deixarem.' : 'Te mandei duas decisões.'
+      } else if (turn.mcpUrl && /pr[oó]ximos passos/i.test(last)) {
+        // "os próximos passos": a to-do card, one of its steps plainly optional.
+        const r = await callTool(turn.mcpUrl, 'next_steps', {
+          question: 'O que vem agora?',
+          steps: [
+            { label: 'Rodar a suíte inteira', description: 'o que já está escrito' },
+            { label: 'Traduzir os rótulos novos' },
+            { label: 'Escrever o teste do card' },
+            { label: 'Publicar as capturas', description: 'só quando o resto estiver verde' }
+          ]
+        })
+        reply = textOf(r).includes('card') ? 'Deixei os próximos passos no card.' : textOf(r)
       } else if (turn.mcpUrl && /pergunte (?:a|à|pra|para) (\p{L}+)/iu.test(last)) {
         // "pergunte a Bia": a question to someone in particular (a Tucano with people).
         const r = await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?', para: /pergunte (?:a|à|pra|para) (\p{L}+)/iu.exec(last)![1]! })
@@ -262,6 +309,42 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       const slow = /^\s*(?:delegue|hand) /i.test(last) ? null : /demore (\d+) ?s/i.exec(last) // what it hands down is the other's to take its time on
       if (slow) await new Promise((r) => setTimeout(r, Number(slow[1]) * 1000))
       if (id === 'claude') yield { type: 'quota', quota: { fiveHour: { utilization: 0.34, resetsAt: Date.now() + 2 * 3_600_000 }, sevenDay: { utilization: 0.21, resetsAt: Date.now() + 4 * 86_400_000 }, at: Date.now() } }
+      // With TUCANO_FAKE_THINKING=1, the model thinks out loud first, slowly, so the window has
+      // something to show as it arrives: the same shape Pi's thinking_delta has.
+      if (process.env['TUCANO_FAKE_THINKING'] === '1') {
+        const thoughts = [
+          'Reading the request: it is about ',
+          'a piece of code and a test that fails. ',
+          'Before answering, worth seeing where the request comes from ',
+          'and what was already said in this conversation. ',
+          'The short path is reading the file it names, ',
+          'src/renderer/src/components/Conversation.tsx:11799 ',
+          'checking the version in the repository ',
+          'and only then saying what to do. ',
+          'If the test fails the same on a clean main, it is not the build. ',
+          'Better to say that with the number in hand. ',
+          'This machine may not have the branch the test was written on, ',
+          'so a failure here says nothing about the build yet. ',
+          'First the file, then whether the same test fails on a clean main. ',
+          'If it does, the machine and the build are both fine. ',
+          'If it passes there, something in this checkout changed under it. ',
+          'Also worth checking the Node version the runner used, ',
+          'since the suite pins nothing and this machine may run another one. ',
+          'That is the whole plan: two runs, one comparison, and the number. ',
+          'One more thing before the run: the suite reads its fixtures from the repository, ',
+          'so a checkout that is behind would fail for a reason that has nothing to do with the code. ',
+          'Worth printing the commit first as well. ',
+          'Then the two runs against that same commit, one here and one on a clean main. ',
+          'If the numbers agree the machine is out of it entirely. ',
+          'If they differ, the difference is the answer and it needs to be said the same way. ',
+          'No guessing before the runs: a wrong cause costs more than the minute they take.'
+        ]
+        for (const piece of thoughts) {
+          if (turn.signal.aborted) return
+          await new Promise((r) => setTimeout(r, 260))
+          yield { type: 'thinking', delta: piece }
+        }
+      }
       let text = ''
       for (const word of reply.split(/(\s+)/)) {
         if (turn.signal.aborted) return

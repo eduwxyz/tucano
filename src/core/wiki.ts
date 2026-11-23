@@ -9,7 +9,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { readdir, stat } from 'node:fs/promises'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { L, locale } from '../shared/lang'
+import { L, lang, locale } from '../shared/lang'
 import { UserError } from '../shared/errors'
 import type { WikiChange, WikiFinding, WikiHit, WikiImport, WikiOp, WikiPage, WikiPageInfo, WikiSource, WikiVersion } from '../shared/types'
 import type { ToolDef } from './gateway'
@@ -77,7 +77,8 @@ export function parsePage(text: string): { meta: Record<string, string>; body: s
 
 // Changes some keys of a page's frontmatter and leaves every other line as it was (lists,
 // aliases, whatever Obsidian or its plugins keep there).
-export function withFront(text: string | undefined, set: Record<string, string>, body: string): string {
+// `extra`: lines of a block the body brought (see ownFront); the keys the page doesn't have yet go in as written.
+export function withFront(text: string | undefined, set: Record<string, string>, body: string, extra: string[] = []): string {
   const m = text ? /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text) : null
   const lines = m ? m[1]!.split(/\r?\n/) : []
   for (const [k, v] of Object.entries(set)) {
@@ -86,8 +87,42 @@ export function withFront(text: string | undefined, set: Record<string, string>,
     if (at >= 0) lines[at] = line
     else lines.push(line)
   }
+  let keep = true
+  for (const l of extra) {
+    const k = /^([\wÀ-ɏ-]+):/.exec(l)?.[1]?.toLowerCase()
+    if (k) keep = !lines.some((x) => x.toLowerCase().startsWith(`${k}:`))
+    if (keep) lines.push(l)
+  }
   const clean = body.replace(/^\n+/, '')
   return lines.length ? `---\n${lines.join('\n')}\n---\n\n${clean}` : clean
+}
+
+// The keys Tucano writes in a page's frontmatter, in the workspace's language (Obsidian shows
+// them as Properties). Reading takes either language, so a wiki written in both stays one wiki.
+export const frontKeys = (): { kind: string; created: string; updated: string } => (lang() === 'en' ? { kind: 'type', created: 'created', updated: 'updated' } : { kind: 'tipo', created: 'criada', updated: 'atualizada' })
+const KIND_KEYS = ['tipo', 'type', 'kind']
+const DATE_KEYS = ['criada', 'created', 'atualizada', 'updated']
+
+// A body that starts with a frontmatter block of its own: a model that wrote a page file whole
+// ("---\ntipo: Agent\ncriada: …\n---"), a note pasted from Obsidian. Kept in the text, that block
+// shows as a rule and a bold line on top of the page. Only a block made of "key: value" lines
+// (and "  - item" under one) counts, so a paragraph between two rules stays text. Gives the
+// block's meta, its lines with Tucano's own keys left out, and the body after it.
+export function ownFront(body: string): { meta: Record<string, string>; extra: string[]; body: string } | null {
+  const text = body.replace(/^(?:[ \t]*\r?\n)+/, '')
+  const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text)
+  if (!m) return null
+  const lines = m[1]!.split(/\r?\n/)
+  const kv = /^([\wÀ-ɏ-]+):(\s|$)/
+  if (!lines.some((l) => kv.test(l)) || !lines.every((l) => !l.trim() || kv.test(l) || /^\s+-\s/.test(l))) return null
+  const extra: string[] = []
+  let skip = false
+  for (const l of lines) {
+    const k = kv.exec(l)?.[1]?.toLowerCase()
+    if (k) skip = KIND_KEYS.includes(k) || DATE_KEYS.includes(k)
+    if (!skip && l.trim()) extra.push(l)
+  }
+  return { meta: parsePage(text).meta, extra, body: text.slice(m[0].length) }
 }
 
 const SKIP = new Set(['.obsidian', '.trash', '.git', 'node_modules'])
@@ -970,16 +1005,24 @@ export class Wiki {
     }
     const day = new Date().toISOString().slice(0, 10)
     const prev = existing ? parsePage(existing).meta : {}
-    const body = p.body.replace(/\r\n/g, '\n').trimEnd() + '\n'
-    // A page Tucano writes says its kind and dates; one that came from elsewhere keeps its
-    // frontmatter as it was, and only gets a kind when it's changed to one it didn't have.
+    // A frontmatter block at the top of the body is the page's, not its text: its kind counts when
+    // none was given, its other keys join the page's, and the dates are the ones Tucano keeps.
+    const own = ownFront(p.body)
+    const kind = p.kind || (own && KIND_KEYS.map((k) => own.meta[k]).find(Boolean)) || undefined
+    const body = (own ? own.body : p.body).replace(/\r\n/g, '\n').trimEnd() + '\n'
+    // A page Tucano writes says its kind and dates, with keys in the workspace's language; one that
+    // came from elsewhere keeps its frontmatter as it was, and only gets a kind when it's changed to
+    // one it didn't have. A key the page already has is the one changed, whatever its language.
+    const keys = frontKeys()
     const set: Record<string, string> = {}
-    if (existing === undefined) Object.assign(set, { tipo: p.kind || KIND_OTHER(), criada: day, atualizada: day })
+    if (existing === undefined) Object.assign(set, { [keys.kind]: kind || KIND_OTHER(), [keys.created]: day, [keys.updated]: day })
     else {
-      if (p.kind && p.kind !== this.kindOf(file, prev, !!prev['tipo'])) set['tipo'] = p.kind
-      if ('atualizada' in prev) set['atualizada'] = day
+      const kindKey = KIND_KEYS.find((k) => k in prev)
+      if (kind && kind !== this.kindOf(file, prev, !!kindKey)) set[kindKey ?? keys.kind] = kind
+      const updated = ['atualizada', 'updated'].find((k) => k in prev)
+      if (updated) set[updated] = day
     }
-    const text = withFront(existing, set, body)
+    const text = withFront(existing, set, body, own?.extra)
     if (oldFile && oldFile !== file) {
       renameSync(join(this.pagesDir, oldFile), join(this.pagesDir, file)) // Obsidian's links by name follow it
       this.unindex(oldFile)
@@ -1147,7 +1190,8 @@ export class Wiki {
       writeFileSync(join(this.dir, SOURCES, 'arquivos', name), p.file.data)
       origin.original = `${SOURCES}/arquivos/${name}`
     }
-    const meta: Record<string, string> = { tipo: L('fonte', 'source'), origem: p.kind, adicionada: d.toISOString().slice(0, 16).replace('T', ' '), ...(origin.url ? { link: origin.url } : {}), ...(origin.original ? { arquivo: `[[${origin.original}]]` } : {}) }
+    const en = lang() === 'en' // its keys in the workspace's language, as a page's (nothing reads them back)
+    const meta: Record<string, string> = { [frontKeys().kind]: L('fonte', 'source'), [en ? 'origin' : 'origem']: p.kind, [en ? 'added' : 'adicionada']: d.toISOString().slice(0, 16).replace('T', ' '), ...(origin.url ? { link: origin.url } : {}), ...(origin.original ? { [en ? 'file' : 'arquivo']: `[[${origin.original}]]` } : {}) }
     writeFileSync(join(this.dir, SOURCES, file), pageText(meta, `# ${p.title}\n\n${p.text.trim()}\n`))
     const src: WikiSource = { id: sha(file + at), file: `${SOURCES}/${file.replace(/\.md$/, '')}`, title: p.title, kind: p.kind, origin, addedBy: p.by, addedAt: at, ...(p.status ? { status: p.status } : {}) }
     this.db.prepare('INSERT INTO sources (id, file, title, kind, origin, added_by, added_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(src.id, src.file, src.title, src.kind, JSON.stringify(src.origin), src.addedBy, src.addedAt, p.status ?? null)
