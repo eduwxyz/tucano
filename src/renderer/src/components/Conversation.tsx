@@ -772,11 +772,11 @@ function TryAgain({ messageId }: { messageId: string }): ReactNode {
   }
   return (
     <>
-      <button className="btn btn--xs retry" onClick={() => retry()}>
-        {L('Tentar de novo', 'Try again')}
+      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar de novo', 'Try again')} onClick={() => retry()}>
+        <Icon name="retry" size={11} /><span className="steps__ask-pill__word">{L('Tentar de novo', 'Try again')}</span>
       </button>
-      <button className="btn btn--xs retry" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        {L('Tentar com instruções', 'Try with instructions')}
+      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar com instruções', 'Try with instructions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <Icon name="edit" size={11} /><span className="steps__ask-pill__word">{L('Tentar com instruções', 'Try with instructions')}</span>
       </button>
       {open && (
         <div className="retry-note">
