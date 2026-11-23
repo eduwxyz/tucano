@@ -4,13 +4,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { askKind, channelsOf, entriesOf, headsOf, reportsOf, sectorName, type AskKind } from '../../../shared/org'
-import { BOARD, boundsOf, ZONE_PAD, type Point } from '../../../shared/org-layout'
+import { BOARD, boundsOf, ZONE_BOTTOM, ZONE_PAD, ZONE_TOP, type Point } from '../../../shared/org-layout'
 import { navigate, openDm, openThread, saveAgent, useStore, type Agent, type Delegation } from '../store'
 import { ago, AgentAvatar, Icon, ownColor } from './ui'
 
 const PAD_SIDE = ZONE_PAD // what a zone keeps around its cards; the board leaves room for two of them between sectors
-const PAD_TOP = 68 // above the head card: the chip fits there
-const PAD_BOTTOM = 32
+const PAD_TOP = ZONE_TOP // above the head card: the chip fits there
+const PAD_BOTTOM = ZONE_BOTTOM
 const DOES_ROOM = 520 // a zone this wide has room for what it solves, beside the chip
 
 const tint = (a: Agent): CSSProperties => ownColor(a)
@@ -143,7 +143,7 @@ export function SectorPanel({ head, agents, admin, asks, onClose }: { head: Agen
           <label className="field">
             <span className="field__label">{L('O que este setor resolve', 'What this sector solves')}</span>
             <textarea rows={3} value={does} maxLength={200} onChange={(e) => ((draft.current.does = e.target.value), setDoes(e.target.value))} onBlur={save} />
-            <span className="hint">{L('Os outros chefes leem isto para saber quando mandar algo pra cá.', 'The other heads read this to know when to send something here.')}</span>
+            <span className="hint">{L('Os outros chefes leem isto para saber quando mandar algo pra cá.', 'Other sector heads use this to decide when to send work here.')}</span>
           </label>
           <span className={`org-sector__saved ${saved ? 'is-on' : ''}`} role="status">
             {saved && (
@@ -170,7 +170,7 @@ export function SectorPanel({ head, agents, admin, asks, onClose }: { head: Agen
             {head.role && ` · ${head.role}`}
           </span>
         </span>
-        <span className="hint">{L('É quem fica no topo do ramo. Ele decide quem do setor faz.', 'They are at the top of the branch. They decide who in the sector does it.')}</span>
+        <span className="hint">{L('É quem fica no topo do ramo. Ele decide quem do setor faz.', 'The sector head leads the branch and assigns requests within the sector.')}</span>
       </div>
       <div className="field">
         <span className="field__label">{L('Pedidos de outros setores', 'Requests from other sectors')}</span>

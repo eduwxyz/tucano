@@ -89,8 +89,9 @@ describe('an agent on an endpoint, with no harness', () => {
     const r = runner(endpointEngine(async () => ({ baseUrl: 'http://localhost:11434/v1' }), p.f))
     await r.send('d1', 'pede pra Clara responder o Fulano')
     await r.idle()
-    // The request really went out, through the gateway: a thread in #clientes in Orion's name.
-    expect(db.messages().some((m) => m.conversationId === 'clientes' && m.text.includes('@clara, um pedido'))).toBe(true)
+    // The request really went out, through the gateway, in Orion's name: Clara isn't in this DM, so it went to hers.
+    const dm = db.conversations().find((c) => c.kind === 'dm' && c.name === 'clara')!
+    expect(db.messages().some((m) => m.conversationId === dm.id && m.text.includes('@clara, um pedido'))).toBe(true)
     // The second call carried the tool call and its result, as OpenAI's format has them.
     const second = p.sent[1]!.body.messages
     expect(second.at(-2)).toMatchObject({ role: 'assistant', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'pedir', arguments: JSON.stringify({ para: 'clara', pedido: 'responda o Fulano' }) } }] })

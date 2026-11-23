@@ -6,6 +6,7 @@ import { L } from '../../../shared/lang'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import {
   ACCOUNT_ENGINES,
+  accountsOn,
   addAccount,
   ENGINES,
   ENGINE_IDS,
@@ -291,7 +292,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
           <code className="harness__cmd">{manual}</code>
         </div>
       )}
-      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', 'Installing in the terminal that opened. Once it finishes, it shows up here on its own.')}</p>}
+      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', "Finish installing in the terminal. Tucano picks it up on its own.")}</p>}
       {!st.installed && install === 'node' && (
         <p className="hint hint--warn harness__body">
           {L(`O ${ENGINES[engine].label} precisa do Node.js. Instale o Node.js e depois clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js. Install Node.js, then click Install again.`)}{' '}
@@ -413,7 +414,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
           <p className="hint">
             {L(
               'Um endereço no padrão da OpenAI (/chat/completions) e a chave dele. Os agentes rodam direto nele, sem Claude Code nem Codex, e cada um usa um dos modelos que você marcar.',
-              'An address in OpenAI’s format (/chat/completions) and its key. Agents run straight on it, with no Claude Code or Codex, each on one of the models you tick.'
+              'Enter an OpenAI-compatible address (/chat/completions) and its key. Agents run directly on the selected models, without Claude Code or Codex.'
             )}
           </p>
           <div className="endpoint__presets">
@@ -456,7 +457,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
                   </label>
                 ))}
               </div>
-              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must handle tool calls: that’s how an agent asks another, asks you and uses connectors.')}</p>
+              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must support tool calls so the agent can ask other agents or you, and use connectors.')}</p>
             </>
           )}
           <div className="endpoint__actions">
@@ -558,11 +559,13 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
   )
 }
 
-// More logins of Claude Code and Codex: a work account beside a personal one. Each lives in a
-// folder of its own and is signed into through the CLI, in a terminal; an agent picks one on its page.
+// More logins of Claude Code, Codex and Antigravity (that one on a Mac): a work account beside a
+// personal one. Each lives in a folder of its own and is signed into through the CLI, in a terminal;
+// an agent picks one on its page.
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])
   const engines = useStore((s) => s.settings.engines)
+  const os = useStore((s) => s.platform)
   const [engine, setEngine] = useState<AccountEngine>('claude')
   const [name, setName] = useState('')
   const [manual, setManual] = useState<Record<string, string>>({})
@@ -610,7 +613,7 @@ export function AccountsCard(): ReactNode {
         <Select
           value={engine}
           onChange={(v) => { if (v) void setEngine(v as AccountEngine) }}
-          options={ACCOUNT_ENGINES.filter((e) => engines[e].installed).map((e) => ({ value: e, label: ENGINES[e].label }))}
+          options={ACCOUNT_ENGINES.filter((e) => engines[e].installed && accountsOn(e, os)).map((e) => ({ value: e, label: ENGINES[e].label }))}
           placeholder={L('Motor', 'Engine')}
         />
         <input className="grow" placeholder={L('Nome da conta (ex.: Trabalho)', 'Account name (e.g. Work)')} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
@@ -618,6 +621,11 @@ export function AccountsCard(): ReactNode {
           {L('Adicionar e entrar', 'Add and sign in')}
         </button>
       </div>
+      {engine === 'antigravity' && (
+        <p className="hint">
+          {L('O login abre o Antigravity num terminal: entre com a outra conta Google, espere ele responder e saia com /quit.', 'Signing in opens Antigravity in a terminal: sign in with the other Google account, wait for it to answer and leave with /quit.')}
+        </p>
+      )}
       {removing && (
         <p className="hint hint--warn">
           {L(

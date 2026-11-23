@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Account, Agent, EngineId, Message, Settings } from '../src/shared/types'
+import { ACCOUNT_ENGINES, accountsOn, type Account, type Agent, type EngineId, type Message, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { accountDir, accountLogin } from '../src/core/engines/detect'
 import { claudeEngine } from '../src/core/engines/claude'
@@ -84,6 +84,17 @@ describe('accounts', () => {
     expect(accountLogin('claude', { code: 0, stdout: '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max", "email": "a@b.co"}', stderr: '' })).toEqual({ loggedIn: true, detail: 'Plano Claude Max · a@b.co' })
     expect(accountLogin('codex', { code: 0, stdout: 'Logged in using ChatGPT', stderr: '' })).toEqual({ loggedIn: true, detail: 'Plano ChatGPT' })
     expect(accountLogin('codex', { code: 1, stdout: 'Not logged in', stderr: '' })).toEqual({ loggedIn: false })
+    // Antigravity: `agy models` in that home lists what its login can run, or asks to sign in.
+    expect(accountLogin('antigravity', { code: 0, stdout: 'Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n', stderr: '' })).toEqual({ loggedIn: true, detail: 'Google · 2 modelos' })
+    expect(accountLogin('antigravity', { code: 1, stdout: 'Fetching available models...\nError: Please sign in to view available models.', stderr: '' })).toEqual({ loggedIn: false })
+  })
+
+  it('has Antigravity accounts only on a Mac, where its login can live in a file of the account’s home', () => {
+    expect(ACCOUNT_ENGINES).toContain('antigravity')
+    expect(accountsOn('antigravity', 'mac')).toBe(true)
+    expect(accountsOn('antigravity', 'linux')).toBe(false)
+    expect(accountsOn('antigravity', 'windows')).toBe(false)
+    expect(accountsOn('codex', 'windows')).toBe(true)
   })
 
   // The stand-in CLI is a shell script, which Windows can't run.

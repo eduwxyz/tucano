@@ -14,7 +14,7 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Memories, memorySystem } from '../src/core/memory'
 import { People } from '../src/core/people'
-import { handoffSystem, routerSystem } from '../src/core/router'
+import { chimeSystem, handoffSystem, routerSystem } from '../src/core/router'
 import { Runner } from '../src/core/runs'
 
 const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-round2-'))
@@ -303,7 +303,7 @@ describe('10. routed replies in a busy channel', () => {
           yield { type: 'done', text: JSON.stringify({ handles: handle ? [handle] : [], reason: 'teste' }), usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }
-        if (t.system === handoffSystem() || t.system === memorySystem()) {
+        if (t.system === handoffSystem() || t.system === chimeSystem() || t.system === memorySystem()) {
           yield { type: 'done', text: '{"handles":[],"reason":"x","summary":"x","memories":[]}', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }

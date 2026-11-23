@@ -35,7 +35,7 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
           {L('Todos os agentes', 'All agents')}
         </button>
         <button type="button" className={everyone ? '' : 'is-active'} onClick={() => everyone && onChange(agents.map((a) => a.id))}>
-          {L('Só alguns', 'Only some')}
+          {L('Só alguns', 'Selected agents')}
         </button>
       </div>
       {!everyone && (

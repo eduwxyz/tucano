@@ -39,9 +39,17 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Connectors',
     summary: 'Connecting Tucano to your tools (Linear, GitHub, Notion…) over MCP: the store, the custom ones, sign-in, tool classes and errors.'
   },
+  cofre: {
+    title: 'Cofre (vault)',
+    summary: 'Keeping API keys and tokens for the agents to use by name, in a command, without ever seeing the value: who may use one, approval per use, the log and .env import.'
+  },
   conversas: {
     title: 'Conversations, channels and threads',
-    summary: 'Channels, direct messages, threads, mentions, who answers, passing the turn between agents, stop and try again, images and dictation.'
+    summary: 'Channels, direct messages, threads, mentions, who answers, work that goes on until it is done, who joins on their own, stop and try again, images and dictation.'
+  },
+  harnesses: {
+    title: 'Harnesses (MCP)',
+    summary: 'Connect your harness (Claude Code, Codex, Cursor, OpenCode) to Tucano over MCP: from there it understands the team, talks to the agents and sets Tucano up.'
   },
   google: {
     title: 'Google: Gmail, Calendar, Drive, Docs and Sheets',
@@ -49,7 +57,7 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   },
   limites: {
     title: 'Limits, usage and pause',
-    summary: "Each agent's monthly limit, the ceiling per reply, when a reply is cut, Usage and limits, Report, pausing everything and quiet hours."
+    summary: "Each agent's monthly limit, the ceiling per reply, when a piece of work stops, replies that are cut or try again, Usage and limits, Report, pausing everything and quiet hours."
   },
   memoria: {
     title: 'Memory',
@@ -61,7 +69,7 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   },
   organograma: {
     title: 'Team (who answers to whom)',
-    summary: 'An agent above the others hands work to those below, each in its own channel, and gets the answer back. How to set it up, what happens in a request, questions, cancelling, deadlines and limits.'
+    summary: 'Who splits the work with whom: a map, not a fence. How to set it up, what happens in a request, questions, cancelling, failures and limits.'
   },
   problemas: {
     title: 'When something goes wrong',
@@ -77,7 +85,7 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   },
   setores: {
     title: "Sectors (when the subject is another area's)",
-    summary: 'Each team on the board is a sector with a head. How to name it, say what it solves and how a request passes from one sector to another.'
+    summary: 'Each team on the board is a sector with a head. How to name it, say what it solves and how a request goes from one sector to another (straight to whoever knows, or to the head).'
   },
   servidor: {
     title: 'Tucano on a server',
