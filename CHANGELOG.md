@@ -16,6 +16,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 > - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
 > - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo enquanto a página rola.
+> - **Mudou:** **Continuar**, **Tentar de novo** e **Tentar com instruções** viraram botões discretos na linha de baixo da resposta e aparecem ao passar o mouse. Em telas de toque ficam sempre visíveis.
+> - **Corrigido:** **Enviar feedback** e **Conectores** agora têm a mesma altura de **Cofre** no pé da barra lateral.
 
 ### Added
 
@@ -31,6 +33,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
 - **The computer icon on an agent's row comes in on hover.** The laptop or globe that says where an agent runs now appears with the settings gear, so the sidebar is quieter at rest. On a touch screen, where nothing hovers, it stays in sight. Thanks to Apostol Apostolov. (#640)
+- **A reply's way back sits on its footer line.** **Continue**, **Try again** and **Try with instructions** are now small pills on the line with the reply's numbers. They come in when the pointer or the keyboard focus is on the message, and stay in sight on a touch screen. Thanks to Apostol Apostolov. (#641)
 
 ### Changed
 
@@ -39,6 +42,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Fixed
 
 - **Settings tabs and subject jumps stay in sight while scrolling.** The group tabs stayed at the top, but the subject links scrolled away. Both rows now stay pinned, so moving between sections works from deep in the page. Thanks to Apostol Apostolov. (#643)
+- **The sidebar's foot rows are one height.** **Send feedback** and **Connectors** sat at 20 px next to **Vault** at 30 px. All three now line up. Thanks to Apostol Apostolov. (#639)
 
 ## [0.2.45] - 2026-11-22
 
