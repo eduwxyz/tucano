@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CliError } from '../src/core/databricks'
 import { Db } from '../src/core/db'
+import { settingsPatchError } from '../src/core/settings-patch'
 import { giveJobSkill, JOB_SKILL_NAME, JobWatches, jobEventTask, jobSummary, jobTools, type JobWatchDeps } from '../src/core/job-watches'
 import { Skills } from '../src/core/skills'
 import { jobWatchConfig, type JobEvent, type JobReading, type JobWatch, type JobWatchSettings, type SparkReading } from '../src/shared/job-watch'
@@ -659,5 +660,13 @@ describe('the database', () => {
     expect(db.agent('a1')?.jobWatch).toBe(true)
     db.saveAgent({ ...pm, jobWatch: false })
     expect(db.agent('a1')?.jobWatch).toBeUndefined()
+  })
+})
+
+describe('the job watch settings', () => {
+  it('is a setting the app takes: the card in Settings saves it', () => {
+    expect(settingsPatchError({ jobWatch: { ...jobWatchConfig(undefined), actions: true } })).toBeUndefined()
+    expect(settingsPatchError({ jobWatch: null })).toBeUndefined()
+    expect(settingsPatchError({ jobWatch: 'on' })).toBeDefined()
   })
 })

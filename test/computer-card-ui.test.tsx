@@ -33,12 +33,18 @@ const render = async (agent: Agent, computer?: ComputerInfo): Promise<void> => {
   await act(async () => root.render(<AgentPage id="a1" />))
 }
 // The section, since the page's sections became list groups (its title, a "?", then its rows).
-const card = (): Element => [...document.querySelectorAll('.lgroup')].find((c) => c.textContent?.startsWith('Computador'))!
+const card = (): Element => [...document.querySelectorAll('.lgroup')].find((c) => c.textContent?.startsWith('Onde trabalha'))!
 const text = (): string => card().textContent ?? ''
 const picked = (): string => [...card().querySelectorAll('[role="radio"]')].filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent).join()
 const click = async (name: string): Promise<void> => {
   const b = [...card().querySelectorAll('button')].find((x) => x.textContent === name)!
   await act(async () => void b.dispatchEvent(new window.Event('click', { bubbles: true })))
+}
+const lead = (): string => card().querySelector('.lgroup__lead')?.textContent ?? ''
+const toggle = (label: string): Element => card().querySelector(`[role="switch"][aria-label="${label}"]`)!
+const flip = async (label: string): Promise<void> => {
+  await act(async () => void toggle(label).dispatchEvent(new window.Event('click', { bubbles: true })))
+  await act(async () => new Promise((r) => setTimeout(r, 10)))
 }
 
 beforeEach(() => (root = createRoot(document.getElementById('root')!)))
@@ -47,10 +53,11 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
-describe('the Computador card, on its first render', () => {
-  it('none: just the choice', async () => {
+describe('the Onde trabalha card, on its first render', () => {
+  it('none: just the choice, and the line says it runs commands nowhere', async () => {
     await render(lia({ computer: false }))
-    expect(picked()).toBe('Nenhum')
+    expect(picked()).toBe('Não')
+    expect(lead()).toBe('Lia não roda comandos em nenhum computador: conversa, pesquisa e usa os conectores.')
     expect(text()).not.toContain('Liberar o computador pra ele')
     expect(text()).not.toContain('Emprestar pasta')
   })
@@ -58,23 +65,25 @@ describe('the Computador card, on its first render', () => {
   it("Linux: Docker's state, lent folders and the computer's buttons", async () => {
     await render(lia({ computer: true, computerKind: 'linux' }), info('linux', 'no_docker'))
     expect(picked()).toBe('Linux isolado')
+    expect(lead()).toBe('Lia trabalha num Linux isolado neste computador.')
     for (const t of ['sem Docker', 'Verificar de novo', 'Pastas do seu computador', 'Emprestar pasta…', 'Abrir pasta', 'Reiniciar', 'Apagar computador']) expect(text()).toContain(t)
     expect(text()).not.toContain('Liberar o computador pra ele')
   })
 
   it('this computer, let: what it means, its folder and services, and nothing of Linux nor the confirmation', async () => {
     await render(lia({ computer: true, computerKind: 'mac' }), info('mac', 'running'))
-    expect(picked()).toBe('Este computador')
+    expect(picked()).toBe('Direto no computador')
+    expect(lead()).toBe('Lia trabalha direto neste computador.')
     for (const t of ['no seu computador', 'Liberado: os comandos rodam direto no seu computador', 'alcança as suas pastas sem emprestar e não precisa do Docker', 'Abrir pasta dele', 'Parar serviços']) expect(text()).toContain(t)
     for (const t of ['Liberar o computador pra ele', 'Emprestar pasta', 'sem Docker', 'Verificar de novo', 'Apagar computador']) expect(text()).not.toContain(t)
   })
 })
 
-describe('picking "Este computador"', () => {
-  it('from Linux: the confirmation alone, with "Este computador" picked; Cancelar goes back, nothing saved', async () => {
+describe('picking "Direto no computador"', () => {
+  it('from Linux: the confirmation alone, with "Direto no computador" picked; Cancelar goes back, nothing saved', async () => {
     await render(lia({ computer: true, computerKind: 'linux' }), info('linux', 'no_docker'))
-    await click('Este computador')
-    expect(picked()).toBe('Este computador')
+    await click('Direto no computador')
+    expect(picked()).toBe('Direto no computador')
     expect(text()).toContain('Liberar o computador pra ele')
     for (const t of ['sem Docker', 'Emprestar pasta', 'Apagar computador']) expect(text()).not.toContain(t)
     await act(async () => new Promise((r) => setTimeout(r, 10)))
@@ -86,52 +95,60 @@ describe('picking "Este computador"', () => {
 
   it('clicking the saved choice again drops the confirmation', async () => {
     await render(lia({ computer: false }))
-    await click('Este computador')
+    await click('Direto no computador')
     expect(text()).toContain('Liberar o computador pra ele')
-    await click('Nenhum')
-    expect(picked()).toBe('Nenhum')
+    await click('Não')
+    expect(picked()).toBe('Não')
     expect(text()).not.toContain('Liberar o computador pra ele')
   })
 
   it('Liberar saves it and shows this computer’s card', async () => {
     await render(lia({ computer: false }))
-    await click('Este computador')
+    await click('Direto no computador')
     await click('Liberar o computador pra ele')
     // It saves by itself, right away: the stored agent with the change, in its channels.
     await act(async () => new Promise((r) => setTimeout(r, 10)))
     expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', computer: true, computerKind: 'mac' }), [])
-    expect(picked()).toBe('Este computador')
+    expect(picked()).toBe('Direto no computador')
     expect(text()).toContain('Abrir pasta dele')
     expect(text()).not.toContain('Liberar o computador pra ele')
   })
 })
 
-// On a server (Tucano Pro's, with no Docker): "this computer" is the server, an isolated Linux can't run,
-// and the person's own computer comes lent from the desktop app, as a connector the agent needs access to.
-describe('the Computador card on a server', () => {
+// On a server (Tucano Pro's, with no Docker): the server is one place, an isolated Linux can't run there, and
+// each computer lent to it is another, its person's to give.
+describe('Onde trabalha on a server', () => {
   const node = { id: 'mac1', name: 'MacBook Air de Ana', kind: 'remote', url: 'tucano-node://dev1', auth: 'none', status: 'connected', tools: [] } as unknown as State['connectors'][number]
+  const bias = { ...node, id: 'mac2', url: 'tucano-node://dev2?owner=bia', name: 'iMac de Bia', status: 'disconnected' } as unknown as State['connectors'][number]
   const bia: Person = { id: 'bia', name: 'Bia', role: 'member', about: '' }
   const onServer = async (agent: Agent, o: { connectors?: State['connectors']; lending?: () => void; you?: string } = {}): Promise<void> => {
     Object.assign(window, { __TUCANO_WEB__: true, tucano: { ...(o.lending ? { openLending: o.lending } : {}) } })
+    Object.assign(globalThis, { location: { host: 'kobi.tucano.pro' } })
     fake = { ...getState(), ready: true, people: [ana, bia], you: o.you ?? 'ana', agents: [agent], connectors: o.connectors ?? [], tabs: { agent: 'ferramentas' }, computers: [], isolatedComputers: false }
     await act(async () => root.render(<AgentPage id="a1" />))
   }
   afterEach(() => void Object.assign(window, { __TUCANO_WEB__: undefined, tucano: undefined }))
 
-  it('Linux without Docker: says it can’t run here, with no "check again", and switches to None in one click', async () => {
+  it('the server is a row of its own, named with its address', async () => {
+    await onServer(lia({ computer: false }))
+    expect(text()).toContain('Servidorkobi.tucano.pro · sempre ligado')
+    expect(lead()).toBe('Lia não roda comandos em nenhum computador: conversa, pesquisa e usa os conectores. A conversa e a memória ficam sempre no servidor.')
+  })
+
+  it('Linux without Docker: says it can’t run here, with no "check again", and switches to Não in one click', async () => {
     await onServer(lia({ computer: true, computerKind: 'linux' }))
     expect(text()).toContain('Este servidor não tem Docker, então o Linux isolado não roda aqui')
+    expect(lead()).toContain('Lia não roda comandos em nenhum computador')
     for (const t of ['Verificar de novo', 'Depois, clique', 'Emprestar pasta', 'Apagar computador']) expect(text()).not.toContain(t)
-    await click('Trocar pra Nenhum')
+    await click('Trocar pra Não')
     await act(async () => new Promise((r) => setTimeout(r, 10)))
     expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', computer: false }), [])
   })
 
   it('names the server choice for what it is, and its confirmation says it isn’t your computer', async () => {
     await onServer(lia({ computer: false }))
-    expect(card().textContent).toContain('O servidor')
     expect(text()).not.toContain('Este computador')
-    await click('O servidor')
+    await click('Direto no servidor')
     expect(text()).toContain('vão rodar direto no servidor, não no seu computador')
     expect(text()).toContain('Liberar o servidor pra ele')
   })
@@ -151,33 +168,39 @@ describe('the Computador card on a server', () => {
     expect(text()).not.toContain('Emprestar este computador')
   })
 
-  it('your computer lent but not given to this agent: gives access in one click', async () => {
+  it('your computer lent but not given to this agent: a row of its own, turned on in one click', async () => {
     await onServer(lia({ computer: false }), { connectors: [node] })
-    expect(text()).toContain('MacBook Air de Ana está emprestado a este servidor, mas este agente ainda não usa')
-    await click('Dar acesso')
-    await act(async () => new Promise((r) => setTimeout(r, 10)))
+    expect(text()).toContain('MacBook Air de Anaemprestado por você ·  conectado')
+    expect(toggle('Usa o MacBook Air de Ana').getAttribute('aria-checked')).toBe('false')
+    expect(text()).toContain('Pra ele usar outro computador, empreste ele no app do Tucano de lá.')
+    expect(text()).not.toContain('Deixar este servidor usar este computador')
+    await flip('Usa o MacBook Air de Ana')
     expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', grants: { mac1: 'read_write' } }), [])
   })
 
-  it('given: says what it uses, and takes it away in one click', async () => {
-    await onServer(lia({ computer: false, grants: { mac1: 'read_write' } }), { connectors: [node] })
-    expect(text()).toContain('Ele usa o MacBook Air de Ana (terminal, pastas emprestadas e navegador)')
-    expect(text()).not.toContain('Dar acesso')
-    await click('Tirar o acesso')
-    await act(async () => new Promise((r) => setTimeout(r, 10)))
+  it('given: the line names it with the server, and it turns off in one click', async () => {
+    await onServer(lia({ computer: true, computerKind: 'mac', grants: { mac1: 'read_write' } }), { connectors: [node] })
+    expect(lead()).toBe('Lia trabalha direto no servidor e no MacBook Air de Ana. Num computador emprestado, só quando trabalha pra quem emprestou. A conversa e a memória ficam sempre no servidor.')
+    expect(toggle('Usa o MacBook Air de Ana').getAttribute('aria-checked')).toBe('true')
+    await flip('Usa o MacBook Air de Ana')
     expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', grants: {} }), [])
   })
 
   it('a member gives their own computer through the core, since they can’t save the agent', async () => {
-    await onServer(lia({ computer: false }), { connectors: [{ ...node, url: 'tucano-node://dev2?owner=bia', name: 'iMac · computador de Bia' }], you: 'bia' })
-    await click('Dar acesso')
-    expect(shareComputer).toHaveBeenCalledWith('mac1', ['a1'])
+    await onServer(lia({ computer: false }), { connectors: [{ ...bias, status: 'connected' } as State['connectors'][number]], you: 'bia' })
+    await flip('Usa o iMac de Bia')
+    expect(shareComputer).toHaveBeenCalledWith('mac2', ['a1'])
     expect(saveAgent).not.toHaveBeenCalled()
   })
 
-  it("someone else's computer isn't yours to give", async () => {
-    await onServer(lia({ computer: false }), { connectors: [{ ...node, url: 'tucano-node://dev2?owner=bia' }] })
-    expect(text()).not.toContain('MacBook Air de Ana')
+  it("someone else's computer shows, off or on, but only its person turns it", async () => {
+    await onServer(lia({ computer: false, grants: { mac2: 'read_write' } }), { connectors: [bias] })
+    expect(text()).toContain('iMac de Biaemprestado por Bia ·  desligado')
+    expect(text()).toContain('só Bia libera')
+    expect(toggle('Usa o iMac de Bia').getAttribute('aria-checked')).toBe('true')
+    expect(toggle('Usa o iMac de Bia').hasAttribute('disabled')).toBe(true)
+    expect(lead()).toContain('Lia trabalha no iMac de Bia (desligado agora).')
+    // None of the viewer's own is lent: how to lend it, still.
     expect(text()).toContain('Deixar este servidor usar este computador')
   })
 })

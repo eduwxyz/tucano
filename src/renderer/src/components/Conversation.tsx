@@ -1,3 +1,4 @@
+import { captureThoughtLine, restoreThoughtLine, type ThoughtLine } from '../thought-reading'
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { sectorName } from '../../../shared/org'
@@ -15,8 +16,12 @@ import { CUT, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
+import { WorkDrawer } from './WorkDrawer'
+import { FeedbackDraftCard } from './Feedback'
+import { lentComputersOf } from '../lent'
 import { canEditChannel,
   agentById,
+  approvalsIn,
   askerIn,
   messagesIn,
   attachedTo,
@@ -32,6 +37,7 @@ import { canEditChannel,
   repliesOf,
   timelineOf,
   useLiveText,
+  useLiveThoughtState,
   workingIds,
   openDialog,
   decideApproval,
@@ -45,6 +51,9 @@ import { canEditChannel,
   navigate,
   openDm,
   openPanel,
+  widenPanel,
+  getState,
+  windowless,
   openThread,
   seeThread,
   openTuca,
@@ -52,9 +61,11 @@ import { canEditChannel,
   removeRoutine,
   retryRun,
   continueRun,
+  continueJob,
   ACCESS_REQUEST,
   countedTokens,
   sendMessage,
+  updateSettings,
   typing,
   setTab,
   stopRun,
@@ -91,19 +102,24 @@ import { canEditChannel,
   type Person
 } from '../store'
 import { askWay } from './OrgSectors'
+import { runStep } from '../board'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
+import { KeyRequestCard } from './Vault'
+import { historyStatus } from '../approval-history'
+import { COFRE } from '../../../shared/vault'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
-import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
+import { ArtifactCard, BrowserCard, ServiceCard, SidePanel, WidenButton } from './Panel'
 import { JobWatchCard } from './JobWatch'
 import { ResultTableCard } from './ResultTable'
 import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
 import { FoldToggle } from './Fold'
-import { AnswersSummary, AskCard, asShown, cardAnswers } from './Decisions'
-import { questionsOf, type Answer, type Decision } from '../../../shared/questions'
+import { AnswersSummary, AskCard, asShown, cardAnswers, NextStepsCard, ReplacedStepsCard } from './Decisions'
+import { AskStrip } from './AskStrip'
+import { hasOpenSteps, questionsOf, type Answer, type Decision } from '../../../shared/questions'
 import { AgentCardButton } from './AgentCard'
 
 // Something exact a person may want to check (the raw error, a tool's arguments), folded until asked.
@@ -175,11 +191,28 @@ export function ConversationView({ id }: { id: string }): ReactNode {
     if (focus && !focusHere) void loadOlder(id, focus)
   }, [id, focus, focusHere])
   const thread = useStore((s) => (s.panel?.kind === 'thread' ? s.panel.id : undefined))
+  const wide = useStore((s) => s.panelWide)
+  // Something above the field pressed to go to a reply: open its thread first when it lives in one.
+  // The count is what makes pressing the same one again move again.
+  const [jump, setJump] = useState<{ id: string; rootId?: string; n: number } | null>(null)
+  const onJump = (messageId: string, threadId?: string): void => {
+    if (threadId) openThread(threadId)
+    setJump((j) => ({ id: messageId, ...(threadId ? { rootId: threadId } : {}), n: (j?.n ?? 0) + 1 }))
+  }
+  // Opened on a message from elsewhere (a notification, the inbox): that's the newest place to be.
+  useEffect(() => {
+    if (focus) setJump(null)
+  }, [focus])
   const [showSummary, setShowSummary] = useState(false)
   const firstChannel = useStore((s) => s.conversations.find((c) => c.kind === 'channel'))
   // The DM's agent's routines that post here: a way to them from the top, instead of each run's prompt in the conversation.
   const dmAgentId = conv?.kind === 'dm' ? conv.members[0] : undefined
   const routinesHere = useStore((s) => (dmAgentId ? s.routines.filter((r) => r.conversationId === id && r.agentId === dmAgentId && r.enabled).length : 0))
+  // A DM with an agent deleted for good: its history to read, nothing to write.
+  const gone = useStore((s) => {
+    const a = dmAgentId ? agentById(s, dmAgentId) : undefined
+    return a?.deleted ? a : undefined
+  })
 
   if (!conv)
     return (
@@ -199,13 +232,23 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
   // Who here runs its commands right on this computer: said once, up top, not on every message.
   const onMac = members.filter(isMac)
+  // On a server an agent's "own computer" is the server: said as that, never as the person's laptop.
+  const onServer = windowless()
+  const names = onMac.map((a) => a.name).join(', ')
+  const macTitle = onServer
+    ? { one: L('Os comandos deste agente rodam direto no servidor', 'This agent’s commands run right on the server'), many: L(`Os comandos de ${names} rodam direto no servidor`, `${names}’s commands run right on the server`) }
+    : { one: L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer'), many: L(`Os comandos de ${names} rodam direto no seu computador`, `${names}’s commands run right on your computer`) }
+  const first = onMac[0]?.name ?? ''
+  const macLabel = onServer
+    ? { dm: L('roda no servidor', 'runs on the server'), one: L(`${first} roda no servidor`, `${first} runs on the server`), many: L(`${onMac.length} rodam no servidor`, `${onMac.length} run on the server`) }
+    : { dm: L('roda no seu computador', 'runs on your computer'), one: L(`${first} roda no seu computador`, `${first} runs on your computer`), many: L(`${onMac.length} rodam no seu computador`, `${onMac.length} run on your computer`) }
 
   return (
-    <div className="split">
+    <div className={`split ${wide ? 'is-wide' : ''}`}>
       <section className="conversation">
         <header className="topbar">
           <div className="topbar__title">
-            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card (its settings: the gear on the right, or the card). */}
+            {/* A channel's name opens its settings; a DM's, like Slack, the agent's card. In a DM the gear on the right opens the agent's page. */}
             {dmAgent ? (
               <AgentCardButton agentId={dmAgent.id} settingsOf={id} below className="topbar__name" title={L(`Perfil de ${dmAgent.name}`, `${dmAgent.name}’s profile`)}>
                 <AgentAvatar agent={dmAgent} size={22} />
@@ -223,20 +266,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               </span>
             )}
             {onMac.length > 0 && (
-              <span
-                className="tag tag--warn topbar__mac"
-                title={
-                  dmAgent
-                    ? L('Os comandos deste agente rodam direto no seu computador', 'This agent’s commands run right on your computer')
-                    : L(`Os comandos de ${onMac.map((a) => a.name).join(', ')} rodam direto no seu computador`, `${onMac.map((a) => a.name).join(', ')}’s commands run right on your computer`)
-                }
-              >
-                <Icon name="laptop" size={12} />
-                {dmAgent
-                  ? L('roda no seu computador', 'runs on your computer')
-                  : onMac.length === 1
-                    ? L(`${onMac[0]!.name} roda no seu computador`, `${onMac[0]!.name} runs on your computer`)
-                    : L(`${onMac.length} rodam no seu computador`, `${onMac.length} run on your computer`)}
+              <span className="tag tag--warn topbar__mac" title={dmAgent ? macTitle.one : macTitle.many}>
+                <Icon name={onServer ? 'globe' : 'laptop'} size={12} />
+                {dmAgent ? macLabel.dm : onMac.length === 1 ? macLabel.one : macLabel.many}
               </span>
             )}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
@@ -266,7 +298,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <Icon name="book" size={14} /> {L('Resumo', 'Summary')}
             </button>
             {dmAgent && (
-              <button className="icon-btn" title={L('Configurações da conversa', 'Conversation settings')} aria-label={L('Configurações da conversa', 'Conversation settings')} onClick={() => openDialog({ kind: 'settings', id })}>
+              <button className="icon-btn" title={L(`Configurações de ${dmAgent.name}`, `${dmAgent.name}’s settings`)} aria-label={L(`Configurações de ${dmAgent.name}`, `${dmAgent.name}’s settings`)} onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
                 <Icon name="gear" size={16} />
               </button>
             )}
@@ -275,10 +307,45 @@ export function ConversationView({ id }: { id: string }): ReactNode {
 
         {showSummary && <SummaryPanel conv={conv} messages={timeline} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={focus} />
-        <Composer conversationId={id} members={members} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} />
+        <MessageList messages={timeline} replies={replies} older={older} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} focus={jump ? (jump.rootId ? undefined : jump.id) : focus} focusKey={jump && !jump.rootId ? jump.n : undefined} />
+        {gone ? (
+          <p className="composer-off muted small">{L(`${gone.name} foi excluído. A conversa fica aqui pra ler.`, `${gone.name} was deleted. The conversation remains available to read.`)}</p>
+        ) : (
+          <Composer conversationId={id} members={members} onJump={onJump} placeholder={dmAgent ? L(`Mensagem pra ${dmAgent.name}`, `Message ${dmAgent.name}`) : L(`Mensagem em #${title}`, `Message #${title}`)} notice={dmAgent && <ComputerOff agent={dmAgent} />} />
+        )}
       </section>
-      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} /> : <SidePanel />}
+      {thread ? <ThreadPanel rootId={thread} conv={conv} title={conv.kind === 'channel' ? `#${title}` : title} members={members} onJump={onJump} {...(jump && jump.rootId === thread ? { focusId: jump.id, focusKey: jump.n } : {})} /> : <SidePanel />}
+    </div>
+  )
+}
+
+// In a DM, while a computer lent to the server that its agent uses is off (the Tucano app is closed there): the
+// agent still answers, but can't reach that computer until it's back. Nothing while every one is on.
+export function ComputerOff({ agent }: { agent: Agent }): ReactNode {
+  const connectors = useStore((s) => s.connectors)
+  const people = useStore((s) => s.people)
+  const you = useStore((s) => s.you)
+  const off = lentComputersOf({ connectors, people, you }, agent).filter((c) => !c.on)
+  if (!off.length) return null
+  const names = off.map((c) => c.name)
+  const which = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} ${L('e', 'and')} ${names.at(-1)}`
+  const one = names.length === 1
+  return (
+    <div className="computer-off" role="status" title={L('Desligado: o app do Tucano está fechado lá. Ao abrir, volta sozinho.', "Tucano is closed on this computer. Open it to reconnect.")}>
+      <Icon name="laptop" size={14} />
+      <span className="grow">
+        {L(`${one ? '' : 'Os computadores '}`, `${one ? '' : 'The computers '}`)}
+        <b>{which}</b>
+        {L(
+          ` ${one ? 'está desligado' : 'estão desligados'}. ${agent.name} responde, mas só usa ${one ? 'esse computador' : 'eles'} quando ${one ? 'ele ligar' : 'ligarem'}.`,
+          ` ${one ? 'is' : 'are'} off. ${agent.name} answers, but only uses ${one ? 'it' : 'them'} once ${one ? "it's" : "they're"} back on.`
+        )}
+      </span>
+      {off.some((c) => c.mine) && (
+        <button className="text-btn small" onClick={() => navigate({ kind: 'connectors' })}>
+          {L('Ver computadores', 'See computers')}
+        </button>
+      )}
     </div>
   )
 }
@@ -290,7 +357,9 @@ const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedi
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
-export function MessageList({ messages: all, replies, older, conversationId, empty, focus, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; lead?: ReactNode }): ReactNode {
+// `focus` / `focusKey`: bring one message into view and flash it, and again every time the key changes
+// (pressing the same drawer row twice moves again instead of doing nothing).
+export function MessageList({ messages: all, replies, older, conversationId, empty, focus, focusKey, lead }: { messages: Message[]; replies?: Map<string, Message[]>; older?: boolean; conversationId: string; empty?: boolean; focus?: string; focusKey?: number; lead?: ReactNode }): ReactNode {
   // An answer sent from a decisions card shows on the card, not again as a message (Decisions.asShown).
   const everything = useStore((s) => messagesIn(s, conversationId)) // a list: the store compares a Map as always equal
   const messages = useMemo(() => asShown(all, cardAnswers(everything)), [all, everything])
@@ -325,7 +394,7 @@ export function MessageList({ messages: all, replies, older, conversationId, emp
     const t = setTimeout(() => el.classList.remove('is-flash'), 1800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, conversationId, focusAt])
+  }, [focus, conversationId, focusAt, focusKey])
 
   useEffect(() => {
     if (!lead) stick.current = true
@@ -499,6 +568,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
 
   if (message.author.kind === 'system') {
+    if (message.stop) return <StopNote message={message} />
     return (
       <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`} data-id={message.id}>
         <Icon name="spark" size={13} />
@@ -523,7 +593,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
     <article className={`msg ${agent || ghost ? 'msg--agent' : other ? 'msg--agent msg--person' : 'msg--me'} ${grouped ? 'msg--grouped' : ''} ${threadOpen ? 'is-thread-open' : ''}`} data-id={message.id}>
       <div className="msg__gutter">
         {!grouped &&
-          (agent ? (
+          (agent?.deleted ? (
+            <span className="msg__face is-deleted">
+              <AgentAvatar agent={agent} size={34} />
+            </span>
+          ) : agent ? (
             <AgentCardButton agentId={agent.id} className="msg__face" tabIndex={-1} label={L(`Perfil de ${agent.name}`, `${agent.name}’s profile`)}>
               <AgentAvatar agent={agent} size={34} busy={message.run?.status === 'working'} />
             </AgentCardButton>
@@ -534,7 +608,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
       <div className="msg__body">
         {!grouped && (
           <div className="msg__head">
-            {agent ? (
+            {agent?.deleted ? (
+              <span className="msg__author is-deleted" title={L(`${agent.name} foi excluído`, `${agent.name} was deleted`)}>
+                {name}
+              </span>
+            ) : agent ? (
               <AgentCardButton agentId={agent.id} className="msg__author link">
                 {name}
               </AgentCardButton>
@@ -555,10 +633,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
               <div className="msg__anchor-pin">
                 <ThreadButton message={message} />
               </div>
-              <RunSteps message={message} />
+              <RunBlock message={message} />
             </div>
           ) : (
-            <RunSteps message={message} />
+            <RunBlock message={message} />
           )
         ) : null}
         {text && quiet && !showSaid ? (
@@ -581,16 +659,28 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
             ))}
           </div>
         )}
+        {/* A prompt of mine waiting its turn (the conversation has all its replies at once running, or its
+            agent goes one at a time; runs.ts): it says so until its own reply starts, and then the mark goes. */}
+        {message.sendMode === 'queue' && (
+          <span className="tag msg__queued" title={L('Começa quando uma resposta em curso terminar (Configurações › Agentes › Respostas)', 'Starts when a running reply ends (Settings › Agents › Replies)')}>
+            {L('Na fila, esperando uma resposta terminar', 'Queued until a reply ends')}
+          </span>
+        )}
         {/* The question, as a card under the reply: alone, mine to answer there; with a team, it says whom it's for, and who
             may answer it does it there. One from before decisions, with a team, is the question card it was. */}
         {questionsOf(message.run).length > 0 &&
-          (team && message.run?.askedTo ? (
-            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
+          (hasOpenSteps(message.run) ? (
+            <NextStepsCard message={message} agentName={agent?.name} />
+          ) : message.run?.stepsReplaced ? (
+            <ReplacedStepsCard message={message} />
+          ) : team && message.run?.askedTo ? (
+            <QuestionCard id={message.id} agentName={agent?.name} askedTo={message.run.askedTo} question={message.run.question ?? ''} {...(message.run.questions?.length ? { decisions: message.run.questions } : {})} answers={message.run.answers} answeredInText={message.run.answeredInText} cancelled={message.run.cancelled} answered={message.run.status !== 'waiting_input'} answeredBy={message.run.answeredBy} />
           ) : (
             <AnswersSummary message={message} />
           ))}
         {approval && (approval.state === 'pending' ? <ApprovalCard approval={approval} /> : <DecidedApproval approval={approval} />)}
         {(message.run?.agentDraft || proposalsOf(message.run).length > 0) && <Proposals message={message} />}
+        {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.jobWatchIds?.map((wid) => <JobWatchCard key={wid} id={wid} />)}
@@ -639,9 +729,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
             With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
         {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
-            {L('Tentar de novo', 'Try again')}
-          </button>
+          <TryAgain messageId={message.id} />
         )}
         {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
           <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
@@ -675,6 +763,56 @@ function AskedFromHere({ message }: { message: Message }): ReactNode {
         <DelegationChip key={d.id} at={{ id: d.id, to: d.to, conversationId: d.conversationId, rootId: d.rootId, ...(d.threadId ? { threadId: d.threadId } : {}) }} from={d.from} asked />
       ))}
     </div>
+  )
+}
+
+// A reply that stopped — by the person, by the app closing, by a failure — has two ways back:
+// "Try again" repeats what was asked, and "Try with instructions" repeats it in a new direction.
+// The direction is written under the buttons and goes into the prompt, not into a new message, so
+// the reply that comes back is the answer to the same ask, steered.
+function TryAgain({ messageId }: { messageId: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const typed = note.trim()
+  const retry = (withNote?: string): void => {
+    retryRun(messageId, withNote)
+    setOpen(false)
+    setNote('')
+  }
+  return (
+    <>
+      <button className="btn btn--xs retry" onClick={() => retry()}>
+        {L('Tentar de novo', 'Try again')}
+      </button>
+      <button className="btn btn--xs retry" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {L('Tentar com instruções', 'Try with instructions')}
+      </button>
+      {open && (
+        <div className="retry-note">
+          <textarea
+            aria-label={L('Instruções para a nova tentativa', 'Instructions for the new try')}
+            placeholder={L('O que deve ser diferente nesta tentativa?', 'What should be different this time?')}
+            rows={2}
+            value={note}
+            autoFocus
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && typed) retry(typed)
+              if (e.key === 'Escape') setOpen(false)
+            }}
+          />
+          <div className="retry-note__row">
+            <button className="btn btn--primary btn--xs" disabled={!typed} onClick={() => retry(typed)}>
+              {L('Tentar de novo com isso', 'Try again with this')}
+            </button>
+            <button className="link" onClick={() => { setOpen(false); setNote('') }}>
+              {L('Cancelar', 'Cancel')}
+            </button>
+            <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -863,13 +1001,14 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
   const [open, setOpen] = useState(false)
   const by = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : undefined))
   const team = useStore(teamMode)
-  const state = approval.state === 'approved' ? L('Aprovada', 'Approved') : approval.state === 'refused' ? L('Recusada', 'Refused') : L('Expirou', 'Expired')
-  const what = approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
+  // The same words as the card it opens: a call that failed never reads as a green "approved".
+  const status = approvalStatus(approval, false)
+  const what = approval.connectorId === COFRE ? (typeof approval.args['nome'] === 'string' ? L(`a chave ${approval.args['nome']}`, `the ${approval.args['nome']} key`) : L(`o login de ${String(approval.args['site'] ?? '')}`, `the login for ${String(approval.args['site'] ?? '')}`)) : approval.tool === ACCESS_REQUEST ? L(`acesso ao ${approval.connectorName}`, `access to ${approval.connectorName}`) : approval.connectorId === COMPUTADOR ? L('comando no computador', 'command on the computer') : toolWords(approval.tool)
   return (
-    <div className={`approval-line approval-line--${approval.state} ${open ? 'is-open' : ''}`}>
+    <div className={`approval-line approval-line--${status.tone === 'error' ? 'refused' : status.tone === 'muted' ? 'expired' : approval.state} ${open ? 'is-open' : ''}`}>
       <button className="approval-line__head" aria-expanded={open} title={`${approval.connectorName} · ${approval.tool}`} onClick={() => setOpen(!open)}>
-        <Icon name={approval.state === 'approved' ? 'check' : approval.state === 'refused' ? 'x' : 'clock'} size={12} />
-        <span className="approval-line__state">{state}</span>
+        <Icon name={status.tone === 'error' ? 'x' : status.tone === 'muted' ? 'clock' : 'check'} size={12} />
+        <span className="approval-line__state">{status.text}</span>
         <span className="approval-line__what">
           · {what}
           {team && by ? ` · ${by}` : ''}
@@ -881,6 +1020,23 @@ function DecidedApproval({ approval }: { approval: Approval }): ReactNode {
         </span>
       </button>
       {open && <ApprovalCard approval={approval} />}
+    </div>
+  )
+}
+
+// Where a piece of work stopped on its brakes: why, what got done, where it stopped, and Continuar. Once
+// someone goes on, the core drops `stop` and the note says who did.
+function StopNote({ message }: { message: Message }): ReactNode {
+  return (
+    <div className="system-line system-line--stop" data-id={message.id}>
+      <Icon name="spark" size={13} />
+      <div className="system-line__body md">
+        <Markdown urlTransform={safeUrl}>{message.text}</Markdown>
+        <button className="btn btn--xs retry" onClick={() => continueJob(message.id)}>
+          {L('Continuar', 'Continue')}
+        </button>
+      </div>
+      <span className="muted">{time(message.at)}</span>
     </div>
   )
 }
@@ -1008,7 +1164,7 @@ function ThreadLink({ message, replies, noReply }: { message: Message; replies: 
 
 // A thread on the side: the message that started it, set apart, then its replies and a
 // field that answers there.
-function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: Conversation; title: string; members: Agent[] }): ReactNode {
+function ThreadPanel({ rootId, conv, title, members, focusId, focusKey, onJump }: { rootId: string; conv: Conversation; title: string; members: Agent[]; focusId?: string; focusKey?: number; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const root = useStore((s) => messageById(s, rootId, conv.id))
   const replies = useStore((s) => repliesOf(s, conv.id, rootId))
   // A thread from before what's here comes from the core; only then is it gone if it isn't there.
@@ -1031,7 +1187,9 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal, .menu, .mention-menu, .lightbox')) return
-      openPanel(null)
+      // Over the whole page, the first Esc brings the conversation back; the next one closes it.
+      if (getState().panelWide) widenPanel(false)
+      else openPanel(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -1050,9 +1208,10 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       </div>
     </div>
   )
+  const wide = useStore((s) => s.panelWide)
   return (
-    <aside className="side-panel side-panel--thread">
-      <PanelResize />
+    <aside className={`side-panel side-panel--thread ${wide ? 'is-wide' : ''}`}>
+      {!wide && <PanelResize />}
       <header className="side-panel__head">
         <Icon name="thread" size={14} />
         <strong className="side-panel__title">{L('Thread', 'Thread')}</strong>
@@ -1069,6 +1228,7 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
             <Icon name="book" size={14} />
           </button>
         )}
+        <WidenButton />
         <button className="icon-btn" title={L('Fechar', 'Close')} aria-label={L('Fechar a thread', 'Close the thread')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>
@@ -1076,8 +1236,8 @@ function ThreadPanel({ rootId, conv, title, members }: { rootId: string; conv: C
       {root?.conversationId === conv.id ? (
         <>
           {showSummary && <ThreadSummaryPanel root={root} replies={replies} onClose={() => setShowSummary(false)} />}
-          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} />
-          <Composer conversationId={conv.id} threadId={rootId} members={members} placeholder={L('Responder na thread…', 'Reply in thread…')} />
+          <MessageList key={rootId} messages={replies} conversationId={conv.id} lead={lead} {...(focusId ? { focus: focusId } : {})} {...(focusKey ? { focusKey } : {})} />
+          <Composer conversationId={conv.id} threadId={rootId} members={members} {...(onJump ? { onJump } : {})} placeholder={L('Responder na thread…', 'Reply in thread…')} />
         </>
       ) : looked === rootId || root ? (
         <p className="empty">{L('Essa mensagem não está mais aqui.', 'That message is no longer here.')}</p>
@@ -1142,7 +1302,7 @@ function ThreadSummaryPanel({ root, replies, onClose }: { root: Message; replies
       at={s?.at}
       ready={since > 0}
       notYet={L('Nada novo desde o resumo.', 'Nothing new since the summary.')}
-      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', 'Once the thread is quiet for a few minutes, what was said becomes a summary here, and the memories about you come from it.')}
+      empty={L('Quando a thread ficar parada por alguns minutos, o que foi dito vira um resumo aqui, e as memórias sobre você saem dele.', "After a few idle minutes, this thread is summarized here and used to learn memories about you.")}
       hint={L(
         `Os agentes de outras threads acham esta por ele, quando procuram. Aqui, eles recebem a thread inteira até ${SUMMARY_MAX_AFTER} respostas; passando disso, este resumo e as mais recentes.`,
         `Agents in other threads find this one by it when they search. Here, they get the whole thread up to ${SUMMARY_MAX_AFTER} replies; past that, this summary and the newest ones.`
@@ -1221,7 +1381,7 @@ function MemoryChip({ id }: { id: string }): ReactNode {
       <Icon name="book" size={13} />
       <span className="memory-chip__label">{label}:</span>
       <span className="memory-chip__text">{memory.text}</span>
-      {!scopePerson(memory.scope) && <span className="tag">{L('nota dele', 'its own note')}</span>}
+      {!scopePerson(memory.scope) && <span className="tag">{L('nota dele', "agent note")}</span>}
       {memory.state === 'active' && (
         <button className="link" onClick={() => forgetMemory(id)}>
           {L('Desfazer', 'Undo')}
@@ -1250,7 +1410,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
     ? null
     : d.state === 'open'
       ? d.asking
-        ? { tone: 'is-warn', text: L('esperando uma resposta', 'waiting on an answer') }
+        ? { tone: 'is-warn', text: L('esperando uma resposta', "waiting for an answer") }
         : { tone: 'is-live', text: L('em andamento', 'under way') }
       : d.state === 'done'
         ? { tone: 'is-done', text: L('terminado', 'done') }
@@ -1267,7 +1427,7 @@ function RequestNote({ at, from }: { at: DelegationRef; from?: string }): ReactN
           {state.text}
         </span>
       )}
-      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', 'what this thread ends with goes back to whoever asked')}</span>
+      <span className="request-note__where">{at.threadId ? (from ? L(`a resposta volta pra ${from}`, `the answer goes back to ${from}`) : L('a resposta volta pra quem pediu', 'the answer goes back to whoever asked')) : from ? L(`a resposta desta thread volta pra ${from}`, `what this thread ends with goes back to ${from}`) : L('a resposta desta thread volta pra quem pediu', "the final answer goes back to whoever asked")}</span>
     </div>
   )
 }
@@ -1320,6 +1480,8 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
   const agents = useStore((s) => s.agents)
   const d = useStore((s) => (asked ? s.delegations.find((x) => x.id === at.id) : undefined))
   const approval = useStore((s) => (d?.state === 'open' && d.approval ? s.approvals.find((a) => a.id === d.approval && a.state === 'pending') : undefined))
+  // While it's worked on: what the doer is doing right now, from its newest reply in the request's thread.
+  const step = useStore((s) => (d?.state === 'open' ? runStep(repliesOf(s, at.conversationId, at.threadId ?? at.rootId).findLast((m) => m.author.kind === 'agent' && m.author.id === at.to)?.run) : undefined))
   const kind = from && to ? askWay(agents, { from, to: at.to }) : undefined
   const label =
     kind === 'up'
@@ -1336,7 +1498,7 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
         ? { tone: 'is-warn', text: L('com uma dúvida', 'has a question') }
         : approval
           ? { tone: 'is-warn', text: L('esperando sua aprovação', 'waiting for your approval') }
-          : { tone: 'is-live', text: L('trabalhando', 'working') }
+          : { tone: 'is-live', text: step ? `${L('trabalhando', 'working')} · ${step}` : L('trabalhando', 'working') }
       : d.state === 'done'
         ? { tone: 'is-done', text: L('concluído', 'done') }
         : d.state === 'cancelled'
@@ -1416,7 +1578,7 @@ function RoutineChip({ id }: { id: string }): ReactNode {
 // or the card moves (Pra você drops it), it's still there, with who answered.
 export const questionDrafts = new Map<string, string>()
 
-export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+export function QuestionCard(props: { id: string; agentName?: string; askedTo?: string; question: string; decisions?: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   return props.decisions?.length ? <TeamAsk {...props} decisions={props.decisions} /> : <TextQuestion {...props} />
 }
 
@@ -1512,7 +1674,7 @@ function TextQuestion({ id, agentName, askedTo, question, answered, answeredBy, 
 // A question with decisions, with a team: whom it's for and who asked; answered on the card by
 // whoever may (the person, whoever covers for them or, past the deadline, the requester: those
 // who have it in For you; an admin, after choosing to answer for them); for anyone else, to read.
-function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
+function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, cancelled, answered, answeredBy, inbox }: { id: string; agentName?: string; askedTo?: string; decisions: Decision[]; answers?: (Answer | null)[]; answeredInText?: boolean; cancelled?: boolean | undefined; answered: boolean; answeredBy?: string; inbox?: boolean }): ReactNode {
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
   const admin = useStore(amAdmin)
@@ -1522,6 +1684,7 @@ function TeamAsk({ id, agentName, askedTo, decisions, answers, answeredInText, a
   const [answering, setAnswering] = useState(false)
   const who = agentName ?? L('O agente', 'The agent')
   const card = { id, questions: decisions, saved: answers }
+  if (cancelled) return <AskCard {...card} mode="done" badge={L('Cancelada', 'Cancelled')} cancelled />
   if (!team || !target) return <AskCard {...card} mode={answered ? 'done' : 'answer'} badge={answered ? L('Respondida', 'Answered') : L('Esperando você', 'Waiting for you')} answeredInText={!!answeredInText} />
   const toMe = target.id === you
   const asked = toMe ? L(`${who} pergunta a você`, `${who} asks you`) : L(`${who} pergunta a ${target.name}`, `${who} asks ${target.name}`)
@@ -1598,6 +1761,16 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
   const working = run.status === 'working'
+  // The steer is a pill in the row under this chain: it opens a field under the box, still held by
+  // this reply's id so it cannot direct another reply of the same agent.
+  const [steerOpen, setSteerOpen] = useState(false)
+  const [steerNote, setSteerNote] = useState('')
+  const steerTyped = steerNote.trim()
+  const steer = (text: string): void => {
+    sendMessage(message.conversationId, text, [], message.threadId, [], 'steer', message.id)
+    setSteerOpen(false)
+    setSteerNote('')
+  }
   const open = toggled ?? (working && stepsOpen)
   const now = useNow(working)
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
@@ -1609,65 +1782,224 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   const current = [...run.steps].reverse().find((st) => st.status === 'running')
 
   return (
-    <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
-      <button className="steps__toggle" onClick={() => setOpen(!open)}>
-        {working ? (
-          <span className="steps__pulse" />
-        ) : justDone ? (
-          <span className="steps__done">
-            <Icon name="check" size={12} />
-          </span>
-        ) : (
-          <span className="steps__chev">
-            <Icon name="chevron" size={12} />
-          </span>
-        )}
-        {working ? (
-          <span className="shimmer">
-            {current
-              ? `${current.label}…`
-              : now - message.at > 60_000
-                ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
-                : run.steps.length === 0
-                  ? L('Lendo o pedido…', 'Reading the request…')
-                  : L('Pensando…', 'Thinking…')}
-          </span>
-        ) : (
-          <span className="steps__summary">
-            {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-            {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
-            {total > 0 && ` · ${duration(total)}`}
-          </span>
-        )}
-        {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
-        {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+    <>
+      <div className={`steps ${open ? 'is-open' : ''} ${working ? 'is-working' : ''}`}>
+        <button className="steps__toggle" onClick={() => setOpen(!open)}>
+          {working ? (
+            <span className="steps__pulse" />
+          ) : justDone ? (
+            <span className="steps__done">
+              <Icon name="check" size={12} />
+            </span>
+          ) : (
+            <span className="steps__chev">
+              <Icon name="chevron" size={12} />
+            </span>
+          )}
+          {working ? (
+            <span className="shimmer">
+              {current
+                ? `${current.label}…`
+                : now - message.at > 60_000
+                  ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
+                  : run.steps.length === 0
+                    ? L('Lendo o pedido…', 'Reading the request…')
+                    : L('Pensando…', 'Thinking…')}
+            </span>
+          ) : (
+            <span className="steps__summary">
+              {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
+              {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
+              {total > 0 && ` · ${duration(total)}`}
+            </span>
+          )}
+          {failed > 0 && <span className="steps__failed">{failed} {L('com falha', 'failed')}</span>}
+          {working && <span className="steps__elapsed">{duration(Math.max(0, now - message.at))}</span>}
+          {working && (
+            <span
+              className="btn btn--xs btn--ghost steps__stop"
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                stopRun(message.id)
+              }}
+            >
+              <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
+            </span>
+          )}
+        </button>
+        {/* One row of pills under the chain, not one row per control: the steer opens here, and the
+            pause pill of a held reply joins the same row instead of drawing a second one. */}
         {working && (
-          <span
-            className="btn btn--xs btn--ghost steps__stop"
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              stopRun(message.id)
-            }}
-          >
-            <Icon name="stop" size={11} /> {L('Parar', 'Stop')}
-          </span>
+          <div className="steps__pills">
+            <span
+              className="steps__steer-pill"
+              role="button"
+              aria-expanded={steerOpen}
+              title={L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply')}
+              onClick={() => setSteerOpen((v) => !v)}
+            >
+              <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+            </span>
+          </div>
         )}
+        {open && (
+          <ol className="steps__list">
+            {run.steps.map((st) => (
+              <StepRow key={st.id} step={st} />
+            ))}
+          </ol>
+        )}
+        <Thought message={message} working={working} />
+      </div>
+      {working && steerOpen && (
+        <div className="steps__steer">
+          <div className="steps__steer-note">
+            <textarea
+              aria-label={L('Orientação para a resposta em curso', "Instructions for the current reply")}
+              placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+              rows={2}
+              value={steerNote}
+              autoFocus
+              onChange={(e) => setSteerNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && steerTyped) steer(steerTyped)
+                if (e.key === 'Escape') {
+                  setSteerOpen(false)
+                  setSteerNote('')
+                }
+              }}
+            />
+            <div className="steps__steer-row">
+              <button className="btn btn--primary btn--xs" disabled={!steerTyped} onClick={() => steer(steerTyped)}>
+                {L('Orientar', 'Steer')}
+              </button>
+              <button
+                className="link"
+                onClick={() => {
+                  setSteerOpen(false)
+                  setSteerNote('')
+                }}
+              >
+                {L('Cancelar', 'Cancel')}
+              </button>
+              <span className="muted small">{L('Ctrl+Enter envia', 'Ctrl+Enter sends')}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// How close to the end of the block counts as reading its end: a little over one line, so a wheel's
+// fraction of a line and a subpixel scroll still count as the end.
+const THOUGHT_END = 24
+
+// Whether the block sits at the end of what it shows: the place a person is reading, not where the
+// stream stopped. Content arriving below it does not move that place.
+export function followsTheEnd(box: { scrollHeight: number; scrollTop: number; clientHeight: number }): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < THOUGHT_END
+}
+
+// What the model is thinking, dim and small, as it arrives: not what it said, and not a step. It
+// sits under the steps of the run it belongs to, and above whatever the reply offers at its bottom.
+// It follows the reply: open and scrolling while it works, and once that is over, folded to the last
+// line it thought — the whole of it one click away. The window keeps it in memory so it can be read
+// back. Off unless the person turned it on in Settings: a reply's reasoning is its own, and most
+// people want the answer.
+export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
+  const on = useStore((s) => s.settings.showThinking === true)
+  const retained = useLiveThoughtState(message.id, STREAM_MS)
+  const thought = retained?.text
+  // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
+  const [asked, setAsked] = useState<boolean | null>(null)
+  const open = asked ?? working
+  const box = useRef<HTMLDivElement>(null)
+  // The block follows what arrives only while the person is at its end. Someone who scrolled up to
+  // read an earlier passage keeps that place while the rest streams in below it, and the block takes
+  // the stream up again by itself once they are back at the end. Opened by a click, it starts there.
+  const follow = useRef(true)
+  const line = useRef<ThoughtLine | null>(null)
+  const written = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (open) {
+      follow.current = true
+      line.current = null
+    }
+  }, [open])
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || !retained || !open || !on) {
+      line.current = null
+      written.current = null
+      follow.current = true
+      return
+    }
+    if (working && follow.current) el.scrollTop = el.scrollHeight
+    else if (line.current) restoreThoughtLine(el, line.current, retained.start)
+    written.current = el.scrollTop
+  }, [retained, open, working, on])
+  if (!on || !thought) return null
+  // Folded, it carries the line it is on now: what it is thinking, cut to the width of the block.
+  const last = thought.trimEnd().split(/\r?\n/).filter((l) => l.trim() !== '').pop() ?? ''
+  return (
+    <div className={`thought${open ? ' is-open' : ''}${working ? ' is-working' : ''}`} aria-label={L('O que o agente está pensando', 'What the agent is thinking')}>
+      <button
+        type="button"
+        className="thought__head"
+        aria-expanded={open}
+        title={open ? L('Recolher o que ele pensou', "Collapse reasoning") : L('Ler o que ele pensou', "Show reasoning")}
+        onClick={() => setAsked(!open)}
+      >
+        <Icon name="chevron" size={11} />
+        <span className="thought__label">{working ? L('Pensando', 'Thinking') : L('Pensou', 'Thought')}</span>
+        {!open && <span className="thought__last">{last}</span>}
       </button>
       {open && (
-        <ol className="steps__list">
-          {run.steps.map((st) => (
-            <StepRow key={st.id} step={st} />
-          ))}
-        </ol>
+        <div ref={box} className="thought__text" onScroll={(e) => {
+          const el = e.currentTarget
+          if (written.current !== null && Math.abs(el.scrollTop - written.current) < 0.5) return
+          follow.current = followsTheEnd(el)
+          line.current = !follow.current && retained ? captureThoughtLine(el, retained.start) : null
+          written.current = el.scrollTop
+        }}>
+          {thought}
+          {working && <span className="thought__caret" aria-hidden="true" />}
+        </div>
       )}
     </div>
   )
 }
 
+// One reply's run as the conversation draws it: its steps, the steer sub-button beside Stop in
+// the steps row, and the steer's field under the box. Anything the run says about itself — its steps
+// and the thinking under them — still sits above the field.
+export function RunBlock({ message }: { message: Message }): ReactNode {
+  return <RunSteps message={message} />
+}
+
 function StepRow({ step }: { step: Step }): ReactNode {
   const [whole, setWhole] = useState(false)
   const [allInput, setAllInput] = useState(false)
+  // A steer is not a prompt and not a tool: it is the person's direction for this reply, handed over
+  // between two calls. In the chain it reads as a call of its own — the row a call gets — and what it
+  // carries is their words, whole, two lines at a time and all of it on a click (runs.ts, `steerIn`).
+  if (step.kind === 'steer')
+    return (
+      <li className={`step step--steer step--why step--${step.status}`}>
+        <span className="step__icon">
+          {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'error' ? 'x' : 'pointer'} size={12} />}
+        </span>
+        <span className="step__label">{step.label}</span>
+        {step.input && (
+          <code className={`step__input${allInput ? ' is-whole' : ''}`} title={allInput ? undefined : L('Ver tudo', 'See all')} onClick={() => setAllInput(!allInput)}>
+            <span className="step__clamp">{step.input}</span>
+          </code>
+        )}
+        {step.error && <span className="step__output">{step.error}</span>}
+      </li>
+    )
   return (
     <li className={`step step--${step.status}${step.error || step.input || step.output ? ' step--why' : ''}`}>
       <span className="step__icon">
@@ -1675,6 +2007,12 @@ function StepRow({ step }: { step: Step }): ReactNode {
       </span>
       <span className="step__label">{step.label}</span>
       {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
+      {step.keys?.map((k) => (
+        <span key={k} className="step__key" title={L('Chave do Cofre usada neste comando', 'Vault key used in this command')}>
+          <Icon name="key" size={11} />
+          {k}
+        </span>
+      ))}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
       {step.input && (
         // What it asked (the SQL, the path): two lines, the whole of it on a click.
@@ -1724,7 +2062,63 @@ function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['ru
   )
 }
 
+const capital = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
+
+// What the card leads with (issue #252, direction A): the action, and the one thing it lands on.
+// Where the app can't name a target reliably it says only the action — the exact arguments are
+// still below, so nothing is invented to fill the line.
+function approvalFace(approval: Approval): { action: string; target?: string } {
+  const s = (k: string): string => (typeof approval.args[k] === 'string' ? String(approval.args[k]) : typeof approval.args[k] === 'number' ? String(approval.args[k]) : '')
+  if (approval.tool === ACCESS_REQUEST) {
+    const rw = approval.args['nivel'] === 'read_write'
+    return { action: rw ? L('Ler e escrever em', 'Read and write in') : L('Ler', 'Read'), target: approval.connectorName }
+  }
+  if (approval.connectorId === COMPUTADOR) {
+    const kinds = shellActions(s('command'))
+    return { action: kinds.length ? capital(kinds.map(actionVerb).join(L(' e ', ' and '))) : L('Rodar um comando', 'Run a command') }
+  }
+  if (approval.tool === 'abrir_pr') return { action: L('Abrir um pull request em', 'Open a pull request in'), target: s('repo') || undefined }
+  if (approval.connectorId === 'apps') {
+    const app = s('app')
+    if (s('texto')) return { action: L('Confirmar', 'Confirm'), target: `“${s('texto')}”${app ? ` ${L('no', 'in')} ${app}` : ''}` }
+    if (s('tecla')) return { action: L('Apertar', 'Press'), target: `${s('tecla')}${app ? ` ${L('no', 'in')} ${app}` : ''}` }
+    const alvo = s('alvo')
+    return { action: L('Clicar em', 'Click'), target: `${alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen')}${app ? ` ${L('no', 'in')} ${app}` : ''}` }
+  }
+  if (approval.connectorId === 'navegador') {
+    // The page it lands on is part of what's being approved: the card has no other line that says it.
+    const alvo = s('alvo')
+    const page = s('url').replace(/^https?:\/\//, '').slice(0, 60)
+    return { action: s('tecla') ? L('Apertar', 'Press') : L('Clicar em', 'Click'), target: `${alvo ? `“${alvo}”` : L('um ponto da tela', 'a spot on the screen')}${page ? ` ${L('em', 'on')} ${page}` : ''}` }
+  }
+  // A connector's own tool names the action; the first argument that names a thing is the target.
+  const named = ['title', 'name', 'subject', 'repo', 'query', 'path', 'to'].map(s).find((v) => v.trim())
+  return { action: capital(toolWords(approval.tool)), ...(named ? { target: `“${named}”` } : {}) }
+}
+
+// The quiet status row: what's waiting, and once it's over, the one thing the person wants to know
+// without reading the prose above it. "Approved" is not "completed": the decision is stored the
+// moment it's made and the call finishes later, so the two are said apart.
+function approvalStatus(approval: Approval, mayDecide: boolean): { text: string; tone: 'wait' | 'ok' | 'error' | 'muted' } {
+  if (approval.state === 'pending') return { text: mayDecide ? L('Esperando você', 'Waiting for you') : L('Esperando aprovação', 'Waiting for approval'), tone: 'wait' }
+  if (approval.state === 'refused') return { text: L('Recusado', 'Refused'), tone: 'error' }
+  if (approval.state === 'expired') return { text: L('Expirado', 'Expired'), tone: 'muted' }
+  // No result but an outcome: a grant, a key, an app's action the agent makes next, or a row from
+  // before this field (whose failures only its outcome can tell). Without either, it's on its way.
+  if (!approval.result && historyStatus(approval) === 'failed') return { text: L('Falhou', 'Failed'), tone: 'error' }
+  if (!approval.result) return { text: approval.outcome ? L('Aprovado', 'Approved') : L('Aprovado · esperando o resultado', 'Approved · waiting for result'), tone: 'ok' }
+  if (approval.result === 'done') return { text: L('Concluído', 'Completed'), tone: 'ok' }
+  if (approval.result === 'error') return { text: L('Falhou', 'Failed'), tone: 'error' }
+  return { text: L('Aprovado · não rodou', 'Approved · didn’t run'), tone: 'muted' }
+}
+
 export function ApprovalCard({ approval, compact }: { approval: Approval; compact?: boolean }): ReactNode {
+  // A key or a login asked for (pedir_chave): pasted in its own card, never approved like a call.
+  if (approval.connectorId === COFRE) return <KeyRequestCard approval={approval} {...(compact ? { compact } : {})} />
+  return <CallApprovalCard approval={approval} {...(compact ? { compact } : {})} />
+}
+
+function CallApprovalCard({ approval, compact }: { approval: Approval; compact?: boolean }): ReactNode {
   const agent = useStore((s) => agentById(s, approval.agentId))
   const me = useStore((s) => s.me)
   // With a team: who asked, whose decision it is, and who decided; only who may decide gets buttons.
@@ -1736,6 +2130,19 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
   const decidedBy = useStore((s) => (approval.decidedBy ? personName(s, approval.decidedBy) : me.name))
   const [refusing, setRefusing] = useState(false)
   const [reason, setReason] = useState('')
+  // One decision at a time: the controls stay disabled until the core acknowledges it, and when it
+  // doesn't, they come back with a line saying so instead of a card that looks decided.
+  const [asking, setAsking] = useState(false)
+  const [unconfirmed, setUnconfirmed] = useState(false)
+  const decide = (how: 'approved' | 'refused', why?: string, always?: boolean): void => {
+    if (asking) return
+    setAsking(true)
+    setUnconfirmed(false)
+    void decideApproval(approval.id, how, why, always).then((acknowledged) => {
+      setAsking(false)
+      setUnconfirmed(!acknowledged)
+    })
+  }
   const summary = argSummary(approval.args)
   // A runner's call (Composio's): the actions it runs are what's being approved.
   const runner = isRunner(approval.tool)
@@ -1746,81 +2153,72 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         ?.map(ruleTool)
         .map(({ tool, account }) => accountLabel(tool, account))
     : undefined
-  // Hold to approve: CSS fills the button in 1.5s (.is-holding) and this timer approves, so the
+  // Hold to approve: CSS fills a 3px track in 1.5s (.is-holding) and this timer approves, so the
   // approval no longer depends on a transitionend that a re-render or a throttled window can drop.
   // Letting go drains the fill back and clears the timer. Space or Enter hold too.
   const [holding, setHolding] = useState(false)
   const startHold = (): void => setHolding(true)
   const cancelHold = (): void => setHolding(false)
+  // Decided on another device mid-hold: the button is gone, so its release never comes.
+  const pendingNow = approval.state === 'pending'
   useEffect(() => {
     if (!holding) return
+    if (!pendingNow) return setHolding(false)
     const t = setTimeout(() => {
       setHolding(false)
-      decideApproval(approval.id, 'approved')
+      decide('approved')
     }, 1500)
     return () => clearTimeout(t)
-  }, [holding, approval.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holding, pendingNow, approval.id])
 
   const decided = approval.state !== 'pending'
-  // A command on the agent's computer: what it does, in words, and the command itself.
+  // A command on the agent's computer: what it does, in words.
   const onComputer = approval.connectorId === COMPUTADOR
   const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
   const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
   const alwaysTitle = onComputer
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
-    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `From now on ${agent?.name ?? 'the agent'} uses “${toolWords(approval.tool)}” in ${approval.connectorName} without asking, in any call, even after reading something from outside. You can take it back on its page.`)
+    : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `Allow ${agent?.name ?? 'the agent'} to use “${toolWords(approval.tool)}” in ${approval.connectorName} without approval on any call, even after reading external content. Revoke this on its page.`)
+  const face = approvalFace(approval)
+  const status = approvalStatus(approval, mayDecide)
+  const idArg = typeof approval.args['id'] === 'string' || typeof approval.args['id'] === 'number' ? String(approval.args['id']) : ''
+  // The same target without the quotation marks, with its id: "what exactly" in the metadata row.
+  const targetMeta = [face.target?.replace(/[“”]/g, ''), idArg ? `ID ${idArg}` : ''].filter(Boolean).join(', ')
 
   return (
-    <div className={`approval approval--${approval.state} ${compact ? 'approval--compact' : ''}`}>
+    <div className={`approval approval--${approval.state} ${status.tone === 'error' ? 'approval--error' : ''} ${approval.result === 'not_run' ? 'approval--not-run' : ''} ${compact ? 'approval--compact' : ''}`} data-approval={approval.id}>
       <div className="approval__head">
         <span className="approval__badge">
           <Icon name="shield" size={13} />
-          {approval.state === 'pending' ? (mayDecide ? L('Esperando você', 'Waiting for you') : L('Esperando aprovação', 'Waiting for approval')) : approval.state === 'approved' ? L('Aprovado', 'Approved') : approval.state === 'refused' ? L('Recusado', 'Refused') : L('Expirado', 'Expired')}
+          {status.text}
         </span>
+        {agent && <span className="approval__who">{agent.name}</span>}
+        <span className="approval__grow" />
         {approval.highRisk && <span className="tag tag--danger">{L('alto risco', 'high risk')}</span>}
       </div>
-      <div className="approval__title">
-        {approval.tool === ACCESS_REQUEST ? (
+      {/* The heading is what Review focuses: it's where the decision starts. */}
+      <h3 className="approval__title" tabIndex={-1}>
+        {face.action}
+        {face.target && (
           <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('pede acesso ao', 'asks for access to')} <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? L('ler e escrever', 'read and write') : L('ler', 'read')}
-          </>
-        ) : onComputer ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer', 'wants to')} <strong>{kinds.length ? kinds.map(actionVerb).join(L(' e ', ' and ')) : L('rodar um comando', 'run a command')}</strong> {L('no computador dele', 'on its computer')}
-          </>
-        ) : approval.tool === 'abrir_pr' ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer abrir uma', 'wants to open a')} <strong>pull request</strong> {L('em', 'in')} {String(approval.args['repo'])}
-          </>
-        ) : approval.connectorId === 'apps' ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')}{' '}
-            {typeof approval.args['texto'] === 'string' ? (
-              <>
-                {L('quer confirmar', 'wants to confirm')} <strong>“{approval.args['texto']}”</strong>
-              </>
-            ) : typeof approval.args['tecla'] === 'string' ? (
-              <>
-                {L('quer apertar', 'wants to press')} <strong>{approval.args['tecla']}</strong>
-              </>
-            ) : (
-              <>
-                {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] ?? '')}</strong>
-              </>
-            )}{' '}
-            {L('no', 'in')} {String(approval.args['app'] ?? '')}
-          </>
-        ) : approval.connectorId === 'navegador' ? (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer clicar em', 'wants to click')} <strong>{String(approval.args['alvo'] || L('um ponto da tela', 'a spot on the screen'))}</strong> {L('em', 'on')} {String(approval.args['url']).replace(/^https?:\/\//, '').slice(0, 60)}
-          </>
-        ) : (
-          <>
-            {agent?.name ?? L('Agente', 'Agent')} {L('quer usar', 'wants to use')} <strong>{toolWords(approval.tool)}</strong> {L('no', 'in')} {approval.connectorName}
+            {' '}
+            <strong>{face.target}</strong>
           </>
         )}
-      </div>
+      </h3>
+      {approval.why && <p className="approval__why">{approval.why}</p>}
+      <p className="approval__meta">
+        <span>
+          <span className="muted">{L('Conector:', 'Connector:')}</span> {approval.connectorName}
+        </span>
+        {targetMeta && (
+          <span>
+            <span className="muted">{L('Alvo:', 'Target:')}</span> {targetMeta}
+          </span>
+        )}
+      </p>
       {runner && (
         <div className="approval__args small">
           {actions ? (
@@ -1837,7 +2235,6 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           )}
         </div>
       )}
-      {approval.why && <p className="approval__why">{approval.why}</p>}
       {team && <ApprovalRoute approval={approval} agent={agent} requester={requester} decider={decider} you={you} />}
       {/* The title already says it all for an access request, an app or the browser. */}
       {onComputer && <pre className="approval__command">{String(approval.args['command'] ?? '')}</pre>}
@@ -1883,7 +2280,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           className="approval__refuse"
           onSubmit={(e) => {
             e.preventDefault()
-            decideApproval(approval.id, 'refused', reason.trim() || undefined)
+            decide('refused', reason.trim() || undefined)
           }}
         >
           <textarea
@@ -1894,22 +2291,24 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
             onChange={(e) => setReason(e.target.value)}
           />
           <div className="row">
-            <button type="button" className="btn btn--ghost" onClick={() => setRefusing(false)}>
+            <button type="button" className="btn btn--ghost" disabled={asking} onClick={() => setRefusing(false)}>
               {L('Cancelar', 'Cancel')}
             </button>
-            <button type="submit" className="btn btn--danger">
-              {L('Recusar', 'Refuse')}
+            <button type="submit" className="btn btn--danger" disabled={asking}>
+              {asking ? L('Enviando…', 'Submitting…') : L('Recusar', 'Refuse')}
             </button>
           </div>
+          {unconfirmed && <span className="approval__unconfirmed">{L('Não deu pra confirmar a decisão. Tente de novo.', 'Couldn’t confirm the decision. Try again.')}</span>}
         </form>
       ) : (
-        <div className="row approval__buttons">
+        <div className="approval__actions">
           {approval.highRisk ? (
             // The hold can't depend on the pointer staying inside the button: taking capture makes
             // the browser fire pointerout/pointerleave on the button at once, and a cursor that drifts
             // off fires them too. Capture keeps the release, and pointercancel is the real interruption.
             <button
-              className={`btn btn--primary btn--hold ${holding ? 'is-holding' : ''}`}
+              className={`btn btn--primary btn--hold approval__approve ${holding ? 'is-holding' : ''}`}
+              disabled={asking}
               onPointerDown={(e) => {
                 e.currentTarget.setPointerCapture(e.pointerId)
                 startHold()
@@ -1921,36 +2320,38 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               onBlur={cancelHold}
             >
               {/* One label for both states: swapping it to "Hold…" shrank the button under the
-                  cursor, and the fill from ::before is the feedback anyway. */}
-              <span>{L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
+                  cursor, and the 3px track along its bottom is the feedback anyway. */}
+              <span>{asking ? L('Enviando…', 'Submitting…') : L('Segure pra aprovar · ação de alto risco', 'Hold to approve · high-risk action')}</span>
             </button>
           ) : (
             <>
-              <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
-                {L('Aprovar', 'Approve')}
+              <button className="btn btn--primary approval__approve" disabled={asking} onClick={() => decide('approved')}>
+                {asking ? L('Enviando…', 'Submitting…') : L('Aprovar', 'Approve')}
               </button>
               {canAlways && (
-                <button className="btn approval__always" title={alwaysTitle} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
-                  {L('Aprovar e sempre permitir', 'Approve and always allow')}
+                <button className="btn approval__allow" disabled={asking} title={alwaysTitle} onClick={() => decide('approved', undefined, true)}>
+                  <span className="approval__allow-label">{L('Aprovar e sempre permitir', 'Approve and always allow')}</span>
                 </button>
               )}
               {forGood && (
                 <button
-                  className="btn approval__always"
+                  className="btn approval__allow"
+                  disabled={asking}
                   title={L(
                     `Daqui pra frente ${agent?.name ?? 'o agente'} roda ${forGood.join(', ')} pelo ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. As outras ações continuam pedindo. Dá pra tirar na página dele.`,
-                    `From now on ${agent?.name ?? 'the agent'} runs ${forGood.join(', ')} through ${approval.connectorName} without asking, in any call, even after reading something from outside. Other actions still ask. You can take it back on its page.`
+                    `Allow ${agent?.name ?? 'the agent'} to run ${forGood.join(', ')} through ${approval.connectorName} without approval on any call, even after reading external content. Other actions still require approval. Revoke this on its page.`
                   )}
-                  onClick={() => decideApproval(approval.id, 'approved', undefined, true)}
+                  onClick={() => decide('approved', undefined, true)}
                 >
-                  {L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}
+                  <span className="approval__allow-label">{L(`Aprovar e sempre permitir ${forGood.join(', ')}`, `Approve and always allow ${forGood.join(', ')}`)}</span>
                 </button>
               )}
             </>
           )}
-          <button className="btn" onClick={() => setRefusing(true)}>
+          <button className="btn approval__refuse-btn" disabled={asking} onClick={() => setRefusing(true)}>
             {L('Recusar', 'Refuse')}
           </button>
+          {unconfirmed && <span className="approval__unconfirmed">{L('Não deu pra confirmar a decisão. Tente de novo.', 'Couldn’t confirm the decision. Try again.')}</span>}
         </div>
       )}
     </div>
@@ -2308,7 +2709,8 @@ export function pastedFiles(files: File[], text: string, server: boolean): File[
 
 // `threadId`: it answers in the thread that message started, not in the conversation.
 // `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
-export function Composer({ conversationId, threadId, members, placeholder, tools }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode }): ReactNode {
+// notice: one quiet line tucked above the field (a computer its agent uses is off).
+export function Composer({ conversationId, threadId, members, placeholder, tools, notice, onJump }: { conversationId: string; threadId?: string; members: Agent[]; placeholder: string; tools?: ReactNode; notice?: ReactNode; onJump?: (messageId: string, threadId?: string) => void }): ReactNode {
   const key = threadId ?? conversationId // the draft's
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
@@ -2331,12 +2733,18 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   // Replies at work and questions asked here: in this thread, or outside threads. Ids, not the
   // messages, so a reply's steps don't redraw the field.
   const working = useStore((s) => workingIds(s, conversationId, threadId))
+  // Requests still waiting on me in this conversation (or thread), oldest first: what the reminder
+  // over the field counts, and where Review goes back to.
+  const waiting = useStore((s) => approvalsIn(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
-  const asker = useStore((s) => {
+  // The message itself, not just the name: the strip above the field needs what was asked.
+  const asked = useStore((s) => {
     const q = askerIn(s, conversationId, threadId)
     if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
-    return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
+    return q
   })
+  const askerId = asked?.author.kind === 'agent' ? asked.author.id : undefined
+  const asker = useStore((s) => (askerId ? agentById(s, askerId)?.name : undefined))
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -2535,6 +2943,8 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   }
   const [voice, voiceControls] = useDictation(insert, setNote, key)
 
+  // A prompt starts its own reply beside what runs here, up to the replies at once the workspace allows;
+  // past them it waits its turn (see `send` in src/core/runs.ts). A running reply is steered from its own pill.
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
     sendMessage(
@@ -2552,8 +2962,43 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
     setMention(null)
   }
 
+  // Review goes back to the oldest request, in this conversation, and puts the cursor's focus on the
+  // card's heading — only for the person who asked for it, never on arrival.
+  const review = (approval: Approval): void => {
+    const cardOf = (): HTMLElement | null => document.querySelector<HTMLElement>(`[data-approval="${CSS.escape(approval.id)}"]`)
+    const go = (): void => {
+      const card = cardOf()
+      if (!card) return
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      card.querySelector<HTMLElement>('.approval__title')?.focus({ preventScroll: true })
+    }
+    if (cardOf()) return go()
+    // Further back than what's loaded: the conversation opens on that message and loads the way back.
+    navigate({ kind: 'conversation', id: approval.conversationId, message: approval.messageId })
+    setTimeout(go, 400)
+  }
+
   return (
     <div className="composer-wrap">
+      {/* The work this conversation is carrying, attached to the field it belongs to. A thread has
+          no drawer of its own: what runs inside one is a row of its conversation's. */}
+      {!threadId && (
+        <WorkDrawer
+          key={conversationId}
+          conversationId={conversationId}
+          {...(onJump ? { onJump } : {})}
+          onThread={(rootId) => openThread(rootId)}
+        />
+      )}
+      {waiting.length > 0 && (
+        <div className="approval-reminder">
+          <Icon name="shield" size={13} />
+          <span>{waiting.length === 1 ? L('1 aprovação espera a sua decisão', '1 approval needs your decision') : L(`${waiting.length} aprovações esperam a sua decisão`, `${waiting.length} approvals need your decision`)}</span>
+          <button className="link" onClick={() => review(waiting[0]!)}>
+            {L('Ver', 'Review')}
+          </button>
+        </div>
+      )}
       {dragging && !inThread && (
         <div className="drop-overlay">
           <div className="drop-overlay__card">
@@ -2590,6 +3035,9 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           )}
         </div>
       )}
+      {notice}
+      {/* Only where it can take you to the card: the intro's short chats have it in plain sight. */}
+      {asked && onJump && <AskStrip asked={asked} who={asker} onOpen={() => onJump(asked.id, asked.threadId)} />}
       <div className="composer">
         {images.length > 0 && (
           <div className="composer__images">
@@ -2679,7 +3127,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
               <Icon name="stop" size={12} /> {L('Parar', 'Stop')}
             </button>
           ) : null}
-          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={submit} title={L('Enviar (Enter)', 'Send (Enter)')}>
+          <button className="btn btn--primary btn--sm btn--icon" disabled={!text.trim() && images.length === 0} onClick={() => submit()} title={L('Enviar (Enter)', 'Send (Enter)')}>
             <Icon name="send" size={14} />
           </button>
         </div>

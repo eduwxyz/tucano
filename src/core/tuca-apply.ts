@@ -5,7 +5,7 @@
 // connector's reach, the month's limit) still waits on a card for the person to confirm.
 // This holds the rules for both halves and for taking a change back safely; index.ts applies them.
 import { L } from '../shared/lang'
-import { UNDO_HOURS, type Agent, type AgentChanges, type AgentDraft, type Proposal, type Routine, type Settings } from '../shared/types'
+import { UNDO_HOURS, proposalsOf, type Agent, type AgentChanges, type AgentDraft, type Proposal, type Routine, type Run, type Settings } from '../shared/types'
 
 export const UNDO_MS = UNDO_HOURS * 3_600_000
 
@@ -67,7 +67,7 @@ const list = (xs: string[]): string => (xs.length < 2 ? (xs[0] ?? '') : `${xs.sl
 
 // Why it can't be taken back, said so instead of undoing blindly, with what to do instead.
 export const undoErrors = {
-  expired: (): string => L(`Passou o prazo pra desfazer (${UNDO_HOURS} horas). Dá pra mudar à mão.`, `The time to undo has passed (${UNDO_HOURS} hours). You can still change it by hand.`),
+  expired: (): string => L(`Passou o prazo pra desfazer (${UNDO_HOURS} horas). Dá pra mudar à mão.`, `The ${UNDO_HOURS}-hour undo period has expired. You can still change it manually.`),
   nothing: (): string => L('Não tem nada pra desfazer aqui.', "There's nothing to undo here."),
   changed: (name: string, fields: string[]): string =>
     L(
@@ -75,10 +75,33 @@ export const undoErrors = {
       `${name}'s ${list(fields.map((f) => (FIELDS()[f] ?? f).replace(/^the /, '')))} changed since. Undoing now would throw that away: change it on their page.`
     ),
   edited: (name: string): string => L(`${name} foi ajustado depois de criado. Desfazer agora apagaria esses ajustes: se não quiser mais, arquive na página dele.`, `${name} was adjusted after it was made. Undoing now would throw that away: if you don't want it any more, archive it on its page.`),
-  archived: (name: string): string => L(`${name} foi arquivado depois disso: reative na lista de agentes, se quiser.`, `${name} was archived since: bring it back from the agents list if you want.`),
+  archived: (name: string): string => L(`${name} foi arquivado depois disso: reative na lista de agentes, se quiser.`, `${name} has since been archived. Reactivate it from the agents list if needed.`),
   worked: (name: string): string => L(`${name} já começou a trabalhar. Desfazer apagaria o que foi feito: se não quiser mais, arquive na página dele.`, `${name} has already started working. Undoing would delete what was done: if you don't want it any more, archive it on its page.`),
   boss: (name: string): string => L(`Já tem agentes respondendo a ${name} no organograma. Mude isso antes, ou arquive ${name} na página dele.`, `Agents already answer to ${name} in the org chart. Change that first, or archive ${name} on its page.`),
   routine: (name: string, routine: string): string => L(`${name} já tem a rotina “${routine}”, criada depois. Apague ela em Rotinas antes.`, `${name} already has the routine “${routine}”, made since. Delete it in Routines first.`),
   routineChanged: (routine: string): string => L(`A rotina “${routine}” mudou depois disso. Desfazer agora apagaria essa mudança: apague em Rotinas, se quiser.`, `The routine “${routine}” changed since. Undoing now would throw that away: delete it in Routines if you want.`),
   talked: (channel: string): string => L(`Já tem conversa em #${channel}. Desfazer apagaria o que foi dito: se quiser, apague o canal à mão.`, `There's already talk in #${channel}. Undoing would delete what was said: delete the channel by hand if you want.`)
+}
+
+// ---------- a card is settled once ----------
+
+// A reply's cards as the stored message has them, put back on the running reply's own copy before
+// that copy is saved again. A reply saves its whole message on every step from what it holds, so a
+// card the person applied or discarded while it was still working (the core settles it on the stored
+// message) went back to "Create" with the next step, and a second click made the same agents twice.
+// Cards are matched by id: the core is the only one that changes a card the reply already saved, and
+// one the reply proposed since is only in its copy.
+export function keepDecided(run: Run, stored: Run | undefined): Run {
+  if (!stored) return run
+  const saved = new Map(proposalsOf(stored).flatMap((p) => (p.id ? [[p.id, p] as const] : [])))
+  const proposals = run.proposals?.map((p) => (p.id && saved.get(p.id)) || p)
+  const draft = run.agentDraft?.id && stored.agentDraft?.id === run.agentDraft.id ? stored.agentDraft : run.agentDraft
+  return { ...run, ...(proposals ? { proposals } : {}), ...(draft ? { agentDraft: draft } : {}) }
+}
+
+// The cards of a reply that were settled (applied, discarded, undone), kept when it's tried again:
+// what they made exists, and a card back at "Create" would make it twice.
+export function decidedCards(run: Run | undefined): Pick<Run, 'proposals' | 'agentDraft'> {
+  const proposals = proposalsOf(run).filter((p) => p.state)
+  return { ...(proposals.length ? { proposals } : {}), ...(run?.agentDraft?.state ? { agentDraft: run.agentDraft } : {}) }
 }

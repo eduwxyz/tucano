@@ -1,6 +1,6 @@
 // tucano.sh: the static pages (dist/, served as assets), the push relay for the iPhone app (push.js,
 // /api/push/*), the app's feedback and surveys (feedback.js, /api/feedback and /api/surveys*) and
-// /api/lista, where
+// /api/empresa (the company form, below), /api/stripe (payments, to the owner: stripe.js) and /api/lista, where
 // the Tucano Pro beta's waitlist form (pro.html) lands. It checks the anti-robot token (Cloudflare
 // Turnstile), then saves the sign-up in Supabase (supabase/migrations/0001_waitlist.sql) with the
 // project's secret key, which only this worker holds:
@@ -11,6 +11,8 @@
 
 import { answer as surveyAnswer, feedback, surveys, sweep } from './feedback.js'
 import { register as pushRegister, send as pushSend } from './push.js'
+import { tell } from './notify.js'
+import { stripe } from './stripe.js'
 
 const MAX_BODY = 8 * 1024
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
@@ -90,10 +92,76 @@ export async function lista(request, env) {
   return json(200, { ok: true })
 }
 
+// ---------- /api/empresa: the company form ("Fale com a gente") ----------
+// Checked like the waitlist (same origin, hidden field, Turnstile), saved in public.company_leads
+// (supabase/migrations/0004_company_leads.sql), and, when the two optional secrets are set, mailed
+// to whoever answers them:
+//   npx wrangler secret put RESEND_API_KEY
+//   npx wrangler secret put LEADS_TO
+// (and PHONE_HOOK, for a push on the phone too: notify.js)
+const SIZES = ['2-15', '16-25', '26-50', '51+']
+
+async function saveLead(row, env) {
+  const key = env.SUPABASE_SECRET_KEY
+  if (!key || !env.SUPABASE_URL) throw new Error('no SUPABASE_SECRET_KEY or SUPABASE_URL')
+  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/company_leads`, {
+    method: 'POST',
+    headers: { apikey: key, ...(key.startsWith('eyJ') ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', prefer: 'return=minimal' },
+    body: JSON.stringify(row),
+  })
+  if (!r.ok) throw new Error(`supabase ${r.status}: ${(await r.text()).slice(0, 200)}`)
+}
+
+// A short note to the team (notify.js: email, and a push on the owner's phone); the lead is already
+// saved, so a failed note only gets logged.
+async function tellTeam(row, env) {
+  const text = [`${row.name} <${row.email}>`, `Empresa: ${row.company}`, `Pessoas: ${row.size}`, `Pra quê: ${row.use_case || '—'}`, `Página: ${row.source || '—'} (${row.lang})`].join('\n')
+  await tell(env, { uid: `lead-${row.email}-${Date.now()}`, subject: `Empresa: ${row.company} (${row.size} pessoas)`, text, replyTo: row.email })
+}
+
+export async function empresa(request, env) {
+  if (request.method !== 'POST') return json(405, { error: 'POST' })
+  const origin = request.headers.get('origin')
+  if (origin && new URL(origin).host !== new URL(request.url).host) return json(403, { error: 'origin' })
+  if (env.COMPANY_LIMIT && !(await env.COMPANY_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') || 'none' })).success) return json(429, { error: 'too many' })
+  const text = await request.text()
+  if (text.length > MAX_BODY) return json(413, { error: 'too large' })
+  let b
+  try {
+    b = JSON.parse(text)
+  } catch {
+    return json(400, { error: 'json' })
+  }
+  const lang = b?.lang === 'en' ? 'en' : 'pt'
+  if (clip(b?.website, 200)) return json(200, { ok: true })
+  const name = clip(b?.name, 120)
+  const email = clip(b?.email, 254).toLowerCase()
+  const company = clip(b?.company, 120)
+  const size = SIZES.includes(b?.size) ? b.size : null
+  if (!name) return json(400, { error: words(lang, 'Diga o seu nome.', 'Tell us your name.') })
+  if (!EMAIL.test(email)) return json(400, { error: words(lang, 'Confira o seu e-mail.', 'Check your email.') })
+  if (!company) return json(400, { error: words(lang, 'Diga o nome da empresa.', 'Tell us the company’s name.') })
+  if (!size) return json(400, { error: words(lang, 'Diga quantas pessoas vão usar.', 'Tell us how many people will use it.') })
+  if (!(await human(b?.turnstile, request.headers.get('cf-connecting-ip'), env)))
+    return json(400, { error: words(lang, 'Não conseguimos confirmar que você não é um robô. Recarregue a página e tente de novo.', "We couldn't confirm you're not a robot. Reload the page and try again.") })
+  const row = { name, email, company, size, use_case: clip(b?.use_case, 1000) || null, lang, source: clip(b?.source, 200) || null }
+  try {
+    await saveLead(row, env)
+  } catch (e) {
+    console.error('company lead:', e instanceof Error ? e.message : e)
+    return json(502, { error: words(lang, 'Não deu pra enviar agora. Tente de novo, ou escreva pra contato@tucano.sh.', 'Couldn’t send it just now. Try again, or write to contato@tucano.sh.') })
+  }
+  await tellTeam(row, env)
+  return json(200, { ok: true })
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
     if (url.pathname === '/api/lista') return lista(request, env)
+    if (url.pathname === '/api/empresa') return empresa(request, env)
+    // Stripe's webhook: new payments, failed ones and cancellations, to the owner (stripe.js).
+    if (url.pathname === '/api/stripe') return stripe(request, env)
     // The push relay for the iPhone app (push.js).
     if (url.pathname === '/api/push/register') return pushRegister(request, env)
     if (url.pathname === '/api/push/send') return pushSend(request, env)

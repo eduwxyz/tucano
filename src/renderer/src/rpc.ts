@@ -2,6 +2,7 @@ import { L } from '../../shared/lang'
 import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../shared/rpc'
 import type { UpdateState } from '../../shared/types'
 import type { WorkspaceList, WorkspaceParts } from '../../shared/workspaces'
+import type { DesktopPlaces, Place } from '../../shared/servers'
 
 // Seu iPhone: on, where the phone finds this computer, and how many are on the line now.
 export type NotifyState = 'on' | 'ask' | 'blocked' | 'insecure' | 'unsupported'
@@ -27,6 +28,15 @@ declare global {
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
       onNavigatePage?: (cb: (page: 'skills' | 'servers' | 'connectors') => void) => void // desktop; on a server's page in the app, Connectors (where its lent computer gets its agents)
       openLending?: () => void // a server's page in the desktop app: this computer's Tucano, on Settings › Servers
+      // A server's page in the desktop app: this computer's workspaces and the servers, for its own
+      // workspace menu; going to one; and whether that menu is drawn (own), so the app's bar goes away.
+      places?: {
+        list: () => Promise<DesktopPlaces | null>
+        onChanged: (cb: () => void) => () => void // returns the unsubscribe
+        go: (place: Place) => void
+        own: (on: boolean) => void
+        os: string // the desktop's process.platform: 'darwin' keeps room for the window's buttons
+      }
       onCoreDown?: (cb: () => void) => void // desktop only: a browser reloads on its own
       viewing: (conversationId: string | null) => void
       // Settings › General › Notifications: one sent now ('shown'), or why none can come here
@@ -47,7 +57,7 @@ declare global {
       }
       servers?: {
         // desktop only: Tucanos on servers, shown in this window over the app; open: the one on screen
-        list: () => Promise<{ id: string; name: string; origin: string; open: boolean; node: boolean }[]>
+        list: () => Promise<{ id: string; name: string; origin: string; open: boolean; node: boolean; own?: boolean }[]>
         pair: (link: string) => Promise<'paired' | 'cancelled' | 'invalid' | 'unsafe' | 'used' | 'unreachable'>
         open: (id: string) => void
         local: () => void // back to this computer's Tucano

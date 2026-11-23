@@ -21,8 +21,9 @@ afterEach(() => {
 })
 
 it('uses legacy ports by default and validates per-workspace ports', () => {
-  expect(workspacePorts({})).toEqual({ webhook: 47717, git: 47718 })
-  expect(workspacePorts({ TUCANO_WEBHOOK_PORT: '49001', TUCANO_GIT_PORT: '49002' })).toEqual({ webhook: 49001, git: 49002 })
+  expect(workspacePorts({})).toEqual({ webhook: 47717, git: 47718, mcp: 47817 })
+  expect(workspacePorts({ TUCANO_WEBHOOK_PORT: '49001', TUCANO_GIT_PORT: '49002' })).toEqual({ webhook: 49001, git: 49002, mcp: 49101 })
+  expect(workspacePorts({ TUCANO_MCP_PORT: '49500' }).mcp).toBe(49500)
   for (const port of ['0', 'NaN', '65536', '47718', '4000.1']) expect(() => workspacePorts({ TUCANO_WEBHOOK_PORT: port })).toThrow()
 })
 
@@ -197,6 +198,7 @@ it('brings only what was picked to a new workspace, and what depends on it comes
   source.setSecret('connector:linear:token', 'encrypted')
   source.setSecret('github:token', 'encrypted-github')
   source.setSecret('typesafe:key', 'encrypted-jev')
+  source.setSecret('classifier:luna:key', 'encrypted-luna')
   source.saveSkill({ id: 'all', name: 'For all', description: 'x', body: 'y', agents: [], state: 'active', createdAt: 1, updatedAt: 1 })
   source.saveSkill({ id: 'own', name: 'For Lia', description: 'x', body: 'y', agents: ['lia'], state: 'active', createdAt: 1, updatedAt: 1 })
   source.saveRoutine({ id: 'daily', name: 'Daily', agentId: 'lia', conversationId: 'eng', prompt: 'p', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
@@ -212,6 +214,7 @@ it('brings only what was picked to a new workspace, and what depends on it comes
   expect(g.channelLayout).toBeUndefined()
   expect([general.agents(), general.conversations(), general.connectors(), general.skills(), general.routines()].map((x) => x.length)).toEqual([0, 0, 0, 0, 0])
   expect(general.getSecret('typesafe:key')).toBe('encrypted-jev')
+  expect(general.getSecret('classifier:luna:key')).toBe('encrypted-luna')
   expect(general.getSecret('github:token')).toBeUndefined()
 
   // Agents and their routines, no connectors: no grants, and the routine that polls one stays behind.
@@ -221,7 +224,7 @@ it('brings only what was picked to a new workspace, and what depends on it comes
   expect(agents.conversations().map((c) => c.id).sort()).toEqual(['dm', 'eng'])
   expect(agents.routines().map((r) => r.id)).toEqual(['daily'])
   expect(agents.connectors()).toEqual([])
-  for (const key of ['connector:linear:token', 'github:token', 'typesafe:key']) expect(agents.getSecret(key)).toBeUndefined()
+  for (const key of ['connector:linear:token', 'github:token', 'typesafe:key', 'classifier:luna:key']) expect(agents.getSecret(key)).toBeUndefined()
   expect(agents.getSettings(defaults)).toMatchObject({ routerModel: 'haiku', context: '', onboarding: { done: true } }) // defaults: the general settings stayed
 
   // Skills and connectors without agents: a skill of agents left behind comes archived.
