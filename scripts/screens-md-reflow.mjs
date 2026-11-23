@@ -29,7 +29,7 @@ const msg = db.prepare("SELECT id, author_id, run FROM messages WHERE conversati
 const run = JSON.parse(msg.run)
 const artId = randomUUID()
 const name = 'quarterly-report.md'
-const content = `# Quarterly Report\n\nThis markdown attachment should reflow to the full width when the side panel is expanded.\n\n| Column A | Column B | Column C | Column D | Column E | Column F |\n|---|---|---|---|---|---|\n| Long value that helps show width | Another value | More content | Even more | Still more | Last column |\n| Row 2 | Data | Data | Data | Data | Data |\n\n## Notes\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\n- A bullet point that stretches across the available width of the expanded panel\n- Another bullet point with enough text to show wrapping behavior when narrow\n- Third item\n`
+const content = `# Quarterly Report\n\nThis markdown attachment should reflow to the full width when the side panel is expanded.\n\n| Column A | Column B | Column C | Column D | Column E | Column F | Column G | Column H |\n|---|---|---|---|---|---|---|---|\n| Long value that helps show width and breakout behavior | Another longer value here | More content in this cell | Even more content | Still more content | Another column | Penultimate | Last column |\n| Row 2 with longer text | Data value | Data value | Data value | Data value | Data value | Data value | Data value |\n\n## Notes\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\n- A bullet point that stretches across the available width of the expanded panel\n- Another bullet point with enough text to show wrapping behavior when narrow\n- Third item\n`
 const bytes = Buffer.from(content)
 mkdirSync(join(data, 'artifacts', artId), { recursive: true })
 writeFileSync(join(data, 'artifacts', artId, name), bytes)
@@ -60,7 +60,9 @@ await win.screenshot({ path: `${out}/02-expanded-reflow.png` })
 const widths = await win.evaluate(() => {
   const panel = document.querySelector('.side-panel')?.getBoundingClientRect()
   const doc = document.querySelector('.side-panel__doc')?.getBoundingClientRect()
-  return { panelW: panel?.width, docW: doc?.width }
+  const table = document.querySelector('.side-panel__doc table')?.getBoundingClientRect()
+  const firstP = document.querySelector('.side-panel__doc.md > p')?.getBoundingClientRect()
+  return { panelW: panel?.width, docW: doc?.width, textW: firstP?.width, tableW: table?.width }
 })
 console.log(JSON.stringify(widths, null, 2))
 await app.close()

@@ -3561,9 +3561,33 @@ h3 {
   min-width: 0;
   border-left: 0;
 }
-.side-panel.is-wide .side-panel__doc,
+/* Expanded: wider reading column, not edge-to-edge. Text stays readable;
+   tables/images can break out wider than the text column without a horizontal scrollbar. */
 .side-panel.is-wide .side-panel__text {
-  max-width: none;
+  max-width: min(100%, 960px);
+  margin-inline: auto;
+  width: 100%;
+}
+.side-panel.is-wide .side-panel__doc.md {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(960px, 100%)) minmax(0, 1fr);
+  align-content: start;
+}
+.side-panel.is-wide .side-panel__doc.md > * {
+  grid-column: 2;
+  min-width: 0;
+}
+.side-panel.is-wide .side-panel__doc.md > table,
+.side-panel.is-wide .side-panel__doc.md > pre,
+.side-panel.is-wide .side-panel__doc.md > .md-table-wrap {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 100%;
+  justify-self: center;
+}
+.side-panel.is-wide .side-panel__doc.md > table {
+  width: fit-content;
+  max-width: 100%;
 }
 /* The side panel slides in from its edge. */
 .side-panel {
