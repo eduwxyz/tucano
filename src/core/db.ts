@@ -680,7 +680,6 @@ const COLUMNS: [string, string, string][] = [
   ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
   ['messages', 'title', 'TEXT'],
-<<<<<<< HEAD
   // A person's message sent by a harness over MCP (src/core/mcp.ts): the key's name, for the agent to read; the screens don't show it.
   ['messages', 'via', 'TEXT'],
   // The note a job left where it stopped on its brakes (src/core/jobs.ts): the job it carries Continuar for.
@@ -692,11 +691,9 @@ const COLUMNS: [string, string, string][] = [
   // An agent whose replies go one at a time (Agent.oneAtATime): 1; unset, as many as the app runs.
   ['agents', 'one_at_a_time', 'INTEGER'],
   // What became of an approved call: 'done', 'error' or 'not_run' (src/shared/types.ts).
-  ['approvals', 'result', 'TEXT']
-=======
+  ['approvals', 'result', 'TEXT'],
   // A channel's mention mode, per member: in the room, answering only when mentioned.
   ['members', 'mention_only', 'INTEGER NOT NULL DEFAULT 0']
->>>>>>> df2d68e8 (Let a channel keep an agent in mention mode: it reads everything and answers only when mentioned)
 ]
 
 
