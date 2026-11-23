@@ -14595,11 +14595,14 @@ button.agent-card__now:hover {
   background: var(--hover);
   color: var(--text);
 }
-/* Room for the gear on hover. A row with the laptop (last in it) keeps that room always, so the gear coming doesn't push the laptop. */
+/* Room for the hover icons (gear, and the computer when this agent has one). */
 .agent-row:hover > .nav-item,
-.agent-row:focus-within > .nav-item,
-.agent-row:has(.nav-item__mac) > .nav-item {
+.agent-row:focus-within > .nav-item {
   padding-right: 32px;
+}
+.agent-row:has(.nav-item__mac):hover > .nav-item,
+.agent-row:has(.nav-item__mac):focus-within > .nav-item {
+  padding-right: 56px;
 }
 .agent-row__gear {
   position: absolute;
@@ -14615,7 +14618,17 @@ button.agent-card__now:hover {
   pointer-events: auto;
 }
 .agent-row .nav-item__mac {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  translate: 0 -50%;
   color: var(--text-3);
+  opacity: 0;
+  pointer-events: none;
+}
+.agent-row:hover .nav-item__mac,
+.agent-row:focus-within .nav-item__mac {
+  opacity: 1;
 }
 .agent-row.is-archived > .nav-item {
   opacity: 0.6;
