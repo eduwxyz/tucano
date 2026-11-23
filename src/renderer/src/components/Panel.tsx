@@ -408,7 +408,9 @@ export function SidePanel(): ReactNode {
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const canSave = useStore(canSaveArtifact)
   const [reload, setReload] = useState(0)
+  const [rawMd, setRawMd] = useState(false)
   const wide = useStore((s) => s.panelWide)
+  useEffect(() => setRawMd(false), [artifact?.id])
   if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
@@ -437,13 +439,24 @@ export function SidePanel(): ReactNode {
             </button>
           </>
         )}
+        {artifact?.kind === 'markdown' && (
+          <button
+            className={`icon-btn ${rawMd ? 'is-active' : ''}`}
+            title={rawMd ? L('Ver visualização', 'View preview') : L('Ver markdown', 'View markdown source')}
+            aria-label={rawMd ? L('Ver visualização', 'View preview') : L('Ver markdown', 'View markdown source')}
+            aria-pressed={rawMd}
+            onClick={() => setRawMd((v) => !v)}
+          >
+            <Icon name="code" size={14} />
+          </button>
+        )}
         <WidenButton />
         <button className="icon-btn" title={L('Fechar', 'Close')} onClick={() => openPanel(null)}>
           <Icon name="x" size={14} />
         </button>
       </header>
       <div className="side-panel__body">
-        {artifact && <ArtifactView artifact={artifact} />}
+        {artifact && <ArtifactView artifact={artifact} rawMd={rawMd} />}
         {panel.kind === 'service' &&
           (service?.running && service.url ? (
             // Same origin is the service's own (127.0.0.1:port), not the app's.
@@ -458,7 +471,7 @@ export function SidePanel(): ReactNode {
   )
 }
 
-function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
+function ArtifactView({ artifact, rawMd }: { artifact: Artifact; rawMd: boolean }): ReactNode {
   const url = artifactUrl(artifact)
   const [text, setText] = useState<string | null>(null)
   const textual = artifact.kind === 'markdown' || artifact.kind === 'csv' || artifact.kind === 'text'
@@ -489,7 +502,11 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
     case 'pdf':
       return <iframe src={url} title={artifact.title} />
     case 'markdown':
-      return <div className="side-panel__doc md">{text !== null && <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
+      return rawMd ? (
+        <pre className="side-panel__text">{text}</pre>
+      ) : (
+        <div className="side-panel__doc md">{text !== null && <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
+      )
     case 'csv':
       return <div className="side-panel__doc">{text !== null && <CsvTable text={text} tab={artifact.name.endsWith('.tsv')} />}</div>
     case 'text':

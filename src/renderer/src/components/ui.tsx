@@ -68,6 +68,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   terminal: <path d="m5 7 5 5-5 5M12 17h7" />,
+  code: <path d="M8 9 5 12l3 3M16 9l3 3-3 3M14 7l-4 10" />,
   zap: <path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z" />,
   pause: <path d="M8 5v14M16 5v14" />,
   play: <path d="M7 4v16l13-8L7 4Z" />,
