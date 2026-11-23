@@ -14517,7 +14517,7 @@ button.agent-card__now:hover {
   gap: 2px;
 }
 .sidebar__tool {
-  flex: 1 1 auto;
+  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -14629,6 +14629,16 @@ button.agent-card__now:hover {
 .agent-row:hover .nav-item__mac,
 .agent-row:focus-within .nav-item__mac {
   opacity: 1;
+  pointer-events: auto; /* its title says where the agent runs */
+}
+/* A touch screen has no hover: where the agent runs stays in sight, with its room kept. */
+@media (hover: none) {
+  .agent-row:has(.nav-item__mac) > .nav-item {
+    padding-right: 56px;
+  }
+  .agent-row .nav-item__mac {
+    opacity: 1;
+  }
 }
 .agent-row.is-archived > .nav-item {
   opacity: 0.6;
