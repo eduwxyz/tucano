@@ -126,10 +126,12 @@ describe('Runner', () => {
     await r.idle()
     const replies = agentMessages()
     expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a2'])
-    const note = db.messages().find((m) => m.author.kind === 'system')!
-    expect(note.text).toContain('Chamei **theo**')
-    expect(note.run).toBeUndefined()
-    expect(db.receiptTotals(note.id).tokens).toBeGreaterThan(0)
+    // Who answers is said on the reply it started, and the channel keeps no note of its own.
+    expect(replies[0]!.run?.routed).toMatchObject({ by: 'Haiku' })
+    expect(db.messages().filter((m) => m.author.kind === 'system')).toEqual([])
+    // The router's read is charged to the prompt it read, not to an agent's month.
+    const asked = db.messages().find((m) => m.author.kind === 'person')!
+    expect(db.receiptTotals(asked.id).tokens).toBeGreaterThan(0)
     expect(db.usedThisMonth('a1')).toBe(0) // the router's tokens are not charged to agents
   })
 

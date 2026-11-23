@@ -82,6 +82,8 @@ import { canEditChannel,
   type Author,
   type DelegationRef,
   type Message,
+  type Routed,
+  type Run,
   type Step,
   IMAGE_MIMES,
   MAX_IMAGES_PER_MESSAGE,
@@ -625,6 +627,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </div>
         )}
         {ask && showAsk && <RoutineAsk ask={ask} />}
+        {message.run?.routed && <RoutedLine routed={message.run.routed} />}
         {/* A run is taller than the screen, so the way into the thread can't sit at its start: it rides the
             top of the run here, in the same block, and leaves with the run's last line. Without threads, or
             without a run, it stays where it was, at the corner of the message (ThreadLink). */}
@@ -1388,6 +1391,21 @@ function MemoryChip({ id }: { id: string }): ReactNode {
           </button>
         </>
       )}
+    </div>
+  )
+}
+
+// Who picked this agent for the message it answers (src/core/runs.ts, `routed`): one quiet line at the
+// head of the session, before anything it did or said, and it goes up with the session instead of staying
+// under the prompt as a row of its own. The reason is cut to the line and whole in the title.
+function RoutedLine({ routed }: { routed: Routed }): ReactNode {
+  const who = routed.by ? L(`Escolhido por ${routed.by}`, `Picked by ${routed.by}`) : L('Escolhido', 'Picked')
+  const why = routed.reason?.replace(/\*\*/g, '').trim() ?? ''
+  return (
+    <div className="msg__routed" title={why || undefined}>
+      <Icon name="spark" size={12} />
+      <span className="msg__routed-who">{who}</span>
+      {why && <span className="msg__routed-why">{why}</span>}
     </div>
   )
 }
