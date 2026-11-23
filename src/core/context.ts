@@ -14,6 +14,9 @@ import { kindLabel, levelOf, policyOf, type ActionKind, type Autonomy } from '..
 
 export const HISTORY_LIMIT = 30
 
+// How much of the computer's setup script goes in the prompt.
+const SETUP_CHARS = 2000
+
 export type PromptOpts = {
   agent: Agent
   settings: Pick<Settings, 'workspaceName' | 'context' | 'autonomy'>
@@ -23,6 +26,7 @@ export type PromptOpts = {
   canRemember?: boolean
   hasComputer?: boolean
   computerOff?: string // it has a computer, but Docker is off right now: what the person has to do
+  computerSetup?: string // what its Linux computer was set up with (Settings): it's there, not to install again
   offline?: string[] // connectors it has access to that aren't connected right now
   macFolder?: string // a computer on this Mac (spec §23): where its commands start in this conversation
   web?: boolean
@@ -56,7 +60,7 @@ export interface GitHubAccess {
 // session (Claude Code keeps the first system prompt on resume), so whatever changes on its own
 // goes in liveContext instead.
 export function systemPrompt(opts: PromptOpts): string {
-  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, macFolder, web, browser, browserLogins, apps, routines, skills, connectors, builderGuide, people } = opts
+  const { agent, settings, conversation, peers, canRemember, hasComputer, computerOff, computerSetup, macFolder, web, browser, browserLogins, apps, routines, skills, connectors, builderGuide, people } = opts
   const me = settings.workspaceName || L('o usuário', 'the user')
   const where =
     conversation.kind === 'dm'
@@ -89,6 +93,16 @@ export function systemPrompt(opts: PromptOpts): string {
           `Você tem um computador Linux só seu (Debian, você é root, com internet), que continua existindo entre conversas. A pasta de trabalho é /work. Use as ferramentas bash, read_file, write_file e edit_file pra instalar, criar, rodar e testar o que precisar: nada lá dentro pede permissão, então faça em vez de descrever. Pra servidor web, API ou dashboard, use start_service e confira com screenshot. Pra mostrar o resultado a ${me}, use show_file (documento, imagem, planilha) ou screenshot. Esse computador não é o de ${me}: ${agent.folders?.length ? `do computador de ${me}, você só vê as pastas abaixo` : `os arquivos de ${me} não estão nele`}.`,
           `You have a Linux computer of your own (Debian, you're root, with internet), which keeps existing between conversations. The working folder is /work. Use the bash, read_file, write_file and edit_file tools to install, create, run and test whatever you need: nothing in there asks for permission, so do it instead of describing it. For a web server, API or dashboard, use start_service and check it with screenshot. To show the result to ${me}, use show_file (document, image, spreadsheet) or screenshot. This computer isn't ${me}'s: ${agent.folders?.length ? `of ${me}'s computer, you only see the folders below` : `${me}'s files aren't on it`}.`
         ),
+        computerSetup?.trim() &&
+          [
+            L(
+              `O computador já vem preparado por ${me} com o que este script instala (num computador criado antes dele, pode faltar algo: aí instale do mesmo jeito). Use o que já está lá em vez de instalar outra versão:`,
+              `The computer comes set up by ${me} with what this script installs (on a computer made before it, something may be missing: then install it the same way). Use what's there instead of installing another version:`
+            ),
+            '```bash',
+            computerSetup.trim().length > SETUP_CHARS ? `${computerSetup.trim().slice(0, SETUP_CHARS)}\n# …` : computerSetup.trim(),
+            '```'
+          ].join('\n'),
         agent.folders?.length &&
           [
             L(`Pastas do computador de ${me} emprestadas pra você (são os arquivos de verdade, o que você muda aparece na hora no computador dele):`, `Folders of ${me}'s computer lent to you (they're the real files: what you change shows up on their computer right away):`),

@@ -212,6 +212,8 @@ const RAW_ALLOWED: Record<string, string[]> = {
   'src/shared/types.ts': ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'Todo domingo', 'Toda segunda', 'Toda terça', 'Toda quarta', 'Toda quinta', 'Toda sexta', 'Todo sábado'],
   // keys matched against a step's label, in both languages
   'src/renderer/src/components/Panel.tsx': ['Leu a página'],
+  // a setup preset's opening comment, written into the person's script and looked for there, never shown
+  'src/shared/computer-setup.ts': ['# básicas'],
   // a sign-in wall's own words, matched against the page and never shown
   'src/shared/wall.ts': ['inicia sessão para continuar', 'faça login para continuar'],
   'src/renderer/src/components/Servers.tsx': ['Conectado: os agentes de lá podem usar este computador quando trabalham pra você.']

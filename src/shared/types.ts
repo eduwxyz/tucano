@@ -551,6 +551,9 @@ export interface Settings {
   node?: { apps?: AgentApp[]; folders?: string[]; device?: string } // this computer lent to servers' Tucanos (core/node-server.ts): the apps and folders it lends, and its id there
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
+  // A script (bash, as root) every new Linux computer is set up with: the tools the agents use (glab, the
+  // Databricks CLI…). Run once into a base image, which each new computer starts from.
+  computerSetup?: string
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
