@@ -214,7 +214,9 @@ const RAW_ALLOWED: Record<string, string[]> = {
   'src/renderer/src/components/Panel.tsx': ['Leu a página'],
   // a sign-in wall's own words, matched against the page and never shown
   'src/shared/wall.ts': ['inicia sessão para continuar', 'faça login para continuar'],
-  'src/renderer/src/components/Servers.tsx': ['Conectado: os agentes de lá podem usar este computador quando trabalham pra você.']
+  'src/renderer/src/components/Servers.tsx': ['Conectado: os agentes de lá podem usar este computador quando trabalham pra você.'],
+  // the colour themes' names: Brazilian places, the same in both languages
+  'src/shared/themes.ts': ['Sertão', 'Mata Atlântica', 'Lençóis', 'Açaí', 'Ipê']
 }
 
 // The strings an L() call's first argument holds, wherever it is: the Portuguese side, fine as it is.
