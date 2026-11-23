@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, applyOrder, isEffort, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -2017,24 +2017,33 @@ const api: Handlers = {
     if (job) bg(runner.continueJob(job, ctx.person), 'continueJob')
   },
 
-  setAgentModels: ({ agentIds, modelId }, ctx) => {
+  setAgentModels: ({ agentIds, modelId, effort }, ctx) => {
     const value = modelId.trim()
-    const model = modelInfo(value)
-    if (!model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
+    // The thinking level travels with the model when one is sent ("high", or null for the default).
+    const level = effort === undefined || effort === null || effort === 'default' ? undefined : effort
+    // No model with a level is a bulk change of the level alone: every agent keeps its own model and
+    // only its level moves, which is what picking a level and no model means.
+    const only = value === ''
+    if (only && level === undefined) throw new Error(L('Escolha um modelo ou um esforço.', 'Choose a model or a thinking level.'))
+    if (level !== undefined && !isEffort(level)) throw new Error(L('Escolha um esforço válido.', 'Choose a valid effort.'))
+    const model = value ? modelInfo(value) : undefined
+    if (!only && !model?.id) throw new Error(L('Escolha um modelo válido.', 'Choose a valid model.'))
     const agents = [...new Set(agentIds)].map((id) => {
       const agent = db.agent(id)
       if (!agent) throw new Error(L('Um dos agentes não existe mais. Atualize a lista.', 'An agent no longer exists. Refresh the list.'))
       return agent
     })
-    const changed = agents.filter((a) => a.modelId !== value).map((a): Agent => ({
+    const changes = (a: Agent): boolean => (!only && a.modelId !== value) || (level !== undefined && a.effort !== level)
+    const changed = agents.filter(changes).map((a): Agent => ({
       ...a,
-      modelId: value,
-      ...(modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
+      ...(only ? {} : { modelId: value }),
+      ...(level !== undefined ? { effort: level } : {}),
+      ...(model && modelInfo(a.modelId)?.engine !== model.engine ? { accountId: undefined } : {})
     }))
     db.tx(() => {
       for (const agent of changed) {
         db.saveAgent(agent)
-        record(ctx, 'agent.updated', agent.id, { name: agent.name, modelId: value })
+        record(ctx, 'agent.updated', agent.id, { name: agent.name, ...(only ? {} : { modelId: value }), ...(level !== undefined ? { effort: level } : {}) })
       }
     })
     for (const agent of changed) emit({ type: 'agent', agent: db.agent(agent.id)! })

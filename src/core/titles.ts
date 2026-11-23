@@ -9,6 +9,7 @@ import { cleanTitle, titledAlready } from '../shared/titles'
 import { modelInfo, usable, type EngineId, type Message, type Settings } from '../shared/types'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
+import { memoryEffort } from './memory'
 
 export const titleSystem = (): string =>
   L(
@@ -53,7 +54,7 @@ export class Titles {
     mkdirSync(cwd, { recursive: true })
     const started = Date.now()
     let text = ''
-    for await (const ev of this.deps.engines[model.engine].run({ model: model.id, effort: 'low', system: titleSystem(), prompt: m.text.slice(0, PROMPT_MAX), cwd, signal: AbortSignal.timeout(60_000) })) {
+    for await (const ev of this.deps.engines[model.engine].run({ model: model.id, effort: memoryEffort(settings), system: titleSystem(), prompt: m.text.slice(0, PROMPT_MAX), cwd, signal: AbortSignal.timeout(60_000) })) {
       if (ev.type === 'text') text += ev.delta
       else if (ev.type === 'done') {
         text = ev.text || text

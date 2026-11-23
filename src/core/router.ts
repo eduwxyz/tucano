@@ -5,7 +5,7 @@
 // "thanks, @bia" doesn't wake her up.
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
-import { CODE_SPANS, type Agent, type Connector, type Message, type Person } from '../shared/types'
+import { CODE_SPANS, type Agent, type Connector, type Effort, type Message, type Person } from '../shared/types'
 import type { Engine, TurnShape, Usage } from './engines/types'
 import type { ThreadDigest } from './memory'
 
@@ -246,12 +246,17 @@ export function parseRoute(text: string, agents: Agent[], max = MAX_ROUTED): { a
   return { agents: picked.slice(0, max), reason: why }
 }
 
+// How hard the router thinks, from Settings → Models: one small call per message, low unless the
+// person raised it on purpose.
+export const routerEffort = (s: { routerEffort?: Effort }): Effort => s.routerEffort ?? 'low'
+
 // The router's turn without its prompt: the same for every message, so its process can start ahead.
-export const routerTurn = (model: string, cwd: string): TurnShape => ({ model, effort: 'low', system: routerSystem(), cwd })
+export const routerTurn = (model: string, cwd: string, effort: Effort = 'low'): TurnShape => ({ model, effort, system: routerSystem(), cwd })
 
 export async function route(opts: {
   engine: Engine
   model: string
+  effort?: Effort
   messages: Message[]
   agents: Agent[]
   me: string
@@ -266,7 +271,7 @@ export async function route(opts: {
   let text = ''
   let usage: Usage | undefined
   let error: string | undefined
-  for await (const ev of opts.engine.run({ ...routerTurn(opts.model, opts.cwd), prompt: routerPrompt(opts), signal: AbortSignal.timeout(60_000) })) {
+  for await (const ev of opts.engine.run({ ...routerTurn(opts.model, opts.cwd, opts.effort), prompt: routerPrompt(opts), signal: AbortSignal.timeout(60_000) })) {
     if (ev.type === 'text') text += ev.delta
     else if (ev.type === 'done') {
       text = ev.text || text
@@ -283,6 +288,7 @@ export async function route(opts: {
 export async function screenHandoff(opts: {
   engine: Engine
   model: string
+  effort?: Effort
   reply: string
   author: Agent
   candidates: Agent[]
@@ -300,7 +306,7 @@ export async function screenHandoff(opts: {
   let error: string | undefined
   for await (const ev of opts.engine.run({
     model: opts.model,
-    effort: 'low',
+    effort: opts.effort ?? 'low',
     system: handoffSystem(),
     prompt: handoffPrompt(opts),
     cwd: opts.cwd,

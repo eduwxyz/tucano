@@ -45,7 +45,6 @@ import {
   openBackups,
   type TelegramInfo,
   useStore,
-  EFFORTS,
   ENGINES,
   MAX_AGENT_ROUTINES,
   RUN_BUDGET_PCT,
@@ -91,7 +90,7 @@ import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VOICE_WHERE, VoiceSetup } from './VoiceSetup'
 import { HermesImport } from './HermesImport'
-import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
+import { AccountPicker, AccountsCard, EffortSelect, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
@@ -757,10 +756,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
           {pane('perfil') && (
             <Section
               title={L('Onde roda e modelo', 'Where it runs and model')}
-              help={L('O agente roda no Claude Code, no Codex ou em outro que você já usa, do jeito que você configurou: no seu plano, no gateway da empresa ou no seu provedor.', 'The agent runs in Claude Code, Codex or another configured runtime, using your plan, company gateway or provider.')}
+              help={L('O agente roda no Claude Code, no Codex ou em outro que você já usa, do jeito que você configurou: no seu plano, no gateway da empresa ou no seu provedor. O esforço diz quanto ele pensa: mais esforço pensa mais e gasta mais do plano.', 'The agent runs in Claude Code, Codex or another one you already use, the way you set it up: on your plan, your company’s gateway or your provider. The effort says how hard it thinks: more effort thinks longer and uses more of your plan.')}
             >
+              {/* The harness, the model and how hard it thinks on one row: the harness gives up the width its short name doesn't need. */}
               <Row label={L('Modelo', 'Model')} className="lrow--wide">
-                <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} />
+                <ModelPicker value={draft.modelId} onChange={(modelId) => patch({ modelId })} effort={draft.effort} onEffort={(effort) => patch({ effort }, true)} />
               </Row>
               <div className="lrow lrow--picker">
                 <AccountPicker draft={draft} patch={patch} />
@@ -4063,6 +4063,13 @@ export function SettingsPage(): ReactNode {
                     placeholder={L('Escolha', 'Pick')}
                   />
                 </Field>
+                {/* It also names each request: the same level serves both small calls. */}
+                <EffortSelect
+                  className="effort-select--inline"
+                  label={L('Esforço de raciocínio', 'Reasoning effort')}
+                  value={settings.memoryEffort ?? 'low'}
+                  onChange={(memoryEffort) => { if (memoryEffort) updateSettings({ memoryEffort }) }}
+                />
               </div>
             </Card>
           </SectionAnchor>

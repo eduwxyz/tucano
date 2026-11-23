@@ -16,6 +16,7 @@ import {
   startsPicked,
   codexValue,
   customModel,
+  EFFORTS,
   engineModels,
   harnessMcps,
   importHarnessMcp,
@@ -34,6 +35,7 @@ import {
   type Account,
   type AccountEngine,
   type Agent,
+  type Effort,
   type EngineId,
   type EngineStatus,
   type HarnessMcp,
@@ -107,9 +109,38 @@ const providerOf = (value: string): string => {
   return L('Outros', 'Others')
 }
 
+// The thinking level, in the same four names and the same order everywhere a model is picked (an
+// agent's page, Settings → Models): low, medium, high, max. A compact control, made to sit in a row
+// beside a harness and a model, or under them. With no level chosen it says so (Keep): passing one is
+// what changes it, so a control nobody touched never sets one by looking like it did.
+// With `keep`, Keep is also an option of its own, not only what an untouched control shows: a level
+// already picked can be given back, and the control reports null for it. That is what a place that
+// applies a level onto agents which have one each needs — "Keep" there means leave them as they are.
+const KEEP = 'keep'
+export function EffortSelect({ value, onChange, className = '', label, placeholder, keep, 'aria-label': ariaLabel }: { value?: Effort | null; onChange: (e: Effort | null) => void; keep?: boolean; className?: string; label?: string; placeholder?: string; 'aria-label'?: string }): ReactNode {
+  const options = EFFORTS.map((e) => ({ value: e.id, label: e.label }))
+  return (
+    <Select
+      className={`effort-select ${className}`.trim()}
+      label={label}
+      placeholder={placeholder ?? L('Manter', 'Keep')}
+      aria-label={ariaLabel ?? label ?? L('Esforço de raciocínio', 'Reasoning effort')}
+      value={value ?? null}
+      onChange={(v) => {
+        const found = EFFORTS.find((e) => e.id === v)
+        if (found) onChange(found.id)
+        else if (keep && v === KEEP) onChange(null)
+      }}
+      options={keep ? [{ value: KEEP, label: placeholder ?? L('Manter', 'Keep') }, ...options] : options}
+    />
+  )
+}
+
 // A model to run with: the harness, then its model from the list, or another by name.
 // jev adds TypeSafe's Jev (the router). Engines limits the harnesses offered.
-export function ModelPicker({ value, onChange, engines, jev }: { value: string; onChange: (v: string) => void; engines?: EngineId[]; jev?: boolean }): ReactNode {
+// With `onEffort`, the thinking level rides along on the same row, after the model: the harness gives
+// up width for it (its names are short, and the level's are shorter still).
+export function ModelPicker({ value, onChange, engines, jev, effort, onEffort }: { value: string; onChange: (v: string) => void; engines?: EngineId[]; jev?: boolean; effort?: Effort | null; onEffort?: (e: Effort) => void }): ReactNode {
   const usable = useStore((s) => usableEngines(s.settings))
   const statuses = useStore((s) => s.settings.engines)
   const choices = (engines ?? usable).filter((e) => usable.includes(e))
@@ -152,6 +183,7 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
     <div className="model-picker">
       {!fixed && (
         <Select
+          className="model-picker__engine"
           value={value === 'jev' ? 'jev' : engine}
           onChange={(v) => {
             setTyping(false)
@@ -186,6 +218,8 @@ export function ModelPicker({ value, onChange, engines, jev }: { value: string; 
           )}
         </>
       )}
+      {/* Cursor's models carry the effort in the name (…-high, …-xhigh): there it would be a second one. */}
+      {onEffort && engine && engine !== 'cursor' && <EffortSelect className="model-picker__effort" value={effort} onChange={(e) => { if (e) onEffort(e) }} />}
       {error && other && <span className="hint">{L('Não deu pra pegar a lista', 'Couldn’t get the list')}: {error}</span>}
     </div>
   )
