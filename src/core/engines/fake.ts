@@ -5,7 +5,6 @@ import { memorySystem } from '../memory'
 import { titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
-<<<<<<< HEAD
 import { chimeSystem, handoffSystem, routerSystem } from '../router'
 import { resolverSystem } from '../wiki-resolver'
 import type { Engine, EngineEvent, Turn } from './types'
