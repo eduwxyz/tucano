@@ -22,7 +22,7 @@ const SAVED_HERE = (folder: string): string => L(`Salvo em ${folder}`, `Saved to
 const FOLDER_GONE = (folder: string): string => L(`A pasta ${folder} não está mais lá — escolha onde salvar.`, `${folder} isn't there any more — choose where to save it.`)
 
 const FAILED_SAVE = (): string => L('Não consegui salvar a imagem.', "Couldn't save the image.")
-const COPIED = (): string => L('Imagem copiada.', 'Image copied.')
+const COPIED = (): string => L('Imagem copiada para a área de transferência. Você pode colar como imagem.', 'Copied image to clipboard. You can paste it as an image.')
 const FAILED_COPY = (): string => L('Não consegui copiar a imagem.', "Couldn't copy the image.")
 const ATTACHED = (): string => L('Imagem anexada à sua mensagem.', 'Image attached to your message.')
 const FAILED_ATTACH = (): string => L('Não consegui anexar a imagem.', "Couldn't attach the image.")

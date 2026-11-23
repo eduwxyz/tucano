@@ -36,6 +36,9 @@ declare global {
         // The folder a one-click save lands in before anything has been saved: the system's own.
         folder?: () => Promise<{ folder: string } | null>
       }
+      artifact?: {
+        copy: (url: string, kind?: string) => Promise<{ ok: true; kind: 'image' | 'text' | 'file' | 'path' } | { ok: false }>
+      }
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void

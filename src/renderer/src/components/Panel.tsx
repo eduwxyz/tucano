@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
-import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { agentById, amAdmin, amOwner, canSaveArtifact, copyArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { galleryLayout } from '../gallery'
 import { openImageMenu } from '../image-menu'
 import { call } from '../rpc'
@@ -58,6 +58,11 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
       {saveLabel()}
     </button>
   )
+  const copy = (
+    <button className="artifact-card__open" onClick={() => void copyArtifact(a)}>
+      {L('Copiar', 'Copy')}
+    </button>
+  )
   if (a.kind === 'image')
     return (
       <div className="artifact-image">
@@ -74,6 +79,7 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
         </button>
         <span className="artifact-image__caption">
           <span className="grow">{a.title}</span>
+          {copy}
           {save}
         </span>
       </div>
@@ -88,6 +94,7 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
           {L('Abrir', 'Open')}
         </button>
       )}
+      {copy}
       {save}
     </>
   )

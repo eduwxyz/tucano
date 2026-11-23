@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('tucano', {
     // Where a picture goes in one click before the person has saved one themselves.
     folder: (): Promise<{ folder: string } | null> => ipcRenderer.invoke('image:folder') as Promise<{ folder: string } | null>
   },
+  artifact: {
+    copy: (url: string, kind?: string): Promise<{ ok: true; kind: 'image' | 'text' | 'file' | 'path' } | { ok: false }> =>
+      ipcRenderer.invoke('artifact:copy', { url, kind }) as Promise<{ ok: true; kind: 'image' | 'text' | 'file' | 'path' } | { ok: false }>
+  },
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
   // A click on a notification opens its conversation, and the thread it's about.

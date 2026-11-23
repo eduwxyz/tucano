@@ -16,7 +16,7 @@ import { Browsers } from './browser'
 import { Servers } from './servers'
 import { thisDevice } from './redeem'
 import { placeOf, serverNote, type DesktopPlaces } from '../shared/servers'
-import { artifactImagePath, fileNameFor, freeName, imageBytesOf, mimeOfImage } from './image-bytes'
+import { artifactImagePath, fileNameFor, freeName, imageBytesOf, MAX_IMAGE_BYTES, mimeOfImage } from './image-bytes'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -835,6 +835,66 @@ ipcMain.handle('image:clipboard', async (event, arg: unknown) => {
     return true
   } catch {
     return false
+  }
+})
+
+const TEXT_EXT = /\.(md|markdown|txt|text|csv|tsv|json|xml|ya?ml|html?|svg|css|js|mjs|cjs|ts|tsx|jsx|py|rb|sh|bash|zsh|ps1|bat|cmd|sql|log|ini|cfg|conf|toml|env|gitignore|rtf)$/i
+const artifactPath = (url: unknown): string | null =>
+  typeof url === 'string' && url.length <= 8192 ? artifactImagePath(registry.selected().dataDir, url) ?? localImagePath(url) : null
+
+// Copy an artifact: image as image, text as text, other files as a file in the file manager (or the
+// full local path as a fallback).
+ipcMain.handle('artifact:copy', async (event, arg: unknown) => {
+  if (!fromApp(event)) return { ok: false as const }
+  const { url, kind } = (arg ?? {}) as { url?: unknown; kind?: unknown }
+  const path = artifactPath(url)
+  const k = typeof kind === 'string' ? kind : ''
+  if (!path) return { ok: false as const }
+  try {
+    const info = statSync(path)
+    if (!info.isFile() || info.size > MAX_IMAGE_BYTES) return { ok: false as const }
+  } catch {
+    return { ok: false as const }
+  }
+  const lower = path.toLowerCase()
+  const isImage = k === 'image' || /\.(png|jpe?g|gif|webp)$/.test(lower)
+  if (isImage) {
+    const bytes = await imageBytes(url)
+    const mime = bytes ? mimeOfImage(bytes) : null
+    if (bytes && mime) {
+      try {
+        await clipboard.write([new ClipboardItem({ [mime]: new Blob([new Uint8Array(bytes)], { type: mime }) })])
+        return { ok: true as const, kind: 'image' as const }
+      } catch {
+        /* fall through to file/path copy */
+      }
+    }
+  }
+  const isText = ['markdown', 'html', 'csv', 'text'].includes(k) || TEXT_EXT.test(lower)
+  if (isText) {
+    try {
+      const bytes = await imageBytes(url)
+      if (bytes) {
+        clipboard.writeText(bytes.toString('utf-8'))
+        return { ok: true as const, kind: 'text' as const }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  if (process.platform === 'win32') {
+    try {
+      ;(clipboard as unknown as { writeBuffer: (format: string, buffer: Buffer) => void }).writeBuffer('FileNameW', Buffer.from(`${path}\0`, 'ucs2'))
+      return { ok: true as const, kind: 'file' as const }
+    } catch {
+      /* fall through */
+    }
+  }
+  try {
+    clipboard.writeText(path)
+    return { ok: true as const, kind: 'path' as const }
+  } catch {
+    return { ok: false as const }
   }
 })
 

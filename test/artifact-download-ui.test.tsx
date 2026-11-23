@@ -109,7 +109,7 @@ describe('in a browser (Tucano as a server)', () => {
 describe('on the desktop', () => {
   it('keeps Open, and adds Save… that asks the app for a Save dialog', async () => {
     await render(art({}))
-    expect(buttons()).toEqual(expect.arrayContaining(['Abrir', 'Salvar…']))
+    expect(buttons()).toEqual(expect.arrayContaining(['Abrir', 'Copiar', 'Salvar…']))
     await click('Abrir')
     expect(store.openPanel).toHaveBeenCalledWith({ kind: 'artifact', id: 'a1' })
     await click('Salvar…')
@@ -132,7 +132,17 @@ describe('on the desktop', () => {
     for (const cb of cbs) await act(async () => cb([], [] as unknown as ResizeObserver))
     expect(card.className).toContain('is-stacked')
     const actions = document.querySelector('.artifact-card__actions')
-    expect(actions?.querySelectorAll('button').length).toBe(2)
+    expect(actions?.querySelectorAll('button').length).toBe(3)
     delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver
+  })
+
+  it('copies an artifact through the desktop bridge and reports how it was copied', async () => {
+    const copy = vi.fn(async () => ({ ok: true as const, kind: 'text' as const }))
+    ;(window as unknown as { tucano: unknown }).tucano = { artifact: { copy } }
+    await render(art({ kind: 'markdown', name: 'notes.md', title: 'Notes' }))
+    await click('Copiar')
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(copy).toHaveBeenCalledWith('tucano://artifact/a1/notes.md', 'markdown')
+    delete (window as unknown as { tucano?: unknown }).tucano
   })
 })
