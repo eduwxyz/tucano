@@ -68,6 +68,18 @@ export function WorkDrawer({
   const [open, setOpen] = useState<boolean>(remember.open ?? busy)
   const [ended, setEnded] = useState<string[]>(remember.done)
   const now = useTick(running.length > 0)
+  // Two clicks for a destructive X: the first arms it and turns the glyph red, the second does it.
+  // Only one button is armed at a time; leaving it or clicking elsewhere disarms it.
+  const [armed, setArmed] = useState<string | null>(null)
+  const arm = (key: string, run: () => void): void => {
+    if (armed === key) {
+      setArmed(null)
+      run()
+      return
+    }
+    setArmed(key)
+  }
+  const disarm = (): void => setArmed(null)
   const oneLine = (text: string, max: number): string => {
     const flat = text.replace(/\s+/g, ' ').trim()
     return flat.length > max ? `${flat.slice(0, max)}…` : flat
@@ -124,7 +136,7 @@ export function WorkDrawer({
     .join(' · ')
   return (
     <div className={`work-drawer ${open ? 'is-open' : ''}`}>
-      <button className="work-drawer__head" onClick={() => paint(!open)} aria-expanded={open}>
+      <button type="button" className="work-drawer__head" onClick={() => paint(!open)} aria-expanded={open}>
         <Icon name="layers" size={13} />
         <span className="work-drawer__count">{counts}</span>
         <span className="work-drawer__more">{open ? L('Fechar', 'Close') : L('Ver', 'Show')}</span>
@@ -136,12 +148,12 @@ export function WorkDrawer({
         <div className="work-drawer__list">
           {running.map((m) => (
             <div className="work-row" key={m.id}>
-              <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
+              <button type="button" className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
                 <span className="work-row__dot" aria-hidden />
                 <span className="work-row__text">{asked(m)}</span>
               </button>
               <span className="work-row__meta">{duration(Math.max(0, now - m.at))}</span>
-              <button
+              <button type="button"
                 className="icon-btn icon-btn--sm work-row__thread-btn"
                 title={into(m)}
                 aria-label={L('Abrir a thread desta resposta', 'Open this reply’s thread')}
@@ -149,11 +161,13 @@ export function WorkDrawer({
               >
                 <Icon name="thread" size={12} />
               </button>
-              <button
-                className="icon-btn icon-btn--sm work-row__stop"
-                title={L('Parar esta resposta', 'Stop this reply')}
+              <button type="button"
+                className={`icon-btn icon-btn--sm work-row__stop ${armed === `stop:${m.id}` ? 'is-armed' : ''}`}
+                title={armed === `stop:${m.id}` ? L('Clique de novo para parar', 'Click again to stop') : L('Parar esta resposta', 'Stop this reply')}
                 aria-label={L('Parar esta resposta', 'Stop this reply')}
-                onClick={() => stopRun(m.id)}
+                onClick={() => arm(`stop:${m.id}`, () => stopRun(m.id))}
+                onBlur={disarm}
+                onMouseLeave={disarm}
               >
                 <Icon name="x" size={12} />
               </button>
@@ -166,14 +180,14 @@ export function WorkDrawer({
                 const how = endedAs(m.run?.status ?? 'done')
                 return (
                   <div className="work-row work-row--done" key={m.id}>
-                    <button className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
+                    <button type="button" className="work-row__go" onClick={() => onJump?.(m.id, m.threadId)} title={L('Ir para esta resposta', 'Go to this reply')}>
                       <span className={`work-row__state work-row__state--${how.tone}`} title={how.said}>
                         <Icon name={how.icon} size={11} />
                       </span>
                       <span className="work-row__text">{asked(m)}</span>
                     </button>
                     <span className="work-row__meta">{how.said}</span>
-                    <button
+                    <button type="button"
                       className="icon-btn icon-btn--sm work-row__thread-btn"
                       title={into(m)}
                       aria-label={L('Abrir a thread desta resposta', 'Open this reply’s thread')}
@@ -181,11 +195,13 @@ export function WorkDrawer({
                     >
                       <Icon name="thread" size={12} />
                     </button>
-                    <button
-                      className="icon-btn icon-btn--sm work-row__remove"
-                      title={L('Tirar da lista', 'Remove from the list')}
+                    <button type="button"
+                      className={`icon-btn icon-btn--sm work-row__remove ${armed === `remove:${m.id}` ? 'is-armed' : ''}`}
+                      title={armed === `remove:${m.id}` ? L('Clique de novo para tirar', 'Click again to remove') : L('Tirar da lista', 'Remove from the list')}
                       aria-label={L('Tirar da lista', 'Remove from the list')}
-                      onClick={() => keep(remember.done.filter((x) => x !== m.id))}
+                      onClick={() => arm(`remove:${m.id}`, () => keep(remember.done.filter((x) => x !== m.id)))}
+                      onBlur={disarm}
+                      onMouseLeave={disarm}
                     >
                       <Icon name="trash" size={12} />
                     </button>
