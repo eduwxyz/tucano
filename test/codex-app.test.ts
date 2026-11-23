@@ -288,6 +288,21 @@ describe('Codex app-server process', () => {
     expect(secondAgain).toMatch(/resumed=true/)
   }, 20_000)
 
+  it('closes a replaced process that still has a thread when the app goes away', async () => {
+    const auth = oldLogin()
+    const e = make()
+    const first = reply(await collect(e.run(turn('s1', false))))
+    await collect(e.run(turn('s2', false)))
+    writeFileSync(auth, '{"tokens":{"access_token":"novo"}}')
+    const after = reply(await collect(e.run(turn('s1', true))))
+    const replaced = Number(field(first, 'pid'))
+    expect(field(after, 'pid')).not.toBe(field(first, 'pid'))
+    expect(isAlive(replaced)).toBe(true)
+    e.dispose!()
+    await until(() => !isAlive(replaced))
+    expect(isAlive(replaced)).toBe(false)
+  }, 20_000)
+
   it('interrupts a stopped turn and lets its thread go', async () => {
     const e = make()
     const stop = new AbortController()

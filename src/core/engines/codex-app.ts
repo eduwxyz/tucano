@@ -403,6 +403,7 @@ const loginAt = (home: string): number => {
 
 export class CodexApp {
   private hosts = new Map<string, Promise<Host>>()
+  private running = new Set<Promise<Host>>() // every process not gone yet, a replaced one with threads left included
   private servers = new Map<string, AppServer>() // each host's process, to tell a dead one before its exit comes
   private logins = new Map<string, number>() // by host key: the login file's time when that process started
   private kept = new Map<string, Kept>() // by session id
@@ -439,10 +440,12 @@ export class CodexApp {
       }
     )
     this.hosts.set(key, ready)
+    this.running.add(ready)
     const later = this.later
     this.later = undefined
     later?.(bin)
     void server.exited().then(() => {
+      this.running.delete(ready)
       if (this.hosts.get(key) === ready) this.hosts.delete(key)
       if (this.servers.get(key) === server) {
         this.servers.delete(key)
@@ -796,7 +799,8 @@ export class CodexApp {
     for (const s of this.spares.values()) clearTimeout(s.timer)
     this.kept.clear()
     this.spares.clear()
-    for (const h of this.hosts.values()) void h.then((host) => host.server.killNow(), () => {})
+    for (const h of this.running) void h.then((host) => host.server.killNow(), () => {})
+    this.running.clear()
     this.hosts.clear()
   }
 }
