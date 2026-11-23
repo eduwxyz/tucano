@@ -173,13 +173,8 @@ export function askKind(agents: Node[], from: string, to: string): AskKind {
   if (reportsOf(agents, from).some((a) => a.id === to)) return 'down'
   if (peersOf(agents, from).some((a) => a.id === to)) return 'peer'
   const me = agents.find((a) => a.id === from)
-<<<<<<< HEAD
-  if (me && (bossOf(agents, me)?.id === to || (to !== from && sectorOf(agents, from)?.id === to))) return 'up'
-  return heads.some((h) => h.id === to) ? 'sector' : 'other'
-=======
   if (me && (bossesOf(agents, me).some((b) => b.id === to) || (to !== from && sectorOf(agents, from)?.id === to))) return 'up'
   return 'sector'
->>>>>>> 202c1647 (Let one agent answer to more than one boss, so a specialist serves several teams)
 }
 
 // The most requests one piece of work stacks up, each made inside the thread of the one before.

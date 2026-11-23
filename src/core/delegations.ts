@@ -254,32 +254,23 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
   const isEntry = entriesOf(agents).some((e) => e.id === agent.id)
   // Another sector's head that answers to the same agent is told as a sector, below, not as a colleague.
   const peers = peersOf(agents, agent.id).filter((p) => !team.some((t) => t.id === p.id) && !(isHead && heads.some((h) => h.id === p.id)))
-<<<<<<< HEAD
   // In no tree: the others in none are its colleagues, with no one over any of them.
   const loose = looseColleaguesOf(agents, agent.id)
   // Everyone else: out of its way in the tree, but no fence. A question or a small part goes to them directly.
-  const near = new Set([agent.id, ...team.map((a) => a.id), ...peers.map((a) => a.id), ...loose.map((a) => a.id), ...(boss ? [boss.id] : []), ...(isHead || isEntry ? heads.map((h) => h.id) : [])])
+  const near = new Set([agent.id, ...team.map((a) => a.id), ...peers.map((a) => a.id), ...loose.map((a) => a.id), ...bosses.map((b) => b.id), ...(isHead || isEntry ? heads.map((h) => h.id) : [])])
   const top0 = boss && !isHead ? sectorOf(agents, agent.id) : undefined
   if (top0) near.add(top0.id)
   const others = agents.filter((a) => !near.has(a.id) && !a.archived && a.kind !== 'tuca')
-  if (!team.length && !peers.length && !loose.length && !boss && !isHead && !others.length) return undefined
-=======
-  if (!team.length && !peers.length && !bosses.length && !isHead) return undefined
->>>>>>> 202c1647 (Let one agent answer to more than one boss, so a specialist serves several teams)
+  if (!team.length && !peers.length && !loose.length && !bosses.length && !isHead && !others.length) return undefined
   const direct = new Set(directReports(agents, agent.id).map((a) => a.id))
   const name = (id: string): string => agents.find((a) => a.id === id)?.name ?? L('agente removido', 'removed agent')
   const channel = (id: string): string => placeOf(conversations.find((c) => c.id === id))
   const row = (a: Agent, mine: boolean): string => {
     const channels = channelsOf(conversations, a.id)
-<<<<<<< HEAD
-    const where = channels.length ? channels.map((c) => `#${c.name}${c.topic ? ` (${c.topic.replace(/\s+/g, ' ').slice(0, 100)})` : ''}`).join(', ') : L('nenhum', 'none')
-    const under = !mine || direct.has(a.id) ? '' : ` · ${L('abaixo de', 'under')} ${name(a.reportsTo!)}`
-=======
     const where = channels.length ? channels.map((c) => `#${c.name}${c.topic ? ` (${c.topic.replace(/\s+/g, ' ').slice(0, 100)})` : ''}`).join(', ') : L('nenhum: o pedido chega na DM dele', 'none: a request arrives in their DM')
     // Not who it answers to, but the name the asker knows it by: the one between the two.
     const up = bossOf(agents, a)
     const under = !mine || direct.has(a.id) || !up ? '' : ` · ${L('abaixo de', 'under')} ${up.name}`
->>>>>>> 202c1647 (Let one agent answer to more than one boss, so a specialist serves several teams)
     return `- @${a.handle} · ${describeAgent(a, connectors)}${under} · ${L('canais', 'channels')}: ${where}`
   }
   const asked = open.filter((d) => d.from === agent.id)
@@ -314,20 +305,6 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
   const top = boss && !isHead ? sectorOf(agents, agent.id) : undefined
   const far = top && top.id !== boss?.id ? top : undefined
   const who = (a: Agent): string => `@${a.handle} · ${a.name}${a.role ? `, ${a.role.replace(/\s+/g, ' ').slice(0, 100)}` : ''}`
-<<<<<<< HEAD
-  const up = boss
-    ? `${
-        far
-          ? L(
-              `## Seu chefe\n${who(boss)}. Passe a ele com pedir só o que você não consegue fazer, dizendo por quê. Nunca passe pra cima o que o próprio chefe pediu a você: responda a ele.\n\n## Chefe do seu setor\n${who(far)}. Trabalho grande que não é do seu setor vai direto a ele com pedir, dizendo por quê, sem passar por quem está no meio: ele sabe a quem levar. Uma pergunta ou uma parte pequena de outro setor, peça direto a quem sabe.`,
-              `## Your boss\n${who(boss)}. Pass to them with pedir only what you can't do, saying why. Never pass up what your boss itself asked you: answer it.\n\n## Your sector's head\n${who(far)}. A big job that isn't your sector's goes straight to them with pedir, saying why, past whoever is in between: they know where to take it. A question or a small part of another sector, ask whoever knows directly.`
-            )
-          : L(
-              `## Seu chefe\n${who(boss)}. Passe a ele com pedir só o que não é do trabalho do seu setor ou que você não consegue fazer, dizendo por quê. Nunca passe pra cima o que o próprio chefe pediu a você: responda a ele.`,
-              `## Your boss\n${who(boss)}. Pass to them with pedir only what isn't your sector's job or what you can't do, saying why. Never pass up what your boss itself asked you: answer it.`
-            )
-      }`
-=======
   // One boss reads as it always did. More than one: a specialist that several teams share, each with the
   // same standing — what any of them asks is answered, and what it can't do goes to its first one.
   const many = bosses.length > 1
@@ -347,7 +324,6 @@ export function teamSection(opts: { agent: Agent; agents: Agent[]; conversations
           "What isn't your sector's job goes straight to them with pedir, saying why, past whoever is in between: only they ask another sector."
         )}`
       : `## ${heading}\n${whom}. ${pass} ${L('só o que não é do trabalho do seu setor ou que você não consegue fazer, dizendo por quê', "only what isn't your sector's job or what you can't do, saying why")}. ${never}`
->>>>>>> 202c1647 (Let one agent answer to more than one boss, so a specialist serves several teams)
     : ''
   const does = (a: Agent): string => a.sectorDoes?.replace(/\s+/g, ' ').trim() || L('não descrito', 'not described')
   const sectors = isHead
