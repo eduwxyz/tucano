@@ -14,6 +14,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
+> - **Novo:** uma resposta que terminou ganha **Seguir**, no mesmo botão que orienta uma resposta em curso: o que você escreve volta para aquela resposta, que continua na mesma linha, com o que já disse e fez.
 
 ### Added
 
@@ -24,6 +25,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An agent can leave its next steps in a card of checkboxes.** When a piece of work reaches a point with concrete ways to go on, the agent can propose 1 to 6 of them with the new `next_steps` tool instead of burying them in its text. The card opens with nothing ticked: **Do these** sends what you tick as your next message, **Another step…** takes one written by hand, and **Cancel** closes it without waking the agent. It holds nothing up: the reply is finished, it stays out of For you, it takes no slot in **Replies at once**, and a message written instead is a new request, not an answer to the card. When the same agent proposes a new card in the same conversation and thread, its previous open card closes quietly and reads as replaced. In a team, only the person it was proposed to, whoever covers for them or an admin can answer it. Thanks to Apostol Apostolov. (#298)
 - **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
 - **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
+
+- **Follow: a finished reply goes on from where it stopped.** The pill under a reply's steps said **Steer** while it worked, and once the reply had ended there was nothing left to steer: asking more of it meant the composer, where the words become another message under the answer. Now the same pill reads **Follow** on a reply that has ended. It opens the same field, and what you write goes to that reply as a steer, with nothing running to steer: the reply goes on in the same row, keeping its text and its steps, with the instruction as a row of its own in the chain, and the session it ended with is resumed instead of restarted, so the new turn carries the instruction and the past comes from the cache. A reply that stopped, failed or waits for an answer has no Follow: its own way on is Try again, Continue, or the answer it asked for. Thanks to Apostol Apostolov. (#631)
 
 ### Changed
 
