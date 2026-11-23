@@ -15,6 +15,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
 > - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
+> - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo enquanto a página rola.
 
 ### Added
 
@@ -34,6 +35,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **The approval card leads with what is being approved, and says what became of it.** The card opens with the action and its target, the status is a quiet row above them, and the decisions sit on one line. Its receipt now tells approved apart from completed: **Approved · waiting for result**, **Completed**, **Failed** with the reason, or **Approved · didn't run**. A row above the message field counts the approvals waiting on you, and **Review** goes back to the oldest one. Thanks to Apostol Apostolov. (#334)
+
+### Fixed
+
+- **Settings tabs and subject jumps stay in sight while scrolling.** The group tabs stayed at the top, but the subject links scrolled away. Both rows now stay pinned, so moving between sections works from deep in the page. Thanks to Apostol Apostolov. (#643)
 
 ## [0.2.45] - 2026-11-22
 
