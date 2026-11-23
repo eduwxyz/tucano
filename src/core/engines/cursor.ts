@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
-import { lastLines, num, parseJson, runCli, type Parser } from './cli'
+import { lastLines, num, parseJson, retryOnRefusal, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn, Usage } from './types'
 import { isWin, osOf, spawnable } from '../platform'
 import type { Os } from '../../shared/types'
@@ -321,17 +321,7 @@ export function cursorEngine(bin: () => string | undefined, appDir: string, shel
         }
         // With images, a refusal of --image (it comes before anything else) runs
         // the turn again without them, and the agent is told why.
-        let said = false
-        let refused = false
-        for await (const ev of run(turn.images, turn.prompt)) {
-          if (!said && ev.type === 'error' && imageRefused(ev.message)) {
-            refused = true
-            break
-          }
-          said = said || ev.type === 'text'
-          yield ev
-        }
-        if (refused && !turn.signal.aborted) yield* run(undefined, turn.prompt + imagesLeftOut())
+        yield* retryOnRefusal(run(turn.images, turn.prompt), imageRefused, () => run(undefined, turn.prompt + imagesLeftOut()), turn.signal)
       } finally {
         await cursorCleanup(dirs)
       }

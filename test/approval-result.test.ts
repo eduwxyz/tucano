@@ -25,7 +25,7 @@ let clickWorks: boolean
 
 function runner(): Runner {
   const fake = fakeEngine('claude', { delayMs: 1 })
-  const engines: Record<EngineId, Engine> = { claude: fake, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
+  const engines: Record<EngineId, Engine> = { claude: fake, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint'), copilot: fakeEngine('copilot') }
   return new Runner({
     db,
     engines,
@@ -57,7 +57,7 @@ beforeEach(async () => {
   commandFails = false
   clickWorks = true
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ar-db-')), 'test.db'))
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready, copilot: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   db.saveAgent({ id: 'lia', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: true, browser: true, apps: [{ name: 'Mail', level: 'read_write' }], archived: false } as Agent)
   db.createConversation({ id: 'dm', kind: 'dm', name: 'lia', members: ['lia'] })
   gateway = new Gateway()
