@@ -1,11 +1,13 @@
 // What agents make on their computers, in the chat: artifact cards and
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
 import remarkGfm from 'remark-gfm'
 import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { galleryLayout } from '../gallery'
+import { openImageMenu } from '../image-menu'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
@@ -33,6 +35,23 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   const a = useStore((s) => s.artifacts.find((x) => x.id === id))
   const open = useStore((s) => s.panel?.kind === 'artifact' && s.panel.id === id)
   const canSave = useStore(canSaveArtifact)
+  const textRef = useRef<HTMLSpanElement>(null)
+  const [stacked, setStacked] = useState(false)
+  useLayoutEffect(() => {
+    const el = textRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const check = (): void => {
+      // More than 3 rows worth of text: drop the actions below, aligned under the subline.
+      const view = el.ownerDocument.defaultView
+      const line = parseFloat(view?.getComputedStyle?.(el)?.lineHeight ?? '')
+      const row = Number.isFinite(line) && line > 0 ? line : 20
+      setStacked(el.offsetHeight > row * 3)
+    }
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [a?.title, a?.name, a?.kind, a?.size])
   if (!a) return null
   const save = canSave && (
     <button className="artifact-card__open" title={a.name} onClick={() => saveArtifact(a)}>
@@ -42,7 +61,15 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   if (a.kind === 'image')
     return (
       <div className="artifact-image">
-        <button className="artifact-image__show" onClick={() => showImages(a)} title={a.title}>
+        <button
+          className="artifact-image__show"
+          onClick={() => showImages(a)}
+          title={a.title}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            openImageMenu({ url: artifactUrl(a), title: a.title, surface: 'reply', conversationId: a.conversationId }, { x: e.clientX, y: e.clientY })
+          }}
+        >
           <img src={artifactUrl(a)} alt={a.title} />
         </button>
         <span className="artifact-image__caption">
@@ -54,26 +81,80 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   // On a server, a file no browser shows (a .docx, a .zip) is only good downloaded: the panel would be empty.
   const onlySave = windowless() && a.kind === 'file'
   const show = (): void => (onlySave ? saveArtifact(a) : openPanel({ kind: 'artifact', id }))
-  return (
-    <div className={`artifact-card ${open ? 'is-open' : ''}`}>
-      <button className="artifact-card__main" onClick={show}>
-        <span className="artifact-card__icon">
-          <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
-        </span>
-        <span className="artifact-card__text">
-          <strong>{a.title}</strong>
-          <span className="muted small">
-            {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
-          </span>
-        </span>
-      </button>
+  const actions = (
+    <>
       {!onlySave && (
         <button className="artifact-card__open" onClick={show}>
           {L('Abrir', 'Open')}
         </button>
       )}
       {save}
+    </>
+  )
+  return (
+    <div className={`artifact-card ${open ? 'is-open' : ''}${stacked ? ' is-stacked' : ''}`}>
+      <button className="artifact-card__main" onClick={show}>
+        <span className="artifact-card__icon">
+          <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
+        </span>
+        <span className="artifact-card__text" ref={textRef}>
+          <strong>{a.title}</strong>
+          <span className="muted small">
+            {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
+          </span>
+        </span>
+      </button>
+      <div className="artifact-card__actions">{actions}</div>
     </div>
+  )
+}
+
+// What one reply made, in the chat: its pictures as an album — one large and the rest beside it,
+// the golden section — and whatever isn't a picture still a card under them. One picture is not an
+// album: it stays exactly the picture it always was.
+export function ArtifactGallery({ ids }: { ids: string[] }): ReactNode {
+  const all = useStore((s) => s.artifacts)
+  const picked = ids.map((id) => all.find((x) => x.id === id)).filter((a): a is Artifact => !!a)
+  const images = picked.filter((a) => a.kind === 'image')
+  const cells = galleryLayout(images.length)
+  return (
+    <>
+      {cells.length === 0 ? (
+        images.map((a) => <ArtifactCard key={a.id} id={a.id} />)
+      ) : (
+        <div className="artifacts-gallery" role="group" aria-label={L('As imagens desta resposta', 'The images in this reply')}>
+          {cells.map((c) => {
+            const a = images[c.index]!
+            return (
+              <button
+                key={a.id}
+                className={`artifact-image gallery__cell${c.hero ? ' gallery__cell--hero' : ''}`}
+                style={{ gridRow: `span ${c.rowSpan}` }}
+                onClick={() => showImages(a)}
+                title={c.more ? L(`${a.title} — e mais ${c.more}`, `${a.title} — and ${c.more} more`) : a.title}
+                aria-label={c.more ? L(`${a.title} — e mais ${c.more}`, `${a.title} — and ${c.more} more`) : a.title}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  openImageMenu({ url: artifactUrl(a), title: a.title, surface: 'reply', conversationId: a.conversationId }, { x: e.clientX, y: e.clientY })
+                }}
+              >
+                <img src={artifactUrl(a)} alt={a.title} />
+                {c.more ? (
+                  <span className="gallery__more" aria-hidden="true">
+                    +{c.more}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {picked
+        .filter((a) => a.kind !== 'image')
+        .map((a) => (
+          <ArtifactCard key={a.id} id={a.id} />
+        ))}
+    </>
   )
 }
 

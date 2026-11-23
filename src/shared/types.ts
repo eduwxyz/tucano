@@ -606,6 +606,7 @@ export interface Settings {
   }
   folded?: string[] // the ids of what I folded in the sidebar
   sidebarHidden?: string[] // what I took out of the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: none
+  lastImageFolder?: string // the folder the last picture was saved to, so the next one goes there in one click
   navOrder?: string[] // my order for the items at the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: as they come
   agentOrder?: string[] // my order for the agents in the sidebar, by agent id, kept within each sector; unset: as they come
   sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come

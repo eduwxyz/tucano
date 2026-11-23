@@ -110,7 +110,8 @@ import { COFRE } from '../../../shared/vault'
 import { PanelResize } from './SidebarResize'
 import { canRecord, NoSound, record, type Recording } from '../voice'
 import { useVoice, VoicePopover } from './VoiceSetup'
-import { ArtifactCard, BrowserCard, ServiceCard, SidePanel, WidenButton } from './Panel'
+import { ArtifactCard, ArtifactGallery, BrowserCard, ServiceCard, SidePanel, WidenButton } from './Panel'
+import { onComposerImages } from '../composer-attach'
 import { describeRoutine, when } from './Routines'
 import { idsOf, shownMessages, spanOf, type RoutineRunPair, type Shown } from '../routine-runs'
 import { Proposals } from './Tuca'
@@ -687,9 +688,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
-            {message.run.artifactIds.map((aid) => (
-              <ArtifactCard key={aid} id={aid} />
-            ))}
+            <ArtifactGallery ids={message.run.artifactIds} />
           </div>
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
@@ -2753,6 +2752,24 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   }, [key])
   // Opened: the agent that answers here gets its process up while the person reads.
   useEffect(() => typing(conversationId, threadId, true), [conversationId, threadId])
+  // A picture right-clicked in a reply, "copy to prompt": it lands here as if it had been dropped,
+  // and the draft keeps it from then on.
+  useEffect(
+    () =>
+      onComposerImages(key, (arrived) => {
+        setImages((cur) => {
+          // Pictures only, and the ceiling is the pictures': a document already in the field keeps its place.
+          const all = [...cur, ...(arrived as Attached[])]
+          const pics = all.filter((a) => !isFile(a))
+          if (pics.length > MAX_IMAGES_PER_MESSAGE) setNote(L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`))
+          const room = [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...all.filter(isFile)]
+          drafts.set(key, { text: live.current.text, images: room })
+          return room
+        })
+        ref.current?.focus()
+      }),
+    [key]
+  )
   useEffect(() => {
     const draft = drafts.get(key)
     setText(draft?.text ?? '')
