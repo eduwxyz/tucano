@@ -680,6 +680,8 @@ const COLUMNS: [string, string, string][] = [
   ['connector_tools', 'remote_high_risk', 'INTEGER NOT NULL DEFAULT 0'],
   // A request's title in a few words, made by a cheap model when work on it starts (src/core/titles.ts).
   ['messages', 'title', 'TEXT'],
+  // 1: the agent organizes the team (it proposes whom each agent answers to); empty: it doesn't.
+  ['agents', 'manager', 'INTEGER'],
   // A person's message sent by a harness over MCP (src/core/mcp.ts): the key's name, for the agent to read; the screens don't show it.
   ['messages', 'via', 'TEXT'],
   // The note a job left where it stopped on its brakes (src/core/jobs.ts): the job it carries Continuar for.
@@ -1009,7 +1011,8 @@ export class Db {
       ...(r['sector_does'] ? { sectorDoes: str(r['sector_does']) } : {}),
       ...(r['entry'] ? { entry: true as const } : {}),
       ...(r['proactive'] === 0 ? { proactive: false } : {}),
-      ...(r['one_at_a_time'] === 1 ? { oneAtATime: true as const } : {})
+      ...(r['one_at_a_time'] === 1 ? { oneAtATime: true as const } : {}),
+      ...(r['manager'] === 1 ? { manager: true } : {})
     }
   }
 
@@ -1035,7 +1038,7 @@ export class Db {
       .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.fallbackModelId || null, a.fallbackAccountId || null, a.accountId || null, a.effort, safeLimit(a.limit), routineCap(a.maxRoutines), JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, a.browser ? 1 : 0, JSON.stringify(a.apps ?? []), JSON.stringify(a.autoApprove ?? []), JSON.stringify(cleanRules(a.actionRules)), isAutonomy(a.autonomy) ? a.autonomy : null, a.outsideGuard === undefined ? null : a.outsideGuard ? 1 : 0, a.archived ? 1 : 0, a.kind ?? null, a.customColor ?? null, a.picture ?? null, a.avatar ? JSON.stringify(a.avatar) : null, a.wiki ?? null, Date.now())
     // An agent made without one belongs to the Tucano's owner; a save that doesn't say keeps it.
     this.db.prepare('UPDATE agents SET owner = COALESCE(?, owner, (SELECT id FROM people WHERE role = ?)) WHERE id = ?').run(a.owner ?? null, 'owner', a.id)
-    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ?, proactive = ?, one_at_a_time = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.proactive === false ? 0 : null, a.oneAtATime ? 1 : null, a.id)
+    this.db.prepare('UPDATE agents SET reports_to = ?, sector_name = ?, sector_does = ?, entry = ?, proactive = ?, one_at_a_time = ?, manager = ? WHERE id = ?').run(a.reportsTo || null, a.sectorName || null, a.sectorDoes || null, a.entry ? 1 : null, a.proactive === false ? 0 : null, a.oneAtATime ? 1 : null, a.manager ? 1 : null, a.id)
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.

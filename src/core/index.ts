@@ -1475,7 +1475,9 @@ function createDraft(ctx: Ctx, messageId: string, auto = false): { agentId: stri
   if (!d) throw new Error(L('Essa proposta não existe mais.', 'That proposal no longer exists.'))
   if (d.state === 'created' && d.agentId) throw new Error(L('Esse agente já foi criado.', 'That agent was already created.'))
   if (d.state === 'undone') throw new Error(L('Essa proposta foi desfeita.', 'That proposal was undone.'))
-  const agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
+  const agent: Agent = { ...agentFromDraft(d, db.agents().map((a) => a.handle), settings().defaultLimit), owner: ctx.person.id }
+  // The boss it was proposed with, if it still fits the chart.
+  if (agent.reportsTo && !possibleBosses(db.agents(), agent.id).some((a) => a.id === agent.reportsTo)) delete agent.reportsTo
   db.saveAgent(agent)
   emit({ type: 'agent', agent })
   record(ctx, 'agent.created', agent.id, { name: agent.name })
@@ -1520,8 +1522,14 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, aut
     const agent = db.agent(p.agentId)
     if (!agent || agent.archived) throw new Error(L('Esse agente não existe mais.', 'That agent no longer exists.'))
     const channelIds = db.conversations().filter((c) => c.kind === 'channel' && c.members.includes(agent.id)).map((c) => c.id)
+    // A new boss is checked again: the chart may have changed since the card (saveAgent would drop it quietly).
+    const boss = p.changes.reportsTo
+    // An entry point the person chose since: saveAgent would drop it for the boss, so the card says why instead.
+    if (boss && agent.entry) throw new Error(L(`${agent.name} virou um ponto de entrada desde a proposta: não responde a nenhum agente.`, `${agent.name} became an entry point since the proposal: it answers to no agent.`))
+    if (boss && boss !== agent.reportsTo && !possibleBosses(db.agents(), agent.id).some((a) => a.id === boss))
+      throw new Error(L(`${agent.name} não pode mais responder a ${db.agent(boss)?.name ?? 'esse agente'}: o organograma mudou desde a proposta.`, `${agent.name} can no longer answer to ${db.agent(boss)?.name ?? 'that agent'}: the org chart changed since the proposal.`))
     const prior = Object.fromEntries(Object.keys(p.changes).map((k) => [k, agent[k as keyof AgentChanges]])) as AgentChanges
-    api.saveAgent({ agent: { ...agent, ...p.changes }, channelIds }, ctx)
+    api.saveAgent({ agent: { ...agent, ...p.changes, ...(p.changes.reportsTo === '' ? { reportsTo: undefined } : {}) }, channelIds }, ctx)
     id = agent.id
     extra.undo = { until, prior }
   } else if (p.kind === 'routine') {
@@ -1550,6 +1558,19 @@ function applyOne(ctx: Ctx, messageId: string, index: number, batch = false, aut
       api.openDm({ agentId: agent.id }, ctx)
       made.push(agent.id)
     }
+    // Whom each answers to, now that they all exist: another of the card by name, or one that already did.
+    p.agents.forEach((d, i) => {
+      const j = d.reportsToName ? p.agents.findIndex((x) => x.name.toLowerCase() === d.reportsToName!.toLowerCase()) : -1
+      const boss = j >= 0 ? made[j] : d.reportsTo
+      const agent = db.agent(made[i]!)
+      if (!boss || !agent || agent.reportsTo === boss) return
+      if (!possibleBosses(db.agents(), agent.id).some((a) => a.id === boss)) {
+        if (agent.reportsTo) db.saveAgent({ ...agent, reportsTo: undefined }) // made with a boss that no longer fits
+        return
+      }
+      db.saveAgent({ ...agent, reportsTo: boss })
+    })
+    for (const aid of made) emit({ type: 'agent', agent: db.agent(aid)! })
     extra.agentIds = made
     if (p.channel) {
       id = api.createChannel({ name: p.channel.name, ...(p.channel.threads ? { threads: true } : {}) }, ctx)
@@ -2055,6 +2076,8 @@ const api: Handlers = {
     clean.actionRules = cleanRules(clean.actionRules)
     if (!isAutonomy(clean.autonomy)) delete clean.autonomy
     if (typeof clean.outsideGuard !== 'boolean') delete clean.outsideGuard
+    // Organizing the team is a yes or nothing; the Tuca already proposes the chart.
+    if (clean.manager !== true || clean.kind === 'tuca') delete clean.manager
     if (clean.proactive !== false) delete clean.proactive // on unless turned off
     if (clean.oneAtATime !== true) delete clean.oneAtATime // as many at once unless turned on
     // Whom it answers to (src/shared/org.ts): another agent that isn't itself, below it, archived or the Tuca. Anything else: no one.
