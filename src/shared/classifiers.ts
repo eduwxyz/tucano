@@ -87,6 +87,8 @@ export const providerSpec = (p: ClassifierProvider): ProviderSpec => PROVIDERS.f
 // The classifier an install from before this section had: one TypeSafe Jev.
 export const JEV_CLASSIFIER: ClassifierConfig = { id: 'jev', name: 'Jev', provider: 'typesafe', model: 'jev-latest' }
 
+const MAX_CLASSIFIERS = 20
+
 // The jobs the Classifier Uses card offers, one selector each.
 export const CLASSIFIER_JOBS: readonly ClassifierJob[] = ['routing', 'listen', 'smart', 'browser', 'recommend']
 
@@ -153,6 +155,36 @@ export function classifierFor(s: ClassifierSettings, job: ClassifierJob): Classi
   return id ? classifierList(s).find((c) => c.id === id) : undefined
 }
 
+// A settings patch's rows, checked: real providers, sane text, no id twice. A row keeps the provider
+// it was saved with, because its key was checked against that provider and must never be sent to
+// another one by editing the row.
+export function cleanClassifiers(raw: unknown, before: readonly ClassifierConfig[]): ClassifierConfig[] {
+  if (!Array.isArray(raw) || raw.length > MAX_CLASSIFIERS) throw new Error('Invalid classifiers')
+  const seen = new Set<string>()
+  return raw.map((row: unknown) => {
+    const { id, name, provider, model } = (row ?? {}) as Record<string, unknown>
+    if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id) || seen.has(id)) throw new Error('Invalid classifier id')
+    if (!PROVIDERS.some((p) => p.provider === provider)) throw new Error('Invalid classifier provider')
+    if (typeof name !== 'string' || !name.trim() || name.length > 80) throw new Error('Invalid classifier name')
+    if (typeof model !== 'string' || !model.trim() || model.length > 120) throw new Error('Invalid classifier model')
+    const saved = before.find((c) => c.id === id)
+    if (saved && saved.provider !== provider) throw new Error('A classifier keeps its provider')
+    seen.add(id)
+    return { id, name: name.trim(), provider: provider as ClassifierProvider, model: model.trim() }
+  })
+}
+
+// Only the jobs that exist, each pointing at a row the list holds.
+export function cleanClassifierJobs(raw: unknown, list: readonly ClassifierConfig[]): Partial<Record<ClassifierJob, string>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid classifier jobs')
+  const jobs: Partial<Record<ClassifierJob, string>> = {}
+  for (const job of CLASSIFIER_JOBS) {
+    const id = (raw as Record<string, unknown>)[job]
+    if (typeof id === 'string' && list.some((c) => c.id === id)) jobs[job] = id
+  }
+  return jobs
+}
+
 // A row's name, with the provider's when the person renamed it to something of their own.
 export function classifierLabel(c: ClassifierConfig): string {
   const spec = providerSpec(c.provider)
@@ -163,4 +195,20 @@ export function classifierLabel(c: ClassifierConfig): string {
 export const providerNote = (c: ClassifierConfig): string => {
   const spec = providerSpec(c.provider)
   return L(`o provedor ${spec.label} (${c.model})`, `the ${spec.label} provider (${c.model})`)
+}
+
+
+export function jobNotice(job: ClassifierJob, c: ClassifierConfig): string {
+  const spec = providerSpec(c.provider)
+  if (job === 'routing')
+    return `every message without an @mention sends the channel's recent messages to ${spec.label} to pick who replies, billed to your account there. If it fails, the router's model decides.`
+  if (job === 'listen')
+    return `each channel message is sent to ${spec.label} to decide whether a listening agent should join, billed to your account there.`
+  if (job === 'recommend')
+    return `each question with options is sent to ${spec.label} to pick a recommended option, billed to your account there.`
+  if (job === 'smart')
+    return `each reply may send its prompt to ${spec.label} to pick a model, billed to your account there.`
+  return spec.box
+    ? `every click text can't resolve sends ${spec.label} the page's element list and sometimes its screenshot, including signed-in areas.`
+    : `every click text can't resolve sends ${spec.label} the page's element list, including signed-in areas. The screenshot isn't sent.`
 }

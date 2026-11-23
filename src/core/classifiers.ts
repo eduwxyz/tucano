@@ -46,11 +46,7 @@ const vendorOf = (p: ClassifierProvider): string => providerSpec(p).label
 export const noAnswer = (p: ClassifierProvider): string => L(`o ${vendorOf(p)} não respondeu`, `${vendorOf(p)} didn't answer`)
 
 export const badFormat = (p: ClassifierProvider): string =>
-<<<<<<< HEAD
   L(`resposta do ${vendorOf(p)} fora do formato`, `${vendorOf(p)}'s response was not in the expected format`)
-=======
-  L(`resposta do ${vendorOf(p)} fora do formato`, `${vendorOf(p)}'s answer wasn't in the format`)
->>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
 
 export function failure(status: number, p: ClassifierProvider): string {
   const v = vendorOf(p)
@@ -138,11 +134,7 @@ const probabilitiesOf = (raw: unknown): Record<string, number> | undefined => {
   // TypeSafe, OpenRouter and Google: { option: probability }. OpenAI: [ { value, probability } ].
   if (Array.isArray(raw)) {
     const out: Record<string, number> = {}
-<<<<<<< HEAD
     for (const e of raw as ({ value?: unknown; probability?: unknown } | null)[]) if (typeof e?.value === 'string' && typeof e.probability === 'number') out[e.value] = e.probability
-=======
-    for (const e of raw as { value?: unknown; probability?: unknown }[]) if (typeof e.value === 'string' && typeof e.probability === 'number') out[e.value] = e.probability
->>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
     return Object.keys(out).length ? out : undefined
   }
   if (typeof raw !== 'object') return undefined
@@ -182,7 +174,6 @@ export async function ask(opts: {
   if (!answers) return { error: badFormat(target.provider) }
   const out: ClassifierAnswers = {}
   if (Array.isArray(answers)) {
-<<<<<<< HEAD
     // OpenAI: one answer per question, in the order asked; its name when it carries one.
     ;(answers as (RawAnswer | null)[]).forEach((raw, i) => {
       if (!raw || typeof raw !== 'object') return
@@ -191,12 +182,6 @@ export async function ask(opts: {
     })
   } else if (typeof answers === 'object') {
     for (const [name, raw] of Object.entries(answers as Record<string, RawAnswer | null>)) if (raw && typeof raw === 'object') out[name] = answerOf(raw)
-=======
-    // OpenAI: one answer per question, in the order asked, each carrying its name.
-    for (const raw of answers as RawAnswer[]) if (typeof raw.name === 'string') out[raw.name] = answerOf(raw)
-  } else if (typeof answers === 'object') {
-    for (const [name, raw] of Object.entries(answers as Record<string, RawAnswer>)) out[name] = answerOf(raw ?? {})
->>>>>>> 9489fbf5 (Expand Jev into a Classifiers section: TypeSafe, OpenRouter, OpenAI and Google)
   }
   return Object.keys(out).length ? out : { error: badFormat(target.provider) }
 }

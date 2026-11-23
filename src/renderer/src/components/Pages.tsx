@@ -1,12 +1,16 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
-import { L, locale, type Lang } from '../../../shared/lang'import { nodeOf } from '../../../shared/node-link'import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
+import { defaultRouting } from '../../../shared/routing'
+import { L, locale, type Lang } from '../../../shared/lang'
+import { nodeOf } from '../../../shared/node-link'
+import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
 import { AgentVaultKeys, AgentVaultLogins } from './Vault'
-import { COFRE } from '../../../shared/vault'import {
+import { COFRE } from '../../../shared/vault'
+import {
   agentById,
   harnessNoticeSeen,
   getState,
@@ -2657,7 +2661,11 @@ type TabList = readonly (readonly [string, string])[]
 // The groups at the top of Settings, from settings-structure.ts: only those this person has something
 // in. A member sees only what's theirs to change; the phone (Telegram) is the owner's alone.
 export const SETTINGS_TABS = (team = false, admin = true, owner = true): TabList =>
-  settingsGroups(settingsStructure({ admin, owner, team, servers: hasServers() })).map((group) => [group, settingsGroupLabel(group)])const AGENT_TABS = (): TabList => [  ['perfil', L('Perfil', 'Profile')],  ['canais', L('Canais e skills', 'Channels and skills')],
+  settingsGroups(settingsStructure({ admin, owner, team, servers: hasServers() })).map((group) => [group, settingsGroupLabel(group)])
+
+const AGENT_TABS = (): TabList => [
+  ['perfil', L('Perfil', 'Profile')],
+  ['canais', L('Canais e skills', 'Channels and skills')],
   ['ferramentas', L('Ferramentas', 'Tools')],
   ['memoria', L('Memória', 'Memory')]
 ]
@@ -3239,7 +3247,7 @@ function ClassifierKey({ classifier, saved }: { classifier: ClassifierConfig; sa
           </button>
         </div>
       ) : (
-        <Field label={L(`Chave do ${spec.label}`, `${spec.label} key`)} hint={`${spec.keyHint()} ${L('O app confere antes de guardar.', 'The app checks it before saving.')}`}>
+        <Field label={L(`Chave do ${spec.label}`, `${spec.label} key`)} hint={`${L(spec.keyHint.pt, spec.keyHint.en)} ${L('O app confere antes de guardar.', 'The app checks it before saving.')}`}>
           <div className="row">
             <input className="grow" type="password" value={key} placeholder={L('Cole a chave aqui', 'Paste the key here')} onChange={(e) => setKey(e.target.value)} />
             <button className="btn" disabled={busy || !key.trim()} onClick={() => save(key)}>
@@ -3387,7 +3395,7 @@ export function ClassifiersCard(): ReactNode {
                   >
                     {L('Salvar chave', 'Save key')}
                   </button>
-                  <span className="muted small grow">{spec.keyHint()}</span>
+                  <span className="muted small grow">{L(spec.keyHint.pt, spec.keyHint.en)}</span>
                 </div>
               )}
             </div>
@@ -3439,10 +3447,14 @@ export function ClassifiersCard(): ReactNode {
 }
 
 // Which job each classifier serves: who replies in a channel, and what an agent clicks in a page. It sits in its own card, apart from the list, because
-// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.export function ClassifierUsesCard(): ReactNode {  const settings = useStore((s) => s.settings)  const work = onGateway(settings)
+// an assignment is a decision of its own — and the settings rail needs a section of its own to link to it.
+export function ClassifierUsesCard(): ReactNode {
+  const settings = useStore((s) => s.settings)
+  const work = onGateway(settings)
   const list = settings.classifiers ?? []
   const jobs = settings.classifierJobs ?? {}
-  const assign = (job: ClassifierJob, id: string | null): void => {    const next = { ...jobs }
+  const assign = (job: ClassifierJob, id: string | null): void => {
+    const next = { ...jobs }
     if (id) next[job] = id
     else delete next[job]
     updateSettings({ classifierJobs: next })
@@ -3453,7 +3465,7 @@ export function ClassifiersCard(): ReactNode {
       {list.length > 0 && (
         <>
           {CLASSIFIER_JOBS.map((job) => (
-            <Field key={job} label={jobLabel(job)} hint={jobAbout(job)}>
+            <Field key={job} label={L(jobLabel(job).pt, jobLabel(job).en)} hint={L(jobAbout(job).pt, jobAbout(job).en)}>
               <Select
                 value={jobs[job] ?? ''}
                 onChange={(v) => assign(job, v)}                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}              />
@@ -3467,13 +3479,17 @@ export function ClassifiersCard(): ReactNode {
                 <ClassifierNotice job={job} classifier={c} work={work} />
                 {!settings.classifierKeys?.[c.id] && (
                   <p className="hint hint--warn">
-                    {L(`${jobLabel(job)}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${jobLabel(job)}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
+                    {L(`${L(jobLabel(job).pt, jobLabel(job).en)}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${L(jobLabel(job).pt, jobLabel(job).en)}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
                   </p>
                 )}
-              </div>            )
+              </div>
+            )
           })}
         </>
-      )}    </>  )}
+      )}
+    </>
+  )
+}
 
 // Settings › Agents: who finds the element an agent asks to click. A card of its own, beside the
 // other things agents do, because the choice is about the browser and not about a classifier row —
@@ -3671,7 +3687,8 @@ export function SettingsPage(): ReactNode {
     setLanding(section.id)
   }
   const searching = query.trim().length > 0
-  const on = (group: SettingsPageId): boolean => !searching && tab === group  return (
+  const on = (group: SettingsPageId): boolean => !searching && tab === group
+  return (
     <Page title={L('Configurações', 'Settings')} actions={<SettingsSearchField value={query} onChange={setQuery} />}>
       <div className="settings-page" ref={body}>
         <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />

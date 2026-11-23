@@ -22,9 +22,9 @@ import {
   type RoutingConfig,
   type Tier
 } from '../../../shared/routing'
-import { navigate, setTab, updateSettings, useStore } from '../store'
+import { navigate, setTab, setJevKey, updateSettings, useStore } from '../store'
 import { Select } from './Select'
-import { Card, Field, JevKey, Toggle } from './Pages'
+import { Card, Field, Toggle } from './Pages'
 import { useEngineModels, usableEngines } from './Harness'
 import { Icon } from './ui'
 
@@ -151,6 +151,33 @@ export function SmartRoutingSwitch(): ReactNode {
   )
 }
 
+
+// A TypeSafe key for Jev. Small, local to this pane: Jev is also sold through OpenRouter, but this
+// key is the direct TypeSafe one.
+function JevKey({ saved }: { saved: boolean }): ReactNode {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const save = async (): Promise<void> => {
+    const k = value.trim()
+    if (!k) return
+    setBusy(true)
+    setErr('')
+    try { await setJevKey(k); setValue('') }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return (
+    <Field label={L('Chave do TypeSafe', 'TypeSafe key')} hint={saved ? L('Uma chave está salva.', 'A key is saved.') : L('Cole a chave para o Jev começar a responder.', 'Paste the key so Jev can start answering.')}>
+      <div className="row" style={{ gap: 8 }}>
+        <input className="input" type="password" value={value} placeholder={saved ? '••••••••' : 'ts-...'} onChange={(e) => setValue(e.target.value)} />
+        <button className="btn btn--sm" disabled={busy || !value.trim()} onClick={() => void save()}>{busy ? L('Salvando…', 'Saving…') : L('Salvar', 'Save')}</button>
+        {saved && <button className="btn btn--sm btn--ghost" onClick={() => void setJevKey(null)}>{L('Remover', 'Remove')}</button>}
+      </div>
+      {err && <p className="hint hint--warn">{err}</p>}
+    </Field>
+  )
+}
 // ---------- the tab ----------
 
 export function RoutingPane(): ReactNode {

@@ -23,9 +23,6 @@ const Prose = ({ text, className }: { text: string; className: string }): ReactN
   </div>
 )
 const Title = ({ q }: { q: Decision }): ReactNode => (isLong(q) ? <Prose className="ask__prose" text={q.question} /> : <div className="ask__title">{q.question}</div>)
-// The option the agent recommends, marked where it's listed.
-const Recommended = (): ReactNode => <span className="tag tag--agent ask-option__tag">{L('recomendada', 'recommended')}</span>
-
 // What's ticked or typed but not confirmed, by message and decision, so moving around or
 // scrolling away keeps it (like the message box's drafts). In memory: closing the app drops them.
 const drafts = new Map<string, AnswerDraft>()
