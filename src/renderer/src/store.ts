@@ -1138,6 +1138,55 @@ export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
   link.download = a.name
   link.click()
 }
+
+const copiedToast = (kind: 'image' | 'text' | 'file' | 'path'): string => {
+  if (kind === 'image') return L('Imagem copiada para a área de transferência. Você pode colar como imagem.', 'Copied image to clipboard. You can paste it as an image.')
+  if (kind === 'text') return L('Texto copiado para a área de transferência. Você pode colar em um editor de texto.', 'Copied text to clipboard. You can paste it in a text editor.')
+  if (kind === 'path') return L('Caminho copiado para a área de transferência. Você pode colar em um editor de texto.', 'Copied file path to clipboard. You can paste it in a text editor.')
+  return L('Arquivo copiado para a área de transferência. Você pode colar em uma pasta no gerenciador de arquivos.', 'Copied file to clipboard. You can paste it in a folder in file manager.')
+}
+
+export const copyArtifact = async (a: Pick<Artifact, 'id' | 'name' | 'kind'>): Promise<void> => {
+  const url = artifactUrl(a)
+  const api = window.tucano?.artifact
+  if (api?.copy) {
+    const done = await api.copy(url, a.kind).catch(() => ({ ok: false as const }))
+    if (done.ok) {
+      toast(copiedToast(done.kind))
+      return
+    }
+  }
+  // Browser fallback: images as image, text as text, otherwise copy the link.
+  if (a.kind === 'image') {
+    try {
+      const blob = await (await fetch(url)).blob()
+      const write = navigator.clipboard as Clipboard & { write?: (items: ClipboardItem[]) => Promise<void> }
+      if (write.write) {
+        await write.write([new ClipboardItem({ [blob.type || 'image/png']: blob })])
+        toast(copiedToast('image'))
+        return
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  if (['markdown', 'html', 'csv', 'text'].includes(a.kind)) {
+    try {
+      const text = await (await fetch(url)).text()
+      await navigator.clipboard.writeText(text)
+      toast(copiedToast('text'))
+      return
+    } catch {
+      /* fall through */
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(new URL(url, window.location.href).toString())
+    toast(copiedToast('text'))
+  } catch {
+    toast(L('Não consegui copiar o arquivo.', "Couldn't copy the file."))
+  }
+}
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
 // The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.

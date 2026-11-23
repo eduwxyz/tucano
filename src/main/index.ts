@@ -2,9 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { verifyLocalUrl } from '../core/local-paths'
 import { readInstall } from '../core/feedback'
 import { downloadsFolder } from '../core/downloads'
-import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { copyFile } from 'node:fs/promises'
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -16,6 +16,7 @@ import { Browsers } from './browser'
 import { Servers } from './servers'
 import { thisDevice } from './redeem'
 import { placeOf, serverNote, type DesktopPlaces } from '../shared/servers'
+import { artifactImagePath, fileNameFor, freeName, imageBytesOf, MAX_IMAGE_BYTES, mimeOfImage } from './image-bytes'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -736,6 +737,179 @@ ipcMain.handle('pick-folder', async (event, o?: { start?: string; hidden?: boole
   }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   return r.canceled ? null : (r.filePaths[0] ?? null)
+})
+
+// A picture right-clicked in a conversation: saved where the person says, or taken to the clipboard.
+// The page names it by the URL it was shown from; the bytes are read here (src/main/image-bytes.ts),
+// so a page never gets to ask for a file of its choosing.
+// A picture a reply links to on this computer, signed for the window by the core (src/core/local-paths).
+const localImagePath = (url: string): string | null => {
+  try {
+    return verifyLocalUrl(localKey, new URL(url))
+  } catch {
+    return null
+  }
+}
+const imageBytes = (url: unknown): Promise<Buffer | null> =>
+  typeof url === 'string' && url.length <= 8192
+    ? imageBytesOf(url, (u) => artifactImagePath(registry.selected().dataDir, u) ?? localImagePath(u))
+    : Promise.resolve(null)
+
+ipcMain.handle('image:save', async (event, arg: unknown) => {
+  if (!fromApp(event)) return null
+  const { url, title, dir, dialog: wantsDialog } = (arg ?? {}) as { url?: unknown; title?: unknown; dir?: unknown; dialog?: unknown }
+  const bytes = await imageBytes(url)
+  if (!bytes) return { result: 'failed' as const }
+  const name = fileNameFor(typeof title === 'string' ? title : '', String(url))
+  const folder = typeof dir === 'string' ? dir : ''
+  const win = BrowserWindow.fromWebContents(event.sender)
+  // One click, no dialog: into the folder the last picture went to. A folder that has gone is said
+  // out loud (a drive unplugged, a share down) so the page can open the dialog instead of saving
+  // into nowhere, and a name already there gets a number rather than replacing it.
+  if (folder && wantsDialog !== true) {
+    if (!isFolder(folder)) return { result: 'missing_folder' as const, folder }
+    try {
+      const target = join(folder, freeName(name, (candidate) => existsSync(join(folder, candidate))))
+      writeFileSync(target, bytes)
+      return { result: 'saved' as const, path: target, folder }
+    } catch {
+      return { result: 'failed' as const }
+    }
+  }
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  const opts = {
+    title: L('Salvar imagem', 'Save image'),
+    // The dialog opens where the last picture went, so choosing another folder is one step from there.
+    defaultPath: folder ? join(folder, name) : join(app.getPath('downloads'), name),
+    buttonLabel: L('Salvar', 'Save'),
+    filters: [{ name: L('Imagem', 'Image'), extensions: [ext] }]
+  }
+  const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+  if (r.canceled || !r.filePath) return { result: 'cancelled' as const }
+  try {
+    writeFileSync(r.filePath, bytes)
+    // Where it landed is where the next one goes in one click — a folder made in the dialog too.
+    return { result: 'saved' as const, path: r.filePath, folder: dirname(r.filePath) }
+  } catch {
+    return { result: 'failed' as const }
+  }
+})
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// "Send to prompt": the picture goes back into the field as an attachment, so the page needs its bytes.
+ipcMain.handle('image:read', async (event, arg: unknown) => {
+  if (!fromApp(event)) return null
+  const { url } = (arg ?? {}) as { url?: unknown }
+  const bytes = await imageBytes(url)
+  const mime = bytes ? mimeOfImage(bytes) : null
+  if (!bytes || !mime) return null
+  return { mime, data: bytes.toString('base64') }
+})
+
+// Where a picture goes in one click before the person has saved one themselves: the folder the system
+// keeps downloads in. The page names it in the menu, so a first save needs no dialog either.
+ipcMain.handle('image:folder', (event) => {
+  if (!fromApp(event)) return null
+  try {
+    return { folder: app.getPath('downloads') }
+  } catch {
+    return null
+  }
+})
+
+ipcMain.handle('image:clipboard', async (event, arg: unknown) => {
+  if (!fromApp(event)) return false
+  const { url } = (arg ?? {}) as { url?: unknown }
+  const bytes = await imageBytes(url)
+  const mime = bytes ? mimeOfImage(bytes) : null
+  if (!bytes || !mime) return false
+  try {
+    await clipboard.write([new ClipboardItem({ [mime]: new Blob([new Uint8Array(bytes)], { type: mime }) })])
+    return true
+  } catch {
+    return false
+  }
+})
+
+const TEXT_EXT = /\.(md|markdown|txt|text|csv|tsv|json|xml|ya?ml|html?|svg|css|js|mjs|cjs|ts|tsx|jsx|py|rb|sh|bash|zsh|ps1|bat|cmd|sql|log|ini|cfg|conf|toml|env|gitignore|rtf)$/i
+const artifactPath = (url: unknown): string | null =>
+  typeof url === 'string' && url.length <= 8192 ? artifactImagePath(registry.selected().dataDir, url) ?? localImagePath(url) : null
+
+// Copy an artifact: image as image, text as text, other files as a file in the file manager (or the
+// full local path as a fallback).
+ipcMain.handle('artifact:copy', async (event, arg: unknown) => {
+  if (!fromApp(event)) return { ok: false as const }
+  const { url, kind } = (arg ?? {}) as { url?: unknown; kind?: unknown }
+  const path = artifactPath(url)
+  const k = typeof kind === 'string' ? kind : ''
+  if (!path) return { ok: false as const }
+  try {
+    const info = statSync(path)
+    if (!info.isFile() || info.size > MAX_IMAGE_BYTES) return { ok: false as const }
+  } catch {
+    return { ok: false as const }
+  }
+  const lower = path.toLowerCase()
+  const isImage = k === 'image' || /\.(png|jpe?g|gif|webp)$/.test(lower)
+  if (isImage) {
+    const bytes = await imageBytes(url)
+    const mime = bytes ? mimeOfImage(bytes) : null
+    if (bytes && mime) {
+      try {
+        await clipboard.write([new ClipboardItem({ [mime]: new Blob([new Uint8Array(bytes)], { type: mime }) })])
+        return { ok: true as const, kind: 'image' as const }
+      } catch {
+        /* fall through to file/path copy */
+      }
+    }
+  }
+  const isText = ['markdown', 'html', 'csv', 'text'].includes(k) || TEXT_EXT.test(lower)
+  if (isText) {
+    try {
+      const bytes = await imageBytes(url)
+      if (bytes) {
+        clipboard.writeText(bytes.toString('utf-8'))
+        return { ok: true as const, kind: 'text' as const }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  // Copy the file itself so it can be pasted in a file manager (Explorer/Finder/Nautilus).
+  try {
+    // SAFETY: Electron's Clipboard exposes writeBuffer at runtime; the public TS type omits it in this version.
+    const cb = clipboard as unknown as { writeBuffer: (format: string, buffer: Buffer) => void }
+    if (process.platform === 'win32') {
+      cb.writeBuffer('FileNameW', Buffer.from(`${path}\0`, 'ucs2'))
+      return { ok: true as const, kind: 'file' as const }
+    }
+    if (process.platform === 'darwin') {
+      const esc = path.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+      const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><array><string>${esc}</string></array></plist>`
+      cb.writeBuffer('NSFilenamesPboardType', Buffer.from(plist, 'utf8'))
+      return { ok: true as const, kind: 'file' as const }
+    }
+    if (process.platform === 'linux') {
+      const uri = `file://${path.split(/[/\\]/).map((p) => encodeURIComponent(p)).join('/')}`
+      cb.writeBuffer('text/uri-list', Buffer.from(`${uri}\n`, 'utf8'))
+      return { ok: true as const, kind: 'file' as const }
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    clipboard.writeText(path)
+    return { ok: true as const, kind: 'path' as const }
+  } catch {
+    return { ok: false as const }
+  }
 })
 
 function createWindow(): BrowserWindow {
