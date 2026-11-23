@@ -4,6 +4,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 > **Em português:**
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
 > - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
@@ -71,6 +72,25 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **A server opened in the desktop app is one app with it, not a window laid over it.** The app's bar on top of a server's page ("Tucano em X · Voltar pra este computador") is gone. The server's own workspace menu lists **On this computer** (the local workspaces) and **Servers** (the one on screen checked), and switches between them like switching workspaces; under the workspace's name it says "on the server". An older server, one that doesn't answer, or a page still loading keeps the bar until its menu can take you back. The server's Settings open with a fixed line saying they belong to that server, with **Open on my computer** for what is only your computer's, like lending it. (#621)
 - **An agent's Tools tab says where it works.** The "Computer" card became **Where it works**. A line on top names where its commands run, and that its conversations and memory stay on the server. On a server, the server is a row of its own (**No / Isolated Linux / Right on the server**), and every computer lent to the server has a row with who lent it and whether it's connected: yours turns on and off for that agent, and someone else's shows read-only ("only Ana can change"), since only whoever lent a computer picks its agents. In the desktop app the same card has a **This computer** row. (#627)
 - **A wider chat on big screens, expanding side panels, and connector filters.** The conversation grows to 940 px from a 1600 px window and 1020 px from 2000 px (it was 860 px everywhere). A thread, a file, a service or an agent's browser in the side panel, and a Wiki page opened beside the map, have an **Expand** button that puts them over the whole page; Esc brings the conversation back. Connectors have chips on top (All, and each category with its count) instead of one long scroll. On a server, an agent that runs on the host says "on the server" instead of "on your computer". (#614)
+=======
+### Added
+
+- **A bot can look after something for you between conversations.** Give any of your bots an
+  initiative: a brief in your own words, how often it checks, when it may interrupt you, the
+  conversations it may look at and the actions it may take. It then reads that work on its own clock,
+  in the DM it belongs to. A check-in that finds nothing leaves no trace at all: no message, no
+  unread, no notice. One that finds something writes in the conversation as any reply does, once.
+  The DM's header carries a line saying what it is doing (next check-in, waiting on you, checking
+  now, off), and opens the window holding the brief, the day's limits, what the bot is carrying
+  (each responsibility with the state its own work gives it) and what it did, newest first, with why
+  each check-in happened and what it cost. Every bot has its own: its own switch on its own page,
+  its own brief, scope and daily allowance, and its own line in its own DM, so a second bot joins
+  rather than replaces the first. **Check now** asks for one on the spot and says what stopped it
+  when it cannot. An initiative grants nothing: every tool call is still decided by
+  the bot's Autonomy, and the scope you set can only narrow it. A report repeating the one before it
+  stays out of the conversation, its record saying so; a check-in the app did not survive is closed
+  as interrupted and nothing it may have done is replayed.
+>>>>>>> e3b43429 (A bot can look after something for you between conversations)
 
 ### Fixed
 
@@ -423,7 +443,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An English workspace no longer teaches a model Portuguese words for the app.** The screen links the Tuca is taught (`#abrir/conectores`), the areas of `ver_estado` and the guide's index it carries on every message were in Portuguese whatever the workspace's language, and the model wrote those words back into replies, skills and wiki pages. The ids are now language-free (`#abrir/connectors`, `#abrir/settings/models`), the guide's index has an English version, and the old ids in messages and memories keep working. The body of a guide page is still Portuguese.
 
 - **A Hermes skill says it came from Hermes.** In the skills list and in an agent's tab, a skill linked from Hermes was tagged "from your Claude Code".
+<<<<<<< HEAD
 
+=======
+>>>>>>> e3b43429 (A bot can look after something for you between conversations)
 ## [0.2.28] - 2026-11-12
 
 > **Em português:**

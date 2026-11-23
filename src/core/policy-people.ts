@@ -140,6 +140,12 @@ export const NEEDS: Record<Method, Need> = {
   sendFeedback: 'anyone', // to the people who make Tucano: what anyone here saw go wrong
   survey: 'owner', // one answer per install: the owner's
   answerSurvey: 'owner',
+  // A person's own proactive coordinator: these handlers only ever touch the asking person's records,
+  // so another person's brief, scope and responsibilities are not reachable through them at all.
+  initiative: 'anyone',
+  checkInNow: 'anyone',
+  saveInitiative: 'anyone',
+  saveCommitment: 'anyone',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
   // The Cofre: each person has their own keys; the team's are checked inside (src/core/vault.ts: only an admin changes them).
   vaultKeys: 'anyone',

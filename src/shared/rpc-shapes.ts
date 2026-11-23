@@ -225,7 +225,11 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   watchRoutine: { id: 's', on: 'b' },
   sendFeedback: { kind: '[bug,idea,other]', message: 's', image: 's?', lang: '[pt,en]?' },
   survey: { lang: '[pt,en]?' },
-  answerSurvey: { survey: 's', choice: 's?', comment: 's?', dismiss: 'b?', lang: '[pt,en]?' }
+  answerSurvey: { survey: 's', choice: 's?', comment: 's?', dismiss: 'b?', lang: '[pt,en]?' },
+  initiative: {},
+  saveInitiative: { config: 'o', expectedRevision: 'n' },
+  saveCommitment: { commitment: 'o' },
+  checkInNow: { agentId: 's' },
 }
 
 const fits = (v: unknown, t: string): boolean => {

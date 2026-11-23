@@ -8,7 +8,7 @@ import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, chainDepthCap, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type InitiativeRun, type Settings, type Step, delegating, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -21,6 +21,7 @@ import { extractFile } from './wiki-extract'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
 import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
+import { isQuiet } from '../shared/initiative'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
@@ -412,7 +413,7 @@ export interface RoutineEvent {
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string; initiative?: InitiativeRun } // for: whom it's for, when it isn't read from the conversation (an answer back)
 
 // What a person wrote into a reply that was already running (`send` with mode 'steer'): the agent
 // reads it with its next tool result, and the reply's own chain carries it, in their words, from the
@@ -1100,6 +1101,63 @@ export class Runner {
     return this.startReply(agent, conv, { depth: 1, existing: msg, task: this.routineTask(r, when, me), work: msg.run!.work, routine: true }, { parallel: true })
   }
 
+  // A check-in: the person's coordinator looking at their work on its own, through the same runner as
+  // every reply (same session, same queue, same limits). It says nothing to the conversation while it
+  // works and nothing at all when it finds nothing; what came of it is returned, never posted.
+  // `onStart` runs once the reply is under way, with the message it is writing.
+  async checkIn(input: {
+    personId: string
+    revision: number
+    wake: string
+    agent: Agent
+    conversation: Conversation
+    task: string
+    onStart?: (message: Message) => void
+  }): Promise<{ outcome: 'quiet' | 'reported' | 'failed' | 'interrupted' | 'skipped'; why?: 'paused' | 'agent' | 'dm'; message?: Message }> {
+    const { db } = this.deps
+    if (this.paused) return { outcome: 'skipped', why: 'paused' }
+    const agent = db.agent(input.agent.id)
+    const conv = db.conversation(input.conversation.id)
+    if (!agent || agent.archived) return { outcome: 'skipped', why: 'agent' }
+    if (!conv || conv.kind !== 'dm') return { outcome: 'skipped', why: 'dm' }
+    // Kept out of the conversation from the first moment: nothing to show while it thinks.
+    const anchor: Message = {
+      id: randomUUID(),
+      conversationId: conv.id,
+      author: { kind: 'agent', id: agent.id },
+      text: '',
+      at: Date.now(),
+      hidden: true,
+      run: { status: 'working', depth: 1, steps: [] }
+    }
+    db.saveMessage(anchor)
+    input.onStart?.(anchor)
+    const done = await this.startReply(agent, conv, {
+      depth: 1,
+      existing: anchor,
+      task: input.task,
+      initiative: { wake: input.wake, personId: input.personId, revision: input.revision }
+    })
+    if (!done) return { outcome: 'failed', message: anchor }
+    const status = done.run?.status
+    if (status === 'working' || status === 'interrupted') return { outcome: 'interrupted', message: done }
+    if (status !== 'done') return { outcome: 'failed', message: done }
+    return { outcome: isQuiet(done.text) ? 'quiet' : 'reported', message: done }
+  }
+
+  // A check-in that reported is a message the person reads: it leaves the hiding and the page hears of
+  // it, as any reply does.
+  reveal(m: Message): void {
+    m.hidden = undefined
+    this.deps.db.saveMessage(m)
+    this.deps.emit({ type: 'message', message: { ...m } })
+  }
+
+  // The app is paused ("Pausar tudo"): nothing starts, check-ins included.
+  isPaused(): boolean {
+    return this.paused
+  }
+
   // `me`: the owner, by the workspace's name; a person's routine reads with theirs, and the team's as the channel's.
   private routineTask(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, owner: string): string {
     const { event } = when
@@ -1172,6 +1230,9 @@ export class Runner {
     // A card settled while the reply was working stays settled (keepDecided).
     if (m.run?.agentDraft || m.run?.proposals?.length) m.run = keepDecided(m.run, this.deps.db.message(m.id)?.run)
     this.deps.db.saveMessage(m)
+    // A check-in says nothing to the conversation while it works, and nothing at all when it finds
+    // nothing: the page hears of it only when it has something to report.
+    if (m.hidden) return
     this.deps.emit({ type: 'message', message: { ...m }, ...(attemptStart ? { attemptStart: true } : {}) })
   }
 
@@ -1483,7 +1544,7 @@ export class Runner {
     const job = this.jobOf(jobId) ?? this.startJob(jobId, conv, msg.threadId, replyTo, task)
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run) }
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run), ...(opts.initiative ? { initiative: opts.initiative } : {}) }
     // Only a new execution replaces this reply's reasoning; tool/steering updates do not.
     let attemptStart = true
     const save = (patch: Partial<Message> = {}): void => {
@@ -3307,7 +3368,7 @@ ${note}`,
           if (delegated.length || (answeredUp && !msg.text.trim())) return
           // The job's last reply: the answer. The person hears it once, here.
           this.endJob(job)
-          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id])
+          if (!opts.routine && !opts.initiative) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id])
         }
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
