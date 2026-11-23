@@ -14,7 +14,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
-> - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo enquanto a página rola.
+> - **Mudou:** o ícone de computador na linha do agente aparece ao passar o mouse, junto da engrenagem. Em telas de toque ele continua visível.
 
 ### Added
 
@@ -29,14 +29,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+- **The computer icon on an agent's row comes in on hover.** The laptop or globe that says where an agent runs now appears with the settings gear, so the sidebar is quieter at rest. On a touch screen, where nothing hovers, it stays in sight. Thanks to Apostol Apostolov. (#640)
 
 ### Changed
 
 - **The approval card leads with what is being approved, and says what became of it.** The card opens with the action and its target, the status is a quiet row above them, and the decisions sit on one line. Its receipt now tells approved apart from completed: **Approved · waiting for result**, **Completed**, **Failed** with the reason, or **Approved · didn't run**. A row above the message field counts the approvals waiting on you, and **Review** goes back to the oldest one. Thanks to Apostol Apostolov. (#334)
-
-### Fixed
-
-- **Settings tabs and subject jumps stay visible while scrolling.** In Settings, the group tabs stayed at the top when scrolling down, but the subject jump links scrolled away. Both rows now stay pinned so section navigation remains available deep in the page.
 
 ## [0.2.45] - 2026-11-22
 
