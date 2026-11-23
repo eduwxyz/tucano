@@ -3934,6 +3934,102 @@ body.is-resizing webview {
 .msg__meta .wiki-keep {
   margin: 0;
 }
+/* The reply's footer line holds the action pills first, then the numbers: one row, centred, so a
+   22 px pill and 12 px text share a band instead of hanging from a text baseline. */
+.msg__meta {
+  align-items: center;
+  row-gap: 6px;
+}
+/* The way on from a reply that stopped: Continue, Try again, Follow. Same pill, dim colour, and only
+   under the pointer. A row that ended badly reads as its words and its numbers until someone goes
+   near it. It keeps its space while hidden, so nothing below it jumps when it appears. */
+.msg__hire {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.msg:hover .msg__hire,
+.msg:focus-within .msg__hire {
+  opacity: 1;
+}
+/* A touch screen has no pointer to hover with: there, the pill is simply there. */
+@media (hover: none) {
+  .msg__hire {
+    opacity: 1;
+  }
+}
+/* Action pills share one row under the reply. None carries a top margin here: the row has the air. */
+.msg__meta .msg__hire {
+  margin-top: 0;
+}
+/* A prompt pill in the reply footer: comes in with the footer line, quiet until hover/focus/open. */
+.msg__meta .steps__ask--reply {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.msg:hover .msg__meta .steps__ask--reply,
+.msg__meta .steps__ask--reply:focus-within,
+.msg__meta .steps__ask--reply:has(.steps__ask-pill[aria-expanded='true']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg__meta .steps__ask--reply {
+    opacity: 1;
+  }
+}
+/* Open, the field needs the row: the pill keeps its place and the rest goes under it. */
+.msg__meta .steps__ask--reply:has(.steps__ask-pill[aria-expanded='true']) {
+  flex: 1 1 100%;
+}
+.steps__ask {
+  display: grid;
+  gap: 8px;
+}
+.steps__ask-note {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
+}
+.steps__ask-note textarea {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+}
+.steps__ask-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.steps__ask-pill {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.steps__ask-pill:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover);
+}
+/* A phone's row spends its width on the reply's own words: a pill that carries a glyph drops its
+   word and keeps the glyph. Every dropped word stays as the button's aria-label. */
+@media (max-width: 760px) {
+  .steps__ask-pill__word {
+    display: none;
+  }
+}
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */
 .msg.is-thread-open::before {
