@@ -165,6 +165,11 @@ const PATHS: Record<string, ReactNode> = {
 
 export type IconName = keyof typeof PATHS
 
+// `label` names it for a screen reader when no text sits next to it (a card's action, say).
+export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />
+}
+
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }): ReactNode {
   return (
     <svg

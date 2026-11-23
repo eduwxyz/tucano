@@ -61,7 +61,7 @@ describe.skipIf(process.platform === 'win32' || !hasChrome())('a lane switching 
   const windows = (lane: string): string[] => launches().filter((l) => l.includes('--new-window') && l.includes(join(root, lane)))
   const pids = (lane: string): number[] => launches().filter((l) => l.includes(join(root, lane))).map((l) => Number(l.split(' ')[0]))
   const browsers = (dir: string, wallWindows = true): ChromeBrowsers => {
-    const b = new ChromeBrowsers(join(root, dir), (id, s) => shown.push(`${id}:${s}`), bin, undefined, false, undefined, undefined, wallWindows)
+    const b = new ChromeBrowsers(join(root, dir), (id, s) => shown.push(`${id}:${s}`), bin, undefined, false, undefined, undefined, undefined, undefined, wallWindows)
     lanes.push(b)
     return b
   }

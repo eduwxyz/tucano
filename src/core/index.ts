@@ -76,7 +76,8 @@ import { COFRE } from '../shared/vault'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
-import { ChromeBrowsers, hasChrome } from './chrome'
+import { ChromeBrowsers, assistFlags, hasChrome } from './chrome'
+import { AddOns } from './chrome-addons'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Titles } from './titles'
@@ -317,6 +318,11 @@ const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
 
+// The agents' ad blocker and cookie-notice removers (Settings › Agents), one switch each, which need Chrome
+// for Testing and three extensions from the store: a download into the data folder, on the switch, never
+// on the way of a reply — the lane works as it does today until it lands, and if it never does.
+const addOns = new AddOns(join(dataDir, 'navegador-extra'), () => emit({ type: 'settings', settings: settings() }))
+
 // A classifier's key, as the page sees it: saved or not. An install from before Settings ›
 // Classifiers kept Jev's under the old name, and that one still counts.
 const classifierKeySaved = (c: ClassifierConfig): boolean =>
@@ -363,6 +369,7 @@ const settings = (): Settings => {
     ...(s.endpoint ? { endpoint: { ...s.endpoint, hasKey: db.getSecret(ENDPOINT_SECRET) !== undefined } } : {}),
     jevKey: classifiers.some((c) => c.provider === 'typesafe' && classifierKeySaved(c)),
     telegram: telegram?.info(),
+    ...(addOns.info ? { addOns: addOns.info } : {}),
     accounts: (s.accounts ?? []).map((a) => ({ ...a, ...accountLogins.get(a.id) }))
   }
 }
@@ -844,6 +851,9 @@ const electronHost: BrowserHost = (agentId, op, args) =>
     process.parentPort.postMessage({ type: 'browser', id, agentId, op, args })
     setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error(L('o navegador não respondeu em 60 s', "the browser didn't answer in 60 s")))), 60_000).unref()
   })
+// Each extension's switch, as they were left: what is on is here already, or downloads on this start.
+if (!fake && !serverMode && hasChrome()) bg(addOns.set(settings().browserAddOns), 'browserAddOns')
+
 // Google Chrome when the Mac has it (Google refuses logins in embedded browsers); Electron's Chromium otherwise.
 const chrome =
   !fake && hasChrome()
@@ -854,7 +864,9 @@ const chrome =
         (agentId, jpeg) => browser.frame(agentId, jpeg),
         serverMode,
         serverMode ? 10 * 60_000 : undefined, // on a server, an idle agent's Chrome gives its memory back
-        (agentId) => downloadsFolder(dataDir, agentId)
+        (agentId) => downloadsFolder(dataDir, agentId),
+        serverMode ? undefined : addOns, // not on a server until this is tested in its container
+        serverMode ? undefined : () => assistFlags(settings().browserAccessibility) // Settings › Agents › Additional accessibility
       )
     : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
@@ -1974,6 +1986,7 @@ const api: Handlers = {
     // On a desktop it's always offered (the page says when Docker is missing); a server without Docker,
     // inside a container, can't have one, so it isn't.
     isolatedComputers: !serverMode || onPath('docker'),
+    browserExtensions: !serverMode,
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }, { server: serverMode }),
 
@@ -2595,7 +2608,12 @@ const api: Handlers = {
   voiceRemoveModel: ({ model }) => modelDownload.remove(model),
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
-  updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
+  updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, addOns: _addOns, ...all } }, ctx) => {
+    // A server takes no browser extensions yet: the switch isn't drawn there, and one sent anyway is dropped.
+    if (serverMode) {
+      delete all.browserAddOns
+      delete all.browserAccessibility
+    }
     // Only the settings there are, each of its kind and size: what's kept goes to everyone, every snapshot.
     const bad = settingsPatchError(all)
     if (bad) throw new Error(bad)
@@ -2633,6 +2651,7 @@ const api: Handlers = {
     if (!serverMode && patch.theme !== undefined) toMain({ type: 'theme', theme: patch.theme })
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
+    if (patch.browserAddOns !== undefined) bg(addOns.set(patch.browserAddOns), 'browserAddOns') // on downloads it, off removes it
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
     emit({ type: 'settings', settings: settings() })

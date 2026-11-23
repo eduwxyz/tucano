@@ -694,6 +694,17 @@ export class Browser {
     if (user === undefined && pass === undefined) return { result: textResult(L('Diga o número do campo de usuário (usuario) e/ou o do campo de senha (senha), como #3.', 'Give the number of the username field (usuario) and/or of the password field (senha), like #3.'), true) }
     const els = page.elements ?? []
     for (const ref of [user, pass]) if (ref !== undefined && !els.some((e) => e.ref === ref)) return { result: textResult(L(`Não existe o elemento #${ref} na página. Leia a página de novo.`, `There's no element #${ref} on the page. Read the page again.`), true) }
+    // Before the login is even read: a lane with extensions comes back without them, and the numbers the
+    // agent gave were for the page that closed, so it reads this one and asks again.
+    const ready = await this.deps.host(id, 'prepare_login')
+    if (ready.reopened) {
+      const page = await this.after(id, ready, { label: L('Reabriu sem extensões', 'Reopened without extensions'), detail: origin })
+      const note = L(
+        'Reabri o navegador sem as extensões, pra elas não verem a senha. Nada foi preenchido, e os números abaixo são os da página de agora: chame navegador_login de novo com eles.',
+        'I reopened the browser without its extensions, so they cannot see the password. Nothing was filled in, and the numbers below are the current page’s: call navegador_login again with them.'
+      )
+      return { result: { ...page, content: [{ type: 'text', text: note }, ...page.content] }, detail: origin }
+    }
     const login = await this.deps.logins?.loginFor(id, origin, ctx)
     if (!login) return { result: textResult(L(`O login de ${origin} não abriu. Peça pra ${this.deps.me()} conferir no Cofre.`, `The login for ${origin} didn't open. Ask ${this.deps.me()} to check it in the Cofre.`), true) }
     this.update(id, { doing: { label: doing()[LOGIN]!, detail: origin } })

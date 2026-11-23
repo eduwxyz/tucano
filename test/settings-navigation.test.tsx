@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Root } from 'react-dom/client'
 import { setLang } from '../src/shared/lang'
 import { SettingsJumps, SettingsResults } from '../src/renderer/src/components/SettingsLayout'
-import { searchSettings, settingsGroups, settingsStructure } from '../src/renderer/src/settings-structure'
+import { inStrip, searchSettings, settingsGroups, settingsStructure } from '../src/renderer/src/settings-structure'
 
 const { window, document } = parseHTML('<!doctype html><html><body><div id="root"></div></body></html>')
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })
@@ -47,7 +47,7 @@ Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { configurab
 Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return 5000 } })
 const { createRoot } = await import('react-dom/client')
 
-const access = { admin: true, owner: true, team: false, servers: false }
+const access = { admin: true, owner: true, team: false, servers: false, extensions: true }
 const ALL = settingsStructure(access)
 const SECTIONS = ALL.filter(section => section.visible)
 let root: Root
@@ -95,14 +95,25 @@ describe('settings jump row', () => {
   it('names the subjects in the order they read, as links and not tabs', async () => {
     await render()
     expect(document.querySelectorAll('[role="tablist"]')).toHaveLength(0)
-    expect(links()).toHaveLength(SECTIONS.length)
-    expect(links().map(link => link.textContent)).toEqual(SECTIONS.map(section => section.label))
+    // Every subject the page draws, minus the ones the structure keeps out of the row on purpose.
+    expect(links()).toHaveLength(SECTIONS.filter(inStrip).length)
+    expect(links().map(link => link.textContent)).toEqual(SECTIONS.filter(inStrip).map(section => section.label))
+  })
+
+  it('leaves out a subject that reads inside the one above it, and still draws its card', async () => {
+    // The extensions are a card of their own under Browser, with no link of its own in the row
+    // (Apo, 22 Nov 2026): the subject above already says where you are.
+    const quiet = SECTIONS.filter(section => !inStrip(section))
+    expect(quiet.map(section => section.id)).toEqual(['agents-addons'])
+    await render()
+    expect(links().map(link => link.textContent)).not.toContain('Ads and consent notices')
+    expect(document.querySelector('[data-settings-section="agents-addons"]')).not.toBeNull()
   })
 
   it('drops a subject the page did not draw', async () => {
     skipped = SECTIONS[1]!.id
     await render()
-    expect(links()).toHaveLength(SECTIONS.length - 1)
+    expect(links()).toHaveLength(SECTIONS.filter(inStrip).length - 1)
     expect(links().map(link => link.getAttribute('href'))).not.toContain(`#settings-${SECTIONS[1]!.id}`)
   })
 

@@ -198,6 +198,8 @@ export class Browsers {
         await this.settle(wc)
         return { ...here(), point: point(at), frame: await this.frame(win) }
       }
+      case 'prepare_login': // this browser never carries extensions
+        return here()
       case 'fill': {
         // A saved login (navegador_login): checked in the page right before typing, on that exact origin
         // and, for a password, in a password field. Errors never carry the text: it may be the password.

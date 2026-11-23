@@ -565,6 +565,13 @@ export interface Settings {
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
+  // The extensions the agents' browser carries (core/chrome-addons.ts), one switch each: what is on is
+  // downloaded and loaded into the next session's browser, what is off leaves the disk.
+  browserAddOns?: BrowserAddOns
+  addOns?: AddOnsInfo // computed: where each of them is, for the rows' own lines
+  // For a page that moves on its own and a video that starts talking: the agent's browser asks for less
+  // motion and for nothing to play by itself, so a click lands where the element was.
+  browserAccessibility?: boolean
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
@@ -662,7 +669,28 @@ export type BrowserOp =
   | 'close'
   | 'clear'
   | 'input'
+  | 'prepare_login' // fill a Vault login in the page (the lane drops its extensions for it)
   | 'headful' // the page is a bot check: the same lane, in a real window (chrome.ts)
+
+
+// The extensions an agent's browser can carry (shared/addons.ts lists them), each with its own switch.
+export type AddOn = 'ads' | 'cookies' | 'consent' | 'popups' | 'clutter' | 'defuddle'
+export type BrowserAddOns = Partial<Record<AddOn, boolean>>
+
+// Where one of them is. On means downloaded and loaded into the browser of the next session; off removes
+// the folder, so the switch is the install. 'waiting' is the moment between the switch and the download.
+export interface AddOnStep {
+  state: 'waiting' | 'preparing' | 'ready' | 'failed'
+  error?: string // why it didn't land: the lane keeps working without it
+  note?: string // landed, but not set up the way the app sets it up: the store's build moved a line
+}
+
+// What the settings page shows of them: Chrome for Testing, which the three share (the branded build has
+// refused a folder of extensions since version 158), and each switched-on extension.
+export interface AddOnsInfo {
+  browser: AddOnStep & { progress?: { received: number; total: number } } // bytes of the browser
+  extensions: Partial<Record<AddOn, AddOnStep>>
+}
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -695,6 +723,7 @@ export interface BrowserReply {
   headful?: boolean // drawn in a real window because this site only lets a real browser through (not a takeover)
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
   signs?: PageSigns // what the page is when it isn't the page: a bot check, a refusal, a wall (shared/wall.ts)
+  reopened?: boolean // prepare_login: the lane came back without its extensions, so the page is a new one
 }
 
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.

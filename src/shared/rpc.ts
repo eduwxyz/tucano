@@ -27,6 +27,7 @@ export interface Snapshot {
   platform: Os
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
   isolatedComputers: boolean // agents can have an isolated Linux computer: Docker is there (not inside a server's container)
+  browserExtensions?: boolean // the agents' browser can carry extensions: not on a server yet
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
   people: Person[] // everyone with access now (no keys)
   former?: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before

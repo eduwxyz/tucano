@@ -6,6 +6,7 @@ export interface SettingsAccess {
   owner: boolean
   team: boolean
   servers: boolean
+  extensions?: boolean // this install's browser can carry extensions: not a server, until tested there
 }
 
 type Scope = 'personal' | 'workspace' | 'computer' | 'mixed'
@@ -21,12 +22,15 @@ type Section = {
   keys: readonly (keyof Settings)[]
   scope: Scope
   visible: boolean
+  // `false`: the subject is drawn where it belongs, and the jump row under the groups lists no link
+  // for it. A subject that reads inside the one above it has no place of its own to jump to.
+  nav?: boolean
 }
 
 // Every subject of the page, once: the group it sits in, its name and tile, the settings keys it
 // owns, its scope and who sees it. A card declares the subject it holds, so moving a control means
 // moving its keys with it. Labels are read again after locale changes.
-export function settingsStructure({ admin, owner, team, servers }: SettingsAccess) {
+export function settingsStructure({ admin, owner, team, servers, extensions = false }: SettingsAccess) {
   return [
     { id: 'workspace-context', page: 'geral', label: L('Geral', 'General'), icon: 'gear', color: 'var(--c-graphite)', keys: ['workspaceLabel', 'workspaceName', 'context', 'onboarding'], scope: 'workspace', visible: admin },
     { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'language'], scope: 'mixed', visible: true },
@@ -39,6 +43,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'agents-routines', page: 'agentes', label: L('Rotinas', 'Routines'), icon: 'clock', color: 'var(--c-violet)', keys: ['openAtLogin', 'quietHours'], scope: 'mixed', visible: admin },
     { id: 'agents-tuca', page: 'agentes', label: L('Tuca', 'Tuca'), icon: 'spark', color: 'var(--accent)', keys: ['tucaApplyNow'], scope: 'workspace', visible: admin },
     { id: 'agents-browser', page: 'agentes', label: L('Navegador', 'Browser'), icon: 'globe', color: 'var(--c-teal)', keys: ['browserJev'], scope: 'workspace', visible: admin },
+    { id: 'agents-addons', page: 'agentes', label: L('Extensões do navegador', 'Browser Extensions'), icon: 'shield', color: 'var(--c-green)', keys: ['browserAddOns', 'browserAccessibility'], scope: 'workspace', visible: admin && extensions, nav: false },
     { id: 'models-agents', page: 'modelos', label: L('Modelos dos agentes', 'Agent models'), icon: 'layers', color: 'var(--c-indigo)', keys: [], scope: 'workspace', visible: admin },
     { id: 'models-runtimes', page: 'modelos', label: L('Harnesses', 'Harnesses'), icon: 'terminal', color: 'var(--c-graphite)', keys: ['harnesses', 'endpoint'], scope: 'mixed', visible: admin },
     { id: 'models-accounts', page: 'modelos', label: L('Contas', 'Accounts'), icon: 'key', color: 'var(--c-green)', keys: ['accounts'], scope: 'mixed', visible: admin },
@@ -58,6 +63,11 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
 }
 
 export type SettingsSection = ReturnType<typeof settingsStructure>[number]
+// Whether the jump row under the groups names a subject. One declared `nav: false` reads inside the
+// subject above it, so a link of its own there would be a second way to the same place: the subject
+// still renders and keeps its anchor, the row just gets no entry for it. The structure is `as const`,
+// so a section without the flag carries no property to read and the cast keeps the default `true`.
+export const inStrip = (section: SettingsSection): boolean => (section as { nav?: boolean }).nav !== false
 export type SettingsSectionId = SettingsSection['id']
 export type SettingsPageId = SettingsSection['page']
 
@@ -65,7 +75,7 @@ export type SettingsPageId = SettingsSection['page']
 // what most people change first, what can't be undone last.
 const tabSections: Readonly<Record<string, readonly SettingsSectionId[]>> = {
   geral: ['workspace-context', 'app-appearance', 'app-notifications', 'app-dictation', 'app-conversation'],
-  agentes: ['agents-permissions', 'agents-replies', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser'],
+  agentes: ['agents-permissions', 'agents-replies', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser', 'agents-addons'],
   modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-classifiers', 'models-router', 'knowledge-memory'],
   conexoes: ['connections-phone', 'connections-servers', 'harnesses-keys'],
   workspace: ['workspace-people', 'workspace-activity', 'workspace-team', 'workspace-backups', 'app-updates', 'workspace-danger']
@@ -111,6 +121,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'agents-routines': [L('Abrir ao ligar o computador', 'Open when the computer starts'), L('Horário de silêncio', 'Quiet hours')],
     'agents-tuca': [L('Aplicar mudanças do Tuca na hora', 'Apply Tuca’s changes right away'), L('Desfazer', 'Undo')],
     'agents-browser': [L('Navegador dos agentes', 'Agents’ browser'), 'Jev', 'TypeSafe'],
+    'agents-addons': [L('Bloqueador de anúncios', 'Ad blocker'), L('Avisos de cookies', 'Cookie notices'), L('Consentimento', 'Consent'), 'uBlock Origin Lite', 'Consent-O-Matic'],
     'models-agents': [L('Modelo de cada agente', 'Each agent’s model'), L('Trocar o modelo de vários agentes', 'Change models for several agents')],
     'models-runtimes': ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', L('Endpoint', 'Endpoint')],
     'models-accounts': [L('Login', 'Sign-in'), L('Conta do trabalho e pessoal', 'Work and personal account')],

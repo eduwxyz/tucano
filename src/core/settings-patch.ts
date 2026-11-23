@@ -15,6 +15,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   channelLayout: { kind: 'object', max: 500_000, nullable: true },
   orgLayout: { kind: 'object', max: 100_000, nullable: true },
   browserJev: { kind: 'boolean', max: 10, nullable: true },
+  browserAddOns: { kind: 'object', max: 200, nullable: true }, // one boolean per extension
+  browserAccessibility: { kind: 'boolean', max: 10, nullable: true },
   memoryLearning: { kind: ['approve', 'auto', 'off'], max: 20 },
   repliesAtOnce: { kind: 'number', max: 10, nullable: true },
   wikiCapture: { kind: 'boolean', max: 10, nullable: true },
