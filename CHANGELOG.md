@@ -14,6 +14,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** uma **pergunta aberta aparece acima do campo**, com quem perguntou e um botão **Responder** que leva ao cartão.
 > - **Novo:** uma **gaveta acima do campo** mostra as respostas em curso e as que terminaram nesta conversa: clique pra ir até uma, pare só aquela no **x**.
 > - **Mudou:** o inglês das respostas ao mesmo tempo e dos ajustes de servidor e computador ficou mais claro.
+> - **Novo:** uma resposta que terminou ganha **Seguir**, no mesmo botão que orienta uma resposta em curso: o que você escreve volta para aquela resposta, que continua na mesma linha, com o que já disse e fez.
+> - **Mudou:** o botão de **Orientar** e o de **Seguir** saíram da corrente de passos e ficaram na linha da própria resposta, embaixo dela, antes do recibo e do caminho para a wiki; o campo abre embaixo dessa linha.
 
 ### Added
 
@@ -25,9 +27,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **An open question stays next to the message field.** A strip above the field says who asked and what, and **Answer** takes you to the card, in the conversation or its thread, however far up it is. In a team it only appears for a question you may answer, and it goes away once it's answered. Thanks to Apostol Apostolov. (#248)
 - **A work drawer above the message field.** Each conversation now lists the replies running in it, threads included, and the ones that already ended, marked done, failed or stopped. Press a row to go to that reply, press its **x** to stop only that one, and take a finished row off with the trash. Thanks to Apostol Apostolov. (#558)
 
+- **Follow: a finished reply goes on from where it stopped.** The pill under a reply's steps said **Steer** while it worked, and once the reply had ended there was nothing left to steer: asking more of it meant the composer, where the words become another message under the answer. Now the same pill reads **Follow** on a reply that has ended. It opens the same field, and what you write goes to that reply as a steer, with nothing running to steer: the reply goes on in the same row, keeping its text and its steps, with the instruction as a row of its own in the chain, and the session it ended with is resumed instead of restarted, so the new turn carries the instruction and the past comes from the cache. A reply that stopped, failed or waits for an answer has no Follow: its own way on is Try again, Continue, or the answer it asked for. Thanks to Apostol Apostolov. (#631)
+
 ### Changed
 
 - **Clearer English for concurrent replies and computer settings.** Nine strings now say what the limit, the queue, the per-agent override and the server's settings do, and the settings search finds the new label. The Portuguese is unchanged. Thanks to Apostol Apostolov. (#628)
+
+- **The way on from a reply moved to the reply's own line.** **Steer** (on a reply at work) and **Follow** (on one that ended) used to sit in the row under the reply's steps, which put them above the steps themselves whenever the chain was open, away from the answer they act on. They now sit on the reply's own line under its answer, first on it, before the receipt and the way into the wiki; the field they open takes that whole line, and the line appears for a reply that has ended even when it has no receipt, so its pill always has a place. Thanks to Apostol Apostolov. (#632)
 
 ### Changed
 

@@ -1608,16 +1608,8 @@ h3 {
 }
 /* One row of pills under the chain: a control is a pill in this row, not a row of its own, so the
    steer and a held reply's pause sit side by side. It lines up with the steps' own text. */
-.steps__pills {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 2px 0 0 3px;
-  padding-left: 14px;
-}
-/* Steer opens from its pill in that row. Its field sits under the box, starting where the steps'
-   text starts and ending where the chain ends. */
+/* The pill opens its field where the pill is: under the chain it starts where the steps' text
+   starts, and on the reply's own line it takes the whole line. */
 .steps__steer {
   display: grid;
   gap: 8px;
@@ -3922,13 +3914,25 @@ body.is-resizing webview {
   margin-top: 2px;
 }
 
-/* A reply's receipt and "Guardar na wiki", on one quiet line that shows on hover. */
+/* The reply's own line, under its answer: the way on from it (steer while it works, follow once it
+   ended), its receipt and "Guardar na wiki". The receipt shows on hover; the pill is always there,
+   because it is the way to act on the reply. */
 .msg__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   column-gap: 14px;
   margin-top: 4px;
+}
+.msg__meta .steps__steer-pill {
+  align-self: center;
+}
+/* Its field takes the whole line under the pill, at the reply's own left edge. */
+.msg__meta .steps__steer--reply {
+  flex: 1 1 100%;
+  margin: 4px 0 0;
+  padding-left: 0;
+  max-width: none;
 }
 .msg__meta .receipt,
 .msg__meta .wiki-keep {

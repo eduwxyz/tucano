@@ -42,7 +42,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
 
 const { createRoot } = await import('react-dom/client')
 const { getState } = await import('../src/renderer/src/store')
-const { RunBlock } = await import('../src/renderer/src/components/Conversation')
+const { RunBlock, ReplyPill } = await import('../src/renderer/src/components/Conversation')
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({ id, label: `read ${id}.ts`, status: 'done', ms: 120, ...extra })
 
@@ -66,6 +66,16 @@ afterEach(() => act(() => root.unmount()))
 
 const draw = async (message: Message): Promise<void> => {
   await act(async () => root.render(<RunBlock message={message} />))
+}
+// The pill lives on the reply's own line under the answer, so it is drawn there, in the line's box.
+const drawPill = async (message: Message): Promise<void> => {
+  await act(async () =>
+    root.render(
+      <div className="msg__meta">
+        <ReplyPill message={message} />
+      </div>
+    )
+  )
 }
 const pill = (): HTMLElement | null => document.querySelector('.steps__steer-pill')
 const field = (): HTMLTextAreaElement | null => document.querySelector('.steps__steer-note textarea')
@@ -93,32 +103,34 @@ const key = async (k: string, extra: { ctrlKey?: boolean } = {}): Promise<void> 
 }
 
 describe('the steer pill', () => {
-  it('is one pill in the row under the chain of a reply at work, not a control inside its header', async () => {
+  it('is on the reply\'s own line under its answer, and not in the chain', async () => {
+    // The chain carries the steps and nothing to press: the way on from a reply is on its line.
     await draw(reply('working'))
-    const pills = document.querySelector('.steps__pills')!
-    const steer = pills.querySelector<HTMLElement>('.steps__steer-pill')!
+    expect(document.querySelectorAll('.steps__pills')).toHaveLength(0)
+    expect(pill()).toBeNull()
+    expect(document.querySelectorAll('.steps__stop')).toHaveLength(1) // Stop stays the stop action
+    expect(document.querySelector('.steps__list')).not.toBeNull()
+    await drawPill(reply('working'))
+    const steer = pill()!
     expect(steer.textContent?.trim()).toBe('Orientar')
     expect(steer.getAttribute('title')).toMatch(/Dizer como seguir|Say how to go on/)
-    expect(document.querySelectorAll('.steps__pills')).toHaveLength(1) // one row, not one row per control
-    expect(document.querySelectorAll('.steps__steer-pill')).toHaveLength(1) // not a second steer control
-    expect(document.querySelectorAll('.steps__stop')).toHaveLength(1) // Stop stays the stop action
-    // The header keeps Stop alone: a pill inside it would also fire the header's own toggle.
-    expect(document.querySelector('.steps__toggle')!.querySelector('.steps__steer-pill')).toBeNull()
-    expect(document.querySelector('.steps__list')).not.toBeNull()
+    expect(document.querySelectorAll('.steps__steer-pill')).toHaveLength(1) // one pill, no second control
+    expect(steer.parentElement!.className).toBe('msg__meta') // on that line, not beside it
     expect(document.querySelector('.steps__steer')).toBeNull() // no field until it is opened
-    // The row sits inside the box, under the header and above the steps it opened.
-    expect(pills.parentElement!.className).toContain('steps')
-    expect(pills.nextElementSibling!.className).toBe('steps__list')
     await act(async () => steer.click())
-    expect(document.querySelector('.steps')!.nextElementSibling?.className).toBe('steps__steer')
+    expect(field()).not.toBeNull()
+    // It opens under the line it was pressed on, in the line's own box.
+    expect(field()!.closest('.msg__meta')).toBe(document.querySelector('.msg__meta'))
+    expect(document.querySelector('.steps__steer')!.className).toContain('steps__steer--reply')
     expect(stopped).toHaveLength(0) // steering did not stop the reply
-    expect(document.querySelector('.steps__list')).not.toBeNull() // and did not toggle the steps
-    await draw(reply('done'))
-    expect(pill()).toBeNull()
+    // Once the reply has ended the same pill is still there, under the name it takes then
+    // (follow-pill.test.tsx: what it does there, and what it sends).
+    await drawPill(reply('done'))
+    expect(pill()!.textContent?.trim()).toMatch(/^(Seguir|Follow)$/)
   })
 
   it('opens a field, and sends nothing until something is written', async () => {
-    await draw(reply('working'))
+    await drawPill(reply('working'))
     await act(async () => pill()!.click())
     expect(field()).not.toBeNull()
     expect(buttons()[0]!.hasAttribute('disabled')).toBe(true) // empty: nothing to send
@@ -129,7 +141,7 @@ describe('the steer pill', () => {
   })
 
   it('sends what was written as a steer of the reply that is running, and closes the field', async () => {
-    await draw(reply('working'))
+    await drawPill(reply('working'))
     await act(async () => pill()!.click())
     await type('só as abertas, não mexa no resto')
     await act(async () => buttons()[0]!.click())
@@ -138,7 +150,7 @@ describe('the steer pill', () => {
   })
 
   it('Ctrl+Enter sends it too, and Escape closes it without sending', async () => {
-    await draw(reply('working'))
+    await drawPill(reply('working'))
     await act(async () => pill()!.click())
     await type('pelo caminho mais curto')
     await key('Enter', { ctrlKey: true })
