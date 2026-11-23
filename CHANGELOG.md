@@ -223,7 +223,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ### Changed
 
 - **A routine's run in the conversation is lighter.** Its prompt no longer sits above every reply: the reply gets a chip with the routine's name, which opens what it asked. Consecutive runs with nothing new fold into one line ("Vigia do GitHub · 3 execuções sem novidade"), and an approval already decided is one line. "On your computer" shows once, in the conversation's header. (#525)
-
 ### Fixed
 
 - **The Team board with many sectors.** Tidy up put every sector in one row, so a team of 17 in 5 sectors was a strip over 4,000 px wide that only fit at the 30% zoom floor. Sectors now wrap into rows to about a screen's shape, with each line to a lower row going down a gap between sectors; panning and zooming no longer redraw every card on each step. (#535)

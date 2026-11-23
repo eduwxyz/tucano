@@ -2,6 +2,7 @@
 // window over the app. Desktop only; the pairing link comes from the server (`server.js link`).
 import { useEffect, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { pairProblem } from '../../../shared/servers'
 import { confirmDialog } from './Dialogs'
 import { Card, Toggle } from './Pages'
@@ -367,7 +368,7 @@ function NodeLog(): ReactNode {
   useEffect(() => {
     if (open && !entries) load()
   }, [open])
-  const time = (at: number): string => new Date(at).toLocaleString(L('pt-BR', 'en-US'), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const time = (at: number): string => new Date(at).toLocaleString(L('pt-BR', 'en-US'), timeOpts({ day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }))
   return (
     <div className="node-card__apps">
       <div className="node-log__head">

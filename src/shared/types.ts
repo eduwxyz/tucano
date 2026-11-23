@@ -590,6 +590,7 @@ export interface Settings {
   outsideGuard?: boolean // after reading something from outside, what goes out asks first even where rules let it run (default on)
   theme: 'system' | 'light' | 'dark'
   language: Lang // the app's, and the language agents answer in
+  clock?: '24' | '12' // times as 15:05 or 3:05 PM; unset keeps the app's own reading, by language
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)

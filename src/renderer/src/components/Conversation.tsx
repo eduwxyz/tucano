@@ -5,6 +5,7 @@ import { isReplyShortcut } from '../../../shared/reply-shortcut'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { sectorName } from '../../../shared/org'
 import { withMessage } from '../../../shared/attach'
+import { hourStyle, timeOpts } from '../../../shared/clock'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
@@ -167,7 +168,7 @@ function argSummary(args: Record<string, unknown>): { shown: [string, string][];
 // "Vale até as 14:30." / "Good until 2:30 PM.", with the day when it isn't today.
 function until(at: number): string {
   const d = new Date(at)
-  const hm = d.toLocaleTimeString(locale(), lang() === 'en' ? { hour: 'numeric', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' })
+  const hm = d.toLocaleTimeString(locale(), timeOpts({ hour: hourStyle(), minute: '2-digit' }))
   if (d.toDateString() === new Date().toDateString()) return L(`Vale até as ${hm}.`, `Good until ${hm}.`)
   const day = d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' }).replace('.', '')
   return L(`Vale até ${day}, às ${hm}.`, `Good until ${day}, ${hm}.`)
@@ -1064,7 +1065,7 @@ function RoutineAsk({ ask }: { ask: Message }): ReactNode {
 }
 
 const MAX_DOTS = 24
-const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+const hm = (at: number): string => new Date(at).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' }))
 
 // Runs in a row of one routine that found nothing new, as one line: how many, from when to when, a dot
 // per run (a red square for one that failed and was got past). It opens to a row per run, and each

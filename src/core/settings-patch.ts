@@ -51,6 +51,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   showThinking: { kind: 'boolean', max: 10, nullable: true },
   thinkingSize: { kind: ['sm', 'md', 'lg'], max: 10, nullable: true },
   replyShortcut: { kind: 'boolean', max: 10, nullable: true },
+  clock: { kind: ['24', '12'], max: 4, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true },
   surveys: { kind: 'boolean', max: 10, nullable: true },
   tucaApplyNow: { kind: 'boolean', max: 10, nullable: true }

@@ -12,6 +12,7 @@ import { basename, join, resolve, sep } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
+import { setClock, type Clock } from '../shared/clock'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
@@ -132,6 +133,7 @@ const clineDir = clineAppDir(dataDir)
 const clineLogin = clineLoginDir(clineDir)
 // Until the settings are read, the language of a new install: the Mac's.
 setLang(langOf(process.env['TUCANO_LOCALE']))
+setClock(undefined) // the clock follows the language until a workspace says otherwise
 initializeWorkspace(db)
 // A workspace made from the switcher starts with the name it was given there.
 if (db.created && process.env['TUCANO_WORKSPACE_LABEL']) db.setSettings({ workspaceLabel: process.env['TUCANO_WORKSPACE_LABEL'] })
@@ -352,6 +354,7 @@ const settleClassifiers = (patch: Partial<Settings>): ClassifierConfig[] => {
 const settings = (): Settings => {
   const s = db.getSettings(DEFAULTS)
   setLang(s.language)
+  setClock(s.clock)
   const stored = classifierSettings(s)
   const classifiers = classifierList(stored)
   return {
@@ -606,11 +609,11 @@ type ToMain =
   | { type: 'person-changed'; id: string } // a role changed: the server forgets what it remembered of them
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
-  | { type: 'lang'; lang: Lang }
+  | { type: 'lang'; lang: Lang; clock?: Clock }
 const toMain = (msg: ToMain): void =>
   process.parentPort.postMessage(msg)
 // The menu is the main process's: it follows the language picked here.
-toMain({ type: 'lang', lang: db.getSettings(DEFAULTS).language })
+toMain({ type: 'lang', lang: db.getSettings(DEFAULTS).language, clock: db.getSettings(DEFAULTS).clock })
 if (!serverMode && defaultWorkspace) toMain({ type: 'theme', theme: db.getSettings(DEFAULTS).theme, initial: true })
 
 // Screenshots use Electron's Chromium, which lives in the main process.
@@ -2636,7 +2639,7 @@ const api: Handlers = {
     if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
-    if (patch.language) toMain({ type: 'lang', lang: patch.language })
+    if (patch.language || 'clock' in patch) toMain({ type: 'lang', lang: patch.language ?? db.getSettings(DEFAULTS).language, clock: patch.clock ?? db.getSettings(DEFAULTS).clock })
     emit({ type: 'settings', settings: settings() })
   },
 

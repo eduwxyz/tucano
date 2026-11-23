@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { L, locale } from '../shared/lang'
 import { monthlyCeiling } from '../shared/limits'
+
+import { timeOpts } from '../shared/clock'
 import { friendly, toolLabel } from '../shared/errors'
 import { NODE_APPROVED, NODE_BASH } from './node-server'
 import { nodeOf } from '../shared/node-link'
@@ -1147,7 +1149,7 @@ export class Runner {
     const me = r.scope === 'channel' ? L('o time', 'the team') : (person?.name ?? owner)
     // Late for whatever reason (the app closed, the Mac asleep, quiet hours, paused): it only says when.
     const sameDay = new Date(when.scheduledAt).toDateString() === new Date().toDateString()
-    const hm = sameDay ? new Date(when.scheduledAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : whenText(when.scheduledAt)
+    const hm = sameDay ? new Date(when.scheduledAt).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' })) : whenText(when.scheduledAt)
     return [
       event
         ? L(

@@ -1,5 +1,6 @@
 import { CLASSIFIER_JOBS, classifierFor, classifierJobsOf, classifierLabel, classifierList, JEV_CLASSIFIER, jobAbout, jobLabel, jobNotice, PROVIDERS, providerSpec, type ClassifierConfig, type ClassifierJob, type ClassifierProvider } from '../../../shared/classifiers'
-import { L, locale, type Lang } from '../../../shared/lang'
+import { L, lang, locale, type Lang } from '../../../shared/lang'
+import { timeOpts } from '../../../shared/clock'
 import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -1938,7 +1939,7 @@ const STATUS_WORD = (): Record<HistoryStatus, string> => ({
 
 // The times of a folded row: all of them up to four; past that, the first three and the last.
 const timesOf = (items: Approval[]): string => {
-  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))
+  const hm = items.map((a) => new Date(a.decidedAt ?? a.createdAt).toLocaleTimeString(locale(), timeOpts({ hour: '2-digit', minute: '2-digit' })))
   return hm.length > 4 ? `${hm.slice(0, 3).join(', ')} … ${hm.at(-1)}` : hm.join(', ')
 }
 
@@ -2780,6 +2781,15 @@ export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChang
 
 // ---------- Settings ----------
 
+// The two clocks, with the one in force marked: unset follows the language, which is what the app
+// did before there was a choice, so a person who never chose still sees the right one lit.
+const CLOCK_CHOICES = (chosen: '24' | '12' | undefined): { value: '24' | '12'; label: string; hint: string; on: boolean }[] => {
+  const inForce = chosen ?? (lang() === 'en' ? '12' : '24')
+  return [
+    { value: '24', label: '24 h', hint: L('15:05, do jeito que sempre foi.', '24-hour time, e.g. 15:05.'), on: inForce === '24' },
+    { value: '12', label: '12 h', hint: L('3:05 PM, com AM e PM.', '12-hour time, e.g. 3:05 PM.'), on: inForce === '12' }
+  ]
+}
 // Português or English: the app's, and the language agents answer in. Labeled in both, so anyone finds it.
 export function LanguagePicker({ className = '' }: { className?: string }): ReactNode {
   const language = useStore((s) => s.settings.language)
@@ -3752,6 +3762,20 @@ export function SettingsPage(): ReactNode {
                   <span className="hint">{L('O idioma do app pra você. Os agentes respondem no idioma do Tucano.', 'Your app language. Agents reply in the workspace language.')}</span>
                 </div>
               )}
+              <div className="key-row">
+                <Icon name="clock" />
+                <div className="grow">
+                  <strong>{L('Formato da hora', 'Time format')}</strong>
+                  <p className="muted small">{L('Como os horários aparecem na conversa, nas rotinas e no que os agentes leem.', 'How times appear in chats, routines, and agent context.')}</p>
+                </div>
+                <div className="segmented" role="radiogroup" aria-label={L('Formato da hora', 'Time format')}>
+                  {CLOCK_CHOICES(settings.clock).map((c) => (
+                    <button key={c.value} type="button" role="radio" aria-checked={c.on} className={c.on ? 'is-active' : ''} title={c.hint} onClick={() => updateSettings({ clock: c.value })}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {!admin && <AdminOnly>{L('Só um admin muda os modelos, os agentes, o contexto e as outras configurações do Tucano.', 'Only an admin changes the models, the agents, the context and the Tucano’s other settings.')}</AdminOnly>}
             </Card>
           </SectionAnchor>

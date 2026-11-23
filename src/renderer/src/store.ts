@@ -5,6 +5,7 @@ import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { ThoughtCache, type RetainedThought } from './thoughts'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from '../../shared/harness-keys'
 import { L, setLang } from '../../shared/lang'
+import { setClock } from '../../shared/clock'
 import type { Answer } from '../../shared/questions'
 import type { HermesPreview } from '../../shared/hermes-import'
 import type { CoreEvent, Method, Params } from '../../shared/rpc'
@@ -602,6 +603,7 @@ function withMe(s: State): State {
 function withSettings(s: State, settings: Settings): State {
   if (settings.showThinking !== true) thoughts.clear()
   setLang(settings.language)
+  setClock(settings.clock)
   return withMe({ ...s, settings })
 }
 
