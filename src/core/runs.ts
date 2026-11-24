@@ -1744,7 +1744,9 @@ export class Runner {
     const team = this.deps.gateway ? agentsFor(requester, anyoneOf(db.agents(), agent.id)) : [] // a restricted person's agent hands work only to what they see
     const handed = this.handedIn(msg)
     const boss = handed ? db.agent(handed.from) : undefined
-    const delegated: DelegationRef[] = []
+    const delegated: DelegationRef[] = [] // each request this reply made or went on with, once: what the person sees under it
+    let asks = 0 // how many times it asked in this reply, follow-ups too: what the cap counts
+    const followed = new Set<string>() // requests it went on with in this reply: one follow-up each, the rest is noise
     let handedOn = 0 // requests handed on in this reply that weren't asked before on the job: the work moving on
     let answeredUp = false // answered a question its team left on a request: nothing in that for the person
     let computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
@@ -2084,6 +2086,9 @@ ${note}`,
           const parsed = parseQuestions(args)
           if ('error' in parsed) return textResult(parsed.error, true)
           if (question || approval) return textResult(L('Você já está esperando uma resposta nesta mensagem. Encerre agora.', "You're already waiting for an answer in this message. End now."), true)
+          // "Ok", "Certo": a card the person can only stare at. A reply ends by ending, not by asking.
+          const bare = parsed.questions.find((x) => !x.options?.length && !/[?？]/.test(x.question) && x.question.trim().split(/\s+/).length < 3)
+          if (bare) return textResult(L(`"${bare.question.trim()}" não é uma pergunta. ask_user é só pra quando falta uma resposta de alguém pra você seguir. Se não falta nada, não pergunte: encerre sua resposta com uma frase curta.`, `"${bare.question.trim()}" is not a question. ask_user is only for when you need someone's answer to go on. If nothing is missing, do not ask: end your reply with one short sentence.`), true)
           const para = typeof args['para'] === 'string' ? args['para'].trim() : ''
           const target = para ? personNamed(para, others) : requester
           if (!target) return textResult(L(`Não há ninguém chamado "${para}" no Tucano. As pessoas: ${others.map((p) => p.name).join(', ')}.`, `There's no one called "${para}" in this Tucano. The people: ${others.map((p) => p.name).join(', ')}.`), true)
@@ -2134,6 +2139,7 @@ ${note}`,
           // A follow-up on a request that came back here: the same agent, in the same thread.
           const code = typeof args['continuar'] === 'string' && args['continuar'].trim() ? args['continuar'] : undefined
           const before = code ? byCode(db.delegationsFrom(agent.id, conv.id, this.originThread(msg)), code) : undefined
+          if (before && followed.has(before.id)) return textResult(L(`Você já acrescentou algo ao pedido [${codeOf(before)}] nesta resposta, e isso já chegou. Um complemento por pedido: não repita, não confirme e não corrija o complemento. Encerre agora com uma frase curta.`, `You already added something to request [${codeOf(before)}] in this reply, and it has arrived. One follow-up per request: do not repeat, confirm or correct it. End now with one short sentence.`), true)
           if (code && !before) return textResult(L(`Não achei o pedido "${code}" entre os seus daqui. Sem "continuar", é um pedido novo.`, `I couldn't find request "${code}" among yours from here. Without "continuar", it's a new request.`), true)
           // One still under way takes the follow-up in its thread, as one more thing to do in it. Not while it
           // waits on its question (the answer goes with responder_pedido, and the rest with it) or on an approval.
@@ -2147,7 +2153,7 @@ ${note}`,
           if (chain.length >= MAX_CHAIN) return textResult(L(`Este trabalho já passou por ${MAX_CHAIN} pedidos seguidos, o máximo. Faça você, ou diga na resposta o que ficou faltando.`, `This work has already gone through ${MAX_CHAIN} requests in a row, the most allowed. Do it yourself, or say in your reply what is left.`), true)
           if (this.paused) return textResult(L('Os agentes estão pausados: nenhum pedido sai agora.', 'The agents are paused: no request goes out now.'), true)
           if (job.state === 'stopped') return textResult(L('Este trabalho parou nos freios (nada andava): nenhum pedido sai até alguém clicar em Continuar. Encerre dizendo onde parou.', "This work stopped on its brakes (nothing was moving): no request goes out until someone clicks Continue. End saying where it stopped."), true)
-          if (delegated.length >= MAX_DELEGATIONS_PER_REPLY) return textResult(L(`Já são ${MAX_DELEGATIONS_PER_REPLY} pedidos nesta resposta, o máximo. Encerre e espere o que voltar.`, `That's ${MAX_DELEGATIONS_PER_REPLY} requests in this reply, the most allowed. End now and wait for what comes back.`), true)
+          if (asks >= MAX_DELEGATIONS_PER_REPLY) return textResult(L(`Já são ${MAX_DELEGATIONS_PER_REPLY} pedidos nesta resposta, o máximo. Encerre e espere o que voltar.`, `That's ${MAX_DELEGATIONS_PER_REPLY} requests in this reply, the most allowed. End now and wait for what comes back.`), true)
           if (before?.state !== 'open' && myOpen().length >= MAX_OPEN_DELEGATIONS) return textResult(L(`Você já tem ${MAX_OPEN_DELEGATIONS} pedidos em aberto, o máximo. Espere algum voltar, ou cancele um com cancelar_pedido.`, `You already have ${MAX_OPEN_DELEGATIONS} open requests, the most allowed. Wait for one to come back, or cancel one with cancelar_pedido.`), true)
           let d: Delegation
           let channel: Conversation
@@ -2181,7 +2187,10 @@ ${note}`,
             // The parts already under way learn of this one at their next step: no one does another's part.
             for (const x of db.delegationsFrom(agent.id, d.originConversationId, d.originThreadId)) if (x.id !== d.id && x.state === 'open') this.noteFor(x.id, teammateNote('asked', to.name, ask.text))
           }
-          delegated.push(refOf(d))
+          asks++
+          if (before) followed.add(before.id)
+          // A follow-up on a request this same reply made is still that one request: one line, not two.
+          if (!delegated.some((x) => x.id === d.id)) delegated.push(refOf(d))
           msg.run = { ...msg.run!, delegations: [...delegated] }
           // The same request to the same agent coming around again is the work going in circles (src/core/jobs.ts).
           if (countAsk(job, to.id, ask.text) === 1) handedOn++
@@ -2198,8 +2207,8 @@ ${note}`,
           addSteps({ id: randomUUID(), label: before ? L(`Continuou com ${to.name}`, `Went on with ${to.name}`) : L(`Pediu a ${to.name}`, `Asked ${to.name}`), detail: `${placeOf(channel)} · ${snip(ask.text, 120)}`, status: 'done' })
           return textResult(
             L(
-              `Pedido [${codeOf(d)}] entregue a ${to.name} ${inPlace(channel)}${before ? ', na mesma thread' : ''}: ele já começou. A resposta volta pra você e você é chamado. Não espere nem confira: se não há mais nada a pedir, encerre agora, sem texto: o que você escrever depois de pedir fica recolhido. ${settings.workspaceName} vê embaixo da mensagem a quem você pediu e como está, e você fala quando o trabalho voltar.`,
-              `Request [${codeOf(d)}] delivered to ${to.name} ${inPlace(channel)}${before ? ', in the same thread' : ''}: they have started. The answer comes back to you and you are called. Do not wait or check: if there is nothing else to ask, end now, with no text: whatever you write after asking stays folded away. ${settings.workspaceName} sees under the message whom you asked and how it stands, and you speak when the work comes back.`
+              `Pedido [${codeOf(d)}] entregue a ${to.name} ${inPlace(channel)}${before ? ', na mesma thread' : ''}: ele já começou. A resposta volta pra você e você é chamado. Não espere nem confira. Se há outra parte pra outro agente, peça agora; senão, encerre sua resposta agora com uma frase curta dizendo a quem pediu, sem chamar mais nenhuma ferramenta: não confirme nem repita o pedido, e não pergunte nada só pra encerrar. ${settings.workspaceName} vê embaixo da mensagem a quem você pediu e como está (a sua frase fica recolhida), e você fala quando o trabalho voltar.`,
+              `Request [${codeOf(d)}] delivered to ${to.name} ${inPlace(channel)}${before ? ', in the same thread' : ''}: they have started. The answer comes back to you and you are called. Do not wait or check. If another part goes to another agent, ask now; otherwise end your reply now with one short sentence saying whom you asked, calling no other tool: do not confirm or repeat the request, and do not ask anything just to end. ${settings.workspaceName} sees under the message whom you asked and how it stands (your sentence stays folded away), and you speak when the work comes back.`
             )
           )
         }
@@ -2537,7 +2546,8 @@ ${note}`,
           memoryIds.push(r.memory.id)
           msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
           addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
-          return textResult(r.reply)
+          // After asking, there is no reply to go on with: said here, or "go on" reads as one more thing to ask.
+          return textResult(delegated.length ? `${r.reply} ${L('Você já pediu nesta resposta e o trabalho já começou: não há mais o que fazer agora. Encerre sem texto, sem repetir nem confirmar pedido nenhum.', 'You already asked in this reply and the work has started: there is nothing more to do now. End with no text, without repeating or confirming any request.')}` : r.reply)
         }
 
         if (wiki && WIKI_TOOL_NAMES.has(name)) {
@@ -4513,7 +4523,7 @@ ${note}`,
       const requester = behalf ?? requesterOf(db, conv, [], threadId)
       const me = requester.id === db.ownerId() ? undefined : requester.name
       this.followups.reserve(key)
-      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName), reserved: true, ...(behalf ? { for: behalf } : {}), ...(jobId ? { job: jobId } : {}) }), true, agent)
+      this.enqueue(async () => this.execute(agent, conv, { depth: 1, threadId, task: returnTask(returned, open.map((d) => ({ ...place(d), parked: this.onApproval(d) })), me ?? (await this.deps.settings()).workspaceName, agent.kind === 'tuca'), reserved: true, ...(behalf ? { for: behalf } : {}), ...(jobId ? { job: jobId } : {}) }), true, agent)
     }
     if (this.followups.busy(key)) this.tells.set(key, go)
     else go()

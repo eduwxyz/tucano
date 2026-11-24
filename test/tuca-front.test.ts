@@ -13,6 +13,7 @@ import { askTask, teamSection } from '../src/core/delegations'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
+import { Memories } from '../src/core/memory'
 import { Runner } from '../src/core/runs'
 import { tucaAgent, tucaHello, tucaInstructions } from '../src/core/tuca'
 
@@ -25,11 +26,12 @@ let gateway: Gateway
 let turns: Turn[]
 let tuca: Agent
 
-function runner(): Runner {
+function runner(remembers = false): Runner {
   const fake = fakeEngine('claude', { delayMs: 1 })
   const claude: Engine = { id: 'claude', run: (t) => (turns.push(t), fake.run(t)) }
   const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
-  return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway })
+  const workDir = mkdtempSync(join(tmpdir(), 'ad-work-'))
+  return new Runner({ db, engines, settings: async () => settings, emit: () => {}, workDir, gateway, ...(remembers ? { memory: new Memories({ db, engines, settings: async () => settings, emit: () => {}, workDir }) } : {}) })
 }
 
 const by = (id: string, conversationId?: string): Message[] => db.messages().filter((m) => m.author.kind === 'agent' && m.author.id === id && (!conversationId || m.conversationId === conversationId))
@@ -190,5 +192,47 @@ describe('a request through the Tuca', () => {
     const back = turns.filter((t) => t.system.includes('Você é Tuca')).at(-1)!
     expect(back.prompt).toContain('Voltou do que você pediu ao seu time')
     expect(by(tuca.id, 'tuca-dm').at(-1)!.run?.status).toBe('done')
+  })
+
+  it('going on with a request in the reply that made it is still one request: one line under the message, and he is told to stop', async () => {
+    db.saveAgent(agent('nina', { role: 'Conteúdo' }))
+    const r = runner(true)
+    // A model that doesn't end after asking: it saves a memory, then "confirms" the request it has just made.
+    await r.send('tuca-dm', 'delegue a @nina: demore 1 s e escreva o aviso do feriado (e confirme)')
+    await r.idle()
+    await until(() => by(tuca.id, 'tuca-dm').some((m) => !!m.run?.delegations?.length && m.run.status === 'done'))
+
+    const asking = by(tuca.id, 'tuca-dm').find((m) => !!m.run?.delegations?.length)!
+    // The request and one follow-up went out, to the same request...
+    expect(asking.run!.steps.map((x) => x.label).filter((l) => /Nina/.test(l))).toEqual(['Pediu a Nina', 'Continuou com Nina'])
+    // ...and the person sees it once.
+    expect(asking.run!.delegations).toHaveLength(1)
+    // What the memory tool answered after the request: nothing to go on with, and no repeating it.
+    expect(asking.text).toContain('Guardado.')
+    expect(asking.text).toContain('Encerre sem texto, sem repetir nem confirmar pedido nenhum.')
+    // A second follow-up on the same request, in the same reply, does not go out: Nina got two messages, not three.
+    expect(asking.text).toContain('Um complemento por pedido')
+    expect(by(tuca.id, dmOf('nina')).map((m) => m.text.split('\n').at(-1))).toEqual(['demore 1 s e escreva o aviso do feriado (e confirme)', 'Só confirmando: siga o pedido anterior.'])
+    // And "Ok" is not a question: no card is left waiting on the person.
+    expect(asking.text).toContain('"Ok" não é uma pergunta.')
+    expect(asking.run).toMatchObject({ status: 'done' })
+    expect(asking.run!.questions ?? []).toHaveLength(0)
+    expect(asking.run!.question).toBeUndefined()
+  })
+
+  it('he is told to end on a short sentence after asking, and what a part gets of the whole request says it is only context', async () => {
+    db.saveAgent(agent('nina', { role: 'Conteúdo' }))
+    const r = runner()
+    await r.send('tuca-dm', 'delegue a @nina: escreva o aviso do sábado')
+    await r.idle()
+    await until(() => by(tuca.id, 'tuca-dm').some((m) => m.run?.status === 'done' && m.text.trim().length > 0))
+    const hers = turns.find((t) => t.system.includes('Você é Nina'))!
+    expect(hers.prompt).toContain('O que Edu pediu no começo:\n')
+    expect(hers.prompt).toContain('Isto é o pedido inteiro, pra você ter o contexto. A sua parte é só o que a mensagem acima pede: o que ela não pede pode estar com outro agente, não faça.')
+    // What comes back to him: he delivers it whole, in his own reply.
+    const back = turns.filter((t) => t.system.includes('Você é Tuca')).at(-1)!
+    expect(back.prompt).toContain('Entregue a Edu. O que Edu pediu pra ter em mãos (um texto, um número, uma lista) vai inteiro na sua resposta')
+    expect(back.prompt).toContain('nunca troque a entrega por uma pergunta')
+    expect(back.prompt).not.toContain('Não copie as respostas inteiras')
   })
 })
