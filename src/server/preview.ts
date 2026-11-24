@@ -30,6 +30,16 @@ export function withoutOurCookies(cookie: string | undefined): string | undefine
   return kept.length ? kept.join('; ') : undefined
 }
 
+// What the agent's page may set: its own cookies, on its own address. Not ours by name (it would sign
+// the person out, or in as someone else), and none with a Domain, which would reach Tucano's address too.
+export function theirCookies(set: string | string[] | undefined): string[] | undefined {
+  const kept = (Array.isArray(set) ? set : set ? [set] : []).filter((c) => {
+    const name = c.split('=')[0]!.trim().toLowerCase()
+    return name !== 'tucano' && name !== 'tucano_preview' && !/;\s*domain\s*=/i.test(c)
+  })
+  return kept.length ? kept : undefined
+}
+
 // What the agent's page gets of a request: the host it expects (a dev server refuses others) and the
 // person's cookies, without ours. A request that only had ours has none left, and no header for it.
 function forwarded(req: IncomingMessage, port: number, extra: Record<string, string> = {}): Record<string, string | string[]> {
@@ -119,7 +129,9 @@ export class Preview {
       const up = request(
         { host: '127.0.0.1', port, method: req.method, path: req.url, headers: forwarded(req, port, { 'x-forwarded-host': req.headers.host ?? '', 'x-forwarded-proto': 'https' }) },
         (r) => {
-          res.writeHead(r.statusCode ?? 502, r.headers)
+          const { 'set-cookie': set, ...headers } = r.headers
+          const kept = theirCookies(set)
+          res.writeHead(r.statusCode ?? 502, kept ? { ...headers, 'set-cookie': kept } : headers)
           r.pipe(res)
         }
       )
