@@ -300,6 +300,13 @@ export function MeAvatar({ initials, size = 32 }: { initials: string; size?: num
   )
 }
 
+// The time today; the date and the time before that.
+export const shortTime = (at: number): string => {
+  const d = new Date(at)
+  const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })} ${hm}`
+}
+
 export const usd = (v: number): string =>
   v < 0.01 && v > 0 ? `US$ ${v.toLocaleString(locale(), { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : `US$ ${v.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -320,6 +327,9 @@ export function duration(ms: number): string {
   const s = Math.round(ms / 1000)
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)} min ${s % 60}s`
 }
+export const durationOrDash = (ms: number | undefined): string => (ms === undefined ? '—' : duration(ms))
+// A share of a whole, to one decimal.
+export const share = (x: number): string => `${(x * 100).toLocaleString(locale(), { maximumFractionDigits: 1 })}%`
 
 // Monday 00:00 of the week `t` is in, and the Monday `n` weeks away.
 export const startOfWeek = (t: number): number => {

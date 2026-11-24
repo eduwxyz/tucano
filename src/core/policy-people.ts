@@ -287,6 +287,8 @@ export const NEEDS: Record<Method, Need> = {
   openBackups: 'admin',
   report: 'admin',
   usage: 'admin',
+  executions: 'admin',
+  executionSteps: 'admin',
   // people
   createInvite: 'admin',
   revokeInvite: 'admin',

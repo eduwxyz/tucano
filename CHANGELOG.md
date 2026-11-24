@@ -5,6 +5,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Novo:** em **Uso e limites**, **Execuções** lista as respostas dos agentes com tempo, ferramentas, tokens e status, além de p50, p95 e taxa de erro, com filtros de período, status e agente. Abra uma linha pra ver onde foi o tempo. No **Boletim**, **Ferramentas** mostra as mais lentas, com usos e erros. Só admins veem, e só as respostas que podem ler.
 > - **Novo:** uma resposta que você parou ganha **Tentar com instruções**, ao lado de **Tentar de novo**: escreva o que deve mudar, e a resposta é refeita no mesmo lugar seguindo essa direção.
 > - **Novo:** quando o navegador de um agente cai numa **barreira** (verificação de robô, acesso recusado, login, aviso de cookies, página que não abriu ou vazia), o agente recebe uma linha dizendo o que é e o que fazer, em vez de clicar de novo. Uma página normal que só fala dessas coisas não é marcada.
 > - **Novo:** quando um site só deixa passar um navegador de verdade, o agente reabre a página **uma vez por site** numa janela real do Chrome, fora da tela e no mesmo perfil. **Assumir** traz essa mesma janela, sem recarregar a página. No Mac isso fica desligado por enquanto, porque a janela vem para a frente e tira o foco do que você está fazendo: lá o agente só avisa do bloqueio.
@@ -19,9 +20,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo enquanto a página rola.
 > - **Mudou:** **Continuar**, **Tentar de novo** e **Tentar com instruções** viraram botões discretos na linha de baixo da resposta e aparecem ao passar o mouse. Em telas de toque ficam sempre visíveis.
 > - **Corrigido:** **Enviar feedback** e **Conectores** agora têm a mesma altura de **Cofre** no pé da barra lateral.
+> - **Corrigido:** no **Boletim**, os problemas de cada agente só mostram respostas que você pode ler. Antes, um admin via o texto de erro de DMs de outras pessoas.
 
 ### Added
 
+- **Executions: find what was slow or failed, and why.** **Usage and limits** now lists the agents' finished replies with time, tools, tokens and status, over the last 24 hours, 7 days or 30 days, with p50, p95 and error rate for what's selected. Filter by status or agent, and open a row to see each tool call with its time and error. It replaces the recent receipts. The **Report** gains **Tools**, slowest first, with uses, p95 and error rate, and each agent links to its executions. Admins only, and only replies they can read: someone else's DM stays out of the list and the numbers. Tool names are recorded from this version on, so older replies don't count in **Tools**.
 - **Try a stopped reply again in a direction you write.** A stopped reply had one way back, **Try again**, which repeats the ask. Now **Try with instructions** sits next to it: it opens a field under the buttons, and what you write goes into the new attempt's prompt after what was asked, as a direction the agent follows even where it changes course. The reply is tried again in the same row, with no second reply and no message of its own in the conversation. Thanks to Apostol Apostolov. (#321)
 - **The browser names the wall it landed on.** A Cloudflare check answers 200 with a title and a few words, so an agent read it as a page that had changed and clicked again. After each browser action, the agent now gets one line when the page is a bot check, a refusal, a sign-in, a cookie wall, a failed load or an empty page, with the move that helps. A page that only mentions these things stays silent, and the line never quotes the page's own text. Thanks to Apostol Apostolov. (#620)
 - **A real window, for a site that only lets a real browser through.** When a page comes back as a bot check or a refusal, that lane reopens in a real Chrome window on the same page and profile, once per site, and the page is read again. The window is sent off the screen. On a Mac this stays off for now, because Chrome comes to the front and takes the focus from what you're doing, and macOS won't keep the window off the screen: there the agent gets the note about the wall instead. If the window doesn't get past the wall, the note says so instead of advising another try. Taking the lane over brings that same window into view without reloading it, so a half-solved challenge stays as it was. Thanks to Apostol Apostolov. (#623)
@@ -43,6 +46,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **The Report's problems stay within what you can read.** Each agent's problems listed failed and cut replies from every conversation, so an admin saw the error text of someone else's DM. They now hold only replies the viewer can read, by the same rule as the conversations.
 - **Settings tabs and subject jumps stay in sight while scrolling.** The group tabs stayed at the top, but the subject links scrolled away. Both rows now stay pinned, so moving between sections works from deep in the page. Thanks to Apostol Apostolov. (#643)
 - **The sidebar's foot rows are one height.** **Send feedback** and **Connectors** sat at 20 px next to **Vault** at 30 px. All three now line up. Thanks to Apostol Apostolov. (#639)
 

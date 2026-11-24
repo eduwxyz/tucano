@@ -1489,7 +1489,9 @@ export class Runner {
     const autoContinued = opts.autoContinued ?? opts.existing?.run?.autoContinued
     // How many times it already tried again by itself, after something that passes (waitToRetry).
     const retries = opts.existing?.run?.retries
-    const again = { ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}), ...(autoContinued ? { autoContinued } : {}), ...(retries ? { retries } : {}) }
+    // Tried again, the message keeps its first `at`: how long this attempt took is counted from here.
+    const attempt = opts.existing ? { startedAt: started } : {}
+    const again = { ...attempt, ...(task ? { task } : {}), ...(handedId ? { handed: handedId } : {}), ...(autoContinued ? { autoContinued } : {}), ...(retries ? { retries } : {}) }
     const replyTo = opts.trigger ?? opts.replyTo ?? opts.existing?.run?.replyTo
     // The job this reply is part of: handed along (a hand-off, a request, what came back), kept on a retry, or
     // set off by the message it answers. One with none starts its own (a routine's run, an approval's outcome).
@@ -1524,7 +1526,8 @@ export class Runner {
       const note = thought ? said() : undefined
       // A steer's row is the person's, not the reply's thinking: it keeps its own label and only the
       // reply's work closes it (runs.ts, `steerIn`).
-      return msg.run!.steps.map((s) => (s.status === 'running' && s.kind !== 'steer' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
+      // A tool call the reply ended under keeps no time: it never came back.
+      return msg.run!.steps.map((s) => (s.status === 'running' && s.kind !== 'steer' && (!thought || thoughts.has(s.id)) ? { ...s, status, label, ...(s.tool ? {} : { ms: Date.now() - stepStarted }), ...(note ? { note } : {}) } : s))
     }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
@@ -2164,12 +2167,13 @@ ${note}`,
           const query = typeof args['busca'] === 'string' ? args['busca'].trim() : ''
           if (!query) return textResult(L('Diga o que buscar em "busca".', 'Say what to search for in "busca".'), true)
           const count = typeof args['quantos'] === 'number' ? args['quantos'] : 6
+          const t0 = Date.now()
           try {
             const found = await (this.deps.web?.search ?? ((q: string, n: number) => searchWeb(q, n)))(query, count)
-            addSteps({ id: randomUUID(), label: L('Buscou na web', 'Searched the web'), detail: `${query} · ${found.length}`, status: 'done' })
+            addSteps({ id: randomUUID(), label: L('Buscou na web', 'Searched the web'), detail: `${query} · ${found.length}`, tool: name, status: 'done', ms: Date.now() - t0 })
             return textResult(formatResults(query, found))
           } catch (e) {
-            addSteps({ id: randomUUID(), label: L('Buscou na web', 'Searched the web'), detail: query, status: 'error' })
+            addSteps({ id: randomUUID(), label: L('Buscou na web', 'Searched the web'), detail: query, tool: name, status: 'error', ms: Date.now() - t0 })
             return textResult(L(`A busca falhou: ${e instanceof Error ? e.message : String(e)}`, `The search failed: ${e instanceof Error ? e.message : String(e)}`), true)
           }
         }
@@ -2177,12 +2181,13 @@ ${note}`,
         if (name === LER_PAGINA.name && ownWeb) {
           const url = typeof args['url'] === 'string' ? args['url'].trim() : ''
           if (!url) return textResult(L('Diga o endereço em "url".', 'Say the address in "url".'), true)
+          const t0 = Date.now()
           try {
             const page = await (this.deps.web?.read ?? readPage)(url)
-            addSteps({ id: randomUUID(), label: L('Leu a página', 'Read the page'), detail: url, status: 'done' })
+            addSteps({ id: randomUUID(), label: L('Leu a página', 'Read the page'), detail: url, tool: name, status: 'done', ms: Date.now() - t0 })
             return textResult(page)
           } catch (e) {
-            addSteps({ id: randomUUID(), label: L('Leu a página', 'Read the page'), detail: url, status: 'error' })
+            addSteps({ id: randomUUID(), label: L('Leu a página', 'Read the page'), detail: url, tool: name, status: 'error', ms: Date.now() - t0 })
             return textResult(L(`Não consegui ler a página: ${e instanceof Error ? e.message : String(e)}`, `I couldn't read the page: ${e instanceof Error ? e.message : String(e)}`), true)
           }
         }
@@ -2551,8 +2556,8 @@ ${note}`,
           const command = name === 'bash' && typeof args['command'] === 'string' ? commandStep(args['command']) : undefined
           const used = picked.keys.length ? { keys: picked.keys.map((k) => k.name) } : {}
           const step: Step = command
-            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, status: 'running', ...used }
-            : { id: randomUUID(), label, detail: maskSecrets(detail), status: 'running', ...used }
+            ? { id: randomUUID(), label: command.sql ? L('Rodou SQL', 'Ran SQL') : label, detail: command.detail, input: command.input, tool: name, status: 'running', ...used }
+            : { id: randomUUID(), label, detail: maskSecrets(detail), tool: name, status: 'running', ...used }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
@@ -2591,7 +2596,7 @@ ${note}`,
           if (!current?.browser) return textResult(L('Seu navegador foi desligado.', 'Your browser was turned off.'), true)
           const t0 = Date.now()
           const { label, detail } = browserStep(name, args)
-          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          const step: Step = { id: randomUUID(), label, detail, tool: name, status: 'running' }
           flush()
           msg.run = { ...msg.run!, browser: true, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
@@ -2643,7 +2648,7 @@ ${note}`,
               ...msg.run!,
               approvalId: approval.id,
               artifactIds: artifactIds.length ? [...artifactIds] : undefined,
-              steps: andThink(close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail }))
+              steps: andThink(close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail, tool: undefined }))
             }
             stepStarted = Date.now()
             save()
@@ -2671,7 +2676,7 @@ ${note}`,
           if (!current?.apps?.length) return textResult(L('Seus apps foram desligados.', 'Your apps were turned off.'), true)
           const t0 = Date.now()
           const { label, detail } = appStep(name, args)
-          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          const step: Step = { id: randomUUID(), label, detail, tool: name, status: 'running' }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', THOUGHT()), step] }
           save()
@@ -2723,7 +2728,7 @@ ${note}`,
             }
             db.createApproval(approval)
             emit({ type: 'approval', approval })
-            msg.run = { ...msg.run!, approvalId: approval.id, steps: andThink(close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail })) }
+            msg.run = { ...msg.run!, approvalId: approval.id, steps: andThink(close('done', { label: L('Pediu aprovação', 'Asked for approval'), detail: out.approval.detail, tool: undefined })) }
             stepStarted = Date.now()
             save()
             notifyApproval(L(`${agent.name} pede aprovação`, `${agent.name} asks for approval`), `${out.approval.detail}: ${out.approval.why}`)
@@ -2901,7 +2906,7 @@ ${note}`,
         }
 
         const t0 = Date.now()
-        const step: Step = { id: randomUUID(), label: cls === 'read' ? L('Consultou', 'Looked up') : judgedNow.why === 'always' ? L('Executou (sempre permitido)', 'Ran (always allowed)') : cls === 'sensitive' || judgedNow.why === 'rule' ? L('Executou (sem pedir: autonomia)', 'Ran (no ask: autonomy)') : L('Executou', 'Ran'), detail, status: 'running' }
+        const step: Step = { id: randomUUID(), label: cls === 'read' ? L('Consultou', 'Looked up') : judgedNow.why === 'always' ? L('Executou (sempre permitido)', 'Ran (always allowed)') : cls === 'sensitive' || judgedNow.why === 'rule' ? L('Executou (sem pedir: autonomia)', 'Ran (no ask: autonomy)') : L('Executou', 'Ran'), detail, tool: current.name, status: 'running' }
         // What it asked (the SQL, the path) shows while it runs; what came back, when it's done.
         const input = keyArg(callArgs)
         if (input) step.input = input
@@ -3271,7 +3276,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
+    const base = { endedAt, ...attempt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -3679,14 +3684,16 @@ ${note}`,
     const msg = live ?? db.message(ap.messageId)
     if (msg?.run) {
       const label = decision === 'approved' ? L('Aprovado', 'Approved') : decision === 'refused' ? L('Recusado', 'Refused') : L('Expirou', 'Expired')
+      // The call the app made once approved is the tool's use; a refusal or an expiry ran nothing.
+      const step: Step = { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error', ...(attempted && !noCall && ap.tool !== NODE_APPROVED ? { tool: ap.tool } : {}) }
       if (live) {
-        live.run!.steps.push({ id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' })
+        live.run!.steps.push(step)
         this.update(live, {})
       } else this.update(msg, {
         run: {
           ...msg.run,
           status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
-          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && ok ? 'done' : 'error' }]
+          steps: [...msg.run.steps, step]
         }
       })
     }

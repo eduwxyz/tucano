@@ -7290,7 +7290,7 @@ kbd {
 .usage-receipt {
   width: 100%;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 110px 90px 64px 64px 84px;
+  grid-template-columns: 20px minmax(0, 1fr) 96px 84px 76px 44px 60px 104px 84px;
   align-items: center;
   gap: 12px;
   padding: 9px 12px;
@@ -7305,7 +7305,8 @@ kbd {
 .usage-receipt:hover {
   background: var(--hover);
 }
-.usage-receipt .num {
+.usage-receipt .num,
+.exec-step .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -7323,6 +7324,152 @@ kbd {
 .usage-more {
   margin-top: 8px;
 }
+.usage-jump {
+  margin-bottom: 12px;
+}
+
+/* Execuções, in Uso e limites */
+#executions {
+  scroll-margin-top: 16px;
+}
+.exec-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 12px;
+}
+.exec-agent {
+  min-width: 170px;
+  max-width: 240px;
+}
+.exec-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin-bottom: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.exec-stat strong {
+  color: var(--text);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.exec-status {
+  font-size: 12px;
+}
+.exec-status.is-ok {
+  color: var(--ok);
+}
+.exec-status.is-warn {
+  color: var(--warn);
+}
+.exec-status.is-danger {
+  color: var(--danger);
+}
+.exec-steps {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin: 2px 12px 10px 44px;
+  padding: 8px 0 2px 12px;
+  border-left: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.exec-steps > .btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+.exec-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(60px, 180px) 76px;
+  align-items: center;
+  gap: 2px 12px;
+}
+.exec-step__bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.exec-step__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.exec-step.is-error .exec-step__bar i {
+  background: var(--danger);
+}
+.exec-step__error {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* The Boletim's tools */
+.rep-tool {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 64px 44px 56px;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.rep-tool + .rep-tool {
+  border-top: 1px solid var(--border);
+}
+.rep-tool--head {
+  padding: 0 0 6px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.rep-tool .mono {
+  font-size: 12.5px;
+}
+.rep-tool .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rep-tool__p95 {
+  font-weight: 550;
+}
+.rep-tool__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.rep-tool__bar i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.rep-tool .is-danger {
+  color: var(--danger);
+  font-weight: 550;
+}
+@media (max-width: 640px) {
+  .rep-tool {
+    grid-template-columns: minmax(0, 1fr) 56px 36px 48px;
+    gap: 10px;
+  }
+  .rep-tool__bar,
+  .rep-tool--head > :nth-child(2) {
+    display: none;
+  }
+}
+.text-btn.rep-line__runs {
+  padding: 2px 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
 
 @media (max-width: 900px) {
   .usage-agent {
@@ -7335,12 +7482,24 @@ kbd {
   .usage-agent > .icon {
     display: none;
   }
+  /* A phone keeps who, the time and how it ended. */
   .usage-receipt {
-    grid-template-columns: 20px minmax(0, 1fr) 64px 84px;
+    grid-template-columns: 20px minmax(0, 1fr) 76px 72px;
   }
   .usage-receipt > :nth-child(3),
   .usage-receipt > :nth-child(4),
-  .usage-receipt > :nth-child(5) {
+  .usage-receipt > :nth-child(6),
+  .usage-receipt > :nth-child(7),
+  .usage-receipt > :nth-child(9) {
+    display: none;
+  }
+  .exec-steps {
+    margin-left: 12px;
+  }
+  .exec-step {
+    grid-template-columns: minmax(0, 1fr) 76px;
+  }
+  .exec-step__bar {
     display: none;
   }
 }
