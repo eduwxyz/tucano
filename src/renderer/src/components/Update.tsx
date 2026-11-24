@@ -1,4 +1,4 @@
-// A newer Tucano: a note at the foot of the sidebar once it's downloaded, the state in
+// A newer Tucano: the Tuca says so from his row in the sidebar once it's downloaded, the state in
 // Settings, and what's new once it's running. The main process looks and downloads (src/main/updates.ts).
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
@@ -8,7 +8,7 @@ import { newsPages, newsSince, type NewsPage } from '../../../shared/release-not
 import type { UpdateState } from '../../../shared/types'
 import { updateSettings, useStore, workingAgents } from '../store'
 import { Modal } from './Modal'
-import { ago, Icon } from './ui'
+import { ago, Icon, TucaMark } from './ui'
 
 const RELEASES = 'https://github.com/eduwxyz/tucano/releases'
 
@@ -45,25 +45,83 @@ const useWorking = (): number => useStore((s) => workingAgents(s).size)
 
 const workingNote = (n: number): string => (n === 1 ? L('1 agente trabalhando: reinicie quando ele terminar.', '1 agent working: restart once it’s done.') : L(`${n} agentes trabalhando: reinicie quando terminarem.`, `${n} agents working: restart once they’re done.`))
 
-export function UpdateNote(): ReactNode {
+// His words come out a letter at a time, once per text, as if he were typing them; with reduced motion,
+// all at once. `typing`: still going.
+function useTyped(text: string, ms = 30): { shown: string; typing: boolean } {
+  const still = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const [n, setN] = useState(still ? text.length : 0)
+  useEffect(() => {
+    if (still) return setN(text.length)
+    setN(0)
+    const t = setInterval(() => setN((k) => (k >= text.length ? (clearInterval(t), k) : k + 1)), ms)
+    return () => clearInterval(t)
+  }, [text, ms, still])
+  return { shown: text.slice(0, n), typing: n < text.length }
+}
+
+// Whether the Tuca is typing the note right now: his row in the sidebar (Sidebar.tsx) moves his beak
+// meanwhile. One Tuca: the note speaks from his row, it doesn't draw another.
+let talking = false
+const talkers = new Set<() => void>()
+const setTalking = (on: boolean): void => {
+  if (talking === on) return
+  talking = on
+  talkers.forEach((l) => l())
+}
+export function useTucaCall(): { calling: boolean; talking: boolean } {
+  const calling = useUpdate()?.status === 'ready'
+  const now = useSyncExternalStore(
+    (l) => {
+      talkers.add(l)
+      return () => talkers.delete(l)
+    },
+    () => talking
+  )
+  return { calling, talking: calling && now }
+}
+
+// The Tuca telling it, in a speech bubble under his row in the sidebar, its tail toward him: what's
+// ready, typed out, then what to do. The bubble takes its full size from the start (the whole text
+// under the typed one, unseen), so the sidebar doesn't move while he types. `alone`: his row is out of
+// the sidebar, so the note brings him.
+export function UpdateNote({ alone }: { alone?: boolean }): ReactNode {
   const u = useUpdate()
   const working = useWorking()
+  const said = u?.status === 'ready' ? L(`Chegou o Tucano ${u.next}! Quer reiniciar pra usar?`, `Tucano ${u.next} is here! Restart to use it?`) : ''
+  const { shown, typing } = useTyped(said)
+  useEffect(() => {
+    setTalking(typing && !!said)
+    return () => setTalking(false)
+  }, [typing, said])
   if (u?.status !== 'ready') return null
   return (
-    <div className="update-note">
-      <div className="update-note__text">
-        <strong>{L(`Tucano ${u.next} pronto`, `Tucano ${u.next} is ready`)}</strong>
-        {working > 0 ? (
-          <span className="muted small">{workingNote(working)}</span>
-        ) : (
-          <a href={notes(u.next)} target="_blank" rel="noreferrer">
-            {L('O que mudou', 'Changed')}
-          </a>
-        )}
+    <div className={`update-note ${alone ? 'update-note--alone' : ''}`} role="status">
+      {alone && <TucaMark size={24} busy={typing} />}
+      <div className="update-note__bubble">
+        <p className="update-note__said">
+          <span className="sr-only">{said}</span>
+          <span className="update-note__ghost" aria-hidden="true">
+            {said}
+          </span>
+          <span aria-hidden="true">
+            {shown}
+            {typing && <span className="update-note__caret" />}
+          </span>
+        </p>
+        <div className={`update-note__after ${typing ? 'is-waiting' : ''}`}>
+          {working > 0 && <span className="muted small">{workingNote(working)}</span>}
+          <div className="update-note__acts">
+            {working === 0 && (
+              <a href={notes(u.next)} target="_blank" rel="noreferrer">
+                {L('O que mudou', 'Changed')}
+              </a>
+            )}
+            <button className={`btn btn--sm ${working > 0 ? '' : 'btn--primary'}`} tabIndex={typing ? -1 : 0} onClick={() => window.tucano.installUpdate()}>
+              {working > 0 ? L('Reiniciar mesmo assim', 'Restart anyway') : L('Reiniciar', 'Restart')}
+            </button>
+          </div>
+        </div>
       </div>
-      <button className={`btn btn--sm ${working > 0 ? '' : 'btn--primary'}`} onClick={() => window.tucano.installUpdate()}>
-        {working > 0 ? L('Reiniciar mesmo assim', 'Restart anyway') : L('Reiniciar', 'Restart')}
-      </button>
     </div>
   )
 }

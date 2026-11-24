@@ -45,7 +45,7 @@ import { SurveyLine } from './Feedback'
 import { ContextMenu, confirmDialog, type MenuItem, type MenuState } from './Dialogs'
 import { FoldToggle, useFold } from './Fold'
 import { MissionsCard, useSidebarParts } from './Missions'
-import { UpdateNote } from './Update'
+import { UpdateNote, useTucaCall } from './Update'
 import { SidebarFoot, WorkspaceMenu } from './Workspaces'
 import { Glyph, hubOf, hubTab, hubTitle, openHub, useHubTabs, type HubId } from './Hubs'
 import { AgentAvatar, Icon, MeAvatar, TucaMark, useJustEnded, type IconName } from './ui'
@@ -73,10 +73,15 @@ function NavItem({ view, icon, label, badge, fresh }: { view: View; icon: IconNa
 }
 
 // The Tuca is a screen, not one of the agents: here at the top, and behind the "+" for a new agent.
+// A new version ready (Update.tsx): he calls for attention, a ring going out from him and a little
+// shake now and then, and moves his beak while he types the note under his row.
 function TucaItem(): ReactNode {
+  const { calling, talking } = useTucaCall()
   return (
-    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Pergunte ao Tuca como algo funciona, por que algo falhou, ou monte um agente com ele', 'Ask Tuca how something works or why something failed, or build an agent with him')}>
-      <TucaMark size={18} />
+    <button className={`nav-item ${calling ? 'is-calling' : ''}`} data-coach="tuca" onClick={openTuca} title={L('Pergunte ao Tuca como algo funciona, por que algo falhou, ou monte um agente com ele', 'Ask Tuca how something works or why something failed, or build an agent with him')}>
+      <span className="tuca-call">
+        <TucaMark size={18} busy={talking} />
+      </span>
       <span className="nav-item__label">Tuca</span>
       <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
     </button>
@@ -514,6 +519,8 @@ export function Sidebar(): ReactNode {
             <TucaItem />
           </TopRow>
         )}
+        {/* A new version ready: the Tuca says so, right under his row (or, his row out, at the top). */}
+        <UpdateNote alone={!shows('tuca')} />
         {navShown.map((item) => (
           <TopRow key={item} item={item} back={back(item)} onMenu={menuAt} sort={navSort}>
             {item === 'approvals' ? (
@@ -640,7 +647,6 @@ export function Sidebar(): ReactNode {
       <ContextMenu menu={menu} onClose={closeMenu} />
       <SurveyLine />
       <div className="sidebar__foot">
-        <UpdateNote />
         <SidebarFoot />
       </div>
     </aside>
