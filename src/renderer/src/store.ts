@@ -77,7 +77,7 @@ export * from '../../shared/types'
 
 export type View =
   | { kind: 'conversation'; id: string; message?: string } // `message`: scroll to it and flash it
-  | { kind: 'agent'; id: string }
+  | { kind: 'agent'; id: string; full?: boolean } // full: in the simple view, the agent's whole page instead of the short one
   | { kind: 'new-agent'; draft?: Agent; fromMessage?: string } // a draft from a Tuca card, to edit before creating
   | { kind: 'tuca'; from?: View; making?: boolean } // the Tuca's screen; closing goes back to `from`. making: opened to make an agent, so the proposal is beside the chat
   | { kind: 'approvals' }
@@ -93,6 +93,11 @@ export type View =
   | { kind: 'board' } // every agent's work as cards (components/Board.tsx)
   | { kind: 'settings' }
   | { kind: 'missions' } // what to try next, each bringing a part of the sidebar on a new install
+  // The simple view's own screens (components/Simple.tsx): where a request starts, the team, and my requests.
+  | { kind: 'home'; draft?: string } // draft: what the field starts with ("Pedir algo pra Duda")
+  | { kind: 'team' }
+  | { kind: 'requests' }
+  | { kind: 'simple-settings' }
 
 export interface State {
   webhookPort: number
@@ -758,7 +763,7 @@ export async function start(): Promise<void> {
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
     const there = web ? stillThere(hashToView(location.hash), snap) : undefined
-    const view = s.view ?? there ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
+    const view = s.view ?? there ?? (snap.settings.uiMode === 'simple' ? { kind: 'home' as const } : first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
     return {
       ...withSettings({ ...s, you: snap.you, people: snap.people }, snap.settings),
       ready: true,
@@ -1005,6 +1010,23 @@ export async function createChannel(name: string, threads?: boolean): Promise<vo
 export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: string; conversationId: string }> => call('ensureTuca', { modelId, fresh })
 // Takes back something I let the Tuca do himself: he asks again the next time.
 export const removeTucaLeave = (id: string): Promise<void> => call('removeTucaLeave', { id })
+export const setConversationTitle = (id: string, title: string): Promise<void> => call('setConversationTitle', { id, title })
+
+// The simple view and the whole app are the same Tucano, seen two ways: switching keeps the person where
+// they were when the other one has that screen, and otherwise opens where each one starts.
+export const SIMPLE_VIEWS: readonly View['kind'][] = ['home', 'team', 'requests', 'simple-settings']
+export function setUiMode(mode: 'simple' | 'full'): void {
+  const at = state.view
+  updateSettings({ uiMode: mode })
+  if (mode === 'simple') {
+    const withTuca = at?.kind === 'conversation' && agentById(state, state.conversations.find((c) => c.id === at.id)?.name ?? '')?.kind === 'tuca'
+    if (!withTuca && at?.kind !== 'approvals') navigate({ kind: 'home' })
+    return
+  }
+  if (!at || !SIMPLE_VIEWS.includes(at.kind)) return
+  const channel = state.conversations.find((c) => c.kind === 'channel')
+  navigate(at.kind === 'simple-settings' ? { kind: 'settings' } : at.kind === 'team' ? { kind: 'org' } : channel ? { kind: 'conversation', id: channel.id } : { kind: 'approvals' })
+}
 // The agent a Tuca card proposed, created with a DM of its own.
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.

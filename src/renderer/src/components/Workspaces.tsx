@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import { sortWorkspaces, workspaceLabel, type WorkspaceList } from '../../../shared/workspaces'
 import type { DesktopPlaces } from '../../../shared/servers'
-import { amAdmin, amOwner, getState, navigate, openDialog, shortcut, teamMode, updateSettings, useStore, windowless, type State } from '../store'
+import { amAdmin, amOwner, getState, navigate, openDialog, setUiMode, shortcut, teamMode, updateSettings, useStore, windowless, type State } from '../store'
 import { Icon } from './ui'
 import { useServers } from './Servers'
 import { useSidebarParts } from './Missions'
@@ -233,6 +233,11 @@ export function SidebarFoot(): ReactNode {
   const onFeedback = useStore((s) => s.dialog?.kind === 'feedback')
   return (
     <div className="sidebar__foot-rows">
+      {/* The same Tucano with less on screen: the person talks to the Tuca and sees what waits on them, the team and their requests. */}
+      <button className="sidebar__tool" title={L('Menos coisa na tela: você fala com o Tuca e vê só o que espera você, o time e as suas conversas. Dá pra voltar quando quiser.', 'Less on screen: you talk to Tuca and see only what waits on you, the team and your requests. You can come back whenever you want.')} onClick={() => setUiMode('simple')}>
+        <Icon name="shrink" size={15} />
+        <span className="grow">{L('Modo simples', 'Simple view')}</span>
+      </button>
       {/* Always in sight, for everyone: the way to tell us something. */}
       <button className={`sidebar__tool ${onFeedback ? 'is-active' : ''}`} onClick={() => void openFeedback()}>
         <Icon name="ask" size={15} />

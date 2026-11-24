@@ -561,8 +561,10 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const [showSaid, setShowSaid] = useState(false)
   const [showAsk, setShowAsk] = useState(false)
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
+  // In the simple view, a reply that only passed the work on says so in a line, over the colleagues it went to.
   // Each request once: a reply saved before follow-ups stopped being listed again may hold one twice.
   const handedTo = (message.run?.delegations ?? []).filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i)
+  const passedOn = useStore((s) => s.settings.uiMode === 'simple' && !!message.run?.delegations?.length && s.agents.find((a) => message.author.kind === 'agent' && a.id === message.author.id)?.kind === 'tuca')
   const hasFooter = !!message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)
   const resumable = !!message.run && (message.run.status === 'paused' || (CUT.includes(message.run.status) && canContinue(message.run)))
   const retryable = !!message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit))))
@@ -686,6 +688,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
+        {passedOn && <p className="simple-passed">{handedTo.length > 1 ? L('Passei cada parte pra quem faz:', 'I passed each part to whoever does it:') : L('Passei pra quem faz:', 'I passed it to whoever does it:')}</p>}
         {handedTo.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
         {message.run?.delegation && message.conversationId !== message.run.delegation.conversationId && <DelegationChip at={message.run.delegation} from={agent?.id} />}
         {message.run?.delegation && message.id === message.run.delegation.rootId && <RequestNote at={message.run.delegation} from={agent?.name} />}
@@ -1483,6 +1486,7 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
         ? asked ? L(`Pediu para ${sectorName(to, 'Setor de')}`, `Asked ${sectorName(to, 'Sector of')}`) : L(`Do pedido para ${sectorName(to, 'Setor de')}`, `From the request to ${sectorName(to, 'Sector of')}`)
         : undefined
   const channel = useStore((s) => s.conversations.find((c) => c.id === at.conversationId))
+  const simple = useStore((s) => s.settings.uiMode === 'simple' && s.view?.kind === 'conversation' && s.view.id !== at.conversationId)
   if (!channel) return null // a channel this person doesn't see, or one that's gone
   const state = !d
     ? null
@@ -1498,6 +1502,36 @@ function DelegationChip({ at, asked, from }: { at: DelegationRef; asked?: boolea
           ? { tone: '', text: L('cancelado', 'cancelled') }
           : { tone: 'is-warn', text: L('não terminou', 'did not finish') }
   const answer = d && d.state !== 'open' && d.originThreadId ? d.originThreadId : undefined
+  // In the simple view a request is a line of the reply that made it: the colleague's face and name, what
+  // they were asked (or are doing right now), how it stands, and their work one click away. Only there,
+  // once: what came back says so in the Tuca's own words.
+  if (simple)
+    return asked && to ? (
+      <>
+        <button
+          className="simple-ask"
+          onClick={() => {
+            navigate({ kind: 'conversation', id: at.conversationId, message: at.threadId ?? at.rootId })
+            openThread(at.threadId ?? at.rootId)
+          }}
+          title={L(`Ver o trabalho de ${to.name}`, `See ${to.name}'s work`)}
+        >
+          <AgentAvatar agent={to} size={30} busy={d?.state === 'open' && !d.asking && !approval} />
+          <span className="simple-ask__name">{to.name}</span>
+          <span className="simple-ask__what">{(d?.state === 'open' && step) || d?.text.replace(/\s+/g, ' ') || ''}</span>
+          {state && (
+            <span className={`simple-state ${state.tone === 'is-warn' ? 'is-wait' : state.tone === 'is-live' ? 'is-run' : state.tone === 'is-done' ? 'is-done' : 'is-idle'}`}>
+              <i />
+              {state.tone === 'is-live' ? L('trabalhando', 'working') : state.text}
+            </span>
+          )}
+          <span className="simple-row__go">
+            <Icon name="caret" size={14} />
+          </span>
+        </button>
+        {approval && <ApprovalCard approval={approval} compact />}
+      </>
+    ) : null
   return (
     <>
       <div className="memory-chip delegation-chip">

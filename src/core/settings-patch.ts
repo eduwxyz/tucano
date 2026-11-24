@@ -50,7 +50,10 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   showThinking: { kind: 'boolean', max: 10, nullable: true },
   seenVersion: { kind: 'string', max: 100, nullable: true },
   surveys: { kind: 'boolean', max: 10, nullable: true },
-  tucaApplyNow: { kind: 'boolean', max: 10, nullable: true }
+  tucaApplyNow: { kind: 'boolean', max: 10, nullable: true },
+  uiMode: { kind: ['simple', 'full'], max: 10, nullable: true },
+  tucaSpeaksFirst: { kind: 'boolean', max: 10, nullable: true },
+  tucaNudge: { kind: 'object', max: 400, nullable: true }
 }
 
 const fits = (kind: Kind, v: unknown): boolean =>

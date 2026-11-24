@@ -207,6 +207,7 @@ const lineOf = (src: string, pos: number): number => src.slice(0, pos).split('\n
 const RAW_ALLOWED: Record<string, string[]> = {
   'src/renderer/src/components/Intro.tsx': ['Português', 'Idioma · Language'],
   'src/renderer/src/components/Pages.tsx': ['Português'],
+  'src/renderer/src/components/Simple.tsx': ['Português'], // the language's own name, the same in both
   'src/renderer/src/components/Routines.tsx': ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'],
   'src/renderer/src/components/routines-view.ts': ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'],
   'src/shared/types.ts': ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'Todo domingo', 'Toda segunda', 'Toda terça', 'Toda quarta', 'Toda quinta', 'Toda sexta', 'Todo sábado'],

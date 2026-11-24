@@ -392,7 +392,7 @@ describe('the sidebar and the missions', () => {
     await openMenu()
     expect(menuItems().join(' | ')).not.toMatch(/Conectores|Configurações/)
     // Enviar feedback is at the foot from the start, for everyone, always in sight; not in the menu.
-    expect([...document.querySelectorAll('.sidebar__foot .sidebar__tool')].map((x) => x.textContent)).toEqual(['Enviar feedback', 'Conectores', 'Cofre'])
+    expect([...document.querySelectorAll('.sidebar__foot .sidebar__tool')].map((x) => x.textContent)).toEqual(['Modo simples', 'Enviar feedback', 'Conectores', 'Cofre']) // the way into the simple view sits first
     expect(menuItems()).not.toContain('Enviar feedback')
   })
 

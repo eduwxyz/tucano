@@ -4,6 +4,15 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novo:** **Modo simples**, pra quem não quer o app inteiro: você fala com o Tuca e vê quatro lugares (**Novo**, **Pra você**, **Time** e **Conversas**). O resto continua funcionando por baixo, e cada tela do app abre dentro dele quando algo leva até lá. Entra por **Modo simples**, no pé da barra lateral, e sai por **Completo**, no topo. O que você deixou o Tuca fazer ele mesmo fica nos **Ajustes** do modo simples, com **Retirar**. É de cada pessoa, e uma instalação nova começa nele.
+> - **Novo:** no modo simples, o **Tuca fala primeiro**, no máximo uma vez por dia: um serviço pedindo login, uma rotina que não terminou, um colega sem limite do mês, algo esperando você há horas. Dá pra desligar nos Ajustes.
+
+### Added
+
+- **A simple view, for someone who doesn't want the whole app.** You talk to the Tuca and see four places, each named: **New**, where a request starts; **For you**, what waits on a yes or an answer of yours, decided right there; **Team**, the colleagues as lines with what each does and how it stands, what the team knows and the connected services; and **Requests**, everything you asked for, with how each stands and a search. A request passed on shows a line per colleague with their face and state, and their work is one click away. Nothing is taken away: channels, the wiki, routines, connectors and settings keep running, and each of their screens opens inside the same frame when something leads there. **Simple view** at the foot of the sidebar goes in, **Full** at the top goes out. It is each person's own choice, it follows the theme, and a new install starts in it.
+- **In the simple view, the Tuca speaks first.** Once a day at most, and never while a request of yours is going, he tells you one thing the app already knows and you should too: a service asking you to sign in, a routine that didn't finish, a colleague out of its month, something waiting on you for hours. It comes with what to do in one click, **Not now** closes it, and a switch in the settings turns it off.
+
 ## [0.2.47] - 2026-11-24
 
 > **Em português:**

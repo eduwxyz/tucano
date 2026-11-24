@@ -91,6 +91,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Tucano on a server',
     summary: 'Running Tucano on a server of your own (a VPS or a machine at home) and using it through the browser: installing, reaching it, keeping it running and what changes.'
   },
+  simples: {
+    title: 'The simple view',
+    summary: 'The simple view: fewer screens, the same Tucano. You talk to the Tuca and see what waits on you, the team and your conversations.'
+  },
   skills: {
     title: 'Skills',
     summary: "Recipes the agents follow for a kind of task: writing one, bringing one from Claude Code or Codex, approving the agents' proposals and going back to a version."

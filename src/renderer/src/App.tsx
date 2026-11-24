@@ -26,9 +26,43 @@ import { WhatsNew } from './components/Update'
 import { CoreDown, Toasts } from './components/Toast'
 import { Icon } from './components/ui'
 import { NameModal } from './components/People'
+import { SimpleMain, SimpleRail } from './components/Simple'
+import { SIMPLE_VIEWS, type View } from './store'
+
+// One of the app's screens, by what is open: the same in the whole app and inside the simple view's frame.
+function Screen({ view }: { view: View }): ReactNode {
+  const tab = hubTab(view)
+  return (
+    <>
+      {view.kind === 'conversation' && <ConversationView key={view.id} id={view.id} />}
+      {view.kind === 'agent' && <AgentPage key={view.id} id={view.id} />}
+      {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
+      {view.kind === 'approvals' && <ApprovalsPage />}
+      {view.kind === 'connectors' && <ConnectorsPage />}
+      {view.kind === 'vault' && <VaultPage tab={view.tab} />}
+      {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
+      {tab && (
+        <Hub tab={tab}>
+          {tab === 'memory' && <MemoryPage />}
+          {tab === 'wiki' && <WikiView />}
+          {tab === 'skills' && <SkillsPage />}
+          {tab === 'routines' && <RoutinesPage />}
+          {tab === 'report' && <ReportPage />}
+          {tab === 'usage' && <UsagePage />}
+        </Hub>
+      )}
+      {view.kind === 'wiki' && !tab && <WikiView />}
+      {view.kind === 'org' && <OrgPage />}
+      {view.kind === 'board' && <BoardPage />}
+      {view.kind === 'settings' && <SettingsPage />}
+      {view.kind === 'missions' && <MissionsPage />}
+    </>
+  )
+}
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
+  const simple = useStore((s) => s.settings.uiMode === 'simple')
   const theme = useStore((s) => s.settings.theme)
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
@@ -36,7 +70,14 @@ export function App(): ReactNode {
   // A server's page in the desktop app on a Mac: the window's buttons are over it, as over the app's own.
   const mac = useStore((s) => s.platform === 'mac') || window.tucano?.places?.os === 'darwin'
   const navOpen = useStore((s) => s.navOpen)
-  const tab = hubTab(view)
+
+  // A screen of the simple view opened in the whole app (an address kept from before, a switch made on
+  // another device): there it is the app's own start.
+  useEffect(() => {
+    if (simple || !view || !SIMPLE_VIEWS.includes(view.kind)) return
+    const channel = getState().conversations.find((c) => c.kind === 'channel')
+    navigate(view.kind === 'simple-settings' ? { kind: 'settings' } : channel ? { kind: 'conversation', id: channel.id } : { kind: 'approvals' })
+  }, [simple, view])
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
@@ -59,7 +100,8 @@ export function App(): ReactNode {
       const s = getState()
       const channels = s.conversations.filter((c) => c.kind === 'channel')
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
-      else if (e.key === 'n' && !e.shiftKey) openDialog({ kind: 'new-channel' })
+      // In the simple view what one starts is a request, not a channel.
+      else if (e.key === 'n' && !e.shiftKey) s.settings.uiMode === 'simple' ? navigate({ kind: 'home' }) : openDialog({ kind: 'new-channel' })
       else if (e.key === ',') navigate({ kind: 'settings' })
       else if (/^[1-9]$/.test(e.key) && channels[Number(e.key) - 1]) navigate({ kind: 'conversation', id: channels[Number(e.key) - 1]!.id })
       else return
@@ -86,6 +128,23 @@ export function App(): ReactNode {
         <CoreDown />
       </>
     )
+  // The simple view: its own frame, with every screen of the app inside it when something leads there.
+  if (simple)
+    return (
+      <div className="simple">
+        <SimpleRail />
+        <main className="simple-main">
+          <SimpleMain deep={(v) => <Screen view={v} />} />
+        </main>
+        <AgentCardLayer />
+        <Dialogs />
+        <NameModal />
+        <WhatsNew />
+        <Lightbox />
+        <Toasts />
+        <CoreDown />
+      </div>
+    )
   if (view.kind === 'tuca')
     return (
       <>
@@ -106,28 +165,7 @@ export function App(): ReactNode {
       <Sidebar />
       <SidebarResize />
       <main className="main">
-        {view.kind === 'conversation' && <ConversationView key={view.id} id={view.id} />}
-        {view.kind === 'agent' && <AgentPage key={view.id} id={view.id} />}
-        {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
-        {view.kind === 'approvals' && <ApprovalsPage />}
-        {view.kind === 'connectors' && <ConnectorsPage />}
-        {view.kind === 'vault' && <VaultPage tab={view.tab} />}
-        {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
-        {tab && (
-          <Hub tab={tab}>
-            {tab === 'memory' && <MemoryPage />}
-            {tab === 'wiki' && <WikiView />}
-            {tab === 'skills' && <SkillsPage />}
-            {tab === 'routines' && <RoutinesPage />}
-            {tab === 'report' && <ReportPage />}
-            {tab === 'usage' && <UsagePage />}
-          </Hub>
-        )}
-        {view.kind === 'wiki' && !tab && <WikiView />}
-        {view.kind === 'org' && <OrgPage />}
-        {view.kind === 'board' && <BoardPage />}
-        {view.kind === 'settings' && <SettingsPage />}
-        {view.kind === 'missions' && <MissionsPage />}
+        <Screen view={view} />
       </main>
       <CoachLayer />
       <AgentCardLayer />
