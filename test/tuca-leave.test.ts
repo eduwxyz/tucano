@@ -18,7 +18,7 @@ import { Gateway } from '../src/core/gateway'
 import { People } from '../src/core/people'
 import { Runner } from '../src/core/runs'
 import { tucaAgent } from '../src/core/tuca'
-import { covering, kindKey, leaveChoice, leaveDecision, leaveFrom, leaveSection, leavesFor, leaveTask, leaveTools, newLeave, shouldSuggest, SUGGEST_AT, timesDone, withLeaves } from '../src/core/tuca-leave'
+import { covering, forRole, kindKey, leaveChoice, leaveDecision, leaveFrom, leaveSection, leavesFor, leaveTask, leaveTools, newLeave, shouldSuggest, SUGGEST_AT, timesDone, withLeaves } from '../src/core/tuca-leave'
 
 const linear: Connector = { id: 'c-lin', name: 'Linear', kind: 'remote', url: 'https://mcp.linear.app/mcp', auth: 'oauth', status: 'connected', tools: [] }
 const ask: LeaveAsk = { kind: 'pesquisa de preços', what: 'Pesquisar o preço dos concorrentes.', web: true }
@@ -77,6 +77,18 @@ describe('what he asks leave for', () => {
     expect(leaveChoice(undefined, '')).toBeUndefined()
     expect(leaveChoice([{ chosen: [0, 1] }], '')).toBeUndefined()
     expect(leaveChoice([{ skipped: true }], '')).toBeUndefined()
+    // A pick sent with something written beside it: what they wrote may narrow or take it back, so nothing is allowed.
+    expect(leaveChoice([{ chosen: [1] }], 'pensando melhor, só desta vez e sem o Linear')).toBeUndefined()
+    expect(leaveChoice([{ chosen: [1] }], 'Pode fazer')).toBe('once') // unless what they wrote is one of the answers: then that one
+  })
+
+  it('a connector is only an admin\'s to give, and a kind is a kind in any alphabet', () => {
+    const asks: LeaveAsk[] = [{ kind: 'triagem', what: 'x', web: true, grants: { 'c-lin': 'read' } }]
+    expect(forRole(asks, true)).toBe(asks)
+    expect(forRole(asks, false)).toEqual([{ kind: 'triagem', what: 'x', web: true }])
+    expect(kindKey('调研价格')).toBe('调研价格')
+    expect(kindKey('pesquisa 价格')).not.toBe(kindKey('pesquisa 天气'))
+    expect(leaveFrom({ o_que: 'x', tipo: '调研价格', web: true }, { connectors: [], admin: true }).ask).toMatchObject({ kind: '调研价格' })
   })
 })
 
@@ -150,6 +162,8 @@ describe('the leave, in his conversations', () => {
   let gateway: Gateway
   let turns: (Turn & { tools: string[] })[]
   let events: CoreEvent[]
+  let called: string[] // what a tool answered when a message said "chame <tool> [id]"
+  let slow = 0 // how long reading the settings takes (the app's start, while the harnesses are checked)
   let tuca: Agent
   let r: Runner
   const person = (id: string, name: string): Person => ({ id, name, role: 'member', about: '' }) as Person
@@ -177,6 +191,8 @@ describe('the leave, in his conversations', () => {
     db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
     turns = []
     events = []
+    called = []
+    slow = 0
     settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memory: 'auto', chainDepth: 3 } as unknown as Settings
     tuca = tucaAgent('sonnet', [])
     db.saveAgent(tuca)
@@ -190,12 +206,25 @@ describe('the leave, in his conversations', () => {
     const claude: Engine = {
       id: 'claude',
       run: async function* (t) {
-        turns.push({ ...t, tools: await listed(t.mcpUrl) })
+        const tools = await listed(t.mcpUrl)
+        turns.push({ ...t, tools })
+        // "chame list_issues" / "chame cancelar_pedido 7a51430a": the call is made for real, and what came back is kept.
+        const ask = /chame ([\w-]+)(?: ([0-9a-f]{6,}))?\s*$/.exec(t.prompt.trim().split('\n').at(-1) ?? '')
+        const name = ask && tools.find((x) => x === ask[1] || x.endsWith(`__${ask[1]}`) || x.includes(ask[1]!))
+        if (ask && t.mcpUrl) {
+          const client = new Client({ name: 'test', version: '0.0.0' })
+          await client.connect(new StreamableHTTPClientTransport(new URL(t.mcpUrl)))
+          const r = (await client.callTool({ name: name ?? ask[1]!, arguments: ask[2] ? { id: ask[2] } : {} })) as { content?: { text?: string }[] }
+          called.push(r.content?.map((c) => c.text ?? '').join('') ?? '')
+          await client.close()
+          yield { type: 'done', text: 'ok', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+          return
+        }
         yield* fake.run(t)
       }
     }
     const engines: Record<EngineId, Engine> = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
-    r = new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [{ type: 'text', text: 'ok' }] }) } })
+    r = new Runner({ db, engines, settings: async () => (slow && (await new Promise((done) => setTimeout(done, slow))), settings), emit: (e) => events.push(e), workDir: mkdtempSync(join(tmpdir(), 'ad-work-')), gateway, connectors: { list: () => [linear], call: async () => ({ content: [{ type: 'text', text: 'ok' }] }) } })
     return () => gateway.stop()
   })
 
@@ -334,6 +363,81 @@ describe('the leave, in his conversations', () => {
     expect(db.tucaLeaves(db.ownerId())).toHaveLength(1) // the owner's own, untouched
     expect(new People(db).eventFor({ type: 'leaves' }, db.person(ana.id)!)).toMatchObject({ type: 'leaves', leaves: [{ kind: 'pesquisa' }] })
     expect(new People(db).eventFor({ type: 'leaves' }, db.owner())).toMatchObject({ type: 'leaves', leaves: [{ kind: 'triagem' }] })
+  })
+
+  it('what a leave gives is really his to use, call by call, and stops the moment it is taken back', async () => {
+    await r.send('c1', 'faça você (triagem, +Linear): Ver as issues abertas.')
+    await r.idle()
+    await pick('c1', 1)
+    await r.send('c1', 'chame list_issues')
+    await r.idle()
+    expect(called.at(-1)).toBe('ok') // the connector answered: listed, and allowed when called
+    // Taken back: gone from his next reply.
+    expect(db.removeTucaLeave(db.tucaLeaves(db.ownerId())[0]!.id, db.ownerId())).toBe(true)
+    await r.send('c1', 'chame list_issues')
+    await r.idle()
+    expect(turns.at(-1)!.tools.some((t) => t.includes('list_issues'))).toBe(false)
+    expect(called.at(-1)).toMatch(/Ferramenta (?:desconhecida|não permitida)|Unknown tool|not allowed/) // refused: it is no longer his
+  })
+
+  it('a connector holds only while its person may give one: an admin demoted loses it, the web stays', async () => {
+    const ana = { ...person('ana', 'Ana'), role: 'admin' } as Person
+    db.addPerson(ana)
+    db.createConversation({ id: 'c-ana', kind: 'dm', name: tuca.id, members: [tuca.id], owner: ana.id })
+    await r.send('c-ana', 'faça você (triagem, web, +Linear): Ver as issues abertas.', [], undefined, ana.id)
+    await r.idle()
+    await pick('c-ana', 1, db.person(ana.id)!)
+    expect(db.tucaLeaves(ana.id)[0]).toMatchObject({ web: true, grants: { 'c-lin': 'read' } })
+    await r.send('c-ana', 'oi', [], undefined, ana.id)
+    await r.idle()
+    expect(turns.at(-1)!.tools.some((t) => t.includes('list_issues'))).toBe(true)
+    db.setRole(ana.id, 'member')
+    await r.send('c-ana', 'oi de novo', [], undefined, ana.id)
+    await r.idle()
+    expect(turns.at(-1)!.tools.some((t) => t.includes('list_issues'))).toBe(false)
+    expect(turns.at(-1)!.web).toBe(true)
+    // And a card asked while she was an admin, answered after: the connector doesn't come with it.
+    db.setRole(ana.id, 'admin')
+    await r.send('c-ana', 'faça você (relatório, +Linear): Contar as issues.', [], undefined, ana.id)
+    await r.idle()
+    db.setRole(ana.id, 'member')
+    await pick('c-ana', 0, db.person(ana.id)!)
+    const report = db.tucaLeaves(ana.id).find((l) => l.kind === 'relatório')!
+    expect(report.grants).toBeUndefined()
+  })
+
+  it('a pick sent with something written beside it allows nothing', async () => {
+    await r.send('c1', 'faça você (pesquisa de preços, web): Pesquisar o preço dos concorrentes.')
+    await r.idle()
+    r.answerDecision(asked('c1').id, 0, { chosen: [1] }, db.owner())
+    await r.send('c1', 'pensando melhor, só desta vez e sem web')
+    await r.idle()
+    expect(db.tucaLeaves(db.ownerId())).toHaveLength(0)
+    expect(turns.at(-1)!.web).toBe(false)
+  })
+
+  it('a card sent twice is answered once, even while the app is still starting', async () => {
+    await r.send('c1', 'faça você (pesquisa de preços, web): Pesquisar o preço dos concorrentes.')
+    await r.idle()
+    const card = asked('c1').id
+    r.answerDecision(card, 0, { chosen: [1] }, db.owner())
+    slow = 40
+    await Promise.allSettled([r.submitDecisions(card, db.owner()), r.submitDecisions(card, db.owner())])
+    slow = 0
+    await r.idle()
+    expect(db.tucaLeaves(db.ownerId())).toHaveLength(1)
+    expect(db.messages().filter((m) => m.conversationId === 'c1' && m.author.kind === 'person')).toHaveLength(2) // the request and one answer
+  })
+
+  it('a copy of the workspace carries no leave and no conversation title from where it came', () => {
+    db.saveTucaLeave(leave({ id: 'mine', person: db.ownerId() }))
+    db.setConversationTitle('c1', 'Demitir o Carlos do financeiro')
+    const file = join(mkdtempSync(join(tmpdir(), 'ad-copy-')), 'copy.db')
+    db.duplicateTo(file, 'Copy')
+    const copy = new Db(file)
+    expect(copy.tucaLeaves(copy.ownerId())).toHaveLength(0)
+    expect(copy.conversations().map((c) => c.title)).toEqual([undefined, undefined])
+    copy.close()
   })
 
   it('is taken back by its own person, and goes with its conversation and with the person', () => {

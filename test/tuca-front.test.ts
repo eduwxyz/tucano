@@ -131,6 +131,36 @@ describe('what the Tuca is told of the team', () => {
   })
 })
 
+describe('one Tuca for everyone, each person\'s requests their own', () => {
+  it("with no one on the team yet, he is still told so: that is when he builds the first colleague", async () => {
+    const r = runner()
+    await r.send('tuca-dm', 'quero alguém pra responder meus clientes')
+    await r.idle()
+    const first = turns.find((t) => t.system.includes('Você é Tuca'))!
+    expect(`${first.system}\n${first.prompt}`).toContain('## O time\nAinda não tem ninguém no time.')
+  })
+
+  it("someone else's open request is not in his prompt for me, nor mine to cancel", async () => {
+    db.saveAgent(agent('duda', { role: 'Atendimento' }))
+    db.addPerson({ id: 'ana', name: 'Ana', role: 'member', about: '' } as never)
+    db.createConversation({ id: 'ana-dm', kind: 'dm', name: tuca.id, members: [tuca.id], owner: 'ana' })
+    const r = runner()
+    // The owner's request stays open: Duda takes her time.
+    await r.send('tuca-dm', 'delegue a @duda: demore 3 s e levante a folha de pagamento confidencial da diretoria')
+    await until(() => db.openDelegations().length === 1)
+    const code = db.openDelegations()[0]!.id.slice(0, 8)
+    await r.send('ana-dm', 'oi', [], undefined, 'ana')
+    await until(() => turns.some((t) => t.prompt.includes('[Ana]') || t.prompt.includes('Ana')))
+    await until(() => by(tuca.id, 'ana-dm').some((m) => m.run?.status === 'done'))
+    const hers = turns.filter((t) => t.system.includes('Você é Tuca')).find((t) => t.cwd && `${t.system}\n${t.prompt}`.includes('Ana') && !`${t.system}\n${t.prompt}`.includes('delegue a'))!
+    expect(`${hers.system}\n${hers.prompt}`).not.toContain('folha de pagamento')
+    expect(`${hers.system}\n${hers.prompt}`).not.toContain(code)
+    // And the owner still has it as his.
+    expect(db.openDelegations()[0]).toMatchObject({ requestedBy: db.ownerId(), state: 'open' })
+    await r.idle()
+  })
+})
+
 describe('a request through the Tuca', () => {
   it('goes to the colleague, works in their own conversation with the person, and comes back to his', async () => {
     db.saveAgent(agent('duda', { role: 'Atendimento' }))
