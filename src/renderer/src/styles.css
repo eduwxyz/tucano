@@ -10454,6 +10454,12 @@ button.agent-card__now:hover {
 .select__trigger.is-disabled { opacity: 0.5; cursor: not-allowed; background: var(--bg); }
 .select__trigger.is-open { border-color: var(--accent); z-index: 40; }
 .select__trigger__value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+/* A multi select that shows every value chosen (Select showAllValues): the chips wrap onto as many lines as
+   they need and the field grows with them, instead of cutting them off or folding them into a count. */
+.select__trigger.is-wrapped { height: auto; min-height: 36px; align-items: flex-start; padding-top: 6px; padding-bottom: 6px; }
+.select__trigger__value.is-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; white-space: normal; overflow: visible; text-overflow: clip; }
+.select__trigger__value.is-wrap .select__chip { margin: 0; }
+.select__trigger.is-wrapped .select__caret { margin-top: 7px; }
 .select__placeholder { color: var(--text-3); }
 .select__value { color: var(--text); font-weight: 500; }
 .select__chip {
@@ -12691,6 +12697,12 @@ button.agent-card__now:hover {
 .orgb__lines .is-me .orgb__line {
   stroke-dasharray: 1 6;
 }
+/* A second (or third) boss: a specialist several teams share. Dashed, and drawn behind the tree's own
+   lines, so the card still reads as hanging from its first boss. */
+.orgb__lines .is-also .orgb__line {
+  stroke-dasharray: 2 5;
+  opacity: 0.75;
+}
 .orgb__hit {
   fill: none;
   stroke: transparent;
@@ -12726,6 +12738,10 @@ button.agent-card__now:hover {
   stroke-width: 2.25;
   stroke-dasharray: 5 6;
   transition: none;
+}
+/* Pulled from the dot for another boss it also answers to: dashed from the start, as the line will be. */
+.orgb__line.is-new.is-extra {
+  stroke-dasharray: 2 5;
 }
 @keyframes org-flow {
   to {
@@ -12955,6 +12971,31 @@ button.agent-card__now:hover {
 }
 .org-port--in {
   top: -7px;
+}
+/* A second (or third) boss: pulled from the dot beside the first one, on the very point its line arrives at
+   (topSlots), so it is clear of the one above and of every other. Small, and drawn as the line it makes: dashed. */
+.org-port--also {
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  box-shadow: 0 0 0 2px var(--text-3), inset 0 0 0 1.5px var(--panel);
+}
+.org-port--also::after {
+  inset: -9px;
+}
+/* A line pulled from under a card: every dot for another boss that would take it shows, as a place to let go
+   on. The rest of the card stays out of the way; this one is the difference between replacing its boss and
+   adding one. */
+.orgb.is-linking.is-from-above .org-card:not(.is-linking) .org-port--also.is-offer,
+.orgb.is-linking .org-card:not(.is-linking) .org-port--also.is-over {
+  opacity: 1;
+  scale: 1;
+}
+.org-port--also.is-over {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft);
+  scale: 1.2;
 }
 .org-port--out {
   bottom: -7px;
