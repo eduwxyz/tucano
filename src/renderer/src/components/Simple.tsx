@@ -6,7 +6,6 @@
 // app is one click away, at the top.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { questionsOf } from '../../../shared/questions'
 import {
   agentById,
   ensureTuca,
@@ -532,7 +531,8 @@ function ColleagueRow({ agent }: { agent: Agent }): ReactNode {
     const m = workingOn(s).get(agent.id)
     return m ? (runStep(m.run) ?? L('trabalhando', 'working')) : undefined
   })
-  const waits = useStore((s) => s.approvals.filter((a) => a.state === 'pending' && a.agentId === agent.id).length + Object.values(s.messages).flat().filter((m) => m.author.kind === 'agent' && m.author.id === agent.id && m.run?.status === 'waiting_input' && questionsOf(m.run).length > 0).length)
+  // What waits on me there: an approval of theirs I decide, or a question they asked me (the inbox has both).
+  const waits = useStore((s) => s.inbox.approvals.filter((a) => a.agentId === agent.id).length + s.inbox.questions.filter((q) => q.agentId === agent.id).length)
   const routines = useStore((s) => s.routines.filter((r) => r.agentId === agent.id && r.enabled).length)
   const st: RequestState = waits ? 'wait' : doing ? 'run' : 'new'
   return (

@@ -1,6 +1,6 @@
 // The Tuca speaks first, in the simple view: one thing a day he thinks the person should know, where a
 // request starts and never in the middle of one. Not a guess and not a model's turn: each comes from
-// something the app already knows (a service asking to sign in again, a routine that didn't finish, a
+// something the app already knows (a service asking to sign in, a routine that didn't finish, a
 // colleague out of its month, something waiting on the person since yesterday), with what to do about it
 // one click away. Turned off in the simple view's settings (Settings.tucaSpeaksFirst).
 import { L } from '../../shared/lang'
@@ -34,7 +34,7 @@ export function tucaNudges(s: Pick<State, 'agents' | 'connectors' | 'routines' |
     if (!who.length) continue
     out.push({
       key: `connector:${c.id}:${c.status}`,
-      text: c.status === 'needs_auth' ? L(`O ${c.name} está pedindo login de novo, e ${names(who)} ${who.length > 1 ? 'dependem' : 'depende'} dele.`, `${c.name} is asking you to sign in again, and ${names(who)} ${who.length > 1 ? 'depend' : 'depends'} on it.`) : L(`O ${c.name} parou de responder, e ${names(who)} ${who.length > 1 ? 'dependem' : 'depende'} dele.`, `${c.name} stopped answering, and ${names(who)} ${who.length > 1 ? 'depend' : 'depends'} on it.`),
+      text: c.status === 'needs_auth' ? L(`O ${c.name} está pedindo login, e ${names(who)} ${who.length > 1 ? 'dependem' : 'depende'} dele.`, `${c.name} is asking you to sign in, and ${names(who)} ${who.length > 1 ? 'depend' : 'depends'} on it.`) : L(`O ${c.name} parou de responder, e ${names(who)} ${who.length > 1 ? 'dependem' : 'depende'} dele.`, `${c.name} stopped answering, and ${names(who)} ${who.length > 1 ? 'depend' : 'depends'} on it.`),
       label: L('Resolver', 'Fix it'),
       view: { kind: 'connectors' }
     })
@@ -49,12 +49,12 @@ export function tucaNudges(s: Pick<State, 'agents' | 'connectors' | 'routines' |
       say: L(`${a.name} usou todo o limite do mês. Proponha um limite maior pra ${a.name}.`, `${a.name} used up the month's limit. Propose a higher limit for ${a.name}.`)
     })
   }
-  // A routine whose last run didn't finish.
-  const all = Object.values(s.messages).flat()
+  // A routine whose last run didn't finish: its reply, where the routine runs (what is loaded of it).
   for (const r of s.routines) {
     if (!r.enabled || !r.lastMessageId) continue
-    const last = all.find((m) => m.id === r.lastMessageId) ?? all.find((m) => m.run?.routineAsk === r.lastMessageId)
-    const reply = last?.author.kind === 'routine' ? all.find((m) => m.run?.routineAsk === last.id) : last
+    const there = s.messages[r.conversationId] ?? []
+    const last = there.find((m) => m.id === r.lastMessageId)
+    const reply = last?.author.kind === 'routine' ? there.find((m) => m.run?.routineAsk === last.id) : last
     const st = reply?.run?.status
     if (st !== 'failed' && st !== 'limit_reached') continue
     const who = s.agents.find((a) => a.id === r.agentId)?.name

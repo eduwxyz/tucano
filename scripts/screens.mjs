@@ -214,6 +214,29 @@ await win.click('.cal-pop button:has-text("Ver a")')
 await settle()
 await shot('27-rotina-na-conversa')
 
+// The simple view: where a request starts, a request passed on to two colleagues, a request no one does
+// (the Tuca asks leave), what waits on the person, the team and the requests.
+await win.click('.sidebar__tool:has-text("Modo simples"), .sidebar__tool:has-text("Simple view")')
+await win.waitForSelector('.simple-home .composer textarea')
+await shot('28-simples-inicio')
+await send('delegue a @lia: confira por que o build do checkout quebrou\ndelegue a @nina: escreva o aviso do feriado')
+await win.waitForSelector('.simple-request')
+await settle()
+await shot('29-simples-pedido')
+await win.click('.simple-rail__new')
+await win.waitForSelector('.simple-home .composer textarea')
+await send('faça você (pesquisa de preços, web): Pesquisar o preço dos concorrentes.')
+await win.waitForSelector('.simple-request')
+await settle()
+await shot('30-simples-licenca')
+for (const [n, name] of [[2, '31-simples-pra-voce'], [3, '32-simples-time'], [4, '33-simples-conversas']]) {
+  await win.click(`.simple-rail__item:nth-of-type(${n})`)
+  await win.waitForTimeout(400)
+  await shot(name)
+}
+await win.click('.mode-switch button:has-text("Completo"), .mode-switch button:has-text("Full")')
+await win.waitForSelector('.sidebar')
+
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 console.log(`data: ${data}`)
 await app.close()

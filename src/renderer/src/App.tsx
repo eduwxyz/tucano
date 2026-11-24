@@ -100,7 +100,8 @@ export function App(): ReactNode {
       const s = getState()
       const channels = s.conversations.filter((c) => c.kind === 'channel')
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
-      else if (e.key === 'n' && !e.shiftKey) openDialog({ kind: 'new-channel' })
+      // In the simple view what one starts is a request, not a channel.
+      else if (e.key === 'n' && !e.shiftKey) s.settings.uiMode === 'simple' ? navigate({ kind: 'home' }) : openDialog({ kind: 'new-channel' })
       else if (e.key === ',') navigate({ kind: 'settings' })
       else if (/^[1-9]$/.test(e.key) && channels[Number(e.key) - 1]) navigate({ kind: 'conversation', id: channels[Number(e.key) - 1]!.id })
       else return
