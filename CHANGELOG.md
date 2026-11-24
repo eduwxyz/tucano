@@ -18,6 +18,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Mudou:** o **cartão de aprovação** abre com a ação e o alvo, e diz o que aconteceu depois: **Concluído**, **Falhou** ou **não rodou**, em vez de só "Aprovado".
 > - **Mudou:** **Continuar**, **Tentar de novo** e **Tentar com instruções** viraram botões discretos na linha de baixo da resposta. O ícone de computador do agente aparece ao passar o mouse, e um Markdown expandido fica numa coluna de até 960 px.
 > - **Corrigido:** o Codex não dá mais **"seu login expirou"** depois de você entrar de novo numa conta. Antes era preciso reiniciar o app.
+> - **Corrigido:** o **mapa da wiki** de um cofre grande (milhares de páginas) não trava mais o app: ele abre sem congelar a tela, cabe inteiro na tela, mostra só os nomes que não se sobrepõem e anda liso ao arrastar. As notas ainda não escritas saem do mapa a partir de mil páginas.
 > - **Corrigido:** no **Boletim**, os problemas de cada agente só mostram respostas que você pode ler. Antes, um admin via o texto de erro de DMs de outras pessoas.
 > - **Corrigido:** nas Configurações, as abas e os atalhos de seção ficam fixos no topo, e os itens do pé da barra lateral têm a mesma altura.
 
@@ -45,6 +46,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A big wiki's map no longer freezes the app.** An imported vault of a few thousand pages compared every page with every other on each step of the map's layout, which froze the screen for many seconds, and drew a name over every busy dot. Far pages now push as one group (a Barnes-Hut quadtree) from 400 pages on, so the map opens without freezing. It fits whole when zoomed out, names go where they cover no other, and past 1,000 pages the notes nobody wrote yet stay off the map. Moving the map slides one layer instead of redrawing every page, and lighting a page draws it and its links over a veil. Thanks to Juliano Nicocelli. (#653, #654)
 - **Codex works again right after a new sign-in.** A Codex app-server that was already running kept the old token, so replies failed with "your login expired" until the app restarted. A process now moves to a new one when `auth.json` changed since it started, including threads still open on the old one. Thanks to FernandoBolzan. (#625)
 - **The Report's problems stay within what you can read.** Each agent's problems listed failed and cut replies from every conversation, so an admin saw the error text of someone else's DM. They now hold only replies the viewer can read, by the same rule as the conversations.
 - **Settings tabs and subject jumps stay in sight while scrolling.** The group tabs stayed at the top, but the subject links scrolled away. Both rows now stay pinned, so moving between sections works from deep in the page. Thanks to Apostol Apostolov. (#643)
