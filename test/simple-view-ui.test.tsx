@@ -240,6 +240,16 @@ describe('the simple view', () => {
     expect(went()).toEqual([{ kind: 'team' }])
   })
 
+  it('a reply that saved the same request twice counts it once: it passed one thing on, not parts', async () => {
+    await show({ kind: 'conversation', id: 'c-done' }, requests)
+    expect(text()).toContain('Passei cada parte pra quem faz:')
+    // A reply from before follow-ups stopped being listed again: the same request, twice in its record.
+    const twice = requests.messages!['c-done']!.map((m) => (m.id === 'a1' ? { ...m, run: { ...m.run!, delegations: [m.run!.delegations![0]!, m.run!.delegations![0]!] } } : m))
+    await show({ kind: 'conversation', id: 'c-done' }, { ...requests, messages: { ...requests.messages, 'c-done': twice }, delegations: [asked('d1', 'duda', 'c-done', 'done')] })
+    expect(text()).toContain('Passei pra quem faz:')
+    expect(text()).not.toContain('Passei cada parte')
+  })
+
   it('the switch says which view is on and asks for the other', async () => {
     await show({ kind: 'team' })
     const [simple, full] = [...document.querySelectorAll('.mode-switch button')] as HTMLButtonElement[]

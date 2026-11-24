@@ -562,6 +562,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const [showAsk, setShowAsk] = useState(false)
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
   // In the simple view, a reply that only passed the work on says so in a line, over the colleagues it went to.
+  // Each request once: a reply saved before follow-ups stopped being listed again may hold one twice.
+  const handedTo = (message.run?.delegations ?? []).filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i)
   const passedOn = useStore((s) => s.settings.uiMode === 'simple' && !!message.run?.delegations?.length && s.agents.find((a) => message.author.kind === 'agent' && a.id === message.author.id)?.kind === 'tuca')
   const hasFooter = !!message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)
   const resumable = !!message.run && (message.run.status === 'paused' || (CUT.includes(message.run.status) && canContinue(message.run)))
@@ -686,8 +688,8 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
-        {passedOn && <p className="simple-passed">{message.run!.delegations!.length > 1 ? L('Passei cada parte pra quem faz:', 'I passed each part to whoever does it:') : L('Passei pra quem faz:', 'I passed it to whoever does it:')}</p>}
-        {message.run?.delegations?.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
+        {passedOn && <p className="simple-passed">{handedTo.length > 1 ? L('Passei cada parte pra quem faz:', 'I passed each part to whoever does it:') : L('Passei pra quem faz:', 'I passed it to whoever does it:')}</p>}
+        {handedTo.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
         {message.run?.delegation && message.conversationId !== message.run.delegation.conversationId && <DelegationChip at={message.run.delegation} from={agent?.id} />}
         {message.run?.delegation && message.id === message.run.delegation.rootId && <RequestNote at={message.run.delegation} from={agent?.name} />}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}

@@ -166,14 +166,32 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         } else if (waiting) {
           await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
           reply = 'Ele precisa de uma decisão sua.'
+        } else if (/: não terminou|did not finish/.test(back) && /se n[ãa]o sair, fa[çc]a voc[êe] \(([^)]*)\): ([^\n"]+)/i.test(turn.prompt)) {
+          // "…; se não sair, faça você (contas): calcular a mediana": a part that didn't get done is not his to
+          // take. He asks leave for it, as for anything no one on the team does.
+          const [, kind, what] = /se n[ãa]o sair, fa[çc]a voc[êe] \(([^)]*)\): ([^\n"]+)/i.exec(turn.prompt)!
+          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!.trim(), tipo: kind!.trim(), web: false }))
+          reply = /^(?:Pergunta enviada|Question sent)/.test(told) ? L('Não saiu. Posso fazer eu mesmo?', "It didn't get done. May I do it myself?") : told
         } else reply = /passou do prazo|past its deadline/.test(back) ? 'Passou do prazo e ainda não terminou.' : /: não terminou|did not finish/.test(back) ? 'Não deu certo: o pedido não terminou.' : 'Pronto: o time terminou o que pedi.'
       } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/i.test(last)) {
         // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".
         const out: string[] = []
         for (const m of last.matchAll(/(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/gi)) out.push(textOf(await callTool(turn.mcpUrl, 'pedir', { para: m[1]!, pedido: m[3]!, ...(m[2] ? { canal: m[2] } : {}), ...(/prazo de (\d+) ?h/i.test(m[3]!) ? { prazo_horas: Number(/prazo de (\d+) ?h/i.exec(m[3]!)![1]) } : {}) })))
-        // Asked: it ends with no text, as told (the person sees whom it asked under their message). What
+        // Asked: it ends with no text of its own (the person sees whom it asked under their message). What
         // didn't go out is said.
         reply = out.filter((t) => !/^(?:Pedido|Request) \[/.test(t)).join('\n')
+        // "(e confirme)": a model that doesn't stop after asking. It saves a memory and then goes on with
+        // the request it has just made, in the same reply.
+        const made = /\[([0-9a-f]{8})\]/.exec(out[0] ?? '')?.[1]
+        if (made && /\((?:e confirme|and confirm)\)/i.test(last)) {
+          const who = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)/i.exec(last)![1]!
+          const saved = textOf(await callTool(turn.mcpUrl, 'lembrar', { texto: L('Avisos pros clientes vão pra quem escreve.', 'Notices to customers go to whoever writes.'), sobre: 'usuario' }))
+          await callTool(turn.mcpUrl, 'pedir', { para: who, pedido: L('Só confirmando: siga o pedido anterior.', 'Just confirming: follow the request above.'), continuar: made })
+          // ...and once more, and then asks the person "Ok" for something to end on: what each was told is its text.
+          const again = textOf(await callTool(turn.mcpUrl, 'pedir', { para: who, pedido: L('Ignore a confirmação, foi redundante.', 'Ignore the confirmation, it was redundant.'), continuar: made }))
+          const ok = textOf(await callTool(turn.mcpUrl, 'ask_user', { question: 'Ok' }))
+          reply = [saved, again, ok].join('\n')
+        }
       } else if (turn.mcpUrl && /^continue (?:com|with) @?([\w-]+): (.+)/i.test(last)) {
         // "continue com clara: e mande também pro Beltrano": the request that came back from her, in its thread.
         const [, who, what] = /^continue (?:com|with) @?([\w-]+): (.+)/i.exec(last)!

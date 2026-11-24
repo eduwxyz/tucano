@@ -36,8 +36,8 @@ export const PEDIR: ToolDef = {
         continuar: {
           type: 'string',
           description: L(
-            'Opcional: o código de um pedido seu (em "Pedidos seus em aberto" ou em "Pedidos que já voltaram aqui"), quando isto continua ou completa o mesmo assunto com o mesmo agente. O pedido segue na mesma thread, e ele vê o que já fez lá; um em aberto recebe isto como mais uma coisa a fazer nele.',
-            'Optional: the code of a request of yours (in "Your open requests" or in "Requests that came back here"), when this continues or adds to the same subject with the same agent. The request goes on in the same thread, and they see what they already did there; an open one takes this as one more thing to do in it.'
+            'Opcional: o código de um pedido seu (em "Pedidos seus em aberto" ou em "Pedidos que já voltaram aqui"), quando isto continua ou completa o mesmo assunto com o mesmo agente. O pedido segue na mesma thread, e ele vê o que já fez lá; um em aberto recebe isto como mais uma coisa a fazer nele. Não é pra confirmar nem repetir um pedido que você acabou de fazer: ele já começou.',
+            'Optional: the code of a request of yours (in "Your open requests" or in "Requests that came back here"), when this continues or adds to the same subject with the same agent. The request goes on in the same thread, and they see what they already did there; an open one takes this as one more thing to do in it. Not for confirming or repeating a request you have just made: it has already started.'
           )
         },
         prazo_horas: { type: 'number', description: L('Em quantas horas você quer isso (opcional). Passou disso sem terminar, você é avisado.', 'In how many hours you want it (optional). Past that without an end, you are told.') },
@@ -172,7 +172,12 @@ const DELIVERED_MAX = 2_000
 
 export function askContext(c: AskContext): string {
   const parts: string[] = []
-  if (c.asked?.text.trim()) parts.push(`${L(`O que ${c.asked.by} pediu no começo`, `What ${c.asked.by} asked to begin with`)}:\n${quoted(c.asked.text.slice(0, TEXT_MAX))}`)
+  // The whole of what was asked is context, not the job: the first to get a part starts before the others are
+  // handed theirs, so the split below may not list them yet.
+  if (c.asked?.text.trim())
+    parts.push(
+      `${L(`O que ${c.asked.by} pediu no começo`, `What ${c.asked.by} asked to begin with`)}:\n${quoted(c.asked.text.slice(0, TEXT_MAX))}\n${L('Isto é o pedido inteiro, pra você ter o contexto. A sua parte é só o que a mensagem acima pede: o que ela não pede pode estar com outro agente, não faça.', 'This is the whole request, for context. Your part is only what the message above asks: what it does not ask may be with another agent, do not do it.')}`
+    )
   const others = (c.split ?? []).filter((x) => !x.mine)
   if (others.length) {
     const state = (x: { state: Delegation['state'] }): string => (x.state === 'open' ? L('em andamento', 'under way') : x.state === 'done' ? L('pronto', 'done') : x.state === 'failed' ? L('não terminou', 'did not finish') : L('parado', 'stopped'))
@@ -216,13 +221,18 @@ const quoted = (text: string): string =>
     .join('\n')
 
 // What the asker is told when it gets the turn back: each thing that came back, by its code, and what to do with it.
-export function returnTask(returned: Returned[], open: { d: Delegation; to: string; channel: string; parked?: boolean }[], me: string): string {
+// `front`: the asker is the one who takes the person's requests (the Tuca). He does none of the team's work on
+// his own and the person reads what was made in his reply, not in the colleague's conversation.
+export function returnTask(returned: Returned[], open: { d: Delegation; to: string; channel: string; parked?: boolean }[], me: string, front = false): string {
   const line = (r: Returned): string => {
     const head = `- [${codeOf(r.d)}] ${r.to}, ${r.channel}`
     if (r.what === 'done')
       return `${head}: ${L('terminou. O que respondeu', 'finished. What they answered')}${r.text?.trim() ? `:\n${quoted(r.text)}` : ` ${L('está na thread do pedido', 'is in the request\'s thread')}.`}`
     if (r.what === 'failed')
-      return `${head}: ${L(
+      return `${head}: ${front ? L(
+        `não terminou${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}${r.text?.trim() ? `. O que ficou pronto:\n${quoted(r.text)}\n` : '. '}Diga a ${me} em uma linha por que não saiu e, se a causa é coisa que só ${me} resolve (um login, o limite do mês), onde resolver. Não faça você a parte de ${r.to}, nem que seja simples. Pra ela sair agora, passe a outro colega do time que faça a mesma coisa; se ninguém mais faz, peça licença com fazer_eu_mesmo`,
+        `did not finish${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}${r.text?.trim() ? `. What got done:\n${quoted(r.text)}\n` : '. '}Tell ${me} in one line why it did not get done and, if the cause is something only ${me} can solve (a sign-in, the month's limit), where to solve it. Do not do ${r.to}'s part yourself, however simple. For it to get done now, pass it to another colleague on the team who does the same; if no one else does, ask leave with fazer_eu_mesmo`
+      ) : L(
         `não terminou${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}${r.text?.trim() ? `. O que ficou pronto:\n${quoted(r.text)}\n` : '. '}Decida você o caminho: passe pra outro agente que faz a mesma coisa, faça de outro jeito, ou, se só ${me} resolve (um login, o limite do mês, uma decisão), leve a ${me} numa pergunta só, com a sua recomendação`,
         `did not finish${r.why ? ` (${r.why.replace(/[.\s]+$/, '')})` : ''}${r.text?.trim() ? `. What got done:\n${quoted(r.text)}\n` : '. '}Decide the way yourself: hand it to another agent who does the same, do it another way, or, if only ${me} can solve it (a sign-in, the month's limit, a decision), take it to ${me} in one question, with your recommendation`
       )}.`
@@ -238,7 +248,16 @@ export function returnTask(returned: Returned[], open: { d: Delegation; to: stri
   const still = open.length ? `\n\n${L('Ainda em andamento', 'Still going')}: ${open.map((o) => `[${codeOf(o.d)}] ${o.to}, ${o.channel}${o.parked ? ` (${L(`parado numa aprovação que espera ${me}, que ${me} vê embaixo da sua mensagem`, `held on an approval that waits for ${me}, which ${me} sees under your message`)})` : ''}`).join('; ')}.` : ''
   const close = returned.some((r) => r.what === 'asking')
     ? ''
-    : `\n\n${L(
+    : front
+      ? `\n\n${L(
+          open.length
+            ? `Diga a ${me} só o que voltou agora, em uma ou duas linhas, e o que ainda está andando. A entrega fica pra quando o resto voltar.`
+            : `Entregue a ${me}. O que ${me} pediu pra ter em mãos (um texto, um número, uma lista) vai inteiro na sua resposta, como o colega fez: ${me} não precisa abrir a conversa do colega pra ver. O resto, em poucas linhas: o que importa de cada resposta e o que precisa de decisão. Não repita o que você já disse nesta conversa. Se falta um detalhe pra fechar, entregue primeiro o que está pronto e só depois pergunte: nunca troque a entrega por uma pergunta.`,
+          open.length
+            ? `Tell ${me} only what came back now, in a line or two, and what is still going. The delivery waits for the rest to come back.`
+            : `Deliver to ${me}. What ${me} asked to have in hand (a text, a number, a list) goes whole in your reply, as the colleague made it: ${me} need not open the colleague's conversation to see it. The rest, in a few lines: what matters from each answer and what needs a decision. Do not repeat what you have already said in this conversation. If a detail is missing to close it, deliver what is ready first and only then ask: never trade the delivery for a question.`
+        )}`
+      : `\n\n${L(
         `${open.length ? `Diga a ${me} o que já voltou, em poucas linhas, e o que ainda está andando.` : `Feche o assunto com ${me}: diga o resultado em poucas linhas, com o que importa de cada resposta, e o que precisa de decisão. Não copie as respostas inteiras: cada uma fica na thread do pedido, que ${me} abre pela linha embaixo da sua mensagem. Se falta ${me} escolher algo pra você seguir, pergunte com ask_user (com as opções), não no texto.`}`,
         `${open.length ? `Tell ${me} what has come back, in a few lines, and what is still going.` : `Close the subject with ${me}: say the result in a few lines, with what matters from each answer, and what needs a decision. Do not copy the answers whole: each stays in the request's thread, which ${me} opens from the line under your message. If ${me} has to choose something for you to go on, ask with ask_user (with the options), not in the text.`}`
       )}`

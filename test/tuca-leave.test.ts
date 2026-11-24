@@ -220,6 +220,11 @@ describe('the leave, in his conversations', () => {
           yield { type: 'done', text: 'ok', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }
+        // "quebre de vez": Theo's reply fails on something that doesn't pass by itself.
+        if (t.system.includes('Você é Theo') && /quebre de vez/.test(t.prompt)) {
+          yield { type: 'error', message: 'O Codex não está logado' }
+          return
+        }
         yield* fake.run(t)
       }
     }
@@ -453,6 +458,28 @@ describe('the leave, in his conversations', () => {
     expect(db.tucaLeaves(db.ownerId())).toHaveLength(0)
     db.removePerson(ana.id)
     expect(db.tucaLeaves(ana.id)).toHaveLength(0)
+  })
+
+  it("a colleague's part that did not get done is not his to take: he says why and asks leave for it", async () => {
+    db.saveAgent({ ...tucaAgent('sonnet', ['tuca']), id: 'theo', name: 'Theo', handle: 'theo', role: 'Dados', instructions: 'Você é Theo. Cuida dos números.', kind: undefined })
+    await r.send('c1', 'delegue a @theo: quebre de vez; se não sair, faça você (contas): Calcular a mediana de 3, 9 e 4')
+    await r.idle()
+    // Theo's reply failed, and what he is told of it: why, and that the part is not his to do on his own.
+    const told = turns.findLast((t) => t.prompt.includes('Voltou do que você pediu ao seu time'))!
+    expect(told.prompt).toMatch(/Theo, DM: não terminou \(/)
+    expect(told.prompt).toContain('Não faça você a parte de Theo, nem que seja simples.')
+    expect(told.prompt).toContain('se ninguém mais faz, peça licença com fazer_eu_mesmo')
+    expect(told.prompt).not.toContain('Decida você o caminho')
+    expect(told.tools).toContain('fazer_eu_mesmo')
+    // So he asks, on the same card as for anything no one does, where the request was made.
+    const card = asked('c1')
+    expect(card.run).toMatchObject({ status: 'waiting_input', leave: { kind: 'contas', what: 'Calcular a mediana de 3, 9 e 4' } })
+    expect(db.tucaLeaves(db.ownerId())).toHaveLength(0)
+    // With "Pode fazer", he does it.
+    await pick('c1', 0)
+    expect(db.tucaLeaves(db.ownerId())).toMatchObject([{ conversationId: 'c1', kind: 'contas', uses: 1 }])
+    expect(turns.at(-1)!.prompt).toContain('Edu deixou você fazer isto você mesmo, desta vez: "Calcular a mediana de 3, 9 e 4"')
+    expect(by('c1').at(-1)!.text).toBe('Pronto, fiz eu mesmo: Calcular a mediana de 3, 9 e 4')
   })
 
   it('any other agent has no such tool', async () => {
