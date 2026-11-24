@@ -5,10 +5,10 @@
 // out) and each person's own (theirs alone, used only in work they asked for). And the card an agent's
 // pedir_chave leaves in the chat, where anyone in it pastes what's missing.
 import { L, locale } from '../../../shared/lang'
-import { keyNameError, loginOrigin, parseEnv, type EnvLine, type KeyRequestAnswer, type VaultKey, type VaultLogin, type VaultUse } from '../../../shared/vault'
+import { keyNameError, loginOrigin, parseEnv, parseLoginCsv, type CsvLogin, type EnvLine, type KeyRequestAnswer, type VaultKey, type VaultLogin, type VaultUse } from '../../../shared/vault'
 import type { Approval } from '../../../shared/types'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { agentById, amAdmin, answerKeyRequest, canDecide, decideApproval, importVaultKeys, isTeam, navigate, personById, personName, removeVaultKey, removeVaultLogin, saveVaultKey, saveVaultLogin, setVaultKeyAgent, setVaultLoginAgent, teamMode, useStore, vaultKeys, vaultLogins, vaultUses, type Agent } from '../store'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { agentById, amAdmin, answerKeyRequest, canDecide, decideApproval, importVaultKeys, importVaultLogins, isTeam, navigate, personById, personName, removeVaultKey, removeVaultLogin, saveVaultKey, saveVaultLogin, setVaultKeyAgent, setVaultLoginAgent, teamMode, useStore, vaultKeys, vaultLogins, vaultUses, type Agent } from '../store'
 import { confirmDialog } from './Dialogs'
 import { Modal } from './Modal'
 import { Field, Page, Toggle } from './Pages'
@@ -24,6 +24,7 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
   const [editing, setEditing] = useState<VaultKey | 'new' | 'new-mine' | null>(null)
   const [editingLogin, setEditingLogin] = useState<VaultLogin | 'new' | 'new-mine' | null>(null)
   const [importing, setImporting] = useState(false)
+  const [importingCsv, setImportingCsv] = useState(false)
   const admin = useStore(amAdmin)
   const team = useStore(teamMode)
   const you = useStore((s) => s.you)
@@ -122,9 +123,14 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
             </button>
           </>
         ) : tab === 'logins' ? (
-          <button className="btn btn--sm btn--primary" onClick={newLogin}>
-            <Icon name="plus" size={14} /> {L('Novo login', 'New login')}
-          </button>
+          <>
+            <button className="btn btn--sm btn--ghost" onClick={() => setImportingCsv(true)}>
+              {L('Importar CSV', 'Import CSV')}
+            </button>
+            <button className="btn btn--sm btn--primary" onClick={newLogin}>
+              <Icon name="plus" size={14} /> {L('Novo login', 'New login')}
+            </button>
+          </>
         ) : undefined
       }
     >
@@ -146,6 +152,7 @@ export function VaultPage({ tab = 'keys' }: { tab?: 'keys' | 'logins' | 'log' })
       {editing && <KeyEditor k={typeof editing === 'string' ? undefined : editing} mine={editing === 'new-mine'} onClose={() => setEditing(null)} onSaved={() => (setEditing(null), load())} />}
       {editingLogin && <LoginEditor l={typeof editingLogin === 'string' ? undefined : editingLogin} mine={editingLogin === 'new-mine'} onClose={() => setEditingLogin(null)} onSaved={() => (setEditingLogin(null), load())} />}
       {importing && <ImportEnv have={keys ?? []} mine={team && !admin} onClose={() => setImporting(false)} onSaved={() => (setImporting(false), load())} />}
+      {importingCsv && <ImportCsv have={logins ?? []} mine={team && !admin} onClose={() => setImportingCsv(false)} onSaved={() => (setImportingCsv(false), load())} />}
     </Page>
   )
 }
@@ -426,6 +433,137 @@ function ImportEnv({ have, mine, onClose, onSaved }: { have: VaultKey[]; mine: b
         </button>
         <button className="btn btn--primary btn--sm" disabled={busy || !saving.length} onClick={save}>
           {saving.length === 1 ? L('Guardar 1 chave', 'Keep 1 key') : L(`Guardar ${saving.length} chaves`, `Keep ${saving.length} keys`)}
+        </button>
+      </footer>
+    </Modal>
+  )
+}
+
+// A browser's exported passwords, read on the page: Chrome's `Chrome Passwords.csv` and Firefox's
+// `logins.csv`. The file is chosen in the system's dialog where the app has one, and pasted where it
+// has none (a page in a browser). Each row is shown before anything is saved, and no login goes to an
+// agent. The password never leaves this object but to be saved.
+function ImportCsv({ have, mine, onClose, onSaved }: { have: VaultLogin[]; mine: boolean; onClose: () => void; onSaved: () => void }): ReactNode {
+  const you = useStore((s) => s.you)
+  const [text, setText] = useState('')
+  const [fileName, setFileName] = useState('')
+  const [replace, setReplace] = useState<number[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const pick = (window as { tucano?: { pickLoginsCsv?: () => Promise<{ name: string; text: string } | null> } }).tucano?.pickLoginsCsv
+  const asked = useRef(false)
+  useEffect(() => {
+    if (!pick || asked.current) return
+    asked.current = true
+    void pick().then((file) => {
+      if (!file) return onClose()
+      setFileName(file.name)
+      setText(file.text)
+    }, (e: unknown) => setError(errorOf(e)))
+  }, [])
+  const parsed = useMemo(() => parseLoginCsv(text), [text])
+  const drawer = have.filter((l) => (mine ? l.owner === you : !l.owner))
+  const already = (r: CsvLogin): VaultLogin | undefined => drawer.find((l) => l.origin === r.origin && l.username === r.username)
+  const good = parsed.logins.filter((r) => !r.skip)
+  const going = good.filter((r) => {
+    const same = already(r)
+    return !same || replace.includes(r.row)
+  })
+  const saved = good.filter((r) => already(r)).length // rows already in this drawer
+  const out = parsed.logins.length - good.length
+  const counts = L(
+    `${going.length} pra entrar${saved ? `, ${saved} já ${saved === 1 ? 'salvo' : 'salvos'}` : ''}${out ? `, ${out} fora` : ''}.`,
+    `${going.length} to go in${saved ? `, ${saved} already saved` : ''}${out ? `, ${out} left out` : ''}.`
+  )
+  // A tag short enough for the row, and the whole reason as its tooltip.
+  const why: Record<NonNullable<CsvLogin['skip']>, { tag: string; hint: string }> = {
+    address: {
+      tag: L('endereço não aceito', 'address not accepted'),
+      hint: L('Só https (http só neste computador): o app não digita senha num site sem cifra.', 'Only https (http only on this computer): the app doesn’t type a password into a site without it.')
+    },
+    protocol: {
+      tag: L('não é um site', 'not a site'),
+      hint: L('Um endereço android://, chrome-extension:// ou de outro protocolo não tem site pra digitar.', 'An android://, chrome-extension:// or other protocol address has no site to type into.')
+    },
+    realm: {
+      tag: L('entrada do navegador', 'the browser’s entry'),
+      hint: L('O Firefox guarda entradas de autenticação HTTP que não são um login de site.', 'Firefox keeps HTTP-authentication entries that are not a site login.')
+    },
+    username: { tag: L('sem usuário', 'no username'), hint: L('O Cofre precisa do usuário e da senha.', 'The Vault needs both the username and the password.') },
+    password: { tag: L('sem senha', 'no password'), hint: L('O Cofre precisa do usuário e da senha.', 'The Vault needs both the username and the password.') },
+    again: { tag: L('repetida no arquivo', 'repeated in the file'), hint: L('O mesmo site e usuário já apareceu antes neste arquivo.', 'The same site and username appeared earlier in this file.') }
+  }
+  const save = (): void => {
+    setBusy(true)
+    setError('')
+    const rows = going.map((r) => {
+      const same = already(r)
+      return { ...(same ? { id: same.id } : {}), site: r.site, username: r.username, password: r.password }
+    })
+    importVaultLogins(rows, mine)
+      .then(onSaved, (e: unknown) => setError(errorOf(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Modal title={L('Importar os logins do navegador', 'Import the browser’s logins')} onClose={onClose}>
+      <p className="small modal__lead">
+        {L(
+          'Chrome (Configurações › Senhas › Exportar) grava um Chrome Passwords.csv; o Firefox (about:logins › Exportar logins) grava um logins.csv. Cada linha vira um login, sem agente liberado: o app só digita no site exato. O arquivo continua onde está, sem cifra: apague depois.',
+          'Chrome (Settings › Passwords › Export) writes a Chrome Passwords.csv; Firefox (about:logins › Export logins) writes a logins.csv. Each row becomes a login, given to no agent: the app only types it on the exact site. The file stays where it is, unencrypted: delete it afterwards.'
+        )}
+      </p>
+      {!pick && (
+        <textarea
+          className="vault-import__text"
+          rows={6}
+          spellCheck={false}
+          autoFocus
+          value={text}
+          placeholder={'"url","username","password"\n"https://conta.exemplo.com","edu@exemplo.com","a-senha"'}
+          onChange={(e) => setText(e.target.value)}
+        />
+      )}
+      {fileName && <p className="muted small">{fileName}</p>}
+      {parsed.error && <p className="note note--error">{parsed.error}</p>}
+      {parsed.logins.length > 0 && (
+        <>
+          <p className="muted small">
+            {parsed.browser === 'firefox' ? L('Exportação do Firefox.', 'Firefox’s export.') : L('Exportação do Chrome.', 'Chrome’s export.')} {counts}
+          </p>
+          <div className="table vault-import__lines">
+            {parsed.logins.map((r) => (
+              <div key={r.row} className="table__row">
+                <code className="grow">{r.origin ? host(r.origin) : r.site}</code>
+                <span className="muted small">{r.username}</span>
+                {r.skip ? (
+                  <span className="tag tag--danger vault-import__state" title={why[r.skip].hint}>
+                    {why[r.skip].tag}
+                  </span>
+                ) : already(r) ? (
+                  <label className="row small vault-import__state">
+                    <input
+                      type="checkbox"
+                      checked={replace.includes(r.row)}
+                      onChange={(e) => setReplace((s) => (e.target.checked ? [...s, r.row] : s.filter((x) => x !== r.row)))}
+                    />
+                    {L('já salvo: trocar a senha', 'already saved: replace the password')}
+                  </label>
+                ) : (
+                  <span className="tag tag--ok">{L('novo', 'new')}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {error && <p className="note note--error">{error}</p>}
+      <footer className="modal__foot">
+        <span className="grow" />
+        <button className="btn btn--ghost btn--sm" onClick={onClose}>
+          {L('Cancelar', 'Cancel')}
+        </button>
+        <button className="btn btn--primary btn--sm" disabled={busy || !going.length} onClick={save}>
+          {going.length === 1 ? L('Guardar 1 login', 'Keep 1 login') : L(`Guardar ${going.length} logins`, `Keep ${going.length} logins`)}
         </button>
       </footer>
     </Modal>

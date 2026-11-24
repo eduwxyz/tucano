@@ -2,7 +2,7 @@
 // (on Approvals). Fresh data, fake engines; the card's request is put straight into the database.
 // Run after `npm run build`: node scripts/screens-cofre.mjs [out-dir]
 import { _electron as electron } from 'playwright'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -13,7 +13,7 @@ const data = mkdtempSync(join(tmpdir(), 'tucano-'))
 const env = { ...process.env, TUCANO_DATA: data, TUCANO_SEED: '1', TUCANO_FAKE_ENGINES: '1', TUCANO_LOCALE: process.env.TUCANO_LOCALE ?? 'pt-BR' }
 const errors = []
 const open = async () => {
-  const app = await electron.launch({ args: ['.'], env })
+  const app = await electron.launch({ args: [...(env.TUCANO_ELECTRON ? [] : ['.'])], ...(env.TUCANO_ELECTRON ? { executablePath: env.TUCANO_ELECTRON } : {}), env })
   const win = await app.firstWindow()
   win.on('pageerror', (e) => errors.push(String(e)))
   win.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
@@ -58,16 +58,53 @@ await win.click('button:has-text("Guardar no Cofre")')
 await win.waitForTimeout(400)
 await shot('4-logins')
 
+// The browser's export, read through the system's file dialog: the main process answers with a
+// fixture, so the modal is drawn as someone sees it after choosing a Chrome export.
+const csv = join(mkdtempSync(join(tmpdir(), 'tucano-csv-')), 'Chrome Passwords.csv')
+writeFileSync(
+  csv,
+  [
+    'name,url,username,password,note',
+    'Luz,https://conta.luz.com.br/entrar,edu@exemplo.com,senha-trocada,',
+    'Banco,"https://app.banco.com/login","ana@exemplo.com","sen,ha nova",',
+    'App,android://abcd@app.exemplo/,app@exemplo.com,senha-do-app,',
+    'Portal,http://portal.exemplo,edu@exemplo.com,senha-http,'
+  ].join('\n')
+)
+await app.evaluate(async ({ dialog }, file) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] })
+}, csv)
+await win.click('.sidebar__tool:has-text("Cofre")')
+await win.click('.tabs button:has-text("Logins")')
+await win.click('button:has-text("Importar CSV")')
+await win.waitForSelector('.vault-import__lines')
+await win.waitForTimeout(300)
+await shot('5-import-csv')
+const rows = await win.locator('.vault-import__lines .table__row').count()
+const skipped = await win.locator('.vault-import__lines .tag--danger').count()
+const already = await win.locator('.vault-import__lines label').count()
+console.log('csv import, rows:', rows, 'already saved:', already, 'skipped:', skipped)
+
+// Keep what the preview counted, then read the file back: the rows are in the vault, not just drawn.
+await win.click('.modal__foot .btn--primary')
+await win.waitForSelector('.vault-import__lines', { state: 'detached' })
+await win.waitForTimeout(600)
+await shot('6-logins-depois-do-csv')
+
 await win.locator('.nav-item', { hasText: /Aprovações|Approvals/ }).first().click()
 await win.waitForSelector('.key-request')
 await win.locator('.key-request input[type="password"]').first().fill('sk_test_123456789')
 await win.click('.key-request button:has-text("Guardar no Cofre e liberar")')
 await win.waitForTimeout(800)
-await shot('5-depois-de-colar')
+await shot('7-depois-de-colar')
 
 await win.click('.sidebar__tool:has-text("Cofre")')
 await win.click('.tabs button:has-text("Chaves")')
 await win.waitForTimeout(300)
-await shot('6-chaves')
+await shot('8-chaves')
 console.log('agente:', agent.name, 'erros:', errors)
 await app.close()
+const after = new DatabaseSync(join(data, 'tucano.db'))
+const rowsThere = after.prepare('SELECT origin, username FROM vault_logins ORDER BY origin').all()
+after.close()
+console.log('vault_logins after the import:', rowsThere.map((r) => `${r.origin} ${r.username}`).join(' | '))

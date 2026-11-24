@@ -1,4 +1,4 @@
-import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from '../../shared/vault'
+import type { EnvPair, KeyRequestAnswer, LoginImport, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from '../../shared/vault'
 // Renderer state. Everything except the current view comes from the core and
 // is kept in sync by its events; actions go to the core over RPC.
 import { useCallback, useRef, useSyncExternalStore } from 'react'
@@ -1172,6 +1172,8 @@ export const saveVaultKey = (key: VaultKeyInput): Promise<VaultKey> => call('sav
 export const removeVaultKey = (id: string): Promise<void> => call('removeVaultKey', { id })
 export const setVaultKeyAgent = (id: string, agentId: string, on: boolean): Promise<VaultKey> => call('setVaultKeyAgent', { id, agentId, on })
 export const importVaultKeys = (lines: EnvPair[], replace: string[], mine?: boolean): Promise<{ saved: number }> => call('importVaultKeys', { lines, replace, ...(mine ? { mine } : {}) })
+// A browser's exported passwords, read on the page: each row a login, no agent given one.
+export const importVaultLogins = (logins: LoginImport[], mine?: boolean): Promise<{ saved: number }> => call('importVaultLogins', { logins, ...(mine ? { mine } : {}) })
 // Its site logins: sites and usernames, never a password.
 export const vaultLogins = (): Promise<VaultLogin[]> => call('vaultLogins')
 export const saveVaultLogin = (login: VaultLoginInput): Promise<VaultLogin> => call('saveVaultLogin', { login })
