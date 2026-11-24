@@ -7411,26 +7411,59 @@ kbd {
 }
 
 /* The Boletim's tools */
-.rep-tools {
-  padding: 4px 12px;
-}
 .rep-tool {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px 72px 64px;
-  gap: 12px;
-  padding: 6px 0;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 64px 44px 56px;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
   font-size: 13px;
 }
+.rep-tool + .rep-tool {
+  border-top: 1px solid var(--border);
+}
 .rep-tool--head {
+  padding: 0 0 6px;
   color: var(--text-3);
   font-size: 11.5px;
+}
+.rep-tool .mono {
+  font-size: 12.5px;
 }
 .rep-tool .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.rep-tool__p95 {
+  font-weight: 550;
+}
+.rep-tool__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.rep-tool__bar i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.6;
+}
 .rep-tool .is-danger {
   color: var(--danger);
+  font-weight: 550;
+}
+@media (max-width: 640px) {
+  .rep-tool {
+    grid-template-columns: minmax(0, 1fr) 56px 36px 48px;
+    gap: 10px;
+  }
+  .rep-tool__bar,
+  .rep-tool--head > :nth-child(2) {
+    display: none;
+  }
 }
 .text-btn.rep-line__runs {
   padding: 2px 0;

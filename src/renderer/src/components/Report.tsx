@@ -237,6 +237,7 @@ function AgentLine({ report: r }: { report: AgentReport }): ReactNode {
 
 // The week's tools, slowest first: which one drags and which one fails.
 export function ToolsSection({ tools }: { tools: ToolStat[] }): ReactNode {
+  const slowest = Math.max(1, ...tools.map((t) => t.p95 ?? 0))
   return (
     <section className="read-group">
       <h2>
@@ -249,18 +250,27 @@ export function ToolsSection({ tools }: { tools: ToolStat[] }): ReactNode {
         <div className="rep-tools">
           <div className="rep-tool rep-tool--head">
             <span>{L('Ferramenta', 'Tool')}</span>
-            <span className="num">{L('Usos', 'Uses')}</span>
+            <span />
             <span className="num">p95</span>
+            <span className="num">{L('Usos', 'Uses')}</span>
             <span className="num">{L('Erros', 'Errors')}</span>
           </div>
-          {tools.map((t) => (
-            <div key={t.tool} className="rep-tool">
-              <span className="mono truncate">{t.tool}</span>
-              <span className="num">{t.uses.toLocaleString(locale())}</span>
-              <span className="num">{durationOrDash(t.p95)}</span>
-              <span className={`num ${t.errorRate > 0 ? 'is-danger' : ''}`}>{share(t.errorRate)}</span>
-            </div>
-          ))}
+          {tools.map((t) => {
+            const failed = Math.round(t.errorRate * t.uses)
+            return (
+              <div key={t.tool} className="rep-tool">
+                <span className="mono truncate" title={t.tool}>
+                  {t.tool}
+                </span>
+                <span className="rep-tool__bar">{t.p95 !== undefined && <i style={{ width: `${(t.p95 / slowest) * 100}%` }} />}</span>
+                <span className="num rep-tool__p95">{durationOrDash(t.p95)}</span>
+                <span className="num muted">{t.uses.toLocaleString(locale())}</span>
+                <span className={`num ${failed ? 'is-danger' : 'muted'}`} title={failed ? L(`${failed} de ${t.uses}`, `${failed} of ${t.uses}`) : undefined}>
+                  {share(t.errorRate)}
+                </span>
+              </div>
+            )
+          })}
         </div>
       )}
     </section>
