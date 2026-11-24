@@ -2,9 +2,9 @@
 // pull grows with the distance, and two pages too close oscillate through each other),
 // which landed every page on the same spot of the screen. No force may do that.
 import { describe, expect, it } from 'vitest'
-import { fitLabels, tick, withoutGhosts, type Body } from '../src/renderer/src/components/Wiki'
+import { fitLabels, tick, forTheMap, type Body } from '../src/renderer/src/components/Wiki'
 
-type Graph = Parameters<typeof withoutGhosts>[0]
+type Graph = Parameters<typeof forTheMap>[0]
 import { repelGrouped } from '../src/renderer/src/components/wiki-quadtree'
 
 // a dense wiki like the one that broke it: many pages, most of them linked to a few
@@ -91,12 +91,20 @@ describe('a big wiki map stays readable', () => {
     const pages = (n: number): Graph['nodes'] => Array.from({ length: n }, (_, i) => ({ title: `p${i}`, kind: 'note', links: 1 }))
     const ghost = { title: 'word', kind: 'note', links: 1, missing: true }
     const small = { nodes: [...pages(10), ghost], edges: [['p0', 'word'], ['p0', 'p1']] as [string, string][] }
-    expect(withoutGhosts(small)).toBe(small)
+    expect(forTheMap(small)).toBe(small)
     const big = { nodes: [...pages(1001), ghost], edges: [['p0', 'word'], ['p0', 'p1']] as [string, string][] }
-    const shown = withoutGhosts(big)
+    const shown = forTheMap(big)
     expect(shown.nodes.some((n) => n.missing)).toBe(false)
     expect(shown.nodes).toHaveLength(1001)
     expect(shown.edges).toEqual([['p0', 'p1']])
+  })
+
+  it('draws one dot per title, with one link between two of them', () => {
+    const g = { nodes: [{ title: 'Untitled', kind: 'note', links: 1 }, { title: 'a', kind: 'note', links: 2 }, { title: 'Untitled', kind: 'note', links: 3 }], edges: [['Untitled', 'a'], ['a', 'Untitled']] as [string, string][] }
+    const shown = forTheMap(g)
+    expect(shown.nodes.map((n) => n.title)).toEqual(['Untitled', 'a'])
+    expect(shown.nodes[0]!.links).toBe(3)
+    expect(shown.edges).toEqual([['Untitled', 'a']])
   })
 
   it('draws the most linked names that fit, never one over another, and always the one asked for', () => {

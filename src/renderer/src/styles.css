@@ -9302,6 +9302,11 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
    animated element is a layer of its own: eighty of them at once is a first frame the compositor can
    leave unpainted until something else invalidates it. */
 .wk-canvas.is-many .wk-node { animation: none; }
+/* thousands of dots fading at once on every hover is what a busy map can't afford */
+.wk-canvas.is-many .wk-node, .wk-canvas.is-many .wk-node text, .wk-canvas.is-many .wk-canvas__edges line { transition: none; }
+/* a page lit: a veil over the map, and the page and its links over the veil */
+.wk-canvas__over { pointer-events: none; }
+.wk-canvas__veil { fill: var(--bg); opacity: 0.8; }
 .wk-canvas.is-many > svg { animation: fade var(--dur-data) var(--ease-out) both; }
 .wk-node__hit { fill: transparent; }
 .wk-node__dot { fill: var(--k); stroke: var(--bg); stroke-width: 2.5; }
