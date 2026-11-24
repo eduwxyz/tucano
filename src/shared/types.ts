@@ -180,6 +180,7 @@ export interface Receipt {
   outputTokens: number
   ms: number
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
+  responseModel?: string // the model id the harness says answered; `model` stays the one asked for
 }
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
@@ -191,7 +192,8 @@ export interface LeaveAsk {
   what: string // what he said he would do, in one sentence
   web?: true // he will search and read web pages
   grants?: Record<string, GrantLevel> // the connectors he will use, by id
-  state?: 'once' | 'always' | 'colleague'
+  instead?: string // the colleague whose part this is and who did not finish it: asked for this once only, or the person waits for them
+  state?: 'once' | 'always' | 'colleague' | 'wait'
 }
 
 // What a person let the Tuca do himself. It is theirs, never his: each person's Tuca works with what that
@@ -204,6 +206,7 @@ export interface TucaLeave {
   what: string
   web?: true
   grants?: Record<string, GrantLevel>
+  instead?: string // given in the place of a colleague who had not finished: it lets him use what he asked for there, and is no kind of thing he may do himself
   uses: number // times he did it himself under this leave
   suggested?: true // he was already told to suggest a colleague for this kind of thing
   at: number
@@ -1407,6 +1410,17 @@ export interface ToolStat {
 }
 
 export const EXECUTION_DAYS: readonly number[] = [1, 7, 30] // the periods Execuções offers
+
+// Settings › Connections › Traces, as an admin's page sees it. Headers are never sent back: only whether some are saved.
+export interface TracesView {
+  on: boolean
+  endpoint: string // the base address, as typed: /v1/traces is added when sending
+  text: boolean // the prompt and final reply go too
+  headers: boolean
+  fromEnv?: string // the server's environment configures traces: its endpoint's origin, and the screen is read-only
+}
+
+export type TracesTest = { ok: true } | { ok: false; status?: number } // status: what the backend answered; none: it couldn't be reached
 export const OK_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval']) // a reply that went fine
 export type ExecutionFilter = 'ok' | 'failed' | 'stopped'
 export interface ExecutionQuery {

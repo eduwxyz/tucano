@@ -51,6 +51,12 @@ describe('settings ownership and visibility', () => {
     }
   })
 
+  it('shows Connections › Traces to an admin only', () => {
+    const shown = (admin: boolean): boolean => settingsStructure({ admin, owner: false, team: true, servers: false }).some((s) => s.id === 'connections-traces' && s.visible)
+    expect(shown(true)).toBe(true)
+    expect(shown(false)).toBe(false)
+  })
+
   it('gates the phone on the owner and the servers on a capable workspace', () => {
     const admin = settingsStructure({ admin: true, owner: false, team: true, servers: false })
     expect(admin.find(section => section.id === 'connections-phone')!.visible).toBe(false)

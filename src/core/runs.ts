@@ -50,7 +50,7 @@ import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellAct
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
-import { during, inReplyTool, traceReply, tracing, type ReplyTrace, type SpanRef } from './telemetry'
+import { during, inReplyTool, traceReply, tracing, type ReplyText, type ReplyTrace, type SpanRef } from './telemetry'
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
@@ -322,7 +322,8 @@ export interface RunnerDeps {
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
-  vault?: Pick<Vault, 'usable' | 'pick' | 'open' | 'mask' | 'warm' | 'loginSites'> // the Cofre's keys, for bash and start_service, and its logins (src/core/vault.ts)
+  vault?: Pick<Vault, 'usable' | 'pick' | 'open' | 'mask' | 'maskAll' | 'warm' | 'loginSites'> // the Cofre's keys, for bash and start_service, and its logins (src/core/vault.ts)
+  traceText?: (reply: Pick<Message, 'conversationId' | 'at'>) => boolean // Settings › Traces: whether this reply's text goes with its trace
   browser?: Pick<Browser, 'call' | 'approved'> & Partial<Pick<Browser, 'loginSites'>> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -716,16 +717,17 @@ export class Runner {
     let granted: { agent: string; ask: LeaveAsk; choice: LeaveChoice; person: string; suggest?: number } | undefined
     const leaveAsk = asked?.run?.leave
     if (asked && asked.author.kind === 'agent' && leaveAsk && !leaveAsk.state) {
-      const choice = leaveChoice(asked.run?.answers, typed)
+      const choice = leaveChoice(asked.run?.answers, typed, !!leaveAsk.instead)
       if (choice) {
         const person = dmOwner(conv, db.ownerId()) ?? writer.id
         // A connector only if whose leave it is may still give one (asked as an admin, answered as a member: no).
         const [ask] = forRole([leaveAsk], isAdmin(db.person(person) ?? writer))
         let suggest: number | undefined
-        if (choice !== 'colleague') {
+        if (choice === 'once' || choice === 'always') {
           const made = newLeave(ask!, person, choice, conv.id)
           const all = [...db.tucaLeaves(person), made]
-          if (shouldSuggest(all, ask!.kind)) suggest = timesDone(all, ask!.kind)
+          // In a colleague's place there is no one to suggest: someone on the team already does that.
+          if (!ask!.instead && shouldSuggest(all, ask!.kind)) suggest = timesDone(all, ask!.kind)
           db.saveTucaLeave({ ...made, ...(suggest ? { suggested: true as const } : {}) })
           emit({ type: 'leaves' })
         }
@@ -1474,6 +1476,24 @@ export class Runner {
     }
   }
 
+  // A reply's text for its trace, when Settings › Traces sends it: the message it answers (or the request it
+  // works on) and what it ended with. Nothing else it saw or did.
+  // Only the message it answers, from the same conversation: a task can carry what came back from
+  // another one (a hand-off's result), which whoever turned the text on may not read. Never fails the reply.
+  private textOf(msg: Message): ReplyText | undefined {
+    try {
+      if (!this.deps.traceText?.(msg)) return undefined
+      const vault = this.deps.vault
+      const mask = (t: string): string => maskSecrets(vault ? vault.maskAll(t) : t) // every Vault key, then the token shapes
+      const answered = msg.run?.replyTo ? this.deps.db.message(msg.run.replyTo) : undefined
+      const asked = answered?.conversationId === msg.conversationId ? answered.text : undefined
+      return { ...(asked ? { input: mask(asked) } : {}), output: mask(msg.text) }
+    } catch (e) {
+      console.error('[telemetry] no text for this trace:', e instanceof Error ? e.message : e)
+      return undefined
+    }
+  }
+
   private async executeReply(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
@@ -1485,7 +1505,7 @@ export class Runner {
     const traced: { reply?: ReplyTrace | undefined } = {}
     try {
       msg = await this.reply(agent, conv, rest, traced)
-      traced.reply?.end({ status: msg.run?.status ?? 'failed', usage: msg.run?.receipt })
+      traced.reply?.end({ status: msg.run?.status ?? 'failed', usage: msg.run?.receipt, text: traced.reply && this.textOf(msg) })
     } catch (e) {
       traced.reply?.end({ status: 'failed' })
       this.followups.end(key)
@@ -2280,7 +2300,12 @@ ${note}`,
 
         if (name === FAZER_EU.name && leaveAsks) {
           const mine = (this.deps.connectors?.list() ?? []).filter((c) => !notYours(c))
-          const r = leaveFrom(args, { connectors: mine, admin: isAdmin(requester) })
+          // Whose part did not get done: the last thing he asked each one from this conversation, within a
+          // day, ended so (newest first: the first seen for each is the last asked).
+          const lastAsked = new Map<string, Delegation>()
+          for (const d of db.liveDelegations(Date.now() - 86_400_000)) if (d.from === agent.id && d.originConversationId === conv.id && !lastAsked.has(d.to)) lastAsked.set(d.to, d)
+          const unfinished = [...lastAsked.values()].filter((d) => d.state === 'failed').flatMap((d) => db.agent(d.to)?.name ?? [])
+          const r = leaveFrom(args, { connectors: mine, admin: isAdmin(requester), unfinished })
           if (!r.ask) return textResult(r.error!, true)
           const ask = r.ask
           const all = db.tucaLeaves(requester.id)
@@ -2311,12 +2336,17 @@ ${note}`,
           question = questionsAsText(questions)
           askedTo = requester
           msg.run = { ...msg.run!, leave: ask }
-          addSteps({ id: randomUUID(), label: L('Pediu licença pra fazer ele mesmo', 'Asked leave to do it himself'), detail: `${ask.kind} · ${leaveTools(ask, mine)}`, status: 'done' })
+          addSteps({ id: randomUUID(), label: L('Pediu licença pra fazer ele mesmo', 'Asked leave to do it himself'), detail: `${ask.kind} · ${leaveTools(ask, mine)}${ask.instead ? L(` · no lugar de ${ask.instead}`, ` · in ${ask.instead}'s place`) : ''}`, status: 'done' })
           return textResult(
-            L(
-              `Pergunta enviada a ${settings.workspaceName}, num card com três respostas. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. Se ${settings.workspaceName} deixar, você continua numa nova mensagem, já com o que pediu pra usar.`,
-              `Question sent to ${settings.workspaceName}, as a card with three answers. End your reply now with one sentence at most, without repeating the question. If ${settings.workspaceName} allows it, you go on in a new message, already with what you asked to use.`
-            )
+            ask.instead
+              ? L(
+                  `Pergunta enviada a ${settings.workspaceName}, num card com duas respostas: você faz desta vez, ou ${settings.workspaceName} espera ${ask.instead}. Encerre sua resposta agora com no máximo uma frase, dizendo por que ${ask.instead} não terminou e, se só ${settings.workspaceName} resolve, onde; não repita a pergunta. Se ${settings.workspaceName} deixar, você continua numa nova mensagem, já com o que pediu pra usar.`,
+                  `Question sent to ${settings.workspaceName}, as a card with two answers: you do it this once, or ${settings.workspaceName} waits for ${ask.instead}. End your reply now with one sentence at most, saying why ${ask.instead} did not finish and, if only ${settings.workspaceName} can solve it, where; do not repeat the question. If ${settings.workspaceName} allows it, you go on in a new message, already with what you asked to use.`
+                )
+              : L(
+                  `Pergunta enviada a ${settings.workspaceName}, num card com três respostas. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. Se ${settings.workspaceName} deixar, você continua numa nova mensagem, já com o que pediu pra usar.`,
+                  `Question sent to ${settings.workspaceName}, as a card with three answers. End your reply now with one sentence at most, without repeating the question. If ${settings.workspaceName} allows it, you go on in a new message, already with what you asked to use.`
+                )
           )
         }
 

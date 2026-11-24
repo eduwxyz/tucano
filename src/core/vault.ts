@@ -108,7 +108,9 @@ export class Vault {
     }
     if (value) {
       await this.deps.secrets.set(secretKey(id), value)
-      this.values.delete(id)
+      // Known from now on, to be masked; a 1Password reference is read only when a use asks.
+      if (isOpRef(value)) this.values.delete(id)
+      else this.values.set(id, value)
     }
     db.saveVaultKey(key)
     return key
@@ -188,18 +190,33 @@ export class Vault {
   // (whoever's) whose values were opened in this run of the app, so a `cat .env` or a service's log
   // shows [cofre:NAME] too.
   mask(agentId: string, text: string): string {
-    const keys = this.deps.db
-      .vaultKeys()
-      .filter((k) => k.agents.includes(agentId) && this.values.has(k.id))
-      .map((k) => ({ name: k.name, value: this.values.get(k.id)! }))
-    return maskKeys(text, keys)
+    return this.maskWith(text, (k) => k.agents.includes(agentId))
+  }
+
+  // Every key whose value this run of the app knows, whoever it's given to: for text that may hold any of
+  // them (Settings › Traces sends what a person typed).
+  maskAll(text: string): string {
+    return this.maskWith(text, () => true)
+  }
+
+  private maskWith(text: string, which: (k: VaultKey) => boolean): string {
+    return maskKeys(text, this.deps.db.vaultKeys().flatMap((k) => (which(k) && this.values.has(k.id) ? [{ name: k.name, value: this.values.get(k.id)! }] : [])))
   }
 
   // Opens (once) every key given to this agent, so mask() knows their values before its first command.
   // Not a 1Password reference: reading one asks to unlock 1Password, which only a use should do.
-  async warm(agentId: string): Promise<void> {
+  warm(agentId: string): Promise<void> {
+    return this.warmWhere((k) => k.agents.includes(agentId))
+  }
+
+  // The same for every key, so maskAll() knows them all.
+  warmAll(): Promise<void> {
+    return this.warmWhere(() => true)
+  }
+
+  private async warmWhere(which: (k: VaultKey) => boolean): Promise<void> {
     for (const k of this.deps.db.vaultKeys()) {
-      if (!k.agents.includes(agentId) || this.values.has(k.id)) continue
+      if (!which(k) || this.values.has(k.id)) continue
       const stored = await this.deps.secrets.get(secretKey(k.id)).catch(() => undefined)
       if (stored !== undefined && !isOpRef(stored)) this.values.set(k.id, stored)
     }
