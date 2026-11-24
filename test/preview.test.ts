@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { createServer, request, type IncomingHttpHeaders, type Server } from 'node:http'
 import { createServer as tcpServer, connect, type AddressInfo, type Socket } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Preview, withoutOurCookies } from '../src/server/preview'
+import { Preview, theirCookies, withoutOurCookies } from '../src/server/preview'
 
 // An agent's page on the loopback, and the server's front door in front of it (as src/server does).
 let site: Server
@@ -21,7 +21,9 @@ const listen = (s: { listen: (port: number, host: string, cb: () => void) => unk
 beforeAll(async () => {
   site = createServer((req, res) => {
     seen = req.headers
-    res.writeHead(200, { 'content-type': 'text/plain' }).end(`site:${req.url}`)
+    // A page that tries to set our cookies, or one for the whole domain, besides its own.
+    const cookies = req.url === '/cookies' ? ['tucano=forged; Path=/', 'Tucano_Preview=x', 'wide=1; Domain=example.com', 'theirs=1; Path=/; HttpOnly'] : []
+    res.writeHead(200, { 'content-type': 'text/plain', ...(cookies.length ? { 'set-cookie': cookies } : {}) }).end(`site:${req.url}`)
   })
   sitePort = await listen(site)
   // A WebSocket-ish server: answers the upgrade, then echoes.
@@ -177,6 +179,16 @@ describe("an agent's page at an address of its own", () => {
     expect((await ask(host, '/', `${name}=${value.split('.')[0]}.${Number(at) + 1}.${mac}`)).status).toBe(401)
     // The old form, the same for everyone, is gone.
     expect((await ask(host, '/', `${name}=${mac}`)).status).toBe(401)
+  })
+
+  it('lets the page set only its own cookies', async () => {
+    const cookie = await signIn(sitePort)
+    const r = await ask(`${sitePort}-ana.example.com`, '/cookies', cookie)
+    expect(r.status).toBe(200)
+    expect(r.headers['set-cookie']).toEqual(['theirs=1; Path=/; HttpOnly'])
+    expect(theirCookies(['tucano=x', ' tucano_preview =y'])).toBeUndefined()
+    expect(theirCookies('a=1; domain=.example.com')).toBeUndefined()
+    expect(theirCookies('tucanos=1')).toEqual(['tucanos=1'])
   })
 
   it('keeps only the page’s own cookies', () => {
