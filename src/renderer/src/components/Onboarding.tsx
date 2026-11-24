@@ -512,7 +512,7 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
 
   const note = conv
     ? L('Trocar o modelo mantém a conversa: ele continua de onde parou.', 'Changing the model keeps the conversation: he goes on from where you left off.')
-    : L('Escolha com qual modelo o Tuca conversa com você e monta os agentes.', 'Pick the model Tuca uses to talk with you and build the agents.')
+    : L('Escolha com qual modelo o Tuca conversa com você, passa os pedidos e monta os agentes.', 'Pick the model Tuca uses to talk with you, pass requests on and build the agents.')
   const chip = <ModelChip value={model} onPick={pick} note={note} applying={applying} />
 
   return (

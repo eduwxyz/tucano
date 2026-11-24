@@ -75,7 +75,7 @@ function NavItem({ view, icon, label, badge, fresh }: { view: View; icon: IconNa
 // The Tuca is a screen, not one of the agents: here at the top, and behind the "+" for a new agent.
 function TucaItem(): ReactNode {
   return (
-    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Pergunte ao Tuca como algo funciona, por que algo falhou, ou monte um agente com ele', 'Ask Tuca how something works or why something failed, or build an agent with him')}>
+    <button className="nav-item" data-coach="tuca" onClick={openTuca} title={L('Peça ao Tuca: ele passa pra quem do time faz. Ele também explica o Tucano, vê por que algo falhou e monta agentes', 'Ask Tuca: he passes it to whoever on the team does it. He also explains Tucano, looks into why something failed and builds agents')}>
       <TucaMark size={18} />
       <span className="nav-item__label">Tuca</span>
       <span className="nav-item__meta">{L('te ajuda', 'helps you')}</span>
