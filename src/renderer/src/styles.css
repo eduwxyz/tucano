@@ -8974,29 +8974,154 @@ kbd {
 /* ---------- a new version, ready to go in ---------- */
 .update-note {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  margin: 0 0 8px;
-  padding: 8px 8px 8px 10px;
-  border-radius: 8px;
-  background: var(--accent-soft);
+  margin: 2px 8px 10px;
 }
-.update-note__text {
-  /* A longer button ("Restart anyway") goes under the text instead of over it. */
-  flex: 1 1 120px;
+.update-note > .avatar {
+  flex: none;
+  margin-top: 2px;
+}
+/* A speech bubble under the Tuca's row, its tail up toward him. */
+.update-note__bubble {
+  position: relative;
+  flex: 1;
   min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  font-size: 12.5px;
+  line-height: 1.4;
+  animation: update-note-in 0.3s var(--ease-out, ease-out);
+}
+.update-note__bubble::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 9px;
+  border: 6px solid transparent;
+  border-top: 0;
+  border-bottom-color: var(--accent-soft);
+}
+/* Alone (his row out of the sidebar): beside his own face, the tail toward it. */
+.update-note--alone .update-note__bubble::before {
+  top: 8px;
+  left: -6px;
+  border: 6px solid transparent;
+  border-left: 0;
+  border-right-color: var(--accent-soft);
+}
+@keyframes update-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+/* The Tuca calling: a ring going out from him, and a little shake every few seconds. */
+.tuca-call {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.nav-item.is-calling .tuca-call::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 8px;
+  border: 2px solid var(--accent);
+  animation: tuca-ring 1.8s var(--ease-out, ease-out) infinite;
+  pointer-events: none;
+}
+.nav-item.is-calling .tuca-call .avatar {
+  animation: tuca-shake 3.6s ease-in-out infinite;
+}
+@keyframes tuca-ring {
+  from {
+    opacity: 0.9;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+@keyframes tuca-shake {
+  0%,
+  76%,
+  100% {
+    transform: rotate(0);
+  }
+  80% {
+    transform: rotate(-12deg);
+  }
+  84% {
+    transform: rotate(10deg);
+  }
+  88% {
+    transform: rotate(-6deg);
+  }
+  92% {
+    transform: rotate(3deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-item.is-calling .tuca-call::after {
+    animation: none;
+    opacity: 0.8;
+  }
+  .nav-item.is-calling .tuca-call .avatar,
+  .update-note__bubble {
+    animation: none;
+  }
+}
+.update-note__said {
+  display: grid;
+  margin: 0;
+}
+.update-note__said > [aria-hidden] {
+  grid-area: 1 / 1;
+}
+.update-note__ghost {
+  visibility: hidden;
+}
+.update-note__caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: currentColor;
+  animation: update-note-caret 0.9s steps(1) infinite;
+}
+@keyframes update-note-caret {
+  50% {
+    opacity: 0;
+  }
+}
+.update-note__after {
   display: flex;
   flex-direction: column;
-  font-size: 12.5px;
-  line-height: 1.35;
+  gap: 6px;
+  margin-top: 8px;
+  transition: opacity 0.3s ease;
 }
-.update-note__text a {
+.update-note__after.is-waiting {
+  opacity: 0;
+  visibility: hidden;
+}
+.update-note__acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.update-note__acts a {
+  margin-right: auto;
   color: var(--accent);
   font-size: 12px;
   text-decoration: none;
 }
-.update-note__text a:hover {
+.update-note__acts a:hover {
   text-decoration: underline;
 }
 
