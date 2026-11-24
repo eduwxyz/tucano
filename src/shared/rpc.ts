@@ -177,6 +177,11 @@ export interface Api {
   hermesPreview(p: { path?: string }): HermesPreview
   importHermes(p: { path: string; profiles: string[] }): string // the chosen profiles (by key) as agents; what was added
   backupNow(): string // where the copy went
+  // The file itself: what it takes on disk, how much of that is free pages, and whether it reads back sound.
+  dbHealth(): { bytes: number; free: number; sound: boolean; said: string }
+  // Empties the log, rebuilds the file and refreshes the planner, refusing while a reply is at work:
+  // before and after in bytes, the free pages left, and the check's verdict.
+  optimizeDb(): { before: number; after: number; free: number; sound: boolean; said: string }
   // Everything in one .zip, to take this Tucano to a server (desktop): where it went, and what's in it.
   exportBackup(): { path: string } & BackupSummary
   // On a server, the owner: a backup sent up (/upload) checked and set apart; nothing changes yet.
