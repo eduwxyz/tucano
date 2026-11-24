@@ -100,6 +100,14 @@ describe('what became of an approved call', () => {
     expect(a.outcome).toContain('Acesso liberado')
   })
 
+  it('for Execuções, the call made once approved is the tool’s use, and a refusal or a let-through is none', async () => {
+    const tools = (a: Approval): string[] => db.message(a.messageId)!.run!.steps.flatMap((s) => (s.tool ? [s.tool] : []))
+
+    expect(tools(await decided(ask({})))).toEqual(['bash'])
+    expect(tools(await decided(ask({}), 'refused'))).toEqual([])
+    expect(tools(await decided(ask({ connectorId: 'apps', connectorName: 'Apps', tool: 'app_clicar', args: { app: 'Mail', alvo: 'Enviar' } })))).toEqual([])
+  })
+
   it('a refusal is never done', async () => {
     expect((await decided(ask({}), 'refused')).result).toBe('not_run')
   })

@@ -103,6 +103,7 @@ export function claudeParser(): Parser {
   let finished = false
   let wroteText = false // text from an earlier model call in this turn
   let newCall = false
+  let model: string | undefined // as the API named the one that answered
 
   return {
     line(line) {
@@ -116,7 +117,9 @@ export function claudeParser(): Parser {
         if (e['type'] === 'message_start') {
           doneTokens += callInput + callOutput
           doneCache += callCache
-          const u = ((e['message'] as Record<string, unknown> | undefined)?.['usage'] ?? {}) as Record<string, unknown>
+          const m = (e['message'] ?? {}) as Record<string, unknown>
+          if (typeof m['model'] === 'string' && m['model']) model = m['model']
+          const u = (m['usage'] ?? {}) as Record<string, unknown>
           callCache = num(u['cache_read_input_tokens'])
           callInput = num(u['input_tokens']) + callCache + num(u['cache_creation_input_tokens'])
           callOutput = 0
@@ -166,7 +169,8 @@ export function claudeParser(): Parser {
               inputTokens: num(u['input_tokens']) + cacheRead + num(u['cache_creation_input_tokens']),
               cacheReadTokens: cacheRead,
               outputTokens: num(u['output_tokens']),
-              apiCostUsd: typeof ev['total_cost_usd'] === 'number' ? ev['total_cost_usd'] : undefined
+              apiCostUsd: typeof ev['total_cost_usd'] === 'number' ? ev['total_cost_usd'] : undefined,
+              ...(model ? { responseModel: model } : {})
             }
           })
         }

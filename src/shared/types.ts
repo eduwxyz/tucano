@@ -162,6 +162,7 @@ export interface Step {
   input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
   output?: string // what came back, in a few words ("120 rows")
   keys?: string[] // the Cofre's keys the command used, by name (src/core/vault.ts)
+  tool?: string // the tool that ran, by its own name (no connector): set on tool calls since Execuções
   status: StepStatus
   ms?: number
   // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran,
@@ -176,6 +177,7 @@ export interface Receipt {
   outputTokens: number
   ms: number
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
+  responseModel?: string // the model id the harness says answered; `model` stays the one asked for
 }
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
@@ -191,6 +193,7 @@ export interface Run {
   status: RunStatus
   steps: Step[]
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
+  startedAt?: number // when this attempt started, on a reply tried again (its message keeps the first `at`)
   receipt?: Receipt
   approvalId?: string
   outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
@@ -218,6 +221,7 @@ export interface Run {
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
   job?: string // the job it is part of: what a message set off, until it's done (src/core/jobs.ts)
+  trace?: { traceId: string; spanId: string; linkedTo?: { traceId: string; spanId: string } } // its OpenTelemetry span, when traces are on: a reply it asks for links here, and linkedTo is the one that asked for it
   autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   retryAt?: number // 'failed' on something that passes (a network, a plan's window, a computer off): when it tries again by itself
   retries?: number // how many times it already tried again by itself
@@ -1341,6 +1345,63 @@ export interface UsageReport {
   models: { model: string; engine: EngineId; tokens: number }[] // biggest first
 }
 
+// Uso e limites › Execuções: finished agent replies, one row each (src/core/executions.ts).
+export interface ExecutionRow {
+  id: string // the reply's message
+  conversationId: string
+  agentId: string
+  preview: string // the reply's first line
+  status: RunStatus
+  at: number
+  model?: string
+  ms?: number
+  tokens?: number // counted; unset when it ended before reporting usage
+  tools: number
+}
+
+// A step as Execuções shows it: what ran, how long and how it ended, without what the agent said or got back.
+export type ExecutionStep = Pick<Step, 'id' | 'label' | 'detail' | 'tool' | 'status' | 'ms' | 'error'>
+
+// A tool over a week, in the Boletim. Only steps since tools were recorded count.
+export interface ToolStat {
+  tool: string
+  uses: number
+  p95?: number // ms; unset if none of its calls has a time
+  errorRate: number // 0 to 1
+}
+
+export const EXECUTION_DAYS: readonly number[] = [1, 7, 30] // the periods Execuções offers
+
+// Settings › Connections › Traces, as an admin's page sees it. Headers are never sent back: only whether some are saved.
+export interface TracesView {
+  on: boolean
+  endpoint: string // the base address, as typed: /v1/traces is added when sending
+  text: boolean // the prompt and final reply go too
+  headers: boolean
+  fromEnv?: string // the server's environment configures traces: its endpoint's origin, and the screen is read-only
+}
+
+export type TracesTest = { ok: true } | { ok: false; status?: number } // status: what the backend answered; none: it couldn't be reached
+export const OK_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval']) // a reply that went fine
+export type ExecutionFilter = 'ok' | 'failed' | 'stopped'
+export interface ExecutionQuery {
+  days: number // how far back
+  agentId?: string
+  status?: ExecutionFilter
+  beforeAt?: number // with beforeId: the page after this row
+  beforeId?: string
+}
+export type ExecutionCursor = Pick<ExecutionRow, 'at' | 'id'>
+
+export interface ExecutionPage {
+  rows: ExecutionRow[]
+  next?: ExecutionCursor // there's more after this page
+  count: number // all that the filters select, past this page
+  p50?: number // ms; unset with nothing selected
+  p95?: number
+  errorRate?: number // 0 to 1
+}
+
 // One calendar week; skills are rated over the six weeks up to it.
 export interface Report {
   since: number // Monday 00:00
@@ -1348,6 +1409,7 @@ export interface Report {
   agents: AgentReport[]
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
+  tools: ToolStat[] // in replies the viewer may read
 }
 
 // ---------- the wiki ----------

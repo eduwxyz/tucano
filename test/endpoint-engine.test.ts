@@ -117,6 +117,7 @@ describe('an agent on an endpoint, with no harness', () => {
     expect(p.sent[2]!.body.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'c2', content: expect.stringContaining('Fechou a R$ 5,40.') })
     expect(reply().text).toBe('O dólar fechou a R$ 5,40.')
     expect(reply().run?.steps.map((s) => s.label)).toEqual(expect.arrayContaining(['Buscou na web', 'Leu a página']))
+    expect(reply().run?.steps.flatMap((s) => (s.tool ? [[s.tool, typeof s.ms]] : []))).toEqual([['buscar_na_web', 'number'], ['ler_pagina', 'number']]) // for Execuções
   })
 
   it('gives the web tools to no agent with Web off', async () => {

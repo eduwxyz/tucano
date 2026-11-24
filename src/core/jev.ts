@@ -10,6 +10,7 @@ import type { Agent, Connector, Message, Person } from '../shared/types'
 import { ask, badFormat, checkClassifierKey, failure, noAnswer, type ClassifierAnswers, type ClassifierQuestion } from './classifiers'
 import type { ThreadDigest } from './memory'
 import { describeAgent, MAX_ROUTED, REPLY_JSON, routerPrompt } from './router'
+import { classifierCall } from './telemetry'
 
 export const JEV_MODEL = 'jev' // the routerModel value that picks the routing classifier
 export const JEV_SECRET = 'typesafe:key' // the key an install from before Settings › Classifiers saved
@@ -148,16 +149,23 @@ export async function jevElement(opts: {
 
 // Where on the screenshot the target is, as fractions of its width and height. Only TypeSafe reads
 // a screenshot, so another classifier says so and the browser stays with the page's own text.
-export async function jevBox(opts: {
+type BoxAsk = {
   key: string
   target: string // what the agent asked for, in words
   classifier?: ClassifierConfig
   jpeg: string
   fetch?: Fetch
-}): Promise<{ x: number; y: number; confidence: number } | { error: string }> {
+}
+type BoxAnswer = { x: number; y: number; confidence: number } | { error: string }
+
+export async function jevBox(opts: BoxAsk): Promise<BoxAnswer> {
   const classifier = targetOf(opts.classifier)
   if (!providerSpec(classifier.provider).box)
     return { error: L(`${providerSpec(classifier.provider).label} não acha no print da tela`, `${providerSpec(classifier.provider).label} doesn't find things in a screenshot`) }
+  return classifierCall({ harness: 'typesafe', model: 'jev-preview' }, () => askBox(opts))
+}
+
+async function askBox(opts: BoxAsk): Promise<BoxAnswer> {
   const ref = `tela-${randomUUID()}`
   let res: Response
   try {

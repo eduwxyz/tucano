@@ -4,6 +4,19 @@
 
 export const TITLE_MAX = 60
 
+// The first line of a reply that has words, without Markdown marks: what a list shows of it.
+export const firstLine = (text: string): string =>
+  text
+    .split('\n')
+    .map((l) =>
+      l
+        .replace(/^[#>\-*\s]+/, '')
+        .replace(/[*_`]+/g, '')
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .trim()
+    )
+    .find(Boolean) ?? ''
+
 // The words of a line, without mentions, links, Markdown or extra spaces.
 const clean = (line: string): string =>
   line

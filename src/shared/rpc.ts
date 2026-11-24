@@ -2,6 +2,7 @@
 import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
+import type { ExecutionFilter, ExecutionPage, ExecutionStep, TracesTest, TracesView } from './types'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
@@ -186,6 +187,11 @@ export interface Api {
   openBackups(): void
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default
   usage(): UsageReport
+  executions(p: { days: number; agentId?: string; status?: ExecutionFilter; beforeAt?: number; beforeId?: string }): ExecutionPage // finished replies the viewer may read, a page at a time
+  executionSteps(p: { messageId: string }): ExecutionStep[]
+  traces(): TracesView // Settings › Connections › Traces
+  setTraces(p: { on: boolean; endpoint: string; text?: boolean; headers?: string | null }): Promise<TracesView> // headers: one per line, "Name: value"; left out, the saved ones stay; null removes them
+  testTraces(p: { endpoint: string; headers?: string }): Promise<TracesTest> // one test trace with the form's values; headers left out: the saved ones
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.

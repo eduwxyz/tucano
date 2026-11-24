@@ -3,10 +3,11 @@
 import { L, locale } from '../../../shared/lang'
 import { windowNow } from '../../../shared/quota-window'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { agentById, amAdmin, countedTokens, ENGINES, isTeam, loadUsage, messageById, modelInfo, navigate, receipts, useStore, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
+import { agentById, amAdmin, ENGINES, isTeam, loadUsage, modelInfo, navigate, receipts, useStore, workingOn, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
+import { Executions, toExecutions } from './Executions'
 import { Sheet } from './Pages'
 import { AdminOnly } from './People'
-import { AgentAvatar, duration, Icon, tokens, usd } from './ui'
+import { AgentAvatar, duration, Icon, shortTime, tokens, usd } from './ui'
 
 const DAY = 86_400_000
 const APP = 'app' // the chart's one color for the app's own turns: router, memory, the Tuca
@@ -23,12 +24,6 @@ const until = (at: number): string => {
   return `${d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')}, ${d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}`
 }
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
-const shortTime = (at: number): string => {
-  const d = new Date(at)
-  const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
-  return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })} ${hm}`
-}
-
 // When a window that's over started over: the time today, the date before that.
 const resetAt = (at: number): string => {
   const today = new Date(at).toDateString() === new Date().toDateString()
@@ -62,9 +57,13 @@ export function UsagePage(): ReactNode {
   const [u, setU] = useState<UsageReport | null>(null)
   // Recomputed whenever a reply lands with its receipt.
   const count = useStore((s) => receipts(s).length)
+  // Execuções also catches up when a reply ends with no receipt (one that failed before any usage).
+  const ended = useStore((s) => `${count}:${[...workingOn(s).values()].map((m) => m.id).join()}`)
   // What the team spends is the admins' (a member can still land here from the search).
   const admin = useStore(amAdmin)
   useEffect(() => void (admin && loadUsage().then(setU)), [count, admin])
+  // Brought here for the executions (the Report's link): straight to them, already filtered.
+  const wanted = useStore((s) => (s.view?.kind === 'usage' ? s.view.executions : undefined))
   const billing = useBilling(u)
   const allPlan = billing.length > 0 && billing.every((b) => b.status.route === 'plan')
 
@@ -96,6 +95,9 @@ export function UsagePage(): ReactNode {
         <p className="read-empty">{L('Fazendo as contas…', 'Doing the math…')}</p>
       ) : (
         <>
+          <button className="btn btn--ghost btn--sm usage-jump" onClick={toExecutions}>
+            {L('Ver execuções', 'See executions')}
+          </button>
           <Month u={u} claude={billing.find((b) => b.id === 'claude')?.status} />
           {billing.find((b) => b.id === 'claude')?.status.route === 'plan' && <Quota />}
           {billing.find((b) => b.id === 'codex')?.status.route === 'plan' && <CodexQuota />}
@@ -104,7 +106,7 @@ export function UsagePage(): ReactNode {
             <Models u={u} />
             <Backstage u={u} />
           </div>
-          <Receipts />
+          <Executions key={JSON.stringify(wanted ?? {})} filter={wanted} refresh={ended} />
         </>
       )}
     </Sheet>
@@ -467,59 +469,5 @@ function Backstage({ u }: { u: UsageReport }): ReactNode {
         ))}
       </div>
     </section>
-  )
-}
-
-// ---------- recent receipts ----------
-
-function Receipts(): ReactNode {
-  const [shown, setShown] = useState(10)
-  const all = useStore(receipts)
-  const recent = [...all].sort((a, b) => b.at - a.at)
-  if (recent.length === 0) return null
-  return (
-    <section className="read-group">
-      <h2>
-        {L('Recibos recentes', 'Recent receipts')}<span>{L('Clique pra abrir a resposta na conversa.', 'Click to open the reply in its conversation.')}</span>
-      </h2>
-      <div className="usage-receipts">
-        <div className="usage-receipt usage-receipt--head">
-          <span />
-          <span>{L('Resposta', 'Reply')}</span>
-          <span>{L('Onde', 'Where')}</span>
-          <span>{L('Modelo', 'Model')}</span>
-          <span className="num">{L('Tempo', 'Time')}</span>
-          <span className="num">Tokens</span>
-          <span className="num">{L('Quando', 'When')}</span>
-        </div>
-        {recent.slice(0, shown).map((m) => (
-          <ReceiptRow key={m.id} id={m.id} />
-        ))}
-      </div>
-      {recent.length > shown && (
-        <button className="btn btn--ghost btn--sm usage-more" onClick={() => setShown(shown + 20)}>
-          {L('Mostrar mais', 'Show more')}
-        </button>
-      )}
-    </section>
-  )
-}
-
-function ReceiptRow({ id }: { id: string }): ReactNode {
-  const m = useStore((s) => messageById(s, id)!)
-  const agent = useStore((s) => (m.author.kind === 'agent' ? agentById(s, m.author.id) : undefined))
-  const conv = useStore((s) => s.conversations.find((c) => c.id === m.conversationId))
-  const r = m.run!.receipt!
-  const model = modelInfo(r.model)
-  return (
-    <button className="usage-receipt" onClick={() => navigate({ kind: 'conversation', id: m.conversationId, message: m.id })}>
-      <span>{agent && <AgentAvatar agent={agent} size={20} />}</span>
-      <span className="truncate">{m.text.replace(/[*`_#>]/g, '').split('\n')[0] || '—'}</span>
-      <span className="muted truncate">{conv?.kind === 'channel' ? `#${conv.name}` : 'DM'}</span>
-      <span className="muted truncate">{model?.label ?? r.model}</span>
-      <span className="muted num">{duration(r.ms)}</span>
-      <span className="mono num">{tokens(countedTokens(r))}</span>
-      <span className="muted num">{shortTime(m.at)}</span>
-    </button>
   )
 }
