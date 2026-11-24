@@ -65,7 +65,8 @@ export interface Api {
   saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
   removeTask(p: { id: string }): void
   startTask(p: { id: string }): { conversationId: string } // posts it as my message to its agent (its DM, or the channel set) and takes it off the list
-  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
+  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the Tuca, with this person's conversation with him that was last talked in; fresh starts another ("Nova conversa") and keeps the rest
+  setConversationTitle(p: { id: string; title: string }): void // names one of my conversations with the Tuca; '': back to what I first asked there
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)
   dismissProposal(p: { messageId: string; index?: number }): void

@@ -709,6 +709,8 @@ const COLUMNS: [string, string, string][] = [
   ['messages', 'send_mode', 'TEXT'],
   // An agent whose replies go one at a time (Agent.oneAtATime): 1; unset, as many as the app runs.
   ['agents', 'one_at_a_time', 'INTEGER'],
+  // What a conversation with the Tuca is about, in a few words: the person has several, one per request.
+  ['conversations', 'title', 'TEXT'],
   // What became of an approved call: 'done', 'error' or 'not_run' (src/shared/types.ts).
   ['approvals', 'result', 'TEXT']
 ]
@@ -1077,7 +1079,7 @@ export class Db {
   conversations(personId = this.ownerId()): Conversation[] {
     const rows = this.db
       .prepare(
-        `SELECT c.*, COALESCE(u.n, 0) AS unread FROM conversations c
+        `SELECT c.*, COALESCE(u.n, 0) AS unread, (SELECT MAX(at) FROM messages x WHERE x.conversation_id = c.id) AS last_at FROM conversations c
          LEFT JOIN (SELECT m.conversation_id AS id, COUNT(*) AS n FROM unread x JOIN messages m ON m.id = x.message_id WHERE x.person_id = ? GROUP BY m.conversation_id) u ON u.id = c.id
          ORDER BY c.created_at`
       )
@@ -1101,6 +1103,9 @@ export class Db {
       ...(r['owner'] ? { owner: str(r['owner']) } : {}),
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
       ...(r['proactive'] === 0 ? { proactive: false } : {}),
+      ...(r['title'] ? { title: str(r['title']) } : {}),
+      createdAt: Number(r['created_at']),
+      ...(r['last_at'] ? { lastAt: Number(r['last_at']) } : {}),
       unread: Number(r['unread'])
     }
   }
@@ -1115,7 +1120,8 @@ export class Db {
   conversation(id: string, personId = this.ownerId()): Conversation | undefined {
     const r = this.db
       .prepare(
-        `SELECT c.*, (SELECT COUNT(*) FROM unread x JOIN messages m ON m.id = x.message_id WHERE x.person_id = ? AND m.conversation_id = c.id) AS unread
+        `SELECT c.*, (SELECT COUNT(*) FROM unread x JOIN messages m ON m.id = x.message_id WHERE x.person_id = ? AND m.conversation_id = c.id) AS unread,
+           (SELECT MAX(at) FROM messages x WHERE x.conversation_id = c.id) AS last_at
          FROM conversations c WHERE c.id = ?`
       )
       .get(personId, id) as Row | undefined
@@ -1145,6 +1151,17 @@ export class Db {
       this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, owner, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, owner, by, Date.now())
       for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
     })
+  }
+
+  // What a conversation with the Tuca is about; '' takes it away.
+  setConversationTitle(id: string, title: string): void {
+    this.db.prepare('UPDATE conversations SET title = ? WHERE id = ?').run(title.trim() || null, id)
+  }
+
+  // The first thing a person wrote in a conversation, outside any thread: what a conversation with the Tuca is named after.
+  firstRequest(conversationId: string): Message | undefined {
+    const r = this.db.prepare("SELECT id FROM messages WHERE conversation_id = ? AND author_kind = 'person' AND thread_id IS NULL ORDER BY at, rowid LIMIT 1").get(conversationId) as Row | undefined
+    return r ? this.message(str(r['id'])) : undefined
   }
 
   renameConversation(id: string, name: string): void {

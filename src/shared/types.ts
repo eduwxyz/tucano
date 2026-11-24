@@ -139,6 +139,9 @@ export interface Conversation {
   owner?: string // a DM's person: one DM per agent and person, and only they read it
   createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
   proactive?: boolean // false: no agent is called in here on its own, only who is mentioned or picked; on unless false
+  title?: string // a conversation with the Tuca: what it is about, in a few words (the person has several, one per request)
+  createdAt?: number
+  lastAt?: number // when something was last said there, as the core knew when it sent this
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.

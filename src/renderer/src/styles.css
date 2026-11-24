@@ -15507,6 +15507,64 @@ button.agent-card__now:hover {
   font-size: 12.5px;
   color: var(--text-2);
 }
+/* His other conversations: a small menu by "Nova conversa". */
+.onb-tc__convs {
+  position: relative;
+  flex: none;
+}
+.onb-tc__convs-pop {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  --pop-y: -6px;
+  animation: pop var(--dur-base) var(--ease-out) both;
+}
+.onb-tc__conv {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.onb-tc__conv:hover,
+.onb-tc__conv:focus-visible {
+  background: var(--hover);
+}
+.onb-tc__conv.is-on {
+  font-weight: 600;
+}
+.onb-tc__conv-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__conv-when {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
 .onb-tc__confirm {
   display: flex;
   align-items: center;
