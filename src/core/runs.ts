@@ -944,6 +944,15 @@ export class Runner {
     writeFileSync(join(dir, FILE_TEXT_NAME), JSON.stringify(read))
   }
 
+  // Deleted history must not return when an aborted or queued reply settles.
+  drop(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c) return
+    c.deleted = true
+    c.reason = 'stopped'
+    c.ctl.abort()
+  }
+
   stop(messageId: string): void {
     const c = this.controllers.get(messageId)
     if (!c) return
@@ -1170,6 +1179,7 @@ export class Runner {
   }
 
   private update(m: Message, patch: Partial<Message>, attemptStart = false): void {
+    if (this.controllers.get(m.id)?.deleted) return
     Object.assign(m, patch)
     // A card settled while the reply was working stays settled (keepDecided).
     if (m.run?.agentDraft || m.run?.proposals?.length) m.run = keepDecided(m.run, this.deps.db.message(m.id)?.run)
@@ -3260,6 +3270,7 @@ ${note}`,
         ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
+    if (control.deleted) return msg
     const usedNow = db.usedThisMonth(agent.id)
     // Only an agent with a ceiling has a share of it to warn about.
     if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {

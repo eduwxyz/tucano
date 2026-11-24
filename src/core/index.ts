@@ -2018,6 +2018,20 @@ const api: Handlers = {
 
   stopRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), runner.stop(messageId)),
 
+  // A session's reply, a routine's post or my own prompt can leave the room. Only the message and
+  // the thread it started go; the prompt it answered and its receipts stay.
+  deleteMessage: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
+    const m = db.message(messageId)
+    if (!m || (m.author.kind !== 'agent' && m.author.kind !== 'routine' && m.author.kind !== 'person')) return []
+    manage(ctx, m.conversationId)
+    const gone = db.deleteMessage(messageId)
+    for (const id of gone) runner.drop(id)
+    for (const id of gone) emit({ type: 'message_removed', id, conversationId: m.conversationId })
+    record(ctx, 'session.deleted', m.conversationId, { message: messageId, went: gone.length })
+    return gone
+  },
+
   retryRun: ({ messageId, note }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), runner.retry(messageId, note ?? undefined)),
 
   continueRun: ({ messageId }, ctx) => (reachMessage(ctx, messageId), assertReplyVisible(db, ctx.person, messageId), bg(runner.continue(messageId), 'continueRun')),
