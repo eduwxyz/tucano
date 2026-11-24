@@ -5,6 +5,7 @@
 // a page with what links to it, the sources, the review; the editor takes the whole screen.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { repelGrouped } from './wiki-quadtree'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -298,12 +299,15 @@ type Pos = { x: number; y: number }
 type Cam = { x: number; y: number; k: number }
 export type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
 const SPREAD = 1.6 // from the simulation's units to the map's
+const GROUPED_FROM = 400 // pages from which the push between them is grouped (see wiki-quadtree)
 
 // One step of the forces: pages push each other away, links pull, the middle holds them.
 // A page being dragged stays under the pointer and pulls its neighbors along.
 export function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
   const n = bodies.length
-  for (let i = 0; i < n; i++)
+  // a big wiki groups the far pages, or comparing every pair freezes the screen for seconds
+  if (n > GROUPED_FROM) repelGrouped(bodies)
+  else for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
       const a = bodies[i]!
       const b = bodies[j]!
@@ -367,10 +371,13 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const first = bodies.size === 0
     const titles = new Set(graph.nodes.map((n) => n.title))
     for (const t of [...bodies.keys()]) if (!titles.has(t)) bodies.delete(t)
+    // each page's links in the graph's order, so finding one already placed doesn't scan every link
+    const linked = new Map<string, string[]>()
+    for (const [a, b] of graph.edges) (linked.get(a) ?? linked.set(a, []).get(a)!).push(b), (linked.get(b) ?? linked.set(b, []).get(b)!).push(a)
     graph.nodes.forEach((nd, i) => {
       if (bodies.has(nd.title)) return
-      const friend = graph.edges.find(([a, b]) => (a === nd.title && bodies.has(b)) || (b === nd.title && bodies.has(a)))
-      const near = friend ? bodies.get(friend[0] === nd.title ? friend[1] : friend[0])! : null
+      const friend = linked.get(nd.title)?.find((t) => bodies.has(t))
+      const near = friend ? bodies.get(friend)! : null
       // a golden spiral to start from, so the same wiki always lands the same way
       const r = 16 * Math.sqrt(i + 1)
       const a = i * 2.399963
@@ -382,7 +389,7 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const deg = new Uint16Array(list.length)
     for (const [a, b] of links) deg[a]!++, deg[b]!++
     parts.current = { list, links, deg }
-    if (first) for (let it = 0, iters = list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
+    if (first) for (let it = 0, iters = list.length > 3000 ? 80 : list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
     else heat.current = Math.max(heat.current, 0.6)
   }, [graph])
 
@@ -553,6 +560,9 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   }
   const scale = 0.8 + 0.2 * Math.min(k, 1.8)
   const many = graph.nodes.length > 40
+  // what's off the screen isn't drawn: a big wiki is thousands of pages, most of them out of view
+  const M = 120
+  const side = (p: Pos): number => (p.x < -M ? 1 : p.x > size.w + M ? 2 : 0) | (p.y < -M ? 4 : p.y > size.h + M ? 8 : 0)
   return (
     <div
       ref={ref}
@@ -612,7 +622,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
             {graph.edges.map(([a, b]) => {
               const p = at(a)
               const q = at(b)
-              if (!p || !q) return null
+              if (!p || !q || side(p) & side(q)) return null
               const hot = !!lit && (a === lit || b === lit)
               const off = !shown(a) && !shown(b)
               return <line key={`${a}\n${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className={hot ? 'is-hot' : lit || off ? 'is-dim' : ''} />
@@ -620,7 +630,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
           </g>
           {graph.nodes.map((nd, i) => {
             const p = at(nd.title)
-            if (!p) return null
+            if (!p || side(p)) return null
             const r = (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
             const label = !many || k > 1.05 || nd.links >= 3 || (!!lit && isNear(nd.title))
             const dim = !isNear(nd.title) || !shown(nd.title)
