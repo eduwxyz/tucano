@@ -5,6 +5,7 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { leakedError, maskShown, type ShownKey } from './vault'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, posix, sep } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -387,6 +388,7 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
+  secrets?: (agentId: string) => ShownKey[] // the Cofre's values this agent may have: a file it shows comes out masked
 }
 
 export class Computers {
@@ -400,7 +402,7 @@ export class Computers {
   readonly mac: MacComputer // agents whose computer is this Mac (spec §23)
 
   constructor(private deps: ComputerDeps) {
-    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot })
+    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot, ...(deps.secrets ? { secrets: deps.secrets } : {}) })
     this.prefix = prefixOf(deps.dataDir, 'tucano')
     // Before the app was called Tucano its data folder, next to this one, was agent-desk.
     this.legacy = prefixOf(join(dirname(deps.dataDir), 'agent-desk'), 'agentdesk')
@@ -815,11 +817,19 @@ export class Computers {
         return { error: r.stderr.trim() || L(`Não achei ${file.containerPath}.`, `I couldn't find ${file.containerPath}.`) }
       }
     } else writeFileSync(join(dir, name), file.data ?? Buffer.alloc(0))
-    const size = statSync(join(dir, name)).size
+    let size = statSync(join(dir, name)).size
     if (!statSync(join(dir, name)).isFile() || size > MAX_SHOW_BYTES) {
       rmSync(dir, { recursive: true, force: true })
       return { error: tooBig() }
     }
+    // Out of the computer, the masking of what it prints no longer applies: the Cofre's values go here.
+    const checked = maskShown(readFileSync(join(dir, name)), this.deps.secrets?.(agentId) ?? [])
+    if ('leaked' in checked) {
+      rmSync(dir, { recursive: true, force: true })
+      return { error: leakedError(checked.leaked) }
+    }
+    writeFileSync(join(dir, name), checked.data)
+    size = checked.data.length
     const artifact: Artifact = {
       id,
       agentId,

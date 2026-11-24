@@ -983,7 +983,7 @@ const memory = new Memories({ db, engines: operationEngines(engineImpls, { opera
 titles = new Titles({ db, engines: operationEngines(engineImpls, { operation: 'title' }), settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 const wikiEngines = operationEngines(engineImpls, { operation: 'wiki' })
 
-const computers = new Computers({ db, dataDir, emit, shoot })
+const computers = new Computers({ db, dataDir, emit, shoot, secrets: (agentId) => vault.openedFor(agentId) })
 
 // This computer lent to servers' Tucanos (core/node-server.ts, core/node-link.ts): the app calls each server it
 // was paired with and lends it (Settings › Servers), and that server's agents use this computer's terminal, files,
