@@ -21,7 +21,7 @@ it('moves what ran on Gemini over to Antigravity, and leaves the rest alone', ()
   // As a database from before the rename: that migration not run yet (nor the ones after it, which are safe to run again: the board's tasks, the harness keys, the jobs, the Cofre's keys and logins, the Tuca's limit).
   const raw = new DatabaseSync(file)
   const { user_version } = raw.prepare('PRAGMA user_version').get() as { user_version: number }
-  raw.exec(`PRAGMA user_version = ${user_version - 8}`)
+  raw.exec(`PRAGMA user_version = ${user_version - 9}`)
   raw.close()
 
   const db = new Db(file)

@@ -25,6 +25,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     useStore: <T,>(select: (s: State) => T): T => select(fake),
     getState: () => fake,
     ensureTuca: vi.fn(async (_model?: string, fresh?: boolean) => ({ agentId: 'tuca', conversationId: fresh ? 't2' : 't1' })),
+    removeTucaLeave: vi.fn(async () => {}),
     applyProposal: vi.fn(async () => ({ id: 'x' })),
     applyProposals: vi.fn(async () => ({ applied: [{ index: 0, id: 'lia' }, { index: 2, id: 'r1' }], failed: [{ index: 1, error: 'Já existe o canal #financeiro.' }], forwarded: [], draft: { agentId: 'leo' } })),
     dismissProposal: vi.fn(),
@@ -244,6 +245,39 @@ describe("the Tuca's builder screen", () => {
     await click(/Resumo das vendas/)
     expect(text()).toContain('preciso de um resumo das vendas')
     expect(text()).not.toContain('quero planejar a migração')
+  })
+})
+
+describe('what the Tuca was let to do himself, on his screen', () => {
+  const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'quero o preço dos concorrentes', at: 5 } as Message
+  const linear = { id: 'c-lin', name: 'Linear', kind: 'remote', status: 'connected', tools: [] } as unknown as State['connectors'][number]
+
+  it('is not there while nothing was allowed', async () => {
+    fake = state({ messages: { t1: [said] } })
+    await render(<Onboarding build />)
+    expect(text()).not.toContain('Liberado (')
+  })
+
+  it('lists each leave with what it uses and where it holds, and "Retirar" takes it back', async () => {
+    fake = state({
+      messages: { t1: [said] },
+      connectors: [linear],
+      leaves: [
+        { id: 'l1', person: 'ana', kind: 'pesquisa de preços', what: 'Pesquisar.', web: true, uses: 3, at: 1 },
+        { id: 'l2', person: 'ana', conversationId: 't1', kind: 'tarefas do Linear', what: 'Listar.', grants: { 'c-lin': 'read' }, uses: 1, at: 2 },
+        { id: 'l3', person: 'ana', conversationId: 'gone', kind: 'contas', what: 'Calcular.', uses: 1, at: 3 }
+      ]
+    })
+    await render(<Onboarding build />)
+    await click(/Liberado \(3\)/)
+    const rows = [...document.querySelectorAll('.onb-tc__leave')].map((e) => e.textContent!.replace(/\s+/g, ' ').trim())
+    expect(rows).toEqual([
+      'pesquisa de preçosUsando a web · sempre, sem perguntarRetirar',
+      'tarefas do LinearUsando Linear (leitura) · só em “Quero o preço dos concorrentes”Retirar',
+      'contasUsando nada além de escrever · só numa conversaRetirar'
+    ])
+    await act(async () => (document.querySelectorAll('.onb-tc__leave .link')[1] as HTMLElement).click())
+    expect(store.removeTucaLeave).toHaveBeenCalledWith('l2')
   })
 })
 

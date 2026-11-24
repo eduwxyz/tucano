@@ -150,6 +150,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   openBackups: {},
   report: { week: 'n?' },
   usage: {},
+  executions: { days: 'n', agentId: 's?', status: '[ok,failed,stopped]?', beforeAt: 'n?', beforeId: 's?' },
+  executionSteps: { messageId: 's' },
   removeRoutine: { id: 's' },
   runRoutine: { id: 's' },
   wiki: {},

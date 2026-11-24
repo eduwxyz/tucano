@@ -23,13 +23,13 @@ import {
   type Conversation,
   type State,
   type Message,
-  type TucaLeave,
   type View
 } from '../store'
 import { dayOf, nudgeNow, tucaNudges } from '../tuca-nudges'
 import { runStep } from '../board'
 import { describeRoutine } from './Routines'
 import { lastSaid, requestAgents, requestLine, requestState, stateLabel, tucaConversations, tucaOf, tucaTitle, type RequestState } from '../tuca-conversations'
+import { leaveRows, type LeaveRow } from '../tuca-leaves'
 import { ApprovalCard, Composer, ConversationView, MessageList, QuestionCard, setComposerDraft } from './Conversation'
 import { AgentAvatar, ago, Icon, TucaMark, type IconName } from './ui'
 import { draftAgent, ProposalCard, UseDraft } from './Tuca'
@@ -734,27 +734,22 @@ function Team(): ReactNode {
 
 // ---------- settings ----------
 
-const leaveUses = (l: TucaLeave, connectors: { id: string; name: string }[]): string =>
-  [...(l.web ? [L('a web', 'the web')] : []), ...Object.entries(l.grants ?? {}).map(([id, g]) => `${connectors.find((c) => c.id === id)?.name ?? L('um serviço removido', 'a removed service')} (${g === 'read_write' ? L('leitura e escrita', 'read and write') : L('leitura', 'read')})`)].join(', ') || L('nada além de escrever', 'nothing but writing')
-
-// What a person let the Tuca do himself, with a way to take each back. Shown in both views' settings.
+// What a person let the Tuca do himself, with a way to take each back (the full app lists the same on
+// the Tuca's own screen: src/renderer/src/tuca-leaves.ts).
 export function TucaLeaves(): ReactNode {
-  const leaves = useStore((s) => s.leaves)
-  const connectors = useStore((s) => s.connectors)
-  const conversations = useStore((s) => s.conversations)
-  const titles = useStore((s) => JSON.stringify(Object.fromEntries(s.leaves.flatMap((l) => (l.conversationId ? [[l.conversationId, tucaTitle(s, s.conversations.find((c) => c.id === l.conversationId) ?? ({ id: l.conversationId } as Conversation))]] : [])))))
-  const named = JSON.parse(titles) as Record<string, string>
-  if (!leaves.length) return <p className="simple-none">{L('Nada ainda. Quando ninguém do time faz o que você pediu, o Tuca pergunta se pode fazer ele mesmo, e o que você deixar aparece aqui.', 'Nothing yet. When no one on the team does what you asked, Tuca asks whether he may do it himself, and what you allow shows up here.')}</p>
+  const rows = useStore((s) => JSON.stringify(leaveRows(s)))
+  const list = JSON.parse(rows) as LeaveRow[]
+  if (!list.length) return <p className="simple-none">{L('Nada ainda. Quando ninguém do time faz o que você pediu, o Tuca pergunta se pode fazer ele mesmo, e o que você deixar aparece aqui.', 'Nothing yet. When no one on the team does what you asked, Tuca asks whether he may do it himself, and what you allow shows up here.')}</p>
   return (
     <div className="simple-rows">
-      {leaves.map((l) => (
+      {list.map((l) => (
         <div key={l.id} className="simple-row simple-row--leave">
           <span className="simple-row__text">
             <span className="simple-row__title">{l.kind}</span>
             <span className="simple-row__sub">
-              {L(`Usando ${leaveUses(l, connectors)}`, `Using ${leaveUses(l, connectors)}`)}
+              {L(`Usando ${l.uses}`, `Using ${l.uses}`)}
               {' · '}
-              {l.conversationId ? (conversations.some((c) => c.id === l.conversationId) ? L(`só em “${named[l.conversationId]}”`, `only in “${named[l.conversationId]}”`) : L('só numa conversa', 'in one conversation only')) : L('sempre, sem perguntar', 'always, without asking')}
+              {l.where}
             </span>
           </span>
           <button className="simple-link" onClick={() => void removeTucaLeave(l.id)}>

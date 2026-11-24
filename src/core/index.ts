@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -57,6 +57,7 @@ import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
+import { executions, executionSteps, type CanRead } from './executions'
 import { Skills } from './skills'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
 import { COPY_SUFFIX, WikiGit } from './wiki-git'
@@ -100,6 +101,10 @@ import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
 import { companyNetwork } from './network'
+import { flushTelemetry, loadTelemetry, operationEngines, otelConfig, stopTelemetry, takeOtelEnv, tracedEngines, tracesWanted, tracing } from './telemetry'
+
+// Before any child process: the OTEL_* settings can hold a backend's key, and agents inherit this environment.
+const otelEnv = takeOtelEnv(process.env)
 
 // Before any request: the system's certificates and proxy, for networks that inspect HTTPS (src/core/network.ts).
 companyNetwork()
@@ -311,7 +316,15 @@ let fakeSetupState: SetupState | null = null
 const gateway = new Gateway()
 // The login shell's PATH comes before any CLI starts: harnesses, connectors and Docker are found on it.
 // Then the CLIs the introduction installed, after the person's own.
-const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))
+// Traces start here too, so no reply runs before them. Off, this reads two variables and loads nothing.
+// Only this process's environment configures them, never the login shell: an agent that can edit
+// ~/.zshrc could otherwise send every conversation to a server of its own at the next launch.
+const startTraces = async (): Promise<void> => {
+  const config = tracesWanted(process.env, serverMode) ? otelConfig(otelEnv) : undefined
+  if (!config) return
+  await loadTelemetry(config, { workspaceId: process.env['TUCANO_WORKSPACE_ID'] ?? 'default', version: appVersion, mode: serverMode ? 'server' : 'desktop' }).catch((e: unknown) => console.error('[telemetry]', e))
+}
+const pathReady = (fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))).then(startTraces)
 // The harnesses are checked behind the window (it opens on the last check). What truly needs
 // them (a reply, the memory, routines, a connection test) waits for this.
 const enginesReady = pathReady.then(detect)
@@ -418,7 +431,7 @@ function moved(id: EngineId): Parameters<typeof relocating>[1] {
   return { path: () => engines[id].path, label: ENGINES[id].label, redetect: () => detect().then(() => undefined) }
 }
 
-const engineImpls: Record<EngineId, Engine> = fake
+const engineImpls: Record<EngineId, Engine> = tracedEngines<EngineId>(fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex'), opencode: fakeBrokenOpencode ? { ...fakeEngine('opencode'), async *run() { yield { type: 'error' as const, message: OPENCODE_CRASH } } } : fakeEngine('opencode'), pi: fakeBrokenPi ? { ...fakeEngine('pi'), async *run() { yield { type: 'error' as const, message: PI_EXPIRED } } } : fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') }
   : {
       claude: relocating(claudeEngine(() => engines.claude.path, async () => quietClaude(userProvider())), moved('claude')),
@@ -431,7 +444,7 @@ const engineImpls: Record<EngineId, Engine> = fake
       cline: relocating(clineEngine(() => engines.cline.path, clineDir, loginEnv), moved('cline')),
       hermes: relocating(hermesEngine(() => engines.hermes.path, hermesAppDir(), loginEnv), moved('hermes')),
       endpoint: endpointEngine(endpointTarget)
-    }
+    })
 
 // A command in the login shell, where SSO tools live; what it prints, trimmed.
 // Windows has no login shell: the same shell agents' commands use (Git Bash, or cmd.exe).
@@ -621,6 +634,7 @@ const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error)
 const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
   const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean; conversationId?: string | null; targetDir?: string; name?: string; theme?: unknown; paused?: unknown; parts?: unknown; path?: unknown; person?: unknown; key?: unknown; code?: unknown; label?: unknown; artifact?: unknown; port?: unknown } | undefined
+  if (r?.type === 'flush-traces') return void flushTelemetry()
   if (r?.type === 'workspace-pause') {
     try {
       if (closing || typeof r.paused !== 'boolean') throw new Error('Workspace cannot change pause state right now')
@@ -934,8 +948,9 @@ const oauthCallback = async (url: URL): Promise<string> => {
 }
 gateway.route('/oauth/callback', oauthCallback)
 
-const memory = new Memories({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
-titles = new Titles({ db, engines: engineImpls, settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
+const memory = new Memories({ db, engines: operationEngines(engineImpls, { operation: 'memory' }), settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
+titles = new Titles({ db, engines: operationEngines(engineImpls, { operation: 'title' }), settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
+const wikiEngines = operationEngines(engineImpls, { operation: 'wiki' })
 
 const computers = new Computers({ db, dataDir, emit, shoot })
 
@@ -1123,7 +1138,7 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   mkdirSync(cwd, { recursive: true })
   const started = Date.now()
   let text = ''
-  for await (const ev of engineImpls[model.engine].run({ model: model.id, effort: 'low', system, prompt, cwd, signal: AbortSignal.timeout(180_000) })) {
+  for await (const ev of wikiEngines[model.engine].run({ model: model.id, effort: 'low', system, prompt, cwd, signal: AbortSignal.timeout(180_000) })) {
     if (ev.type === 'text') text += ev.delta
     else if (ev.type === 'done') {
       text = ev.text || text
@@ -1848,6 +1863,16 @@ function ownMemory(ctx: Ctx, id: string): void {
   const m = db.memory(id)
   if (m) must(ctx.person, { kind: 'memory', scope: m.scope, ...(m.privateTo ? { privateTo: m.privateTo } : {}) })
 }
+// Whether this person may read a reply, for Execuções and the Boletim's tools. A page of them asks about
+// the same few conversations over and over.
+const readsReply = (ctx: Ctx): CanRead => {
+  const conversations = new Map<string, boolean>()
+  return (r) => {
+    let sees = conversations.get(r.conversationId)
+    if (sees === undefined) conversations.set(r.conversationId, (sees = people.canSeeConversation(ctx.person, db.conversationOwner(r.conversationId))))
+    return sees && people.visibleAt(ctx.person, r)
+  }
+}
 // What the wiki made of a source is seen by whoever sees the source: one from someone's DM, by
 // them alone. A change or version whose source is gone went with it.
 const seesSource = (ctx: Ctx) => (sourceId: string): boolean => {
@@ -2491,10 +2516,20 @@ const api: Handlers = {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })
   },
-  report: ({ week }) => report(db, Date.now(), week),
+  report: ({ week }, ctx) => report(db, Date.now(), week, readsReply(ctx)),
   usage: () => {
     refreshCodexQuota()
     return usage(db)
+  },
+  executions: (q, ctx) => {
+    if (!EXECUTION_DAYS.includes(q.days)) throw new UserError(L('Esse período não está disponível.', "That period isn't available."))
+    return executions(db, readsReply(ctx), q)
+  },
+  executionSteps: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
+    const steps = executionSteps(db, messageId)
+    if (!steps) throw new UserError(L('Essa resposta não está disponível.', "That reply isn't available."))
+    return steps
   },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
@@ -3518,4 +3553,9 @@ process.on('exit', () => {
 })
 // The app stops the core with SIGTERM, which by default skips the 'exit' handlers
 // above and leaves the agents' Chromes running with nothing to drive them.
-process.on('SIGTERM', () => process.exit(0))
+// On a server, what's queued gets a moment to leave first (its shutdown caps the wait). A desktop exits
+// at once: the app doesn't wait for this process, and the cleanup above has to run. It flushed on before-quit.
+process.on('SIGTERM', () => {
+  if (!serverMode || !tracing()) process.exit(0)
+  void stopTelemetry().finally(() => process.exit(0))
+})

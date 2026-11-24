@@ -638,6 +638,11 @@ export const MIGRATIONS = [
     used_at INTEGER
   );
   `,
+  // Execuções reads the agents' replies by time. Only on the author, which never changes: `run` is
+  // rewritten at every step of a reply, and an index on it would be rewritten with it.
+  `
+  CREATE INDEX IF NOT EXISTS messages_agent_replies ON messages (at DESC, id DESC) WHERE author_kind = 'agent';
+  `,
   // The Tuca takes the person's requests now and passes each to whoever does it (src/core/tuca.ts). With
   // everything going through him he has no monthly limit of his own (there is no page to raise it on, and a
   // Tuca out of tokens is a Tucano nobody can ask anything of), and he remembers like any agent.
@@ -1364,6 +1369,14 @@ export class Db {
 
   messages(): Message[] {
     return (this.db.prepare('SELECT * FROM messages ORDER BY at').all() as Row[]).map((r) => this.toMessage(r))
+  }
+
+  // Agents' replies since a moment, newest first: how each ended and how long it took, without
+  // the lines that only say work was handed on (Runner.say), and without parsing their steps (a month of them is read at each look at Execuções).
+  agentReplyOutcomes(since: number): (Pick<Message, 'id' | 'conversationId' | 'at'> & Pick<Run, 'status' | 'endedAt' | 'startedAt'> & { agentId: string; ms?: number })[] {
+    const rows = this.db.prepare("SELECT id, conversation_id, author_id, at, json_extract(run, '$.status') AS status, json_extract(run, '$.receipt.ms') AS ms, json_extract(run, '$.endedAt') AS ended_at, json_extract(run, '$.startedAt') AS started_at FROM messages WHERE author_kind = 'agent' AND run IS NOT NULL AND json_extract(run, '$.delegation') IS NULL AND at >= ? ORDER BY at DESC, id DESC").all(since) as Row[]
+    const num = (v: unknown): number | undefined => (v === null || v === undefined ? undefined : Number(v))
+    return rows.map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']), agentId: str(r['author_id']), at: Number(r['at']), status: str(r['status']) as Run['status'], ms: num(r['ms']), endedAt: num(r['ended_at']), startedAt: num(r['started_at']) }))
   }
 
   // The latest question waiting for me, however much was said after it. `threadId`: in that thread; null: outside threads.

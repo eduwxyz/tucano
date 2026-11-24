@@ -1,7 +1,8 @@
 // The report (spec §20): computed on demand from replies, approvals and receipts,
 // for one calendar week (Monday to Sunday), with the five before it for the trend.
-import { countedTokens, isTeam, type AgentReport, type Message, type Problem, type Rate, type Report, type SkillReport } from '../shared/types'
+import { countedTokens, isTeam, OK_STATUSES, type AgentReport, type Message, type Problem, type Rate, type Report, type SkillReport } from '../shared/types'
 import type { Db } from './db'
+import { backstage, toolStats, type CanRead } from './executions'
 
 const WEEKS = 6
 const WEEK = 7 * 86_400_000
@@ -19,18 +20,18 @@ const plusWeeks = (week: number, n: number): number => {
   d.setDate(d.getDate() + 7 * n)
   return d.getTime()
 }
-const OK = new Set(['done', 'waiting_input', 'waiting_approval'])
 const CUT = /^Parei: (repeti|\d+ ferramentas falharam|fiquei)/
 
-const rate = (ms: Message[]): Rate => ({ replies: ms.length, ok: ms.filter((m) => OK.has(m.run!.status)).length })
+const rate = (ms: Message[]): Rate => ({ replies: ms.length, ok: ms.filter((m) => OK_STATUSES.has(m.run!.status)).length })
 
-export function report(db: Db, now = Date.now(), week = weekStart(now)): Report {
+export function report(db: Db, now = Date.now(), week = weekStart(now), canRead: CanRead = () => true): Report {
   const until = plusWeeks(week, 1)
   const since = plusWeeks(week, 1 - WEEKS)
   const all = db.messages().filter((m) => m.author.kind === 'agent' && m.run && m.at >= since && m.at < until && m.run.status !== 'working')
   const replies = all.filter((m) => m.at >= week)
   const approvals = db.approvals().filter((a) => a.createdAt >= week && a.createdAt < until)
   const weekAt = (i: number): number => plusWeeks(week, i - (WEEKS - 1))
+  const app = backstage(db)
 
   const agents: AgentReport[] = db
     .agents()
@@ -51,6 +52,7 @@ export function report(db: Db, now = Date.now(), week = weekStart(now)): Report 
         ...paused.map((m) => ({ kind: 'paused' as const, at: m.at, conversationId: m.conversationId, messageId: m.id })),
         ...refused.map((x) => ({ kind: 'refused' as const, at: x.createdAt, conversationId: x.conversationId, messageId: x.messageId, detail: `${x.connectorName}: ${x.tool}` }))
       ]
+        .filter(canRead) // a problem's text is the reply's: only who may read the conversation sees it
         .sort((x, y) => y.at - x.at)
         .slice(0, PROBLEMS)
       return {
@@ -85,5 +87,5 @@ export function report(db: Db, now = Date.now(), week = weekStart(now)): Report 
       }
     })
 
-  return { since: week, until, agents, skills, work: db.costByWork(week, until) }
+  return { since: week, until, agents, skills, work: db.costByWork(week, until), tools: toolStats(replies.filter((m) => canRead(m) && !app.has(m.author.kind === 'agent' ? m.author.id : ''))) }
 }

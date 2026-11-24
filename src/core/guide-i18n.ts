@@ -92,8 +92,8 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     summary: 'Running Tucano on a server of your own (a VPS or a machine at home) and using it through the browser: installing, reaching it, keeping it running and what changes.'
   },
   simples: {
-    title: 'The Tuca and the simple view',
-    summary: 'What the Tuca does with a request, when he asks leave to do it himself, the conversations with him, and the simple view: fewer screens, the same Tucano.'
+    title: 'The simple view',
+    summary: 'The simple view: fewer screens, the same Tucano. You talk to the Tuca and see what waits on you, the team and your conversations.'
   },
   skills: {
     title: 'Skills',
@@ -106,6 +106,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   time: {
     title: 'Team (several people in one Tucano)',
     summary: 'Using the same Tucano with other people: inviting, roles, what belongs to whom, For you, calling a person, who covers for me, routines, Activity, removing someone and the first invite.'
+  },
+  tuca: {
+    title: 'The Tuca',
+    summary: 'What the Tuca does with a request, when he asks leave to do it himself, and the conversations with him.'
   },
   'wiki-git': {
     title: 'Wiki in git',
