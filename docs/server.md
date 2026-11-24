@@ -165,12 +165,21 @@ Once a browser has the cookie, the server answers only its own page: a page of a
 
 Tucano can send a trace of its agents' work to any backend that takes OTLP over HTTP. It's off until you set an endpoint, and nothing goes to the people who make Tucano.
 
+**From the app:** an admin sets it in **Settings › Connections › Traces**:
+- **The address:** the base address the backend gives. Examples fill it in for Langfuse, Grafana Cloud and a local Collector. Tucano adds `/v1/traces` and sends JSON.
+- **Headers:** one per line, as `Authorization: Basic …`. They are stored encrypted and never shown again.
+- **Test connection:** sends one test trace and says whether the backend took it.
+
+A remote address needs `https://`. Plain `http://` works only for `localhost`. Changes apply at once, and each workspace has its own setting. Every change goes to **Settings › Workspace › Activity** with who made it and the address's origin, never the headers.
+
+**From the environment,** on a server:
+
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.com
 OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%20your-key
 ```
 
-Only the environment Tucano's process starts with counts. Your login shell's profile never configures traces, because an agent that can edit `~/.zshrc` could otherwise send your conversations to a server of its own. So a desktop app opened from the Finder has no traces. Started from a terminal, it also needs `TUCANO_OTEL=1`, since your terminal may hold `OTEL_*` variables for another tool.
+When the environment names an endpoint, it wins: the screen shows it as configured by the server's environment, and can't change it. Only the environment Tucano's process starts with counts. Your login shell's profile never configures traces, because an agent that can edit `~/.zshrc` could otherwise send your conversations to a server of its own. So a desktop app opened from the Finder has no traces. Started from a terminal, it also needs `TUCANO_OTEL=1`, since your terminal may hold `OTEL_*` variables for another tool.
 
 | Variable | Default | |
 |---|---|---|
@@ -184,10 +193,14 @@ Only the environment Tucano's process starts with counts. Your login shell's pro
 | `OTEL_SDK_DISABLED`, `OTEL_TRACES_EXPORTER` | | `true` and `none`, respectively, turn traces off even with an endpoint |
 | `TUCANO_OTEL` | off | On the desktop app, `1` is required for the variables above to count |
 
-- **A trace** is one execution of one agent's reply, with its tool calls as child spans. A harness runs as a whole, so its internal model calls aren't separate spans.
+- **A trace** is one execution of one agent's reply. Its tool calls are child spans, and so is one `chat <model>` span for the reply's model calls, with its tokens, cost (`gen_ai.usage.cost`) and the model id the harness reports (`gen_ai.response.model`). Backends such as Langfuse count usage on that span. A harness runs as a whole, so its separate model calls aren't separate spans.
 - **`session.id`** is the task: every reply it set off, across agents. `gen_ai.conversation.id` is the conversation. A reply another agent asked for has a span link to the reply that asked, except a hand-off that had to wait for that agent to finish another reply.
 - **Other model calls** (router, titles, memory, wiki, classifiers) are short traces of their own, marked with `tucano.operation`.
-- **Spans carry no content:** agent names, harness, model, duration, status, tokens, cost and tool names, with no prompt, reply, tool arguments, tool results, error text, attachments or names of people. Name your agents with that in mind. `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` isn't supported: setting it only logs a warning.
+- **Spans carry no content** unless an admin turns on **Send the conversation text** in Settings › Connections › Traces. By default they hold agent names, harness, model, duration, status, tokens, cost and tool names. They hold no prompt, reply, tool arguments, tool results, error text, attachments or names of people. Name your agents with that in mind. `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` isn't supported: setting it only logs a warning.
+- **With the conversation text on,** each reply span carries the message it answers and its final reply, as `gen_ai.input.messages` and `gen_ai.output.messages`. Nothing else is sent: tool calls, attachments, memory, wiki, work handed over from another conversation and Tucano's own model calls stay metadata only. When the server's environment configures traces, no text is sent at all.
+  - **Masking:** every Vault key's value becomes `[cofre:NAME]` first, and known token shapes are masked too. A key kept as a 1Password reference is masked only once a use has read it. A secret typed loose in a message that isn't in the Vault and doesn't look like a token still goes out, just as it already goes to the model's provider.
+  - **Whose conversations:** text goes only from conversations the admin who turned it on can read. Someone else's DM keeps sending metadata only. If that admin stops being an admin, the text stops.
+  - **A new address or new headers turn it off,** until an admin turns it on again for them.
 - **Where traces go is in the log.** At startup Tucano writes the endpoint's address. On a server started by hand, your shell profile's variables count, so prefer the service's own environment (systemd, Docker).
 - **A collector that's down never affects a reply.** Spans wait in a bounded queue and are dropped when it's full.
 - **Don't give Tucano a backend key that agents could use.** Tucano removes the `OTEL_*` variables from what agents and harnesses inherit, so a harness's own OpenTelemetry settings don't reach it through Tucano either. But the operating system keeps a process's original environment, and a program running as the same user can read it (`ps eww`, `/proc`). So an agent running directly on the machine, outside its isolated computer, or a connector run by the same user, could read the key. The safe setup is a **local OpenTelemetry Collector** on `127.0.0.1`: point Tucano at it with no headers, and let the collector hold the key.

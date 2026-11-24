@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -73,7 +73,7 @@ import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Vault } from './vault'
-import { COFRE } from '../shared/vault'
+import { COFRE, pageOrigin } from '../shared/vault'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
@@ -100,7 +100,8 @@ import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
 import { companyNetwork } from './network'
-import { flushTelemetry, loadTelemetry, operationEngines, otelConfig, stopTelemetry, takeOtelEnv, tracedEngines, tracesWanted, tracing } from './telemetry'
+import { flushTelemetry, operationEngines, otelConfig, reloadTelemetry, stopTelemetry, takeOtelEnv, testTelemetry, tracedEngines, tracesWanted, tracing, type OtelConfig } from './telemetry'
+import { endpointError, NO_TRACES, parseHeaders, screenConfig, tracesUrl, type StoredTraces } from './traces-settings'
 
 // Before any child process: the OTEL_* settings can hold a backend's key, and agents inherit this environment.
 const otelEnv = takeOtelEnv(process.env)
@@ -318,12 +319,42 @@ const gateway = new Gateway()
 // Traces start here too, so no reply runs before them. Off, this reads two variables and loads nothing.
 // Only this process's environment configures them, never the login shell: an agent that can edit
 // ~/.zshrc could otherwise send every conversation to a server of its own at the next launch.
-const startTraces = async (): Promise<void> => {
-  const config = tracesWanted(process.env, serverMode) ? otelConfig(otelEnv) : undefined
-  if (!config) return
-  await loadTelemetry(config, { workspaceId: process.env['TUCANO_WORKSPACE_ID'] ?? 'default', version: appVersion, mode: serverMode ? 'server' : 'desktop' }).catch((e: unknown) => console.error('[telemetry]', e))
+// Where the environment doesn't, Settings › Connections › Traces does (src/core/traces-settings.ts).
+const envTraces = tracesWanted(process.env, serverMode) ? otelConfig(otelEnv) : undefined
+const tracesAbout = { workspaceId: process.env['TUCANO_WORKSPACE_ID'] ?? 'default', version: appVersion, mode: serverMode ? ('server' as const) : ('desktop' as const) }
+// Read once and kept: only setTraces writes it, and a reply asks for it as it ends.
+let tracesCache: StoredTraces | undefined
+const storedTraces = (): StoredTraces => (tracesCache ??= { ...NO_TRACES, ...(JSON.parse(db.meta(TRACES_META) ?? '{}') as Partial<StoredTraces>) })
+const TRACES_META = 'traces'
+const TRACES_HEADERS = 'traces.headers'
+const savedHeaders = async (): Promise<string> => (await secrets.get(TRACES_HEADERS).catch(() => undefined)) ?? ''
+const tracesConfig = async (): Promise<OtelConfig | undefined> => {
+  if (envTraces) return envTraces
+  const s = storedTraces()
+  return s.on && s.endpoint ? screenConfig(s, parseHeaders(await savedHeaders())) : undefined
 }
-const pathReady = (fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))).then(startTraces)
+const mayTraceTo = (endpoint: string, on: boolean): void => {
+  const bad = endpointError(endpoint, on)
+  if (bad) throw new UserError(bad)
+}
+const tracesView = (): TracesView => {
+  const { on, endpoint, text } = storedTraces()
+  return { on, endpoint, text, headers: db.getSecret(TRACES_HEADERS) !== undefined, ...(envTraces ? { fromEnv: pageOrigin(envTraces.url) ?? '' } : {}) }
+}
+// A save that changes only the text switch leaves the exporter as it is: the text is decided per reply.
+let appliedTraces: string | undefined = 'none'
+const applyTraces = async (): Promise<void> => {
+  const config = await tracesConfig()
+  const key = config ? JSON.stringify(config) : 'none'
+  if (key === appliedTraces) return
+  try {
+    await reloadTelemetry(config, tracesAbout)
+    appliedTraces = key
+  } catch (e) {
+    console.error('[telemetry]', e)
+  }
+}
+const pathReady = (fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))).then(applyTraces)
 // The harnesses are checked behind the window (it opens on the last check). What truly needs
 // them (a reply, the memory, routines, a connection test) waits for this.
 const enginesReady = pathReady.then(detect)
@@ -1166,6 +1197,12 @@ const runner = new Runner({
   memory,
   computers,
   vault,
+  traceText: (reply) => {
+    if (envTraces || !vaultWarm) return false // the screen's text goes to the screen's address only, once the Vault's values are known
+    const s = storedTraces()
+    const by = s.text && s.textBy ? db.person(s.textBy) : undefined // gone, or no longer an admin: it goes nowhere until another admin turns it on
+    return !!by && isAdmin(by) && readsFor(by)(reply)
+  },
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
@@ -1197,6 +1234,14 @@ const runner = new Runner({
   }
 })
 runner.setPaused(!!settings().paused)
+// With the text going in traces, the Vault's values are known before the first reply, so each is masked.
+let vaultWarm = false
+async function warmTraceText(): Promise<void> {
+  if (!storedTraces().text) return
+  await vault.warmAll().catch((e: unknown) => console.error('[telemetry]', e))
+  vaultWarm = true
+}
+void warmTraceText()
 // What the app cut when it closed goes on by itself once the agents' engines are found (see resumeInterrupted).
 if (interrupted.length) void enginesReady.then(() => runner.resumeInterrupted(interrupted))
 // Installs from before the Tuca get him at the first start after the introduction.
@@ -1841,14 +1886,15 @@ function ownMemory(ctx: Ctx, id: string): void {
 }
 // Whether this person may read a reply, for Execuções and the Boletim's tools. A page of them asks about
 // the same few conversations over and over.
-const readsReply = (ctx: Ctx): CanRead => {
+const readsFor = (person: Person): CanRead => {
   const conversations = new Map<string, boolean>()
   return (r) => {
     let sees = conversations.get(r.conversationId)
-    if (sees === undefined) conversations.set(r.conversationId, (sees = people.canSeeConversation(ctx.person, db.conversationOwner(r.conversationId))))
-    return sees && people.visibleAt(ctx.person, r)
+    if (sees === undefined) conversations.set(r.conversationId, (sees = people.canSeeConversation(person, db.conversationOwner(r.conversationId))))
+    return sees && people.visibleAt(person, r)
   }
 }
+const readsReply = (ctx: Ctx): CanRead => readsFor(ctx.person)
 // What the wiki made of a source is seen by whoever sees the source: one from someone's DM, by
 // them alone. A change or version whose source is gone went with it.
 const seesSource = (ctx: Ctx) => (sourceId: string): boolean => {
@@ -2491,6 +2537,32 @@ const api: Handlers = {
   executions: (q, ctx) => {
     if (!EXECUTION_DAYS.includes(q.days)) throw new UserError(L('Esse período não está disponível.', "That period isn't available."))
     return executions(db, readsReply(ctx), q)
+  },
+  traces: () => tracesView(),
+  setTraces: async ({ on, endpoint, text, headers }, ctx) => {
+    if (envTraces) throw new UserError(L('O ambiente do servidor já configura os traces: mude as variáveis OTEL_ dele.', "The server's environment already configures traces: change its OTEL_ variables."))
+    mayTraceTo(endpoint, on)
+    const was = storedTraces()
+    const next: StoredTraces = { on, endpoint: endpoint.trim(), text: !!text }
+    // Text already going doesn't follow the traces to a new address, or to new credentials (another account
+    // at the same backend): an admin turns it on again for those.
+    if (was.text && (next.endpoint !== was.endpoint || headers !== undefined)) next.text = false
+    // Whoever turned the text on: it goes only for what they may read.
+    if (next.text) next.textBy = was.text && was.textBy ? was.textBy : ctx.person.id
+    if (headers !== undefined) await secrets.set(TRACES_HEADERS, headers?.trim() || undefined)
+    db.setMeta(TRACES_META, JSON.stringify(next))
+    tracesCache = next
+    if (next.on !== was.on || next.endpoint !== was.endpoint || next.text !== was.text || headers !== undefined)
+      record(ctx, 'traces.changed', undefined, { on: next.on, endpoint: pageOrigin(next.endpoint) ?? '', text: next.text, ...(headers === undefined ? {} : { headers: headers?.trim() ? 'changed' : 'removed' }) })
+    await applyTraces()
+    await warmTraceText()
+    return tracesView()
+  },
+  testTraces: async ({ endpoint, headers }) => {
+    mayTraceTo(endpoint, true)
+    // The saved key goes only to the address it was saved for: another one gets the form's headers, or none.
+    const saved = endpoint.trim() === storedTraces().endpoint ? await savedHeaders() : ''
+    return testTelemetry({ url: tracesUrl(endpoint), protocol: 'http/json', headers: parseHeaders(headers ?? saved) }, tracesAbout)
   },
   executionSteps: ({ messageId }, ctx) => {
     reachMessage(ctx, messageId)

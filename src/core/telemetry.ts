@@ -4,6 +4,7 @@
 // This file is what every core loads. The SDK is in telemetry-sdk.ts, imported only when traces are on.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { pageOrigin } from '../shared/vault'
+import type { TracesTest } from '../shared/types'
 import type { Engine, EngineEvent, Turn, Usage } from './engines/types'
 
 export interface TelemetryAbout {
@@ -37,7 +38,13 @@ export interface ReplyTrace {
   ref: SpanRef
   tool(name: string): ToolTrace
   movedTo(engine: string, model: string): void // a reserve took over: who really answered
-  end(outcome: { status: string; usage?: Usage | undefined }): void
+  end(outcome: { status: string; usage?: Usage | undefined; text?: ReplyText | undefined }): void
+}
+
+// What was said, when Settings › Traces sends it: the message that asked and the final reply, already masked.
+export interface ReplyText {
+  input?: string
+  output: string
 }
 
 // A model call Tucano makes for itself, outside a reply. A job's call carries its session; a background one has none.
@@ -61,6 +68,7 @@ export interface Telemetry {
   call(op: Operation, start: CallStart): CallTrace
   flush(): Promise<void>
   shutdown(): Promise<void>
+  retire(closed: () => void): void // settings changed: no new spans here, and it closes once the replies it traces end
 }
 
 export interface OtelConfig {
@@ -147,7 +155,9 @@ export const deactivateTelemetry = (t: Telemetry): void => {
 }
 export const tracing = (): boolean => active !== undefined
 export const traceReply = (start: ReplyStart): ReplyTrace | undefined => active?.reply(start)
-export const stopTelemetry = async (): Promise<void> => active?.shutdown()
+// A quit closes the one in use and any a settings change left finishing its replies.
+const retired = new Set<Telemetry>()
+export const stopTelemetry = async (): Promise<void> => void (await Promise.all([active?.shutdown(), ...[...retired].map((t) => t.shutdown())]))
 export const flushTelemetry = async (): Promise<void> => active?.flush()
 
 // Traces on: the SDK loads now, and nobody else pays for it. Where they go is said once, in the log, so
@@ -156,6 +166,28 @@ export async function loadTelemetry(config: OtelConfig, about: TelemetryAbout): 
   const { startTelemetry } = await import('./telemetry-sdk')
   startTelemetry(config, about)
   ;(about.warn ?? warnLog)(`sending traces to ${pageOrigin(config.url)}`)
+}
+
+// Settings › Traces › Test connection, with the SDK loaded for it alone.
+export async function testTelemetry(config: OtelConfig, about: TelemetryAbout): Promise<TracesTest> {
+  const { testExport } = await import('./telemetry-sdk')
+  return testExport(config, about)
+}
+
+// Settings changed: the next span goes by the new config (none: off), and what the old one queued still goes
+// where it was going, without the save waiting on it. One at a time, so two saves in a row can't leave two running.
+let reloading: Promise<void> = Promise.resolve()
+export const reloadTelemetry = (config: OtelConfig | undefined, about: TelemetryAbout): Promise<void> => {
+  const next = reloading.then(async () => {
+    const old = active
+    if (old) {
+      retired.add(old)
+      old.retire(() => retired.delete(old))
+    }
+    if (config) await loadTelemetry(config, about)
+  })
+  reloading = next.catch(() => {}) // one that failed doesn't stop the next
+  return next
 }
 
 // The operation running here, if any. An engine call outside one and outside a reply (the connection
