@@ -32,7 +32,7 @@ describe('Claude Code stream', () => {
       type: 'done',
       text: 'oi, tudo certo.',
       context: 10 + 6617 + 84, // the last model call's input and output
-      usage: { inputTokens: 10 + 6617, cacheReadTokens: 6617, outputTokens: 84, apiCostUsd: 0.0010917 }
+      usage: { inputTokens: 10 + 6617, cacheReadTokens: 6617, outputTokens: 84, apiCostUsd: 0.0010917, responseModel: 'claude-haiku-4-5-20251001' }
     })
     expect(events.some((e) => e.type === 'error')).toBe(false)
   })
@@ -152,6 +152,15 @@ describe('Claude Code stream', () => {
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('fake-png').toString('base64') } },
       { type: 'text', text: 'b' }
     ])
+  })
+
+  it('says which model answered, as the API named it', () => {
+    const start = JSON.stringify({ type: 'stream_event', event: { type: 'message_start', message: { model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 5 } } } })
+    const result = JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', usage: { input_tokens: 5, output_tokens: 1 } })
+
+    const done = feed(claudeParser(), [start, result]).find((e) => e.type === 'done')
+
+    expect(done).toMatchObject({ usage: { responseModel: 'claude-sonnet-4-5-20250929' } })
   })
 
   it('reports how much of the running total came from the cache', () => {

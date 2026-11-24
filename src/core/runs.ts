@@ -48,7 +48,7 @@ import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellAct
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
-import { during, inReplyTool, traceReply, tracing, type ReplyTrace, type SpanRef } from './telemetry'
+import { during, inReplyTool, traceReply, tracing, type ReplyText, type ReplyTrace, type SpanRef } from './telemetry'
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
@@ -320,7 +320,8 @@ export interface RunnerDeps {
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac' | 'unavailable'>> // without it, no agent has a computer
-  vault?: Pick<Vault, 'usable' | 'pick' | 'open' | 'mask' | 'warm' | 'loginSites'> // the Cofre's keys, for bash and start_service, and its logins (src/core/vault.ts)
+  vault?: Pick<Vault, 'usable' | 'pick' | 'open' | 'mask' | 'maskAll' | 'warm' | 'loginSites'> // the Cofre's keys, for bash and start_service, and its logins (src/core/vault.ts)
+  traceText?: (reply: Pick<Message, 'conversationId' | 'at'>) => boolean // Settings › Traces: whether this reply's text goes with its trace
   browser?: Pick<Browser, 'call' | 'approved'> & Partial<Pick<Browser, 'loginSites'>> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
@@ -1442,6 +1443,24 @@ export class Runner {
     }
   }
 
+  // A reply's text for its trace, when Settings › Traces sends it: the message it answers (or the request it
+  // works on) and what it ended with. Nothing else it saw or did.
+  // Only the message it answers, from the same conversation: a task can carry what came back from
+  // another one (a hand-off's result), which whoever turned the text on may not read. Never fails the reply.
+  private textOf(msg: Message): ReplyText | undefined {
+    try {
+      if (!this.deps.traceText?.(msg)) return undefined
+      const vault = this.deps.vault
+      const mask = (t: string): string => maskSecrets(vault ? vault.maskAll(t) : t) // every Vault key, then the token shapes
+      const answered = msg.run?.replyTo ? this.deps.db.message(msg.run.replyTo) : undefined
+      const asked = answered?.conversationId === msg.conversationId ? answered.text : undefined
+      return { ...(asked ? { input: mask(asked) } : {}), output: mask(msg.text) }
+    } catch (e) {
+      console.error('[telemetry] no text for this trace:', e instanceof Error ? e.message : e)
+      return undefined
+    }
+  }
+
   private async executeReply(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
@@ -1453,7 +1472,7 @@ export class Runner {
     const traced: { reply?: ReplyTrace | undefined } = {}
     try {
       msg = await this.reply(agent, conv, rest, traced)
-      traced.reply?.end({ status: msg.run?.status ?? 'failed', usage: msg.run?.receipt })
+      traced.reply?.end({ status: msg.run?.status ?? 'failed', usage: msg.run?.receipt, text: traced.reply && this.textOf(msg) })
     } catch (e) {
       traced.reply?.end({ status: 'failed' })
       this.followups.end(key)

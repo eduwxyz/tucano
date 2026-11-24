@@ -87,6 +87,7 @@ import {
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { HarnessesPane } from './HarnessKeys'
+import { TracesPane } from './Traces'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VOICE_WHERE, VoiceSetup } from './VoiceSetup'
@@ -4085,6 +4086,7 @@ export function SettingsPage(): ReactNode {
             <NodeCard />
           </SectionAnchor>
         )}
+        {on('conexoes') && admin && <SectionAnchor id="connections-traces" sections={structure}><TracesPane /></SectionAnchor>}
         {on('conexoes') && <SectionAnchor id="harnesses-keys" sections={structure}><HarnessesPane /></SectionAnchor>}
 
         {/* ---------- Workspace ---------- */}

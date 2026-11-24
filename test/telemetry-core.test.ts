@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Db } from '../src/core/db'
 import { WINDOW } from '../src/core/memory'
 import { stopTelemetry } from '../src/core/telemetry'
-import type { Agent } from '../src/shared/types'
+import type { Agent, TracesView } from '../src/shared/types'
 import { bootCore, type Client } from './helpers/core'
 import { until } from './helpers/node-link'
 import { attrsOf, collector } from './helpers/otlp'
@@ -38,6 +38,13 @@ afterAll(async () => {
 describe('the core with an OTLP endpoint set', () => {
   it('takes the OTEL_ variables out of what child processes inherit', () => {
     expect(envAfterBoot).toEqual([])
+  })
+
+  it('shows the environment as what configures traces, and keeps the screen from changing it', async () => {
+    const view = await owner.call<TracesView>('traces')
+
+    expect(view.fromEnv).toBe(new URL(sink.url).origin)
+    await expect(owner.call('setTraces', { on: true, endpoint: 'https://otel.example.com' })).rejects.toThrow(/environment|ambiente/)
   })
 
   it('sends a reply as a trace, naming its workspace', async () => {

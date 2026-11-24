@@ -5823,6 +5823,40 @@ table.csv th {
   font-size: 12.5px;
   user-select: all;
 }
+/* Settings › Traces: two switches, the address with its examples, the headers, and what goes. */
+.traces {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.traces__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.traces__row .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.traces textarea {
+  resize: vertical;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12.5px;
+}
+.traces .hint--warn,
+.traces .note,
+.traces__what {
+  margin: 0;
+}
+.text-btn.traces__remove {
+  align-self: flex-start;
+  margin-top: -4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
 /* Your own endpoint: the address and key, then the models it lists, to tick. */
 .endpoint {
   display: flex;

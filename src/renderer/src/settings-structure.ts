@@ -47,6 +47,7 @@ export function settingsStructure({ admin, owner, team, servers }: SettingsAcces
     { id: 'knowledge-memory', page: 'modelos', label: L('Memória', 'Memory'), icon: 'book', color: 'var(--c-violet)', keys: ['memoryModel', 'memoryLearning'], scope: 'workspace', visible: admin },
     { id: 'connections-phone', page: 'conexoes', label: L('Celular e Telegram', 'Phone and Telegram'), icon: 'phone', color: 'var(--c-green)', keys: ['telegram'], scope: 'mixed', visible: owner },
     { id: 'connections-servers', page: 'conexoes', label: L('Servidores', 'Servers'), icon: 'server', color: 'var(--c-graphite)', keys: ['paused', 'node'], scope: 'computer', visible: admin && servers },
+    { id: 'connections-traces', page: 'conexoes', label: 'Traces', icon: 'report', color: 'var(--c-violet)', keys: [], scope: 'workspace', visible: admin },
     { id: 'harnesses-keys', page: 'conexoes', label: L('Acesso por MCP', 'MCP access'), icon: 'plug', color: 'var(--c-indigo)', keys: [], scope: 'workspace', visible: true },
     { id: 'workspace-people', page: 'workspace', label: L('Pessoas', 'People'), icon: 'users', color: 'var(--c-sky)', keys: [], scope: 'mixed', visible: team },
     { id: 'workspace-activity', page: 'workspace', label: L('Atividade', 'Activity'), icon: 'report', color: 'var(--c-graphite)', keys: [], scope: 'workspace', visible: team && admin },
@@ -67,7 +68,7 @@ const tabSections: Readonly<Record<string, readonly SettingsSectionId[]>> = {
   geral: ['workspace-context', 'app-appearance', 'app-notifications', 'app-dictation', 'app-conversation'],
   agentes: ['agents-permissions', 'agents-replies', 'agents-limits', 'agents-routines', 'agents-tuca', 'agents-browser'],
   modelos: ['models-agents', 'models-runtimes', 'models-accounts', 'models-classifiers', 'models-router', 'knowledge-memory'],
-  conexoes: ['connections-phone', 'connections-servers', 'harnesses-keys'],
+  conexoes: ['connections-phone', 'connections-servers', 'connections-traces', 'harnesses-keys'],
   workspace: ['workspace-people', 'workspace-activity', 'workspace-team', 'workspace-backups', 'app-updates', 'workspace-danger']
 }
 
@@ -119,6 +120,7 @@ function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>>
     'knowledge-memory': [L('Modelo da memória', 'Memory model'), L('O que ele aprende sobre você', 'What it learns about you')],
     'connections-phone': ['Telegram', L('Celular', 'Phone'), 'iPhone'],
     'connections-servers': [L('Servidor', 'Server'), L('Emprestar este computador', 'Lend this computer'), L('Apps', 'Apps')],
+    'connections-traces': ['OpenTelemetry', 'OTLP', 'Langfuse', 'Grafana', 'Honeycomb', 'Datadog', L('Observabilidade', 'Observability'), L('Latência', 'Latency')],
     'harnesses-keys': ['MCP', L('Chave de acesso', 'Access key'), 'Cursor', 'Claude Code', 'Codex'],
     'workspace-people': [L('Convidar', 'Invite'), L('Papéis', 'Roles'), L('Quem te cobre', 'Who covers for you')],
     'workspace-activity': [L('Registro', 'Log'), L('Quem mudou o quê', 'Who changed what')],
