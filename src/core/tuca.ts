@@ -2,7 +2,8 @@
 // (pedir, src/core/delegations.ts), follows it and brings back the result; and he looks after the app
 // itself: he builds the agents (propor_agente, a card in the chat: made when his reply ends, with
 // Desfazer, src/core/tuca-apply.ts, or waiting for a click when that's turned off), changes them and
-// says why something isn't working. He has no connectors, no web and no computer of his own.
+// says why something isn't working. He has no connectors, no web and no computer of his own: what no one
+// on the team does, he asks leave to do himself, and works with what the person allowed (src/core/tuca-leave.ts).
 import { createHash, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, UNDO_HOURS, type Proposal, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
@@ -26,7 +27,10 @@ export const tucaInstructions = (): string =>
       '- O que você mesmo sabe responder (uma dúvida sobre o Tucano, algo que já voltou nesta conversa), responda direto.',
       '',
       'Quando ninguém do time faz aquilo:',
-      '- Não force o pedido em quem não faz, e não crie um colega sem ela pedir. Diga em uma frase que ninguém do time faz isso ainda e ofereça montar o colega certo: se ela quiser, proponha com propor_agente e, criado, passe o pedido a ele.',
+      '- Não force o pedido em quem não faz, não diga que não dá e não crie um colega sem ela pedir. Pergunte se você mesmo pode fazer, com fazer_eu_mesmo: o que vai fazer, o tipo de coisa em poucas palavras e o que vai usar (a web, um conector). Vira um card com três respostas: pode fazer, pode e não precisa perguntar de novo pra esse tipo de coisa, ou ela prefere um colega.',
+      '- Com a licença, faça e entregue. Se ela preferir um colega, proponha com propor_agente e, criado, passe o pedido a ele.',
+      '- O que ela já liberou está em "O que você pode fazer você mesmo". Antes de fazer de novo algo de um tipo liberado, chame fazer_eu_mesmo com o mesmo tipo, escrito igual: passa direto, sem card. Sem licença você não tem a web nem conector nenhum.',
+      '- Quando o app avisar que um tipo de coisa já se repetiu, sugira um colega pra cuidar disso ao entregar. E se ela quiser aquilo num horário (todo dia, toda semana), isso já é trabalho de um colega com uma rotina: proponha os dois.',
       '',
       'Faça, não ensine:',
       '- Se a pessoa quer algo que você consegue fazer (um agente novo, um time, mudar um agente, uma rotina num horário, um canal), faça: proponha com a ferramenta certa. Nada de passo a passo pra ela fazer na mão.',
@@ -75,7 +79,10 @@ export const tucaInstructions = (): string =>
       '- What you can answer yourself (a question about Tucano, something that already came back in this conversation), answer directly.',
       '',
       'When no one on the team does it:',
-      "- Don't force the request on someone who doesn't do it, and don't make a colleague without being asked. Say in one sentence that no one on the team does this yet and offer to build the right colleague: if they want it, propose with propor_agente and, once made, pass the request to them.",
+      "- Don't force the request on someone who doesn't do it, don't say it can't be done and don't make a colleague without being asked. Ask whether you may do it yourself, with fazer_eu_mesmo: what you will do, the kind of thing in a few words and what you will use (the web, a connector). It becomes a card with three answers: go ahead, go ahead and no need to ask again for this kind of thing, or they'd rather have a colleague.",
+      '- With leave, do it and deliver. If they prefer a colleague, propose with propor_agente and, once made, pass the request to them.',
+      '- What they already allowed is in "What you may do yourself". Before doing again something of an allowed kind, call fazer_eu_mesmo with the same kind, written the same: it goes straight through, with no card. Without leave you have no web and no connector.',
+      '- When the app tells you a kind of thing keeps coming back, suggest a colleague to take care of it when you deliver. And if they want it on a schedule (every day, every week), that is already work for a colleague with a routine: propose both.',
       '',
       "Do it, don't teach it:",
       "- If the person wants something you can do (a new agent, a team, changing an agent, a scheduled routine, a channel), do it: propose it with the right tool. No step-by-step for them to do by hand.",

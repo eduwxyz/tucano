@@ -180,6 +180,31 @@ export interface Receipt {
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
 
+// What the Tuca asks leave to do himself, when no one on the team does it (fazer_eu_mesmo, src/core/tuca-leave.ts):
+// on the reply whose question card asks it. `state`: how the person answered, once they did.
+export interface LeaveAsk {
+  kind: string // the kind of thing, in a few words ("pesquisa de preços"): what "no need to ask again" holds for
+  what: string // what he said he would do, in one sentence
+  web?: true // he will search and read web pages
+  grants?: Record<string, GrantLevel> // the connectors he will use, by id
+  state?: 'once' | 'always' | 'colleague'
+}
+
+// What a person let the Tuca do himself. It is theirs, never his: each person's Tuca works with what that
+// person allowed, and they take it back whenever they want.
+export interface TucaLeave {
+  id: string
+  person: string
+  conversationId?: string // given for that conversation only ("Pode fazer"); unset: for good, for that kind of thing
+  kind: string
+  what: string
+  web?: true
+  grants?: Record<string, GrantLevel>
+  uses: number // times he did it himself under this leave
+  suggested?: true // he was already told to suggest a colleague for this kind of thing
+  at: number
+}
+
 // What the Tuca wrote for the people who make Tucano (propor_feedback). Never sent by him: the card opens
 // the "Enviar feedback" window with it, and the person sends it from there.
 export interface FeedbackDraft {
@@ -225,6 +250,7 @@ export interface Run {
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
   feedbackDraft?: FeedbackDraft // a bug or an idea for the people who make Tucano, written by the Tuca with propor_feedback: the person reviews and sends it
+  leave?: LeaveAsk // the Tuca's question on this reply asks leave to do something himself (fazer_eu_mesmo): what for, and how it was answered
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back

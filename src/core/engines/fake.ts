@@ -67,7 +67,29 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
         // What he hands to the team, and what comes back from it, goes as any agent's does, further down.
-        if (/(?:mande|send) (?:um |a )?feedback: (.+)/i.test(last)) {
+        // What the person answered on the card where he asked leave to do something himself: told to him
+        // as this reply's task, at the very end of the prompt.
+        const after = turn.prompt.slice(Math.max(0, turn.prompt.lastIndexOf(last)))
+        const let_ = /(?:deixou você fazer isto você mesmo|let you do this yourself)[^:]*: "([^"]+)"/.exec(after)
+        const rather = /(?:prefere um colega pra isso|would rather have a colleague for this)[^"]*"([^"]+)"/.exec(after)
+        if (let_) {
+          // With leave: he does it, and suggests a colleague when told the kind of thing keeps coming back.
+          const again = /next_steps[^"]*"([^"]+)"/.exec(after)
+          if (again) await callTool(turn.mcpUrl, 'next_steps', { steps: [{ label: again[1]! }] })
+          reply = L(`Pronto, fiz eu mesmo: ${let_[1]}`, `Done, I did it myself: ${let_[1]}`)
+        } else if (rather) {
+          const r = await callTool(turn.mcpUrl, 'propor_agente', { nome: 'Caio', funcao: L('Pesquisa', 'Research'), cor: 'green', instrucoes: L(`Você cuida disto: ${rather[1]}\nEntrega curto, com as fontes.\nPergunta só o que impede de seguir.`, `You take care of this: ${rather[1]}\nDeliver short, with sources.\nAsk only what keeps you from going on.`), esforco: 'low', web: true })
+          reply = textOf(r).includes('card') || /Anotado|Noted/.test(textOf(r)) ? L('Montei o Caio pra isso. Criado, eu passo o pedido a ele.', 'I put Caio together for this. Once made, I pass the request to them.') : textOf(r)
+        } else if (/^fa[çc]a voc[êe](?: \(([^)]*)\))?: (.+)/im.test(last)) {
+          // "faça você (pesquisa de preços, web, +Linear): pesquisar os preços": he asks leave to do it himself,
+          // naming the kind of thing, the web and the connectors (with a +) he would use.
+          const [, how = '', what] = /^fa[çc]a voc[êe](?: \(([^)]*)\))?: (.+)/im.exec(last)!
+          const parts = how.split(',').map((x) => x.trim()).filter(Boolean)
+          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!, tipo: parts.find((x) => x !== 'web' && !x.startsWith('+')) ?? what!.slice(0, 40), web: parts.includes('web'), conectores: parts.filter((x) => x.startsWith('+')).map((x) => ({ conector: x.slice(1).replace(/!$/, ''), ...(x.endsWith('!') ? { nivel: 'escrita' } : {}) })) }))
+          const again = /next_steps[^"]*"([^"]+)"/.exec(told)
+          if (again) await callTool(turn.mcpUrl, 'next_steps', { steps: [{ label: again[1]! }] })
+          reply = /^(?:Liberado|Allowed)/.test(told) ? L(`Pronto, fiz eu mesmo: ${what}`, `Done, I did it myself: ${what}`) : /^(?:Pergunta enviada|Question sent)/.test(told) ? L('Ninguém do time faz isso ainda.', 'No one on the team does this yet.') : told
+        } else if (/(?:mande|send) (?:um |a )?feedback: (.+)/i.test(last)) {
           // "mande um feedback: …": he writes it as a card for the person to review and send.
           const texto = /(?:mande|send) (?:um |a )?feedback: (.+)/i.exec(last)![1]!.trim()
           const r = await callTool(turn.mcpUrl, 'propor_feedback', { tipo: /bug|erro|quebr/i.test(texto) ? 'bug' : 'idea', texto })

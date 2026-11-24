@@ -390,6 +390,9 @@ export class People {
         return { type: 'inbox', inbox: this.inbox(person) }
       case 'delegations':
         return { type: 'delegations', delegations: this.delegations(person) }
+      // What each one let the Tuca do himself: their own.
+      case 'leaves':
+        return { type: 'leaves', leaves: this.db.tucaLeaves(person.id) }
       // One's own to-dos: theirs alone.
       case 'tasks':
         return event.for === person.id ? event : undefined
@@ -595,7 +598,7 @@ export class People {
   }
 
   // The snapshot as this person gets it: no one else's DMs, their messages or their memories.
-  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations'>, opts: { server?: boolean } = {}): Snapshot {
+  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations' | 'leaves'>, opts: { server?: boolean } = {}): Snapshot {
     const conversations = viewedConversations(this.db, person, this.db.conversations(person.id).filter((c) => this.canSeeConversation(person, c)))
     const seen = new Set(conversations.map((c) => c.id))
     const theirs = base.messages.filter((m) => seen.has(m.conversationId))
@@ -624,6 +627,7 @@ export class People {
       you: person.id,
       inbox: this.inbox(person),
       delegations: this.delegations(person),
+      leaves: this.db.tucaLeaves(person.id),
       ...(opts.server && person.role === 'owner' && !this.db.ownerNamed() ? { needsName: true } : {})
     }
   }
