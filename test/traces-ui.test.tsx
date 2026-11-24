@@ -130,4 +130,16 @@ describe('the Traces settings', () => {
 
     for (const shown of ['Enviar traces', 'Endereço', 'Cabeçalhos', 'Enviar o texto das conversas', 'Testar conexão', 'Nenhum texto das conversas']) expect(text()).toContain(shown)
   })
+
+  it('clears what the last save or test said once the form changes', async () => {
+    saveTraces.mockRejectedValueOnce(new Error('Use HTTPS for a backend on another machine.'))
+    await render()
+    await type(input('Address'), 'http://otel.example.com')
+    await click(button('Save'))
+    expect(text()).toContain('Use HTTPS for a backend on another machine.')
+
+    await type(input('Address'), 'https://otel.example.com')
+
+    expect(text()).not.toContain('Use HTTPS for a backend on another machine.')
+  })
 })
