@@ -62,6 +62,13 @@ function TracesForm({ view, onSaved, lead }: { view: TracesView; onSaved: (v: Tr
   const [text, setText] = useState(view.text)
   const [busy, setBusy] = useState<'save' | 'test' | null>(null)
   const [said, setSaid] = useState<Said | null>(null) // the last save's or test's outcome
+  // A change to the form: what the last save or test said was about something else.
+  const changed =
+    <T,>(set: (v: T) => void) =>
+    (v: T): void => {
+      setSaid(null)
+      set(v)
+    }
 
   async function run(what: 'save' | 'test', work: () => Promise<Said | null>): Promise<void> {
     setBusy(what)
@@ -92,23 +99,23 @@ function TracesForm({ view, onSaved, lead }: { view: TracesView; onSaved: (v: Tr
             <strong>{L('Enviar traces', 'Send traces')}</strong>
             <span className="hint">{L('Um trace por resposta de agente, com as ferramentas, o tempo, os tokens e o custo.', 'One trace per agent reply, with its tools, time, tokens and cost.')}</span>
           </span>
-          <Toggle on={on} onChange={setOn} label={L('Enviar traces', 'Send traces')} />
+          <Toggle on={on} onChange={changed(setOn)} label={L('Enviar traces', 'Send traces')} />
         </div>
         <div className="endpoint__presets">
           {examples().map((x) => (
-            <button key={x.label} type="button" className={`chip ${endpoint === x.url ? 'is-on' : ''}`} onClick={() => setEndpoint(x.url)}>
+            <button key={x.label} type="button" className={`chip ${endpoint === x.url ? 'is-on' : ''}`} onClick={() => changed(setEndpoint)(x.url)}>
               {x.label}
             </button>
           ))}
         </div>
         <label className="field">
           <span className="field__label">{L('Endereço', 'Address')}</span>
-          <input value={endpoint} spellCheck={false} placeholder="https://otel.example.com" onChange={(e) => setEndpoint(e.target.value)} />
+          <input value={endpoint} spellCheck={false} placeholder="https://otel.example.com" onChange={(e) => changed(setEndpoint)(e.target.value)} />
           <span className="hint">{L('O endereço base que o backend informa. O Tucano acrescenta /v1/traces.', 'The base address your backend gives. Tucano adds /v1/traces.')}</span>
         </label>
         <label className="field">
           <span className="field__label">{L('Cabeçalhos', 'Headers')}</span>
-          <textarea rows={2} value={headers} autoComplete="off" spellCheck={false} placeholder={view.headers ? L('Salvos. Escreva para trocar.', 'Saved. Type to replace them.') : 'Authorization: Basic …'} onChange={(e) => setHeaders(e.target.value)} />
+          <textarea rows={2} value={headers} autoComplete="off" spellCheck={false} placeholder={view.headers ? L('Salvos. Escreva para trocar.', 'Saved. Type to replace them.') : 'Authorization: Basic …'} onChange={(e) => changed(setHeaders)(e.target.value)} />
           <span className="hint">{L('Um por linha, como o backend mostra. Onde vai a chave: guardada criptografada, e não aparece de novo aqui.', 'One per line, as your backend shows them. This is where the key goes: stored encrypted, and never shown here again.')}</span>
         </label>
         {view.headers && (
@@ -126,7 +133,7 @@ function TracesForm({ view, onSaved, lead }: { view: TracesView; onSaved: (v: Tr
               )}
             </span>
           </span>
-          <Toggle on={text} onChange={setText} label={L('Enviar o texto das conversas', 'Send the conversation text')} />
+          <Toggle on={text} onChange={changed(setText)} label={L('Enviar o texto das conversas', 'Send the conversation text')} />
         </div>
         <p className="hint traces__what">
           {text
