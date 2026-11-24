@@ -62,6 +62,9 @@ import {
   type LocalInfo,
   type VoiceModelId,
   type VoiceStatus,
+  type TeamChoice,
+  type TeamPackageInfo,
+  type TeamUpdate,
   type ProposalsResult,
   type BackupSummary,
   type NodeInfo,
@@ -1218,7 +1221,10 @@ export const checkTrigger = (trigger: Trigger): Promise<string> => call('checkTr
 export const setTelegramToken = (token: string | null): Promise<void> => call('setTelegramToken', { token })
 export const unpairTelegram = (): void => void fire(L('Não consegui desconectar o Telegram.', "I couldn't disconnect Telegram."), 'unpairTelegram')
 export const exportTeam = (): Promise<string> => call('exportTeam')
-export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const previewTeam = (text: string): Promise<TeamUpdate> => call('previewTeam', { text })
+export const importTeam = (text: string, choices: Record<string, TeamChoice>): Promise<string> => call('importTeam', { text, choices })
+export const teams = (): Promise<TeamPackageInfo[]> => call('teams')
+export const forgetTeam = (id: string): Promise<void> => call('forgetTeam', { id })
 export const exportBackup = (): Promise<{ path: string } & BackupSummary> => call('exportBackup')
 export const restoreCheck = (path: string): Promise<BackupSummary> => call('restoreCheck', { path })
 export const restoreApply = (): Promise<void> => call('restoreApply')

@@ -40,7 +40,7 @@ import {
   unpairTelegram,
   exportTeam,
   importAgents,
-  importTeam,
+  previewTeam,
   backupNow,
   openBackups,
   type TelegramInfo,
@@ -86,6 +86,7 @@ import {
   type BackupSummary
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
+import type { TeamUpdate } from '../../../shared/types'
 import { HarnessesPane } from './HarnessKeys'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
@@ -106,6 +107,7 @@ import { Modal } from './Modal'
 import { AgentAvatar, AVATARS, Icon, type IconName, NumberInput, SleepingToucan, time, tokens, UsageBar } from './ui'
 import { Select } from './Select'
 import { UpdateSettings } from './Update'
+import { KnownTeams, TeamImportDialog } from './TeamImport'
 import { openFeedback } from './Feedback'
 import type { NotifyState } from '../rpc'
 import { hasServers, NodeCard, ServersCard } from './Servers'
@@ -2781,6 +2783,8 @@ const MAX_UPLOAD = 40_000_000 // a browser's request has a cap (64 MB) and base6
 function TeamCard(): ReactNode {
   const [note, setNote] = useState('')
   const [hermes, setHermes] = useState(false)
+  const [importing, setImporting] = useState<{ text: string; update: TeamUpdate } | null>(null)
+  const [version, setVersion] = useState(0) // a team was imported or exported: the list below reloads
   const owner = useStore(amOwner) // Hermes reads the server's folder: the owner's
   const settings = useStore((s) => s.settings)
   // Grok Bot has no export: one of the person's agents there runs this skill and writes our .zip.
@@ -2813,12 +2817,20 @@ function TeamCard(): ReactNode {
       a.click()
       URL.revokeObjectURL(a.href)
       setNote(L(`Exportação feita: ${file}.`, `Exported: ${file}.`))
+      setVersion((v) => v + 1)
     }).catch((e: unknown) => setNote(e instanceof Error ? e.message : String(e)))
   }
   const failed = (e: unknown): void => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
   const upload = (file?: File): void => {
     if (!file) return
-    void file.text().then(importTeam).then(setNote, failed)
+    void file.text().then(
+      (text) =>
+        previewTeam(text).then((update) => {
+          if (update.changes.length) setImporting({ text, update })
+          else setNote(L('Nada novo: você já tem tudo o que esse arquivo traz.', 'Nothing new: you already have everything this file brings.'))
+        }, failed),
+      failed
+    )
   }
   // Another app's export: on the desktop the core reads the file where it is; in a browser it goes up whole.
   const fromApp = (file?: File): void => {
@@ -2838,7 +2850,7 @@ function TeamCard(): ReactNode {
       .then(setNote, failed)
   }
   return (
-    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro computador. Os agentes do OpenBot, do Grok Bot e do Hermes também entram, sem nenhum conector e com a busca na web desligada.', 'Export agents, skills, channels and routines as .md, without credentials or conversations. OpenBot, Grok Bot and Hermes imports have no connectors or web search.')}>
+    <Card title={L('Time', 'Team')} lead={L('O time num arquivo .md (agentes, skills, canais, rotinas, conectores e o contexto, sem credenciais nem conversas), pra guardar, levar pra outro computador ou passar pro time. Importar de novo um arquivo mais novo do mesmo time mostra o que mudou pra você escolher, sem sobrescrever o que você mudou aqui. Os agentes do OpenBot, do Grok Bot e do Hermes também entram, sem nenhum conector e com a busca na web desligada.', 'The team in a .md file (agents, skills, channels, routines, connectors and the context, without credentials or conversations), to keep, take to another computer or pass to your team. Importing a newer file of the same team again shows what changed for you to choose, without overwriting what you changed here. Agents from OpenBot, Grok Bot and Hermes come in too, with no connector and web search off.')}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn--sm" onClick={download}>
           {L('Exportar time', 'Export team')}
@@ -2882,6 +2894,19 @@ function TeamCard(): ReactNode {
       </div>
       {note && <p className="small muted" style={{ whiteSpace: 'pre-line' }}>{note}</p>}
       {owner && hermes && <HermesImport onClose={() => setHermes(false)} onDone={setNote} />}
+      <KnownTeams version={version} />
+      {importing && (
+        <TeamImportDialog
+          text={importing.text}
+          update={importing.update}
+          onClose={() => setImporting(null)}
+          onDone={(n) => {
+            setImporting(null)
+            setNote(n)
+            setVersion((v) => v + 1)
+          }}
+        />
+      )}
     </Card>
   )
 }

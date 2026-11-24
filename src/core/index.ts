@@ -64,8 +64,9 @@ import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
 import { extractFile, extractLink } from './wiki-extract'
-import { backup, backupIfDue, exportTeam, importTeam } from './team'
+import { backup, backupIfDue } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
+import { TeamFiles } from './team-files'
 import { applyForeignTeam, readForeignZip } from './agent-import'
 import { hermesPreview, hermesRoot, hermesTeam, readHermes } from './hermes-import'
 import { extractZip, zipFromBuffer, zipFromFile } from './zip'
@@ -1130,6 +1131,9 @@ const wikiLlm = async (system: string, prompt: string): Promise<string> => {
   }
   return text
 }
+// The team's .md file: exporting carries this team's id, importing a newer one offers what changed.
+const teamFiles = new TeamFiles({ db, dir: join(dataDir, 'teams'), defaultLimit: () => settings().defaultLimit, context: () => settings().context, name: () => settings().workspaceName })
+
 // A curation from someone's DM may read the pages held for them; any other, none that's held.
 const curator = new WikiCurator({ wiki, db, settings, emitMessage: (message) => emit({ type: 'message', message }), llm: wikiLlm, hidden: (id) => wiki.heldTitles(id ? (dmOf(id) ?? undefined) : undefined), beforeWrite: () => gitSync.pull() })
 // The review: by hand, or once a week when asked (checked every hour).
@@ -2383,16 +2387,27 @@ const api: Handlers = {
     if (!telegram) throw new Error(L('O Telegram fica no workspace padrão.', 'Telegram belongs to the default workspace.'))
     return telegram.setToken(token)
   },
-  exportTeam: (_, ctx) => exportTeam(db, ctx.person.id),
-  importTeam: ({ text }, ctx) => {
-    const r = importTeam(db, text, settings().defaultLimit, ctx.person.id)
+  exportTeam: (_, ctx) => teamFiles.export(ctx.person.id),
+  previewTeam: ({ text }) => teamFiles.preview(text),
+  importTeam: ({ text, choices }, ctx) => {
+    // Nothing chosen (a harness's import_team): what's new comes in, and what exists here stays as it is.
+    const picks = choices ?? Object.fromEntries(teamFiles.preview(text).changes.filter((c) => c.status === 'new').map((c) => [c.key, 'package' as const]))
+    const r = teamFiles.apply(text, picks, ctx.person.id)
     record(ctx, 'team.imported')
     for (const a of db.agents()) emit({ type: 'agent', agent: a })
     emitConversations()
     for (const k of db.skills()) emit({ type: 'skill', skill: k })
     for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
-    return r
+    emit({ type: 'settings', settings: settings() })
+    for (const id of r.connectors) {
+      const c = connectors.get(id)
+      if (c) emit({ type: 'connector', connector: c })
+      void connectors.connect(id) // each person signs in with their own account
+    }
+    return r.note
   },
+  teams: () => teamFiles.list(),
+  forgetTeam: ({ id }) => teamFiles.forget(id),
   importAgents: ({ path, data }, ctx) => {
     record(ctx, 'team.imported')
     if (!path && !data) throw new Error(L('Escolha um arquivo .zip.', 'Choose a .zip file.'))
