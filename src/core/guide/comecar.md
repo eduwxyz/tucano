@@ -14,7 +14,7 @@ Quem entra num time por convite vê uma boas-vindas curta: quem convidou, os age
 
 ## O Tuca
 O Tuca fica no topo da barra lateral. Ele monta agentes: você conta uma tarefa, ele faz poucas perguntas e cria o agente quando termina de responder, com **Desfazer** no card (veja **agentes**). Acesso a conectores espera você confirmar.
-Várias mudanças pedidas juntas chegam num grupo (**1 de 5**), com **Desfazer tudo**. A conversa fica guardada ao sair e voltar; **Nova conversa** começa do zero.
+Várias mudanças pedidas juntas chegam num grupo (**1 de 5**), com **Desfazer tudo**. A conversa fica guardada ao sair e voltar; **Nova conversa** começa outra e mantém as anteriores, que ficam em **Conversas**.
 
 ## A barra lateral
 - **Aprovações** (Approvals), **Memória** (Memory), **Wiki**, **Rotinas** (Routines), **Skills** e **Boletim** (Report).

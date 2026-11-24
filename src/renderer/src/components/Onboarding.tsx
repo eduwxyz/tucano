@@ -42,7 +42,8 @@ import { draftAgent, EFFORT, UseDraft } from './Tuca'
 import { describeRoutine } from './Routines'
 import { AutonomyPick } from './AutonomyPick'
 import { autonomyChosen, FIRST_AUTONOMY, storedAutonomy } from '../../../shared/onboarding'
-import { AgentAvatar, Icon, type IconName } from './ui'
+import { AgentAvatar, ago, Icon, type IconName } from './ui'
+import { lastSaid, tucaConversations, tucaTitle } from '../tuca-conversations'
 
 type Computer = 'none' | 'linux' | 'mac'
 
@@ -408,9 +409,47 @@ function ModelChip({ value, onPick, note, applying }: { value: string; onPick: (
   )
 }
 
-// A new agent, made with the Tuca: he asks, and the card beside the chat fills in with what he proposes.
-// He starts on his own model; changing it keeps the conversation (he goes on from it on the new one).
-// "Nova conversa" starts over: asked first when cards there weren't applied yet.
+// The person's other conversations with the Tuca, to go back to one: each is kept, one per request.
+function TucaConversations({ current, onPick }: { current?: string; onPick: (id: string) => void }): ReactNode {
+  // As text: the rows are made new at every look, and a string is the same while nothing in them changed.
+  const rows = useStore((s) => JSON.stringify(tucaConversations(s).map((c) => ({ id: c.id, title: tucaTitle(s, c), at: lastSaid(s, c) }))))
+  const list = JSON.parse(rows) as { id: string; title: string; at: number }[]
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent): void => void (!box.current?.contains(e.target as Element | null) && setOpen(false))
+    const key = (e: KeyboardEvent): void => void (e.key === 'Escape' && setOpen(false))
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      window.removeEventListener('keydown', key)
+    }
+  }, [open])
+  if (list.length < 2) return null
+  return (
+    <span className="onb-tc__convs" ref={box}>
+      <button className="btn btn--ghost btn--sm" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>
+        {L(`Conversas (${list.length})`, `Conversations (${list.length})`)} <Icon name="caret" size={12} />
+      </button>
+      {open && (
+        <div className="onb-tc__convs-pop" role="menu" aria-label={L('Suas conversas com o Tuca', 'Your conversations with Tuca')}>
+          {list.map((c) => (
+            <button key={c.id} role="menuitemradio" aria-checked={c.id === current} className={`onb-tc__conv ${c.id === current ? 'is-on' : ''}`} onClick={() => (setOpen(false), onPick(c.id))}>
+              <span className="onb-tc__conv-title">{c.title}</span>
+              <span className="onb-tc__conv-when">{ago(c.at)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
+// With the Tuca: he takes a request and passes it on, or asks and proposes an agent, and the card beside
+// the chat fills in with what he proposes. He starts on his own model; changing it keeps the conversation
+// (he goes on from it on the new one). "Nova conversa" starts another: this one stays in "Conversas".
 function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: string; error?: string }; setConv: (id: string) => void; onUse: (d: AgentDraft, messageId: string) => void; onManual: () => void }): ReactNode {
   const conv = session.id
   const tuca = useStore((s) => s.agents.find((a) => a.kind === 'tuca'))
@@ -426,17 +465,14 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
   useEffect(() => () => clearTimeout(typed.current), [])
   const error = session.error ?? ''
   const messages = useStore((s) => (conv ? messagesIn(s, conv) : []))
-  // Cards not applied or discarded yet: starting over drops them, so it asks first.
-  const unsettled = messages.reduce((n, m) => n + (m.run?.agentDraft && !m.run.agentDraft.state ? 1 : 0) + proposalsOf(m.run).filter((p) => !p.state).length, 0)
   const said = messages.some((m) => m.author.kind === 'person')
-  const [confirmNew, setConfirmNew] = useState(false)
   const [starting, setStarting] = useState(false)
 
+  // Another conversation: this one is kept as it is, cards and all, and stays in "Conversas".
   async function startOver(): Promise<void> {
     setStarting(true)
     try {
       setConv((await ensureTuca(undefined, true)).conversationId)
-      setConfirmNew(false)
     } catch (e) {
       setModelError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -486,34 +522,20 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
           <AgentAvatar agent={tuca ?? { name: 'Tuca', color: 'amber', kind: 'tuca' }} size={36} />
           <div className="grow">
             <h1 className="onb-tc__title">Tuca</h1>
-            <p className="onb-tc__lede">{L('Explica o Tucano, investiga o que não funciona e cria agentes.', 'Explains Tucano, looks into what isn’t working and builds agents.')}</p>
+            <p className="onb-tc__lede">{L('Recebe seus pedidos, passa pra quem do time faz e cuida do Tucano.', 'Takes your requests, passes them to whoever on the team does it, and looks after Tucano.')}</p>
           </div>
-          {conv && tuca && !confirmNew && (
+          {conv && tuca && <TucaConversations current={conv} onPick={setConv} />}
+          {conv && tuca && (
             <button
               className="btn btn--ghost btn--sm"
               disabled={!said || starting}
-              onClick={() => (unsettled ? setConfirmNew(true) : void startOver())}
-              title={L('Começa outra conversa com o Tuca, do zero. Esta fica aqui quando você sai e volta.', 'Starts a new conversation with Tuca, replacing this one. Leaving this page keeps the current conversation.')}
+              onClick={() => void startOver()}
+              title={L('Começa outra conversa com o Tuca. Esta continua guardada, em Conversas.', 'Starts another conversation with Tuca. This one is kept, under Conversations.')}
             >
               <Icon name="plus" size={13} /> {L('Nova conversa', 'New conversation')}
             </button>
           )}
         </header>
-        {confirmNew && (
-          <div className="onb-tc__confirm" role="alert">
-            <span className="small">
-              {unsettled
-                ? L(`${unsettled === 1 ? 'Tem 1 proposta que você não aplicou' : `Tem ${unsettled} propostas que você não aplicou`}. Começar uma conversa nova apaga esta, com ${unsettled === 1 ? 'ela' : 'elas'}.`, `There ${unsettled === 1 ? 'is 1 proposal you haven’t applied' : `are ${unsettled} proposals you haven’t applied`}. Starting a new conversation deletes this one, with ${unsettled === 1 ? 'it' : 'them'}.`)
-                : L('Começar uma conversa nova apaga esta.', 'Starting a new conversation deletes this one.')}
-            </span>
-            <button className="btn btn--sm btn--danger" disabled={starting} onClick={() => void startOver()}>
-              {L('Começar do zero', 'Start over')}
-            </button>
-            <button className="btn btn--ghost btn--sm" disabled={starting} onClick={() => setConfirmNew(false)}>
-              {L('Manter esta', 'Keep this one')}
-            </button>
-          </div>
-        )}
         <div className={`onb-tc__chat ${said ? '' : 'is-fresh'}`}>
           {conv && tuca ? (
             <UseDraft.Provider value={onUse}>

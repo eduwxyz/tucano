@@ -222,26 +222,28 @@ describe("the Tuca's builder screen", () => {
     expect(text()).toContain('quero planejar a migração')
   })
 
-  it('"Nova conversa" asks first when cards were not applied, then starts another', async () => {
+  it('"Nova conversa" starts another at once, cards or not: this one is kept, so there is nothing to confirm', async () => {
     const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'quero planejar a migração', at: 5 } as Message
     fake = state({ messages: { t1: [said, reply(migration())] } })
     await render(<Onboarding build />)
+    expect(text()).not.toContain('Conversas (') // with one conversation there is nothing to switch to
     await click(/Nova conversa/)
-    expect(text()).toContain('Tem 5 propostas que você não aplicou')
-    expect(store.ensureTuca).toHaveBeenCalledTimes(1)
-    await click(/Manter esta/)
-    expect(text()).toContain('quero planejar a migração')
-    await click(/Nova conversa/)
-    await click(/Começar do zero/)
+    expect(text()).not.toContain('apaga esta')
     expect(store.ensureTuca).toHaveBeenLastCalledWith(undefined, true)
   })
 
-  it('"Nova conversa" with nothing left to apply starts over at once', async () => {
-    const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'oi', at: 5 } as Message
-    fake = state({ messages: { t1: [said] } })
+  it('lists the other conversations with him, the one last talked in first, and goes back to one', async () => {
+    const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'quero planejar a migração', at: 5 } as Message
+    const other = { id: 'p2', conversationId: 't0', author: { kind: 'person', id: 'ana' }, text: 'Oi Tuca, preciso de um resumo das vendas', at: 2 } as Message
+    const base = state({ messages: { t1: [said], t0: [other] } })
+    fake = { ...base, conversations: [...base.conversations, { id: 't0', kind: 'dm', name: 'tuca', members: ['tuca'], title: 'Resumo das vendas', createdAt: 1 }] } as State
     await render(<Onboarding build />)
-    await click(/Nova conversa/)
-    expect(store.ensureTuca).toHaveBeenLastCalledWith(undefined, true)
+    await click(/Conversas \(2\)/)
+    const rows = [...document.querySelectorAll('.onb-tc__conv-title')].map((e) => e.textContent)
+    expect(rows).toEqual(['Quero planejar a migração', 'Resumo das vendas'])
+    await click(/Resumo das vendas/)
+    expect(text()).toContain('preciso de um resumo das vendas')
+    expect(text()).not.toContain('quero planejar a migração')
   })
 })
 
@@ -257,7 +259,7 @@ describe('the builder screen, after the debloat: steps, ideas and the proposal b
     fake = state({ messages: { t1: [hello] } })
     await render(<Onboarding build />)
     expect(steps()[0]).toBe('is-now:1Conversa')
-    expect(text()).toContain('Explica o Tucano, investiga o que não funciona e cria agentes.')
+    expect(text()).toContain('Recebe seus pedidos, passa pra quem do time faz e cuida do Tucano.')
     expect(text()).toContain('Oi, eu sou o Tuca.')
     expect(document.querySelectorAll('.onb-tc__idea')).toHaveLength(4)
     expect(rows().slice(0, 4)).toEqual(['Nome=—', 'O que faz=—', 'Quando=—', 'Acesso=—'])

@@ -81,6 +81,7 @@ import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Titles } from './titles'
+import { shortTitle } from '../shared/titles'
 import { loginEnv, MacComputer } from './mac'
 import { NodeLog, NodeServer } from './node-server'
 import { NodeLinks, NodeUplink, type LinkPort } from './node-link'
@@ -540,6 +541,7 @@ function emit(event: CoreEvent): void {
   const more = event.type === 'message' && db.recordActivity(event.message, viewing)
   hub.emit(event)
   if (event.type === 'message') titles?.forReply(event.message)
+  if (event.type === 'message') nameTucaConversation(event.message)
   // An approval asked or decided changes what waits on its deciders.
   if (event.type === 'approval') hub.emit({ type: 'inbox' })
   toPhone(event)
@@ -1326,8 +1328,9 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // The Tuca, made once (the introduction, or the first start after it) and kept
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
-// Each person's DM with him is kept: every way to the builder screen opens it where it was, and his
-// session goes on. `fresh` ("Nova conversa") starts another: the old one goes, with only his hello in the new.
+// Each person has several conversations with him, one per request, each kept with its own session:
+// every way to him opens the one that was last talked in. `fresh` ("Nova conversa") starts another and
+// keeps the others; one that nobody wrote in yet is the new one already, so empty ones don't pile up.
 // A model runs here when its harness is chosen and signed in.
 function worksWith(s: Settings): (id: string) => boolean {
   return (id) => {
@@ -1365,24 +1368,43 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
-  const theirs = (c: { kind: 'channel' | 'dm'; owner?: string; name: string }): boolean => c.kind === 'dm' && c.name === tuca!.id && dmOwner(c, db.ownerId()) === person
-  let dm = db.conversations().find(theirs)
-  if (dm && fresh) {
-    for (const m of db.messagesWithRun(['working'])) if (m.conversationId === dm.id) runner.stop(m.id)
-    runner.forgetSessions({ conversationId: dm.id })
-    db.deleteConversation(dm.id)
-    emit({ type: 'conversation_removed', id: dm.id, for: person })
-    dm = undefined
-  }
+  // The one last talked in comes first; one nobody wrote in yet is where a new conversation starts.
+  const mine = tucaConversations(tuca.id, person)
+  let dm = fresh ? mine.find((c) => !db.firstRequest(c.id)) : mine[0]
   if (!dm) {
-    db.createConversation({ id: randomUUID(), kind: 'dm', name: tuca.id, members: [tuca.id], owner: person })
-    dm = db.conversations().find(theirs)!
-    const hello: Message = { id: randomUUID(), conversationId: dm.id, author: { kind: 'agent', id: tuca.id }, text: tucaHello(), at: Date.now() }
+    const id = randomUUID()
+    db.createConversation({ id, kind: 'dm', name: tuca.id, members: [tuca.id], owner: person })
+    const hello: Message = { id: randomUUID(), conversationId: id, author: { kind: 'agent', id: tuca.id }, text: tucaHello(), at: Date.now() }
     db.saveMessage(hello)
-    emitConversations([dm.id])
+    emitConversations([id])
     emit({ type: 'message', message: hello })
+    dm = db.conversation(id)!
   }
   return { agentId: tuca.id, conversationId: dm.id }
+}
+
+// A person's conversations with the Tuca, the one last talked in first.
+function tucaConversations(tucaId: string, person: string): Conversation[] {
+  return db
+    .conversations()
+    .filter((c) => c.kind === 'dm' && c.name === tucaId && dmOwner(c, db.ownerId()) === person)
+    .sort((a, b) => (b.lastAt ?? b.createdAt ?? 0) - (a.lastAt ?? a.createdAt ?? 0))
+}
+
+// A conversation with the Tuca is named after what the person first asked there: its own words at once
+// (src/shared/titles.ts), then the title a cheap model gives that request (src/core/titles.ts), unless
+// the person named the conversation themselves meanwhile.
+function nameTucaConversation(m: Message): void {
+  if (m.author.kind !== 'person' || m.threadId) return
+  const c = db.conversation(m.conversationId)
+  if (!c || c.kind !== 'dm' || db.agent(c.name)?.kind !== 'tuca') return
+  const first = db.firstRequest(c.id)
+  if (first?.id !== m.id) return
+  const own = shortTitle(m.text)
+  const next = !c.title ? m.title || own : c.title === own && m.title ? m.title : undefined
+  if (!next || next === c.title) return
+  db.setConversationTitle(c.id, next)
+  hub.emit({ type: 'conversation', conversation: db.conversation(c.id)! })
 }
 
 // One of a reply's proposals changed: settled once (applied, with what it made or changed, or
@@ -1798,6 +1820,8 @@ function reach(ctx: Ctx, conversationId: string | undefined): void {
 // The person's DM with an agent: the one there is, or a new one.
 function dmFor(ctx: Ctx, agentId: string): string {
   assertAgentVisible(db, ctx.person, agentId)
+  // With the Tuca a person has several: the one last talked in.
+  if (db.agent(agentId)?.kind === 'tuca') return ensureTuca(undefined, false, ctx.person.id).conversationId
   const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
   if (existing) return existing.id
   const id = randomUUID()
@@ -2230,6 +2254,15 @@ const api: Handlers = {
   },
 
   ensureTuca: ({ modelId, fresh }, ctx) => ensureTuca(modelId, fresh, ctx.person.id),
+  // A conversation with the Tuca, named by its person ('' goes back to what was first asked there).
+  setConversationTitle: ({ id, title }, ctx) => {
+    reach(ctx, id)
+    const c = db.conversation(id)
+    if (!c || c.kind !== 'dm' || db.agent(c.name)?.kind !== 'tuca' || dmOwner(c, db.ownerId()) !== ctx.person.id) throw new Error(L('Só dá pra dar nome às suas conversas com o Tuca.', 'Only your conversations with Tuca can be named.'))
+    const first = db.firstRequest(id)
+    db.setConversationTitle(id, cleanTaskText(title, 80) || (first ? first.title || shortTitle(first.text) : ''))
+    emitConversations([id])
+  },
   createFromDraft: ({ messageId }, ctx) => {
     reachMessage(ctx, messageId)
     return createDraft(ctx, messageId)
