@@ -612,6 +612,10 @@ export interface Settings {
   // team and their conversations, with everything else running underneath (components/Simple.tsx). Unset
   // or 'full': the whole app, as it always was. Each person's own; a new install starts simple.
   uiMode?: 'simple' | 'full'
+  // In the simple view the Tuca speaks first: one thing a day he thinks the person should know
+  // (src/renderer/src/tuca-nudges.ts). false: never. `tucaNudge`: the one of the day, and whether it was closed.
+  tucaSpeaksFirst?: boolean
+  tucaNudge?: { day: string; key: string; closed?: boolean } | null
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT

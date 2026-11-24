@@ -36,6 +36,7 @@ const store = await import('../src/renderer/src/store')
 const { createRoot } = await import('react-dom/client')
 const { SimpleMain, SimpleRail, TucaLeaves } = await import('../src/renderer/src/components/Simple')
 const { requestAgents, requestLine, requestState, tucaConversations, tucaTitle } = await import('../src/renderer/src/tuca-conversations')
+const { dayOf, nudgeNow, tucaNudges } = await import('../src/renderer/src/tuca-nudges')
 
 const base = (await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')).getState()
 const agent = (id: string, name: string, extra: Partial<Agent> = {}): Agent => ({ id, name, handle: name.toLowerCase(), role: '', color: 'sky', instructions: 'x', modelId: 'sonnet', effort: 'low', limit: 2_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
@@ -271,5 +272,76 @@ describe('the simple view', () => {
     fake = state()
     await act(async () => root.render(<TucaLeaves />))
     expect(text()).toContain('o Tuca pergunta se pode fazer ele mesmo')
+  })
+})
+
+describe('the Tuca speaks first', () => {
+  const gmail = { id: 'g', name: 'Gmail', kind: 'remote', status: 'needs_auth', tools: [] } as unknown as Connector
+  const withGmail = { agents: [tuca, { ...duda, grants: { g: 'read' as const } }, nina], connectors: [gmail] }
+  const now = new Date(2026, 10, 24, 10, 0).getTime()
+
+  it('says only what the app knows: a service to sign in to again, a colleague out of its month, a routine that failed, something waiting long', () => {
+    expect(tucaNudges(state())).toEqual([])
+    expect(tucaNudges(state(withGmail))[0]).toMatchObject({ key: 'connector:g:needs_auth', text: 'O Gmail está pedindo login de novo, e Duda depende dele.', label: 'Resolver', view: { kind: 'connectors' } })
+    // A service no colleague uses is nobody's problem yet.
+    expect(tucaNudges(state({ connectors: [gmail] }))).toEqual([])
+    const spent = tucaNudges(state({ agents: [tuca, { ...duda, limit: 1000, used: 1000 }] }), now)[0]!
+    expect(spent).toMatchObject({ key: 'limit:duda:2026-11', label: 'Aumentar o limite' })
+    expect(spent.say).toContain('Proponha um limite maior pra Duda')
+    expect(tucaNudges(state({ agents: [tuca, { ...duda, limit: 0, used: 9e9 }] }))).toEqual([]) // no monthly limit, nothing to be out of
+    const routine = { id: 'r1', agentId: 'duda', conversationId: 'dm-duda', name: 'Avaliações da manhã', prompt: 'x', enabled: true, schedule: { days: [1], time: '09:00' }, lastAt: 50, lastMessageId: 'run1' } as Routine
+    const failed = { id: 'run1', conversationId: 'dm-duda', author: { kind: 'agent', id: 'duda' }, text: '', at: 50, run: { status: 'failed', steps: [] } } as Message
+    expect(tucaNudges(state({ routines: [routine], messages: { 'dm-duda': [failed] } }))[0]).toMatchObject({ key: 'routine:r1:50', text: 'A rotina “Avaliações da manhã” de Duda não terminou da última vez.', say: 'Por que a rotina “Avaliações da manhã” não terminou da última vez?' })
+    expect(tucaNudges(state({ routines: [routine], messages: { 'dm-duda': [{ ...failed, run: { status: 'done', steps: [] } } as Message] } }))).toEqual([])
+    const old = { id: 'ap1', agentId: 'duda', createdAt: now - 13 * 3_600_000 } as Approval
+    const fresh = { id: 'ap2', agentId: 'duda', createdAt: now - 3_600_000 } as Approval
+    expect(tucaNudges(state({ inbox: { approvals: [old, fresh], questions: [] } }), now)).toMatchObject([{ key: 'waiting:ap1', view: { kind: 'approvals' } }])
+    expect(tucaNudges(state({ inbox: { approvals: [fresh], questions: [] } }), now)).toEqual([])
+  })
+
+  it('one a day at most, never while a request is going, and never when turned off', () => {
+    const list = tucaNudges(state({ ...withGmail, agents: [tuca, { ...duda, grants: { g: 'read' }, limit: 1000, used: 1000 }] }), now)
+    expect(list.map((n) => n.key)).toEqual(['connector:g:needs_auth', 'limit:duda:2026-11'])
+    const today = dayOf(now)
+    expect(today).toBe('2026-11-24')
+    expect(nudgeNow(list, {}, { busy: false, now })?.key).toBe('connector:g:needs_auth')
+    expect(nudgeNow(list, {}, { busy: true, now })).toBeUndefined()
+    expect(nudgeNow(list, { tucaSpeaksFirst: false }, { busy: false, now })).toBeUndefined()
+    // The day's stays the day's: shown again while it holds, never replaced by another, gone once closed.
+    expect(nudgeNow(list, { tucaNudge: { day: today, key: 'limit:duda:2026-11' } }, { busy: false, now })?.key).toBe('limit:duda:2026-11')
+    expect(nudgeNow(list, { tucaNudge: { day: today, key: 'something-solved' } }, { busy: false, now })).toBeUndefined()
+    expect(nudgeNow(list, { tucaNudge: { day: today, key: 'connector:g:needs_auth', closed: true } }, { busy: false, now })).toBeUndefined()
+    // Another day, another one.
+    expect(nudgeNow(list, { tucaNudge: { day: '2026-11-23', key: 'connector:g:needs_auth', closed: true } }, { busy: false, now })?.key).toBe('connector:g:needs_auth')
+  })
+
+  it('shows where a request starts, is kept as the day\'s, and goes away with "Agora não" or with what it offers', async () => {
+    await show({ kind: 'home' }, withGmail)
+    expect(document.querySelector('.simple-says')!.textContent).toContain('O Gmail está pedindo login de novo')
+    const kept = (store.updateSettings as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as { tucaNudge?: { key: string; closed?: boolean } })
+    expect(kept.at(-1)!.tucaNudge).toMatchObject({ key: 'connector:g:needs_auth' })
+    expect(kept.at(-1)!.tucaNudge!.closed).toBeUndefined()
+    await click(/^Agora não$/)
+    expect((store.updateSettings as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toMatchObject({ tucaNudge: { key: 'connector:g:needs_auth', closed: true } })
+    await click(/^Resolver$/)
+    expect(went()).toEqual([{ kind: 'connectors' }])
+    // One that is a request to him is sent in the new conversation.
+    vi.clearAllMocks()
+    await show({ kind: 'home' }, { agents: [tuca, { ...duda, limit: 1000, used: 1000 }] })
+    await click(/^Aumentar o limite$/)
+    expect((store.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe('fresh')
+    expect((store.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toContain('Proponha um limite maior pra Duda')
+    // Turned off, or with a request still going: nothing.
+    await show({ kind: 'home' }, { ...withGmail, settings: { tucaSpeaksFirst: false } as State['settings'] })
+    expect(document.querySelector('.simple-says')).toBeNull()
+    await show({ kind: 'home' }, { ...withGmail, ...requests, delegations: [asked('d1', 'duda', 'c-done', 'open')] })
+    expect(document.querySelector('.simple-says')).toBeNull()
+  })
+
+  it('the switch is in my settings', async () => {
+    await show({ kind: 'simple-settings' })
+    expect(text()).toContain('O Tuca fala primeiro')
+    await click(/^Desligado$/)
+    expect((store.updateSettings as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toEqual({ tucaSpeaksFirst: false })
   })
 })

@@ -587,6 +587,39 @@ button.simple-row:focus-visible + .simple-row,
 .simple-home__field {
   margin-top: 28px;
 }
+/* He speaks first: one line under the greeting, in his own colour, with what to do about it. */
+.simple-says {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 12px 14px 12px 18px;
+  border-radius: 16px;
+  background: var(--warn-soft);
+  animation: rise var(--dur-enter) var(--ease-out) backwards;
+}
+.simple-says__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.simple-says .simple-btn {
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+.simple-says .simple-btn:hover {
+  background: var(--primary);
+  color: var(--primary-text);
+  box-shadow: none;
+}
+.simple-says__no {
+  color: var(--text-2);
+}
+.simple-says + .simple-home__field {
+  margin-top: 16px;
+}
 .simple-home__field .composer-wrap {
   max-width: none;
   margin: 0;

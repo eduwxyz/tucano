@@ -27,6 +27,7 @@ import {
   type TucaLeave,
   type View
 } from '../store'
+import { dayOf, nudgeNow, tucaNudges } from '../tuca-nudges'
 import { runStep } from '../board'
 import { describeRoutine } from './Routines'
 import { lastSaid, requestAgents, requestLine, requestState, stateLabel, tucaConversations, tucaOf, tucaTitle, type RequestState } from '../tuca-conversations'
@@ -277,6 +278,7 @@ function Home({ draft }: { draft?: string }): ReactNode {
         <p className="simple-home__hello">{hello(me)}</p>
         <h1 className="simple-home__title">{L('O que você precisa hoje?', 'What do you need today?')}</h1>
       </div>
+      <TucaSays conv={conv} />
       {conv && tuca ? (
         <div className="simple-home__field">
           <Composer key={`${conv}:${draft ?? ''}`} conversationId={conv} members={[tuca]} placeholder={L('Escreva o que você precisa. Eu passo pra quem do time faz.', 'Write what you need. I pass it to whoever on the team does it.')} />
@@ -305,6 +307,39 @@ function Home({ draft }: { draft?: string }): ReactNode {
           </div>
         </section>
       )}
+    </div>
+  )
+}
+
+// He speaks first: one line a day with something the person should know and what to do about it (tuca-nudges.ts).
+// Kept as the day's once shown, so it is the same on every device and isn't followed by another.
+function TucaSays({ conv }: { conv?: string }): ReactNode {
+  const on = useStore((s) => s.settings.tucaSpeaksFirst !== false)
+  const kept = useStore((s) => s.settings.tucaNudge)
+  const busy = useStore((s) => tucaConversations(s).some((c) => requestState(s, c) === 'run'))
+  const found = useStore((s) => JSON.stringify(tucaNudges(s)))
+  const nudge = useMemo(() => nudgeNow(JSON.parse(found), { tucaSpeaksFirst: on, tucaNudge: kept }, { busy }), [found, on, kept, busy])
+  const today = dayOf(Date.now())
+  useEffect(() => {
+    if (nudge && (kept?.day !== today || kept.key !== nudge.key)) updateSettings({ tucaNudge: { day: today, key: nudge.key } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nudge?.key])
+  if (!nudge) return null
+  const close = (): void => updateSettings({ tucaNudge: { day: today, key: nudge.key, closed: true } })
+  const act = (): void => {
+    close()
+    if (nudge.view) navigate(nudge.view)
+    else if (nudge.say && conv) sendMessage(conv, nudge.say)
+  }
+  return (
+    <div className="simple-says" role="status">
+      <p className="simple-says__text">{nudge.text}</p>
+      <button className="simple-btn" onClick={act} disabled={!nudge.view && !conv}>
+        {nudge.label}
+      </button>
+      <button className="simple-link simple-says__no" onClick={close}>
+        {L('Agora não', 'Not now')}
+      </button>
     </div>
   )
 }
@@ -734,6 +769,7 @@ export function TucaLeaves(): ReactNode {
 function SimpleSettings(): ReactNode {
   const theme = useStore((s) => s.settings.theme)
   const language = useStore((s) => s.settings.language)
+  const speaks = useStore((s) => s.settings.tucaSpeaksFirst !== false)
   const pick = <T extends string>(value: T, options: [T, string][], on: (v: T) => void, label: string): ReactNode => (
     <div className="mode-switch" role="group" aria-label={label}>
       {options.map(([v, text]) => (
@@ -760,6 +796,18 @@ function SimpleSettings(): ReactNode {
               <span className="simple-row__sub">{L('O do app e o que o time usa pra responder.', "The app's, and the one the team answers in.")}</span>
             </span>
             {pick(language, [['pt', 'Português'], ['en', 'English']], (v) => updateSettings({ language: v }), L('Idioma', 'Language'))}
+          </div>
+        </div>
+      </section>
+      <section className="simple-section">
+        <h2 className="simple-section__title">Tuca</h2>
+        <div className="simple-rows">
+          <div className="simple-row simple-row--setting">
+            <span className="simple-row__text">
+              <span className="simple-row__title">{L('O Tuca fala primeiro', 'Tuca speaks first')}</span>
+              <span className="simple-row__sub">{L('Uma vez por dia, no máximo, ele avisa de algo que você deveria saber.', 'Once a day at most, he tells you something you should know.')}</span>
+            </span>
+            {pick(speaks ? 'on' : 'off', [['on', L('Ligado', 'On')], ['off', L('Desligado', 'Off')]], (v) => updateSettings({ tucaSpeaksFirst: v === 'on' }), L('O Tuca fala primeiro', 'Tuca speaks first'))}
           </div>
         </div>
       </section>
