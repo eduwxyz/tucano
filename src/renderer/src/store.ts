@@ -1003,6 +1003,8 @@ export async function createChannel(name: string, threads?: boolean): Promise<vo
 
 // The Tuca and his DM, made if missing.
 export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: string; conversationId: string }> => call('ensureTuca', { modelId, fresh })
+// Takes back something I let the Tuca do himself: he asks again the next time.
+export const removeTucaLeave = (id: string): Promise<void> => call('removeTucaLeave', { id })
 // The agent a Tuca card proposed, created with a DM of its own.
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.

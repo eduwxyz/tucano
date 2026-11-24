@@ -15724,6 +15724,40 @@ button.agent-card__now:hover {
   font-weight: 400;
   color: var(--text-2);
 }
+/* What he was let to do himself: the same popover, a row per leave with its way back. */
+.onb-tc__leaves-note {
+  margin: 0;
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.onb-tc__leave {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.onb-tc__leave-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.onb-tc__leave-kind {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.onb-tc__leave-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.onb-tc__leave .link {
+  flex: none;
+}
 .onb-tc__confirm {
   display: flex;
   align-items: center;

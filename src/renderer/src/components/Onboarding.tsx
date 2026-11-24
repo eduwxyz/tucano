@@ -23,6 +23,7 @@ import {
   sendMessage,
   slug,
   ensureTuca,
+  removeTucaLeave,
   settleDraft,
   messagesIn,
   proposalsOf,
@@ -44,6 +45,7 @@ import { AutonomyPick } from './AutonomyPick'
 import { autonomyChosen, FIRST_AUTONOMY, storedAutonomy } from '../../../shared/onboarding'
 import { AgentAvatar, ago, Icon, type IconName } from './ui'
 import { lastSaid, tucaConversations, tucaTitle } from '../tuca-conversations'
+import { leaveRows, type LeaveRow } from '../tuca-leaves'
 
 type Computer = 'none' | 'linux' | 'mac'
 
@@ -447,6 +449,52 @@ function TucaConversations({ current, onPick }: { current?: string; onPick: (id:
   )
 }
 
+// What the person let the Tuca do himself, with a way to take each back: he asks again the next time.
+// In sight only while there is something to take back.
+function TucaLeavesMenu(): ReactNode {
+  const rows = useStore((s) => JSON.stringify(leaveRows(s)))
+  const list = JSON.parse(rows) as LeaveRow[]
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent): void => void (!box.current?.contains(e.target as Element | null) && setOpen(false))
+    const key = (e: KeyboardEvent): void => void (e.key === 'Escape' && setOpen(false))
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      window.removeEventListener('keydown', key)
+    }
+  }, [open])
+  if (!list.length) return null
+  return (
+    <span className="onb-tc__convs" ref={box}>
+      <button className="btn btn--ghost btn--sm" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} title={L('O que você deixou o Tuca fazer ele mesmo. Dá pra retirar.', 'What you let Tuca do himself. You can take it back.')}>
+        {L(`Liberado (${list.length})`, `Allowed (${list.length})`)} <Icon name="caret" size={12} />
+      </button>
+      {open && (
+        <div className="onb-tc__convs-pop" role="dialog" aria-label={L('O que o Tuca pode fazer ele mesmo', 'What Tuca may do himself')}>
+          <p className="onb-tc__leaves-note">{L('O que você deixou o Tuca fazer ele mesmo, quando ninguém do time faz. Retirando, ele volta a perguntar.', 'What you let Tuca do himself, when no one on the team does it. Take one back and he asks again.')}</p>
+          {list.map((l) => (
+            <div key={l.id} className="onb-tc__leave">
+              <span className="onb-tc__leave-text">
+                <span className="onb-tc__leave-kind">{l.kind}</span>
+                <span className="onb-tc__leave-sub">
+                  {L(`Usando ${l.uses}`, `Using ${l.uses}`)} · {l.where}
+                </span>
+              </span>
+              <button className="link" onClick={() => void removeTucaLeave(l.id)}>
+                {L('Retirar', 'Take back')}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 // With the Tuca: he takes a request and passes it on, or asks and proposes an agent, and the card beside
 // the chat fills in with what he proposes. He starts on his own model; changing it keeps the conversation
 // (he goes on from it on the new one). "Nova conversa" starts another: this one stays in "Conversas".
@@ -512,7 +560,7 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
 
   const note = conv
     ? L('Trocar o modelo mantém a conversa: ele continua de onde parou.', 'Changing the model keeps the conversation: he goes on from where you left off.')
-    : L('Escolha com qual modelo o Tuca conversa com você e monta os agentes.', 'Pick the model Tuca uses to talk with you and build the agents.')
+    : L('Escolha com qual modelo o Tuca conversa com você, passa os pedidos e monta os agentes.', 'Pick the model Tuca uses to talk with you, pass requests on and build the agents.')
   const chip = <ModelChip value={model} onPick={pick} note={note} applying={applying} />
 
   return (
@@ -524,6 +572,7 @@ function MeetTuca({ conv: session, setConv, onUse, onManual }: { conv: { id?: st
             <h1 className="onb-tc__title">Tuca</h1>
             <p className="onb-tc__lede">{L('Recebe seus pedidos, passa pra quem do time faz e cuida do Tucano.', 'Takes your requests, passes them to whoever on the team does it, and looks after Tucano.')}</p>
           </div>
+          {conv && tuca && <TucaLeavesMenu />}
           {conv && tuca && <TucaConversations current={conv} onPick={setConv} />}
           {conv && tuca && (
             <button
