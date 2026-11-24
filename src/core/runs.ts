@@ -48,6 +48,7 @@ import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellAct
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
+import { during, inReplyTool, traceReply, tracing, type ReplyTrace, type SpanRef } from './telemetry'
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
@@ -408,12 +409,29 @@ export interface RoutineEvent {
   body: string // the item itself, clipped
 }
 
+// The reply's tools, each call a span of its trace.
+const tracedTools = (session: Session, reply: ReplyTrace, where: { sessionId: string; conversationId: string }): Session => ({
+  ...session,
+  call: async (name, args) => {
+    const tool = reply.tool(name)
+    try {
+      const r = await inReplyTool(where, () => session.call(name, args))
+      tool.end({ ok: !r.isError })
+      return r
+    } catch (e) {
+      tool.end({ ok: false })
+      throw e
+    }
+  }
+})
+
 // msg is the live reply: a decision taken mid-run must land on it, or the run's last save overwrites it.
 // `trigger`: the message this reply answers (a routed one): what people wrote after it, while it
 // waited its turn, isn't what it answers (another reply is, or it was merged in, see `waiting`).
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
-type ReplyOpts = { depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+// `askedIn`: the agent's reply that handed this one the turn or called it in, for its trace's link.
+type ReplyOpts = { askedIn?: string; depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
 
 // What a person wrote into a reply that was already running (`send` with mode 'steer'): the agent
 // reads it with its next tool result, and the reply's own chain carries it, in their words, from the
@@ -1210,7 +1228,7 @@ export class Runner {
       if (routing) {
         const key = await this.deps.jev?.key('routing')
         const missing = routing.provider === 'typesafe' ? L('falta a chave do TypeSafe', 'the TypeSafe key is missing') : L(`falta a chave do ${providerSpec(routing.provider).label}`, `the ${providerSpec(routing.provider).label} key is missing`)
-        const j = key ? await routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch }) : { error: missing }
+        const j = key ? await during({ operation: 'classifier', sessionId: trigger, conversationId: conv.id }, () => routeJev({ ...input, key, target: this.deps.jev?.target?.('routing') ?? routing, fetch: this.deps.jev?.fetch })) : { error: missing }
         if (!('error' in j)) return this.routed(conv, note, j.agents, trigger, `${j.reason}, ${(j.ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`, parallel)
         fellBack = L(` · o ${routing.name} falhou (${j.error}), o Haiku decidiu`, ` · ${routing.name} failed (${j.error}), Haiku decided`)
       }
@@ -1227,7 +1245,8 @@ export class Runner {
       let r: Awaited<ReturnType<typeof route>> | undefined
       for (let login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried }); login; login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried })) {
         tried.add(login.id)
-        r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd, account: login.account && this.deps.dataDir ? accountDir(this.deps.dataDir, login.account.id) : undefined })
+        const account = login.account && this.deps.dataDir ? accountDir(this.deps.dataDir, login.account.id) : undefined
+        r = await during({ operation: 'router', sessionId: trigger, conversationId: conv.id }, () => route({ ...input, engine: engines[model.engine], model: model.id, cwd, account }))
         if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
         if (!('error' in r) || !outOfQuota(r.error)) break
         this.spent.mark(model.engine, login.id, Date.now())
@@ -1431,9 +1450,12 @@ export class Runner {
     this.clearWaiting(opts.replyTo)
     this.followups.start(key, reserved)
     let msg: Message
+    const traced: { reply?: ReplyTrace | undefined } = {}
     try {
-      msg = await this.reply(agent, conv, rest)
+      msg = await this.reply(agent, conv, rest, traced)
+      traced.reply?.end({ status: msg.run?.status ?? 'failed', usage: msg.run?.receipt })
     } catch (e) {
+      traced.reply?.end({ status: 'failed' })
       this.followups.end(key)
       this.followups.take(key) // taken even when the reply threw: a stale follow-up must not wait for the next one
       this.startWaiting(key)
@@ -1455,7 +1477,7 @@ export class Runner {
   }
 
   // `threadId`: the reply goes in that thread (an existing reply keeps its own).
-  private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts): Promise<Message> {
+  private async reply(agent: Agent, conv: Conversation, opts: ReplyOpts, traced: { reply?: ReplyTrace | undefined }): Promise<Message> {
     const { db, emit, engines } = this.deps
     let settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -1499,7 +1521,11 @@ export class Runner {
     const job = this.jobOf(jobId) ?? this.startJob(jobId, conv, msg.threadId, replyTo, task)
     // A routine's run, tried again by the routine or by hand, still answers the routine's message.
     const routineAskId = opts.routineAsk ?? opts.existing?.run?.routineAsk
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...decidedCards(opts.existing?.run) }
+    // Tried again, it stays linked to who asked, however it was asked.
+    const linkedTo = tracing() ? (this.askingSpan(opts.askedIn ?? (handedId ? db.delegation(handedId)?.originMessageId : undefined)) ?? opts.existing?.run?.trace?.linkedTo) : undefined
+    const replyTrace = (traced.reply = traceReply({ agent: { id: agent.id, name: agent.name }, engine: engineId, model: modelName, effort: agent.effort, conversationId: conv.id, jobId, ...(linkedTo ? { linkedTo } : {}) }))
+    const spanOn = replyTrace ? { trace: { ...replyTrace.ref, ...(linkedTo ? { linkedTo } : {}) } } : {} // where a reply this one asks for links back to
+    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...spanOn, ...decidedCards(opts.existing?.run) }
     // Only a new execution replaces this reply's reasoning; tool/steering updates do not.
     let attemptStart = true
     const save = (patch: Partial<Message> = {}): void => {
@@ -3126,7 +3152,7 @@ ${note}`,
     inFlight--
     sign()
     const token = plan?.token ?? (engines[engineId].keepsMcp ? this.deps.gateway?.agentToken(agent.id) : undefined)
-    const session = this.deps.gateway?.open(tools, token)
+    const session = this.deps.gateway?.open(replyTrace ? tracedTools(tools, replyTrace, { sessionId: jobId, conversationId: conv.id }) : tools, token)
     const whole = { prompt: withFiles.join('\n\n'), blocks: withFiles, images }
     // Resumed: the live context if it changed, the new messages' blocks, then the task's, with their images.
     const since = (p: SessionPlan): typeof whole => {
@@ -3181,6 +3207,7 @@ ${note}`,
               // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
               acted = true
               sawOutside() // a search or a page is someone else's text
+              replyTrace?.tool(ev.action === 'search' ? 'web_search' : 'web_fetch').end({ ok: true })
               addSteps({ id: randomUUID(), label: ev.action === 'search' ? L('Pesquisou na web', 'Searched the web') : L('Leu uma página', 'Read a page'), detail: ev.detail, status: 'done' })
               if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
             } else if (ev.type === 'done') {
@@ -3233,6 +3260,7 @@ ${note}`,
         modelId = agent.fallbackModelId!
         modelName = reserve.model.id
         engineId = reserve.model.engine
+        replyTrace?.movedTo(engineId, modelName)
         engineLabel = `${ENGINES[engineId].label} · ${reserve.model.label}`
         account = reserve.account
         const to = `${engineLabel}${account ? ` (${account.name})` : ''}`
@@ -3276,7 +3304,7 @@ ${note}`,
 
     // Handed work, as it stands now (cancelled meanwhile, it's no one's any more).
     const handedNow = handed ? this.handedIn(msg) : undefined
-    const base = { endedAt, ...attempt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId }
+    const base = { endedAt, ...attempt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...spanOn }
     if (control.reason === 'stopped') {
       save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
@@ -3428,6 +3456,12 @@ ${note}`,
     if (msg.threadId) void memory?.consolidateThread(msg.threadId, 'grown')
     if (!opts.routine && msg.run?.status === 'done') this.deps.wikiCurator?.afterReply(conv.id)
     return msg
+  }
+
+  // The span of the reply that asked for this one.
+  private askingSpan(messageId: string | undefined): SpanRef | undefined {
+    const trace = messageId ? this.deps.db.message(messageId)?.run?.trace : undefined
+    return trace && { traceId: trace.traceId, spanId: trace.spanId }
   }
 
   // The first decision wins. Approving runs exactly the stored call (after
@@ -4119,7 +4153,7 @@ ${note}`,
       mkdirSync(cwd, { recursive: true })
       const sees = new People(db)
       const messages = contextWindow(db, msg, ROUTER_HISTORY).messages.filter((m) => sees.visibleAt(requester, m))
-      const r = await chimeIn({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates, messages, members, me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), asked: job.text, cwd })
+      const r = await during({ operation: 'chime', sessionId: job.id, conversationId: conv.id }, () => chimeIn({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates, messages, members, me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), asked: job.text, cwd }))
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r || !r.agent || this.paused || job.state !== 'running') return false
       const who = r.agent
@@ -4133,7 +4167,7 @@ ${note}`,
         `No one called you: you joined because there is something of your area to do now${r.reason ? ` (${r.reason})` : ''}, after ${agent.name}'s reply above. Do that part for real, with your tools, and reply with the result. Don't comment on what others did, don't agree or repeat what was said. If, looking closely, there's nothing of yours to do, reply only “Nothing for me here.”`
       )
       this.followups.reserve(key)
-      this.enqueue(() => this.execute(who, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, job: job.id, task }), false, who)
+      this.enqueue(() => this.execute(who, conv, { askedIn: msg.id, depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, job: job.id, task }), false, who)
       return true
     } catch (e) {
       console.warn('[chime]', e)
@@ -4553,7 +4587,7 @@ ${note}`,
           const sees = new People(db)
           const who = requesterOf(db, conv, all, msg.threadId)
           const messages = all.filter((m) => sees.visibleAt(who, m))
-          const r = await screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: agentsFor(who, this.members(conv)), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd })
+          const r = await during({ operation: 'handoff', ...(msg.run?.job ? { sessionId: msg.run.job } : {}), conversationId: conv.id }, () => screenHandoff({ engine: engines[model.engine], model: model.id, reply: msg.text, author: agent, candidates: next, busy: next.filter(isBusy), messages, members: agentsFor(who, this.members(conv)), me: settings.workspaceName, people: promptPeople(db, settings, true), connectors: this.deps.connectors?.list(), cwd }))
           if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: msg.id, agentId: 'router', engine: model.engine, at: Date.now() })
           step.ms = r.ms
           if ('error' in r) failed(r.error)
@@ -4582,7 +4616,7 @@ ${note}`,
         if (busy.includes(a)) this.followups.add(keyOf(a), { depth: depth + 1, work: msg.run?.work, ...(job ? { job } : {}) })
         else {
           this.followups.reserve(keyOf(a))
-          this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(job ? { job } : {}) }), false, a)
+          this.enqueue(() => this.execute(a, conv, { askedIn: msg.id, depth: depth + 1, work: msg.run?.work, threadId: msg.threadId, reserved: true, ...(job ? { job } : {}) }), false, a)
         }
       }
     } finally {

@@ -16,6 +16,7 @@ import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Artifact, ComputerInfo, Service } from '../shared/types'
 import type { Db } from './db'
 import { fallbackPath, isWin, killTree, loginShell, osOf, shellCommand, systemName } from './platform'
+import { takeOtelEnv } from './telemetry'
 import { textResult, type ToolDef } from './gateway'
 import { artifactKind, badName, edited, manyMatches, clipOutput, diedAtStart, emptyOld, fileText, formatExec, isBinary, linuxTools, noService, noShots, notInFile, notOpenYet, portTaken, seenImage, shown, tooBig, type Shooter, type ToolOutcome } from './computer'
 
@@ -114,6 +115,7 @@ export function loginEnv(): Promise<NodeJS.ProcessEnv> {
         const i = pair.indexOf('=')
         if (i > 0) env[pair.slice(0, i)] = pair.slice(i + 1)
       }
+      takeOtelEnv(env) // this environment goes to harnesses and agents' commands
       resolve(env)
     }
     const timer = setTimeout(() => (child.kill('SIGKILL'), done()), 15_000)
