@@ -8,6 +8,7 @@ import {
   archiveAgent,
   isWorking,
   messagesIn,
+  makeWithTuca,
   openTuca,
   isTeam,
   deleteConversation,
@@ -600,7 +601,7 @@ export function Sidebar(): ReactNode {
                 </button>
               )}
               {admin && (
-                <button className="icon-btn icon-btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
+                <button className="icon-btn icon-btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={makeWithTuca}>
                   <Icon name="plus" size={14} />
                 </button>
               )}

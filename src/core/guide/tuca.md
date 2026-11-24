@@ -10,6 +10,10 @@ Você diz ao Tuca o que precisa e ele passa pra quem do time faz. Embaixo da res
 - Ele não tem limite do mês: segue só o freio por resposta (veja **limites**).
 - Ele só age quando você escreve pra ele. Falar direto com um agente continua igual.
 
+## A tela do Tuca
+Ao lado da conversa fica **Seu time**. Quem recebeu uma parte do pedido aparece primeiro, com o que foi pedido e como está (**trabalhando**, **concluído**, **não terminou**); clicar abre o trabalho dele. O resto do time fica embaixo, pelo que cada um faz.
+**Novo agente** troca o time pela proposta de um agente, que vai se montando enquanto vocês conversam, com os passos em cima. **Ver o time** volta. O **+** ao lado de Agentes já abre a tela assim.
+
 ## Quando ninguém do time faz aquilo
 O Tuca não diz que não dá, e não cria um agente sem você pedir. Ele pergunta se pode fazer ele mesmo, dizendo o que vai usar (a web, um conector). As respostas do card:
 - **Pode fazer**: só naquela conversa.

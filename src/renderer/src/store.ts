@@ -79,7 +79,7 @@ export type View =
   | { kind: 'conversation'; id: string; message?: string } // `message`: scroll to it and flash it
   | { kind: 'agent'; id: string; full?: boolean } // full: in the simple view, the agent's whole page instead of the short one
   | { kind: 'new-agent'; draft?: Agent; fromMessage?: string } // a draft from a Tuca card, to edit before creating
-  | { kind: 'tuca'; from?: View } // the builder screen: a new agent with the Tuca; closing goes back to `from`
+  | { kind: 'tuca'; from?: View; making?: boolean } // the Tuca's screen; closing goes back to `from`. making: opened to make an agent, so the proposal is beside the chat
   | { kind: 'approvals' }
   | { kind: 'usage'; executions?: { agentId?: string; days?: number } } // `executions`: go to that list, filtered
   | { kind: 'connectors' }
@@ -1031,6 +1031,8 @@ export function setUiMode(mode: 'simple' | 'full'): void {
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
+// The same screen, opened to make an agent (the + by Agentes): the proposal sits beside the chat from the start.
+export const makeWithTuca = (): void => navigate({ kind: 'tuca', making: true, from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
 // One card of a reply (index: which), or every one still open (draft: its new-agent card too).
 export const applyProposal = (messageId: string, index = 0): Promise<{ id: string }> => call('applyProposal', { messageId, index })
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})

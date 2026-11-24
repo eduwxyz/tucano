@@ -148,7 +148,7 @@ export function App(): ReactNode {
   if (view.kind === 'tuca')
     return (
       <>
-        <Onboarding build from={view.from} />
+        <Onboarding key={view.making ? 'making' : 'tuca'} build from={view.from} making={view.making} />
         <Dialogs />
         <Toasts />
         <CoreDown />
