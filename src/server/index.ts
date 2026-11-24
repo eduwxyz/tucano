@@ -227,7 +227,13 @@ function sawComputers(list: Computer[]): void {
 // address> (preview.ts): only the ports the agents' computers say they serve, never this server's.
 const publicHost = publicUrl.startsWith('https://') ? new URL(publicUrl).host : ''
 const preview = publicHost
-  ? new Preview(Buffer.from(kept('preview.key', () => randomBytes(32).toString('base64')), 'base64'), publicHost, (p) => p !== port && [...servicePorts.values()].some((l) => l.includes(p)))
+  ? new Preview(
+      Buffer.from(kept('preview.key', () => randomBytes(32).toString('base64')), 'base64'),
+      publicHost,
+      (p) => p !== port && [...servicePorts.values()].some((l) => l.includes(p)),
+      // Asked again on every request: the cache is short, and forgets a person removed or changed (personNotice).
+      (person, p) => grants.may(person, { port: p })
+    )
   : undefined
 
 // The server's own connection to the core, to follow the services.
@@ -540,8 +546,9 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     const p = Number(pv[1])
     if (p === port || ![...servicePorts.values()].some((l) => l.includes(p))) return void res.writeHead(404, BASE_HEADERS).end()
     // A page started by a reply in someone's DM is theirs alone.
-    void grants.may(who.person ?? ownerId, { port: p }).then((ok) =>
-      ok ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
+    const person = who.person ?? ownerId
+    void grants.may(person, { port: p }).then((ok) =>
+      ok && person ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, person, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
     )
     return
   }
