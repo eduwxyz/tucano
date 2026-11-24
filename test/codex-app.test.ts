@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -239,6 +239,68 @@ describe('Codex app-server process', () => {
     await e.settle!()
     expect(leftThreads(join(home, '.codex'))).toEqual([])
     expect(existsSync(sessions)).toBe(true)
+  }, 20_000)
+
+  // A process reads the login file once, when it starts. A new login rewrites it, and the old token is revoked.
+  const oldLogin = (): string => {
+    const auth = join(home, '.codex', 'auth.json')
+    writeFileSync(auth, '{"tokens":{"access_token":"antigo"}}')
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(auth, past, past)
+    return auth
+  }
+
+  it('keeps the process while the login is the same, and starts a new one after a new login', async () => {
+    const auth = oldLogin()
+    const e = make()
+    const first = reply(await collect(e.run(turn(undefined, false, 'primeira'))))
+    const same = reply(await collect(e.run(turn(undefined, false, 'segunda'))))
+    expect(field(same, 'pid')).toBe(field(first, 'pid'))
+    writeFileSync(auth, '{"tokens":{"access_token":"novo"}}')
+    const after = reply(await collect(e.run(turn(undefined, false, 'terceira'))))
+    expect(field(after, 'pid')).not.toBe(field(first, 'pid'))
+    expect(after).not.toMatch(/ERROR/)
+  }, 20_000)
+
+  it('resumes a kept thread in a new process after a new login, not in the one with the revoked token', async () => {
+    const auth = oldLogin()
+    const e = make()
+    const first = reply(await collect(e.run(turn('s1', false))))
+    writeFileSync(auth, '{"tokens":{"access_token":"novo"}}')
+    const again = reply(await collect(e.run(turn('s1', true))))
+    expect(field(again, 'pid')).not.toBe(field(first, 'pid'))
+    expect(field(again, 'thread')).toBe(field(first, 'thread'))
+    expect(again).toMatch(/resumed=true/)
+  }, 20_000)
+
+  it('moves every kept thread off the old process after a new login, not only the first to reply', async () => {
+    const auth = oldLogin()
+    const e = make()
+    const first = reply(await collect(e.run(turn('s1', false))))
+    const second = reply(await collect(e.run(turn('s2', false))))
+    expect(field(second, 'pid')).toBe(field(first, 'pid'))
+    writeFileSync(auth, '{"tokens":{"access_token":"novo"}}')
+    const firstAgain = reply(await collect(e.run(turn('s1', true))))
+    const secondAgain = reply(await collect(e.run(turn('s2', true))))
+    expect(field(firstAgain, 'pid')).not.toBe(field(first, 'pid'))
+    expect(field(secondAgain, 'pid')).toBe(field(firstAgain, 'pid'))
+    expect(field(secondAgain, 'thread')).toBe(field(second, 'thread'))
+    expect(secondAgain).toMatch(/resumed=true/)
+  }, 20_000)
+
+  it('closes a replaced process that still has a thread when the app goes away', async () => {
+    const auth = oldLogin()
+    const e = make()
+    const first = reply(await collect(e.run(turn('s1', false))))
+    await collect(e.run(turn('s2', false)))
+    writeFileSync(auth, '{"tokens":{"access_token":"novo"}}')
+    const after = reply(await collect(e.run(turn('s1', true))))
+    const replaced = Number(field(first, 'pid'))
+    expect(field(after, 'pid')).not.toBe(field(first, 'pid'))
+    expect(isAlive(replaced)).toBe(true)
+    e.dispose!()
+    await until(() => !isAlive(replaced))
+    expect(isAlive(replaced)).toBe(false)
   }, 20_000)
 
   it('interrupts a stopped turn and lets its thread go', async () => {
