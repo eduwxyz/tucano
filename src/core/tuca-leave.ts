@@ -5,6 +5,9 @@
 // theirs (a leave), never on him: each person's Tuca has only what that person let him, and for a reply
 // he works with it as if it were his own (withLeaves). A kind of thing he keeps doing himself is worth a
 // colleague: at the third time he is told to suggest one.
+// A colleague who did not finish their part is the one case of team work he may ask leave for (`instead`):
+// the card then has two answers, this once or wait for them. Never "from now on": that would have him do
+// that colleague's kind of work for good, with the colleague back.
 import { randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import type { Answer, Decision } from '../shared/questions'
@@ -19,8 +22,8 @@ export const FAZER_EU: ToolDef = {
   name: 'fazer_eu_mesmo',
   get description() {
     return L(
-      'Pede licença pra você mesmo fazer um trabalho que ninguém do time faz, dizendo o que vai usar. Vira um card com três respostas: pode fazer (só desta vez), pode e não precisa perguntar de novo pra esse tipo de coisa, ou a pessoa prefere um colega pra isso. Com a licença, você continua numa nova mensagem, já com o que pediu pra usar (a web, os conectores). Um tipo de coisa que ela já liberou (veja "O que você pode fazer você mesmo") passa direto, sem card: chame com o mesmo "tipo", escrito igual, antes de fazer. Nunca use pra trabalho que alguém do time faz: isso é pedir.',
-      'Asks leave for you to do a piece of work yourself that no one on the team does, saying what you will use. It becomes a card with three answers: go ahead (this once), go ahead and no need to ask again for this kind of thing, or the person prefers a colleague for it. With leave, you go on in a new message, already with what you asked to use (the web, the connectors). A kind of thing they already allowed (see "What you may do yourself") goes straight through, with no card: call it with the same "tipo", written the same, before doing it. Never use it for work someone on the team does: that is pedir.'
+      'Pede licença pra você mesmo fazer um trabalho que ninguém do time faz, dizendo o que vai usar. Vira um card com três respostas: pode fazer (só desta vez), pode e não precisa perguntar de novo pra esse tipo de coisa, ou a pessoa prefere um colega pra isso. Com a licença, você continua numa nova mensagem, já com o que pediu pra usar (a web, os conectores). Um tipo de coisa que ela já liberou (veja "O que você pode fazer você mesmo") passa direto, sem card: chame com o mesmo "tipo", escrito igual, antes de fazer. Nunca use pra trabalho que alguém do time faz: isso é pedir. A exceção é a parte de um colega que não terminou e que ninguém mais do time faz: diga quem em "no_lugar_de", e o card pergunta só se você faz desta vez ou se a pessoa espera o colega.',
+      'Asks leave for you to do a piece of work yourself that no one on the team does, saying what you will use. It becomes a card with three answers: go ahead (this once), go ahead and no need to ask again for this kind of thing, or the person prefers a colleague for it. With leave, you go on in a new message, already with what you asked to use (the web, the connectors). A kind of thing they already allowed (see "What you may do yourself") goes straight through, with no card: call it with the same "tipo", written the same, before doing it. Never use it for work someone on the team does: that is pedir. The exception is the part of a colleague who did not finish, which no one else on the team does: say who in "no_lugar_de", and the card asks only whether you do it this once or the person waits for the colleague.'
     )
   },
   get inputSchema() {
@@ -30,6 +33,7 @@ export const FAZER_EU: ToolDef = {
         o_que: { type: 'string', maxLength: WHAT_MAX, description: L('O que você vai fazer, em uma frase, como a pessoa vai ler no card ("Pesquisar o preço dos concorrentes e montar uma tabela").', 'What you will do, in one sentence, as the person will read it on the card ("Look up the competitors\' prices and put them in a table").') },
         tipo: { type: 'string', maxLength: KIND_MAX, description: L('O tipo de coisa, em poucas palavras e sem os detalhes deste pedido ("pesquisa de preços"). Se já existe um igual em "O que você pode fazer você mesmo", escreva igual.', 'The kind of thing, in a few words and without this request\'s details ("price research"). If the same one is already in "What you may do yourself", write it the same.') },
         web: { type: 'boolean', description: L('Se vai buscar e ler páginas da web.', 'Whether you will search and read web pages.') },
+        no_lugar_de: { type: 'string', description: L('Só quando a parte era de um colega que não terminou: o nome dele, como veio no aviso de que não terminou.', "Only when the part was a colleague's who did not finish: their name, as it came in the notice that they did not finish.") },
         conectores: {
           type: 'array',
           description: L('Os sistemas que vai usar, da lista "Conectores". Leitura por padrão.', 'The systems you will use, from the "Connectors" list. Read-only by default (nivel "escrita" to write).'),
@@ -53,11 +57,22 @@ export const kindKey = (kind: string): string =>
 
 // A fazer_eu_mesmo call as what it asks leave for, or what to fix. `admin`: whether the person he works for
 // may give access to a connector at all (a member can't: that is an admin's, like any agent's connectors).
-export function leaveFrom(args: Record<string, unknown>, ctx: { connectors: Connector[]; admin: boolean }): { ask?: LeaveAsk; error?: string } {
+// `unfinished`: the colleagues whose part did not get done in this conversation, by name. Only in the place
+// of one of them may he ask leave for work the team does.
+export function leaveFrom(args: Record<string, unknown>, ctx: { connectors: Connector[]; admin: boolean; unfinished?: string[] }): { ask?: LeaveAsk; error?: string } {
   const text = (k: string, max: number): string => (typeof args[k] === 'string' ? (args[k] as string).replace(/\s+/g, ' ').trim().slice(0, max) : '')
   const what = text('o_que', WHAT_MAX)
   const kind = text('tipo', KIND_MAX)
   if (!what || !kindKey(kind)) return { error: L('Faltou o_que (o que você vai fazer) ou tipo (o tipo de coisa, em poucas palavras).', 'Missing o_que (what you will do) or tipo (the kind of thing, in a few words).') }
+  const whose = text('no_lugar_de', 80)
+  const instead = whose ? (ctx.unfinished ?? []).find((n) => kindKey(n) === kindKey(whose)) : undefined
+  if (whose && !instead)
+    return {
+      error: L(
+        `${whose} não deixou parte nenhuma sem terminar nesta conversa. "no_lugar_de" é só pro colega que não terminou a parte dele; o trabalho que alguém do time faz você passa com pedir.`,
+        `${whose} left no part unfinished in this conversation. "no_lugar_de" is only for the colleague who did not finish their part; work someone on the team does you hand over with pedir.`
+      )
+    }
   const grants: Record<string, GrantLevel> = {}
   const unknown: string[] = []
   for (const c of Array.isArray(args['conectores']) ? (args['conectores'] as unknown[]) : []) {
@@ -85,7 +100,7 @@ export function leaveFrom(args: Record<string, unknown>, ctx: { connectors: Conn
       )
     }
   const web = args['web'] === true || (Array.isArray(args['conectores']) && (args['conectores'] as unknown[]).some((c) => /^(?:a )?(?:web|internet)$/i.test(String((c as Record<string, unknown> | null)?.['conector'] ?? '').trim())))
-  return { ask: { kind, what, ...(web ? { web: true } : {}), ...(Object.keys(grants).length ? { grants } : {}) } }
+  return { ask: { kind, what, ...(web ? { web: true } : {}), ...(Object.keys(grants).length ? { grants } : {}), ...(instead ? { instead } : {}) } }
 }
 
 // What a leave lets him use, as people read it: "a web, Gmail (leitura)".
@@ -97,14 +112,26 @@ export function leaveTools(ask: Pick<LeaveAsk, 'web' | 'grants'>, connectors: Pi
   return list.join(', ') || L('nada além de escrever', 'nothing but writing')
 }
 
-// The three answers, in the order the card shows them: what `leaveChoice` reads back.
-export type LeaveChoice = 'once' | 'always' | 'colleague'
+// The three answers, in the order the card shows them: what `leaveChoice` reads back. In a colleague's
+// place there are two: this once, or wait for them.
+export type LeaveChoice = 'once' | 'always' | 'colleague' | 'wait'
 const CHOICES: LeaveChoice[] = ['once', 'always', 'colleague']
+const INSTEAD: LeaveChoice[] = ['once', 'wait']
 const labels = (): string[] => [L('Pode fazer', 'Go ahead'), L('Pode, e não precisa perguntar de novo pra esse tipo de coisa', 'Go ahead, and no need to ask again for this kind of thing'), L('Prefiro um colega pra isso', "I'd rather have a colleague for this")]
+const waitLabel = (): string => L('Prefiro esperar', "I'd rather wait")
 
 // The card: one decision, the first answer recommended (the card goes on with it in one click).
 export function leaveDecision(ask: LeaveAsk, connectors: Pick<Connector, 'id' | 'name'>[]): Decision {
   const [once, always, colleague] = labels()
+  if (ask.instead)
+    return {
+      question: `${L(`${ask.instead} não terminou. Posso fazer eu mesmo desta vez?`, `${ask.instead} did not finish. May I do it myself this once?`)} ${ask.what}`.slice(0, 200),
+      kind: 'single',
+      options: [
+        { label: once!, description: L(`Só desta vez. Vou usar: ${leaveTools(ask, connectors)}.`, `This once. I'll use: ${leaveTools(ask, connectors)}.`).slice(0, 200), recommended: true },
+        { label: waitLabel(), description: L(`Fica com ${ask.instead}: é só me pedir de novo quando estiver resolvido.`, `It stays with ${ask.instead}: just ask me again once it is sorted out.`).slice(0, 200) }
+      ]
+    }
   return {
     question: `${L('Ninguém do time faz isso ainda. Posso fazer eu mesmo?', 'No one on the team does this yet. May I do it myself?')} ${ask.what}`.slice(0, 200),
     kind: 'single',
@@ -120,10 +147,12 @@ export function leaveDecision(ask: LeaveAsk, connectors: Pick<Connector, 'id' | 
 // a harness). Anything else they wrote is just their message: nothing is allowed by it.
 // A pick sent together with something written in the field allows nothing either: what they wrote may narrow
 // or take back what they picked ("só desta vez", "sem o Linear"), and he reads both and asks again.
-export function leaveChoice(answers: (Answer | null)[] | undefined, typed: string): LeaveChoice | undefined {
+// `instead`: the card asked in a colleague's place, with its two answers; no other one is read from it.
+export function leaveChoice(answers: (Answer | null)[] | undefined, typed: string, instead = false): LeaveChoice | undefined {
+  const choices = instead ? INSTEAD : CHOICES
   const picked = answers?.[0]?.chosen
   const said = typed.trim().replace(/[.!\s]+$/, '').toLowerCase()
-  if (!said) return picked?.length === 1 && !answers?.[0]?.other ? CHOICES[picked[0]!] : undefined
+  if (!said) return picked?.length === 1 && !answers?.[0]?.other ? choices[picked[0]!] : undefined
   // In either language: the card may have been drawn in one and answered from an app in the other.
   const all: [LeaveChoice, string][] = [
     ['once', 'Pode fazer'],
@@ -131,14 +160,17 @@ export function leaveChoice(answers: (Answer | null)[] | undefined, typed: strin
     ['always', 'Pode, e não precisa perguntar de novo pra esse tipo de coisa'],
     ['always', 'Go ahead, and no need to ask again for this kind of thing'],
     ['colleague', 'Prefiro um colega pra isso'],
-    ['colleague', "I'd rather have a colleague for this"]
+    ['colleague', "I'd rather have a colleague for this"],
+    ['wait', 'Prefiro esperar'],
+    ['wait', "I'd rather wait"]
   ]
-  return all.find(([, label]) => label.toLowerCase() === said)?.[0]
+  const found = all.find(([, label]) => label.toLowerCase() === said)?.[0]
+  return found && choices.includes(found) ? found : undefined
 }
 
 // A leave made from what was asked and how it was answered. `conversationId`: where it holds, for "this once".
 export function newLeave(ask: LeaveAsk, person: string, choice: 'once' | 'always', conversationId: string, at = Date.now()): TucaLeave {
-  return { id: randomUUID(), person, ...(choice === 'once' ? { conversationId } : {}), kind: ask.kind, what: ask.what, ...(ask.web ? { web: true } : {}), ...(ask.grants ? { grants: ask.grants } : {}), uses: 1, at }
+  return { id: randomUUID(), person, ...(choice === 'once' ? { conversationId } : {}), kind: ask.kind, what: ask.what, ...(ask.web ? { web: true } : {}), ...(ask.grants ? { grants: ask.grants } : {}), ...(ask.instead ? { instead: ask.instead } : {}), uses: 1, at }
 }
 
 // The leaves that hold in a conversation: the ones for good, and the ones given there.
@@ -152,14 +184,16 @@ const reaches = (l: Pick<TucaLeave, 'web' | 'grants'>, ask: Pick<LeaveAsk, 'web'
   (!ask.web || !!l.web) && Object.entries(ask.grants ?? {}).every(([id, g]) => l.grants?.[id] === 'read_write' || (g === 'read' && l.grants?.[id] === 'read'))
 
 // The leave that already covers what he asks now: the same kind of thing, using nothing more than was allowed.
-// One given for good comes before one given in this conversation.
+// One given for good comes before one given in this conversation. One given in a colleague's place covers
+// nothing after it: that kind of thing is the colleague's, and the next time is asked again.
 export function covering(leaves: TucaLeave[], ask: LeaveAsk): TucaLeave | undefined {
-  const same = leaves.filter((l) => kindKey(l.kind) === kindKey(ask.kind) && reaches(l, ask))
+  const same = leaves.filter((l) => !l.instead && kindKey(l.kind) === kindKey(ask.kind) && reaches(l, ask))
   return same.find((l) => !l.conversationId) ?? same[0]
 }
 
-// How many times this kind of thing came to him and he did it himself, for this person.
-export const timesDone = (leaves: TucaLeave[], kind: string): number => leaves.filter((l) => kindKey(l.kind) === kindKey(kind)).reduce((n, l) => n + l.uses, 0)
+// How many times this kind of thing came to him and he did it himself, for this person. Not what he did in
+// a colleague's place: someone on the team already does that.
+export const timesDone = (leaves: TucaLeave[], kind: string): number => leaves.filter((l) => !l.instead && kindKey(l.kind) === kindKey(kind)).reduce((n, l) => n + l.uses, 0)
 
 // Whether it is time to suggest a colleague for this kind of thing: it came SUGGEST_AT times, and he
 // wasn't told before (once is enough: a suggestion at every request would be nagging).
@@ -184,6 +218,11 @@ export function withLeaves(agent: Agent, leaves: TucaLeave[]): Agent {
 export function leaveTask(ask: LeaveAsk, choice: LeaveChoice, ctx: { me: string; connectors: Pick<Connector, 'id' | 'name'>[]; suggest?: number }): string {
   const tools = leaveTools(ask, ctx.connectors)
   const me = ctx.me
+  if (choice === 'wait')
+    return L(
+      `${me} prefere esperar ${ask.instead ?? ''}. Não faça essa parte. Diga em uma frase que ela fica com ${ask.instead ?? ''} e que é só pedir de novo quando estiver resolvido, e encerre sem chamar ferramenta nenhuma.`,
+      `${me} would rather wait for ${ask.instead ?? ''}. Do not do that part. Say in one sentence that it stays with ${ask.instead ?? ''} and that they just have to ask again once it is sorted out, and end without calling any tool.`
+    )
   if (choice === 'colleague')
     return L(
       `${me} prefere um colega pra isso. Proponha um com propor_agente, com o que ele precisa pra fazer isto: "${ask.what}" (${tools}). Diga em uma frase que, criado, você passa o pedido a ele; e quando ele existir, passe com pedir.`,
@@ -192,7 +231,9 @@ export function leaveTask(ask: LeaveAsk, choice: LeaveChoice, ctx: { me: string;
   const scope =
     choice === 'always'
       ? L(`${me} deixou você fazer isto você mesmo, e não precisa perguntar de novo pra esse tipo de coisa (${ask.kind})`, `${me} let you do this yourself, and you need not ask again for this kind of thing (${ask.kind})`)
-      : L(`${me} deixou você fazer isto você mesmo, desta vez`, `${me} let you do this yourself, this once`)
+      : ask.instead
+        ? L(`${me} deixou você fazer isto você mesmo, desta vez, no lugar de ${ask.instead}`, `${me} let you do this yourself, this once, in ${ask.instead}'s place`)
+        : L(`${me} deixou você fazer isto você mesmo, desta vez`, `${me} let you do this yourself, this once`)
   return `${scope}: "${ask.what}". ${L(`Você já tem o que pediu pra usar (${tools}). Faça agora e entregue o resultado, sem perguntar de novo.`, `You already have what you asked to use (${tools}). Do it now and deliver the result, without asking again.`)}${ctx.suggest ? suggestNote(ask.kind, ctx.suggest, me) : ''}`
 }
 
@@ -200,8 +241,9 @@ export function leaveTask(ask: LeaveAsk, choice: LeaveChoice, ctx: { me: string;
 export function leaveSection(leaves: TucaLeave[], ctx: { me: string; conversationId: string; connectors: Pick<Connector, 'id' | 'name'>[] }): string {
   const { me } = ctx
   const row = (l: TucaLeave): string => `- ${l.kind} · ${L('usando', 'using')}: ${leaveTools(l, ctx.connectors)}${l.uses > 1 ? L(` · feito ${l.uses} vezes`, ` · done ${l.uses} times`) : ''}`
-  const standing = leaves.filter((l) => !l.conversationId)
-  const here = leaves.filter((l) => l.conversationId === ctx.conversationId)
+  // What was given in a colleague's place is no kind of thing he may do himself: it is not listed.
+  const standing = leaves.filter((l) => !l.conversationId && !l.instead)
+  const here = leaves.filter((l) => l.conversationId === ctx.conversationId && !l.instead)
   const head = L('## O que você pode fazer você mesmo', '## What you may do yourself')
   if (!standing.length && !here.length)
     return `${head}\n${L(

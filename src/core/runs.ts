@@ -716,16 +716,17 @@ export class Runner {
     let granted: { agent: string; ask: LeaveAsk; choice: LeaveChoice; person: string; suggest?: number } | undefined
     const leaveAsk = asked?.run?.leave
     if (asked && asked.author.kind === 'agent' && leaveAsk && !leaveAsk.state) {
-      const choice = leaveChoice(asked.run?.answers, typed)
+      const choice = leaveChoice(asked.run?.answers, typed, !!leaveAsk.instead)
       if (choice) {
         const person = dmOwner(conv, db.ownerId()) ?? writer.id
         // A connector only if whose leave it is may still give one (asked as an admin, answered as a member: no).
         const [ask] = forRole([leaveAsk], isAdmin(db.person(person) ?? writer))
         let suggest: number | undefined
-        if (choice !== 'colleague') {
+        if (choice === 'once' || choice === 'always') {
           const made = newLeave(ask!, person, choice, conv.id)
           const all = [...db.tucaLeaves(person), made]
-          if (shouldSuggest(all, ask!.kind)) suggest = timesDone(all, ask!.kind)
+          // In a colleague's place there is no one to suggest: someone on the team already does that.
+          if (!ask!.instead && shouldSuggest(all, ask!.kind)) suggest = timesDone(all, ask!.kind)
           db.saveTucaLeave({ ...made, ...(suggest ? { suggested: true as const } : {}) })
           emit({ type: 'leaves' })
         }
@@ -2280,7 +2281,12 @@ ${note}`,
 
         if (name === FAZER_EU.name && leaveAsks) {
           const mine = (this.deps.connectors?.list() ?? []).filter((c) => !notYours(c))
-          const r = leaveFrom(args, { connectors: mine, admin: isAdmin(requester) })
+          // Whose part did not get done: the last thing he asked each one from this conversation, within a
+          // day, ended so (newest first: the first seen for each is the last asked).
+          const lastAsked = new Map<string, Delegation>()
+          for (const d of db.liveDelegations(Date.now() - 86_400_000)) if (d.from === agent.id && d.originConversationId === conv.id && !lastAsked.has(d.to)) lastAsked.set(d.to, d)
+          const unfinished = [...lastAsked.values()].filter((d) => d.state === 'failed').flatMap((d) => db.agent(d.to)?.name ?? [])
+          const r = leaveFrom(args, { connectors: mine, admin: isAdmin(requester), unfinished })
           if (!r.ask) return textResult(r.error!, true)
           const ask = r.ask
           const all = db.tucaLeaves(requester.id)
@@ -2311,12 +2317,17 @@ ${note}`,
           question = questionsAsText(questions)
           askedTo = requester
           msg.run = { ...msg.run!, leave: ask }
-          addSteps({ id: randomUUID(), label: L('Pediu licença pra fazer ele mesmo', 'Asked leave to do it himself'), detail: `${ask.kind} · ${leaveTools(ask, mine)}`, status: 'done' })
+          addSteps({ id: randomUUID(), label: L('Pediu licença pra fazer ele mesmo', 'Asked leave to do it himself'), detail: `${ask.kind} · ${leaveTools(ask, mine)}${ask.instead ? L(` · no lugar de ${ask.instead}`, ` · in ${ask.instead}'s place`) : ''}`, status: 'done' })
           return textResult(
-            L(
-              `Pergunta enviada a ${settings.workspaceName}, num card com três respostas. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. Se ${settings.workspaceName} deixar, você continua numa nova mensagem, já com o que pediu pra usar.`,
-              `Question sent to ${settings.workspaceName}, as a card with three answers. End your reply now with one sentence at most, without repeating the question. If ${settings.workspaceName} allows it, you go on in a new message, already with what you asked to use.`
-            )
+            ask.instead
+              ? L(
+                  `Pergunta enviada a ${settings.workspaceName}, num card com duas respostas: você faz desta vez, ou ${settings.workspaceName} espera ${ask.instead}. Encerre sua resposta agora com no máximo uma frase, dizendo por que ${ask.instead} não terminou e, se só ${settings.workspaceName} resolve, onde; não repita a pergunta. Se ${settings.workspaceName} deixar, você continua numa nova mensagem, já com o que pediu pra usar.`,
+                  `Question sent to ${settings.workspaceName}, as a card with two answers: you do it this once, or ${settings.workspaceName} waits for ${ask.instead}. End your reply now with one sentence at most, saying why ${ask.instead} did not finish and, if only ${settings.workspaceName} can solve it, where; do not repeat the question. If ${settings.workspaceName} allows it, you go on in a new message, already with what you asked to use.`
+                )
+              : L(
+                  `Pergunta enviada a ${settings.workspaceName}, num card com três respostas. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. Se ${settings.workspaceName} deixar, você continua numa nova mensagem, já com o que pediu pra usar.`,
+                  `Question sent to ${settings.workspaceName}, as a card with three answers. End your reply now with one sentence at most, without repeating the question. If ${settings.workspaceName} allows it, you go on in a new message, already with what you asked to use.`
+                )
           )
         }
 

@@ -42,6 +42,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         yield { type: 'error', message: "You've hit your limit · resets 5pm" }
         return
       }
+      // "quebre de vez", in work handed to it: the reply fails on something that doesn't pass by itself, to
+      // see what whoever asked does with a part that did not get done.
+      if (handed && /quebre de vez|break for good/i.test(handed)) {
+        yield { type: 'error', message: L('quebrou', 'it broke') }
+        return
+      }
       let reply: string
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === routerSystem()) {
@@ -72,7 +78,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const after = turn.prompt.slice(Math.max(0, turn.prompt.lastIndexOf(last)))
         const let_ = /(?:deixou você fazer isto você mesmo|let you do this yourself)[^:]*: "([^"]+)"/.exec(after)
         const rather = /(?:prefere um colega pra isso|would rather have a colleague for this)[^"]*"([^"]+)"/.exec(after)
-        if (let_) {
+        const waits = /(?:prefere esperar|would rather wait for) ([^.]+)\./.exec(after)
+        if (waits) {
+          reply = L(`Combinado, fica com ${waits[1]}. É só me pedir de novo quando estiver resolvido.`, `Agreed, it stays with ${waits[1]}. Just ask me again once it is sorted out.`)
+        } else if (let_) {
           // With leave: he does it, and suggests a colleague when told the kind of thing keeps coming back.
           const again = /next_steps[^"]*"([^"]+)"/.exec(after)
           if (again) await callTool(turn.mcpUrl, 'next_steps', { steps: [{ label: again[1]! }] })
@@ -82,10 +91,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           reply = textOf(r).includes('card') || /Anotado|Noted/.test(textOf(r)) ? L('Montei o Caio pra isso. Criado, eu passo o pedido a ele.', 'I put Caio together for this. Once made, I pass the request to them.') : textOf(r)
         } else if (/^fa[çc]a voc[êe](?: \(([^)]*)\))?: (.+)/im.test(last)) {
           // "faça você (pesquisa de preços, web, +Linear): pesquisar os preços": he asks leave to do it himself,
-          // naming the kind of thing, the web and the connectors (with a +) he would use.
+          // naming the kind of thing, the web and the connectors (with a +) he would use. "no lugar de Theo":
+          // in the place of a colleague, which only holds for one who did not finish.
           const [, how = '', what] = /^fa[çc]a voc[êe](?: \(([^)]*)\))?: (.+)/im.exec(last)!
           const parts = how.split(',').map((x) => x.trim()).filter(Boolean)
-          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!, tipo: parts.find((x) => x !== 'web' && !x.startsWith('+')) ?? what!.slice(0, 40), web: parts.includes('web'), conectores: parts.filter((x) => x.startsWith('+')).map((x) => ({ conector: x.slice(1).replace(/!$/, ''), ...(x.endsWith('!') ? { nivel: 'escrita' } : {}) })) }))
+          const place = parts.find((x) => /^(?:no lugar de|in place of) /i.test(x))
+          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { ...(place ? { no_lugar_de: place.replace(/^(?:no lugar de|in place of) /i, '') } : {}), o_que: what!, tipo: parts.find((x) => x !== 'web' && !x.startsWith('+') && x !== place) ?? what!.slice(0, 40), web: parts.includes('web'), conectores: parts.filter((x) => x.startsWith('+')).map((x) => ({ conector: x.slice(1).replace(/!$/, ''), ...(x.endsWith('!') ? { nivel: 'escrita' } : {}) })) }))
           const again = /next_steps[^"]*"([^"]+)"/.exec(told)
           if (again) await callTool(turn.mcpUrl, 'next_steps', { steps: [{ label: again[1]! }] })
           reply = /^(?:Liberado|Allowed)/.test(told) ? L(`Pronto, fiz eu mesmo: ${what}`, `Done, I did it myself: ${what}`) : /^(?:Pergunta enviada|Question sent)/.test(told) ? L('Ninguém do time faz isso ainda.', 'No one on the team does this yet.') : told
@@ -170,8 +181,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           // "…; se não sair, faça você (contas): calcular a mediana": a part that didn't get done is not his to
           // take. He asks leave for it, as for anything no one on the team does.
           const [, kind, what] = /se n[ãa]o sair, fa[çc]a voc[êe] \(([^)]*)\): ([^\n"]+)/i.exec(turn.prompt)!
-          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!.trim(), tipo: kind!.trim(), web: false }))
-          reply = /^(?:Pergunta enviada|Question sent)/.test(told) ? L('Não saiu. Posso fazer eu mesmo?', "It didn't get done. May I do it myself?") : told
+          // In whose place: the colleague the notice names. The card then asks this once, or wait for them.
+          const who = /\] ([^,\n]+),[^\n]*?: (?:não terminou|did not finish)/.exec(back)?.[1]?.trim()
+          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!.trim(), tipo: kind!.trim(), web: false, ...(who ? { no_lugar_de: who } : {}) }))
+          reply = /^(?:Pergunta enviada|Question sent)/.test(told) ? L(`${who ?? 'O colega'} não terminou: deu erro.`, `${who ?? 'The colleague'} did not finish: it hit an error.`) : told
         } else reply = /passou do prazo|past its deadline/.test(back) ? 'Passou do prazo e ainda não terminou.' : /: não terminou|did not finish/.test(back) ? 'Não deu certo: o pedido não terminou.' : 'Pronto: o time terminou o que pedi.'
       } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/i.test(last)) {
         // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".

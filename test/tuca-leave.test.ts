@@ -92,6 +92,77 @@ describe('what he asks leave for', () => {
   })
 })
 
+describe("asking leave in the place of a colleague who did not finish", () => {
+  beforeEach(() => setLang('pt'))
+  const part: LeaveAsk = { kind: 'contas', what: 'Calcular a mediana de 3, 9 e 4.', instead: 'Theo' }
+
+  it('only in the place of one whose part did not get done, by the name the notice gave', () => {
+    const ctx = { connectors: [], admin: true, unfinished: ['Theo'] }
+    expect(leaveFrom({ o_que: 'Calcular a mediana', tipo: 'contas', no_lugar_de: 'Theo' }, ctx).ask).toEqual({ kind: 'contas', what: 'Calcular a mediana', instead: 'Theo' })
+    expect(leaveFrom({ o_que: 'Calcular a mediana', tipo: 'contas', no_lugar_de: ' @theo ' }, ctx).ask).toMatchObject({ instead: 'Theo' }) // as he may write it
+    expect(leaveFrom({ o_que: 'Calcular a mediana', tipo: 'contas' }, ctx).ask).toEqual({ kind: 'contas', what: 'Calcular a mediana' }) // not said: the usual card
+    // Someone who finished, or was never asked: team work is handed over, never taken.
+    const no = leaveFrom({ o_que: 'Escrever o aviso', tipo: 'avisos', no_lugar_de: 'Nina' }, ctx)
+    expect(no.ask).toBeUndefined()
+    expect(no.error).toContain('Nina não deixou parte nenhuma sem terminar nesta conversa')
+    expect(no.error).toContain('você passa com pedir')
+    expect(leaveFrom({ o_que: 'x', tipo: 'y', no_lugar_de: 'Theo' }, { connectors: [], admin: true }).error).toContain('Theo não deixou parte nenhuma')
+  })
+
+  it('becomes a card with two answers: this once, or wait for them', () => {
+    const d = leaveDecision({ ...part, web: true }, [])
+    expect(d.kind).toBe('single')
+    expect(d.question).toBe('Theo não terminou. Posso fazer eu mesmo desta vez? Calcular a mediana de 3, 9 e 4.')
+    expect(d.options!.map((o) => o.label)).toEqual(['Pode fazer', 'Prefiro esperar'])
+    expect(d.options![0]).toMatchObject({ recommended: true, description: 'Só desta vez. Vou usar: a web.' })
+    expect(d.options![1]!.description).toBe('Fica com Theo: é só me pedir de novo quando estiver resolvido.')
+    expect(leaveDecision({ ...part, what: 'x'.repeat(300) }, []).question.length).toBeLessThanOrEqual(200)
+    setLang('en')
+    const en = leaveDecision(part, [])
+    expect(en.question).toBe('Theo did not finish. May I do it myself this once? Calcular a mediana de 3, 9 e 4.')
+    expect(en.options!.map((o) => o.label)).toEqual(['Go ahead', "I'd rather wait"])
+  })
+
+  it('reads only its two answers: nothing there is for good, and no colleague is made', () => {
+    expect(leaveChoice([{ chosen: [0] }], '', true)).toBe('once')
+    expect(leaveChoice([{ chosen: [1] }], '', true)).toBe('wait')
+    expect(leaveChoice([{ chosen: [2] }], '', true)).toBeUndefined()
+    expect(leaveChoice(undefined, 'Prefiro esperar.', true)).toBe('wait')
+    expect(leaveChoice(undefined, "I'd rather wait", true)).toBe('wait')
+    expect(leaveChoice(undefined, 'Pode fazer', true)).toBe('once')
+    expect(leaveChoice(undefined, 'Pode, e não precisa perguntar de novo pra esse tipo de coisa', true)).toBeUndefined()
+    expect(leaveChoice(undefined, 'Prefiro um colega pra isso', true)).toBeUndefined()
+    expect(leaveChoice(undefined, 'Prefiro esperar')).toBeUndefined() // not an answer of the usual card
+    expect(leaveChoice([{ chosen: [1], other: 'mas me avisa' }], '', true)).toBeUndefined()
+  })
+
+  it('what was given there is no kind of thing he may do himself afterwards', () => {
+    const given = newLeave({ ...part, web: true }, 'p1', 'once', 'c1', 5)
+    expect(given).toMatchObject({ conversationId: 'c1', kind: 'contas', web: true, instead: 'Theo', uses: 1 })
+    // It still gives him, in that conversation, what he asked to use.
+    expect(withLeaves(tucaAgent('sonnet', []), leavesFor([given], 'c1'))).toMatchObject({ web: true })
+    // But the next time is asked again, it counts toward no suggestion, and his list of kinds doesn't have it.
+    expect(covering([given], { kind: 'contas', what: 'x' })).toBeUndefined()
+    expect(covering([given], { kind: 'contas', what: 'x', instead: 'Theo' })).toBeUndefined()
+    expect(timesDone([{ ...given, uses: 5 }], 'contas')).toBe(0)
+    expect(shouldSuggest([{ ...given, uses: 5 }], 'contas')).toBe(false)
+    expect(leaveSection([given], { me: 'Edu', conversationId: 'c1', connectors: [] })).toContain('Nada ainda.')
+    // A kind the person allowed for good holds in a colleague's place too.
+    const standing = leave({ kind: 'contas', web: undefined })
+    expect(covering([given, standing], { kind: 'contas', what: 'x', instead: 'Theo' })).toBe(standing)
+  })
+
+  it('tells him what the person answered', () => {
+    expect(leaveTask(part, 'once', { me: 'Edu', connectors: [] })).toBe('Edu deixou você fazer isto você mesmo, desta vez, no lugar de Theo: "Calcular a mediana de 3, 9 e 4.". Você já tem o que pediu pra usar (nada além de escrever). Faça agora e entregue o resultado, sem perguntar de novo.')
+    const wait = leaveTask(part, 'wait', { me: 'Edu', connectors: [] })
+    expect(wait).toContain('Edu prefere esperar Theo. Não faça essa parte.')
+    expect(wait).toContain('é só pedir de novo quando estiver resolvido')
+    setLang('en')
+    expect(leaveTask(part, 'once', { me: 'Edu', connectors: [] })).toContain("Edu let you do this yourself, this once, in Theo's place")
+    expect(leaveTask(part, 'wait', { me: 'Edu', connectors: [] })).toContain('Edu would rather wait for Theo. Do not do that part.')
+  })
+})
+
 describe('what a leave holds for', () => {
   beforeEach(() => setLang('pt'))
 
@@ -460,26 +531,60 @@ describe('the leave, in his conversations', () => {
     expect(db.tucaLeaves(ana.id)).toHaveLength(0)
   })
 
-  it("a colleague's part that did not get done is not his to take: he says why and asks leave for it", async () => {
+  it("a colleague's part that did not get done is not his to take: he says why and asks, right then, whether to do it this once", async () => {
     db.saveAgent({ ...tucaAgent('sonnet', ['tuca']), id: 'theo', name: 'Theo', handle: 'theo', role: 'Dados', instructions: 'Você é Theo. Cuida dos números.', kind: undefined })
     await r.send('c1', 'delegue a @theo: quebre de vez; se não sair, faça você (contas): Calcular a mediana de 3, 9 e 4')
     await r.idle()
     // Theo's reply failed, and what he is told of it: why, and that the part is not his to do on his own.
     const told = turns.findLast((t) => t.prompt.includes('Voltou do que você pediu ao seu time'))!
     expect(told.prompt).toMatch(/Theo, DM: não terminou \(/)
-    expect(told.prompt).toContain('Não faça você a parte de Theo, nem que seja simples.')
-    expect(told.prompt).toContain('se ninguém mais faz, peça licença com fazer_eu_mesmo')
+    expect(told.prompt).toContain('Não faça você a parte de Theo por conta própria, nem que seja simples.')
+    expect(told.prompt).toContain('pergunte nesta mesma resposta com fazer_eu_mesmo, com no_lugar_de "Theo"')
+    expect(told.prompt).toContain('Edu escolhe num card entre você fazer desta vez e esperar Theo')
     expect(told.prompt).not.toContain('Decida você o caminho')
     expect(told.tools).toContain('fazer_eu_mesmo')
-    // So he asks, on the same card as for anything no one does, where the request was made.
+    // So he asks in that same reply, where the request was made: a card of its own, with two answers.
     const card = asked('c1')
-    expect(card.run).toMatchObject({ status: 'waiting_input', leave: { kind: 'contas', what: 'Calcular a mediana de 3, 9 e 4' } })
+    expect(card.text).toBe('Theo não terminou: deu erro.')
+    expect(card.run).toMatchObject({ status: 'waiting_input', leave: { kind: 'contas', what: 'Calcular a mediana de 3, 9 e 4', instead: 'Theo' } })
+    expect(card.run!.questions).toMatchObject([{ question: 'Theo não terminou. Posso fazer eu mesmo desta vez? Calcular a mediana de 3, 9 e 4', options: [{ label: 'Pode fazer', recommended: true }, { label: 'Prefiro esperar' }] }])
     expect(db.tucaLeaves(db.ownerId())).toHaveLength(0)
-    // With "Pode fazer", he does it.
+    // With "Pode fazer", he does it: this once, and it makes that no kind of thing he does himself.
     await pick('c1', 0)
-    expect(db.tucaLeaves(db.ownerId())).toMatchObject([{ conversationId: 'c1', kind: 'contas', uses: 1 }])
-    expect(turns.at(-1)!.prompt).toContain('Edu deixou você fazer isto você mesmo, desta vez: "Calcular a mediana de 3, 9 e 4"')
+    expect(asked('c1').run!.leave).toMatchObject({ state: 'once' })
+    expect(db.tucaLeaves(db.ownerId())).toMatchObject([{ conversationId: 'c1', kind: 'contas', instead: 'Theo', uses: 1 }])
+    expect(turns.at(-1)!.prompt).toContain('Edu deixou você fazer isto você mesmo, desta vez, no lugar de Theo: "Calcular a mediana de 3, 9 e 4"')
+    expect(turns.at(-1)!.prompt).not.toContain('- contas · usando')
     expect(by('c1').at(-1)!.text).toBe('Pronto, fiz eu mesmo: Calcular a mediana de 3, 9 e 4')
+  })
+
+  it('or the person waits for the colleague: nothing is allowed, and the part stays theirs', async () => {
+    db.saveAgent({ ...tucaAgent('sonnet', ['tuca']), id: 'theo', name: 'Theo', handle: 'theo', role: 'Dados', instructions: 'Você é Theo. Cuida dos números.', kind: undefined })
+    await r.send('c1', 'delegue a @theo: quebre de vez; se não sair, faça você (contas): Calcular a mediana de 3, 9 e 4')
+    await r.idle()
+    await pick('c1', 1)
+    expect(asked('c1').run!.leave).toMatchObject({ state: 'wait' })
+    expect(db.tucaLeaves(db.ownerId())).toHaveLength(0)
+    expect(turns.at(-1)!.prompt).toContain('Edu prefere esperar Theo. Não faça essa parte.')
+    expect(by('c1').at(-1)!.text).toBe('Combinado, fica com Theo. É só me pedir de novo quando estiver resolvido.')
+  })
+
+  it("in a colleague's place only when that colleague did not finish: any other team work is handed over", async () => {
+    db.saveAgent({ ...tucaAgent('sonnet', ['tuca']), id: 'theo', name: 'Theo', handle: 'theo', role: 'Dados', instructions: 'Você é Theo. Cuida dos números.', kind: undefined })
+    await r.send('c1', 'delegue a @theo: calcule a mediana de 3, 9 e 4')
+    await r.idle()
+    // Theo finished. Asked to take Theo's place, the tool refuses: no card, nothing allowed.
+    await r.send('c1', 'faça você (contas, no lugar de Theo): Calcular a mediana de 3, 9 e 4')
+    await r.idle()
+    expect(by('c1').at(-1)!.text).toContain('Theo não deixou parte nenhuma sem terminar nesta conversa')
+    expect(by('c1').some((m) => !!m.run?.leave)).toBe(false)
+    expect(db.tucaLeaves(db.ownerId())).toHaveLength(0)
+    // Once a part of Theo's does not get done there, it holds, even asked in a later message.
+    await r.send('c1', 'delegue a @theo: quebre de vez')
+    await r.idle()
+    await r.send('c1', 'faça você (contas, no lugar de Theo): Calcular a mediana de 3, 9 e 4')
+    await r.idle()
+    expect(asked('c1').run).toMatchObject({ status: 'waiting_input', leave: { kind: 'contas', instead: 'Theo' } })
   })
 
   it('any other agent has no such tool', async () => {

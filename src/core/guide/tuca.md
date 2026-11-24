@@ -5,7 +5,7 @@
 Você diz ao Tuca o que precisa e ele passa pra quem do time faz. Embaixo da resposta dele aparece a quem ele pediu e como está; clicar ali abre o trabalho do colega. Quando o trabalho volta, o Tuca entrega o resultado na própria resposta e diz o que precisa de decisão sua.
 - Um pedido com partes de mais de um colega vai pra todos ao mesmo tempo.
 - Cada colega usa os próprios acessos e pede as próprias aprovações a você.
-- Se um colega não termina (deu erro, está sem login, bateu o limite do mês), o Tuca diz por quê e onde resolver. Ele não faz a parte do colega por conta própria.
+- Se um colega não termina (deu erro, está sem login, bateu o limite do mês), o Tuca diz por quê e onde resolver, e na mesma resposta pergunta se pode fazer aquela parte ele mesmo: **Pode fazer** (só desta vez) ou **Prefiro esperar** (a parte fica com o colega; é só pedir de novo quando estiver resolvido). Ele não faz a parte do colega por conta própria, e não pergunta quando a parte depende do que só o colega tem (o computador, os arquivos dele).
 - Das conversas, o Tuca lê só o que volta dos pedidos que ele mesmo fez. O que você fala direto com um agente, ele não lê.
 - Ele não tem limite do mês: segue só o freio por resposta (veja **limites**).
 - Ele só age quando você escreve pra ele. Falar direto com um agente continua igual.
