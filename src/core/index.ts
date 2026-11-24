@@ -64,6 +64,7 @@ import { COPY_SUFFIX, WikiGit } from './wiki-git'
 import { settingsPatchError } from './settings-patch'
 import { WikiCurator } from './wiki-curator'
 import { WikiReviewer } from './wiki-review'
+import { staleTeamUps, teamUpDays } from './team-up'
 import { extractFile, extractLink } from './wiki-extract'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { cancelRestore, finishRestore, markRestoreReady, stageRestore, writeBackup } from './restore'
@@ -317,6 +318,9 @@ const pathReady = fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unk
 const enginesReady = pathReady.then(detect)
 // The window waits only for the database, open by now, and the gateway.
 const ready = gateway.start()
+// What the runner waits for before handing a reply its tools (see RunnerDeps.gatewayReady): a failure to
+// listen is already logged by the gateway, and must not take every reply down with it.
+const gatewayReady = ready.catch((e: unknown) => console.error('[gateway]', e))
 
 // A classifier's key, as the page sees it: saved or not. An install from before Settings ›
 // Classifiers kept Jev's under the old name, and that one still counts.
@@ -1138,6 +1142,9 @@ const reviewer = new WikiReviewer({ wiki, settings, llm: wikiLlm })
 setInterval(() => {
   if (reviewer.due()) void reviewer.review().then(() => emit({ type: 'wiki' }))
 }, 3600_000).unref()
+// A team-up nobody came back to closes itself (checked every hour, from the start: an app that was off
+// for a week has one to close the moment it opens).
+setInterval(sweepTeamUps, 3600_000).unref()
 
 const runner = new Runner({
   db,
@@ -1148,6 +1155,7 @@ const runner = new Runner({
   workDir: join(dataDir, 'agents'),
   dataDir,
   gateway,
+  gatewayReady,
   connectors,
   memory,
   computers,
@@ -1240,6 +1248,7 @@ void ready.then(async () => {
   toMain({ type: 'ready' })
   workspaceSummary()
   await runner.expireApprovals()
+  sweepTeamUps()
   const settled = await runner.settleDecidedRuns()
   if (settled) console.log(`[core] ${settled} reply(ies) closed: their approval was decided without them`)
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
@@ -1936,6 +1945,34 @@ const titleUnavailable = (title: string): string => L(`Não dá pra usar o títu
 // How the wiki's history names someone: the owner by the workspace's name, as before.
 const nameOf = (ctx: Ctx): string => (ctx.person.role === 'owner' ? settings().workspaceName : ctx.person.name) || L('Você', 'You')
 const emitPeople = (): void => emit({ type: 'people', people: db.people(), former: db.formerPeople() })
+
+// A conversation goes, with everything that only made sense in it: replies still running stop, its
+// routines and its pending approvals go, and a kept session is forgotten. The person deleting it and a
+// team-up closing itself (see `sweepTeamUps`) are the same thing, so they do it the same way.
+function closeConversation(id: string, why?: string): void {
+  const c = db.conversation(id)
+  if (!c) return
+  for (const m of db.messagesWithRun(['working', 'waiting_approval'])) if (m.conversationId === id) runner.stop(m.id)
+  for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
+  for (const a of db.approvals())
+    if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', why ?? L('O canal foi excluído.', 'The channel was deleted.'))) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+  runner.forgetSessions({ conversationId: id })
+  db.deleteConversation(id)
+  emit({ type: 'conversation_removed', id, ...(c.kind === 'dm' ? { for: dmOwner(c, db.ownerId()) } : {}) })
+}
+
+// A team-up channel nobody came back to closes itself: the days the person set in Settings, counted from
+// its last message. One with a reply still running is left alone, and so is every other channel.
+function sweepTeamUps(): void {
+  const days = teamUpDays(settings().teamUpDays)
+  if (!(days > 0)) return
+  const busy = new Set(db.messagesWithRun(['working']).map((m) => m.conversationId))
+  const last = (id: string): number | undefined => db.recentMessages(id, 1).at(-1)?.at
+  for (const id of staleTeamUps(db.conversations(), last, { days })) {
+    if (busy.has(id)) continue
+    closeConversation(id, L('A equipe fechou sozinha depois de dias parada.', 'The team-up closed itself after days quiet.'))
+  }
+}
 
 const api: Handlers = {
   markRead: ({ conversationId }, ctx) => {

@@ -52,6 +52,7 @@ import {
   AUTO_CONTINUES,
   routineCap,
   RUN_STALL_MINUTES,
+  TEAM_UP_DAYS,
   archiveAgent,
   setTab,
   saveSkill,
@@ -3766,8 +3767,7 @@ export function SettingsPage(): ReactNode {
                   <strong>{L('Mostrar os passos enquanto o agente trabalha', 'Show the steps while the agent works')}</strong>
                   <p className="muted small">{L('Abre a lista do que o agente está fazendo embaixo da resposta. Desligado, fica só a linha com o que ele faz agora; um clique nela abre os passos. Muda só pra você.', 'Shows steps under replies. When off, select the current step to see the list. This affects only you.')}</p>
                 </div>
-                <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />
-              </div>
+                <Toggle on={settings.stepsOpen !== false} onChange={(v) => updateSettings({ stepsOpen: v })} />              </div>
               <div className="key-row">
                 <Icon name="spark" />
                 <div className="grow">
@@ -4099,9 +4099,7 @@ export function SettingsPage(): ReactNode {
             </Card>
           </SectionAnchor>
         )}
-        {on('workspace') && owner && <SectionAnchor id="workspace-danger" sections={structure}><WorkspaceDangerArea /></SectionAnchor>}
-      </div>
-    </Page>
+        {on('workspace') && owner && <SectionAnchor id="workspace-danger" sections={structure}><WorkspaceDangerArea /></SectionAnchor>}      </div>    </Page>
   )
 }
 
