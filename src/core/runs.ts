@@ -424,7 +424,7 @@ type SteerNote = { id: string; who: string; text: string }
 // what goes on with a reply the person is already reading (an approval's outcome, a question's
 // refusal, a browser hand-back): a message of theirs, a routine, a retry and a reply going on past
 // its budget start their own reply, beside whatever runs there.
-type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; done: ((m: Message | undefined) => void)[] }
+type Parked = { agent: Agent; conv: Conversation; opts: ReplyOpts; urgent: boolean; merge?: boolean; done: ((m: Message | undefined) => void)[] }
 // "Try with instructions": what the person wrote goes into the prompt as a direction for the new
 // attempt, and the model is told it outranks the course of what was asked before.
 const RETRY_NOTE = (): string =>
@@ -438,6 +438,7 @@ type Control = {
   reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' | 'computer' | 'sleeping'
   steer?: SteerNote[] // what the person wrote while this reply ran, handed over at the next tool call
   flush?: () => void // the reply's streamed text, sent before a full message of it: the window's order (`execute`)
+  deleted?: boolean // the run's message was wiped (history retention) mid-run
 }
 
 // A routed reply's transcript: what came before its message, the replies since to what was before
@@ -944,6 +945,15 @@ export class Runner {
     writeFileSync(join(dir, FILE_TEXT_NAME), JSON.stringify(read))
   }
 
+  // Removed history must not return when an aborted or queued reply settles.
+  drop(messageId: string): void {
+    const c = this.controllers.get(messageId)
+    if (!c) return
+    c.deleted = true
+    c.reason = 'stopped'
+    c.ctl.abort()
+  }
+
   stop(messageId: string): void {
     const c = this.controllers.get(messageId)
     if (!c) return
@@ -1170,6 +1180,7 @@ export class Runner {
   }
 
   private update(m: Message, patch: Partial<Message>, attemptStart = false): void {
+    if (this.controllers.get(m.id)?.deleted) return
     Object.assign(m, patch)
     // A card settled while the reply was working stays settled (keepDecided).
     if (m.run?.agentDraft || m.run?.proposals?.length) m.run = keepDecided(m.run, this.deps.db.message(m.id)?.run)
@@ -1413,7 +1424,7 @@ export class Runner {
   // is answered once, right after, when the reply ended well: otherwise the person acts on it anyway.
   // `reserved`: this reply was queued by handOff, which already holds its place.
   // A reply runs here from now on: a prompt marked as queued waits for these, whatever started it.
-  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+  private async execute(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message | undefined> {
     this.convRuns.set(conv.id, (this.convRuns.get(conv.id) ?? 0) + 1)
     this.began(conv.id, opts.replyTo ?? opts.trigger) // the prompt's slot on the way is this reply's now
     try {
@@ -1423,13 +1434,19 @@ export class Runner {
     }
   }
 
-  private async executeReply(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message> {
+  private async executeReply(agent: Agent, conv: Conversation, opts: ReplyOpts & { reserved?: boolean }): Promise<Message | undefined> {
     const threadId = opts.existing ? opts.existing.threadId : opts.threadId
     const key = replyKey(agent.id, conv.id, threadId)
     const { reserved, ...rest } = opts
     // Its reply is starting: the waiting mark goes in the same step, so a restart can't start it twice.
     this.clearWaiting(opts.replyTo)
     this.followups.start(key, reserved)
+    if ((threadId && !this.deps.db.message(threadId)) || (opts.existing && !this.deps.db.message(opts.existing.id))) {
+      this.followups.end(key)
+      this.followups.take(key)
+      this.startWaiting(key)
+      return undefined
+    }
     let msg: Message
     try {
       msg = await this.reply(agent, conv, rest)
@@ -3260,6 +3277,7 @@ ${note}`,
         ? { model: modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
+    if (control.deleted) return msg
     const usedNow = db.usedThisMonth(agent.id)
     // Only an agent with a ceiling has a share of it to warn about.
     if (Number.isFinite(ceiling) && used < ceiling * USAGE_ALERT && usedNow >= ceiling * USAGE_ALERT && usedNow < ceiling) {
