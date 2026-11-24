@@ -636,6 +636,13 @@ export const MIGRATIONS = [
     updated_at INTEGER NOT NULL,
     used_at INTEGER
   );
+  `,
+  // The Tuca takes the person's requests now and passes each to whoever does it (src/core/tuca.ts). With
+  // everything going through him he has no monthly limit of his own (there is no page to raise it on, and a
+  // Tuca out of tokens is a Tucano nobody can ask anything of), and he remembers like any agent.
+  `
+  UPDATE agents SET limit_tokens = 0 WHERE kind = 'tuca';
+  UPDATE agents SET memory_mode = 'auto' WHERE kind = 'tuca' AND memory_mode = 'read';
   `
 ]
 

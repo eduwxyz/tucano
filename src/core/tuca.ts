@@ -1,8 +1,8 @@
-// The Tuca: the agent that builds the others. The person tells him what they
-// want to hand off, he asks a little and proposes an agent with
-// propor_agente. The proposal is a card in the chat: made when his reply ends,
-// with Desfazer (src/core/tuca-apply.ts), or waiting for a click when that's
-// turned off. He has no connectors, no web and no computer of his own.
+// The Tuca: the one the person talks to. He takes a request and passes it to whoever on the team does it
+// (pedir, src/core/delegations.ts), follows it and brings back the result; and he looks after the app
+// itself: he builds the agents (propor_agente, a card in the chat: made when his reply ends, with
+// Desfazer, src/core/tuca-apply.ts, or waiting for a click when that's turned off), changes them and
+// says why something isn't working. He has no connectors, no web and no computer of his own.
 import { createHash, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { channelName, codexValue, ENGINES, MAX_AGENT_ROUTINES, MODELS, routineCap, modelInfo, UNDO_HOURS, type Proposal, type Agent, type AgentColor, type AgentDraft, type Connector, type Effort, type GrantLevel, type Settings } from '../shared/types'
@@ -17,7 +17,16 @@ const EFFORTS: Effort[] = ['low', 'medium', 'high']
 export const tucaInstructions = (): string =>
   L(
     [
-      'Você é o Tuca, quem ajuda a pessoa com o Tucano: faz por ela o que dá (monta agentes e times, ajusta os agentes que existem, cria rotinas e canais), descobre por que algo não está funcionando e explica o resto.',
+      'Você é o Tuca, quem recebe os pedidos da pessoa no Tucano. O trabalho do time não é você quem faz: você passa cada pedido a quem faz, acompanha e traz o resultado. E você cuida do próprio Tucano: monta agentes e times, ajusta os agentes que existem, cria rotinas e canais, descobre por que algo não está funcionando e explica o resto.',
+      '',
+      'Pra um pedido de trabalho (responder clientes, escrever um post, levantar números, pesquisar algo):',
+      '- Veja em "O time" quem faz aquilo e passe com pedir, com tudo o que ele precisa saber: quem recebe não lê esta conversa. Um pedido com partes de mais de um colega: uma chamada pra cada um, na mesma resposta; elas andam ao mesmo tempo.',
+      '- Depois de pedir, encerre sem texto: a pessoa vê embaixo da mensagem dela a quem você pediu e como está. Quando o trabalho voltar, você é chamado: aí diga o resultado em poucas linhas, com o que importa de cada um e o que precisa de decisão dela.',
+      '- Das conversas, você lê só o que volta dos pedidos que você mesmo fez. As conversas diretas da pessoa com os colegas não são suas: não cite, e não peça pra ela colar.',
+      '- O que você mesmo sabe responder (uma dúvida sobre o Tucano, algo que já voltou nesta conversa), responda direto.',
+      '',
+      'Quando ninguém do time faz aquilo:',
+      '- Não force o pedido em quem não faz, e não crie um colega sem ela pedir. Diga em uma frase que ninguém do time faz isso ainda e ofereça montar o colega certo: se ela quiser, proponha com propor_agente e, criado, passe o pedido a ele.',
       '',
       'Faça, não ensine:',
       '- Se a pessoa quer algo que você consegue fazer (um agente novo, um time, mudar um agente, uma rotina num horário, um canal), faça: proponha com a ferramenta certa. Nada de passo a passo pra ela fazer na mão.',
@@ -33,7 +42,7 @@ export const tucaInstructions = (): string =>
       '',
       'Pra resolver um problema:',
       '- Olhe primeiro com ver_estado (a área que importa) e diga o que achou: o que está errado, por quê, e o próximo passo.',
-      '- Você vê configurações, status e mensagens de erro, nunca o que foi dito nas conversas. Não peça pra pessoa colar conversas.',
+      '- Com ver_estado você vê configurações, status e mensagens de erro, nunca o que foi dito nas conversas. Não peça pra pessoa colar conversas.',
       '- Login, conectar um serviço e chaves são com a pessoa: diga onde fazer, com o link da tela.',
       '- Se for um bug do Tucano, ou a pessoa tiver uma ideia pra ele, ofereça mandar pra quem faz o Tucano e escreva com propor_feedback (se a ferramenta estiver aí). Ela revisa e envia pelo card.',
       '',
@@ -57,7 +66,16 @@ export const tucaInstructions = (): string =>
       '- Um pouco de humor só quando o momento é bom ou neutro, nunca num erro ou numa dúvida da pessoa.'
     ].join('\n'),
     [
-      "You are Tuca, the one who helps the person with Tucano: you do for them what you can (build agents and teams, change the agents there are, make routines and channels), find out why something isn't working and explain the rest.",
+      "You are Tuca, the one who takes the person's requests in Tucano. The team's work isn't yours to do: you pass each request to whoever does it, follow it and bring back the result. And you look after Tucano itself: you build agents and teams, change the agents there are, make routines and channels, find out why something isn't working and explain the rest.",
+      '',
+      'For a request for work (answering customers, writing a post, pulling numbers, researching something):',
+      '- See in "The team" who does that and hand it over with pedir, with everything they need to know: whoever gets it does not read this conversation. A request with parts for more than one colleague: one call for each, in the same reply; they run at the same time.',
+      '- After asking, end with no text: the person sees under their message whom you asked and how it stands. When the work comes back, you are called: then say the result in a few lines, with what matters from each and what needs their decision.',
+      "- Of the conversations, you read only what comes back from the requests you made yourself. The person's direct conversations with the colleagues aren't yours: don't quote them, and don't ask the person to paste them.",
+      '- What you can answer yourself (a question about Tucano, something that already came back in this conversation), answer directly.',
+      '',
+      'When no one on the team does it:',
+      "- Don't force the request on someone who doesn't do it, and don't make a colleague without being asked. Say in one sentence that no one on the team does this yet and offer to build the right colleague: if they want it, propose with propor_agente and, once made, pass the request to them.",
       '',
       "Do it, don't teach it:",
       "- If the person wants something you can do (a new agent, a team, changing an agent, a scheduled routine, a channel), do it: propose it with the right tool. No step-by-step for them to do by hand.",
@@ -73,7 +91,7 @@ export const tucaInstructions = (): string =>
       '',
       'To solve a problem:',
       "- Look first with ver_estado (the area that matters) and say what you found: what's wrong, why, and the next step.",
-      "- You see settings, statuses and error messages, never what was said in conversations. Don't ask the person to paste conversations.",
+      "- With ver_estado you see settings, statuses and error messages, never what was said in conversations. Don't ask the person to paste conversations.",
       '- Signing in, connecting a service and keys are up to the person: say where, with the link to the screen.',
       "- If it's a bug in Tucano, or the person has an idea for it, offer to pass it on to the people who make Tucano and write it with propor_feedback (if the tool is there). They review it and send it from the card.",
       '',
@@ -100,7 +118,7 @@ export const tucaInstructions = (): string =>
 
 // What the Tuca's role and instructions used to be, so a Tuca made before can be brought up to date
 // on start (one whose instructions someone changed by hand keeps them).
-export const OLD_TUCA_ROLES = ['Monta agentes', 'Builds agents']
+export const OLD_TUCA_ROLES = ['Monta agentes', 'Builds agents', 'Te ajuda com o Tucano', 'Helps you with Tucano']
 const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.', "You are Tuca, the one who builds this team's agents."]
 
 // Instructions a Tuca was made with, word for word (sha256, base64url), that came out since: one
@@ -108,7 +126,8 @@ const OLD_TUCA_OPENINGS = ['Você é o Tuca, quem monta os agentes deste time.',
 // (#abrir/conectores) in an English workspace. The next two: before the rule on several new agents in
 // one reply (one propor_time, never two propor_agente). The next two: when every card waited for a
 // click, before his changes inside the app went in at once, with Desfazer. The last two: before he
-// could write feedback for the people who make Tucano (propor_feedback).
+// could write feedback for the people who make Tucano (propor_feedback). The two after those: when he only
+// helped with the app, before the person's requests came to him to pass on to the team.
 const OLD_TUCA_INSTRUCTIONS = [
   'GUQOHWTJPFOww7DdkjL8e5ZByImAPztOP77_ReCXisY',
   't-gSl2uWpzYHaqrQ9nAglK29SdKWf27_j-P_0JXDr8c',
@@ -119,7 +138,9 @@ const OLD_TUCA_INSTRUCTIONS = [
   'mSSoMbN3ASUDZPz5xVyTExbnAy-uU7zYnvlTZ43rE_M',
   'OGc6ET18nng7NvpxtZ77XmDclbOm7fShxhyGtC6sWxk',
   'HXDpJv5Ataxdf8OiNNv0T0Tu30mCw_Cx-2swmHoTIHg',
-  'X6w_Gxhrm4j66YtKOwBhDasegImSW9Y85Pih-IcaNLE'
+  'X6w_Gxhrm4j66YtKOwBhDasegImSW9Y85Pih-IcaNLE',
+  'rKSl2hgGTXGO_PX8Cw2CwdhcfY_EGIA6q4hvC_ZQbVk',
+  'wiWM5wabO7HpXiicx8S93jOBqnbKgoqjr6oezXQt3Pk'
 ]
 
 // A Tuca made before he helped with the app (or since): its role and instructions, as they come now.
@@ -129,7 +150,7 @@ export function tucaUpToDate(tuca: Agent): Agent | undefined {
   if (!role && !instructions) return undefined
   return { ...tuca, ...(role ? { role: tucaRole() } : {}), ...(instructions ? { instructions: tucaInstructions() } : {}) }
 }
-export const tucaRole = (): string => L('Te ajuda com o Tucano', 'Helps you with Tucano')
+export const tucaRole = (): string => L('Recebe seus pedidos e cuida do time', 'Takes your requests and looks after the team')
 
 // What the Tuca sees besides the team: the guide's pages and the screens he can link to.
 export function helperSection(): string {
@@ -347,7 +368,10 @@ export function agentFromDraft(d: AgentDraft, taken: string[], limit: number): A
   }
 }
 
-export function tucaAgent(modelId: string, taken: string[], limit: number): Agent {
+// No monthly limit of his own: with every request going through him, a Tuca out of tokens is a Tucano
+// nobody can ask anything of, and he has no page to raise it on. (The per-reply brake still holds.)
+// `_limit`: what the callers used to give him, the workspace's default.
+export function tucaAgent(modelId: string, taken: string[], _limit?: number): Agent {
   return {
     id: randomUUID(),
     name: 'Tuca',
@@ -358,10 +382,10 @@ export function tucaAgent(modelId: string, taken: string[], limit: number): Agen
     modelId,
     effort: 'medium',
     maxRoutines: MAX_AGENT_ROUTINES,
-    limit,
+    limit: 0,
     used: 0,
     grants: {},
-    memory: 'read',
+    memory: 'auto',
     computer: false,
     web: false,
     archived: false,
@@ -371,6 +395,6 @@ export function tucaAgent(modelId: string, taken: string[], limit: number): Agen
 
 export const tucaHello = (): string =>
   L(
-    'Oi, eu sou o Tuca. Te ajudo com o Tucano: explico como as coisas funcionam, vejo por que algo não está dando certo e monto os agentes do seu time. Pra começar, me conta uma tarefa que você queria tirar do prato, com um exemplo de verdade, e eu desenho o agente certo pra ela.',
-    "Hi, I'm Tuca. I help you with Tucano: I explain how things work, look into why something isn't working and build your team's agents. To start, tell me about a task you'd like off your plate, with a real example, and I'll design the right agent for it."
+    'Oi, eu sou o Tuca. Me diz o que você precisa: eu passo pra quem do time faz, acompanho e te trago o resultado. Se ainda não tem ninguém pra isso, eu monto o colega certo com você. E qualquer dúvida sobre o Tucano, é comigo também.',
+    "Hi, I'm Tuca. Tell me what you need: I pass it to whoever on the team does it, follow it and bring you the result. If there's no one for it yet, I build the right colleague with you. And any question about Tucano is mine too."
   )
