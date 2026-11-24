@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -57,6 +57,7 @@ import { checkClassifierKey, classifierSecret } from './classifiers'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { report } from './report'
 import { usage } from './usage'
+import { executions, executionSteps, type CanRead } from './executions'
 import { Skills } from './skills'
 import { cleanTitle, pageKey, Wiki, type WikiView } from './wiki'
 import { COPY_SUFFIX, WikiGit } from './wiki-git'
@@ -1824,6 +1825,16 @@ function ownMemory(ctx: Ctx, id: string): void {
   const m = db.memory(id)
   if (m) must(ctx.person, { kind: 'memory', scope: m.scope, ...(m.privateTo ? { privateTo: m.privateTo } : {}) })
 }
+// Whether this person may read a reply, for Execuções and the Boletim's tools. A page of them asks about
+// the same few conversations over and over.
+const readsReply = (ctx: Ctx): CanRead => {
+  const conversations = new Map<string, boolean>()
+  return (r) => {
+    let sees = conversations.get(r.conversationId)
+    if (sees === undefined) conversations.set(r.conversationId, (sees = people.canSeeConversation(ctx.person, db.conversationOwner(r.conversationId))))
+    return sees && people.visibleAt(ctx.person, r)
+  }
+}
 // What the wiki made of a source is seen by whoever sees the source: one from someone's DM, by
 // them alone. A change or version whose source is gone went with it.
 const seesSource = (ctx: Ctx) => (sourceId: string): boolean => {
@@ -2458,10 +2469,20 @@ const api: Handlers = {
     mkdirSync(backups, { recursive: true })
     toMain({ type: 'open_path', path: backups })
   },
-  report: ({ week }) => report(db, Date.now(), week),
+  report: ({ week }, ctx) => report(db, Date.now(), week, readsReply(ctx)),
   usage: () => {
     refreshCodexQuota()
     return usage(db)
+  },
+  executions: (q, ctx) => {
+    if (!EXECUTION_DAYS.includes(q.days)) throw new UserError(L('Esse período não está disponível.', "That period isn't available."))
+    return executions(db, readsReply(ctx), q)
+  },
+  executionSteps: ({ messageId }, ctx) => {
+    reachMessage(ctx, messageId)
+    const steps = executionSteps(db, messageId)
+    if (!steps) throw new UserError(L('Essa resposta não está disponível.', "That reply isn't available."))
+    return steps
   },
   unpairTelegram: () => void (telegram && bg(telegram.unpair(), 'unpairTelegram')),
 
