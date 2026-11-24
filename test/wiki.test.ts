@@ -131,10 +131,10 @@ describe('the agents and the wiki', () => {
     expect(wikiCall(w, 'wiki_buscar', { busca: 'pizza' }).text).toContain('não invente')
   })
 
-  it('every agent reads the wiki unless told otherwise; the Tuca does not', () => {
+  it('every agent reads the wiki unless told otherwise, the Tuca too', () => {
     expect(wikiAccess({})).toBe('read')
     expect(wikiAccess({ wiki: 'none' })).toBe('none')
-    expect(wikiAccess({ kind: 'tuca' })).toBe('none')
+    expect(wikiAccess({ kind: 'tuca' })).toBe('read') // he takes the requests now: what the team knows helps him pass them on
   })
 
   it('parses the bits a page is made of', () => {

@@ -1402,7 +1402,7 @@ export interface Report {
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'
-export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => a.wiki ?? 'read'
 export interface WikiPageInfo {
   title: string
   kind: string // the page's tipo, from its frontmatter

@@ -1361,7 +1361,7 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
   }
   if (!tuca) {
     const model = readyModel(s, modelId)
-    tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle), s.defaultLimit)
+    tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle))
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }

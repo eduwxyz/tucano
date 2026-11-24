@@ -147,7 +147,9 @@ describe('the guide and the screen links', () => {
 
 it('brings a Tuca made before up to date, unless his instructions were rewritten', () => {
   const old = { ...tucaAgent('sonnet', [], 1000), role: 'Monta agentes', instructions: 'Você é o Tuca, quem monta os agentes deste time. A pessoa te conta…' }
-  expect(tucaUpToDate(old)).toMatchObject({ role: 'Te ajuda com o Tucano', instructions: tucaInstructions() })
+  expect(tucaUpToDate(old)).toMatchObject({ role: 'Recebe seus pedidos e cuida do time', instructions: tucaInstructions() })
+  // The role he had while he only helped with the app is old too.
+  expect(tucaUpToDate({ ...tucaAgent('sonnet', []), role: 'Te ajuda com o Tucano' })?.role).toBe('Recebe seus pedidos e cuida do time')
   expect(tucaUpToDate({ ...old, role: 'Meu ajudante', instructions: 'Outra coisa.' })).toBeUndefined()
   expect(tucaUpToDate(tucaAgent('sonnet', [], 1000))).toBeUndefined() // already current
 })
@@ -357,9 +359,31 @@ describe("the Tuca's prompt, for several changes", () => {
         ['- After proposing, one short sentence is enough: what you did, or what is left for them to confirm.', '- After proposing, one short sentence is enough.']
       ]
     }
-    // Last of all came the feedback rule (propor_feedback): every version before lacks it.
-    const unfed = (): string => tucaInstructions().replace(/\n- (?:Se for um bug do Tucano|If it's a bug in Tucano)[^\n]*/, '')
-    const clicked = (lang: 'pt' | 'en'): string => CLICK[lang].reduce((t, [now, then]) => (expect(t).toContain(now), t.replace(now, then)), (setLang(lang), unfed()))
+    // Last of all he came to take the person's requests and pass them on to the team: before it he only
+    // helped with the app, and his instructions opened straight on "Faça, não ensine".
+    const HELPER: Record<'pt' | 'en', { opening: string; from: string; saw: [string, string] }> = {
+      pt: {
+        opening: 'Você é o Tuca, quem ajuda a pessoa com o Tucano: faz por ela o que dá (monta agentes e times, ajusta os agentes que existem, cria rotinas e canais), descobre por que algo não está funcionando e explica o resto.',
+        from: 'Faça, não ensine:',
+        saw: ['- Com ver_estado você vê configurações', '- Você vê configurações']
+      },
+      en: {
+        opening: "You are Tuca, the one who helps the person with Tucano: you do for them what you can (build agents and teams, change the agents there are, make routines and channels), find out why something isn't working and explain the rest.",
+        from: "Do it, don't teach it:",
+        saw: ['- With ver_estado you see settings', '- You see settings']
+      }
+    }
+    const helper = (lang: 'pt' | 'en'): string => {
+      setLang(lang)
+      const now = tucaInstructions()
+      const h = HELPER[lang]
+      expect(now).toContain(h.from)
+      expect(now).toContain(h.saw[0])
+      return `${h.opening}\n\n${now.slice(now.indexOf(h.from))}`.replace(h.saw[0], h.saw[1])
+    }
+    // Before that came the feedback rule (propor_feedback): every version before lacks it.
+    const unfed = (lang: 'pt' | 'en'): string => helper(lang).replace(/\n- (?:Se for um bug do Tucano|If it's a bug in Tucano)[^\n]*/, '')
+    const clicked = (lang: 'pt' | 'en'): string => CLICK[lang].reduce((t, [now, then]) => (expect(t).toContain(now), t.replace(now, then)), unfed(lang))
     // Before that, the rule on several new agents in one reply: every version before lacks it.
     const lastRule = (lang: 'pt' | 'en'): string => clicked(lang).replace(/\n- (?:Mais de um agente novo|More than one new agent)[^\n]*/, '')
     const before = (lang: 'pt' | 'en'): string => {
@@ -372,8 +396,10 @@ describe("the Tuca's prompt, for several changes", () => {
       const old = { ...tucaAgent('sonnet', [], 1000), instructions: before(lang) }
       setLang(lang)
       expect(clicked(lang)).not.toBe(tucaInstructions())
-      expect(unfed()).not.toBe(tucaInstructions())
-      expect(tucaUpToDate({ ...old, instructions: unfed() })?.instructions).toBe(tucaInstructions())
+      expect(unfed(lang)).not.toBe(tucaInstructions())
+      expect(helper(lang)).not.toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: helper(lang) })?.instructions).toBe(tucaInstructions())
+      expect(tucaUpToDate({ ...old, instructions: unfed(lang) })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: clicked(lang) })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate({ ...old, instructions: lastRule(lang) })?.instructions).toBe(tucaInstructions())
       expect(tucaUpToDate(old)?.instructions).toBe(tucaInstructions())
