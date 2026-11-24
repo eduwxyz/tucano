@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.47] - 2026-11-24
+
 > **Em português:**
 > - **Novo:** o **Tuca recebe os seus pedidos** e passa cada um a quem do time faz. Embaixo da resposta dele você vê a quem ele pediu e como está, e quando o trabalho volta ele entrega o resultado na própria resposta. Das conversas, ele lê só o que volta dos pedidos que ele mesmo fez.
 > - **Novo:** quando ninguém do time faz o que você pediu, o Tuca **pergunta se pode fazer ele mesmo**, dizendo o que vai usar (a web, um conector): **Pode fazer**, **Pode, e não precisa perguntar de novo pra esse tipo de coisa** ou **Prefiro um colega pra isso**. O que você deixou fica em **Liberado**, na tela dele, com **Retirar**. Na terceira vez do mesmo tipo de coisa, ele sugere um colega pra cuidar disso.
