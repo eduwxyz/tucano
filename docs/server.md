@@ -161,6 +161,37 @@ To update Tucano, run `git pull && npm ci && npm run build && sudo systemctl res
 
 Once a browser has the cookie, the server answers only its own page: a page of another site (a sibling subdomain included) can't call it, and no site can show it inside a frame. Twenty wrong tokens from one address in ten minutes lock that address out for ten minutes.
 
+## Traces with OpenTelemetry
+
+Tucano can send a trace of its agents' work to any backend that takes OTLP over HTTP. It's off until you set an endpoint, and nothing goes to the people who make Tucano.
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.com
+OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%20your-key
+```
+
+Only the environment Tucano's process starts with counts. Your login shell's profile never configures traces, because an agent that can edit `~/.zshrc` could otherwise send your conversations to a server of its own. So a desktop app opened from the Finder has no traces. Started from a terminal, it also needs `TUCANO_OTEL=1`, since your terminal may hold `OTEL_*` variables for another tool.
+
+| Variable | Default | |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | The backend's address. Traces go to `/v1/traces` under it |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | none | The full traces address, used exactly as written. Wins over the one above |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | none | `key=value,key2=value2`, percent-encoded. The second wins, key by key |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` | `http/protobuf` | Or `http/json`. gRPC isn't supported |
+| `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` | the exporter's | In milliseconds |
+| `OTEL_SERVICE_NAME` | `tucano` | |
+| `OTEL_RESOURCE_ATTRIBUTES` | none | Extra attributes on every span, such as `deployment.environment.name=prod` |
+| `OTEL_SDK_DISABLED`, `OTEL_TRACES_EXPORTER` | | `true` and `none`, respectively, turn traces off even with an endpoint |
+| `TUCANO_OTEL` | off | On the desktop app, `1` is required for the variables above to count |
+
+- **A trace** is one execution of one agent's reply, with its tool calls as child spans. A harness runs as a whole, so its internal model calls aren't separate spans.
+- **`session.id`** is the task: every reply it set off, across agents. `gen_ai.conversation.id` is the conversation. A reply another agent asked for has a span link to the reply that asked, except a hand-off that had to wait for that agent to finish another reply.
+- **Other model calls** (router, titles, memory, wiki, classifiers) are short traces of their own, marked with `tucano.operation`.
+- **Spans carry no content:** agent names, harness, model, duration, status, tokens, cost and tool names, with no prompt, reply, tool arguments, tool results, error text, attachments or names of people. Name your agents with that in mind. `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` isn't supported: setting it only logs a warning.
+- **Where traces go is in the log.** At startup Tucano writes the endpoint's address. On a server started by hand, your shell profile's variables count, so prefer the service's own environment (systemd, Docker).
+- **A collector that's down never affects a reply.** Spans wait in a bounded queue and are dropped when it's full.
+- **Don't give Tucano a backend key that agents could use.** Tucano removes the `OTEL_*` variables from what agents and harnesses inherit, so a harness's own OpenTelemetry settings don't reach it through Tucano either. But the operating system keeps a process's original environment, and a program running as the same user can read it (`ps eww`, `/proc`). So an agent running directly on the machine, outside its isolated computer, or a connector run by the same user, could read the key. The safe setup is a **local OpenTelemetry Collector** on `127.0.0.1`: point Tucano at it with no headers, and let the collector hold the key.
+
 ## Your harness over MCP
 
 The server answers MCP at `/mcp` on its own address (`https://tucano.example.com/mcp`), so Claude Code, Codex, Cursor, OpenCode or any MCP client can understand the team, talk to the agents and set Tucano up from where you already work. Each harness needs a key of its own: make one in **Settings › Harnesses**, which shows the key once with what to paste into each harness. A key acts as the person who made it, with what they can do in the app, up to the level picked (read, talk, configure). Nothing over MCP deletes anything, decides approvals, or touches people, logins or secrets.

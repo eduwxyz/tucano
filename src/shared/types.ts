@@ -220,6 +220,7 @@ export interface Run {
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
   job?: string // the job it is part of: what a message set off, until it's done (src/core/jobs.ts)
+  trace?: { traceId: string; spanId: string; linkedTo?: { traceId: string; spanId: string } } // its OpenTelemetry span, when traces are on: a reply it asks for links here, and linkedTo is the one that asked for it
   autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   retryAt?: number // 'failed' on something that passes (a network, a plan's window, a computer off): when it tries again by itself
   retries?: number // how many times it already tried again by itself

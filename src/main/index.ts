@@ -1048,7 +1048,10 @@ app.on('before-quit', () => {
   quitting = true
   void phone?.quit()
   servers.quit()
-  for (const r of cores.values()) r.browsers.quit()
+  for (const r of cores.values()) {
+    r.browsers.quit()
+    r.child.postMessage({ type: 'flush-traces' }) // the last spans leave while the app is closing
+  }
 })
 
 app.on('will-quit', () => {

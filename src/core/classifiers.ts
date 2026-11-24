@@ -12,6 +12,7 @@
 import { L } from '../shared/lang'
 import type { ClassifierConfig, ClassifierProvider } from '../shared/classifiers'
 import { providerSpec } from '../shared/classifiers'
+import { classifierCall } from './telemetry'
 
 type Fetch = typeof fetch
 
@@ -152,14 +153,18 @@ const answerOf = (raw: RawAnswer): ClassifierAnswer => ({
 
 // ---------- the one call ----------
 
-export async function ask(opts: {
+type Asking = {
   target: ClassifierConfig
   key: string
   state: unknown
   questions: ClassifierQuestion[]
   timeoutMs: number
   fetch?: Fetch
-}): Promise<ClassifierAnswers | { error: string }> {
+}
+
+export const ask = (opts: Asking): Promise<ClassifierAnswers | { error: string }> => classifierCall({ harness: opts.target.provider, model: opts.target.model }, () => askProvider(opts))
+
+async function askProvider(opts: Asking): Promise<ClassifierAnswers | { error: string }> {
   const { target } = opts
   const req = request(target, opts.key, opts.state, opts.questions)
   let res: Response
