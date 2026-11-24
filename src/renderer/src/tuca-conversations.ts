@@ -68,7 +68,9 @@ export function requestLine(s: Pick<State, 'agents' | 'messages' | 'delegations'
   const asking = messages.findLast((m) => m.run?.status === 'waiting_input' && questionsOf(m.run).length > 0)
   if (asking) return questionsOf(asking.run)[0]!.question
   if (open.length) return L(`${open.map((d) => name(d.to)).filter((n, i, all) => all.indexOf(n) === i).join(', ')} ${open.length > 1 ? 'estão' : 'está'} nisso`, `${open.map((d) => name(d.to)).filter((n, i, all) => all.indexOf(n) === i).join(', ')} ${open.length > 1 ? 'are' : 'is'} on it`)
-  const last = messages.findLast((m) => m.author.kind === 'agent' && m.text.trim() && !m.threadId) ?? messages.findLast((m) => m.author.kind === 'agent' && m.text.trim())
+  // What he last said, wherever in the conversation: his closing of a request sits in its thread. Not his hello.
+  const first = messages.findIndex((m) => m.author.kind === 'person')
+  const last = messages.findLast((m, i) => i > first && m.author.kind === 'agent' && !!m.text.trim())
   return last ? last.text.replace(/[#*_`>]+/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 140) : ''
 }
 

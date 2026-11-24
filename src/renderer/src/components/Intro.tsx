@@ -123,12 +123,15 @@ export function Intro(): ReactNode {
       }
       setComposerDraft(channelId, `@${handle} ${task.trim()}`)
       const o = getState().settings.onboarding
+      // In the simple view the person talks to the Tuca: the first request waits in his field, already for
+      // the colleague just made, and the tour over the whole app's screens has nothing to point at.
+      const simple = getState().settings.uiMode === 'simple'
       updateSettings({
         workspaceName: name.trim() || settings.workspaceName,
         ...(models ? { routerModel: models.router, memoryModel: models.memory } : {}),
-        onboarding: { ...o, done: true, channel: channelId, tour: { done: [] } }
+        onboarding: { ...o, done: true, channel: channelId, tour: simple ? { done: [], skipped: true } : { done: [] } }
       })
-      navigate({ kind: 'conversation', id: channelId })
+      navigate(simple ? { kind: 'home', draft: `${L('Pra', 'For')} ${a.name.trim()}: ${task.trim()}` } : { kind: 'conversation', id: channelId })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setCheer(false)
