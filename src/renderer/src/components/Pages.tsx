@@ -3745,15 +3745,7 @@ export function SettingsPage(): ReactNode {
         {on('geral') && (
           <SectionAnchor id="app-notifications" sections={structure}>
             <Card title={L('Notificações', 'Notifications')} section="app-notifications">
-              <div className="key-row">
-                <Icon name="volume" />
-                <div className="grow">
-                  <strong>{L('Sons', 'Sounds')}</strong>
-                  <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'Plays a sound when an agent needs you or finishes. When off, notifications still appear silently.')}</p>
-                </div>
-                <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
-              </div>
-              <NotifyTest />
+              <NotificationCard settings={settings} update={updateSettings} />
             </Card>
           </SectionAnchor>
         )}
@@ -4325,7 +4317,7 @@ function NotifyTest({ mode }: { mode: NoticeMode }): ReactNode {
       <Icon name="spark" />
       <div className="grow">
         <strong>{L('Testar', 'Test')}</strong>
-        <p className="muted small">{hint ?? L('Manda uma notificação agora, pra ver se chega.', 'Send a test notification.')}</p>
+        <p className="muted small">{L('Manda uma notificação agora, pra ver se chega.', 'Send a test notification.')}</p>
       </div>
       <button className="btn btn--sm" title={L('Uma notificação de cada tipo, como elas ficam.', 'One notification of each kind, as they look.')} onClick={() => window.tucano.notice.demo()}>
         {L('Testar notificações', 'Test notifications')}

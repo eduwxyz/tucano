@@ -225,18 +225,6 @@ function Answering({ id, questions, saved, badge, byline, steps, extra, onSend }
       </div>
     ) : undefined
 
-  // Every decision with the option the agent recommends, sent at once. Only when each one has such an option.
-  const autoRecommended = recommendedAnswers(questions)
-  const goRecommended = (): void => {
-    if (!autoRecommended || sending) return
-    autoRecommended.forEach((a, i) => {
-      drafts.delete(draftKey(id, i))
-      answerDecision(id, i, a)
-    })
-    setAnswers(autoRecommended)
-    send()
-  }
-
   return (
     <section className={`ask ask--answer${steps ? ' ask--steps' : ''}`} aria-label={badge}>
       <Head badge={badge} byline={byline} nav={nav} steps={steps} />
@@ -248,7 +236,7 @@ function Answering({ id, questions, saved, badge, byline, steps, extra, onSend }
         </div>
       )}
       {step === 'review' ? (
-        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} onGoRecommended={autoRecommended ? goRecommended : undefined} />
+        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} onGoRecommended={recommended ? goRecommended : undefined} />
       ) : (
         <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
       )}

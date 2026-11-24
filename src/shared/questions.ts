@@ -59,19 +59,6 @@ export const MAX_DESCRIPTION_LENGTH = 200
 
 const KINDS: DecisionKind[] = ['single', 'multiple', 'text']
 
-// "Pode seguir com a recomendação": every decision answered with the option the agent recommends. Only when
-// each one has such an option (a free-text decision has none, so the card asks for it as usual).
-export function recommendedAnswers(decisions: Decision[]): Answer[] | undefined {
-  if (!decisions.length) return undefined
-  const answers: Answer[] = []
-  for (const d of decisions) {
-    const i = d.kind === 'text' ? -1 : (d.options ?? []).findIndex((o) => o.recommended)
-    if (i < 0) return undefined
-    answers.push({ chosen: [i] })
-  }
-  return answers
-}
-
 // Messages saved before decisions existed have a question string: it reads as one text decision.
 export function questionsOf(run: Run | undefined): Decision[] {
   if (run?.questions?.length) return run.questions
