@@ -17,3 +17,20 @@ export function isAppPage(url: string, appPage: string): boolean {
     return false
   }
 }
+
+// What a page in the default session may be given. Only the app's own page, in its main frame (not a
+// frame or a service shown inside it), gets a permission; the microphone only for dictation (audio);
+// and asking the system to open something goes only for a link that may leave the app.
+export function appMayHave(
+  o: { permission: string; requestingUrl?: string; isMainFrame?: boolean; fromWindow: boolean; mediaTypes?: readonly string[]; externalURL?: string },
+  appPage: string
+): boolean {
+  if (o.permission === 'openExternal') return isOutsideLink(o.externalURL ?? '')
+  const own = o.fromWindow && o.isMainFrame === true && isAppPage(o.requestingUrl ?? '', appPage)
+  if (o.permission === 'media') return own && !!o.mediaTypes?.length && o.mediaTypes.every((t) => t === 'audio')
+  return own
+}
+
+// The same, when the page only checks whether it has one (Notification.permission, a query).
+export const appMayCheck = (o: { permission: string; requestingUrl?: string; isMainFrame?: boolean; fromWindow: boolean }, appPage: string): boolean =>
+  o.permission !== 'openExternal' && o.fromWindow && o.isMainFrame !== false && isAppPage(o.requestingUrl ?? '', appPage)
