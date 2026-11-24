@@ -383,7 +383,7 @@ describe('the sidebar and the missions', () => {
   it('starts short on a new install: the Tuca, what waits on you, the channel, the agent, the missions; Conectores and the settings at the foot', async () => {
     fake = state({ agents: [lia], conversations: [geral], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toEqual(['Tuca', 'Aprovações', 'geral', 'Lia'])
+    expect(labels()).toEqual(['Perguntas', 'Tuca', 'Aprovações', 'geral', 'Lia'])
     expect(text()).toContain('Missões')
     expect(text()).toContain('Próxima: fale com Lia')
     expect(document.querySelector('.sidebar__tool--connectors')?.textContent).toBe('Conectores')
@@ -412,7 +412,7 @@ describe('the sidebar and the missions', () => {
     const routine = { id: 'r1' } as State['routines'][number]
     fake = state({ agents: [lia], conversations: [geral], routines: [routine], settings: { onboarding: { done: true, fresh: true } } })
     await render(<Sidebar />)
-    expect(labels()).toEqual(['Tuca', 'Aprovações', 'Operação', 'geral', 'Lia'])
+    expect(labels()).toEqual(['Perguntas', 'Tuca', 'Aprovações', 'Operação', 'geral', 'Lia'])
     expect(document.querySelector('[data-hub="operations"]')?.textContent).toContain('NOVO')
     await render(<Hub tab="routines">{null}</Hub>)
     expect(tabs()).toEqual(['RotinasNOVO', 'Boletim', 'Uso e limites'])

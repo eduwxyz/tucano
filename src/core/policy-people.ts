@@ -201,7 +201,9 @@ export const NEEDS: Record<Method, Need> = {
   setDelegation: 'anyone',
   inbox: 'anyone',
   answerQuestion: 'target',
+  questionsHistory: 'anyone', // only what this person can see anyway
   confirmQuestion: 'target',
+  dismissQuestion: 'target', // who may answer it may also leave it unanswered
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',
   cancelQuestion: 'target',

@@ -41,6 +41,8 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   primaryAccounts: { kind: 'object', max: 2_000, nullable: true },
   onboarding: { kind: 'object', max: 2_000, nullable: true },
   folded: { kind: 'array', max: 200_000, nullable: true },
+  hideEmptyAsks: { kind: 'boolean', max: 10, nullable: true },
+  hideEmptyApprovals: { kind: 'boolean', max: 10, nullable: true },
   sidebarHidden: { kind: 'array', max: 500, nullable: true },
   navOrder: { kind: 'array', max: 500, nullable: true },
   agentOrder: { kind: 'array', max: 100_000, nullable: true },
