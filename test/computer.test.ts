@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
-import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, hostUrl, listening, mountArgs } from '../src/core/computer'
+import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, hostUrl, lentProblem, listening, mountArgs } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -58,6 +58,26 @@ describe('helpers', () => {
 })
 
 describe('lent folders', () => {
+  it.runIf(process.platform !== 'win32')('are checked again when the computer starts: a folder swapped for a link, or gone, stops it', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'ad-home-')))
+    mkdirSync(join(home, 'projetos/app'), { recursive: true })
+    mkdirSync(join(home, '.ssh'))
+    const dataDir = join(home, 'dados')
+    const lent = [{ name: 'app', path: join(home, 'projetos/app'), readOnly: false }]
+    expect(lentProblem(lent, { home, dataDir })).toBeNull()
+    // The lent folder, moved away and replaced by a link to the keys.
+    renameSync(join(home, 'projetos/app'), join(home, 'projetos/old'))
+    symlinkSync(join(home, '.ssh'), join(home, 'projetos/app'))
+    expect(lentProblem(lent, { home, dataDir })).toMatch(/credenciais/)
+    // A link to another project folder is still not the folder that was lent.
+    mkdirSync(join(home, 'projetos/outro'))
+    execFileSync('rm', [join(home, 'projetos/app')])
+    symlinkSync(join(home, 'projetos/outro'), join(home, 'projetos/app'))
+    expect(lentProblem(lent, { home, dataDir })).toMatch(/Devolva essa pasta/)
+    execFileSync('rm', [join(home, 'projetos/app')])
+    expect(lentProblem(lent, { home, dataDir })).toMatch(/não existe/)
+  })
+
   it('lends only project folders inside home: not home itself, Library, hidden folders or the app data', () => {
     const home = mkdtempSync(join(tmpdir(), 'ad-home-'))
     for (const d of ['projetos/app/.dados', 'Library/Keychains', '.ssh', 'Library/Application Support/Tucano']) mkdirSync(join(home, d), { recursive: true })
