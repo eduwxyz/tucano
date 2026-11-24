@@ -4,8 +4,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
-## [0.2.46] - 2026-11-24
-
 > **Em português:**
 > - **Novo:** em **Uso e limites**, **Execuções** lista as respostas dos agentes com tempo, ferramentas, tokens e status, além de p50, p95 e taxa de erro, com filtros de período, status e agente. Abra uma linha pra ver onde foi o tempo. No **Boletim**, **Ferramentas** mostra as mais lentas, com usos e erros. Só admins veem, e só as respostas que podem ler.
 > - **Novo:** **traces com OpenTelemetry**. Com as variáveis padrão `OTEL_*`, o Tucano envia o trabalho dos agentes para qualquer backend OTLP: uma sessão por tarefa e um trace por resposta, com ferramentas, tempo, tokens e custo. Vem desligado e envia só metadados: o texto das conversas não sai.
