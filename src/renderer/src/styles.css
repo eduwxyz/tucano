@@ -17154,3 +17154,109 @@ button.agent-card__now:hover {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ---------- the Tuca's screen: the team beside his conversation ---------- */
+/* The same card as the proposal: who he passes the requests to. Whoever has a part of the request in
+   hand comes first, with how it stands; the rest are at rest, by what they do. */
+.onb-tc__team-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 28%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.onb-tc__mates {
+  margin: 12px -8px 0;
+  padding: 0;
+  list-style: none;
+}
+.onb-tc__mates > li + li {
+  margin-top: 1px;
+}
+.onb-tc__mate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.onb-tc__mate:hover,
+.onb-tc__mate:focus-visible {
+  background: var(--hover);
+}
+.onb-tc__mate .avatar,
+.onb-tc__mate > svg {
+  flex: none;
+}
+.onb-tc__mate-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.onb-tc__mate-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.onb-tc__mate-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__mate-top .request-note__state {
+  flex: none;
+  font-size: 11.5px;
+}
+.onb-tc__mate-sub {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__mate.is-asked .onb-tc__mate-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+/* The rest of the team steps back while a request is in hand. */
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked) {
+  opacity: 0.62;
+}
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked):hover,
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked):focus-visible {
+  opacity: 1;
+}
+.onb-tc__team .onb-tc__actions {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.onb-tc__back {
+  display: block;
+  margin: 10px auto 0;
+  font-size: 12.5px;
+}
+/* On his screen the request shows once in the conversation, under his reply: the lines under the
+   person's own message would say the same again, and the team card beside it says how it stands now. */
+.onb-tc .asked-here {
+  display: none;
+}

@@ -281,6 +281,93 @@ describe('what the Tuca was let to do himself, on his screen', () => {
   })
 })
 
+describe('the team beside his conversation', () => {
+  const hello = { id: 'h1', conversationId: 't1', author: { kind: 'agent', id: 'tuca' }, text: 'Oi, eu sou o Tuca.', at: 1 } as Message
+  const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'um aviso e a mediana', at: 5 } as Message
+  const duda = agent('duda', 'Duda', { role: 'Atendimento' })
+  const theo = agent('theo', 'Theo', { role: 'Dados' })
+  const cora = agent('cora', 'Cora', { role: 'Conteúdo' })
+  const part = (id: string, to: string, st: State['delegations'][number]['state'], text: string, extra: Partial<State['delegations'][number]> = {}): State['delegations'][number] =>
+    ({ id, from: 'tuca', to, conversationId: `dm-${to}`, rootId: `r-${id}`, originConversationId: 't1', originThreadId: 'p1', originMessageId: 'a1', requestedBy: 'ana', text, state: st, createdAt: Number(id.slice(1)), ...extra }) as State['delegations'][number]
+  const mates = (): string[] => [...document.querySelectorAll('.onb-tc__mate')].map((m) => `${m.querySelector('.onb-tc__mate-name')!.textContent}|${m.querySelector('.request-note__state')?.textContent ?? ''}|${m.querySelector('.onb-tc__mate-sub')!.textContent}`)
+  const steps = (): number => document.querySelectorAll('.onb-steps li').length
+
+  it('at rest: who does what, ideas that are requests, and nothing of building an agent', async () => {
+    fake = state({ agents: [tuca, duda, theo, cora], messages: { t1: [hello] } })
+    await render(<Onboarding build />)
+    expect(steps()).toBe(0)
+    expect(text()).toContain('Seu time')
+    expect(text()).toContain('Quem faz o que você pede')
+    expect(mates()).toEqual(['Duda||Atendimento', 'Theo||Dados', 'Cora||Conteúdo'])
+    expect([...document.querySelectorAll('.onb-tc__idea')].map((i) => i.textContent)).toEqual(['Um aviso pros meus clientes', 'Pesquisar um assunto pra mim', 'Um agente novo no time', 'Por que uma rotina falhou?'])
+    expect(text()).toContain('O Tuca passa pra quem do time faz. O que ele cria entra na hora, e dá pra desfazer.')
+    expect(text()).not.toContain('Prefiro montar eu mesmo')
+    expect(document.querySelector('.onb-tc__rows')).toBeNull() // no proposal card
+    await click(/Um aviso pros meus clientes/)
+    expect(store.sendMessage).toHaveBeenCalledWith('t1', 'Preciso de um aviso curto pros meus clientes sobre uma novidade.')
+    // A colleague at rest opens its page.
+    await click(document.querySelectorAll('.onb-tc__mate')[1]!)
+    expect(store.navigate).toHaveBeenLastCalledWith({ kind: 'agent', id: 'theo' })
+  })
+
+  it('with a request in hand: whoever got a part comes first, with what was asked and how it stands', async () => {
+    fake = state({
+      agents: [tuca, duda, theo, cora],
+      messages: { t1: [hello, said] },
+      delegations: [part('d1', 'cora', 'open', 'Escreva o aviso do feriado.'), part('d2', 'theo', 'failed', 'Calcule a mediana de 3, 9 e 4.')]
+    })
+    await render(<Onboarding build />)
+    expect(mates()).toEqual(['Cora|trabalhando|Escreva o aviso do feriado.', 'Theo|não terminou|Calcule a mediana de 3, 9 e 4.', 'Duda||Atendimento'])
+    expect(text()).toContain('2 neste pedido · 1 trabalhando')
+    // A part in hand opens the colleague's work, where it is done.
+    await click(document.querySelectorAll('.onb-tc__mate')[0]!)
+    expect(store.navigate).toHaveBeenLastCalledWith({ kind: 'conversation', id: 'dm-cora', message: 'r-d1' })
+    // Everything back.
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root')!)
+    fake = state({ agents: [tuca, duda, theo, cora], messages: { t1: [hello, said] }, delegations: [part('d1', 'cora', 'done', 'Escreva o aviso do feriado.')] })
+    await render(<Onboarding build />)
+    expect(mates()[0]).toBe('Cora|concluído|Escreva o aviso do feriado.')
+    expect(text()).toContain('1 neste pedido · tudo de volta')
+  })
+
+  it("only the latest thing asked lights the team: an older request's parts are at rest", async () => {
+    const later = { id: 'p2', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'e como funcionam as aprovações?', at: 50 } as Message
+    fake = state({ agents: [tuca, duda, theo, cora], messages: { t1: [hello, said, later] }, delegations: [part('d1', 'cora', 'done', 'Escreva o aviso do feriado.')] })
+    await render(<Onboarding build />)
+    expect(mates()).toEqual(['Duda||Atendimento', 'Theo||Dados', 'Cora||Conteúdo'])
+  })
+
+  it('"Novo agente" brings the proposal and its steps, and "Ver o time" goes back', async () => {
+    fake = state({ agents: [tuca, duda, theo, cora], messages: { t1: [hello, said] }, delegations: [part('d1', 'cora', 'done', 'Escreva o aviso do feriado.')] })
+    await render(<Onboarding build />)
+    await click(/^Novo agente$/)
+    expect(steps()).toBe(3)
+    expect(document.querySelector('.onb-tc__rows')).not.toBeNull()
+    expect(document.querySelector('.onb-tc__team')).toBeNull()
+    expect(text()).toContain('Prefiro montar eu mesmo')
+    await click(/^Ver o time$/)
+    expect(steps()).toBe(0)
+    expect(document.querySelector('.onb-tc__team')).not.toBeNull()
+  })
+
+  it('a proposal to decide is what sits beside the chat, and a made agent gives the team back once closed', async () => {
+    const proposed = (st?: 'created'): Message => ({ id: 'm1', conversationId: 't1', author: { kind: 'agent', id: 'tuca' }, text: 'Montei o Léo.', at: 10, run: { status: 'done', steps: [], agentDraft: { ...draft, ...(st ? { state: st, agentId: 'leo' } : {}) } } }) as Message
+    fake = state({ agents: [tuca, duda, theo, cora], messages: { t1: [hello, said, proposed()] } })
+    await render(<Onboarding build />)
+    expect(steps()).toBe(3)
+    expect(text()).toContain('Proposta do Tuca, pronta pra criar')
+    expect(text()).not.toContain('Ver o time') // it waits on a decision
+    await act(async () => root.unmount())
+    root = createRoot(document.getElementById('root')!)
+    fake = state({ agents: [tuca, duda, theo, cora, agent('leo', 'Léo', { role: 'Financeiro' })], messages: { t1: [hello, said, proposed('created')] } })
+    await render(<Onboarding build />)
+    expect(text()).toContain('Entrou no time')
+    await click(/^Ver o time$/)
+    expect(mates().at(-1)).toBe('Léo||Financeiro')
+  })
+})
+
 describe('the builder screen, after the debloat: steps, ideas and the proposal beside the chat', () => {
   const hello = { id: 'h1', conversationId: 't1', author: { kind: 'agent', id: 'tuca' }, text: 'Oi, eu sou o Tuca.', at: 1 } as Message
   const said = { id: 'p1', conversationId: 't1', author: { kind: 'person', id: 'ana' }, text: 'tickets de suporte', at: 5 } as Message
@@ -289,9 +376,9 @@ describe('the builder screen, after the debloat: steps, ideas and the proposal b
   const steps = (): string[] => [...document.querySelectorAll('.onb-steps li')].map((li) => `${li.className}:${li.textContent}`)
   const rows = (): string[] => [...document.querySelectorAll('.onb-tc__rows > div')].map((r) => `${r.querySelector('dt')?.textContent}=${r.querySelector('dd')?.textContent}`)
 
-  it('starts in the chat: his greeting, four ideas that send, and an empty proposal that cannot be created', async () => {
+  it('opened to make an agent, it starts on the proposal: his greeting, four ideas that send, and an empty card that cannot be created', async () => {
     fake = state({ messages: { t1: [hello] } })
-    await render(<Onboarding build />)
+    await render(<Onboarding build making />)
     expect(steps()[0]).toBe('is-now:1Conversa')
     expect(text()).toContain('Recebe seus pedidos, passa pra quem do time faz e cuida do Tucano.')
     expect(text()).toContain('Oi, eu sou o Tuca.')
@@ -307,8 +394,17 @@ describe('the builder screen, after the debloat: steps, ideas and the proposal b
     await act(async () => root.unmount())
     root = createRoot(document.getElementById('root')!)
     fake = { ...state({ messages: { t1: [hello] } }), settings: { ...state().settings, tucaApplyNow: false } }
-    await render(<Onboarding build />)
+    await render(<Onboarding build making />)
     expect(text().split('Nada é criado sem você').length - 1).toBe(1)
+  })
+
+  it('with no one on the team yet, the proposal is what sits beside the chat, however he was opened', async () => {
+    fake = state({ agents: [tuca], messages: { t1: [hello] } })
+    await render(<Onboarding build />)
+    expect(steps()[0]).toBe('is-now:1Conversa')
+    expect(rows().slice(0, 2)).toEqual(['Nome=—', 'O que faz=—'])
+    expect(document.querySelector('.onb-tc__team')).toBeNull()
+    expect(text()).not.toContain('Ver o time') // there is no team to see
   })
 
   it('a proposal fills the card ("Quando" from its routine) and "Criar agente" makes it and tries its first task', async () => {

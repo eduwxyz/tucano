@@ -3,7 +3,7 @@
 // menu and the channel's header open the same ones.
 import { L } from '../../../shared/lang'
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as KeyEvent, type ReactNode } from 'react'
-import { agentById, amAdmin, archiveAgent, canEditChannel, deleteAgent, isTeam, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Agent, type Conversation, type State, type View } from '../store'
+import { agentById, amAdmin, archiveAgent, canEditChannel, deleteAgent, isTeam, makeWithTuca, openTuca, createChannel, finishConnectorAuth, getState, navigate, openDialog, openDm, renameChannel, setChannelMembers, setThreads, setTopic, shortcut, useStore, type Agent, type Conversation, type State, type View } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 import { WorkspaceManager } from './WorkspaceManager'
 import { Modal } from './Modal'
@@ -412,7 +412,8 @@ function hits(s: State): Hit[] {
     // Making agents is the admins'.
     ...(amAdmin(s)
       ? [
-          { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus' as const, go: openTuca },
+          { key: 'tuca-ask', label: L('Tuca: pedir algo', 'Tuca: ask for something'), detail: L('conversa', 'conversation'), icon: 'ask' as const, go: openTuca },
+          { key: 'tuca', label: L('Tuca: montar um agente', 'Tuca: build an agent'), detail: L('conversa', 'conversation'), icon: 'plus' as const, go: makeWithTuca },
           { key: 'new-agent', label: L('Novo agente (formulário)', 'New agent (form)'), detail: L('ação', 'action'), icon: 'plus' as const, go: () => navigate({ kind: 'new-agent' }) }
         ]
       : [])
