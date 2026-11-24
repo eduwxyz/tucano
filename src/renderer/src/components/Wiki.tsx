@@ -4,7 +4,7 @@
 // the sources, what needs care, and the pages by kind) and, beside it, the map of the pages,
 // a page with what links to it, the sources, the review; the editor takes the whole screen.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm'
 import { call } from '../rpc'
 import { agentById, amAdmin, navigate, openExternal, personName, setTab, updateSettings, useStore, type State, type View, type WikiChange, type WikiFinding, type WikiGitStatus, type WikiGitTest, type WikiHit, type WikiImport, type WikiPage, type WikiPageInfo, type WikiReview, type WikiSource, type WikiVersion } from '../store'
 import { Sheet, Toggle } from './Pages'
+import { HubTools } from './hub-context'
 import { AdminOnly } from './People'
 import { confirmDialog } from './Dialogs'
 import { AgentAvatar, Icon, type IconName } from './ui'
@@ -768,46 +769,66 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   const curating = admin ? (view.tab === 'pending' ? <WikiPending /> : view.tab === 'review' ? <WikiReviewPane /> : null) : view.tab === 'pending' || view.tab === 'review' ? <AdminOnly>{L('Só um admin decide o que o curador muda e revisa a wiki.', "Only an admin decides the curator's changes and reviews the wiki.")}</AdminOnly> : null
   const content = view.source ? <WikiSourceView key={view.source} id={view.source} /> : view.title ? <WikiPageView key={view.title} title={view.title} data={data} /> : view.tab === 'sources' ? <WikiSources errors={dropError} /> : curating
 
-  return (
-    <Sheet
-      fill
-      title={L('Wiki', 'Wiki')}
-      lede={
-        count > 0
-          ? [count === 1 ? L('1 página', '1 page') : L(`${count} páginas`, `${count} pages`), links === 1 ? L('1 ligação', '1 link') : L(`${links} ligações`, `${links} links`)].join(' · ')
-          : L('O que você e o seu time sabem, em páginas ligadas.', 'What you and your team know, as linked pages.')
-      }
-      actions={
-        <>
-          {kinds.length > 1 && (
-            <div className="wk-kinds" role="group" aria-label={L('Mostrar só um tipo', 'Show only one kind')}>
-              {kinds.slice(0, 6).map(([k, n]) => (
-                <button key={k} className={only === k ? 'is-on' : only ? 'is-dim' : ''} style={{ ['--k' as string]: kindColor(k) }} title={only === k ? L('Mostrar todas', 'Show all') : `${k} · ${n}`} onClick={() => setOnly(only === k ? null : k)}>
-                  <i />
-                  {k}
-                </button>
-              ))}
-            </div>
-          )}
-          <button className="wk-search-btn" title={L(`Buscar (${SEARCH_KEY})`, `Search (${SEARCH_KEY})`)} onClick={() => setSearching(true)}>
-            <Icon name="search" size={14} />
-            <kbd>{SEARCH_KEY}</kbd>
-          </button>
-          {admin && (
-            <button className="btn btn--ghost btn--sm wk-icon-btn" title={L('Ajustes da wiki', 'Wiki settings')} onClick={() => setSettings(true)}>
-              <Icon name="gear" size={15} />
+  // The line under the Wiki tab: how much there is. It rides with the controls, on the right of the
+  // hub's tab row when the page is inside one.
+  const lede =
+    count > 0
+      ? [count === 1 ? L('1 página', '1 page') : L(`${count} páginas`, `${count} pages`), links === 1 ? L('1 ligação', '1 link') : L(`${links} ligações`, `${links} links`)].join(' · ')
+      : L('O que você e o seu time sabem, em páginas ligadas.', 'What you and your team know, as linked pages.')
+  // The hub's tab row hands the page an element to draw its controls in; standalone, the page draws
+  // them in its own head.
+  const tools = useContext(HubTools)
+
+  // The controls this page owns, drawn either in its own head (standalone) or in the hub's tab
+  // row (inside a hub), which is the same node in one of two places.
+  const controls = (
+    <>
+      {kinds.length > 1 && (
+        <div className="wk-kinds" role="group" aria-label={L('Mostrar só um tipo', 'Show only one kind')}>
+          {kinds.slice(0, 6).map(([k, n]) => (
+            <button key={k} className={only === k ? 'is-on' : only ? 'is-dim' : ''} style={{ ['--k' as string]: kindColor(k) }} title={only === k ? L('Mostrar todas', 'Show all') : `${k} · ${n}`} onClick={() => setOnly(only === k ? null : k)}>
+              <i />
+              {k}
             </button>
-          )}
-          {data?.git?.readOnly && (
-            <span className="wk-ro" title={L('A chave do Tucano só lê o repositório git: a wiki mostra o que está lá e não aceita escrita.', "The repository key is read-only. Wiki editing is disabled.")}>
-              <Icon name="lock" size={12} /> {L('Só leitura', 'Read-only')}
-            </span>
-          )}
-          <button className="btn btn--primary btn--sm" disabled={!!data?.git?.readOnly} title={data?.git?.readOnly ? L('A wiki está só leitura', 'The wiki is read-only') : L('Nova página (N)', 'New page (N)')} onClick={() => navigate({ kind: 'wiki', edit: true, title: '' })}>
-            <Icon name="plus" size={14} /> {L('Nova página', 'New page')}
-          </button>
-        </>
-      }
+          ))}
+        </div>
+      )}
+      <button className="wk-search-btn" title={L(`Buscar (${SEARCH_KEY})`, `Search (${SEARCH_KEY})`)} onClick={() => setSearching(true)}>
+        <Icon name="search" size={14} />
+        <kbd>{SEARCH_KEY}</kbd>
+      </button>
+      {admin && (
+        <button className="btn btn--ghost btn--sm wk-icon-btn" title={L('Ajustes da wiki', 'Wiki settings')} onClick={() => setSettings(true)}>
+          <Icon name="gear" size={15} />
+        </button>
+      )}
+      {data?.git?.readOnly && (
+        <span className="wk-ro" title={L('A chave do Tucano só lê o repositório git: a wiki mostra o que está lá e não aceita escrita.', "Tucano's key only reads the git repository: the wiki shows what's there and takes no writes.")}>
+          <Icon name="lock" size={12} /> {L('Só leitura', 'Read-only')}
+        </span>
+      )}
+      <button className="btn btn--primary btn--sm" disabled={!!data?.git?.readOnly} title={data?.git?.readOnly ? L('A wiki está só leitura', 'The wiki is read-only') : L('Nova página (N)', 'New page (N)')} onClick={() => navigate({ kind: 'wiki', edit: true, title: '' })}>
+        <Icon name="plus" size={14} /> {L('Nova página', 'New page')}
+      </button>
+    </>
+  )
+
+  return (
+    <>
+      {tools &&
+        createPortal(
+          <>
+            <span className="hub__tools-note">{lede}</span>
+            {controls}
+          </>,
+          tools
+        )}
+      <Sheet
+      fill
+      headless={!!tools}
+      title={L('Wiki', 'Wiki')}
+      lede={lede}
+      actions={tools ? undefined : controls}
     >
       {admin && (pending.length > 0 || reading.length > 0 || (data?.findings ?? 0) > 0) && (
         <div className="cal-watch wk-watch">
@@ -890,7 +911,8 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
       {searching && <WikiSearch pages={data?.pages ?? []} onClose={() => setSearching(false)} />}
       {settings && <WikiSettingsDialog data={data} onClose={() => setSettings(false)} onImport={startImport} />}
       {imported && <ImportResult result={imported} onClose={() => setImported(null)} />}
-    </Sheet>
+      </Sheet>
+    </>
   )
 }
 
