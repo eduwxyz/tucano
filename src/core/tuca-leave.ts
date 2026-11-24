@@ -41,13 +41,14 @@ export const FAZER_EU: ToolDef = {
   }
 }
 
-// "Pesquisa de Preços " and "pesquisa de precos" are the same kind of thing.
+// "Pesquisa de Preços " and "pesquisa de precos" are the same kind of thing. Letters and digits of any
+// script count (a kind named in another alphabet is still a kind); the rest is spacing.
 export const kindKey = (kind: string): string =>
   kind
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
 
 // A fazer_eu_mesmo call as what it asks leave for, or what to fix. `admin`: whether the person he works for
@@ -117,11 +118,12 @@ export function leaveDecision(ask: LeaveAsk, connectors: Pick<Connector, 'id' | 
 
 // Which of the three the person picked: on the card (the option's index), or by writing its words (a phone,
 // a harness). Anything else they wrote is just their message: nothing is allowed by it.
+// A pick sent together with something written in the field allows nothing either: what they wrote may narrow
+// or take back what they picked ("só desta vez", "sem o Linear"), and he reads both and asks again.
 export function leaveChoice(answers: (Answer | null)[] | undefined, typed: string): LeaveChoice | undefined {
   const picked = answers?.[0]?.chosen
-  if (picked?.length === 1 && !answers?.[0]?.other) return CHOICES[picked[0]!]
   const said = typed.trim().replace(/[.!\s]+$/, '').toLowerCase()
-  if (!said) return undefined
+  if (!said) return picked?.length === 1 && !answers?.[0]?.other ? CHOICES[picked[0]!] : undefined
   // In either language: the card may have been drawn in one and answered from an app in the other.
   const all: [LeaveChoice, string][] = [
     ['once', 'Pode fazer'],
@@ -141,6 +143,10 @@ export function newLeave(ask: LeaveAsk, person: string, choice: 'once' | 'always
 
 // The leaves that hold in a conversation: the ones for good, and the ones given there.
 export const leavesFor = (leaves: TucaLeave[], conversationId: string): TucaLeave[] => leaves.filter((l) => !l.conversationId || l.conversationId === conversationId)
+
+// A connector is an admin's to give, and only while they are one: what a person allowed when they could
+// holds no connector once they can't (demoted since). The web, anyone gives.
+export const forRole = <T extends Pick<LeaveAsk, 'grants'>>(leaves: T[], admin: boolean): T[] => (admin ? leaves : leaves.map(({ grants: _g, ...rest }) => rest as T))
 
 const reaches = (l: Pick<TucaLeave, 'web' | 'grants'>, ask: Pick<LeaveAsk, 'web' | 'grants'>): boolean =>
   (!ask.web || !!l.web) && Object.entries(ask.grants ?? {}).every(([id, g]) => l.grants?.[id] === 'read_write' || (g === 'read' && l.grants?.[id] === 'read'))

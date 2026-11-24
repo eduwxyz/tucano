@@ -800,7 +800,7 @@ export class Db {
           DELETE FROM receipts;
           DELETE FROM artifacts;
           DELETE FROM services;
-          UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL;
+          UPDATE conversations SET summary = NULL, summary_until = NULL, summary_at = NULL, title = NULL;
           DELETE FROM settings WHERE key IN ('quota', 'codexQuota', 'telegram', 'accounts');
           UPDATE agents SET account = NULL, fallback_account = NULL;
           DELETE FROM secrets WHERE key LIKE 'telegram:%' OR key = 'github:proxy-key' OR key LIKE '%:oauth_verifier';
