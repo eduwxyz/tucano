@@ -223,6 +223,8 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   activity: { personId: 's?', kind: 's?', before: 'n?' },
   inbox: {},
   answerQuestion: { id: 's', text: 's' },
+  removeTucaLeave: { id: 's' },
+  setConversationTitle: { id: 's', title: 's' },
   confirmQuestion: { id: 's', ok: 'b' },
   answerDecision: { messageId: 's', index: 'n', answer: 'o|null' },
   submitDecisions: { messageId: 's' },

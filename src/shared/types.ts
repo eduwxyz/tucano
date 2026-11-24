@@ -139,6 +139,9 @@ export interface Conversation {
   owner?: string // a DM's person: one DM per agent and person, and only they read it
   createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
   proactive?: boolean // false: no agent is called in here on its own, only who is mentioned or picked; on unless false
+  title?: string // a conversation with the Tuca: what it is about, in a few words (the person has several, one per request)
+  createdAt?: number
+  lastAt?: number // when something was last said there, as the core knew when it sent this
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -181,6 +184,33 @@ export interface Receipt {
 }
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
+
+// What the Tuca asks leave to do himself, when no one on the team does it (fazer_eu_mesmo, src/core/tuca-leave.ts):
+// on the reply whose question card asks it. `state`: how the person answered, once they did.
+export interface LeaveAsk {
+  kind: string // the kind of thing, in a few words ("pesquisa de preços"): what "no need to ask again" holds for
+  what: string // what he said he would do, in one sentence
+  web?: true // he will search and read web pages
+  grants?: Record<string, GrantLevel> // the connectors he will use, by id
+  instead?: string // the colleague whose part this is and who did not finish it: asked for this once only, or the person waits for them
+  state?: 'once' | 'always' | 'colleague' | 'wait'
+}
+
+// What a person let the Tuca do himself. It is theirs, never his: each person's Tuca works with what that
+// person allowed, and they take it back whenever they want.
+export interface TucaLeave {
+  id: string
+  person: string
+  conversationId?: string // given for that conversation only ("Pode fazer"); unset: for good, for that kind of thing
+  kind: string
+  what: string
+  web?: true
+  grants?: Record<string, GrantLevel>
+  instead?: string // given in the place of a colleague who had not finished: it lets him use what he asked for there, and is no kind of thing he may do himself
+  uses: number // times he did it himself under this leave
+  suggested?: true // he was already told to suggest a colleague for this kind of thing
+  at: number
+}
 
 // What the Tuca wrote for the people who make Tucano (propor_feedback). Never sent by him: the card opens
 // the "Enviar feedback" window with it, and the person sends it from there.
@@ -229,6 +259,7 @@ export interface Run {
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
   feedbackDraft?: FeedbackDraft // a bug or an idea for the people who make Tucano, written by the Tuca with propor_feedback: the person reviews and sends it
+  leave?: LeaveAsk // the Tuca's question on this reply asks leave to do something himself (fazer_eu_mesmo): what for, and how it was answered
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back
@@ -1414,7 +1445,7 @@ export interface Report {
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'
-export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => a.wiki ?? 'read'
 export interface WikiPageInfo {
   title: string
   kind: string // the page's tipo, from its frontmatter

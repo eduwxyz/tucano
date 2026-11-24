@@ -4,6 +4,32 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novo:** o **Tuca recebe os seus pedidos** e passa cada um a quem do time faz. Embaixo da resposta dele você vê a quem ele pediu e como está, e quando o trabalho volta ele entrega o resultado na própria resposta. Das conversas, ele lê só o que volta dos pedidos que ele mesmo fez.
+> - **Novo:** quando ninguém do time faz o que você pediu, o Tuca **pergunta se pode fazer ele mesmo**, dizendo o que vai usar (a web, um conector): **Pode fazer**, **Pode, e não precisa perguntar de novo pra esse tipo de coisa** ou **Prefiro um colega pra isso**. O que você deixou fica em **Liberado**, na tela dele, com **Retirar**. Na terceira vez do mesmo tipo de coisa, ele sugere um colega pra cuidar disso.
+> - **Novo:** quando um colega **não termina** a parte dele (deu erro, está sem login, bateu o limite), o Tuca diz por quê e já **pergunta se pode fazer ele mesmo desta vez**: **Pode fazer** ou **Prefiro esperar**. Ele não faz a parte do colega por conta própria.
+> - **Novo:** **várias conversas com o Tuca**, uma por pedido, cada uma com um título. **Nova conversa** não apaga mais a anterior.
+> - **Mudou:** a **tela do Tuca** mostra o **seu time** ao lado da conversa: quem recebeu uma parte do pedido aparece com o que foi pedido e como está. A proposta de agente e os passos só aparecem quando ele está montando um (**Novo agente**).
+> - **Mudou:** o Tuca **não tem mais limite do mês**, guarda memórias como qualquer agente e lê a wiki.
+> - **Corrigido:** um pedido que o agente completava na mesma resposta aparecia **duas vezes** embaixo da mensagem dele. E um agente não deixa mais um cartão de pergunta sem pergunta ("Ok") só pra encerrar a resposta.
+
+### Added
+
+- **The Tuca takes your requests and passes each to whoever does it.** He was the one who built agents and explained the app. Now a request for work goes to him: he is told the whole team (what each one does and reaches, the sectors, the entry point you chose), hands each part over, and the answer comes back to his conversation, where he delivers the result in his own reply. A request of his reaches a colleague as yours, arriving through him, and each colleague keeps its own access and asks you for its own approvals. When a colleague does not finish, he says why and where to fix it, and does not take the part on his own. Of the conversations, he reads only what comes back from the requests he made himself.
+- **When no one on the team does it, the Tuca asks leave to do it himself.** He doesn't say it can't be done and doesn't make an agent nobody asked for. A card says what he will do and what he will use (the web, a connector), with three answers: **Go ahead** (in that conversation), **Go ahead, and no need to ask again for this kind of thing**, or **I'd rather have a colleague for this**, in which case he proposes one. What you allow is yours, never saved on him: each person's Tuca works with what that person allowed, only an admin can let him use a connector, and **Allowed**, on his screen, lists each one with a way to take it back. The third time the same kind of thing comes to him, he suggests a colleague for it, once.
+- **When a colleague does not finish, the Tuca asks right away whether to do that part himself.** A part that did not get done (an error, a missing sign-in, the month's limit) is not his to take on his own: he says why in one line and where you fix it, and in that same reply a card asks **Go ahead** (this once) or **I'd rather wait** (the part stays with the colleague). There is no "from now on" on that card, which would have him do that colleague's kind of work for good, and what you allow there is no kind of thing he does himself afterwards. He asks only for a colleague whose last part in that conversation did not get done, and not when the part depends on what only the colleague has.
+- **Several conversations with the Tuca, one per request.** **New conversation** no longer deletes the one before. Each is named after what you first asked there, every way to him opens the one you last talked in, and his screen lists the others to go back to.
+
+### Changed
+
+- **The Tuca has no monthly limit of his own.** With requests going through him, a Tuca out of tokens was a Tucano nobody could ask anything of, and he has no page to raise it on. The per-reply brake still holds. He also remembers like any agent and reads the wiki.
+- **The Tuca's screen shows your team beside the conversation.** It was the screen of building an agent: named steps on top and an empty proposal beside whatever was being talked about. Now the team sits there, and whoever has a part of the request in hand comes first, with what was asked and how it stands, one click from its work. The proposal and its steps show while he is building an agent (**New agent** on the card, the **+** by Agents, or with no one on the team yet), the ideas to start with are requests, and in the introduction he says who he is before the first agent is built.
+- **An agent that hands work on ends its reply on a short sentence.** It was told to end with no text, and with nothing to say some models looked for one more thing to call: a second message to the same colleague, a memory, a question. A request now takes one follow-up per reply, and whoever gets a part of a request is told the rest of it may be someone else's.
+
+### Fixed
+
+- **A request an agent went on with shows once.** A follow-up in the same reply listed the same request twice under the agent's message. And a question that is not one ("Ok") is refused instead of becoming a card that waits on you.
+
 ## [0.2.46] - 2026-11-24
 
 > **Em português:**
