@@ -25,7 +25,7 @@ import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { applyRestore } from '../core/restore'
-import { verifyLocal } from '../core/local-paths'
+import { openSigned, signedFor, verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
 import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
@@ -569,21 +569,20 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
   if (url.pathname.startsWith('/local/')) {
     // Signed for one person: anyone else (a link passed on) gets nothing.
     const signed = verifyLocal(localKey, new URL(url.pathname.replace(/^\/local/, ''), 'tucano://local'))
-    const path = signed && (signed.person ? signed.person === (who.person ?? ownerId) : who.owner) ? signed.path : null
-    let size = -1
-    try {
-      size = path && statSync(path).isFile() ? statSync(path).size : -1
-    } catch {}
-    if (!path || size < 0) return void res.writeHead(404, BASE_HEADERS).end()
+    // Opened once and served from that descriptor: only the file the core checked, never a link put in its place.
+    const opened = signed && signedFor(signed, who.person ?? ownerId, !!who.owner) ? openSigned(signed) : null
+    if (!signed || !opened) return void res.writeHead(404, BASE_HEADERS).end()
     const saving = url.searchParams.has('download')
     res.writeHead(200, {
       ...BASE_HEADERS,
-      'content-type': saving ? 'application/octet-stream' : (TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'),
-      'content-length': String(size),
+      'content-type': saving ? 'application/octet-stream' : (TYPES[extname(signed.path).toLowerCase()] ?? 'application/octet-stream'),
+      'content-length': String(opened.size),
       'content-security-policy': 'sandbox',
-      ...(saving ? { 'content-disposition': attachment(basename(path)) } : {})
+      ...(saving ? { 'content-disposition': attachment(basename(signed.path)) } : {})
     })
-    return void createReadStream(path).on('error', () => res.destroy()).pipe(res)
+    const stream = createReadStream('', { fd: opened.fd }).on('error', () => res.destroy())
+    res.on('close', () => stream.destroy()) // a request dropped halfway doesn't keep the descriptor open
+    return void stream.pipe(res)
   }
 
   // What the agents showed in the chat, sandboxed as on the desktop, or saved (?download).
