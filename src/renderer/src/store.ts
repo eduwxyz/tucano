@@ -72,7 +72,7 @@ import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
 import { hashToView, viewToHash } from './address'
 
-import type { ExecutionPage, ExecutionQuery, ExecutionStep } from '../../shared/types'
+import type { ExecutionPage, ExecutionQuery, ExecutionStep, TracesTest, TracesView } from '../../shared/types'
 export * from '../../shared/types'
 
 export type View =
@@ -1244,6 +1244,10 @@ export const loadReport = (week?: number): Promise<Report> => call('report', { w
 export const loadUsage = (): Promise<UsageReport> => call('usage')
 export const loadExecutions = (q: ExecutionQuery): Promise<ExecutionPage> => call('executions', q)
 export const loadExecutionSteps = (messageId: string): Promise<ExecutionStep[]> => call('executionSteps', { messageId })
+// Settings › Connections › Traces (admins).
+export const loadTraces = (): Promise<TracesView> => call('traces')
+export const saveTraces = (p: { on: boolean; endpoint: string; text?: boolean; headers?: string | null }): Promise<TracesView> => call('setTraces', p)
+export const testTraces = (p: { endpoint: string; headers?: string }): Promise<TracesTest> => call('testTraces', p)
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
 // People: who I am, who comes in (admins), who covers for me.
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })

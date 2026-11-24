@@ -180,6 +180,7 @@ export interface Receipt {
   outputTokens: number
   ms: number
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
+  responseModel?: string // the model id the harness says answered; `model` stays the one asked for
 }
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
@@ -1401,6 +1402,17 @@ export interface ToolStat {
 }
 
 export const EXECUTION_DAYS: readonly number[] = [1, 7, 30] // the periods Execuções offers
+
+// Settings › Connections › Traces, as an admin's page sees it. Headers are never sent back: only whether some are saved.
+export interface TracesView {
+  on: boolean
+  endpoint: string // the base address, as typed: /v1/traces is added when sending
+  text: boolean // the prompt and final reply go too
+  headers: boolean
+  fromEnv?: string // the server's environment configures traces: its endpoint's origin, and the screen is read-only
+}
+
+export type TracesTest = { ok: true } | { ok: false; status?: number } // status: what the backend answered; none: it couldn't be reached
 export const OK_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval']) // a reply that went fine
 export type ExecutionFilter = 'ok' | 'failed' | 'stopped'
 export interface ExecutionQuery {

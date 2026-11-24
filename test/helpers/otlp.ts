@@ -1,5 +1,5 @@
 // An OTLP/HTTP collector for tests: it keeps the spans it gets, in JSON.
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 export type OtlpValue = { stringValue?: string; intValue?: string | number; doubleValue?: number; boolValue?: boolean }
@@ -20,12 +20,14 @@ const plain = (v: OtlpValue): unknown => v.stringValue ?? (v.intValue !== undefi
 const attrs = (list: { key: string; value: OtlpValue }[] = []): Record<string, unknown> => Object.fromEntries(list.map((a) => [a.key, plain(a.value)]))
 export const attrsOf = (r: Received): Record<string, unknown> => attrs(r.span.attributes)
 
-export async function collector(): Promise<{ url: string; spans: Received[]; close(): Promise<void> }> {
+export async function collector(): Promise<{ url: string; spans: Received[]; headers: IncomingHttpHeaders[]; close(): Promise<void> }> {
   const spans: Received[] = []
+  const headers: IncomingHttpHeaders[] = [] // each request's, to see what a backend's key looked like on arrival
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (c: Buffer) => chunks.push(c))
     req.on('end', () => {
+      headers.push(req.headers)
       const body = JSON.parse(Buffer.concat(chunks).toString()) as { resourceSpans: { resource: { attributes: { key: string; value: OtlpValue }[] }; scopeSpans: { spans: OtlpSpan[] }[] }[] }
       for (const rs of body.resourceSpans) for (const ss of rs.scopeSpans) for (const span of ss.spans) spans.push({ resource: attrs(rs.resource.attributes), span })
       res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
@@ -35,6 +37,7 @@ export async function collector(): Promise<{ url: string; spans: Received[]; clo
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/traces`,
     spans,
+    headers,
     close: () => new Promise((ok) => server.close(() => ok()))
   }
 }

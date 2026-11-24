@@ -11,7 +11,7 @@ import type { ClassifierConfig } from '../src/shared/classifiers'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { jevBox } from '../src/core/jev'
 import { makeCertificate } from '../src/main/self-signed'
-import { during, inReplyTool, loadTelemetry, operationEngines, otelConfig, stopTelemetry, takeOtelEnv, tracedEngines, tracesWanted, type OtelConfig, type Telemetry } from '../src/core/telemetry'
+import { during, flushTelemetry, inReplyTool, loadTelemetry, operationEngines, otelConfig, reloadTelemetry, stopTelemetry, takeOtelEnv, traceReply, tracedEngines, tracesWanted, type OtelConfig, type Telemetry } from '../src/core/telemetry'
 import { startTelemetry } from '../src/core/telemetry-sdk'
 
 const jsonConfig = (url: string): OtelConfig => ({ url, protocol: 'http/json', headers: {} })
@@ -199,7 +199,7 @@ describe('a reply as a trace', () => {
     sink = undefined
   })
 
-  it('reaches the collector as one trace: the reply and a child span per tool', async () => {
+  it('reaches the collector as one trace: the reply, its model call and a child span per tool', async () => {
     sink = await collector()
     telemetry = startTelemetry(jsonConfig(sink.url), about)
 
@@ -209,7 +209,7 @@ describe('a reply as a trace', () => {
     reply.end({ status: 'done', usage })
     await telemetry.shutdown()
 
-    expect(sink.spans).toHaveLength(3)
+    expect(sink.spans).toHaveLength(4)
     const root = sink.spans.find((s) => s.span.name === 'invoke_agent Clara')!
     const bash = sink.spans.find((s) => s.span.name === 'execute_tool bash')!
     const web = sink.spans.find((s) => s.span.name === 'execute_tool web_read')!
@@ -476,6 +476,28 @@ describe('a reply as a trace', () => {
     expect(new Set(sink.spans.map((s) => s.resource['tucano.workspace.id']))).toEqual(new Set(['w1', 'w2']))
   })
 
+  it('puts the model call inside the reply as a child span, with its tokens, cost and the model that answered', async () => {
+    sink = await collector()
+    telemetry = startTelemetry(jsonConfig(sink.url), about)
+
+    telemetry.reply(clara).end({ status: 'done', usage: { ...usage, responseModel: 'claude-opus-4-1-20250805' } })
+    await telemetry.shutdown()
+
+    const root = sink.spans.find((s) => s.span.name === 'invoke_agent Clara')!
+    const call = sink.spans.find((s) => s.span.name === 'chat opus')!
+    expect(call.span.parentSpanId).toBe(root.span.spanId)
+    expect(attrsOf(call)).toMatchObject({
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.request.model': 'opus',
+      'gen_ai.response.model': 'claude-opus-4-1-20250805',
+      'gen_ai.usage.input_tokens': 8200,
+      'gen_ai.usage.cache_read.input_tokens': 3000,
+      'gen_ai.usage.output_tokens': 640,
+      'gen_ai.usage.cost': 0.12
+    })
+    expect(attrsOf(root)).toMatchObject({ 'gen_ai.response.model': 'claude-opus-4-1-20250805' })
+  })
+
   it('says which model really answered when a reply moved to its reserve', async () => {
     sink = await collector()
     telemetry = startTelemetry(jsonConfig(sink.url), about)
@@ -582,5 +604,32 @@ describe('turning OpenTelemetry on', () => {
     expect(said).toHaveLength(3)
     expect(said[0]).toContain('grpc')
     expect(said.join('\n')).not.toContain('s3cret')
+  })
+})
+
+describe('settings changed while a reply runs', () => {
+  it('sends a reply begun before the change where it began, and the next one to the new address', async () => {
+    const before = await collector()
+    const after = await collector()
+    try {
+      await reloadTelemetry(jsonConfig(before.url), about)
+      const running = traceReply(clara)!
+
+      await reloadTelemetry(jsonConfig(after.url), about)
+      running.end({ status: 'done', usage, text: { input: 'pergunta', output: 'resposta' } })
+      traceReply({ ...clara, agent: { id: 'a2', name: 'Bento' } })!.end({ status: 'done' })
+      await flushTelemetry()
+      await new Promise((r) => setTimeout(r, 300))
+
+      const begun = before.spans.find((s) => s.span.name === 'invoke_agent Clara')!
+      expect(attrsOf(begun)['tucano.run.status']).toBe('done') // it ended as it really ended, not cut by the change
+      expect(String(attrsOf(begun)['gen_ai.input.messages'])).toContain('pergunta')
+      expect(after.spans.map((s) => s.span.name)).toEqual(['invoke_agent Bento'])
+      expect(JSON.stringify(after.spans)).not.toContain('pergunta')
+    } finally {
+      await reloadTelemetry(undefined, about)
+      await before.close()
+      await after.close()
+    }
   })
 })
