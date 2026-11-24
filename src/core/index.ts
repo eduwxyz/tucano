@@ -2861,9 +2861,11 @@ const api: Handlers = {
     if (!agent) return
     const why = checkFolder(path, { dataDir })
     if (why) throw new Error(why)
+    // Kept as where it really is, as addNodeFolder does: the computer checks it is still there when it starts.
+    const real = realpathSync(path)
     const folders = agent.folders ?? []
-    if (folders.some((f) => f.path === path)) return
-    setFolders(agent, [...folders, { name: folderName(path, folders.map((f) => f.name)), path, readOnly: false }])
+    if (folders.some((f) => f.path === real || f.path === path)) return
+    setFolders(agent, [...folders, { name: folderName(real, folders.map((f) => f.name)), path: real, readOnly: false }])
   },
   folderAction: ({ agentId, name, action }) => {
     const agent = db.agent(agentId)

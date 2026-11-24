@@ -57,6 +57,27 @@ function folderRefusal(path: string, opts: { home?: string; dataDir: string }): 
   return null
 }
 
+// Checked again each time the computer is turned on, not only when lent: what the path is now (a
+// link put in its place, a folder moved into Library) has to be what was lent, and still lendable.
+export function lentProblem(folders: readonly LentFolder[], opts: { home?: string; dataDir: string }): string | null {
+  for (const f of folders) {
+    const why = checkFolder(f.path, { ...opts, named: true })
+    if (why) return why
+    const now = realpathSync(f.path)
+    if (now !== f.path)
+      return L(`${f.path} agora leva a ${now}, não à pasta emprestada. Devolva essa pasta e empreste de novo.`, `${f.path} now leads to ${now}, not to the folder that was lent. Return that folder and lend it again.`)
+  }
+  return null
+}
+
+const realOr = (p: string): string => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
 // /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
 export function folderName(path: string, taken: string[]): string {
   const base = basename(path).toLowerCase().normalize('NFD').replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '') || 'pasta'
@@ -494,7 +515,8 @@ export class Computers {
   private async doEnsure(agentId: string): Promise<void> {
     await this.adopt(agentId)
     const name = this.name(agentId)
-    const mounts = mountArgs(name, this.deps.db.agent(agentId)?.folders ?? [])
+    // Signed by where each folder really is now: a folder that came to lead elsewhere remakes the container.
+    const mounts = mountArgs(name, (this.deps.db.agent(agentId)?.folders ?? []).map((f) => ({ ...f, path: realOr(f.path) })))
     const sig = mounts.length ? createHash('sha1').update(JSON.stringify(mounts)).digest('hex').slice(0, 12) : ''
     let state = await docker(['inspect', '-f', '{{.State.Running}} {{index .Config.Labels "tucano.mounts"}}', name], { timeoutMs: 15_000 })
     const [running, raw = ''] = state.stdout.trim().split(' ')
@@ -519,6 +541,19 @@ export class Computers {
     if (problem) {
       this.set(agentId, { state: 'no_docker', detail: problem })
       throw new Error(L(`O Docker não está disponível neste computador: ${problem} Peça pro usuário resolver.`, `Docker isn't available on this computer: ${problem} Ask the user to fix it.`))
+    }
+
+    // Before the folders are mounted again (docker start remounts them too): an old container whose
+    // folder no longer checks out goes, keeping what was installed in it.
+    const lentNow = lentProblem(this.deps.db.agent(agentId)?.folders ?? [], { dataDir: this.deps.dataDir })
+    if (lentNow) {
+      if (state.code === 0) {
+        await docker(['commit', name, this.stateImage(agentId)], { timeoutMs: 10 * 60_000 })
+        await docker(['rm', '-f', name], { timeoutMs: 60_000 })
+        this.deps.db.removeServices(agentId)
+        this.ports.delete(agentId)
+      }
+      return this.fail(agentId, lentNow)
     }
 
     if (state.code === 0) {
