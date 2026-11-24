@@ -613,6 +613,8 @@ function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: G
   }
   const scale = 0.8 + 0.2 * Math.min(k, 1.8)
   const many = graph.nodes.length > 40
+  // a ring around each page to hover it by: on a map of thousands it costs more than it helps
+  const crowded = graph.nodes.length > GROUPED_FROM
   const radius = (nd: Graph['nodes'][number]): number => (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
   const short = (t: string): string => (t.length > 28 ? `${t.slice(0, 26)}…` : t)
   // What's far off the screen isn't drawn: a big wiki is thousands of pages, most of them out of
@@ -680,7 +682,7 @@ function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: G
           const p = at(nd.title)
           if (!p || side(p)) return null
           const mine = nd.title === selected
-          return dot(nd, i, p, { label: !named || named.has(nd.title), lit: false, dim: !shown(nd.title), halo: !many || mine, hit: !many || mine })
+          return dot(nd, i, p, { label: !named || named.has(nd.title), lit: false, dim: !shown(nd.title), halo: !crowded || mine, hit: !crowded || mine })
         })}
       </>
     )
