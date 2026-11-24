@@ -44,7 +44,7 @@ import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentioned
 import { can, isAdmin } from './policy-people'
 import { agentsFor } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
-import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
+import { kindLabel, actionMode, actionVerb, COMPUTADOR, gate, policyOf, shellActions, shellClass, toolActions, verdict, type ActionKind, type Policy, type Verdict } from '../shared/actions'
 import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from './waits'
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
@@ -2525,7 +2525,7 @@ ${note}`,
             const command = typeof args['command'] === 'string' ? args['command'] : ''
             const kinds = shellActions(command)
             // Only a command that does something that matters is judged; any other runs, as always.
-            const rules: Verdict = kinds.length ? verdict({ cls: 'write', kinds, p: await policyNow(), outside }) : { run: true, why: 'class', kinds: [] }
+            const rules: Verdict = kinds.length ? verdict({ cls: shellClass(kinds), kinds, p: await policyNow(), outside }) : { run: true, why: 'class', kinds: [] }
             const words = (rules.kinds.length ? rules.kinds : kinds).map((k) => kindLabel(k).toLowerCase()).join(', ')
             if (rules.off) {
               addSteps({ id: randomUUID(), label: L('Não rodou', "Didn't run"), detail: L(`${words}: desligado pra este agente`, `${words}: turned off for this agent`), status: 'error' })
@@ -2889,13 +2889,18 @@ ${note}`,
         // this computer's browser or apps: by that rule ("never" refuses), asking when none decides, never for good.
         const risky: ActionKind | null | undefined = isNode && current.name === NODE_APPROVED ? (callArgs['kind'] === 'browser' ? 'browser' : callArgs['kind'] === 'apps' ? 'apps' : null) : undefined
         if (risky === null) return textResult(L('Recusada: o "kind" tem que ser "browser" ou "apps", exatamente como a ferramenta devolveu.', 'Refused: "kind" has to be "browser" or "apps", exactly as the tool returned it.'), true)
-        // A command on a node is judged like one on this computer.
-        const kinds: ActionKind[] = risky ? [risky] : inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : isNode && current.name === NODE_BASH ? shellActions(String(callArgs['command'] ?? '')) : kindsOf({ cls, name: current.name })
+        // A command on a node is judged like one on this computer: deleting or publishing asks at normal,
+        // and a node_bash allowed for good covers its commits, not those.
+        const nodeShell = isNode && current.name === NODE_BASH
+        const shellCls = (k: ActionKind[]): 'write' | 'sensitive' => (cls === 'sensitive' ? 'sensitive' : shellClass(k)) // the card can raise it, never lower it
+        const kinds: ActionKind[] = risky ? [risky] : inner ? inner.flatMap((a) => (a.kind === 'tool' ? toolActions(a.slug) : [])) : nodeShell ? shellActions(String(callArgs['command'] ?? '')) : kindsOf({ cls, name: current.name })
         const unplaced = perCall && cls === 'sensitive' && !runnerRules(hit.connector.id, current.name, callArgs)
         // How far it goes on its own, read now: the rules may have changed since the turn started.
         const judgedNow = risky
           ? verdict({ cls: 'write', kinds, p: await policyNow(), highRisk: current.highRisk || readerLink, outside, askByDefault: true })
-          : verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
+          : nodeShell
+            ? verdict({ cls: shellCls(kinds), kinds, p: await policyNow(), highRisk: current.highRisk || readerLink, alwaysAllowed: always && shellClass(kinds) === 'write', outside })
+            : verdict({ cls, kinds, p: await policyNow(), highRisk: current.highRisk || unplaced || readerLink, alwaysAllowed: always, outside })
         if (judgedNow.off) return textResult(L(`Não rodei: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} está desligado pra você agora.`, `I didn't run it: ${judgedNow.kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')} is turned off for you now.`), true)
         if (!judgedNow.run) {
           if (question || approval) return textResult(L('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', 'There is already a request waiting for a decision in this message. End now.'), true)
