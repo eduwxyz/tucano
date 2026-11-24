@@ -433,7 +433,7 @@ function useSize(): [React.RefObject<HTMLDivElement | null>, { w: number; h: num
 const PANEL = 560 // the panel's width; the map keeps what's left of it in view
 const MIN_K = 0.05 // as far as the map zooms out: a big wiki fits whole
 const GHOSTS_UNTIL = 1000 // pages from which the notes nobody wrote yet stay off the map
-const MAX_LABELS = 220 // names on the map at once, at most
+const MAX_LABELS = 220 // names on a screen's worth of map, at most
 
 // What the map draws of the graph. A dot per title: the map knows a page by its title, and two
 // pages with the same one (an imported vault has "Untitled" a few times, and the same word in two
@@ -649,8 +649,8 @@ function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: G
       </g>
     )
   }
-  // The whole map, as it is with nothing lit. Lighting a page doesn't touch it: it fades as one
-  // group and the lit page and its links are drawn again over it (below), so hovering over a
+  // The whole map, as it is with nothing lit. Lighting a page doesn't touch it: a veil goes over
+  // it and the lit page and its links are drawn again over the veil (below), so hovering over a
   // map of thousands of pages redraws a few dozen.
   const base = useMemo(() => {
     if (!view) return null
@@ -687,7 +687,7 @@ function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: G
     // the camera's x and y are left out on purpose: the group around this layer carries them
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, frame, k, tx, ty, w, h, selected, holding, only, pendingKey, !!view])
-  // The lit page and what it links to, over the faded map, at full strength.
+  // The lit page and what it links to, over the veil, at full strength.
   const over = useMemo(() => {
     if (!view || !lit) return null
     const index = new Map(graph.nodes.map((n, i) => [n.title, i]))
