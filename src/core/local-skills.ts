@@ -5,9 +5,9 @@
 // edit in Claude Code counts from the next read.
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, type Dirent } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, extname, join, relative, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { L } from '../shared/lang'
-import type { LocalSkill } from '../shared/types'
+import type { LocalSkill, LocalSkillFolder } from '../shared/types'
 
 const TEXT = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.toml', '.xml', '.html'])
 const SCRIPT = new Set(['.py', '.sh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.go', '.swift'])
@@ -35,15 +35,55 @@ const dirs = (d: string): string[] => {
   }
 }
 
-// name and description from the YAML frontmatter, including "description: |" blocks.
-export function frontmatter(text: string): { name?: string; description?: string; body: string } {
+// A bare or quoted value, or the items of a "[a, b]" list.
+const cleaned = (v: string): string => v.trim().replace(/^(["'])(.*)\1$/, '$2')
+const listed = (inline: string): string[] =>
+  inline
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .split(',')
+    .map(cleaned)
+    .filter(Boolean)
+
+// "metadata.hermes.tags", as one line ("tags: [a, b]") or as a "- a" list under it. A library that
+// is tagged stays tagged: the facets (family:*, tool:*, risk:*) are how a big library is navigated.
+function tagsOf(lines: string[]): string[] {
+  const at = lines.findIndex((l) => /^\s*tags\s*:/.test(l))
+  if (at < 0) return []
+  const line = lines[at]!
+  const inline = line.slice(line.indexOf(':') + 1).trim()
+  if (inline) return listed(inline)
+  const out: string[] = []
+  for (const l of lines.slice(at + 1)) {
+    const item = /^\s*-\s*(.+)$/.exec(l)
+    if (item) out.push(cleaned(item[1]!))
+    else if (/^\s*\S/.test(l)) break
+  }
+  return out
+}
+
+// The frontmatter, read as far as a skill library needs: the two fields every layout has (name,
+// description), the two a Hermes library adds (category, and a version that sits at the top), and
+// the facets under metadata.hermes.tags. None of them is required, so a plain Claude Code or Codex
+// skill reads exactly as it did.
+export function frontmatter(text: string): { name?: string; description?: string; category?: string; version?: string; tags?: string[]; body: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text)
   if (!m) return { body: text }
   const lines = m[1]!.split(/\r?\n/)
-  const field = (key: string): string | undefined => {
-    const i = lines.findIndex((l) => l.startsWith(`${key}:`))
+  // A key at the top level, or one under a section ("version" under "metadata", which is where a
+  // plain Agent Skills file keeps it).
+  const field = (key: string, under?: string): string | undefined => {
+    const top = (name: string): number => lines.findIndex((l) => l.startsWith(`${name}:`))
+    let i = top(key)
+    if (under) {
+      const head = top(under)
+      if (head < 0) return undefined
+      i = lines.findIndex((l, n) => n > head && /^\s/.test(l) && l.trim().startsWith(`${key}:`))
+      if (i >= 0 && lines.slice(head + 1, i).some((l) => !/^\s/.test(l))) return undefined // past that section
+    }
     if (i < 0) return undefined
-    const inline = lines[i]!.slice(key.length + 1).trim()
+    const indent = lines[i]!.length - lines[i]!.trimStart().length
+    const inline = lines[i]!.slice(indent + key.length + 1).trim()
     if (inline && !/^[|>][-+]?$/.test(inline)) return inline.replace(/^(["'])(.*)\1$/, '$2')
     const block: string[] = []
     for (const l of lines.slice(i + 1)) {
@@ -52,7 +92,18 @@ export function frontmatter(text: string): { name?: string; description?: string
     }
     return block.join(' ').trim() || undefined
   }
-  return { name: field('name'), description: field('description'), body: text.slice(m[0].length) }
+  const category = field('category')
+  // A plain Agent Skills file keeps its version under "metadata.version"; a Hermes one at the top.
+  const version = field('version') ?? field('version', 'metadata')
+  const tags = tagsOf(lines)
+  return {
+    name: field('name'),
+    description: field('description'),
+    ...(category ? { category: cleaned(category) } : {}),
+    ...(version ? { version: cleaned(version) } : {}),
+    ...(tags.length ? { tags } : {}),
+    body: text.slice(m[0].length)
+  }
 }
 
 // The other files of a skill: text ones it may point to, and whether it has scripts.
@@ -84,16 +135,24 @@ function skill(file: string, origin: string): LocalSkill | undefined {
   try {
     const fm = frontmatter(readFileSync(file, 'utf8'))
     const dir = dirname(file)
-    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...contents(dir) }
+    return { source: file, name: fm.name || basename(dir), description: fm.description || '', bodyLength: fm.body.trim().length, origin, ...(fm.category ? { category: fm.category } : {}), ...(fm.version ? { version: fm.version } : {}), ...(fm.tags ? { tags: fm.tags } : {}), ...contents(dir) }
   } catch {
     return undefined
   }
 }
 
 const inDirs = (root: string, origin: string): LocalSkill[] =>
-  dirs(root)
-    .map((d) => skill(join(d, 'SKILL.md'), origin))
-    .filter((s): s is LocalSkill => !!s)
+  dirs(root).flatMap((d) => {
+    // "<name>/SKILL.md" is a skill, and is not looked into further.
+    const here = skill(join(d, 'SKILL.md'), origin)
+    if (here) return [here]
+    // One level deeper, "<category>/<name>/SKILL.md": how a Hermes library is organised (the folder
+    // is the category, the leaf is the skill). Only one extra level, so a big tree stays cheap.
+    return dirs(d)
+      .filter((x) => existsSync(join(x, 'SKILL.md')))
+      .map((x) => skill(join(x, 'SKILL.md'), origin))
+      .filter((s): s is LocalSkill => !!s)
+  })
 
 // The newest version folder of each plugin the user turned on in Claude Code.
 function pluginSkills(claude: string): LocalSkill[] {
@@ -138,10 +197,104 @@ function pluginSkills(claude: string): LocalSkill[] {
   })
 }
 
-export function findLocalSkills(home = homedir()): LocalSkill[] {
+// The folders each harness keeps its skills in on this computer. One only appears when its folder
+// is there: nothing is invented for a harness that isn't installed, and a harness that is gets no
+// setup step.
+// `alsoHome`: the folder of the house counts too, not only the one the variable names (Hermes keeps a
+// library in ~/.hermes and its install may live elsewhere). Claude Code and Codex point away on
+// purpose when the variable is set, so for them it replaces the default.
+const HARNESSES: { source: string; env?: string; roots: string[]; alsoHome?: boolean }[] = [
+  { source: 'Claude Code', env: 'CLAUDE_CONFIG_DIR', roots: ['.claude'] },
+  { source: 'Codex', env: 'CODEX_HOME', roots: ['.codex'] },
+  { source: 'Agents', env: 'AGENTS_HOME', roots: ['.agents'], alsoHome: true },
+  { source: 'Pi', env: 'PI_HOME', roots: ['.pi/agent', '.pi'], alsoHome: true },
+  { source: 'Hermes', env: 'HERMES_HOME', roots: ['.hermes'], alsoHome: true },
+  { source: 'OpenCode', env: 'OPENCODE_CONFIG_DIR', roots: ['.config/opencode', '.opencode'], alsoHome: true },
+  { source: 'Copilot', roots: ['.copilot'] },
+  { source: 'Gemini', roots: ['.gemini'] }
+]
+
+const isDirAt = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// The same folder spelled two ways (a link, a drive letter's case) is one folder.
+const same = (path: string): string => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path))
+
+// "~/skills", "~\skills" and an absolute path: the folder the person typed, or nothing.
+export function expandFolder(raw: string, home = homedir()): string | undefined {
+  const t = raw.trim()
+  if (!t) return undefined
+  if (t === '~') return home
+  if (t.startsWith('~/') || t.startsWith('~\\')) return join(home, t.slice(2))
+  return isAbsolute(t) ? resolve(t) : undefined
+}
+
+// A folder's skills: the folders inside it that hold a SKILL.md, or itself when it is one skill.
+export function skillsIn(dir: string, origin: string): LocalSkill[] {
+  if (existsSync(join(dir, 'SKILL.md'))) return [skill(join(dir, 'SKILL.md'), origin)].filter((s): s is LocalSkill => !!s)
+  return inDirs(dir, origin)
+}
+
+const countIn = (dir: string): number =>
+  existsSync(join(dir, 'SKILL.md'))
+    ? 1
+    : dirs(dir).reduce((n, d) => n + (existsSync(join(d, 'SKILL.md')) ? 1 : dirs(d).filter((x) => existsSync(join(x, 'SKILL.md'))).length), 0)
+
+// The folders the harnesses on this computer keep skills in.
+export function detectedFolders(home = homedir()): LocalSkillFolder[] {
+  const out: LocalSkillFolder[] = []
+  const seen = new Set<string>()
+  for (const h of HARNESSES) {
+    const env = h.env ? process.env[h.env] : undefined
+    const defaults = h.roots.map((r) => join(home, ...r.split('/')))
+    for (const root of [...(env ? [env] : []), ...(env && !h.alsoHome ? [] : defaults)]) {
+      const path = join(root, 'skills')
+      if (!isDirAt(path) || seen.has(same(path))) continue
+      seen.add(same(path))
+      out.push({ path, source: h.source, detected: true, on: true, count: countIn(path) })
+    }
+  }
+  return out
+}
+
+// Every folder skills are read from, in the order they're shown: the harnesses' first, then the ones
+// added by hand. `on` is what the settings say, so a folder found here reads unless it was turned off.
+export function skillFolders(home = homedir(), extra: string[] = [], off: string[] = []): LocalSkillFolder[] {
+  const offSet = new Set(off.map(same))
+  const out = detectedFolders(home).map((f) => ({ ...f, on: !offSet.has(same(f.path)) }))
+  for (const raw of extra) {
+    const path = expandFolder(raw, home)
+    if (!path || out.some((f) => same(f.path) === same(path))) continue
+    out.push({ path, source: 'Added', detected: false, on: !offSet.has(same(path)), count: isDirAt(path) ? countIn(path) : 0 })
+  }
+  return out
+}
+
+// Every skill the app can see: the ones in the folders that are on, plus the plugins turned on in
+// Claude Code. A skill reachable twice (the skills CLI links ~/.agents/skills into ~/.claude/skills)
+// is one skill: the first folder to hold it wins.
+export function findLocalSkills(home = homedir(), folders = skillFolders(home)): LocalSkill[] {
   const claude = process.env['CLAUDE_CONFIG_DIR'] || join(home, '.claude')
-  const codex = process.env['CODEX_HOME'] || join(home, '.codex')
-  return [...inDirs(join(claude, 'skills'), 'Claude Code'), ...pluginSkills(claude), ...inDirs(join(codex, 'skills'), 'Codex')]
+  const all = [...folders.filter((f) => f.on).flatMap((f) => skillsIn(f.path, f.source)), ...pluginSkills(claude)]
+  const seen = new Set<string>()
+  return all.filter((k) => {
+    // The folder it really is: a skill the skills CLI linked into two homes is one skill, and the
+    // first folder to hold it — Claude Code before Agents — is the origin that shows.
+    let key = same(dirname(k.source))
+    try {
+      key = same(realpathSync(dirname(k.source)))
+    } catch {
+      // a broken link: its own path is as good as it gets
+    }
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // A linked skill's recipe, or one of its files; never a file outside its folder.

@@ -217,6 +217,7 @@ export const NEEDS: Record<Method, Need> = {
   folderAction: 'admin',
   saveSkill: 'admin',
   localSkills: 'admin',
+  skillFolders: 'admin',
   linkSkill: 'admin',
   decideSkill: 'admin',
   restoreSkill: 'admin',
