@@ -389,7 +389,7 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const deg = new Uint16Array(list.length)
     for (const [a, b] of links) deg[a]!++, deg[b]!++
     parts.current = { list, links, deg }
-    if (first) for (let it = 0, iters = list.length > 3000 ? 80 : list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
+    if (first) for (let it = 0, iters = list.length > 6000 ? 80 : list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
     else heat.current = Math.max(heat.current, 0.6)
   }, [graph])
 
@@ -431,13 +431,48 @@ function useSize(): [React.RefObject<HTMLDivElement | null>, { w: number; h: num
 }
 
 const PANEL = 560 // the panel's width; the map keeps what's left of it in view
+const MIN_K = 0.05 // as far as the map zooms out: a big wiki fits whole
+const GHOSTS_UNTIL = 1000 // pages from which the notes nobody wrote yet stay off the map
+const MAX_LABELS = 220 // names on the map at once, at most
+
+// A big wiki's links name thousands of notes nobody wrote yet (an imported vault of vocabulary
+// cards names every word). As dots they're half the map and bury the pages; past GHOSTS_UNTIL
+// pages they stay off it. The page that links to one still shows it, dashed, in its text.
+export function withoutGhosts(graph: Graph): Graph {
+  let pages = 0
+  for (const n of graph.nodes) if (!n.missing) pages++
+  if (pages <= GHOSTS_UNTIL || pages === graph.nodes.length) return graph
+  const ghost = new Set(graph.nodes.filter((n) => n.missing).map((n) => n.title))
+  return { ...graph, nodes: graph.nodes.filter((n) => !n.missing), edges: graph.edges.filter(([a, b]) => !ghost.has(a) && !ghost.has(b)) }
+}
+
+// Which names fit: the ones asked for first (the page lit and what it links to), then the most
+// linked, each placed only where it doesn't cover one already placed. Zooming in makes room for more.
+export function fitLabels(items: { title: string; x: number; y: number; w: number; first: boolean; links: number }[], max = MAX_LABELS): Set<string> {
+  const CELL = 64
+  const taken = new Map<string, { x0: number; y0: number; x1: number; y1: number }[]>()
+  const out = new Set<string>()
+  const order = [...items].sort((a, b) => Number(b.first) - Number(a.first) || b.links - a.links)
+  for (const it of order) {
+    if (out.size >= max && !it.first) break
+    const box = { x0: it.x - it.w / 2 - 3, y0: it.y - 12, x1: it.x + it.w / 2 + 3, y1: it.y + 5 }
+    const cells: string[] = []
+    for (let cx = Math.floor(box.x0 / CELL); cx <= Math.floor(box.x1 / CELL); cx++) for (let cy = Math.floor(box.y0 / CELL); cy <= Math.floor(box.y1 / CELL); cy++) cells.push(`${cx},${cy}`)
+    const hit = cells.some((c) => taken.get(c)?.some((o) => box.x0 < o.x1 && o.x0 < box.x1 && box.y0 < o.y1 && o.y0 < box.y1))
+    if (hit && !it.first) continue
+    for (const c of cells) (taken.get(c) ?? taken.set(c, []).get(c)!).push(box)
+    out.add(it.title)
+  }
+  return out
+}
 const ease = (p: number): number => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2)
 
 // The whole wiki as a map you can move around: drag the empty map to move it, drag a page to
 // pull it (and what it links to) around, pinch or the mouse wheel (or ⌘/Ctrl + scroll) to zoom. A page picked flies to
 // the middle of what the panel leaves free, with its links lit.
-function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
+function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
   const [ref, size] = useSize()
+  const graph = useMemo(() => withoutGhosts(whole), [whole])
   const { bodies, kick } = useBodies(graph)
   const world = (t: string): Pos | undefined => {
     const b = bodies.get(t)
@@ -460,7 +495,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     for (const b of bodies.values()) (x0 = Math.min(x0, b.x * SPREAD)), (x1 = Math.max(x1, b.x * SPREAD)), (y0 = Math.min(y0, b.y * SPREAD)), (y1 = Math.max(y1, b.y * SPREAD))
     if (!isFinite(x0)) return { x: 0, y: 0, k: 1 }
     const a = free()
-    const k = Math.max(0.3, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
+    const k = Math.max(MIN_K, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
     return { k, x: a.w / 2 - ((x0 + x1) / 2) * k, y: a.h / 2 - ((y0 + y1) / 2) * k }
   }
   // What the first frame is drawn with, before the effect that fits the map runs: the camera the fit
@@ -493,7 +528,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     const c = camRef.current
     if (!c) return
     touched.current = true
-    const k = Math.max(0.3, Math.min(3, c.k * f))
+    const k = Math.max(MIN_K, Math.min(3, c.k * f))
     const p = at ?? { x: free().w / 2, y: size.h / 2 }
     setCam({ k, x: p.x - (p.x - c.x) * (k / c.k), y: p.y - (p.y - c.y) * (k / c.k) })
   }
@@ -560,9 +595,24 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   }
   const scale = 0.8 + 0.2 * Math.min(k, 1.8)
   const many = graph.nodes.length > 40
+  const radius = (nd: Graph['nodes'][number]): number => (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
+  const short = (t: string): string => (t.length > 28 ? `${t.slice(0, 26)}…` : t)
   // what's off the screen isn't drawn: a big wiki is thousands of pages, most of them out of view
   const M = 120
   const side = (p: Pos): number => (p.x < -M ? 1 : p.x > size.w + M ? 2 : 0) | (p.y < -M ? 4 : p.y > size.h + M ? 8 : 0)
+  // the names drawn: in a busy map, only those that fit (worked out each frame from where things are)
+  const named = ((): Set<string> | null => {
+    if (!many || !view) return null
+    const items: Parameters<typeof fitLabels>[0] = []
+    for (const nd of graph.nodes) {
+      const p = at(nd.title)
+      if (!p || side(p)) continue
+      const first = nd.title === lit || nd.title === selected || (!!lit && !!around?.has(nd.title))
+      if (!first && !(k > 1.05 || nd.links >= 3)) continue
+      items.push({ title: nd.title, x: p.x, y: p.y + radius(nd) + 15, w: short(nd.title).length * 6.6, first, links: nd.links })
+    }
+    return fitLabels(items)
+  })()
   return (
     <div
       ref={ref}
@@ -631,8 +681,8 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
           {graph.nodes.map((nd, i) => {
             const p = at(nd.title)
             if (!p || side(p)) return null
-            const r = (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
-            const label = !many || k > 1.05 || nd.links >= 3 || (!!lit && isNear(nd.title))
+            const r = radius(nd)
+            const label = !named || named.has(nd.title)
             const dim = !isNear(nd.title) || !shown(nd.title)
             return (
               <g
@@ -651,7 +701,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
                 <circle className="wk-node__dot" r={r} />
                 {label && (
                   <text y={r + 15} textAnchor="middle">
-                    {nd.title.length > 28 ? `${nd.title.slice(0, 26)}…` : nd.title}
+                    {short(nd.title)}
                   </text>
                 )}
               </g>

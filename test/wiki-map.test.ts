@@ -2,7 +2,9 @@
 // pull grows with the distance, and two pages too close oscillate through each other),
 // which landed every page on the same spot of the screen. No force may do that.
 import { describe, expect, it } from 'vitest'
-import { tick, type Body } from '../src/renderer/src/components/Wiki'
+import { fitLabels, tick, withoutGhosts, type Body } from '../src/renderer/src/components/Wiki'
+
+type Graph = Parameters<typeof withoutGhosts>[0]
 import { repelGrouped } from '../src/renderer/src/components/wiki-quadtree'
 
 // a dense wiki like the one that broke it: many pages, most of them linked to a few
@@ -79,5 +81,38 @@ describe('a big wiki map', () => {
       far = Math.max(far, Math.abs(b.x), Math.abs(b.y))
     }
     expect(far).toBeGreaterThan(100)
+  })
+})
+
+// A big wiki's map was a wall of names on top of each other, and half its dots were notes nobody
+// wrote yet. The names drawn now fit without covering each other, and those notes stay off a big map.
+describe('a big wiki map stays readable', () => {
+  it('leaves the notes nobody wrote yet off a big wiki, and keeps them on a small one', () => {
+    const pages = (n: number): Graph['nodes'] => Array.from({ length: n }, (_, i) => ({ title: `p${i}`, kind: 'note', links: 1 }))
+    const ghost = { title: 'word', kind: 'note', links: 1, missing: true }
+    const small = { nodes: [...pages(10), ghost], edges: [['p0', 'word'], ['p0', 'p1']] as [string, string][] }
+    expect(withoutGhosts(small)).toBe(small)
+    const big = { nodes: [...pages(1001), ghost], edges: [['p0', 'word'], ['p0', 'p1']] as [string, string][] }
+    const shown = withoutGhosts(big)
+    expect(shown.nodes.some((n) => n.missing)).toBe(false)
+    expect(shown.nodes).toHaveLength(1001)
+    expect(shown.edges).toEqual([['p0', 'p1']])
+  })
+
+  it('draws the most linked names that fit, never one over another, and always the one asked for', () => {
+    // a pile of names on the same spot, and one far away
+    const items = [
+      ...Array.from({ length: 50 }, (_, i) => ({ title: `n${i}`, x: 100 + (i % 3), y: 100, w: 80, first: false, links: i })),
+      { title: 'far', x: 600, y: 600, w: 80, first: false, links: 0 },
+      { title: 'lit', x: 101, y: 101, w: 80, first: true, links: 0 }
+    ]
+    const named = fitLabels(items)
+    expect(named.has('lit')).toBe(true)
+    expect(named.has('far')).toBe(true)
+    expect([...named].filter((t) => t.startsWith('n'))).toHaveLength(0)
+    const apart = fitLabels(items.filter((i) => i.title !== 'lit'))
+    expect(apart.has('n49')).toBe(true)
+    expect(apart.size).toBe(2)
+    expect(fitLabels(Array.from({ length: 1000 }, (_, i) => ({ title: `m${i}`, x: (i % 40) * 200, y: Math.floor(i / 40) * 40, w: 60, first: false, links: 1 })), 220).size).toBe(220)
   })
 })
