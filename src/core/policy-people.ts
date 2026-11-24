@@ -201,6 +201,7 @@ export const NEEDS: Record<Method, Need> = {
   setDelegation: 'anyone',
   inbox: 'anyone',
   answerQuestion: 'target',
+  removeTucaLeave: 'anyone', // only one's own is found (db.removeTucaLeave)
   confirmQuestion: 'target',
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',

@@ -12,6 +12,7 @@ import type { AppProvider } from '../../shared/connector-catalog'
 import {
   artifactUrl,
   asSaid,
+  type TucaLeave,
   type Account,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
@@ -107,6 +108,7 @@ export interface State {
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
   inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
+  leaves: TucaLeave[] // what I let the Tuca do himself (src/core/tuca-leave.ts)
   tasks: Task[] | null // my to-dos on the board (Quadro), in order; null until the board first asks
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
@@ -184,6 +186,7 @@ let state: State = {
   former: [],
   inbox: { approvals: [], questions: [] },
   delegations: [],
+  leaves: [],
   tasks: null,
   needsName: false,
   settings: {
@@ -696,6 +699,8 @@ function apply(e: CoreEvent): void {
         return { ...s, inbox: e.inbox ?? s.inbox }
       case 'delegations':
         return { ...s, delegations: e.delegations ?? s.delegations }
+      case 'leaves':
+        return { ...s, leaves: e.leaves ?? s.leaves }
     }
   })
   // A full message carries all its text so far: what streamed before it is in there.
@@ -780,6 +785,7 @@ export async function start(): Promise<void> {
       you: snap.you,
       inbox: snap.inbox ?? { approvals: [], questions: [] },
       delegations: snap.delegations ?? [],
+      leaves: snap.leaves ?? [],
       people: snap.people,
       former: snap.former ?? []
     }

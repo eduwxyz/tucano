@@ -12,6 +12,7 @@ import {
   nextRun,
   routineCap,
   type Agent,
+  type TucaLeave,
   type AgentApp,
   type AgentColor,
   type Approval,
@@ -645,9 +646,20 @@ export const MIGRATIONS = [
   // The Tuca takes the person's requests now and passes each to whoever does it (src/core/tuca.ts). With
   // everything going through him he has no monthly limit of his own (there is no page to raise it on, and a
   // Tuca out of tokens is a Tucano nobody can ask anything of), and he remembers like any agent.
+  //
+  // And what each person let him do himself when no one on the team does it (src/core/tuca-leave.ts): for
+  // one conversation, or for good. The person's, so it goes with them and with that conversation.
   `
   UPDATE agents SET limit_tokens = 0 WHERE kind = 'tuca';
   UPDATE agents SET memory_mode = 'auto' WHERE kind = 'tuca' AND memory_mode = 'read';
+  CREATE TABLE IF NOT EXISTS tuca_leaves (
+    id TEXT PRIMARY KEY,
+    person TEXT NOT NULL,
+    conversation_id TEXT,
+    body TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS tuca_leaves_by_person ON tuca_leaves (person);
   `
 ]
 
@@ -803,6 +815,7 @@ export class Db {
           UPDATE people SET delegate_to = NULL, delegate_until = NULL;
           DELETE FROM routine_watchers;
           DELETE FROM questions;
+          DELETE FROM tuca_leaves;
           DELETE FROM delegations;
           DELETE FROM jobs;
           DELETE FROM tasks;
@@ -1173,6 +1186,21 @@ export class Db {
   // Its messages and members go with it (foreign keys).
   deleteConversation(id: string): void {
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
+    this.db.prepare('DELETE FROM tuca_leaves WHERE conversation_id = ?').run(id) // what was allowed only there
+  }
+
+  // What a person let the Tuca do himself (src/core/tuca-leave.ts), oldest first.
+  tucaLeaves(person: string): TucaLeave[] {
+    return (this.db.prepare('SELECT body FROM tuca_leaves WHERE person = ? ORDER BY at, id').all(person) as Row[]).map((r) => JSON.parse(str(r['body'])) as TucaLeave)
+  }
+
+  saveTucaLeave(l: TucaLeave): void {
+    this.db.prepare('INSERT INTO tuca_leaves (id, person, conversation_id, body, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET body = excluded.body, conversation_id = excluded.conversation_id').run(l.id, l.person, l.conversationId ?? null, JSON.stringify(l), l.at)
+  }
+
+  // Taken back by its own person only: true when there was one to take.
+  removeTucaLeave(id: string, person: string): boolean {
+    return this.db.prepare('DELETE FROM tuca_leaves WHERE id = ? AND person = ?').run(id, person).changes > 0
   }
 
   // Whether anything was said there yet, by anyone.
@@ -2247,6 +2275,7 @@ export class Db {
       this.db.prepare('DELETE FROM person_keys WHERE person_id = ?').run(id)
       this.db.prepare('DELETE FROM harness_keys WHERE person_id = ?').run(id) // their harnesses stop at once too
       this.db.prepare('DELETE FROM tasks WHERE owner = ?').run(id) // their to-dos: never started, only theirs
+      this.db.prepare('DELETE FROM tuca_leaves WHERE person = ?').run(id) // what they let the Tuca do himself
     })
   }
 

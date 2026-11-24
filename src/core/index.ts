@@ -3234,6 +3234,9 @@ const api: Handlers = {
   activity: ({ personId, kind, before }) => db.activity({ personId, kind, before }),
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
+  removeTucaLeave: ({ id }, ctx) => {
+    if (db.removeTucaLeave(id, ctx.person.id)) emit({ type: 'leaves' })
+  },
   confirmQuestion: ({ id, ok }, ctx) => runner.confirm(id, ok, ctx.person),
   // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
   answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),
