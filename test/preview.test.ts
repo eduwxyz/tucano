@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { createServer, request, type IncomingHttpHeaders, type Server } from 'node:http'
 import { createServer as tcpServer, connect, type AddressInfo, type Socket } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Preview, withoutOurCookies } from '../src/server/preview'
+import { Preview, theirCookies, withoutOurCookies } from '../src/server/preview'
 
 // An agent's page on the loopback, and the server's front door in front of it (as src/server does).
 let site: Server
@@ -13,13 +13,17 @@ let wsPort = 0
 let frontPort = 0
 let seen: IncomingHttpHeaders = {}
 let now = 1_000_000
-const preview = new Preview(randomBytes(32), 'ana.example.com', (p) => p === sitePort || p === wsPort, () => now)
+// Who may see which port, as the server's grants answer it.
+let barred = new Set<string>()
+const preview = new Preview(randomBytes(32), 'ana.example.com', (p) => p === sitePort || p === wsPort, async (person, port) => !barred.has(`${person}:${port}`), () => now)
 const listen = (s: { listen: (port: number, host: string, cb: () => void) => unknown; address: () => unknown }): Promise<number> => new Promise((r) => void s.listen(0, '127.0.0.1', () => r((s.address() as AddressInfo).port)))
 
 beforeAll(async () => {
   site = createServer((req, res) => {
     seen = req.headers
-    res.writeHead(200, { 'content-type': 'text/plain' }).end(`site:${req.url}`)
+    // A page that tries to set our cookies, or one for the whole domain, besides its own.
+    const cookies = req.url === '/cookies' ? ['tucano=forged; Path=/', 'Tucano_Preview=x', 'wide=1; Domain=example.com', 'theirs=1; Path=/; HttpOnly'] : []
+    res.writeHead(200, { 'content-type': 'text/plain', ...(cookies.length ? { 'set-cookie': cookies } : {}) }).end(`site:${req.url}`)
   })
   sitePort = await listen(site)
   // A WebSocket-ish server: answers the upgrade, then echoes.
@@ -58,8 +62,8 @@ const ask = (host: string, path: string, cookie?: string): Promise<{ status: num
     r.on('error', reject)
     r.end()
   })
-const signIn = async (port: number): Promise<string> => {
-  const grant = new URL(preview.grantUrl(port, '/app?x=1'))
+const signIn = async (port: number, person = 'ana'): Promise<string> => {
+  const grant = new URL(preview.grantUrl(port, person, '/app?x=1'))
   const r = await ask(grant.host, `${grant.pathname}${grant.search}`)
   expect(r.status).toBe(302)
   expect(r.headers.location).toBe('/app?x=1')
@@ -91,9 +95,11 @@ describe("an agent's page at an address of its own", () => {
   })
 
   it('refuses a grant that expired, was changed, or is for another port', async () => {
-    const grant = new URL(preview.grantUrl(sitePort, '/'))
+    const grant = new URL(preview.grantUrl(sitePort, 'ana', '/'))
     const tampered = grant.search.replace(/g=[^&]+/, 'g=forged')
     expect((await ask(grant.host, `${grant.pathname}${tampered}`)).status).toBe(403)
+    // Nor made out to someone else.
+    expect((await ask(grant.host, `${grant.pathname}${grant.search.replace(/p=[^&]+/, `p=${Buffer.from('bia').toString('base64url')}`)}`)).status).toBe(403)
     expect((await ask(`${wsPort}-ana.example.com`, `${grant.pathname}${grant.search}`)).status).toBe(403)
     now += 6 * 60_000
     expect((await ask(grant.host, `${grant.pathname}${grant.search}`)).status).toBe(403)
@@ -104,8 +110,8 @@ describe("an agent's page at an address of its own", () => {
   })
 
   it('passes nothing to a port no agent serves', async () => {
-    const off = new Preview(randomBytes(32), 'ana.example.com', () => false)
-    const grant = new URL(off.grantUrl(sitePort, '/'))
+    const off = new Preview(randomBytes(32), 'ana.example.com', () => false, async () => true)
+    const grant = new URL(off.grantUrl(sitePort, 'ana', '/'))
     const s = createServer((req, res) => off.handle(req, res, sitePort))
     const p = await listen(s)
     const get = (path: string, cookie?: string): Promise<number> =>
@@ -117,9 +123,10 @@ describe("an agent's page at an address of its own", () => {
 
   it('carries a WebSocket both ways, signed in only', async () => {
     const cookie = await signIn(wsPort)
-    const talk = (withCookie: boolean): Promise<string> =>
+    const talk = (withCookie: boolean): Promise<string> => talkWith(withCookie ? cookie : undefined)
+    const talkWith = (c: string | undefined): Promise<string> =>
       new Promise((resolve) => {
-        const sock = connect(frontPort, '127.0.0.1', () => sock.write(`GET /hmr HTTP/1.1\r\nHost: ${wsPort}-ana.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${withCookie ? `Cookie: ${cookie}\r\n` : ''}\r\n`))
+        const sock = connect(frontPort, '127.0.0.1', () => sock.write(`GET /hmr HTTP/1.1\r\nHost: ${wsPort}-ana.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${c ? `Cookie: ${c}\r\n` : ''}\r\n`))
         let got = ''
         sock.on('data', (d) => {
           got += d
@@ -130,6 +137,58 @@ describe("an agent's page at an address of its own", () => {
       })
     expect(await talk(true)).toContain('echo:ping')
     expect(await talk(false)).toBe('')
+    // Nor with a cookie for another port, or for someone no longer allowed there.
+    const other = await signIn(sitePort)
+    expect(await talkWith(other)).toBe('')
+    barred = new Set([`ana:${wsPort}`])
+    expect(await talkWith(cookie)).toBe('')
+    barred = new Set()
+  })
+
+  it('a cookie older than its 12 hours opens nothing', async () => {
+    const host = `${sitePort}-ana.example.com`
+    const cookie = await signIn(sitePort)
+    now += 12 * 3_600_000 - 1000
+    expect((await ask(host, '/', cookie)).status).toBe(200)
+    now += 2000
+    expect((await ask(host, '/', cookie)).status).toBe(401)
+    now -= 12 * 3_600_000 + 1000
+  })
+
+  it('a cookie stops opening the page once its person may no longer see it', async () => {
+    const host = `${sitePort}-ana.example.com`
+    const cookie = await signIn(sitePort)
+    expect((await ask(host, '/', cookie)).status).toBe(200)
+    barred = new Set([`ana:${sitePort}`])
+    expect((await ask(host, '/', cookie)).status).toBe(401)
+    barred = new Set()
+    // And each cookie is its person's: one made for bia, barred, doesn't ride on ana's access.
+    const bia = await signIn(sitePort, 'bia')
+    barred = new Set([`bia:${sitePort}`])
+    expect((await ask(host, '/', bia)).status).toBe(401)
+    expect((await ask(host, '/', cookie)).status).toBe(200)
+    barred = new Set()
+  })
+
+  it('a cookie changed by hand (another person, another time) opens nothing', async () => {
+    const host = `${sitePort}-ana.example.com`
+    const cookie = await signIn(sitePort)
+    const [name, value] = cookie.split('=') as [string, string]
+    const [, at, mac] = value.split('.')
+    expect((await ask(host, '/', `${name}=${Buffer.from('bia').toString('base64url')}.${at}.${mac}`)).status).toBe(401)
+    expect((await ask(host, '/', `${name}=${value.split('.')[0]}.${Number(at) + 1}.${mac}`)).status).toBe(401)
+    // The old form, the same for everyone, is gone.
+    expect((await ask(host, '/', `${name}=${mac}`)).status).toBe(401)
+  })
+
+  it('lets the page set only its own cookies', async () => {
+    const cookie = await signIn(sitePort)
+    const r = await ask(`${sitePort}-ana.example.com`, '/cookies', cookie)
+    expect(r.status).toBe(200)
+    expect(r.headers['set-cookie']).toEqual(['theirs=1; Path=/; HttpOnly'])
+    expect(theirCookies(['tucano=x', ' tucano_preview =y'])).toBeUndefined()
+    expect(theirCookies('a=1; domain=.example.com')).toBeUndefined()
+    expect(theirCookies('tucanos=1')).toEqual(['tucanos=1'])
   })
 
   it('keeps only the page’s own cookies', () => {

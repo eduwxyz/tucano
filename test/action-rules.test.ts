@@ -378,6 +378,59 @@ describe('levels', () => {
   })
 })
 
+describe('commands at normal', () => {
+  // Reads the list on "lista" (something from outside), then runs the command.
+  const readsThenRuns = (command: string) => (turn: Turn): Plan =>
+    turn.prompt.includes('aprovou') ? null : turn.prompt.includes('roda') ? { tool: 'bash', args: { command } } : turn.prompt.includes('lista') ? { tool: 'tarefas__list_tasks', args: {} } : null
+  const destructive = ['rm -rf src', 'npm publish', 'gh repo delete x/y --yes', 'terraform destroy']
+
+  for (const command of destructive) {
+    it(`"${command}" asks first at normal, as the level promises`, async () => {
+      settings = { ...settings, autonomy: undefined }
+      const r = runner(runs(command))
+      await r.send('d1', 'faça')
+      await r.idle()
+      expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: 'bash', args: { command } })
+      expect(ran).toEqual([])
+    })
+
+    it(`"${command}" asks first at normal after reading something from outside too`, async () => {
+      settings = { ...settings, autonomy: undefined }
+      const r = runner(readsThenRuns(command))
+      await r.send('d1', 'lista as tarefas')
+      await r.idle()
+      expect(agentMessages()[0]!.run!.outside).toBe(true)
+      await r.send('d1', 'roda o comando')
+      await r.idle()
+      expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: 'bash', args: { command } })
+      expect(ran).toEqual([])
+    })
+  }
+
+  it('a commit still runs right away at normal', async () => {
+    settings = { ...settings, autonomy: undefined }
+    const r = runner(runs('git add -A && git commit -m "x"'))
+    await r.send('d1', 'salva')
+    await r.idle()
+    expect(ran).toEqual(['git add -A && git commit -m "x"'])
+    expect(db.approvals()).toEqual([])
+  })
+
+  it('"faz sozinho" for deleting still lets a delete run, and no guardrails still runs one', async () => {
+    settings = { ...settings, autonomy: undefined, actionRules: { delete: 'auto' } }
+    const r = runner(runs('rm -rf build'))
+    await r.send('d1', 'limpa')
+    await r.idle()
+    expect(ran).toEqual(['rm -rf build'])
+    settings = { ...settings, autonomy: 'free', actionRules: undefined }
+    const f = runner(runs('rm -rf dist'))
+    await f.send('d1', 'limpa')
+    await f.idle()
+    expect(ran).toEqual(['rm -rf build', 'rm -rf dist'])
+    expect(db.approvals()).toEqual([])
+  })
+})
+
 describe('saved rules', () => {
   it('an agent keeps its rules, only known kinds and modes', () => {
     db.saveAgent({ ...agent(), actionRules: { commit: 'auto', push: 'maybe', bogus: 'off' } as unknown as ActionRules })

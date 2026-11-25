@@ -2,11 +2,11 @@
 // whatever needs a look. One calendar week at a time, like the routines.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useState, type ReactNode } from 'react'
-import { agentById, amAdmin, loadReport, navigate, useStore, type AgentReport, type Problem, type Rate, type Report } from '../store'
+import { agentById, amAdmin, loadReport, navigate, useStore, type AgentReport, type Problem, type Rate, type Report, type ToolStat } from '../store'
 import { Sheet } from './Pages'
 import { AdminOnly } from './People'
 import { when } from './Routines'
-import { ago, AgentAvatar, Icon, shiftWeek, startOfWeek, tokens, weekRange } from './ui'
+import { ago, AgentAvatar, durationOrDash, Icon, share, shiftWeek, startOfWeek, tokens, weekRange } from './ui'
 
 const ratio = (r: Rate): number | undefined => (r.replies ? r.ok / r.replies : undefined)
 const pct = (r: Rate): string => (r.replies ? `${Math.round((r.ok / r.replies) * 100)}%` : '—')
@@ -107,6 +107,8 @@ export function ReportPage(): ReactNode {
               {quiet.length > 0 && <Quiet ids={quiet.map((a) => a.agentId)} />}
             </section>
           )}
+
+          <ToolsSection tools={report.tools} />
 
           {report.work.length > 0 && (
             <section className="read-group">
@@ -226,7 +228,52 @@ function AgentLine({ report: r }: { report: AgentReport }): ReactNode {
           {more > 0 && <li className="rep-problems__more">{L(`e mais ${more}`, `and ${more} more`)}</li>}
         </ul>
       )}
+      <button className="text-btn rep-line__runs" onClick={() => navigate({ kind: 'usage', executions: { agentId: agent.id, days: 7 } })}>
+        {L('Ver execuções →', 'See executions →')}
+      </button>
     </div>
+  )
+}
+
+// The week's tools, slowest first: which one drags and which one fails.
+export function ToolsSection({ tools }: { tools: ToolStat[] }): ReactNode {
+  const slowest = Math.max(1, ...tools.map((t) => t.p95 ?? 0))
+  return (
+    <section className="read-group">
+      <h2>
+        {L('Ferramentas', 'Tools')}
+        <span>{L('As mais lentas primeiro.', 'Slowest first.')}</span>
+      </h2>
+      {tools.length === 0 ? (
+        <p className="read-empty">{L('As ferramentas aparecem aqui conforme as respostas usam.', 'Tools show up here as replies use them.')}</p>
+      ) : (
+        <div className="rep-tools">
+          <div className="rep-tool rep-tool--head">
+            <span>{L('Ferramenta', 'Tool')}</span>
+            <span />
+            <span className="num">p95</span>
+            <span className="num">{L('Usos', 'Uses')}</span>
+            <span className="num">{L('Erros', 'Errors')}</span>
+          </div>
+          {tools.map((t) => {
+            const failed = Math.round(t.errorRate * t.uses)
+            return (
+              <div key={t.tool} className="rep-tool">
+                <span className="mono truncate" title={t.tool}>
+                  {t.tool}
+                </span>
+                <span className="rep-tool__bar">{t.p95 !== undefined && <i style={{ width: `${(t.p95 / slowest) * 100}%` }} />}</span>
+                <span className="num rep-tool__p95">{durationOrDash(t.p95)}</span>
+                <span className="num muted">{t.uses.toLocaleString(locale())}</span>
+                <span className={`num ${failed ? 'is-danger' : 'muted'}`} title={failed ? L(`${failed} de ${t.uses}`, `${failed} of ${t.uses}`) : undefined}>
+                  {share(t.errorRate)}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 

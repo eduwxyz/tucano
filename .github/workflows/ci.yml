@@ -1,8 +1,12 @@
 # Every pull request and every push to main: typecheck, tests and the app's
 # build, on macOS, Linux and Windows, so a change can't break one of them unnoticed.
-# Windows runs the same tests several times slower, so they're split across four
-# runners there. A pull request runs the heaviest randomized tests with fewer rounds
-# (TUCANO_QUICK_TESTS); main runs them all.
+# A pull request waits for the slowest runner, so each system's tests are split across
+# several, by how long each file takes there (test/helpers/shards.ts): the runners are
+# free for a public repository, and up to 20 run at once (5 of them macOS). Windows runs
+# the same tests about twice as slow and takes 50 s to set up, so it gets the most; a
+# sixth runner there would not help, since its longest file alone takes about a minute.
+# macOS's runners have two test workers where the others have three. A pull request runs
+# the heaviest randomized tests with fewer rounds (TUCANO_QUICK_TESTS); main runs them all.
 name: CI
 
 on:
@@ -21,17 +25,22 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.os }}${{ matrix.shard != '1/1' && format(' ({0})', matrix.shard) || '' }}
+    name: ${{ matrix.os }} (${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, shard: 1/1 }
-          - { os: ubuntu-latest, shard: 1/1 }
-          - { os: windows-latest, shard: 1/4 }
-          - { os: windows-latest, shard: 2/4 }
-          - { os: windows-latest, shard: 3/4 }
-          - { os: windows-latest, shard: 4/4 }
+          - { os: ubuntu-latest, shard: 1/2 }
+          - { os: ubuntu-latest, shard: 2/2 }
+          - { os: macos-latest, shard: 1/4 }
+          - { os: macos-latest, shard: 2/4 }
+          - { os: macos-latest, shard: 3/4 }
+          - { os: macos-latest, shard: 4/4 }
+          - { os: windows-latest, shard: 1/5 }
+          - { os: windows-latest, shard: 2/5 }
+          - { os: windows-latest, shard: 3/5 }
+          - { os: windows-latest, shard: 4/5 }
+          - { os: windows-latest, shard: 5/5 }
     runs-on: ${{ matrix.os }}
     env:
       # The tests and the build don't run Electron itself.
@@ -48,9 +57,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - if: matrix.shard == '1/1' || matrix.shard == '1/4'
+      - if: startsWith(matrix.shard, '1/') # once per system
         run: npm run typecheck
       - run: npx vitest run --shard=${{ matrix.shard }}
-      - if: matrix.shard == '1/1' || matrix.shard == '1/4'
+      - if: startsWith(matrix.shard, '1/') # once per system
         run: npm run build
 

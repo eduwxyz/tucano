@@ -113,10 +113,13 @@ describe("an agent's row in the sidebar", () => {
     expect(row('Lia').querySelector('.nav-item__role')!.getAttribute('title')).toBe('Pesquisadora')
   })
 
-  it('keeps a DM with an archived agent reachable, and the archived entry', async () => {
-    await render({ agents: [agent({}), agent({ id: 'a2', name: 'Duda', handle: 'duda', archived: true })], conversations: [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })] })
-    expect(row('Duda').parentElement!.className).toContain('is-archived')
-    expect(section('Agentes').textContent).toContain('Arquivados')
+  it('puts the laptop last, so the working dots and the unread count come before it and it stays put', async () => {
+    const mac = agent({ computer: true, computerKind: 'mac' })
+    await render({ agents: [mac], conversations: [dm({ unread: 2 })], messages: { d1: [msg('m1', 'd1', 'a1', 'working')] } })
+    const parts = [...row('Lia').children].map((x) => x.className)
+    expect(parts.at(-1)).toBe('nav-item__mac')
+    expect(parts.findIndex((c) => c.includes('working-dots'))).toBeLessThan(parts.indexOf('nav-item__mac'))
+    expect(parts.findIndex((c) => c.includes('badge'))).toBeLessThan(parts.indexOf('nav-item__mac'))
   })
 
   it('has the org chart behind an icon in the header, where "Time" was', async () => {
@@ -124,6 +127,48 @@ describe("an agent's row in the sidebar", () => {
     expect([...document.querySelectorAll('.nav-item__label')].map((x) => x.textContent)).not.toContain('Time')
     await click(section('Agentes').querySelector('.section__head [aria-label="Organograma"]')!)
     expect(store.navigate).toHaveBeenCalledWith({ kind: 'org' })
+  })
+})
+
+describe('the archived agents', () => {
+  // Lia is active; Duda (with a DM) and Rui (without) are archived.
+  const agents = [agent({}), agent({ id: 'a2', name: 'Duda', handle: 'duda', archived: true }), agent({ id: 'a3', name: 'Rui', handle: 'rui', archived: true })]
+  const conversations = [dm({}), dm({ id: 'd2', name: 'a2', members: ['a2'] })]
+  const group = (): Element => [...document.querySelectorAll('.agent-sector')].find((g) => g.querySelector('.agent-sector__head')?.textContent?.includes('Arquivados'))!
+
+  it('are a group at the end, its head first and its agents below it, never among the active ones', async () => {
+    await render({ agents, conversations })
+    const all = [...section('Agentes').querySelectorAll('.agent-sector__head, .agent-row')]
+    expect(all.map((x) => x.querySelector('.fold-toggle, .nav-item__label')!.textContent)).toEqual(['Lia', 'Arquivados', 'Duda', 'Rui'])
+    expect([...group().querySelectorAll('.agent-row')].map((r) => r.className)).toEqual(['agent-row is-archived', 'agent-row is-archived'])
+  })
+
+  it('start folded, with how many; opening is remembered like a sector', async () => {
+    await render({ agents, conversations })
+    expect(group().className).toContain('is-folded')
+    expect(group().querySelector('.agent-sector__count')!.textContent).toBe('2')
+    await click(group().querySelector('.fold-toggle')!)
+    expect(store.updateSettings).toHaveBeenCalledWith({ folded: ['+sector:archived'] })
+    await render({ agents, conversations, settings: { folded: ['+sector:archived'] } as State['settings'] })
+    expect(group().className).not.toContain('is-folded')
+    expect(group().querySelector('.agent-sector__count')).toBeNull()
+    await click(group().querySelector('.fold-toggle')!)
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ folded: [] })
+  })
+
+  it('open the DM, or the page when there is none, and still lead to reactivating', async () => {
+    await render({ agents, conversations, settings: { folded: ['+sector:archived'] } as State['settings'] })
+    await click(row('Duda'))
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'conversation', id: 'd2' })
+    await click(row('Rui'))
+    expect(store.navigate).toHaveBeenCalledWith({ kind: 'agent', id: 'a3' })
+    expect(store.openDm).not.toHaveBeenCalled()
+    expect(group().querySelector('.agent-sector__more')!.textContent).toBe('Reativar…')
+  })
+
+  it('no archived agent, no group', async () => {
+    await render({ agents: [agent({})], conversations: [dm({})] })
+    expect(section('Agentes').textContent).not.toContain('Arquivados')
   })
 })
 
@@ -152,5 +197,38 @@ describe('the agents grouped by sector', () => {
     await render({ agents: [agent({}), agent({ id: 'a2', name: 'Theo', handle: 'theo' })], conversations: [] })
     expect(document.querySelector('.agent-sector')).toBeNull()
     expect(agentRows()).toHaveLength(2)
+  })
+})
+
+// The person's own order (reorder.ts, list-order.ts): the agents within each sector, the sectors, and
+// the items at the top, where one taken out of the sidebar stays out.
+describe('the sidebar in the order the person left it', () => {
+  const team = [agent({ sectorName: 'Pesquisa' }), agent({ id: 'a2', name: 'Theo', handle: 'theo', reportsTo: 'a1' }), agent({ id: 'a3', name: 'Duda', handle: 'duda' })]
+  const keyOn = (el: Element, key: string): Promise<void> =>
+    act(async () => {
+      const ev = new window.Event('keydown', { bubbles: true, cancelable: true })
+      Object.defineProperties(ev, { key: { value: key }, altKey: { value: true } })
+      el.dispatchEvent(ev)
+    })
+
+  it('keeps each sector in its order, and the sectors in theirs', async () => {
+    await render({ agents: team, conversations: [], settings: { agentOrder: ['a2', 'a1'], sectorOrder: ['none'] } as State['settings'] })
+    const groups = [...document.querySelectorAll('.agent-sector')].map((g) => [...g.querySelectorAll('.nav-item__label')].map((x) => x.textContent))
+    expect(groups).toEqual([['Duda'], ['Theo', 'Lia']])
+  })
+
+  it('steps an agent with Alt+arrows within its sector, never into the next one', async () => {
+    await render({ agents: team, conversations: [] })
+    await keyOn(row('Theo'), 'ArrowUp')
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ agentOrder: ['a2', 'a1', 'a3'] })
+    vi.mocked(store.updateSettings).mockClear()
+    await keyOn(row('Theo'), 'ArrowDown') // last in its sector: Duda is in another one
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ agentOrder: ['a1', 'a2', 'a3'] })
+  })
+
+  it('draws the top items in their order, and one taken out stays out', async () => {
+    await render({ agents: [agent({})], conversations: [], settings: { navOrder: ['operations', 'board', 'approvals'], sidebarHidden: ['approvals'] } as State['settings'] })
+    const top = [...document.querySelectorAll('.top-row')].map((r) => r.getAttribute('data-order-id'))
+    expect(top).toEqual([null, 'operations', 'board', 'knowledge']) // the Tuca stays first, unsortable; Aprovações stays out
   })
 })

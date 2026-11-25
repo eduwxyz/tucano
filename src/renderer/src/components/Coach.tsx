@@ -177,7 +177,7 @@ function Balloon({ mark, box, missions }: { mark: TourMark; box: Box; missions: 
     },
     tuca: {
       title: L('Travou? Chama o Tuca.', 'Stuck? Call Tuca.'),
-      body: L('Ele monta outros agentes, muda o que você quiser e explica o app. Fica aqui, no topo da barra.', 'He builds more agents, changes whatever you want and explains the app. He’s right here, at the top of the sidebar.')
+      body: L('Ele passa os seus pedidos pra quem do time faz, monta outros agentes, muda o que você quiser e explica o app. Fica aqui, no topo da barra.', 'He passes your requests to whoever on the team does it, builds more agents, changes whatever you want and explains the app. He’s right here, at the top of the sidebar.')
     },
     missions: {
       title: L('Suas missões.', 'Your missions.'),
