@@ -79,14 +79,23 @@ const INVITATION = new RegExp(
     'se eu puder',
     'posso eu',
     'quer que eu',
-    'no seu tempo'
+    'no seu tempo',
+    'ready when you are'
   ].join('|'),
   'gi'
 )
 
+// Action starters, including the English questions that offer one concrete step and the verbs the
+// agent writes without a modal. A second bare verb after and/ou is a second action, not decoration.
 const ACTION =
-  /(?:i(?:['’]ll| will| can| could| would)|let me|vou|posso|faço|faria|deixo|leio|abro|escrevo|rode|trago|monto|preparo|instalo|configuro|checo)/gi
-const NO_ACTION = /\b(?:i(?:['’]ll| will| can| could| would))\s+(?:not|never)\b|\b(?:não|never)\s+(?:vou|posso|faço)\b/i
+  /(?:i(?:['’]ll| will| can| could| would)|let me|tell me to|shall i|do you want me to|would you like me to|want me to|vou|posso|faço|faria|deixo|leio|abro|escrevo|rode|trago|monto|preparo|instalo|configuro|checo|fecho|reviso|rodo|instalar)/gi
+const BARE_ACTION = /\b(?:and|ou)\s+(?:i\s+)?(?:fix|install|restore|open|close|resend|restart|post|take|do|stop|trigger|send|read|write|run|check|review|port|flip|delete|create|update|merge|push|commit|assino|espero)\b/gi
+const NO_ACTION = /\b(?:i(?:['’]ll| will| can| could| would)\s+(?:not|never)|(?:won['’]t|can['’]t|couldn['’]t|wouldn['’]t|shouldn['’]t))\b|\b(?:não|never)\s+(?:vou|posso|faço)\b/i
+const OPTIONS = /\?[\s\S]*\bor\b|\bor\b[\s\S]*\?/i
+const PT_OPTIONS = /\bou\b/i
+const GENERIC_OFFER = /\b(?:anything else|if you need anything)\b/i
+const IDIOM_CALL = /\bwas\s+(?:a\s+)?your call\b/i
+const SELF_SUFFICIENT = /\b(?:just say (?:yes|so|yes or no)|your call|ready when you are|at your word|say the word)\b/i
 const LIST = /(?:^|\n)\s*(?:[-*•]|\d+[.)])\s+/
 const MARKUP = /(?:^|\n)\s*(?:#{1,6}\s|\||>|\d+\.\s|[-*•]\s)|```/
 
@@ -97,9 +106,16 @@ export function oneActionProposal(reply: string): { paragraph: string } | undefi
     .filter(Boolean)
   const proposals = blocks.filter((block) => {
     if (block.length > 400 || MARKUP.test(block) || LIST.test(block) || NO_ACTION.test(block)) return false
+    if (OPTIONS.test(block) || GENERIC_OFFER.test(block) || IDIOM_CALL.test(block)) return false
     const flat = block.replace(/\s+/g, ' ')
-    if ([...flat.matchAll(INVITATION)].length !== 1) return false
-    return [...flat.matchAll(ACTION)].length <= 1
+    const invitations = [...flat.matchAll(INVITATION)]
+    if (invitations.length !== 1) return false
+    if (PT_OPTIONS.test(flat.slice(invitations[0]!.index ?? 0))) return false
+    const actions = [...flat.matchAll(ACTION)]
+    const count = actions.length + [...flat.matchAll(BARE_ACTION)].length
+    if (count > 1 || (count === 0 && !SELF_SUFFICIENT.test(flat))) return false
+    // An action written before the invitation is a status with a wish, not a proposal to approve.
+    return !actions.length || (invitations[0]!.index ?? 0) <= (actions[0]!.index ?? 0)
   })
   return proposals.length === 1 ? { paragraph: proposals[0]! } : undefined
 }

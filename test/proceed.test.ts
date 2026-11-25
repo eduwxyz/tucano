@@ -7,6 +7,7 @@ const proposals: [string, string][] = [
   ['say the word and I’ll get Wrench or the WSL side to install beautifulsoup4', 'install beautifulsoup4'],
   ['Want me to trigger that now?', 'trigger that'],
   ['your call on bef82566', 'bef82566'],
+  ['Ready when you are', 'Ready when you are'],
   ['say so and I stop committing', 'stop committing'],
   ['just say yes or no', 'just say yes or no'],
   ['Next, at your word: I can take the first polish item', 'first polish item'],
@@ -14,8 +15,7 @@ const proposals: [string, string][] = [
   ['If you want, I can open the PR with the two commits we just made.', 'open the PR'],
   ['Se quiser, eu rodo a suíte e te mando o resultado.', 'rodo a suíte'],
   ['Só dizer que eu fecho os seis cards.', 'fecho os seis cards'],
-  ['Quando você quiser, eu reviso o PR.', 'reviso o PR'],
-  ['Você decide: assino a liberação ou espero mais uma noite.', 'assino a liberação']
+  ['Quando você quiser, eu reviso o PR.', 'reviso o PR']
 ]
 
 const notProposals: string[] = [
@@ -25,8 +25,8 @@ const notProposals: string[] = [
   'Say the word and I’ll do the first item. At your word, I’ll do the second.',
   'Here are the branches:\n- one\n- two\nSay the word and I’ll restore them.',
   '```\nsay the word and I will run it\n```',
+  'Você decide: assino a liberação ou espero mais uma noite.',
   'Your call on bef82566, but I will not change it.',
-  'Ready when you are',
   'Whenever you are ready, I can open the PR.',
   'You have the word: I can open the PR.'
 ]
