@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, isRecommended, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
 import { covers } from '../../../shared/access'
 import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
@@ -48,7 +48,8 @@ export function AskCard({
   answeredInText,
   cancelled,
   closedAs,
-  children
+  children,
+  onSend
 }: {
   id: string
   questions: Decision[]
@@ -60,10 +61,13 @@ export function AskCard({
   cancelled?: boolean | undefined
   closedAs?: string // what a closed card says in place of "(cancelled)"
   children?: ReactNode
+  // A card the app drew for a look (Settings' test): there is nothing behind it to answer, so
+  // choosing and sending stay on the card and this is what Send does.
+  onSend?: (() => void) | undefined
 }): ReactNode {
   // A next-steps card is a to-do, not a menu: it says so, in every mode.
   const steps = questions.some(isNextSteps)
-  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} steps={steps} extra={children} />
+  if (mode === 'answer') return <Answering id={id} questions={questions} saved={saved} badge={badge} byline={byline} steps={steps} extra={children} onSend={onSend} />
   return (
     <section className={`ask ask--${mode}${steps ? ' ask--steps' : ''}`} aria-label={badge}>
       <Head badge={badge} byline={byline} done={mode === 'done'} cancelled={cancelled} steps={steps} />
@@ -131,7 +135,7 @@ function Summary({ questions, answers, answeredInText, cancelled, closedAs }: { 
   )
 }
 
-function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; steps?: boolean; extra?: ReactNode }): ReactNode {
+function Answering({ id, questions, saved, badge, byline, steps, extra, onSend }: { id: string; questions: Decision[]; saved?: (Answer | null)[] | undefined; badge: string; byline?: string | undefined; steps?: boolean; extra?: ReactNode; onSend?: (() => void) | undefined }): ReactNode {
   // Answers given here show at once, before the core echoes them back.
   const [answers, setAnswers] = useState<(Answer | null)[]>(() => questions.map((_, i) => saved?.[i] ?? null))
   useEffect(() => setAnswers(questions.map((_, i) => saved?.[i] ?? null)), [saved])
@@ -148,6 +152,8 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
 
   const send = (): void => {
     if (sending) return
+    // A card the app drew has no question behind it: Send is what its card says it is.
+    if (onSend) return onSend()
     setSending(true)
     void submitDecisions(id).finally(() => setSending(false)) // it failed if the card is still here: it can go again
   }
@@ -177,7 +183,7 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
     drafts.delete(draftKey(id, index))
     const next = answers.map((a, i) => (i === index ? answer : a))
     setAnswers(next)
-    answerDecision(id, index, answer)
+    if (!onSend) answerDecision(id, index, answer)
     if (!answer) return
     if (questions.length === 1) return send()
     const after = questions.findIndex((_, i) => i > index && !isAnswered(next[i]))
@@ -194,7 +200,7 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
     const answer = draftAnswer(questions[step]!, draft)
     const next = answers.map((a, i) => (i === step ? answer : a))
     setAnswers(next)
-    answerDecision(id, step, answer)
+    if (!onSend) answerDecision(id, step, answer)
     return next
   }
 
@@ -230,7 +236,7 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
         </div>
       )}
       {step === 'review' ? (
-        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} />
+        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} onGoRecommended={recommended ? goRecommended : undefined} />
       ) : (
         <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
       )}
@@ -319,7 +325,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
     <div className="ask__body" ref={body} tabIndex={-1} onKeyDown={keys}>
       <Title q={question} />
       {question.kind === 'text' ? (
-        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => edit({ text: e.target.value })} />
+        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onFocus={() => window.tucano?.notice?.focus?.()} onChange={(e) => edit({ text: e.target.value })} />
       ) : (
         <div className="ask-options" role={multiple ? 'group' : 'radiogroup'} aria-label={question.question}>
           {options.map((o, i) => {
@@ -343,7 +349,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
           {writing ? (
             <label className={`ask-option ask-option--other is-open ${other.trim() ? 'is-on' : ''}`} onMouseEnter={() => setFocus(options.length)}>
               <span className="ask-option__key">{options.length + 1}</span>
-              <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onChange={(e) => edit({ other: e.target.value })} />
+              <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onFocus={() => window.tucano?.notice?.focus?.()} onChange={(e) => edit({ other: e.target.value })} />
             </label>
           ) : (
             <button className={`ask-option ask-option--other ${focus === options.length ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(options.length)} onClick={openOther}>
@@ -379,7 +385,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
   )
 }
 
-function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean }): ReactNode {
+function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending, onGoRecommended }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean; onGoRecommended?: () => void }): ReactNode {
   // Reached from the last decision, Send has the keyboard; on a card that just showed up, nothing does.
   const sendButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -400,6 +406,12 @@ function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sendi
         ))}
       </ol>
       <div className="ask__foot">
+        {onGoRecommended && (
+          <label className="ask__recommend ask__recommend--inline">
+            <input type="checkbox" disabled={sending} onChange={(e) => { if (e.target.checked) onGoRecommended() }} />
+            <Icon name="check" size={12} /> {L('Pode seguir com a recomenda��o', 'Go with the recommendation')}
+          </label>
+        )}
         <span className="ask__hint">{L('Clique numa resposta pra mudar', 'Click an answer to change it')}</span>
         <button ref={sendButton} className="btn btn--primary btn--sm" disabled={sending} onClick={onSend}>
           <Icon name="send" size={12} /> {L('Enviar', 'Send')}

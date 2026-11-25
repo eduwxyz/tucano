@@ -15,8 +15,9 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, artifactUrl, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
+import { noticeOf, type NoticeArea, type NoticePicture } from '../shared/notice'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
 import { adminError, admit, admitComputer, can, isAdmin, must } from './policy-people'
@@ -621,11 +622,24 @@ const feedback = new Feedback({ url: feedbackUrl(), dir: installDir, version: ap
 // Desktop notification, and the same on the phone.
 // `fullText`: the whole reply, for the phone; `page`: a click opens that screen instead of a conversation.
 // `to`: the people it's for; unset, everyone (but a DM's news only ever reaches its person).
-const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string; to?: string[] } = {}): void => {
+// `messageId`: the reply it's about, for the pictures the card over the window shows.
+const noticePictures = (messageId: string): NoticePicture[] =>
+  db
+    .artifactsOf(messageId)
+    .slice(0, 4)
+    .map((a) => ({ url: artifactUrl(a), title: a.title || a.name, kind: a.kind }))
+const notifyAll = (title: string, shortText: string, conversationId?: string, fullText?: string, more: { kind?: 'approval'; page?: 'skills'; threadId?: string; to?: string[]; messageId?: string } = {}): void => {
   const to = notifyTo(conversationId, more.to)
-  toMain({ type: 'notify', title, body: shortText, conversationId, ...more, ...(to ? { to } : {}), sound: settings().sounds !== false })
+  const pictures = more.messageId ? noticePictures(more.messageId) : []
+  toMain({ type: 'notify', title, body: shortText, conversationId, ...more, ...(to ? { to } : {}), ...(pictures.length ? { pictures } : {}), sound: settings().sounds !== false })
   void push.send({ title, body: shortText, ...(conversationId ? { conversationId } : {}), ...(more.threadId ? { threadId: more.threadId } : {}), ...(more.kind ? { kind: more.kind } : {}) }, to)
   if (!to || to.includes(db.ownerId())) void telegram?.notice(title, fullText ?? shortText)
+}
+// Whether the cards go over every window instead of the system's own notification (Settings): the
+// mode is the choice, and `on` its reading, so Native leaves the system's own as 0.2.37 had them.
+const noticePrefs = (): { on: boolean; area?: NoticeArea } => {
+  const rules = noticeOf(settings())
+  return { on: rules.on, ...(rules.area ? { area: rules.area } : {}) }
 }
 function notifyTo(conversationId: string | undefined, to: string[] | undefined): string[] | undefined {
   const c = conversationId ? db.conversationOwner(conversationId) : undefined
@@ -643,7 +657,8 @@ type ToMain =
   | { type: 'save_artifact'; path: string } // a copy of an artifact's file, where the person picks
   | { type: 'wiki_dir'; path: string } // the wiki's folder, which the app may open
   | { type: 'restart' } // a server: start again, to restore a backup (src/server)
-  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[] } // to: the people it's for (a server delivers it only to them); unset: everyone
+  | { type: 'notify'; title: string; body: string; conversationId?: string; threadId?: string; kind?: 'approval' | 'question' | 'done'; page?: 'skills'; sound?: boolean; to?: string[]; messageId?: string; pictures?: NoticePicture[] } // to: the people it's for (a server delivers it only to them); unset: everyone
+  | { type: 'notice-pref'; on: boolean; area?: NoticeArea } // the cards over every window (src/main/notice.ts), as the settings say now
   | { type: 'auth-result'; id: string; person?: Person; removed?: true } // removed: a key of someone removed since
   | { type: 'join-result'; id: string; data: { key?: string; person?: Person; error?: string } }
   | { type: 'device-key-result'; id: string; data: { key?: string; person?: Person } }
@@ -1224,10 +1239,11 @@ const runner = new Runner({
   models: () => availableModels(settings(), allListed()),
   applyNow: (messageId, personId) => applyNow(messageId, personId),
   // Approvals and questions reach the phone with their buttons, through toPhone; a finished reply stays on the Mac.
-  notify: (title, body, conversationId, kind, threadId, to) => {
-    if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}) })
+  notify: (title, body, conversationId, kind, threadId, to, messageId) => {
+    if (!kind) return notifyAll(title, body, conversationId, undefined, { threadId, ...(to ? { to } : {}), ...(messageId ? { messageId } : {}) })
     const who = notifyTo(conversationId, to)
-    toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), sound: settings().sounds !== false })
+    const pictures = messageId ? noticePictures(messageId) : []
+    toMain({ type: 'notify', title, body, conversationId, threadId, kind, ...(who ? { to: who } : {}), ...(messageId ? { messageId } : {}), ...(pictures.length ? { pictures } : {}), sound: settings().sounds !== false })
     void push.send({ title, body, ...(conversationId ? { conversationId } : {}), ...(threadId ? { threadId } : {}), kind }, who)
   },
   jev: {
@@ -1309,6 +1325,9 @@ hooks.on('error', (e) => console.error(`[gatilhos] porta ${runtimePorts.webhook}
 
 void ready.then(async () => {
   toMain({ type: 'ready' })
+  // How this workspace's notifications show, before the first one arrives (never a server's: it
+  // has no window to draw them in).
+  if (!serverMode) toMain({ type: 'notice-pref', ...noticePrefs() })
   workspaceSummary()
   await runner.expireApprovals()
   const settled = await runner.settleDecidedRuns()
@@ -2785,6 +2804,7 @@ const api: Handlers = {
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     if (patch.onboarding?.done) bg(enginesReady.then(() => ensureTuca()), 'ensureTuca') // skipping the introduction still gets the Tuca
     if (patch.language) toMain({ type: 'lang', lang: patch.language })
+    if (!serverMode && patch.notice !== undefined) toMain({ type: 'notice-pref', ...noticePrefs() })
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -3350,6 +3370,19 @@ const api: Handlers = {
   },
   activity: ({ personId, kind, before }) => db.activity({ personId, kind, before }),
   inbox: (_, ctx) => people.inbox(ctx.person),
+  // The window over every window (src/main/notice.ts) reads nothing else: its rules, what waits on
+  // this person with the buttons to decide it, and the names to say where each card happened.
+  noticeFeed: (_, ctx) => {
+    const mine = people.settingsFor(ctx.person, settings())
+    return {
+      rules: noticeOf(mine),
+      language: mine.language,
+      agents: db.agents().map((a) => ({ id: a.id, name: a.name, color: a.color, ...(a.customColor ? { customColor: a.customColor } : {}), ...(a.picture ? { picture: a.picture } : {}), ...(a.avatar ? { avatar: a.avatar } : {}) })),
+      // Only the conversations this person may see: a card never says the name of someone else's DM.
+      conversations: db.conversations().filter((c) => people.canSeeConversation(ctx.person, c)).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
+      inbox: people.inbox(ctx.person)
+    }
+  },
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
   removeTucaLeave: ({ id }, ctx) => {
     if (db.removeTucaLeave(id, ctx.person.id)) emit({ type: 'leaves' })

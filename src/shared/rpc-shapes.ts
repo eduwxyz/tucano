@@ -222,6 +222,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   leave: {},
   activity: { personId: 's?', kind: 's?', before: 'n?' },
   inbox: {},
+  noticeFeed: {},
   answerQuestion: { id: 's', text: 's' },
   removeTucaLeave: { id: 's' },
   setConversationTitle: { id: 's', title: 's' },

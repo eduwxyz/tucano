@@ -327,7 +327,7 @@ export interface RunnerDeps {
   browser?: Pick<Browser, 'call' | 'approved'> & Partial<Pick<Browser, 'loginSites'>> // without it, no agent has a browser
   apps?: Pick<DesktopApps, 'call' | 'approved'> // without it, no agent uses the person's apps
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
-  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[]) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation)
+  notify?: (title: string, body: string, conversationId?: string, kind?: 'approval' | 'question' | 'done', threadId?: string, to?: string[], messageId?: string) => void // threadId: a click opens that thread too; to: the people it's for (unset: everyone who sees the conversation); messageId: the reply, for the pictures the card shows
   // The classifier that picks who replies, when one is chosen in Settings › Classifiers. `key` and
   // `target` are asked per job: a job with no classifier is off.
   jev?: { key(job?: ClassifierJob): Promise<string | undefined>; target?(job?: ClassifierJob): ClassifierConfig | undefined; fetch?: typeof fetch }
@@ -3539,7 +3539,7 @@ ${note}`,
           if (delegated.length || (answeredUp && !msg.text.trim())) return
           // The job's last reply: the answer. The person hears it once, here.
           this.endJob(job)
-          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id])
+          if (!opts.routine) this.deps.notify?.(L(`${agent.name} terminou`, `${agent.name} is done`), outcome(msg) || L('Respondeu na conversa.', 'Replied in the conversation.'), conv.id, 'done', msg.threadId, [requester.id], msg.id)
         }
         this.callPeople(conv, msg, agent.name)
         // On handed work, naming whoever asked ("@lia, pronto") calls no one: the answer already goes back to them.
@@ -3585,7 +3585,7 @@ ${note}`,
     const retrying = st === 'failed' && !!msg.run?.retryAt
     const short = !goesOn && !retrying && (st === 'failed' || st === 'limit_reached' || st === 'paused' || st === 'stopped') ? this.handedIn(msg) : undefined
     if (short) this.settle(short, st === 'stopped' ? 'cancelled' : 'failed', msg)
-    else if (!opts.routine && !retrying && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id])
+    else if (!opts.routine && !retrying && (st === 'failed' || st === 'limit_reached')) this.deps.notify?.(L(`${agent.name} parou`, `${agent.name} stopped`), outcome(msg), conv.id, 'done', msg.threadId, [requester.id], msg.id)
 
     if (goesOn) void this.continue(msg.id, 'cap')
 

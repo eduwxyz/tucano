@@ -4,6 +4,7 @@ import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
+import { NOTICE_MAX_SECONDS, NOTICE_MIN_SECONDS, noticeModeOf, noticeOf, type NoticeMode, type NoticeSettings } from '../../../shared/notice'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
@@ -44,6 +45,7 @@ import {
   backupNow,
   openBackups,
   type TelegramInfo,
+  type Settings,
   useStore,
   EFFORTS,
   ENGINES,
@@ -3743,15 +3745,7 @@ export function SettingsPage(): ReactNode {
         {on('geral') && (
           <SectionAnchor id="app-notifications" sections={structure}>
             <Card title={L('Notificações', 'Notifications')} section="app-notifications">
-              <div className="key-row">
-                <Icon name="volume" />
-                <div className="grow">
-                  <strong>{L('Sons', 'Sounds')}</strong>
-                  <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'Plays a sound when an agent needs you or finishes. When off, notifications still appear silently.')}</p>
-                </div>
-                <Toggle on={settings.sounds !== false} onChange={(v) => updateSettings({ sounds: v })} />
-              </div>
-              <NotifyTest />
+              <NotificationCard settings={settings} update={updateSettings} />
             </Card>
           </SectionAnchor>
         )}
@@ -4148,7 +4142,193 @@ export function notifyHint(state: NotifyState | 'shown', mac: boolean): string |
   return null
 }
 
-function NotifyTest(): ReactNode {
+// Settings › General › Notifications: the chirp, which notifications (the system's own, or the cards),
+// and the way to see one arrive in that mode.
+export function NotificationCard({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }): ReactNode {
+  return (
+    <>
+      <div className="key-row">
+        <Icon name="volume" />
+        <div className="grow">
+          <strong>{L('Sons', 'Sounds')}</strong>
+          <p className="muted small">{L('O toque quando um agente precisa de você e quando termina. Desligado, as notificações continuam aparecendo, em silêncio.', 'The chirp when an agent needs you and when it’s done. Off, notifications still show up, silently.')}</p>
+        </div>
+        <Toggle on={settings.sounds !== false} onChange={(v) => update({ sounds: v })} />
+      </div>
+      <NoticeSettingsCard settings={settings} update={update} />
+      <NotifyTest mode={noticeModeOf(settings.notice)} />
+    </>
+  )
+}
+
+// How notifications arrive (0.2.37's own, or the cards over every window) and, for the cards, how
+// they look. Native leaves the system's notifications exactly as they were and hides everything
+// below the selector, so the two never stack their controls or say the same thing twice.
+export function NoticeSettingsCard({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }): ReactNode {
+  const notice = noticeOf(settings)
+  const enhanced = notice.mode === 'enhanced'
+  const set = (patch: Partial<NoticeSettings>): void => update({ notice: { ...settings.notice, ...patch } })
+  // Picking a mode drops the old on/off, so a choice made under it can't argue with this one.
+  const choose = (mode: NoticeMode): void => {
+    const { on: _older, ...rest } = settings.notice ?? {}
+    update({ notice: { ...rest, mode } })
+  }
+  return (
+    <>
+      <div className="key-row">
+        <Icon name="zap" />
+        <div className="grow">
+          <strong>{L('Como as notificações aparecem', 'How notifications arrive')}</strong>
+          <p className="muted small">
+            {enhanced
+              ? L(
+                  'Os avisos chegam numa pilha no canto da tela, por cima das outras janelas, e somem sozinhos.',
+                  'Notifications arrive in a stack in the corner of the screen, over the other windows, and go away on their own.'
+                )
+              : L('As notificações do sistema, como sempre foram.', 'The system’s own notifications, as they always were.')}
+          </p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label={L('Como as notificações aparecem', 'How notifications arrive')}>
+          {(
+            [
+              ['native', L('Nativo', 'Native')],
+              ['enhanced', L('Aprimorado', 'Enhanced')]
+            ] as const
+          ).map(([mode, label]) => (
+            <button key={mode} role="radio" aria-checked={notice.mode === mode} className={notice.mode === mode ? 'is-active' : ''} onClick={() => choose(mode)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {enhanced && (
+        <>
+          <div className="key-row">
+            <Icon name="expand" />
+            <div className="grow">
+              <strong>{L('Onde aparecem', 'Where they appear')}</strong>
+              <p className="muted small">
+                {L(
+                  'Arraste um retângulo na tela, com os cantos, pro canto onde os avisos devem chegar. Sem escolher, eles chegam no canto de baixo, à direita.',
+                  'Choose the screen area for notifications. Default: bottom right.'
+                )}
+              </p>
+            </div>
+            <button className="btn btn--sm" onClick={() => window.tucano.notice.pick()}>
+              {L('Escolher a área', 'Choose the area')}
+            </button>
+            {notice.area && (
+              <button className="btn btn--sm btn--ghost" title={L('Voltar pro canto de baixo, à direita', 'Back to the bottom right corner')} onClick={() => set({ area: undefined })}>
+                {L('Padrão', 'Default')}
+              </button>
+            )}
+          </div>
+          <div className="key-row">
+            <Icon name="shield" />
+            <div className="grow">
+              <strong>{L('Decidir pelo aviso', 'Decide from the notification')}</strong>
+              <p className="muted small">
+                {L(
+                  'Aprovar, recusar e responder direto no aviso, sem abrir a conversa. Uma ação de alto risco pede que você segure o botão.',
+                  'Approve, refuse and answer right on the notification, without opening the conversation. A high-risk action asks you to hold the button.'
+                )}
+              </p>
+            </div>
+            <Toggle on={notice.act} onChange={(v) => set({ act: v })} />
+          </div>
+          <div className="key-row">
+            <Icon name="sun" />
+            <div className="grow">
+              <strong>{L('Aparência', 'Skin')}</strong>
+              <p className="muted small">
+                {L(
+                  'As cores do próprio sistema, no claro e no escuro, com o destaque do Windows, do Mac ou do Linux de agora. Sistema acompanha a troca do dia pra noite.',
+                  'Use light, dark, or system appearance with the operating system’s accent color.'
+                )}
+              </p>
+            </div>
+            <div className="segmented" role="radiogroup" aria-label={L('Aparência dos avisos', 'Notification skin')}>
+              {(
+                [
+                  ['light', L('Claro', 'Light')],
+                  ['dark', L('Escuro', 'Dark')],
+                  ['system', L('Sistema', 'System')]
+                ] as const
+              ).map(([value, label]) => (
+                <button key={value} role="radio" aria-checked={notice.skin === value} className={notice.skin === value ? 'is-active' : ''} onClick={() => set({ skin: value })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="key-row">
+            <Icon name="clock" />
+            <div className="grow">
+              <strong>{L('Tempo na tela', 'Time on screen')}</strong>
+              <p className="muted small">
+                {L(
+                  'Segundos até o aviso sumir. Depois disso ele desaparece aos poucos, com uma pausa curta pra você voltar o ponteiro.',
+                  'Seconds before a notification goes. After that it fades, with a short pause to bring the pointer back.'
+                )}
+              </p>
+            </div>
+            <NumberInput min={NOTICE_MIN_SECONDS} max={NOTICE_MAX_SECONDS} step={1} value={notice.seconds} onChange={(n) => set({ seconds: n })} className="input--short" />
+          </div>
+          <div className="key-row">
+            <Icon name="thread" />
+            <div className="grow">
+              <strong>{L('Modo pilha', 'Stack mode')}</strong>
+              <p className="muted small">
+                {L(
+                  'Um aviso de cada vez, com os outros esperando atrás dele, na ordem do que mais importa: aprovações, perguntas e, por último, o que terminou. O de frente sai com um deslize e o próximo sobe.',
+                  'Show one at a time: approvals, questions, then completions. Swipe to dismiss.'
+                )}
+              </p>
+            </div>
+            <Toggle on={notice.stack} onChange={(v) => set({ stack: v })} />
+          </div>
+          <div className="key-row">
+            <Icon name="hand" />
+            <div className="grow">
+              <strong>{L('Fica com o ponteiro em cima', 'Stays under the pointer')}</strong>
+              <p className="muted small">
+                {L(
+                  'Com o ponteiro sobre o aviso, ele espera. A roda do mouse abre o aviso inteiro, e fecha de novo.',
+                  'With the pointer on a notification it waits. The mouse wheel opens it whole, and closes it again.'
+                )}
+              </p>
+            </div>
+            <Toggle on={notice.hover} onChange={(v) => set({ hover: v })} />
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+function NotifyTest({ mode }: { mode: NoticeMode }): ReactNode {
+  // Native: the system's own notifications are the ones to try, as 0.2.37 had it.
+  if (mode === 'native') return <SystemNotifyTest />
+  // Enhanced: what is left here is the cards, drawn by the page that draws them, so the person sees
+  // how they look with the settings they chose.
+  if (!window.tucano.notice) return null
+  return (
+    <div className="key-row">
+      <Icon name="spark" />
+      <div className="grow">
+        <strong>{L('Testar', 'Test')}</strong>
+        <p className="muted small">{L('Manda uma notificação agora, pra ver se chega.', 'Send a test notification.')}</p>
+      </div>
+      <button className="btn btn--sm" title={L('Uma notificação de cada tipo, como elas ficam.', 'One notification of each kind, as they look.')} onClick={() => window.tucano.notice.demo()}>
+        {L('Testar notificações', 'Test notifications')}
+      </button>
+    </div>
+  )
+}
+
+// Settings › General › Notifications, Native: one from the system now, so the person sees whether
+// they come (and a Mac lists the app under Notifications only after its first one).
+function SystemNotifyTest(): ReactNode {
   const [state, setState] = useState<NotifyState | 'shown' | null>(() => window.tucano.notifyState?.() ?? null)
   if (!window.tucano.testNotify) return null
   const hint = state ? notifyHint(state, /Mac/i.test(navigator.userAgent)) : null
@@ -4157,8 +4337,7 @@ function NotifyTest(): ReactNode {
     <div className="key-row">
       <Icon name="send" />
       <div className="grow">
-        <strong>{L('Testar', 'Test')}</strong>
-        <p className="muted small">{hint ?? L('Manda uma notificação agora, pra ver se chega.', 'Send a test notification.')}</p>
+        <p className="muted small">{hint ?? L('Manda uma notificação agora, pra ver se chega.', 'Sends a notification now, to see that it comes.')}</p>
       </div>
       {!off && (
         <button className="btn btn--sm" onClick={() => void window.tucano.testNotify?.().then(setState, () => setState('unsupported'))}>

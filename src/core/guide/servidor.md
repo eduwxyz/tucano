@@ -1,7 +1,7 @@
 # Tucano num servidor
 > Rodar o Tucano num servidor seu (VPS ou máquina em casa) e usar pelo navegador: instalar, acessar, manter rodando e o que muda.
 
-No servidor, as rotinas continuam rodando quando o seu computador dorme, e você usa o Tucano pelo navegador, em qualquer computador ou celular. Nada passa por um serviço do Tucano: o servidor é seu. É o mesmo que roda nos servidores do Tucano Pro.
+No servidor, as rotinas continuam quando o seu computador dorme, e você usa o Tucano pelo navegador, em qualquer computador ou celular. Nada passa por um serviço do Tucano: o servidor é seu. É o mesmo que roda nos servidores do Tucano Pro.
 
 ## O que precisa
 - Linux (x64 ou ARM64), com 2 GB de RAM ou mais, e Node.js 24 ou mais novo.
@@ -27,7 +27,7 @@ Como um serviço do systemd com o seu usuário. Pra atualizar: `git pull && npm 
 Variáveis: `TUCANO_DATA` (a pasta de dados, `~/.tucano-server` por padrão), `TUCANO_HOST`, `TUCANO_PORT` (7337) e `TUCANO_TOKEN`. Atrás de um proxy de saída, `HTTPS_PROXY` (e `NO_PROXY`): os conectores passam por ele. O Tucano confia nos certificados raiz do sistema além dos do Node.
 
 ## O que muda em relação ao app
-- Notificações: no **app do Tucano no computador** conectado a ele (**Configurações › Servidores**), como as do próprio app, enquanto o app estiver aberto, e no app do iPhone. No navegador, só por HTTPS (um proxy com HTTPS, ou `tailscale serve`): por `http://` no endereço do Tailscale ou da rede de casa o navegador não mostra nenhuma. O Telegram (**Configurações › Celular**) avisa em qualquer caso. **Configurações › Geral › Notificações** › **Mandar uma** testa.
+- Notificações: no **app do Tucano no computador** conectado a ele (**Configurações › Servidores**), como as do próprio app, enquanto o app estiver aberto, e no app do iPhone. No navegador, só por HTTPS (um proxy com HTTPS, ou `tailscale serve`): por `http://` no endereço do Tailscale ou da rede de casa o navegador não mostra nenhuma. O Telegram (**Configurações › Celular**) avisa em qualquer caso. **Configurações › Geral › Notificações** › **Testar notificações** mostra como ficam.
 - Conector com OAuth: a autorização abre no seu navegador; ao terminar, você cola o endereço em que a página parou.
 - Pastas e **Linux isolado** usam o servidor (o do Pro não tem Docker).
 - A wiki pode usar o seu cofre do Obsidian guardado num repositório git: **Ajustes da wiki** › **Sincronizar com git**. Veja **wiki-git**.

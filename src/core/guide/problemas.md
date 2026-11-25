@@ -38,7 +38,7 @@
 - Aprovou e não viu o resultado: ele vem numa nova mensagem.
 
 ## Notificação que não chega
-- **Configurações › Geral › Notificações** › **Mandar uma**. No Mac, o Tucano só aparece em Ajustes do Sistema › Notificações depois da primeira.
+- **Configurações › Geral › Notificações**: **Testar notificações** no Aprimorado, **Mandar uma** no Nativo. No Mac, só depois do primeiro aviso.
 - No Mac: Ajustes do Sistema › Notificações › Tucano permitido, e nenhum modo Foco ligado.
 - A conversa aberta na tela não avisa.
 - Servidor: avisa pelo app do computador conectado a ele (**Configurações › Servidores**); o navegador, só por HTTPS. Veja **servidor**.

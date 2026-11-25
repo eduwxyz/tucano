@@ -3,6 +3,7 @@ import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
 import type { ExecutionFilter, ExecutionPage, ExecutionStep, TracesTest, TracesView } from './types'
+import type { NoticeFeed } from './notice'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
@@ -266,6 +267,9 @@ export interface Api {
   leave(): void // someone (not the owner) leaves on their own: access ends, and their DMs, memories and own routines go now
   activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)
   inbox(): Inbox
+  // The window over every window (src/main/notice.ts) reads only this: how its cards are set, what
+  // waits on me with the buttons to decide it, and the names to say where each card happened.
+  noticeFeed(): NoticeFeed
   answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
   removeTucaLeave(p: { id: string }): void // takes back something I let the Tuca do himself
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?

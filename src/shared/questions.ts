@@ -29,6 +29,22 @@ export interface AnswerDraft {
   text: string
 }
 
+// An option the agent itself points at: its own label or note says so ("recommended", "recomendado").
+export const isRecommended = (o: DecisionOption): boolean => /recomend|recommend/i.test(`${o.label} ${o.description ?? ''}`)
+
+// "Go with the recommendation": every decision answered with the option the agent recommends. Only when
+// each one has such an option (a free-text decision has none, so the card asks for it as usual).
+export function recommendedAnswers(decisions: Decision[]): Answer[] | undefined {
+  if (!decisions.length) return undefined
+  const answers: Answer[] = []
+  for (const d of decisions) {
+    const i = d.kind === 'text' ? -1 : (d.options ?? []).findIndex((o) => o.recommended || isRecommended(o))
+    if (i < 0) return undefined
+    answers.push({ chosen: [i] })
+  }
+  return answers
+}
+
 export const MAX_QUESTIONS = 4
 export const MIN_OPTIONS = 1
 // The card always adds "Something else" (a free answer) after the agent's options: 4 rows at most.
@@ -42,19 +58,6 @@ export const MAX_LABEL_LENGTH = 80
 export const MAX_DESCRIPTION_LENGTH = 200
 
 const KINDS: DecisionKind[] = ['single', 'multiple', 'text']
-
-// "Pode seguir com a recomendação": every decision answered with the option the agent recommends. Only when
-// each one has such an option (a free-text decision has none, so the card asks for it as usual).
-export function recommendedAnswers(decisions: Decision[]): Answer[] | undefined {
-  if (!decisions.length) return undefined
-  const answers: Answer[] = []
-  for (const d of decisions) {
-    const i = d.kind === 'text' ? -1 : (d.options ?? []).findIndex((o) => o.recommended)
-    if (i < 0) return undefined
-    answers.push({ chosen: [i] })
-  }
-  return answers
-}
 
 // Messages saved before decisions existed have a question string: it reads as one text decision.
 export function questionsOf(run: Run | undefined): Decision[] {
