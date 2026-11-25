@@ -114,7 +114,9 @@ describe('the steer pill', () => {
     expect(stopped).toHaveLength(0) // steering did not stop the reply
     expect(document.querySelector('.steps__list')).not.toBeNull() // and did not toggle the steps
     await draw(reply('done'))
-    expect(pill()).toBeNull()
+    // Once it has ended the same pill is still there, under the name it takes then, in the same
+    // row (follow-pill.test.tsx: what it does there, and what it sends).
+    expect(pill()!.textContent?.trim()).toMatch(/^(Seguir|Follow)$/)
   })
 
   it('opens a field, and sends nothing until something is written', async () => {

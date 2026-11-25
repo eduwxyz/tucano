@@ -17382,3 +17382,8 @@ button.agent-card__now:hover {
 .onb-tc .asked-here {
   display: none;
 }
+
+/* A reply that went on keeps each round under the one before it, with its own words. */
+.msg__round + .msg__round {
+  margin-top: 12px;
+}

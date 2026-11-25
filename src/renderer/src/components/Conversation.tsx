@@ -10,7 +10,7 @@ import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
-import { saidAt } from '../../../shared/types'
+import { saidAt, type RunRound } from '../../../shared/types'
 import { CUT, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
@@ -630,25 +630,19 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
               <div className="msg__anchor-pin">
                 <ThreadButton message={message} />
               </div>
-              <RunBlock message={message} />
+              {message.run.rounds?.length ? <Rounds message={message} said={said} components={agentMarkdown} /> : <RunBlock message={message} />}
             </div>
+          ) : message.run.rounds?.length ? (
+            <Rounds message={message} said={said} components={agentMarkdown} />
           ) : (
             <RunBlock message={message} />
           )
         ) : null}
-        {text && quiet && !showSaid ? (
+        {!message.run?.rounds?.length && text && quiet && !showSaid ? (
           <button className="link small msg__said" onClick={() => setShowSaid(true)}>
             {L('Ver o que escreveu', 'See what it wrote')}
           </button>
-        ) : text ? (
-          <div className="md">
-            {agent && message.run?.status !== 'working' ? (
-              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={agentMarkdown}>{wikiLinks(text)}</MessageMarkdown>
-            ) : (
-              <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(text)}</MessageMarkdown>
-            )}
-          </div>
-        ) : null}
+        ) : text && !message.run?.rounds?.length ? <SaidText message={message} text={text} components={agentMarkdown} /> : null}
         {attached.length > 0 && (
           <div className="artifacts artifacts--mine">
             {attached.map((a) => (
@@ -738,6 +732,43 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
     </article>
   )
 })
+
+// The words of one reply or one of its Follow rounds, drawn the same way in both places.
+function SaidText({ message, text, components }: { message: Message; text: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
+  return (
+    <div className="md msg__text">
+      {message.author.kind === 'agent' && message.run?.status !== 'working' ? (
+        <MessageMarkdown urlTransform={safeUrl} remarkPlugins={AGENT_PLUGINS} components={components}>{wikiLinks(text)}</MessageMarkdown>
+      ) : (
+        <MessageMarkdown urlTransform={safeUrl} remarkPlugins={PLAIN_PLUGINS} components={plainMarkdown}>{wikiLinks(text)}</MessageMarkdown>
+      )}
+    </div>
+  )
+}
+
+// A reply that followed up draws each turn under the one before it: its instruction row and toolchain,
+// the reasoning kept with that round, then what it said. The live words belong only to the newest
+// round; the earlier rounds read from what the run has kept.
+export function Rounds({ message, said, components }: { message: Message; said: string; components: ComponentProps<typeof MessageMarkdown>['components'] }): ReactNode {
+  const rounds = message.run!.rounds!
+  const working = message.run!.status === 'working'
+  const before = rounds.slice(0, -1).map((r) => r.text).filter(Boolean).join('\n\n')
+  const live = said.startsWith(before) ? said.slice(before.length).replace(/^\n\n/, '') : said
+  return (
+    <>
+      {rounds.map((round, i) => {
+        const newest = i === rounds.length - 1
+        const text = newest && working ? live || round.text : round.text
+        return (
+          <div className="msg__round" data-follow-round={i + 1} key={round.id}>
+            <RunSteps message={message} round={newest && working ? { ...round, thought: undefined } : round} working={working && newest} />
+            {text && <SaidText message={message} text={text} components={components} />}
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 // What was asked of the team because of a person's message, under it: a status line per request (whom,
 // where, how it stands, an approval it waits on), while the asker's replies stay in the message's thread.
@@ -1741,15 +1772,21 @@ function useNow(on: boolean): number {
 
 // One quiet line: what the agent is doing now (and for how long), or how many
 // steps it took. The steps themselves open on a click.
-export function RunSteps({ message }: { message: Message }): ReactNode {
+export function RunSteps({ message, round, working: roundWorking }: { message: Message; round?: RunRound; working?: boolean }): ReactNode {
   const run = message.run!
+  // A reply that followed up keeps one toolchain per round; a reply that didn't has one round's
+  // worth of steps in the flat chain, drawn as it always was.
+  const steps = round?.steps ?? run.steps
   // Open while the agent works, so its steps read as they go, unless the person closes it or turned
   // that off in Settings (several agents at once would fill the screen); closed after.
   const stepsOpen = useStore((s) => s.settings.stepsOpen) !== false
   const [toggled, setOpen] = useState<boolean | null>(null)
-  const working = run.status === 'working'
-  // The steer is a pill in the row under this chain: it opens a field under the box, still held by
-  // this reply's id so it cannot direct another reply of the same agent.
+  const working = roundWorking ?? run.status === 'working'
+  // A reply that ended carries the same pill under another name: there is nothing left to steer, so
+  // the instruction it takes makes that reply go on from where it stopped (runs.ts, `followIn`).
+  const followable = working || run.status === 'done'
+  // The pill is in the row under this chain: it opens a field under the box, still held by this
+  // reply's id so it cannot direct another reply of the same agent.
   const [steerOpen, setSteerOpen] = useState(false)
   const [steerNote, setSteerNote] = useState('')
   const steerTyped = steerNote.trim()
@@ -1763,10 +1800,10 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
   // Just finished: the pulse turns into a green check for a moment, then the chevron is back.
   const justDone = useJustEnded(working, 1600) && run.status === 'done'
 
-  if (run.steps.length === 0 && !working) return null
-  const total = run.steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
-  const failed = run.steps.filter((st) => st.status === 'error').length
-  const current = [...run.steps].reverse().find((st) => st.status === 'running')
+  if (steps.length === 0 && !working) return null
+  const total = steps.reduce((acc, st) => acc + (st.ms ?? 0), 0)
+  const failed = steps.filter((st) => st.status === 'error').length
+  const current = [...steps].reverse().find((st) => st.status === 'running')
 
   return (
     <>
@@ -1789,14 +1826,14 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
                 ? `${current.label}…`
                 : now - message.at > 60_000
                   ? L('Ainda trabalhando: tarefas longas demoram mesmo', 'Still working: long tasks do take a while')
-                  : run.steps.length === 0
+                  : steps.length === 0
                     ? L('Lendo o pedido…', 'Reading the request…')
                     : L('Pensando…', 'Thinking…')}
             </span>
           ) : (
             <span className="steps__summary">
               {run.status === 'done' && failed === 0 && `${L('Pronto', 'Done')} · `}
-              {run.steps.length} {L(`passo${run.steps.length === 1 ? '' : 's'}`, `step${run.steps.length === 1 ? '' : 's'}`)}
+              {steps.length} {L(`passo${steps.length === 1 ? '' : 's'}`, `step${steps.length === 1 ? '' : 's'}`)}
               {total > 0 && ` · ${duration(total)}`}
             </span>
           )}
@@ -1817,34 +1854,34 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
         </button>
         {/* One row of pills under the chain, not one row per control: the steer opens here, and the
             pause pill of a held reply joins the same row instead of drawing a second one. */}
-        {working && (
+        {followable && (
           <div className="steps__pills">
             <span
               className="steps__steer-pill"
               role="button"
               aria-expanded={steerOpen}
-              title={L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply')}
+              title={working ? L('Dizer como seguir, sem parar a resposta', 'Say how to go on without stopping the reply') : L('Pedir a esta resposta para seguir daqui', 'Ask this reply to go on from here')}
               onClick={() => setSteerOpen((v) => !v)}
             >
-              <Icon name="pointer" size={11} /> {L('Orientar', 'Steer')}
+              <Icon name={working ? 'pointer' : 'down'} size={11} /> {working ? L('Orientar', 'Steer') : L('Seguir', 'Follow')}
             </span>
           </div>
         )}
         {open && (
           <ol className="steps__list">
-            {run.steps.map((st) => (
+            {steps.map((st) => (
               <StepRow key={st.id} step={st} />
             ))}
           </ol>
         )}
-        <Thought message={message} working={working} />
+        <Thought message={message} working={working} thought={round?.thought} />
       </div>
-      {working && steerOpen && (
+      {followable && steerOpen && (
         <div className="steps__steer">
           <div className="steps__steer-note">
             <textarea
-              aria-label={L('Orientação para a resposta em curso', "Instructions for the current reply")}
-              placeholder={L('Como ele deve seguir?', 'How should it go on?')}
+              aria-label={working ? L('Orientação para a resposta em curso', 'Instructions for the current reply') : L('O que mais esta resposta deve fazer', 'What more this reply should do')}
+              placeholder={working ? L('Como ele deve seguir?', 'How should it go on?') : L('O que mais?', 'What next?')}
               rows={2}
               value={steerNote}
               autoFocus
@@ -1859,7 +1896,7 @@ export function RunSteps({ message }: { message: Message }): ReactNode {
             />
             <div className="steps__steer-row">
               <button className="btn btn--primary btn--xs" disabled={!steerTyped} onClick={() => steer(steerTyped)}>
-                {L('Orientar', 'Steer')}
+                {working ? L('Orientar', 'Steer') : L('Seguir', 'Follow')}
               </button>
               <button
                 className="link"
@@ -1895,10 +1932,12 @@ export function followsTheEnd(box: { scrollHeight: number; scrollTop: number; cl
 // line it thought — the whole of it one click away. The window keeps it in memory so it can be read
 // back. Off unless the person turned it on in Settings: a reply's reasoning is its own, and most
 // people want the answer.
-export function Thought({ message, working }: { message: Message; working: boolean }): ReactNode {
+export function Thought({ message, working, thought: kept }: { message: Message; working: boolean; thought?: string }): ReactNode {
   const on = useStore((s) => s.settings.showThinking === true)
   const retained = useLiveThoughtState(message.id, STREAM_MS)
-  const thought = retained?.text
+  // A finished round's reasoning lives on the run: the live cache holds only the newest turn and
+  // is cleared when the next one starts. Old replies have no kept text and still read from it.
+  const thought = kept || retained?.text
   // null: follow the reply — open while it thinks, folded once it's done. A click says otherwise.
   const [asked, setAsked] = useState<boolean | null>(null)
   const open = asked ?? working

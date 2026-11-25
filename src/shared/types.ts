@@ -220,9 +220,22 @@ export interface FeedbackDraft {
   message: string
 }
 
+// A reply that goes on from where it stopped keeps each turn as a round: its instruction row, the
+// toolchain, what it thought and what it said. `rounds` is additive; `steps` and the message's text
+// stay flat for anything written before rounds existed (src/core/runs.ts, src/renderer/src/Conversation.tsx).
+export const MAX_FOLLOW_ROUNDS = 3
+
+export interface RunRound {
+  id: string // the Follow row that opened this round, or the first step of the original reply
+  steps: Step[] // this round's own toolchain, including its Follow row and closing thinking row
+  text: string // what this round said
+  thought?: string // reasoning kept when the round ended, since the live cache is memory only
+}
+
 export interface Run {
   status: RunStatus
   steps: Step[]
+  rounds?: RunRound[] // only on a reply that followed up; newest is the last entry
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
   startedAt?: number // when this attempt started, on a reply tried again (its message keeps the first `at`)
   receipt?: Receipt
