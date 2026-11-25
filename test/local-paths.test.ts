@@ -1,8 +1,8 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { isLimited, localUrl, resolveLocal, verifyLocalUrl, type LocalReach } from '../src/core/local-paths'
+import { isLimited, localUrl, openSigned, resolveLocal, signedFor, verifyLocal, verifyLocalUrl, type LocalReach } from '../src/core/local-paths'
 import { codePath, LOCAL_LINK, remarkLocalPaths, splitPaths } from '../src/shared/path-text'
 
 const paths = (text: string, folder?: string): string[] => splitPaths(text, folder).parts.flatMap((p) => ('path' in p ? [p.path] : []))
@@ -135,20 +135,87 @@ describe.runIf(process.platform !== 'win32')('what a path can do', () => {
   })
 
   it('an address only opens what was signed', () => {
-    const url = new URL(localUrl('chave', '/tmp/a.png'))
+    const a = file('a.png')
+    const url = new URL(localUrl('chave', a))
     expect(url.host).toBe('local')
-    expect(verifyLocalUrl('chave', url)).toBe('/tmp/a.png')
+    expect(verifyLocalUrl('chave', url)?.path).toBe(a)
     expect(verifyLocalUrl('outra', url)).toBeNull()
-    const [sig] = url.pathname.slice(1).split('/')
-    expect(verifyLocalUrl('chave', new URL(`tucano://local/${sig}/${Buffer.from('/etc/passwd').toString('base64url')}`))).toBeNull()
+    const [sig, , id] = url.pathname.slice(1).split('/')
+    expect(verifyLocalUrl('chave', new URL(`tucano://local/${sig}/${Buffer.from('/etc/passwd').toString('base64url')}/${id}`))).toBeNull()
+    // Nor the same path as another file.
+    expect(verifyLocalUrl('chave', new URL(url.href.replace(`/${id}`, '/1-1')))).toBeNull()
   })
 
   it("on a server, the same signature under the server's own /local/ path", () => {
-    const path = localUrl('chave', '/home/tucano/work/relatório.pdf', '/local')
+    const pdf = file('work/relatório.pdf')
+    const path = localUrl('chave', pdf, '/local')
     expect(path.startsWith('/local/')).toBe(true)
     // What src/server does with the address it's asked for.
-    const asked = (p: string): string | null => verifyLocalUrl('chave', new URL(p.replace(/^\/local/, ''), 'tucano://local'))
-    expect(asked(path)).toBe('/home/tucano/work/relatório.pdf')
-    expect(asked(path.replace(/\/[^/]+$/, `/${Buffer.from('/home/tucano/.tucano-server/server.key').toString('base64url')}`))).toBeNull()
+    const asked = (p: string): string | null => verifyLocalUrl('chave', new URL(p.replace(/^\/local/, ''), 'tucano://local'))?.path ?? null
+    expect(asked(path)).toBe(pdf)
+    const enc = Buffer.from(pdf).toString('base64url')
+    expect(asked(path.replace(enc, Buffer.from('/home/tucano/.tucano-server/server.key').toString('base64url')))).toBeNull()
+  })
+})
+
+describe.runIf(process.platform !== 'win32')('serving a signed file', () => {
+  let root: string
+  let secret: string
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'tucano-serve-')))
+    mkdirSync(join(root, 'work/out'), { recursive: true })
+    writeFileSync(join(root, 'work/out/a.png'), 'imagem')
+    secret = join(root, 'server.key')
+    writeFileSync(secret, 'SEGREDO')
+  })
+  const read = (url: string, person?: string, owner = true): string | null => {
+    const signed = verifyLocal('chave', new URL(url))
+    const opened = signed && signedFor(signed, person ?? 'dono', owner) ? openSigned(signed) : null
+    if (!opened) return null
+    try {
+      return readFileSync(opened.fd, 'utf8')
+    } finally {
+      closeSync(opened.fd)
+    }
+  }
+
+  it('serves the file that was checked, untouched', () => {
+    expect(read(localUrl('chave', join(root, 'work/out/a.png')))).toBe('imagem')
+  })
+
+  it('a file swapped for a link after signing serves nothing', () => {
+    const a = join(root, 'work/out/a.png')
+    const url = localUrl('chave', a)
+    unlinkSync(a)
+    symlinkSync(secret, a)
+    expect(read(url)).toBeNull()
+  })
+
+  it('a folder on the way swapped for a link serves nothing', () => {
+    const url = localUrl('chave', join(root, 'work/out/a.png'))
+    // Another folder with a file of the same name, and the link where the folder was.
+    mkdirSync(join(root, 'other'))
+    writeFileSync(join(root, 'other/a.png'), 'SEGREDO')
+    renameSync(join(root, 'work/out'), join(root, 'work/old'))
+    symlinkSync(join(root, 'other'), join(root, 'work/out'))
+    expect(read(url)).toBeNull()
+  })
+
+  it('a file replaced by another under the same name serves nothing', () => {
+    const a = join(root, 'work/out/a.png')
+    const url = localUrl('chave', a)
+    rmSync(a)
+    writeFileSync(join(root, 'work/out/b.png'), 'outro') // takes another inode while a.png's is gone
+    writeFileSync(a, 'trocado')
+    expect(read(url)).toBeNull()
+  })
+
+  it('an address signed for one person opens nothing for another', () => {
+    const url = localUrl('chave', join(root, 'work/out/a.png'), 'tucano://local', 'ana')
+    expect(read(url, 'ana', false)).toBe('imagem')
+    expect(read(url, 'bia', false)).toBeNull()
+    expect(read(url, 'dono', true)).toBeNull()
+    // And a window address (no one) isn't someone's, nor the other way around.
+    expect(read(localUrl('chave', join(root, 'work/out/a.png')), 'bia', false)).toBeNull()
   })
 })

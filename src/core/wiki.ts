@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { L, lang, locale } from '../shared/lang'
 import { UserError } from '../shared/errors'
 import type { WikiChange, WikiFinding, WikiHit, WikiImport, WikiOp, WikiPage, WikiPageInfo, WikiSource, WikiVersion } from '../shared/types'
+import { unsynced } from './db'
 import type { ToolDef } from './gateway'
 
 const PAGES = 'pages'
@@ -362,6 +363,7 @@ export class Wiki {
     if (!existsSync(join(this.dir, SCHEMA))) writeFileSync(join(this.dir, SCHEMA), defaultSchema())
     if (!existsSync(join(this.dir, LOG))) writeFileSync(join(this.dir, LOG), L('# Registro\n\nO que mudou na wiki, do mais antigo pro mais novo.\n\n', '# Log\n\nWhat changed in the wiki, oldest first.\n\n'))
     this.db = new DatabaseSync(this.deps.indexPath)
+    unsynced(this.db)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS pages (file TEXT PRIMARY KEY, title TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, body TEXT NOT NULL, hash TEXT NOT NULL, mtime INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS links (src TEXT NOT NULL, target TEXT NOT NULL);

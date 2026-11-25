@@ -46,6 +46,33 @@ export function maskKeys(text: string, keys: readonly { name: string; value: str
   return t
 }
 
+// A file an agent shows becomes an artifact that anyone in the conversation opens, outside the
+// masking of what its computer prints. A text file comes out masked the same way; a binary one
+// holding a value can't be masked without breaking it, so it's refused, naming the keys.
+export type ShownKey = { name: string; value: string }
+export function maskShown(data: Buffer, keys: readonly ShownKey[]): { data: Buffer } | { leaked: string[] } {
+  const live = keys.filter((k) => k.value.length >= MIN_MASKED)
+  if (!live.length) return { data }
+  let text: string | undefined
+  try {
+    text = data.includes(0) ? undefined : new TextDecoder('utf-8', { fatal: true }).decode(data)
+  } catch {}
+  if (text !== undefined) {
+    const out = maskKeys(text, live)
+    return { data: out === text ? data : Buffer.from(out) }
+  }
+  const forms = (v: string): string[] => [v, JSON.stringify(v).slice(1, -1), encodeURIComponent(v), Buffer.from(v).toString('base64').replace(/=+$/, '')]
+  const leaked = live.filter((k) => forms(k.value).some((f) => f.length >= MIN_MASKED && data.includes(f))).map((k) => k.name)
+  return leaked.length ? { leaked: [...new Set(leaked)] } : { data }
+}
+
+// Refusing a file that would carry a key's value out of the agent's computer.
+export const leakedError = (names: string[]): string =>
+  L(
+    `Não mostrei: o arquivo contém o valor de ${names.map(masked).join(', ')} do Cofre. Tire o valor do arquivo e mostre de novo.`,
+    `I didn't show it: the file holds the value of ${names.map(masked).join(', ')} from the Cofre. Take the value out of the file and show it again.`
+  )
+
 export type Opened = { key: VaultKey; value: string }
 
 export interface VaultDeps {
@@ -108,7 +135,9 @@ export class Vault {
     }
     if (value) {
       await this.deps.secrets.set(secretKey(id), value)
-      this.values.delete(id)
+      // Known from now on, to be masked; a 1Password reference is read only when a use asks.
+      if (isOpRef(value)) this.values.delete(id)
+      else this.values.set(id, value)
     }
     db.saveVaultKey(key)
     return key
@@ -188,18 +217,42 @@ export class Vault {
   // (whoever's) whose values were opened in this run of the app, so a `cat .env` or a service's log
   // shows [cofre:NAME] too.
   mask(agentId: string, text: string): string {
-    const keys = this.deps.db
-      .vaultKeys()
-      .filter((k) => k.agents.includes(agentId) && this.values.has(k.id))
-      .map((k) => ({ name: k.name, value: this.values.get(k.id)! }))
-    return maskKeys(text, keys)
+    return this.maskWith(text, (k) => k.agents.includes(agentId))
+  }
+
+  // Every key whose value this run of the app knows, whoever it's given to: for text that may hold any of
+  // them (Settings › Traces sends what a person typed).
+  maskAll(text: string): string {
+    return this.maskWith(text, () => true)
+  }
+
+  // The keys given to this agent whose values are known: what mask() hides, and a shown file too.
+  openedFor(agentId: string): ShownKey[] {
+    return this.opened((k) => k.agents.includes(agentId))
+  }
+
+  private opened(which: (k: VaultKey) => boolean): ShownKey[] {
+    return this.deps.db.vaultKeys().flatMap((k) => (which(k) && this.values.has(k.id) ? [{ name: k.name, value: this.values.get(k.id)! }] : []))
+  }
+
+  private maskWith(text: string, which: (k: VaultKey) => boolean): string {
+    return maskKeys(text, this.opened(which))
   }
 
   // Opens (once) every key given to this agent, so mask() knows their values before its first command.
   // Not a 1Password reference: reading one asks to unlock 1Password, which only a use should do.
-  async warm(agentId: string): Promise<void> {
+  warm(agentId: string): Promise<void> {
+    return this.warmWhere((k) => k.agents.includes(agentId))
+  }
+
+  // The same for every key, so maskAll() knows them all.
+  warmAll(): Promise<void> {
+    return this.warmWhere(() => true)
+  }
+
+  private async warmWhere(which: (k: VaultKey) => boolean): Promise<void> {
     for (const k of this.deps.db.vaultKeys()) {
-      if (!k.agents.includes(agentId) || this.values.has(k.id)) continue
+      if (!which(k) || this.values.has(k.id)) continue
       const stored = await this.deps.secrets.get(secretKey(k.id)).catch(() => undefined)
       if (stored !== undefined && !isOpRef(stored)) this.values.set(k.id, stored)
     }

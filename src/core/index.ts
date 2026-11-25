@@ -15,7 +15,7 @@ import { L, lang, langOf, locale, setLang, type Lang } from '../shared/lang'
 import { errorFor, UserError } from '../shared/errors'
 import type { Api, CoreEvent, Method, Params, Request, Wire } from '../shared/rpc'
 import { limitError, paramsError } from '../shared/rpc-shapes'
-import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
+import { ACCOUNT_ENGINES, accountsOn, EXECUTION_DAYS, applyOrder, proposalsOf, type AgentChanges, type AgentDraft, type Conversation, type Proposal, type ProposalsResult, type UndoInfo, channelName, ENGINES, inQuietHours, modelInfo, personScope, rememberModels, scopePerson, usable, WEBHOOK_PORT, type Account, type AccountEngine, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Person, type NodeInfo, type Routine, type Settings, type Task, type TracesView, isTeam, MAX_TASK_TITLE, MAX_TASK_NOTES, type WikiChange, type WikiSource } from '../shared/types'
 import { agentOwner, channelEditError, shareComputer as shareComputerFor, cleanName, dmOwner, hashSecret, Hub, MAX_NAME, mayEditChannel, nameLongError, nameTakenError, People, routineDetail, stripInvisible, type Purged } from './people'
 import { restricted } from '../shared/access'
 import { assertAgentVisible, assertChannelVisible, assertReplyVisible, grantOwnChannel, membersFor, restrictedIds } from './access-policy'
@@ -73,14 +73,15 @@ import { extractZip, zipFromBuffer, zipFromFile } from './zip'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Vault } from './vault'
-import { COFRE } from '../shared/vault'
+import { COFRE, pageOrigin } from '../shared/vault'
 import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from './browser'
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
-import { checkFolder, Computers, folderName, type Shooter } from './computer'
+import { checkFolder, Computers, folderName, lentWhereTheyAre, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Titles } from './titles'
+import { shortTitle } from '../shared/titles'
 import { loginEnv, MacComputer } from './mac'
 import { NodeLog, NodeServer } from './node-server'
 import { NodeLinks, NodeUplink, type LinkPort } from './node-link'
@@ -100,7 +101,8 @@ import { workspacePorts } from './ports'
 import { isTheme, workspaceLabel, workspaceParts } from '../shared/workspaces'
 import { isNewQuestion } from '../shared/questions'
 import { companyNetwork } from './network'
-import { flushTelemetry, loadTelemetry, operationEngines, otelConfig, stopTelemetry, takeOtelEnv, tracedEngines, tracesWanted, tracing } from './telemetry'
+import { flushTelemetry, operationEngines, otelConfig, reloadTelemetry, stopTelemetry, takeOtelEnv, testTelemetry, tracedEngines, tracesWanted, tracing, type OtelConfig } from './telemetry'
+import { endpointError, NO_TRACES, parseHeaders, screenConfig, tracesUrl, type StoredTraces } from './traces-settings'
 
 // Before any child process: the OTEL_* settings can hold a backend's key, and agents inherit this environment.
 const otelEnv = takeOtelEnv(process.env)
@@ -318,12 +320,42 @@ const gateway = new Gateway()
 // Traces start here too, so no reply runs before them. Off, this reads two variables and loads nothing.
 // Only this process's environment configures them, never the login shell: an agent that can edit
 // ~/.zshrc could otherwise send every conversation to a server of its own at the next launch.
-const startTraces = async (): Promise<void> => {
-  const config = tracesWanted(process.env, serverMode) ? otelConfig(otelEnv) : undefined
-  if (!config) return
-  await loadTelemetry(config, { workspaceId: process.env['TUCANO_WORKSPACE_ID'] ?? 'default', version: appVersion, mode: serverMode ? 'server' : 'desktop' }).catch((e: unknown) => console.error('[telemetry]', e))
+// Where the environment doesn't, Settings › Connections › Traces does (src/core/traces-settings.ts).
+const envTraces = tracesWanted(process.env, serverMode) ? otelConfig(otelEnv) : undefined
+const tracesAbout = { workspaceId: process.env['TUCANO_WORKSPACE_ID'] ?? 'default', version: appVersion, mode: serverMode ? ('server' as const) : ('desktop' as const) }
+// Read once and kept: only setTraces writes it, and a reply asks for it as it ends.
+let tracesCache: StoredTraces | undefined
+const storedTraces = (): StoredTraces => (tracesCache ??= { ...NO_TRACES, ...(JSON.parse(db.meta(TRACES_META) ?? '{}') as Partial<StoredTraces>) })
+const TRACES_META = 'traces'
+const TRACES_HEADERS = 'traces.headers'
+const savedHeaders = async (): Promise<string> => (await secrets.get(TRACES_HEADERS).catch(() => undefined)) ?? ''
+const tracesConfig = async (): Promise<OtelConfig | undefined> => {
+  if (envTraces) return envTraces
+  const s = storedTraces()
+  return s.on && s.endpoint ? screenConfig(s, parseHeaders(await savedHeaders())) : undefined
 }
-const pathReady = (fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))).then(startTraces)
+const mayTraceTo = (endpoint: string, on: boolean): void => {
+  const bad = endpointError(endpoint, on)
+  if (bad) throw new UserError(bad)
+}
+const tracesView = (): TracesView => {
+  const { on, endpoint, text } = storedTraces()
+  return { on, endpoint, text, headers: db.getSecret(TRACES_HEADERS) !== undefined, ...(envTraces ? { fromEnv: pageOrigin(envTraces.url) ?? '' } : {}) }
+}
+// A save that changes only the text switch leaves the exporter as it is: the text is decided per reply.
+let appliedTraces: string | undefined = 'none'
+const applyTraces = async (): Promise<void> => {
+  const config = await tracesConfig()
+  const key = config ? JSON.stringify(config) : 'none'
+  if (key === appliedTraces) return
+  try {
+    await reloadTelemetry(config, tracesAbout)
+    appliedTraces = key
+  } catch (e) {
+    console.error('[telemetry]', e)
+  }
+}
+const pathReady = (fake ? Promise.resolve() : adoptLoginShellPath().catch((e: unknown) => console.error('[path]', e)).then(() => void (process.env['PATH'] = engineSetup.withDirs(process.env['PATH'] ?? '')))).then(applyTraces)
 // The harnesses are checked behind the window (it opens on the last check). What truly needs
 // them (a reply, the memory, routines, a connection test) waits for this.
 const enginesReady = pathReady.then(detect)
@@ -540,6 +572,7 @@ function emit(event: CoreEvent): void {
   const more = event.type === 'message' && db.recordActivity(event.message, viewing)
   hub.emit(event)
   if (event.type === 'message') titles?.forReply(event.message)
+  if (event.type === 'message') nameTucaConversation(event.message)
   // An approval asked or decided changes what waits on its deciders.
   if (event.type === 'approval') hub.emit({ type: 'inbox' })
   toPhone(event)
@@ -950,7 +983,17 @@ const memory = new Memories({ db, engines: operationEngines(engineImpls, { opera
 titles = new Titles({ db, engines: operationEngines(engineImpls, { operation: 'title' }), settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 const wikiEngines = operationEngines(engineImpls, { operation: 'wiki' })
 
-const computers = new Computers({ db, dataDir, emit, shoot })
+const computers = new Computers({ db, dataDir, emit, shoot, secrets: (agentId) => vault.openedFor(agentId) })
+
+// Once: folders lent before the computer checked where each really is are kept as where they lead today.
+if (!db.meta('lentReal')) {
+  for (const agent of db.agents()) {
+    const lent = agent.folders ?? []
+    const real = lentWhereTheyAre(lent, { dataDir })
+    if (real.some((f, i) => f.path !== lent[i]!.path)) db.setFolders(agent.id, real)
+  }
+  db.setMeta('lentReal', '1')
+}
 
 // This computer lent to servers' Tucanos (core/node-server.ts, core/node-link.ts): the app calls each server it
 // was paired with and lends it (Settings › Servers), and that server's agents use this computer's terminal, files,
@@ -1166,6 +1209,12 @@ const runner = new Runner({
   memory,
   computers,
   vault,
+  traceText: (reply) => {
+    if (envTraces || !vaultWarm) return false // the screen's text goes to the screen's address only, once the Vault's values are known
+    const s = storedTraces()
+    const by = s.text && s.textBy ? db.person(s.textBy) : undefined // gone, or no longer an admin: it goes nowhere until another admin turns it on
+    return !!by && isAdmin(by) && readsFor(by)(reply)
+  },
   browser,
   ...(serverMode ? {} : { apps: desktopApps }),
   routines,
@@ -1197,6 +1246,14 @@ const runner = new Runner({
   }
 })
 runner.setPaused(!!settings().paused)
+// With the text going in traces, the Vault's values are known before the first reply, so each is masked.
+let vaultWarm = false
+async function warmTraceText(): Promise<void> {
+  if (!storedTraces().text) return
+  await vault.warmAll().catch((e: unknown) => console.error('[telemetry]', e))
+  vaultWarm = true
+}
+void warmTraceText()
 // What the app cut when it closed goes on by itself once the agents' engines are found (see resumeInterrupted).
 if (interrupted.length) void enginesReady.then(() => runner.resumeInterrupted(interrupted))
 // Installs from before the Tuca get him at the first start after the introduction.
@@ -1326,8 +1383,9 @@ const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 // The Tuca, made once (the introduction, or the first start after it) and kept
 // even when archived. His model: the one given, else a plan's, else the router's
 // or the memory's, which the introduction made sure work.
-// Each person's DM with him is kept: every way to the builder screen opens it where it was, and his
-// session goes on. `fresh` ("Nova conversa") starts another: the old one goes, with only his hello in the new.
+// Each person has several conversations with him, one per request, each kept with its own session:
+// every way to him opens the one that was last talked in. `fresh` ("Nova conversa") starts another and
+// keeps the others; one that nobody wrote in yet is the new one already, so empty ones don't pile up.
 // A model runs here when its harness is chosen and signed in.
 function worksWith(s: Settings): (id: string) => boolean {
   return (id) => {
@@ -1361,28 +1419,47 @@ function ensureTuca(modelId?: string, fresh = false, person = db.ownerId()): { a
   }
   if (!tuca) {
     const model = readyModel(s, modelId)
-    tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle), s.defaultLimit)
+    tuca = tucaAgent(model ?? 'sonnet', db.agents().map((a) => a.handle))
     db.saveAgent(tuca)
     emit({ type: 'agent', agent: tuca })
   }
-  const theirs = (c: { kind: 'channel' | 'dm'; owner?: string; name: string }): boolean => c.kind === 'dm' && c.name === tuca!.id && dmOwner(c, db.ownerId()) === person
-  let dm = db.conversations().find(theirs)
-  if (dm && fresh) {
-    for (const m of db.messagesWithRun(['working'])) if (m.conversationId === dm.id) runner.stop(m.id)
-    runner.forgetSessions({ conversationId: dm.id })
-    db.deleteConversation(dm.id)
-    emit({ type: 'conversation_removed', id: dm.id, for: person })
-    dm = undefined
-  }
+  // The one last talked in comes first; one nobody wrote in yet is where a new conversation starts.
+  const mine = tucaConversations(tuca.id, person)
+  let dm = fresh ? mine.find((c) => !db.firstRequest(c.id)) : mine[0]
   if (!dm) {
-    db.createConversation({ id: randomUUID(), kind: 'dm', name: tuca.id, members: [tuca.id], owner: person })
-    dm = db.conversations().find(theirs)!
-    const hello: Message = { id: randomUUID(), conversationId: dm.id, author: { kind: 'agent', id: tuca.id }, text: tucaHello(), at: Date.now() }
+    const id = randomUUID()
+    db.createConversation({ id, kind: 'dm', name: tuca.id, members: [tuca.id], owner: person })
+    const hello: Message = { id: randomUUID(), conversationId: id, author: { kind: 'agent', id: tuca.id }, text: tucaHello(), at: Date.now() }
     db.saveMessage(hello)
-    emitConversations([dm.id])
+    emitConversations([id])
     emit({ type: 'message', message: hello })
+    dm = db.conversation(id)!
   }
   return { agentId: tuca.id, conversationId: dm.id }
+}
+
+// A person's conversations with the Tuca, the one last talked in first.
+function tucaConversations(tucaId: string, person: string): Conversation[] {
+  return db
+    .conversations()
+    .filter((c) => c.kind === 'dm' && c.name === tucaId && dmOwner(c, db.ownerId()) === person)
+    .sort((a, b) => (b.lastAt ?? b.createdAt ?? 0) - (a.lastAt ?? a.createdAt ?? 0))
+}
+
+// A conversation with the Tuca is named after what the person first asked there: its own words at once
+// (src/shared/titles.ts), then the title a cheap model gives that request (src/core/titles.ts), unless
+// the person named the conversation themselves meanwhile.
+function nameTucaConversation(m: Message): void {
+  if (m.author.kind !== 'person' || m.threadId) return
+  const c = db.conversation(m.conversationId)
+  if (!c || c.kind !== 'dm' || db.agent(c.name)?.kind !== 'tuca') return
+  const first = db.firstRequest(c.id)
+  if (first?.id !== m.id) return
+  const own = shortTitle(m.text)
+  const next = !c.title ? m.title || own : c.title === own && m.title ? m.title : undefined
+  if (!next || next === c.title) return
+  db.setConversationTitle(c.id, next)
+  hub.emit({ type: 'conversation', conversation: db.conversation(c.id)! })
 }
 
 // One of a reply's proposals changed: settled once (applied, with what it made or changed, or
@@ -1798,6 +1875,8 @@ function reach(ctx: Ctx, conversationId: string | undefined): void {
 // The person's DM with an agent: the one there is, or a new one.
 function dmFor(ctx: Ctx, agentId: string): string {
   assertAgentVisible(db, ctx.person, agentId)
+  // With the Tuca a person has several: the one last talked in.
+  if (db.agent(agentId)?.kind === 'tuca') return ensureTuca(undefined, false, ctx.person.id).conversationId
   const existing = db.conversations().find((c) => c.kind === 'dm' && c.name === agentId && dmOwner(c, db.ownerId()) === ctx.person.id)
   if (existing) return existing.id
   const id = randomUUID()
@@ -1841,14 +1920,15 @@ function ownMemory(ctx: Ctx, id: string): void {
 }
 // Whether this person may read a reply, for Execuções and the Boletim's tools. A page of them asks about
 // the same few conversations over and over.
-const readsReply = (ctx: Ctx): CanRead => {
+const readsFor = (person: Person): CanRead => {
   const conversations = new Map<string, boolean>()
   return (r) => {
     let sees = conversations.get(r.conversationId)
-    if (sees === undefined) conversations.set(r.conversationId, (sees = people.canSeeConversation(ctx.person, db.conversationOwner(r.conversationId))))
-    return sees && people.visibleAt(ctx.person, r)
+    if (sees === undefined) conversations.set(r.conversationId, (sees = people.canSeeConversation(person, db.conversationOwner(r.conversationId))))
+    return sees && people.visibleAt(person, r)
   }
 }
+const readsReply = (ctx: Ctx): CanRead => readsFor(ctx.person)
 // What the wiki made of a source is seen by whoever sees the source: one from someone's DM, by
 // them alone. A change or version whose source is gone went with it.
 const seesSource = (ctx: Ctx) => (sourceId: string): boolean => {
@@ -2230,6 +2310,15 @@ const api: Handlers = {
   },
 
   ensureTuca: ({ modelId, fresh }, ctx) => ensureTuca(modelId, fresh, ctx.person.id),
+  // A conversation with the Tuca, named by its person ('' goes back to what was first asked there).
+  setConversationTitle: ({ id, title }, ctx) => {
+    reach(ctx, id)
+    const c = db.conversation(id)
+    if (!c || c.kind !== 'dm' || db.agent(c.name)?.kind !== 'tuca' || dmOwner(c, db.ownerId()) !== ctx.person.id) throw new Error(L('Só dá pra dar nome às suas conversas com o Tuca.', 'Only your conversations with Tuca can be named.'))
+    const first = db.firstRequest(id)
+    db.setConversationTitle(id, cleanTaskText(title, 80) || (first ? first.title || shortTitle(first.text) : ''))
+    emitConversations([id])
+  },
   createFromDraft: ({ messageId }, ctx) => {
     reachMessage(ctx, messageId)
     return createDraft(ctx, messageId)
@@ -2491,6 +2580,32 @@ const api: Handlers = {
   executions: (q, ctx) => {
     if (!EXECUTION_DAYS.includes(q.days)) throw new UserError(L('Esse período não está disponível.', "That period isn't available."))
     return executions(db, readsReply(ctx), q)
+  },
+  traces: () => tracesView(),
+  setTraces: async ({ on, endpoint, text, headers }, ctx) => {
+    if (envTraces) throw new UserError(L('O ambiente do servidor já configura os traces: mude as variáveis OTEL_ dele.', "The server's environment already configures traces: change its OTEL_ variables."))
+    mayTraceTo(endpoint, on)
+    const was = storedTraces()
+    const next: StoredTraces = { on, endpoint: endpoint.trim(), text: !!text }
+    // Text already going doesn't follow the traces to a new address, or to new credentials (another account
+    // at the same backend): an admin turns it on again for those.
+    if (was.text && (next.endpoint !== was.endpoint || headers !== undefined)) next.text = false
+    // Whoever turned the text on: it goes only for what they may read.
+    if (next.text) next.textBy = was.text && was.textBy ? was.textBy : ctx.person.id
+    if (headers !== undefined) await secrets.set(TRACES_HEADERS, headers?.trim() || undefined)
+    db.setMeta(TRACES_META, JSON.stringify(next))
+    tracesCache = next
+    if (next.on !== was.on || next.endpoint !== was.endpoint || next.text !== was.text || headers !== undefined)
+      record(ctx, 'traces.changed', undefined, { on: next.on, endpoint: pageOrigin(next.endpoint) ?? '', text: next.text, ...(headers === undefined ? {} : { headers: headers?.trim() ? 'changed' : 'removed' }) })
+    await applyTraces()
+    await warmTraceText()
+    return tracesView()
+  },
+  testTraces: async ({ endpoint, headers }) => {
+    mayTraceTo(endpoint, true)
+    // The saved key goes only to the address it was saved for: another one gets the form's headers, or none.
+    const saved = endpoint.trim() === storedTraces().endpoint ? await savedHeaders() : ''
+    return testTelemetry({ url: tracesUrl(endpoint), protocol: 'http/json', headers: parseHeaders(headers ?? saved) }, tracesAbout)
   },
   executionSteps: ({ messageId }, ctx) => {
     reachMessage(ctx, messageId)
@@ -2861,9 +2976,11 @@ const api: Handlers = {
     if (!agent) return
     const why = checkFolder(path, { dataDir })
     if (why) throw new Error(why)
+    // Kept as where it really is, as addNodeFolder does: the computer checks it is still there when it starts.
+    const real = realpathSync(path)
     const folders = agent.folders ?? []
-    if (folders.some((f) => f.path === path)) return
-    setFolders(agent, [...folders, { name: folderName(path, folders.map((f) => f.name)), path, readOnly: false }])
+    if (folders.some((f) => f.path === real || f.path === path)) return
+    setFolders(agent, [...folders, { name: folderName(real, folders.map((f) => f.name)), path: real, readOnly: false }])
   },
   folderAction: ({ agentId, name, action }) => {
     const agent = db.agent(agentId)
@@ -3234,6 +3351,9 @@ const api: Handlers = {
   activity: ({ personId, kind, before }) => db.activity({ personId, kind, before }),
   inbox: (_, ctx) => people.inbox(ctx.person),
   answerQuestion: ({ id, text }, ctx) => runner.answer(id, text, ctx.person),
+  removeTucaLeave: ({ id }, ctx) => {
+    if (db.removeTucaLeave(id, ctx.person.id)) emit({ type: 'leaves' })
+  },
   confirmQuestion: ({ id, ok }, ctx) => runner.confirm(id, ok, ctx.person),
   // A question's decisions, answered on the card one at a time and then sent: by whoever may answer it (Runner.decidable).
   answerDecision: ({ messageId, index, answer }, ctx) => runner.answerDecision(messageId, index, answer, ctx.person),

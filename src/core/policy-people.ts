@@ -201,6 +201,8 @@ export const NEEDS: Record<Method, Need> = {
   setDelegation: 'anyone',
   inbox: 'anyone',
   answerQuestion: 'target',
+  removeTucaLeave: 'anyone', // only one's own is found (db.removeTucaLeave)
+  setConversationTitle: 'anyone', // only one's own conversations with the Tuca (checked there)
   confirmQuestion: 'target',
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',
@@ -289,6 +291,9 @@ export const NEEDS: Record<Method, Need> = {
   usage: 'admin',
   executions: 'admin',
   executionSteps: 'admin',
+  traces: 'admin',
+  setTraces: 'admin',
+  testTraces: 'admin',
   // people
   createInvite: 'admin',
   revokeInvite: 'admin',

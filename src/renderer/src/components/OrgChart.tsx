@@ -8,7 +8,7 @@ import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
 import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyLayout, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
-import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
+import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, makeWithTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
 import { Sheet } from './Pages'
 import { Select } from './Select'
@@ -377,7 +377,7 @@ export function OrgPage(): ReactNode {
                 {L('Organizar', 'Tidy up')}
               </button>
             )}
-            <button className="btn btn--primary btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
+            <button className="btn btn--primary btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={makeWithTuca}>
               <Icon name="plus" size={14} /> {L('Novo agente', 'New agent')}
             </button>
           </>
@@ -828,7 +828,7 @@ function Coach({ agents, admin, onPick }: { agents: Agent[]; admin: boolean; onP
         <p className="muted small">{L('Só um admin monta o organograma.', 'Only an admin sets up the organogram.')}</p>
       ) : agents.length < 2 ? (
         <div className="wk-empty__actions">
-          <button className="btn btn--primary" onClick={openTuca}>
+          <button className="btn btn--primary" onClick={makeWithTuca}>
             <Icon name="plus" size={14} /> {L('Criar agentes com o Tuca', 'Create agents with Tuca')}
           </button>
         </div>

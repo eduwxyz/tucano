@@ -12,6 +12,7 @@ import type { AppProvider } from '../../shared/connector-catalog'
 import {
   artifactUrl,
   asSaid,
+  type TucaLeave,
   type Account,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
@@ -71,14 +72,14 @@ import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
 import { hashToView, viewToHash } from './address'
 
-import type { ExecutionPage, ExecutionQuery, ExecutionStep } from '../../shared/types'
+import type { ExecutionPage, ExecutionQuery, ExecutionStep, TracesTest, TracesView } from '../../shared/types'
 export * from '../../shared/types'
 
 export type View =
   | { kind: 'conversation'; id: string; message?: string } // `message`: scroll to it and flash it
   | { kind: 'agent'; id: string }
   | { kind: 'new-agent'; draft?: Agent; fromMessage?: string } // a draft from a Tuca card, to edit before creating
-  | { kind: 'tuca'; from?: View } // the builder screen: a new agent with the Tuca; closing goes back to `from`
+  | { kind: 'tuca'; from?: View; making?: boolean } // the Tuca's screen; closing goes back to `from`. making: opened to make an agent, so the proposal is beside the chat
   | { kind: 'approvals' }
   | { kind: 'usage'; executions?: { agentId?: string; days?: number } } // `executions`: go to that list, filtered
   | { kind: 'connectors' }
@@ -107,6 +108,7 @@ export interface State {
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
   inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
+  leaves: TucaLeave[] // what I let the Tuca do himself (src/core/tuca-leave.ts)
   tasks: Task[] | null // my to-dos on the board (Quadro), in order; null until the board first asks
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
@@ -184,6 +186,7 @@ let state: State = {
   former: [],
   inbox: { approvals: [], questions: [] },
   delegations: [],
+  leaves: [],
   tasks: null,
   needsName: false,
   settings: {
@@ -696,6 +699,8 @@ function apply(e: CoreEvent): void {
         return { ...s, inbox: e.inbox ?? s.inbox }
       case 'delegations':
         return { ...s, delegations: e.delegations ?? s.delegations }
+      case 'leaves':
+        return { ...s, leaves: e.leaves ?? s.leaves }
     }
   })
   // A full message carries all its text so far: what streamed before it is in there.
@@ -780,6 +785,7 @@ export async function start(): Promise<void> {
       you: snap.you,
       inbox: snap.inbox ?? { approvals: [], questions: [] },
       delegations: snap.delegations ?? [],
+      leaves: snap.leaves ?? [],
       people: snap.people,
       former: snap.former ?? []
     }
@@ -997,10 +1003,14 @@ export async function createChannel(name: string, threads?: boolean): Promise<vo
 
 // The Tuca and his DM, made if missing.
 export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: string; conversationId: string }> => call('ensureTuca', { modelId, fresh })
+// Takes back something I let the Tuca do himself: he asks again the next time.
+export const removeTucaLeave = (id: string): Promise<void> => call('removeTucaLeave', { id })
 // The agent a Tuca card proposed, created with a DM of its own.
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
+// The same screen, opened to make an agent (the + by Agentes): the proposal sits beside the chat from the start.
+export const makeWithTuca = (): void => navigate({ kind: 'tuca', making: true, from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
 // One card of a reply (index: which), or every one still open (draft: its new-agent card too).
 export const applyProposal = (messageId: string, index = 0): Promise<{ id: string }> => call('applyProposal', { messageId, index })
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
@@ -1234,6 +1244,10 @@ export const loadReport = (week?: number): Promise<Report> => call('report', { w
 export const loadUsage = (): Promise<UsageReport> => call('usage')
 export const loadExecutions = (q: ExecutionQuery): Promise<ExecutionPage> => call('executions', q)
 export const loadExecutionSteps = (messageId: string): Promise<ExecutionStep[]> => call('executionSteps', { messageId })
+// Settings › Connections › Traces (admins).
+export const loadTraces = (): Promise<TracesView> => call('traces')
+export const saveTraces = (p: { on: boolean; endpoint: string; text?: boolean; headers?: string | null }): Promise<TracesView> => call('setTraces', p)
+export const testTraces = (p: { endpoint: string; headers?: string }): Promise<TracesTest> => call('testTraces', p)
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
 // People: who I am, who comes in (admins), who covers for me.
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })

@@ -64,6 +64,25 @@ describe('what the runner traces', () => {
     expect(pedir.span.parentSpanId).toBe(asking.span.spanId)
   })
 
+  it('traces the model that really answered, while the receipt keeps the one the agent asked for', async () => {
+    const answers = (e: Engine): Engine => ({
+      ...e,
+      run: (t) =>
+        (async function* () {
+          for await (const ev of e.run(t)) yield ev.type === 'done' ? { ...ev, usage: { ...ev.usage, inputTokens: 10, outputTokens: 2, responseModel: 'claude-sonnet-4-5-20250929' } } : ev
+        })()
+    })
+    const r = runner(answers)
+
+    await r.send('dm', 'oi')
+    await r.idle()
+    await telemetry.shutdown()
+
+    const reply = db.messages().find((m) => m.author.kind === 'agent')!
+    expect(reply.run?.receipt?.model).toBe('sonnet')
+    expect(attrsOf(sink.spans.find((s) => s.span.name === 'chat sonnet')!)).toMatchObject({ 'gen_ai.response.model': 'claude-sonnet-4-5-20250929' })
+  })
+
   it('makes a retry a new trace of the same session, still linked to who asked after a restart', async () => {
     let broken = true
     const claraFails = (e: Engine): Engine => ({

@@ -2,11 +2,11 @@
 import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
-import type { ExecutionFilter, ExecutionPage, ExecutionStep } from './types'
+import type { ExecutionFilter, ExecutionPage, ExecutionStep, TracesTest, TracesView } from './types'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
+import type { TucaLeave, Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
 import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from './vault'
 
 export interface Snapshot {
@@ -35,6 +35,7 @@ export interface Snapshot {
   needsName?: boolean // a server's first access: the owner hasn't said their name yet (setMyName)
   inbox: Inbox // what waits on this person: approvals they can decide, questions to them
   delegations?: Delegation[] // work handed down the tree (src/shared/org.ts) that is open, or ended in the last day, in channels this person sees
+  leaves?: TucaLeave[] // what this person let the Tuca do himself (src/core/tuca-leave.ts)
 }
 
 export interface Api {
@@ -65,7 +66,8 @@ export interface Api {
   saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
   removeTask(p: { id: string }): void
   startTask(p: { id: string }): { conversationId: string } // posts it as my message to its agent (its DM, or the channel set) and takes it off the list
-  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
+  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the Tuca, with this person's conversation with him that was last talked in; fresh starts another ("Nova conversa") and keeps the rest
+  setConversationTitle(p: { id: string; title: string }): void // names one of my conversations with the Tuca; '': back to what I first asked there
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)
   dismissProposal(p: { messageId: string; index?: number }): void
@@ -189,6 +191,9 @@ export interface Api {
   usage(): UsageReport
   executions(p: { days: number; agentId?: string; status?: ExecutionFilter; beforeAt?: number; beforeId?: string }): ExecutionPage // finished replies the viewer may read, a page at a time
   executionSteps(p: { messageId: string }): ExecutionStep[]
+  traces(): TracesView // Settings › Connections › Traces
+  setTraces(p: { on: boolean; endpoint: string; text?: boolean; headers?: string | null }): Promise<TracesView> // headers: one per line, "Name: value"; left out, the saved ones stay; null removes them
+  testTraces(p: { endpoint: string; headers?: string }): Promise<TracesTest> // one test trace with the form's values; headers left out: the saved ones
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
@@ -262,6 +267,7 @@ export interface Api {
   activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)
   inbox(): Inbox
   answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
+  removeTucaLeave(p: { id: string }): void // takes back something I let the Tuca do himself
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
@@ -317,9 +323,10 @@ export type CoreEvent =
   | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
+  | { type: 'leaves'; leaves?: TucaLeave[] } // what a person let the Tuca do himself changed (each gets their own)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'thinking', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'thinking', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations', 'leaves'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

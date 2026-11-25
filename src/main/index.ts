@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { verifyLocalUrl } from '../core/local-paths'
+import { openSigned, verifyLocalUrl } from '../core/local-paths'
+import { localResponse, localType } from './local-file'
 import { readInstall } from '../core/feedback'
 import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
@@ -11,7 +12,7 @@ import { pathToFileURL } from 'node:url'
 import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
-import { isAppPage, isOutsideLink } from '../shared/links'
+import { appMayCheck, appMayHave, isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
 import { thisDevice } from './redeem'
@@ -445,13 +446,12 @@ function serveArtifact(req: Request): Promise<Response> | Response {
   const u = new URL(req.url)
   if (u.host === 'local') {
     // A file the core checked and signed for the window: see resolveLocal.
-    const path = verifyLocalUrl(localKey, u)
-    if (!path) return new Response('not found', { status: 404 })
-    return net.fetch(pathToFileURL(path).toString(), { headers: req.headers }).then((r) => {
-      const headers = new Headers(r.headers)
-      headers.set('Content-Security-Policy', 'sandbox')
-      return new Response(r.body, { status: r.status, headers })
-    })
+    const signed = verifyLocalUrl(localKey, u)
+    // Read from one descriptor, checked to be the very file that was signed: an agent can't put a
+    // link in its place after the core looked at it.
+    const opened = signed && openSigned(signed)
+    if (!signed || !opened) return new Response('not found', { status: 404 })
+    return localResponse(req, opened, localType(signed.path))
   }
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
   const dir = join(registry.selected().dataDir, 'artifacts', id)
@@ -991,13 +991,15 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     app.exit(0)
   })
 } else if (primary) app.whenReady().then(() => {
-  // Dictation: audio, for the app's own page. A service open in the side panel or anything else asks in vain.
+  // Only the app's own page, in its main frame, is given anything (dictation: audio only). A service open in
+  // the side panel, a frame, or anything else asks in vain; the system opens only links that may leave the app.
   session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) => {
-    if (permission !== 'media') return done(true)
-    const media = details as MediaAccessPermissionRequest
-    const own = !!BrowserWindow.fromWebContents(contents) && (media.requestingUrl ?? '').startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'file://')
-    done(own && !!media.mediaTypes?.length && media.mediaTypes.every((t) => t === 'audio'))
+    const d = details as MediaAccessPermissionRequest & { externalURL?: string }
+    done(appMayHave({ permission, requestingUrl: d.requestingUrl, isMainFrame: d.isMainFrame, fromWindow: !!BrowserWindow.fromWebContents(contents), mediaTypes: d.mediaTypes, externalURL: d.externalURL }, APP_PAGE))
   })
+  session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) =>
+    appMayCheck({ permission, requestingUrl: details.requestingUrl, isMainFrame: details.isMainFrame, fromWindow: !!contents && !!BrowserWindow.fromWebContents(contents) }, APP_PAGE)
+  )
   setMenu()
   protocol.handle('tucano', serveArtifact)
   // This computer's install (core/feedback.ts), for every workspace: made once. Nothing here yet is a new

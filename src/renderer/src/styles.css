@@ -5823,6 +5823,40 @@ table.csv th {
   font-size: 12.5px;
   user-select: all;
 }
+/* Settings › Traces: two switches, the address with its examples, the headers, and what goes. */
+.traces {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.traces__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.traces__row .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.traces textarea {
+  resize: vertical;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12.5px;
+}
+.traces .hint--warn,
+.traces .note,
+.traces__what {
+  margin: 0;
+}
+.text-btn.traces__remove {
+  align-self: flex-start;
+  margin-top: -4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
 /* Your own endpoint: the address and key, then the models it lists, to tick. */
 .endpoint {
   display: flex;
@@ -9461,6 +9495,16 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
    animated element is a layer of its own: eighty of them at once is a first frame the compositor can
    leave unpainted until something else invalidates it. */
 .wk-canvas.is-many .wk-node { animation: none; }
+/* thousands of dots fading at once on every hover is what a busy map can't afford */
+.wk-canvas.is-many .wk-node, .wk-canvas.is-many .wk-node text, .wk-canvas.is-many .wk-canvas__edges line { transition: none; }
+/* a page lit: a veil over the map, and the page and its links over the veil */
+.wk-canvas__over { pointer-events: none; }
+.wk-canvas__veil { fill: var(--bg); opacity: 0.8; animation: wk-veil var(--dur-enter) var(--ease-out); }
+@keyframes wk-veil {
+  from {
+    opacity: 0;
+  }
+}
 .wk-canvas.is-many > svg { animation: fade var(--dur-data) var(--ease-out) both; }
 .wk-node__hit { fill: transparent; }
 .wk-node__dot { fill: var(--k); stroke: var(--bg); stroke-width: 2.5; }
@@ -15666,6 +15710,98 @@ button.agent-card__now:hover {
   font-size: 12.5px;
   color: var(--text-2);
 }
+/* His other conversations: a small menu by "Nova conversa". */
+.onb-tc__convs {
+  position: relative;
+  flex: none;
+}
+.onb-tc__convs-pop {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  --pop-y: -6px;
+  animation: pop var(--dur-base) var(--ease-out) both;
+}
+.onb-tc__conv {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.onb-tc__conv:hover,
+.onb-tc__conv:focus-visible {
+  background: var(--hover);
+}
+.onb-tc__conv.is-on {
+  font-weight: 600;
+}
+.onb-tc__conv-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__conv-when {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+/* What he was let to do himself: the same popover, a row per leave with its way back. */
+.onb-tc__leaves-note {
+  margin: 0;
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.onb-tc__leave {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.onb-tc__leave-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.onb-tc__leave-kind {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.onb-tc__leave-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.onb-tc__leave .link {
+  flex: none;
+}
 .onb-tc__confirm {
   display: flex;
   align-items: center;
@@ -17061,4 +17197,110 @@ button.agent-card__now:hover {
   flex: none;
   color: var(--accent);
   font-weight: 600;
+}
+
+/* ---------- the Tuca's screen: the team beside his conversation ---------- */
+/* The same card as the proposal: who he passes the requests to. Whoever has a part of the request in
+   hand comes first, with how it stands; the rest are at rest, by what they do. */
+.onb-tc__team-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 28%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.onb-tc__mates {
+  margin: 12px -8px 0;
+  padding: 0;
+  list-style: none;
+}
+.onb-tc__mates > li + li {
+  margin-top: 1px;
+}
+.onb-tc__mate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.onb-tc__mate:hover,
+.onb-tc__mate:focus-visible {
+  background: var(--hover);
+}
+.onb-tc__mate .avatar,
+.onb-tc__mate > svg {
+  flex: none;
+}
+.onb-tc__mate-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.onb-tc__mate-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.onb-tc__mate-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__mate-top .request-note__state {
+  flex: none;
+  font-size: 11.5px;
+}
+.onb-tc__mate-sub {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__mate.is-asked .onb-tc__mate-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+/* The rest of the team steps back while a request is in hand. */
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked) {
+  opacity: 0.62;
+}
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked):hover,
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked):focus-visible {
+  opacity: 1;
+}
+.onb-tc__team .onb-tc__actions {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.onb-tc__back {
+  display: block;
+  margin: 10px auto 0;
+  font-size: 12.5px;
+}
+/* On his screen the request shows once in the conversation, under his reply: the lines under the
+   person's own message would say the same again, and the team card beside it says how it stands now. */
+.onb-tc .asked-here {
+  display: none;
 }
