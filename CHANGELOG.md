@@ -8,6 +8,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Novo:** **Outlook, OneDrive e Teams** na loja de conectores, numa categoria **Microsoft**: **Outlook.com** pra uma conta pessoal (e-mail, agenda, OneDrive, To Do e contatos) e **Microsoft 365** pra uma do trabalho ou escola (o mesmo, mais Teams e SharePoint). Já vem dentro do Tucano, sem instalar nada. Na primeira vez, o agente te passa um link e um código pra entrar na conta.
 > - **Corrigido:** uma **pergunta deixada numa thread** agora aparece também no canal, na faixa em cima do campo de mensagem, com "numa thread" (ou quantas há em outras threads). **Responder** abre a thread certa e leva até a pergunta. Antes, do canal, ela era só uma marca no link da thread, lá em cima, atrás de prints e logs.
 > - **Corrigido:** um **vídeo ou arquivo aberto de dentro de uma thread** fecha de volta pra thread, em vez de fechar o painel lateral inteiro.
+> - **Corrigido:** em **Uso**, um limite que zera daqui a uma semana ou mais mostra a data ("zera 30/11, 21:00"), não só o dia da semana. O limite de IA do mês dizia "zera seg, 21:00" numa segunda e parecia zerar naquela noite.
 
 ### Added
 
@@ -17,6 +18,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **A question left in a thread shows from the channel too.** The strip above the message field only showed a question asked where you were typing, so from a channel a question an agent asked inside one of its threads was only a mark on that thread's link, pages up behind the work. Now the channel's strip shows the oldest such question with "in a thread" (or how many more wait in other threads), and **Answer** opens that thread at the question. It steps aside while that thread is open beside the channel, which shows its own. What you type in the channel still goes to the channel. Thanks to Leo Miranda for the report.
 - **A file opened from a thread closes back to the thread.** A video, file, service or browser opened from a thread took the thread's place on the side, and its close button closed the whole panel. It now says "Back to the thread" and goes back there.
+- **Usage gives the date of a reset a week or more away.** The reset line named only the weekday, which fits Claude's and Codex's windows of up to a week but not a monthly limit: on a Monday, a limit renewing the Monday after read "resets Mon, 21:00" and passed for that same night. It now names the weekday within the six days ahead and the date beyond that.
 
 ## [0.2.49] - 2026-11-25
 
