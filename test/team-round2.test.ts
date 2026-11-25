@@ -14,7 +14,7 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Memories, memorySystem } from '../src/core/memory'
 import { People } from '../src/core/people'
-import { handoffSystem, routerSystem } from '../src/core/router'
+import { chimeSystem, handoffSystem, routerSystem } from '../src/core/router'
 import { Runner } from '../src/core/runs'
 
 const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-round2-'))
@@ -303,7 +303,7 @@ describe('10. routed replies in a busy channel', () => {
           yield { type: 'done', text: JSON.stringify({ handles: handle ? [handle] : [], reason: 'teste' }), usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }
-        if (t.system === handoffSystem() || t.system === memorySystem()) {
+        if (t.system === handoffSystem() || t.system === chimeSystem() || t.system === memorySystem()) {
           yield { type: 'done', text: '{"handles":[],"reason":"x","summary":"x","memories":[]}', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }
@@ -349,7 +349,9 @@ describe('10. routed replies in a busy channel', () => {
     db.saveAgent(agent('a1', 'leo'))
     db.saveAgent(agent('a2', 'nico'))
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1', 'a2'] })
-    const { runner, prompts } = rig(db, { routerMs: 250, agentMs: 100 })
+    // Leo's first reply has to be in before the second one is written: 130 ms to spare (it was 50, and
+    // a busy macOS runner in CI missed it on 2026-11-25).
+    const { runner, prompts } = rig(db, { routerMs: 250, agentMs: 20 })
     await runner.send('ch', 'leo: pergunta A sobre deploy')
     await sleep(150)
     await runner.send('ch', 'leo: pergunta B sobre testes')

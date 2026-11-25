@@ -8,6 +8,9 @@ import { liveContext, systemPrompt } from '../src/core/context'
 import { artifactKind, Computers, computerTools, linuxTools, stepFor } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
+import { maskResult } from '../src/core/runs'
+import { plainCipher, Secrets } from '../src/core/secrets'
+import { Vault } from '../src/core/vault'
 import { systemName } from '../src/core/platform'
 
 // This file drives real processes (python3, node, lsof, a port) the way the core tests drive the
@@ -117,6 +120,29 @@ describe('an agent whose computer is this Mac', () => {
     const r = await mac.call(db.agent('prod-0001')!, 'show_file', { path: 'grade.md', title: 'A grade' }, ctx)
     expect(r.artifact).toMatchObject({ kind: 'markdown', title: 'A grade', source: join(mac.folder('prod-0001'), 'grade.md') })
     expect(existsSync(join(dataDir, 'artifacts', r.artifact!.id, 'grade.md'))).toBe(true)
+  })
+
+  it("a file it shows carries none of the Cofre's values: a text one masked, a binary one refused", async () => {
+    const vault = new Vault({ db, secrets: new Secrets(db, plainCipher) })
+    await vault.save({ id: 'owner', admin: true, team: false }, { name: 'API_KEY', value: 'tk_test_0123456789abcdef', agents: ['prod-0001'], approve: false })
+    await vault.warm('prod-0001')
+    const guarded = new MacComputer({ db, dataDir, emit: () => {}, secrets: (id) => vault.openedFor(id) })
+    const me = db.agent('prod-0001')!
+    writeFileSync(join(work, '.env'), 'API_KEY=tk_test_0123456789abcdef\nDEBUG=1\n')
+    const shown = await guarded.call(me, 'show_file', { path: '.env' }, ctx)
+    expect(shown.result.isError).toBeFalsy()
+    const kept = readFileSync(join(dataDir, 'artifacts', shown.artifact!.id, '.env'), 'utf8')
+    expect(kept).toBe('API_KEY=[cofre:API_KEY]\nDEBUG=1\n')
+    expect(shown.artifact!.size).toBe(Buffer.byteLength(kept))
+    // What it reads still comes back masked, as runs.ts passes every result through the Cofre.
+    const read = await guarded.call(me, 'read_file', { path: '.env' }, ctx)
+    expect(text(maskResult(read.result, (t) => vault.mask('prod-0001', t)))).not.toContain('tk_test_0123456789abcdef')
+    // A binary file can't be masked without breaking it: refused, naming the key.
+    writeFileSync(join(work, 'dump.bin'), Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from('tk_test_0123456789abcdef'), Buffer.from([0])]))
+    const refused = await guarded.call(me, 'show_file', { path: 'dump.bin' }, ctx)
+    expect(refused.result.isError).toBe(true)
+    expect(text(refused.result)).toContain('[cofre:API_KEY]')
+    expect(refused.artifact).toBeUndefined()
   })
 
   it('an image it shows comes back to it too, so it can check it', async () => {

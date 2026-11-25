@@ -30,6 +30,7 @@ import {
   type Routine,
   type State,
   type RoutineInput,
+  OK_STATUSES,
   type RunStatus,
   type Schedule,
   type Trigger,
@@ -44,7 +45,7 @@ import { Card, Field, Sheet, Toggle } from './Pages'
 import { AgentAvatar, Icon, ownColor, shiftWeek, startOfWeek, weekRange } from './ui'
 import { Modal } from './Modal'
 import { Select } from './Select'
-import { chipOcc, FAILED, failedWords, finished, firstLine, listSections, markOf, nextWords, routineWords, splitWeek, stripDay, waitWords, WAITS, type Need, type Occ } from './routines-view'
+import { chipOcc, FAILED, failedWords, finished, firstLine, isOff, listSections, markOf, nextWords, routineWords, splitWeek, stripDay, waitWords, WAITS, type Need, type Occ } from './routines-view'
 
 const DAYS = (): string[] => (lang() === 'en' ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'])
 const DAY_NAMES = (): string[] => (lang() === 'en' ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'])
@@ -189,7 +190,8 @@ export function RoutinesPage(): ReactNode {
   const mine = (agentId: string): boolean => !only || only === agentId
   const days = Array.from({ length: 7 }, (_, i) => dayAt(week, i))
   const end = dayAt(week, 7)
-  const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.at >= week && o.at < end)
+  // A routine that's off keeps its place in the week; a deleted one leaves it with its runs.
+  const occs = [...runs, ...planned(routines, week, now)].filter((o) => o.routine && o.at >= week && o.at < end)
   const { grid, strip } = splitWeek(occs)
   const failedHere = occs.filter((o) => !o.upcoming && o.status && FAILED.has(o.status) && mine(o.agentId)).length
   const onlyProblems = problems && failedHere > 0
@@ -263,7 +265,7 @@ export function RoutinesPage(): ReactNode {
         {people.length > 1 && (
           <div className="rt-agent">
             <Select
-              aria-label={L('Mostrar só as de um agente', 'Show only one agent’s')}
+              aria-label={L('Mostrar só as de um agente', "Filter routines by agent")}
               value={only ?? ''}
               onChange={(v) => setOnly(v || null)}
               options={[{ value: '', label: L('Todos os agentes', 'All agents') }, ...people.map((a) => ({ value: a.id, label: a.name }))]}
@@ -276,7 +278,7 @@ export function RoutinesPage(): ReactNode {
         <>
           {watching.length > 0 && (
             <div className="cal-watch">
-              <span className="cal-watch__label">{L('De olho, sem horário', 'Watching, no set time')}</span>
+              <span className="cal-watch__label">{L('De olho, sem horário', "Event-triggered routines")}</span>
               {watching.map((r) => {
                 const a = agents.find((x) => x.id === r.agentId)
                 return (
@@ -406,15 +408,19 @@ function runsOf(messages: Message[], routines: Routine[]): Occ[] {
   return out
 }
 
-// What's still to come this week, from each routine's clock.
+// What's still to come this week, from each routine's clock — the ones that are off too: a routine
+// the person turned off keeps its place in the week, greyed, so it can be turned back on from its
+// own panel. Only a deleted routine leaves the timetable.
 function planned(routines: Routine[], week: number, now: number): Occ[] {
   const out: Occ[] = []
   for (const r of routines) {
-    if (!r.enabled || r.trigger) continue
+    if (r.trigger) continue
     // A one-off (a date too) is at its next time; a repeating one, each time it falls in the week.
+    // While it's off the core keeps no next time, so it is read from its own clock — unless it ran.
     const times: number[] = []
     if (r.schedule.once) {
-      if (r.nextAt) times.push(r.nextAt)
+      const at = r.nextAt ?? (r.lastAt ? undefined : nextRun(r.schedule, Math.max(week, now) - 1))
+      if (at !== undefined) times.push(at)
     } else for (let t = nextRun(r.schedule, Math.max(week, now) - 1); t !== undefined && t < dayAt(week, 7); t = nextRun(r.schedule, t)) times.push(t)
     for (const t of times) if (t > now) out.push({ key: `${r.id}-${t}`, routine: r, name: r.name, agentId: r.agentId, at: t, conversationId: r.conversationId, upcoming: true })
   }
@@ -422,7 +428,7 @@ function planned(routines: Routine[], week: number, now: number): Occ[] {
 }
 
 // A run's state in words, for a tick's or a block's tooltip.
-const statusWords = (o: Occ): string => (o.upcoming ? L('vai rodar', 'will run') : (o.status && LAST()[o.status]?.label) || '')
+const statusWords = (o: Occ): string => (o.upcoming ? (isOff(o) ? L('desligada', 'off') : L('vai rodar', 'will run')) : (o.status && LAST()[o.status]?.label) || '')
 
 function Calendar({
   days,
@@ -525,10 +531,11 @@ function Calendar({
                 const a = agents.find((x) => x.id === chip.routine.agentId)
                 const occ = chipOcc(chip)
                 const live = chip.ticks.some((t) => t.status === 'working')
+                const off = isOff({ routine: chip.routine })
                 return (
                   <button
                     key={chip.routine.id}
-                    className={`cal__allday c-${a?.color ?? 'graphite'} ${dim(chip.ticks) ? 'is-dim' : ''} ${chip.ticks.some((t) => t.key === selected) ? 'is-selected' : ''} ${live ? 'is-live' : ''}`}
+                    className={`cal__allday c-${a?.color ?? 'graphite'} ${off ? 'is-off' : ''} ${dim(chip.ticks) ? 'is-dim' : ''} ${chip.ticks.some((t) => t.key === selected) ? 'is-selected' : ''} ${live ? 'is-live' : ''}`}
                     style={a ? ownColor(a) : undefined}
                     title={`${chip.routine.name} · ${routineWords(chip.routine)}`}
                     onClick={(e) => onPick(occ, e.currentTarget.getBoundingClientRect())}
@@ -591,10 +598,11 @@ function Calendar({
                   const a = agents.find((x) => x.id === o.agentId)
                   const mark = markOf(o)
                   const live = mark === 'live'
+                  const off = isOff(o)
                   return (
                     <button
                       key={o.key}
-                      className={`cal__ev cal__ev--two ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${selected === o.key ? 'is-selected' : ''} ${dim([o]) ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
+                      className={`cal__ev cal__ev--two ${o.upcoming ? '' : 'is-past'} ${live ? 'is-live' : ''} ${off ? 'is-off' : ''} ${selected === o.key ? 'is-selected' : ''} ${dim([o]) ? 'is-dim' : ''} c-${a?.color ?? 'graphite'}`}
                       style={{ ...(a ? ownColor(a) : {}), top }}
                       title={`${hm(o.at)} · ${o.name}${statusWords(o) ? ` · ${statusWords(o)}` : ''}`}
                       onMouseEnter={() => setGhost(null)}
@@ -704,7 +712,7 @@ function RoutineList({
       <div className="rt-list">
         <div className="rt-empty">
           <strong>{L('Nenhuma rotina ainda.', 'No routines yet.')}</strong>
-          <span>{L('Crie uma em “Nova rotina”, ou comece por um destes:', 'Create one with “New routine”, or start from one of these:')}</span>
+          <span>{L('Crie uma em “Nova rotina”, ou comece por um destes:', 'Create a routine with “New routine”, or start from one of these:')}</span>
           <Examples onExample={onExample} />
         </div>
       </div>
@@ -791,7 +799,7 @@ function NeedRow({ need, now, open, mayChange, who, onToggle, onPick }: { need: 
   const failed = kind === 'failed'
   const later = okSince === 0 ? '' : okSince === 1 ? L(' Depois, rodou 1 vez normalmente.', ' After that, it ran once as usual.') : L(` Depois, rodou ${okSince} vezes normalmente.`, ` After that, it ran ${okSince} times as usual.`)
   const why = failed
-    ? `${occ.reply?.run?.error ?? (occ.status === 'limit_reached' ? L('Parou no limite de uso do agente.', 'It stopped at the agent’s usage limit.') : L('Não deu certo, e não ficou dito por quê.', 'It didn’t work, and it didn’t say why.'))}${later}`
+    ? `${occ.reply?.run?.error ?? (occ.status === 'limit_reached' ? L('Parou no limite de uso do agente.', 'It stopped at the agent’s usage limit.') : L('Não deu certo, e não ficou dito por quê.', 'The run failed without reporting a reason.'))}${later}`
     : occ.status === 'waiting_input'
       ? L('Ela fez uma pergunta na conversa e está esperando a resposta.', 'It asked a question in the conversation and is waiting for the answer.')
       : L('Ela parou num passo que precisa da sua aprovação.', 'It stopped at a step that needs your approval.')
@@ -842,8 +850,6 @@ function Hook({ token }: { token: string }): ReactNode {
     </div>
   )
 }
-
-const OK = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval'])
 
 // A routine's card, next to the block: what it does, how it's been going, and what to do with it.
 function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; rect: DOMRect; now: number; onClose: () => void; onEdit: (r: Routine) => void; onDuplicate: (r: Routine) => void }): ReactNode {
@@ -903,7 +909,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
             {status && <span className={`cal-pop__status ${status.tone}`}> · {status.label}</span>}
           </span>
         ) : occ.upcoming ? (
-          <span>{L('Vai rodar', 'Will run')} {when(occ.at)}</span>
+          <span>{isOff(occ) ? L('Desligada · rodaria', 'Off · would run') : L('Vai rodar', 'Will run')} {when(occ.at)}</span>
         ) : null}
         {r && <span className="cal-pop__rule">{describeRoutine(r, connector?.name)}</span>}
         {!r && <span className="cal-pop__rule">{L('Esta rotina foi apagada.', 'This routine was deleted.')}</span>}
@@ -921,7 +927,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
           {history.slice(-14).map((h) => (
             <button
               key={h.key}
-              className={h.status === 'working' ? 'is-live' : h.status && WAITS.has(h.status) ? 'is-wait' : h.status && OK.has(h.status) ? 'is-ok' : h.status ? 'is-bad' : ''}
+              className={h.status === 'working' ? 'is-live' : h.status && WAITS.has(h.status) ? 'is-wait' : h.status && OK_STATUSES.has(h.status) ? 'is-ok' : h.status ? 'is-bad' : ''}
               title={`${when(h.at)}${h.status && LAST()[h.status] ? ` · ${LAST()[h.status]!.label}` : ''}`}
               onClick={() => go(h)}
             />
@@ -1282,11 +1288,11 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                   {mode === 'week' && perWeek > 1
                     ? L(`${perWeek} vezes por semana, na hora do seu computador.`, `${perWeek} times a week, on your computer’s clock.`)
                     : mode === 'once'
-                      ? L('No próximo dia marcado em que o horário ainda não passou. Depois, desliga sozinha.', 'On the next checked day the time hasn’t passed yet. Then it turns itself off.')
+                      ? L('No próximo dia marcado em que o horário ainda não passou. Depois, desliga sozinha.', 'Runs once at the next scheduled time on a selected day, then turns itself off.')
                       : mode === 'date'
                         ? L('Roda uma vez e desliga sozinha.', 'Runs once, then turns itself off.')
                         : mode === 'month'
-                          ? L('Num mês sem esse dia, roda no último.', 'In a month without that day, it runs on the last one.')
+                          ? L('Num mês sem esse dia, roda no último.', 'In shorter months, runs on the last day of the month.')
                           : L('Na hora do seu computador.', 'On your computer’s clock.')}
                 </>
               )}

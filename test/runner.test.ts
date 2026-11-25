@@ -159,8 +159,8 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Mencione um agente')
   })
 
-  it('an agent mentioning another hands it the turn, and the chain stops at depth 3', async () => {
-    // Every reply mentions the other agent: a ping-pong that must stop.
+  it('an agent mentioning another hands it the turn, and a ping-pong that moves nothing stops after 3 replies', async () => {
+    // Every reply mentions the other agent and does nothing: a ping-pong that must stop.
     const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
     const r = runner(pingPong)
     settings.engines.codex = ready
@@ -173,44 +173,27 @@ describe('Runner', () => {
       ['a2', 2],
       ['a1', 3]
     ])
-    expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
-    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas')
+    expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, stop: { job: replies[0]!.run!.job } })
+    expect(db.messages().at(-1)?.text).toContain('Parei este trabalho')
+    expect(db.messages().at(-1)?.text).toContain('foram 3 respostas seguidas sem nada novo')
   })
 
-  it('the chain goes as far as the limit set in Settings', async () => {
-    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
-    const r = runner(pingPong)
-    settings.engines.codex = ready
-    settings.chainDepth = 5
+  it('a chain where each reply delivers something new goes on past 3 replies, until one passes the turn to no one', async () => {
+    let n = 0
+    const delivering = fakeEngine('claude', {
+      delayMs: 1,
+      reply: (t) => {
+        n++
+        const part = `Parte ${n}: ${Array.from({ length: 60 }, (_, i) => `item${n}x${i}`).join(' ')}.` // long and new each time
+        return n >= 6 ? part : `${part} ${t.system.startsWith('Você é lia') ? '@theo' : '@lia'}, sua vez`
+      }
+    })
+    const r = runner(delivering)
     db.saveAgent(agent('a2', 'theo'))
     await r.send('c1', '@lia começa')
     await r.idle()
-    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5])
-    expect(db.messages().at(-1)?.text).toContain('foram 5 respostas seguidas')
-  })
-
-  it('a limit below 1 is raised to 1', async () => {
-    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
-    const r = runner(pingPong)
-    settings.engines.codex = ready
-    settings.chainDepth = 0
-    db.saveAgent(agent('a2', 'theo'))
-    await r.send('c1', '@lia começa')
-    await r.idle()
-    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1])
-    expect(db.messages().at(-1)?.text).toContain('foi 1 resposta seguida')
-  })
-
-  it('a limit above 10 is brought down to 10', async () => {
-    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
-    const r = runner(pingPong)
-    settings.engines.codex = ready
-    settings.chainDepth = 50
-    db.saveAgent(agent('a2', 'theo'))
-    await r.send('c1', '@lia começa')
-    await r.idle()
-    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-    expect(db.messages().at(-1)?.text).toContain('foram 10 respostas seguidas')
+    expect(agentMessages().map((m) => m.run?.depth)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(db.messages().some((m) => m.stop)).toBe(false)
   })
 
   describe('screening a hand-off', () => {
@@ -279,6 +262,31 @@ describe('Runner', () => {
     expect(retried.run?.error).toBeUndefined()
   })
 
+  it('tries a stopped reply again in the direction the person wrote', async () => {
+    // "Try with instructions": the ask stays the same, the reply comes back steered.
+    const r = runner(fakeEngine('claude', { delayMs: 20 }))
+    await r.send('d1', 'preciso do relatório de outubro')
+    await new Promise((res) => setTimeout(res, 40))
+    const working = agentMessages()[0]!
+    r.stop(working.id)
+    await r.idle()
+    expect(db.message(working.id)!.run?.status).toBe('stopped')
+
+    r.retry(working.id, 'Faça em tabela e cite as fontes.')
+    await r.idle()
+
+    const turn = claude.turns.at(-1)!
+    const said = `${turn.system}
+${turn.prompt}`
+    expect(said).toContain('Faça em tabela e cite as fontes.') // the direction reached the model
+    expect(said).toContain('direção para a nova tentativa') // and it is told what that is
+    expect(said).toContain('preciso do relatório de outubro') // the ask it is answering did not change
+    const retried = db.message(working.id)!
+    expect(retried.run?.status).toBe('done')
+    expect(agentMessages()).toHaveLength(1) // the same reply, tried again — not a second one
+    expect(retried.text).toContain('Resposta de teste') // and the retry really answered
+  })
+
   it('stops mid-turn when the usage limit is crossed, then refuses the next turn without starting the engine', async () => {
     db.saveAgent(agent('a1', 'lia', { limit: 10 })) // the fake reports more than 10 tokens up front
     const r = runner()
@@ -333,7 +341,7 @@ describe('Runner', () => {
   })
 })
 
-describe('one reply at a time per agent and thread', () => {
+describe('hand-offs wait their turn; a person\'s messages, routines, retries and continuations do not', () => {
   const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((res) => { const t = setTimeout(res, ms); signal.addEventListener('abort', () => (clearTimeout(t), res()), { once: true }) })
   // Lia and Bia ask Theo for something; Theo takes `ms` and records how many of his turns overlap.
   const slowTheo = (ms: number): { engine: Engine; active: () => number; max: () => number } => {
@@ -392,7 +400,7 @@ describe('one reply at a time per agent and thread', () => {
     for (let i = 0; i < 200 && by('a2')[0]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
   }
 
-  it("a person's mention while the agent replies waits for it, and the ones that pile up are one reply", async () => {
+  it("a person's mentions while the agent replies each get a reply of their own, side by side", async () => {
     const t = slowTheo(400)
     const r = runner(t.engine)
     await r.send('c3', '@theo um')
@@ -400,11 +408,12 @@ describe('one reply at a time per agent and thread', () => {
     await r.send('c3', '@theo dois')
     await r.send('c3', '@theo três')
     await r.idle()
-    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done'])
-    expect(t.max()).toBe(1)
+    // A mention is a message like any other: three messages, three sessions, none folded into another.
+    expect(by('a2').map((m) => m.run?.status)).toEqual(['done', 'done', 'done'])
+    expect(t.max()).toBeGreaterThan(1)
   })
 
-  it('a routine in the same chat waits for the reply running there', async () => {
+  it('a routine in the same chat goes beside the reply running there, not after it', async () => {
     const t = slowTheo(400)
     const r = runner(t.engine)
     await r.send('c3', '@theo um')
@@ -413,16 +422,56 @@ describe('one reply at a time per agent and thread', () => {
     await r.idle()
     expect((await done)?.run?.status).toBe('done')
     expect(by('a2')).toHaveLength(2)
-    expect(t.max()).toBe(1)
+    expect(t.max()).toBeGreaterThan(1)
   })
 
-  it('two routines that fire together in one chat run one after the other', async () => {
+  it('two routines that fire together in one chat each run their own reply', async () => {
     const t = slowTheo(200)
     const r = runner(t.engine)
     const routine = (id: string) => ({ id, name: id, agentId: 'a2', conversationId: 'c3', prompt: 'rotina', schedule: { days: [1], time: '09:00' }, enabled: true, createdAt: 1 })
     const runs = await Promise.all([r.runRoutine(routine('r1'), { scheduledAt: 1, late: false }), r.runRoutine(routine('r2'), { scheduledAt: 1, late: false })])
     expect(runs.map((m) => m?.run?.status)).toEqual(['done', 'done'])
-    expect(t.max()).toBe(1)
+    expect(t.max()).toBeGreaterThan(1)
+  })
+
+  it('a retry goes beside the reply running there, not after it', async () => {
+    let fail = true
+    const slow = slowTheo(400)
+    const flaky: Engine = {
+      id: 'claude',
+      run: (ctx) => (fail && ctx.system.startsWith('Você é theo') ? (async function* () { yield { type: 'error' as const, message: 'caiu' } })() : slow.engine.run(ctx))
+    }
+    const r = runner(flaky)
+    await r.send('c3', '@theo um')
+    await r.idle()
+    const failed = by('a2')[0]!
+    expect(failed.run?.status).toBe('failed')
+    fail = false
+    await r.send('c3', '@theo dois')
+    // Theo is answering the second one: the retry of the first doesn't wait for that reply to end.
+    for (let i = 0; i < 200 && by('a2')[1]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
+    r.retry(failed.id)
+    await r.idle()
+    expect(db.message(failed.id)?.run?.status).toBe('done')
+    expect(by('a2')).toHaveLength(2)
+    expect(slow.max()).toBeGreaterThan(1)
+  })
+
+  it('a reply going on past its budget goes beside the reply running there, not after it', async () => {
+    const slow = slowTheo(400)
+    const r = runner(slow.engine)
+    await r.send('c3', '@theo um')
+    await r.idle()
+    const paused = by('a2')[0]!
+    db.saveMessage({ ...paused, run: { ...paused.run!, status: 'paused' } }) // as the budget leaves it, with Continuar on it
+    await r.send('c3', '@theo dois')
+    // Theo is answering the second one: pressing Continuar on the first doesn't wait for that reply to end.
+    for (let i = 0; i < 200 && by('a2')[1]?.run?.status !== 'working'; i++) await new Promise((res) => setTimeout(res, 5))
+    await r.continue(paused.id)
+    await r.idle()
+    expect(db.message(paused.id)?.run?.status).toBe('done')
+    expect(by('a2')).toHaveLength(3)
+    expect(slow.max()).toBeGreaterThan(1)
   })
 
   it('drops the follow-up when the reply it waited for was stopped', async () => {
@@ -612,6 +661,24 @@ describe('ask_user through the gateway', () => {
     expect(sent.map((x) => x.status)).toEqual(['fulfilled', 'rejected'])
     await r.idle()
     expect(mine()).toHaveLength(2)
+  })
+
+  it('cancels the question on its card: it closes, nothing is sent, the agent is not woken and reads it was cancelled', async () => {
+    const { r, asked } = await askDecisions()
+    const turns = claude.turns.length
+    r.answerDecision(asked.id, 0, { chosen: [0] }, db.owner())
+    r.cancelQuestion(asked.id, db.owner())
+    await r.idle()
+    expect(db.message(asked.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.question(asked.id)?.state).not.toBe('open')
+    expect(mine()).toHaveLength(1) // only the message that asked, none sent from the card
+    expect(claude.turns).toHaveLength(turns)
+    expect(() => r.cancelQuestion(asked.id, db.owner())).toThrow('Essa pergunta já foi respondida.')
+    expect(() => r.answerDecision(asked.id, 1, { text: 'x' }, db.owner())).toThrow()
+    await r.send('c1', '@lia seguindo sem isso')
+    await r.idle()
+    // Lia's own turn (the router reads the conversation after her, too).
+    expect(claude.turns.some((t) => t.prompt.includes('a pergunta foi cancelada') && t.prompt.includes('seguindo sem isso'))).toBe(true)
   })
 
   it('clears an answer with null', async () => {

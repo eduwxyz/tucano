@@ -20,6 +20,7 @@ import { floorOf, saysHighRisk } from '../shared/classify'
 import { nodeOf } from '../shared/node-link'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
+import { VAULT_REF } from '../shared/vault'
 
 const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
@@ -197,6 +198,7 @@ export interface ConnectorDeps {
   // oauthCallbackUrl isn't one (a server on its https address): there, the person pastes where the page ended.
   localCallbackUrl?: () => string
   readOp?: (ref: string) => Promise<string> // a 1Password reference's value (the op CLI; tests fake it)
+  vaultValue?: (name: string) => Promise<string | undefined> // a team key of the Cofre, for a variable that says cofre:NAME
   callTimeoutMs?: number // how long a tool call may take; tests shorten it
   // Where a sign-in with the person's own app comes back: Slack takes only the address registered in the
   // app, port and all, which the gateway's (new on each launch) can't be.
@@ -314,6 +316,23 @@ export const sameLoopbackRedirect = (a: string, b: string): boolean => {
 }
 
 export class ConnectorManager {
+  // A variable that says cofre:NAME takes the team key of that name from the Cofre (src/core/vault.ts), read
+  // on each connection, so changing the key there changes it here too.
+  private async fromVault(env: Record<string, string>): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(env)) {
+      const name = v.trim().startsWith(VAULT_REF) ? v.trim().slice(VAULT_REF.length).trim() : undefined
+      if (name === undefined) {
+        out[k] = v
+        continue
+      }
+      const value = await this.deps.vaultValue?.(name)
+      if (value === undefined) throw new Error(L(`A variável ${k} aponta pra ${VAULT_REF}${name}, que não está entre as chaves do time no Cofre.`, `The ${k} variable points to ${VAULT_REF}${name}, which isn't among the team's keys in the Vault.`))
+      out[k] = value
+    }
+    return out
+  }
+
   private live = new Map<string, Live>()
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
   private authUrls = new Map<string, string>() // a connector's last authorization page
@@ -532,7 +551,7 @@ export class ConnectorManager {
           }
         }
       } else {
-        const env = await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp)
+        const env = await this.fromVault(await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp))
         transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
       }
     } catch (e) {

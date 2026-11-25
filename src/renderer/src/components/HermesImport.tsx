@@ -102,7 +102,7 @@ export function HermesImport({ onClose, onDone }: { onClose: () => void; onDone:
           <section>
             <h4>{L('Como entra', 'How it comes in')}</h4>
             <ul className="small">
-              <li>{L('Sem nenhum conector, sem busca na web e sem computador: você libera o que quiser depois.', 'No connector, no web search and no computer: you turn on what you want later.')}</li>
+              <li>{L('Sem nenhum conector, sem busca na web e sem computador: você libera o que quiser depois.', 'No connectors, web search or computer are enabled. You can enable them later.')}</li>
               <li>{L('As memórias esperam você confirmar, em Memórias.', 'Memories wait for you to confirm them, in Memories.')}</li>
               <li>{L('As rotinas chegam desligadas.', 'Routines come in turned off.')}</li>
             </ul>
@@ -110,7 +110,7 @@ export function HermesImport({ onClose, onDone }: { onClose: () => void; onDone:
 
           {names.length > 0 && (
             <section>
-              <h4>{L('Fica só o nome, pra configurar aqui à mão', 'Only the name comes, to set up here by hand')}</h4>
+              <h4>{L('Fica só o nome, pra configurar aqui à mão', 'Names only; configure manually')}</h4>
               <dl className="hermes-import__names small">
                 {names.map((g) => (
                   <div key={g.label}>

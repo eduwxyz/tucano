@@ -1,0 +1,106 @@
+{
+  "base": "e44b688213f1ec70868d685d5a336b3772f1810d",
+  "scope": "English copy follow-up to merged #622, covering #626 and #621",
+  "count": 9,
+  "replacements": [
+    {
+      "id": "concurrency-01",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 805,
+      "context": "AgentPage",
+      "attribute": "sub",
+      "source": "Ligado, um prompt novo para ${name} espera a resposta em curso terminar, em qualquer conversa. Desligado, segue Configurações › Agentes › Respostas.",
+      "before": "On, a new prompt for ${name} waits for the running reply to end, in any conversation. Off, it follows Settings › Agents › Replies.",
+      "after": "New prompts for ${name} wait until its current reply finishes, across all conversations. When off, Settings › Agents › Replies applies.",
+      "reason": "Replace the awkward On/Off construction; preserve the agent name, all-conversation scope and fallback setting."
+    },
+    {
+      "id": "concurrency-02",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3473,
+      "context": "SettingsPage",
+      "attribute": "label",
+      "source": "Respostas ao mesmo tempo numa conversa",
+      "before": "Replies at once in a conversation",
+      "after": "Concurrent replies per conversation",
+      "reason": "Use the established term for the configured concurrency; synchronize visible, accessible and search labels."
+    },
+    {
+      "id": "concurrency-03",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3476,
+      "context": "SettingsPage",
+      "attribute": "hint",
+      "source": "Cada prompt ganha uma resposta própria, ao lado das que já estão em curso. Passando deste número, o prompt espera na fila até uma terminar. Um agente pode ir uma por vez na página dele.",
+      "before": "Each prompt gets its own reply beside the running ones. Past this number, it waits in the queue until one ends. An agent can go one at a time on its own page.",
+      "after": "New prompts start separate replies up to this limit, then queue until one finishes. An agent can override this with “One reply at a time”.",
+      "reason": "Name the limit and the exact per-agent override instead of vague page narration."
+    },
+    {
+      "id": "concurrency-04",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3480,
+      "context": "SettingsPage",
+      "attribute": "aria-label",
+      "source": "Respostas ao mesmo tempo numa conversa",
+      "before": "Replies at once in a conversation",
+      "after": "Concurrent replies per conversation",
+      "reason": "Use the established term for the configured concurrency; synchronize visible, accessible and search labels."
+    },
+    {
+      "id": "concurrency-05",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3488,
+      "context": "SettingsPage",
+      "attribute": "options",
+      "source": "Até 6, o máximo do app",
+      "before": "Up to 6, the app’s most",
+      "after": "Up to 6 (app maximum)",
+      "reason": "Replace an unnatural maximum label while retaining the application-wide ceiling."
+    },
+    {
+      "id": "concurrency-06",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3747,
+      "context": "SettingsWhere",
+      "attribute": null,
+      "source": "Estes ajustes são do servidor ",
+      "before": "These are the settings of the server ",
+      "after": "Settings for server ",
+      "reason": "Shorten the prefix while retaining the separately rendered host and sentence continuity."
+    },
+    {
+      "id": "concurrency-07",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3751,
+      "context": "SettingsWhere",
+      "attribute": null,
+      "source": " e valem lá, de qualquer computador. O que é só do seu computador, como emprestá-lo aos agentes, fica no app do Tucano nele.",
+      "before": ", and they apply there, from any computer. What belongs to your own computer, like lending it to the agents, is in the Tucano app on it.",
+      "after": ". Manage local settings and agent lending in each computer’s Tucano app.",
+      "reason": "Distinguish server scope from computer-specific settings and retain lending guidance. Review together with prefix and host."
+    },
+    {
+      "id": "concurrency-08",
+      "file": "src/renderer/src/components/Pages.tsx",
+      "line": 3756,
+      "context": "SettingsWhere",
+      "attribute": null,
+      "source": "Abrir no meu computador",
+      "before": "Open on my computer",
+      "after": "Open computer settings",
+      "reason": "Name what opens; the action opens the local app’s lending/settings surface."
+    },
+    {
+      "id": "concurrency-09",
+      "file": "src/renderer/src/settings-structure.ts",
+      "line": 108,
+      "context": "settingsTerms",
+      "attribute": null,
+      "source": "Respostas ao mesmo tempo numa conversa",
+      "before": "Replies at once in a conversation",
+      "after": "Concurrent replies per conversation",
+      "reason": "Use the established term for the configured concurrency; synchronize visible, accessible and search labels."
+    }
+  ]
+}

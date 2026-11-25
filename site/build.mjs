@@ -145,7 +145,13 @@ const PAGES = [
 // one source for the styles and the waitlist form, so the two pages can't drift apart.
 const home = HOME_SRC
 const HOME_STYLE = home.slice(home.indexOf('<style>'), home.indexOf('</style>') + '</style>'.length)
-const PRO_SCRIPT = home.slice(home.lastIndexOf('<script src="https://challenges.cloudflare.com'), home.lastIndexOf('</script>') + '</script>'.length)
+// From the <script> that opens with the waitlist's comment to the page's last </script>. It was cut at
+// Turnstile's <script src> until #579 made that script load on demand, which left pro.html with no
+// waitlist code at all: fail the build instead of shipping a form that sends nothing.
+const PRO_START = home.lastIndexOf('<script>', home.indexOf('// ---------- Tucano Pro: the waitlist'))
+if (PRO_START < 0 || !home.includes('// ---------- Tucano Pro: the waitlist')) throw new Error('build.mjs: the Tucano Pro script is missing from index.html')
+const PRO_SCRIPT = home.slice(PRO_START, home.lastIndexOf('</script>') + '</script>'.length)
+if (!PRO_SCRIPT.includes('/api/lista')) throw new Error('build.mjs: the Tucano Pro script has no waitlist call')
 for (const page of PAGES) {
   const src = read(page.file).replaceAll('<!-- STYLE:home -->', HOME_STYLE).replaceAll('<!-- SCRIPT:pro -->', PRO_SCRIPT).replaceAll('__TURNSTILE_SITE_KEY__', TURNSTILE_SITE_KEY)
   const urls = { 'pt-BR': `${SITE}/${page['pt-BR']}`, en: `${SITE}/${page.en}` }
