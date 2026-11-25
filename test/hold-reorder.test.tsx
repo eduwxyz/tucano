@@ -187,7 +187,7 @@ describe('a list of its own', () => {
 })
 
 // One hook can sort several lists (the agents of each sector): each row says which, and a row only
-// lands in its own. A press that wanders off before the hold is a scroll, not a pick-up.
+// lands in its own. A finger or a pen that wanders off before the hold is a scroll, not a pick-up.
 const nudges = vi.hoisted(() => [] as string[])
 function Sectors(): React.ReactNode {
   const sort = useHoldReorder({ group: 'agents', onDrop: (id, before) => store.drops.push(`${id}->${before}`), onNudge: (id, by) => nudges.push(`${id}${by}`) })
@@ -236,11 +236,22 @@ describe('several lists under one hook', () => {
     expect(container.querySelector('[data-live]')).toBeNull()
   })
 
-  it('picks nothing up when the press wanders off before the hold', async () => {
-    fire(rowOf('a1').querySelector('button')!, 'pointerdown', { clientX: 10, clientY: 10 })
-    fire(rowOf('a1').querySelector('button')!, 'pointermove', { clientX: 10, clientY: 40 })
+  it('picks nothing up when a finger wanders off before the hold', async () => {
+    fire(rowOf('a1').querySelector('button')!, 'pointerdown', { clientX: 10, clientY: 10, pointerType: 'touch' })
+    fire(rowOf('a1').querySelector('button')!, 'pointermove', { clientX: 10, clientY: 40, pointerType: 'touch' })
     await hold()
     expect(container.querySelector('[data-picked]')).toBeNull()
+  })
+
+  // A mouse is the other way round: press and drag is how a person moves a row, so moving before the
+  // hold has to keep the hold running. Dropping it on the first few pixels made the sidebar read as
+  // something that cannot be sorted by hand (upstream 0.2.45).
+  it('picks the row up when a mouse drags before the hold', async () => {
+    fire(rowOf('a1').querySelector('button')!, 'pointerdown', { clientX: 10, clientY: 10, pointerType: 'mouse' })
+    fire(rowOf('a1').querySelector('button')!, 'pointermove', { clientX: 30, clientY: 40, pointerType: 'mouse' })
+    await hold()
+    expect(container.querySelector('[data-picked]')).not.toBeNull()
+    press('a1', 'pointerup')
   })
 
   it('steps the row the keyboard is on with Alt+arrows, and lets plain arrows be', () => {

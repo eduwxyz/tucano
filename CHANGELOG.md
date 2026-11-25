@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **The sidebar moves rows by hand again with a mouse, and its Move up and Move down commands show their arrows again.** Since 0.2.45 a press that started moving cancelled the hold, so dragging a row did nothing and the sidebar only sorted if the row was first held perfectly still for a third of a second. A mouse press now keeps its hold while it drags; a row still lifts only after that hold, so a quick flick moves nothing and a plain click still opens. The channel menu's two reorder commands also lost their glyphs in that release, which left two bare labels in a menu where every other command carries an icon. Alt+Up/Down and the saved orders are unchanged.
+
 ## [0.2.48] - 2026-11-25
 
 > **Em português:**
