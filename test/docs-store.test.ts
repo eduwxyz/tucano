@@ -556,4 +556,49 @@ describe('versions, names and the trash', () => {
     expect(ids(docs.search(ana, 'zebrinha').map((h) => h.doc))).toEqual([doc.id])
     expect(existsSync(join(docs.root, 'Financeiro', 'a.md'))).toBe(true)
   })
+
+  it('deletes a trashed document for good: its file, its older versions and every trace in the index', async () => {
+    const doc = await put(ana, 'Financeiro', 'a.md', 'a zebrinha azul')
+    await docs.newVersion(ana, doc.id, { data: Buffer.from('a zebrinha verde') })
+    docs.trash(ana, doc.id)
+    expect(existsSync(join(docs.root, '.trash', doc.id))).toBe(true)
+    expect(existsSync(join(docs.root, '.versions', doc.id))).toBe(true)
+    // What it was called and where it was, for the team's log.
+    expect(docs.purge(adm, doc.id)).toEqual({ name: 'a.md', folder: 'Financeiro' })
+    expect(existsSync(join(docs.root, '.trash', doc.id))).toBe(false)
+    expect(existsSync(join(docs.root, '.versions', doc.id))).toBe(false)
+    expect(docs.index.doc(doc.id)).toBeUndefined()
+    expect(docs.index.versions(doc.id)).toEqual([])
+    expect(docs.index.events(doc.id)).toEqual([])
+    expect(docs.tree(ana).docs.some((d) => d.id === doc.id)).toBe(false)
+    expect(docs.search(ana, 'zebrinha')).toEqual([])
+    // Gone is gone: a second time answers as for a document that never was.
+    expect(await failure(() => docs.purge(ana, doc.id))).toBe(await failure(() => docs.purge(ana, 'nao-existe')))
+  })
+
+  it('deletes for good only from the trash, and in a shared folder only for the owner or an admin', async () => {
+    share('Financeiro', { maria: 'edit' })
+    const doc = await put(maria, 'Financeiro', 'a.md', 'um')
+    expect(await failure(() => docs.purge(ana, doc.id))).toBe('Mande o arquivo para a lixeira antes de apagar de vez.')
+    docs.trash(maria, doc.id)
+    // Maria put it there and may bring it back, but not end it: it was the team's.
+    expect(await failure(() => docs.purge(maria, doc.id))).toBe('Só o dono ou um admin faz isso.')
+    // Pedro doesn't see the folder: for him it answers as a document that isn't there.
+    expect(await failure(() => docs.purge(pedro, doc.id))).toBe(await failure(() => docs.purge(pedro, 'nao-existe')))
+    expect(docs.index.doc(doc.id)).toBeDefined()
+    expect(existsSync(join(docs.root, '.trash', doc.id, 'a.md'))).toBe(true)
+    docs.restore(maria, doc.id)
+    expect(readFileSync(join(docs.root, 'Financeiro', 'a.md'), 'utf8')).toBe('um')
+  })
+
+  it("lets a person delete for good what is in their own personal folder, and says nothing of it to the team's log", async () => {
+    const mine = docs.tree(maria).folders.find((f) => f.privateTo === 'maria')!
+    const doc = await docs.add(maria, { folderId: mine.id, name: 'diario.md', data: Buffer.from('só meu') })
+    docs.trash(maria, doc.id)
+    // Not even the owner reaches a personal folder.
+    expect(await failure(() => docs.purge(ana, doc.id))).toBe(await failure(() => docs.purge(ana, 'nao-existe')))
+    expect(docs.purge(maria, doc.id)).toBeNull()
+    expect(docs.index.doc(doc.id)).toBeUndefined()
+    expect(existsSync(join(docs.root, '.trash', doc.id))).toBe(false)
+  })
 })

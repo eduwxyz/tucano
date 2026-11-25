@@ -30,7 +30,7 @@ Para o agente guardar direto, peça na conversa: "guarda isso na pasta Relatóri
 Cada novo guardar vira uma versão, com anotação. Em **Versões**, **Ver** mostra uma antiga sem mudar nada; **Voltar para esta** cria uma versão nova com o conteúdo dela.
 
 ## Lixeira
-**Mandar para a lixeira** tira o arquivo da lista e da busca; **Desfazer** na hora. No fim de cada pasta, **Lixeira** lista o que foi e traz **Restaurar**.
+**Mandar para a lixeira** tira o arquivo da lista e da busca; **Desfazer** na hora. No fim de cada pasta, **Lixeira** lista o que foi e traz **Restaurar**. **Apagar de vez** tira o arquivo e as versões dele do Tucano, sem volta: é do dono ou de um admin (numa pasta pessoal, da própria pessoa) e fica em Configurações › Atividade.
 
 ## O que entra
 PDF, Word (.docx), planilha (.xlsx, .csv), texto (.txt, .md, .json), página (.html) e imagem (png, jpg, gif, webp), até 20 MB. **Não entram** vídeo, áudio nem arquivo compactado. Word e Excel aparecem como texto; **Baixar** traz o original.

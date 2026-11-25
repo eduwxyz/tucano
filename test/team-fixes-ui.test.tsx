@@ -103,6 +103,8 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
   it('the activity log says in words what happened to a wiki source, a channel, a DM, a summary', () => {
     const at = 1
     expect(activityText({ id: '1', at, personId: 'ana', kind: 'wiki.source_removed', detail: { title: 'Ata de março' } }, fake, new Map())).toBe('apagou a fonte “Ata de março” da wiki')
+    // A document deleted for good leaves nothing behind but this line: what it was called and where it was.
+    expect(activityText({ id: '3', at, personId: 'ana', kind: 'document.deleted', target: 'd1', detail: { name: 'contrato.pdf', folder: 'Empresa › Contratos' } }, fake, new Map())).toBe('apagou de vez o documento “contrato.pdf”, de Empresa › Contratos')
     expect(activityText({ id: '2', at, personId: 'ana', kind: 'wiki.source_removed', detail: { private: true } }, fake, new Map())).toBe('apagou uma fonte da wiki que veio de uma conversa privada')
     expect(activityText({ id: '2b', at, personId: 'ana', kind: 'wiki.source_removed' }, fake, new Map())).toBe('apagou uma fonte da wiki')
     expect(activityText({ id: '3', at, personId: 'ana', kind: 'channel.deleted', detail: { name: 'vendas' } }, fake, new Map())).toBe('excluiu o canal #vendas')

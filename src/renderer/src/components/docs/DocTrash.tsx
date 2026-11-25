@@ -4,13 +4,29 @@ import { L } from '../../../../shared/lang'
 import type { Doc } from '../../../../shared/docs'
 import { call } from '../../rpc'
 import { toast } from '../../store'
+import { confirmDialog } from '../Dialogs'
 import { message } from '../Invite'
 import { DocRow } from './doc-ui'
 
-export function DocTrash({ docs, may }: { docs: Doc[]; may: boolean }): ReactNode {
+// `forGood`: this person may delete what is here for good (the owner or an admin; in a personal folder, its person).
+export function DocTrash({ docs, may, forGood }: { docs: Doc[]; may: boolean; forGood: boolean }): ReactNode {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   if (!docs.length) return null
+  const purge = async (d: Doc): Promise<void> => {
+    const ok = await confirmDialog({
+      title: L(`Apagar "${d.name}" de vez?`, `Delete "${d.name}" for good?`),
+      body: L('O arquivo e as versões antigas dele saem do Tucano. Não dá para desfazer.', 'The file and its older versions leave Tucano. This cannot be undone.'),
+      confirm: L('Apagar de vez', 'Delete for good'),
+      danger: true
+    })
+    if (!ok) return
+    setBusy(d.id)
+    call('docPurge', { id: d.id }).then(
+      () => (toast(L(`${d.name} foi apagado de vez.`, `${d.name} was deleted for good.`)), setBusy(null)),
+      (e: unknown) => (toast(`${L('Não consegui apagar.', "I couldn't delete it.")} ${message(e)}`.trim()), setBusy(null))
+    )
+  }
   const restore = (d: Doc): void => {
     setBusy(d.id)
     call('docRestore', { id: d.id }).then(
@@ -31,9 +47,16 @@ export function DocTrash({ docs, may }: { docs: Doc[]; may: boolean }): ReactNod
               doc={d}
               trailing={
                 may && (
-                  <button className="btn btn--sm" disabled={busy === d.id} onClick={() => restore(d)}>
-                    {busy === d.id ? L('Restaurando…', 'Restoring…') : L('Restaurar', 'Restore')}
-                  </button>
+                  <>
+                    {forGood && (
+                      <button className="btn btn--ghost btn--sm dc-trash__purge" disabled={busy === d.id} onClick={() => void purge(d)}>
+                        {L('Apagar de vez', 'Delete for good')}
+                      </button>
+                    )}
+                    <button className="btn btn--sm" disabled={busy === d.id} onClick={() => restore(d)}>
+                      {L('Restaurar', 'Restore')}
+                    </button>
+                  </>
                 )
               }
             />

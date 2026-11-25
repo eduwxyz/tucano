@@ -3235,6 +3235,11 @@ const api: Handlers = {
   docRename: ({ id, name }, ctx) => viaDocs(() => docs.rename(ctx.person, id, name)),
   docTrash: ({ id }, ctx) => viaDocs(() => docs.trash(ctx.person, id)),
   docRestore: ({ id }, ctx) => viaDocs(() => docs.restore(ctx.person, id)),
+  docPurge: ({ id }, ctx) => {
+    // Nothing is left of it to tell what happened: the team's log keeps who deleted what, and from where.
+    const gone = viaDocs(() => docs.purge(ctx.person, id))
+    if (gone) record(ctx, 'document.deleted', id, gone)
+  },
   docText: ({ id, version }, ctx) => viaDocsAsync(() => docs.text(ctx.person, id, version)),
   docHistory: ({ id }, ctx) => viaDocs(() => docs.history(ctx.person, id)),
   docRestoreVersion: ({ id, n }, ctx) => viaDocsAsync(() => docs.restoreVersion(ctx.person, id, n)),

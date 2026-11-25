@@ -522,6 +522,7 @@ const KINDS = (): [string, string][] => [
   ['skill', 'Skills'],
   ['routine', L('Rotinas', 'Routines')],
   ['channel', L('Canais', 'Channels')],
+  ['document', L('Documentos', 'Documents')],
   ['proposal', L('Propostas', 'Proposals')]
 ]
 
@@ -583,6 +584,8 @@ export function activityText(e: ActivityEntry, s: Pick<State, 'people' | 'agents
       return L('apagou uma conversa privada', 'deleted a private conversation')
     case 'vault_key.imported':
       return L(`importou ${String(d['count'] ?? '')} chaves pro Cofre`, `imported ${String(d['count'] ?? '')} keys into the Vault`)
+    case 'document.deleted':
+      return named ? L(`apagou de vez o documento “${named}”${typeof d['folder'] === 'string' && d['folder'] ? `, de ${d['folder']}` : ''}`, `deleted the document “${named}” for good${typeof d['folder'] === 'string' && d['folder'] ? `, from ${d['folder']}` : ''}`) : L('apagou um documento de vez', 'deleted a document for good')
     case 'channel.summary_edited':
       return L('editou o resumo de um canal', "edited a channel's summary")
   }

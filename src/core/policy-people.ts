@@ -182,6 +182,7 @@ export const NEEDS: Record<Method, Need> = {
   docRename: 'anyone',
   docTrash: 'anyone',
   docRestore: 'anyone',
+  docPurge: 'anyone',
   docText: 'anyone',
   docHistory: 'anyone',
   docRestoreVersion: 'anyone',
