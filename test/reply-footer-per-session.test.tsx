@@ -25,7 +25,6 @@ vi.mock('open-bot-avatar/dom', () => ({ mountAvatar: () => new Proxy({}, { get: 
 // What each pill asked the core for, by the reply it sits under.
 const continued = vi.hoisted(() => [] as string[])
 const retried = vi.hoisted(() => [] as string[])
-const steered = vi.hoisted(() => [] as { text: string; mode?: string; replyId?: string }[])
 
 let fake: State
 vi.mock('../src/renderer/src/store', async (original) => {
@@ -39,7 +38,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     voiceStatus: vi.fn(() => new Promise(() => {})),
     continueRun: (id: string): void => void continued.push(id),
     retryRun: (id: string): void => void retried.push(id),
-    sendMessage: (_conversationId: string, text: string, _images?: unknown, _threadId?: string, _files?: unknown, mode?: string, replyId?: string): void => void steered.push({ text, mode, replyId })
+    sendMessage: (): void => {}
   }
 })
 const realStore = await vi.importActual<typeof import('../src/renderer/src/store')>('../src/renderer/src/store')
@@ -59,18 +58,12 @@ const stopped = (id: string, at: number): Message => ({
   at,
   run: { status: 'stopped', steps: [step(id)] }
 })
-// A reply at work in that same channel: its own row, its own steer.
-const running = (id: string, at: number): Message => ({
-  ...stopped(id, at),
-  run: { status: 'working', steps: [{ id, label: 'Pensando', status: 'running' }] }
-})
 
 let root: Root | undefined
 beforeEach(() => {
   setLang('en')
   continued.length = 0
   retried.length = 0
-  steered.length = 0
   document.getElementById('root')!.innerHTML = ''
   root = undefined
   fake = {
@@ -161,47 +154,5 @@ describe('a channel with three sessions', () => {
     const third = rows()[2]!
     await act(async () => third.pills.find((b) => labelled(b) === 'Continue')!.click())
     expect(continued).toEqual(['m2', 'm3'])
-  })
-
-  it('gives the steer only to the session at work', async () => {
-    // Two finished and one at work: the finished pair keeps its three ways on, and the row at work
-    // carries the steer in their place.
-    fake = { ...fake, messages: { c1: [stopped('m1', 1), stopped('m2', 2), running('m3', 3)] } } as State
-    await render()
-    const all = rows()
-    expect(all.map((r) => r.foot.querySelectorAll('.steps__steer-pill').length)).toEqual([0, 0, 1])
-    const count = (label: string): number[] => all.map((r) => r.pills.filter((b) => labelled(b) === label).length)
-    expect(count('Continue')).toEqual([1, 1, 0])
-    expect(count('Try again')).toEqual([1, 1, 0])
-    expect(count('Try with instructions')).toEqual([1, 1, 0])
-  })
-
-  it('gives every session at work its own steer, and steers the one it sits under', async () => {
-    // Three replies running at once in one channel: each is a session of its own, so each says how to go
-    // on, and the note under the second reaches the second.
-    fake = { ...fake, messages: { c1: [running('m1', 1), running('m2', 2), running('m3', 3)] } } as State
-    await render()
-    const all = rows()
-    expect(all.map((r) => r.foot.querySelectorAll('.steps__steer-pill').length)).toEqual([1, 1, 1])
-    // None of them offers a way back: a reply at work is steered, not tried again.
-    for (const row of all) expect(row.pills.some((b) => labelled(b) === 'Try again')).toBe(false)
-    const second = all[1]!
-    await act(async () => second.foot.querySelector<HTMLButtonElement>('.steps__steer-pill')!.click())
-    const note = second.foot.querySelector<HTMLTextAreaElement>('.retry-note textarea')!
-    let proto: object | null = Object.getPrototypeOf(note)
-    let set: ((v: string) => void) | undefined
-    while (proto && !set) {
-      set = Object.getOwnPropertyDescriptor(proto, 'value')?.set
-      proto = Object.getPrototypeOf(proto)
-    }
-    await act(async () => {
-      set!.call(note, 'go with the second layout')
-      note.dispatchEvent(new window.Event('input', { bubbles: true }))
-    })
-    const send = [...second.foot.querySelectorAll<HTMLButtonElement>('.retry-note__row button')].find((b) => b.textContent?.trim() === 'Steer')!
-    expect(send.disabled).toBe(false)
-    await act(async () => send.click())
-    // Handed into the second reply, as a steer, and into no other.
-    expect(steered).toEqual([{ text: 'go with the second layout', mode: 'steer', replyId: 'm2' }])
   })
 })

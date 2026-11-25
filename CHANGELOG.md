@@ -9,7 +9,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
-- **Every stopped reply in a conversation shows its own ways on again.** Since 0.2.45 Continue, Try again and Try with instructions sat behind the row's hover, so a conversation holding several sessions drew them only under the pointer: the only control in sight was the steer of the session still working, and one that had finished, failed or run out of budget read as a dead end. They now sit in sight on every ended reply, each acting on the reply it belongs to, and only the receipt's numbers keep their quiet until the pointer arrives.
+- **Every stopped reply in a conversation shows its own ways on again.** Since 0.2.45 Continue, Try again and Try with instructions sat behind the row's hover, so a conversation holding several sessions drew them only under the pointer: the only control in sight was the steer of the session still working, and one that had finished, failed or run out of budget read as a dead end. They now sit in sight on every ended reply, each acting on the reply it belongs to, and the way out of a reply that stopped at the month's limit is in sight with them; only the receipt's numbers keep their quiet until the pointer arrives.
 
 ## [0.2.47] - 2026-11-24
 
