@@ -3213,11 +3213,25 @@ const api: Handlers = {
   },
   // Documentos: each call goes on with the person asking; who may do what is the folder's own access (core/docs.ts).
   docs: (_p, ctx) => viaDocs(() => docs.tree(ctx.person)),
-  docFolderSave: (p, ctx) => viaDocs(() => docs.saveFolder(ctx.person, p)),
+  docFolderSave: (p, ctx) => {
+    // Who sees a folder decides who sees everything in it: a change of that goes to the team's log.
+    const before = p.id ? docs.folderAccess(p.id) : undefined
+    const saved = viaDocs(() => docs.saveFolder(ctx.person, p))
+    if (p.id && !saved.privateTo && JSON.stringify(before ?? null) !== JSON.stringify(saved.access ?? null)) record(ctx, 'document.folder_access', saved.id, { name: docs.folderName(saved.id) })
+    return saved
+  },
   docFolderRemove: ({ id }, ctx) => viaDocs(() => docs.removeFolder(ctx.person, id)),
   docAdd: ({ folderId, name, data, summary }, ctx) => viaDocsAsync(() => docs.add(ctx.person, { folderId, name, data: Buffer.from(data, 'base64'), ...(summary ? { summary } : {}) })),
   docSaveArtifact: ({ artifactId, folderId }, ctx) => viaDocsAsync(() => docs.saveFromArtifact(ctx.person, artifactId, folderId)),
-  docMove: ({ id, folderId, name }, ctx) => viaDocs(() => docs.move(ctx.person, id, folderId, name)),
+  docMove: ({ id, folderId, name }, ctx) => {
+    // Out of the team's folders into a personal one: from there on only its person reads its history,
+    // so the team's log keeps that it went, and from where.
+    const before = docs.peek(id)
+    const moved = viaDocs(() => docs.move(ctx.person, id, folderId, name))
+    const taken = before ? docs.takenToPersonal(before, moved) : null
+    if (taken) record(ctx, 'document.to_personal', id, taken)
+    return moved
+  },
   docRename: ({ id, name }, ctx) => viaDocs(() => docs.rename(ctx.person, id, name)),
   docTrash: ({ id }, ctx) => viaDocs(() => docs.trash(ctx.person, id)),
   docRestore: ({ id }, ctx) => viaDocs(() => docs.restore(ctx.person, id)),

@@ -19,7 +19,7 @@ O cadeado ao lado do título diz quem entra. Dono e admin mudam em **Quem entra 
 - **Agentes**: por setor, **Não lê**, **Lê** ou **Lê e guarda**. **Todos os agentes** vale também para os criados depois.
 - **Usar o mesmo acesso da pasta de cima**: a subpasta segue a de cima.
 
-Quem fica de fora não acha o arquivo, nem pela busca, e o agente dessa pessoa também não lê. Um agente que trabalha para alguém lê só o que ele **e** a pessoa podem. Dono e admin veem tudo, exceto a pasta pessoal de outra pessoa.
+Quem fica de fora não acha o arquivo, nem pela busca, e o agente dessa pessoa também não lê. Um agente que trabalha para alguém lê só o que ele **e** a pessoa podem. Dono e admin veem tudo, exceto a pasta pessoal de outra pessoa. Por isso um arquivo que mais alguém vê não vai para **Só meus**: antes, dono ou admin deixa a pasta dele só para aquela pessoa. Mudar quem vê uma pasta e levar um arquivo para a pasta pessoal ficam em Configurações › Atividade.
 
 ## Mostrar é da conversa, guardar é do time
 Um arquivo que o agente mostra na conversa não é guardado sozinho. No painel dele, **Guardar em Documentos** escolhe a pasta e vira a versão 1. Depois aparecem **Guardado** e **Abrir em Documentos**.

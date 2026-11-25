@@ -7,7 +7,7 @@
 // see a document it says it does not exist, as it would for one that doesn't.
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { agentFolderIds, cleanFolderAccess, personMay, seenByAll, visibleFolderIds, type Requester } from '../shared/doc-access'
+import { agentFolderIds, cleanFolderAccess, effectiveAccess, personMay, seenByAll, visibleFolderIds, type Requester } from '../shared/doc-access'
 import { actorOfAgent, actorOfPerson, docKind, folderPath, folderPathWithin, type Doc, type DocEvent, type DocFolder, type DocHit, type DocKind, type DocLevel, type DocOrigin, type DocsTree, type DocVersion, type FolderAccess } from '../shared/docs'
 import { UserError } from '../shared/errors'
 import { L } from '../shared/lang'
@@ -215,9 +215,39 @@ export class Docs extends DocsFiling {
     const d = this.docFor(person, docId, 'edit')
     if (d.trashedAt) throw trashed()
     this.folderFor(person, folderId, 'edit')
+    this.notTakenFromOthers(d, folderId)
     const next = this.moveDoc(d, folderId, name, actorOfPerson(person.id))
     this.deps.emit()
     return next
+  }
+  // A personal folder is its person's alone: not the owner's, not an admin's. So a document someone else
+  // sees can't be moved into one, by whoever edits it: it would be gone for the others, with no one left to
+  // bring it back (and gone for good with its person, if they leave). First its folder is narrowed to that
+  // one person, by whoever decides who sees it; then it may go. Inside one's own personal folders, freely.
+  private notTakenFromOthers(d: Doc, toFolderId: string): void {
+    const folders = this.index.folders()
+    const whose = effectiveAccess(folders, toFolderId).privateTo
+    if (!whose || effectiveAccess(folders, d.folderId).privateTo === whose) return
+    if (this.deps.people().some((p) => p.id !== whose && personMay(p, folders, d.folderId, 'view')))
+      throw new UserError(L('Outras pessoas veem este documento, então ele não vai para uma pasta pessoal. Antes, o dono ou um admin deixa a pasta dele só para você.', 'Other people see this document, so it does not go to a personal folder. First the owner or an admin makes its folder yours alone.'))
+  }
+  // For the team's log (src/core/index.ts), read before a change: a document as the index has it, a
+  // folder's own access, and a folder's path in words. Nothing here is given to a person as it is.
+  peek(docId: string): Doc | undefined {
+    return this.ready ? this.index.doc(docId) : undefined
+  }
+  folderAccess(folderId: string): FolderAccess | null | undefined {
+    return this.ready ? this.index.folders().find((f) => f.id === folderId)?.access : undefined
+  }
+  folderName(folderId: string): string {
+    return this.ready ? folderPath(this.index.folders(), folderId).join(' › ') : ''
+  }
+  // Where a document came from, when it was just moved out of the team's folders into a personal one:
+  // for the team's log, since from there on only its person reads its history. Null for any other move.
+  takenToPersonal(before: Doc, after: Doc): { name: string; folder: string } | null {
+    const folders = this.index.folders()
+    if (!effectiveAccess(folders, after.folderId).privateTo || effectiveAccess(folders, before.folderId).privateTo) return null
+    return { name: before.name, folder: folderPath(folders, before.folderId).join(' › ') }
   }
   rename(person: Person, docId: string, name: string): Doc {
     this.need()
@@ -488,6 +518,7 @@ export class Docs extends DocsFiling {
     if (!d) throw gone()
     const to = this.resolveFolder(folder, ids, folders, readable)
     if (!to) throw noFolder()
+    this.notTakenFromOthers(d, to.id) // an agent working for someone takes nothing into that person's folder that they couldn't
     const next = this.moveDoc(d, to.id, name, actorOfAgent(agent.id))
     this.deps.emit()
     return { ...next, path: this.pathIn(folders, next, readable) }
