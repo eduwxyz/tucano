@@ -1,6 +1,7 @@
 // An OTLP/HTTP collector for tests: it keeps the spans it gets, in JSON.
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { flushTelemetry } from '../../src/core/telemetry'
 
 export type OtlpValue = { stringValue?: string; intValue?: string | number; doubleValue?: number; boolValue?: boolean }
 export type OtlpSpan = {
@@ -39,5 +40,16 @@ export async function collector(): Promise<{ url: string; spans: Received[]; hea
     spans,
     headers,
     close: () => new Promise((ok) => server.close(() => ok()))
+  }
+}
+
+// The core sends its spans in a batch every 5 s. A test asks for what there is each time it looks, so
+// it waits on the reply and not on the clock.
+export async function arrived(ok: () => boolean, ms = 9_000): Promise<void> {
+  const end = Date.now() + ms
+  while (!ok()) {
+    if (Date.now() > end) throw new Error('timed out waiting')
+    await flushTelemetry()
+    await new Promise((r) => setTimeout(r, 10))
   }
 }
