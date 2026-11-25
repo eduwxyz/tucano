@@ -61,8 +61,49 @@ const text = (): string => document.body.textContent ?? ''
 const selectOf = (label: string): Element | undefined =>
   [...document.querySelectorAll('label.field')].find((el) => el.querySelector('.field__label')?.textContent === label)?.querySelector('[role="combobox"]') ?? undefined
 const options = (): Element[] => [...document.querySelectorAll('[role="option"]')]
+const noticeOf = (fragment: string): Element | undefined =>
+  [...document.querySelectorAll('p.hint')].find((el) => (el.textContent ?? '').includes(fragment)) ?? undefined
+const warningOf = (fragment: string): Element | undefined =>
+  [...document.querySelectorAll('p.hint--warn')].find((el) => (el.textContent ?? '').includes(fragment)) ?? undefined
+// Document order of the dropdowns and the sublines, including a missing-key line when present.
+const noticeOrder = (): string[] => {
+  const index = (el: Element): number => [...document.querySelectorAll('*')].indexOf(el)
+  const parts: [string, Element | undefined][] = [
+    ['dropdown(routing)', selectOf('Who replies in a channel')],
+    ['notice(routing)', noticeOf('Every message without an @mention sends')],
+    ['warning(routing)', warningOf('Who replies in a channel: Jev has no key yet')],
+    ['dropdown(browser)', selectOf('What an agent clicks in a page')],
+    ['notice(browser)', noticeOf('Every click text can’t resolve sends')],
+    ['warning(browser)', warningOf('What an agent clicks in a page: Jev has no key yet')]
+  ]
+  return parts
+    .filter((part): part is [string, Element] => part[1] !== undefined)
+    .sort((a, b) => index(a[1]) - index(b[1]))
+    .map(([name]) => name)
+}
 
 describe('the classifier uses', () => {
+  const assignedToBoth = async (c: ClassifierConfig, withKeys = true): Promise<void> => {
+    await act(async () => root.render(<div />))
+    settings = { ...settings, classifiers: [c], classifierJobs: { routing: c.id, browser: c.id }, classifierKeys: withKeys ? { [c.id]: true } : {}, engines: engines() }
+    await act(async () => root.render(<ClassifierUsesCard />))
+    expect(noticeOrder()).toEqual(withKeys ? ['dropdown(routing)', 'notice(routing)', 'dropdown(browser)', 'notice(browser)'] : ['dropdown(routing)', 'notice(routing)', 'warning(routing)', 'dropdown(browser)', 'notice(browser)', 'warning(browser)'])
+  }
+
+  it('puts each notice after its own dropdown, with the default and an added classifier', async () => {
+    expect(noticeOrder()).toEqual(['dropdown(routing)', 'dropdown(browser)'])
+    await assignedToBoth(JEV_CLASSIFIER)
+    expect(text()).toContain('Every message without an @mention sends the channel’s recent messages to TypeSafe')
+    await assignedToBoth(luna)
+    expect(text()).toContain('Every message without an @mention sends the channel’s recent messages to OpenAI')
+  })
+
+  it('keeps each missing-key line with the notice it explains', async () => {
+    await assignedToBoth(JEV_CLASSIFIER, false)
+    expect(text()).toContain('Who replies in a channel: Jev has no key yet. Until it does, nothing goes to TypeSafe.')
+    expect(text()).toContain('What an agent clicks in a page: Jev has no key yet. Until it does, nothing goes to TypeSafe.')
+  })
+
   it('offers the two jobs, in order, and nothing else', () => {
     expect(CLASSIFIER_JOBS).toEqual(['routing', 'browser'])
     expect([...document.querySelectorAll('label.field .field__label')].map((el) => el.textContent)).toEqual(['Who replies in a channel', 'What an agent clicks in a page'])
