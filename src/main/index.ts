@@ -1,13 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { openSigned, verifyLocalUrl } from '../core/local-paths'
+import { localResponse, localType } from './local-file'
 import { readInstall } from '../core/feedback'
 import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile, execFileSync } from 'node:child_process'
-import { closeSync, createReadStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { Readable } from 'node:stream'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { copyFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
+import { basename, dirname, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
@@ -442,49 +442,6 @@ async function screenshot(o: { url: string; width: number; height: number; fullP
   }
 }
 
-// What the window shows from a cited file: images, videos and PDFs.
-const LOCAL_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.bmp': 'image/bmp',
-  '.mp4': 'video/mp4',
-  '.m4v': 'video/mp4',
-  '.webm': 'video/webm',
-  '.mov': 'video/quicktime',
-  '.pdf': 'application/pdf'
-}
-
-// A file served from its descriptor, with the byte ranges a video asks for when it seeks.
-function localResponse(req: Request, opened: { fd: number; size: number }, type: string): Response {
-  const headers = new Headers({ 'Content-Type': type, 'Content-Security-Policy': 'sandbox', 'Accept-Ranges': 'bytes' })
-  const asked = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('range') ?? '')
-  let start = 0
-  let end = opened.size - 1
-  if (asked && (asked[1] || asked[2])) {
-    if (asked[1]) {
-      start = Number(asked[1])
-      if (asked[2]) end = Math.min(Number(asked[2]), end)
-    } else start = Math.max(0, opened.size - Number(asked[2]))
-    if (start > end) {
-      closeSync(opened.fd)
-      headers.set('Content-Range', `bytes */${opened.size}`)
-      return new Response(null, { status: 416, headers })
-    }
-    headers.set('Content-Range', `bytes ${start}-${end}/${opened.size}`)
-  }
-  headers.set('Content-Length', String(end - start + 1))
-  if (opened.size === 0) {
-    closeSync(opened.fd)
-    return new Response(null, { status: 200, headers })
-  }
-  const body = Readable.toWeb(createReadStream('', { fd: opened.fd, start, end })) as ReadableStream<Uint8Array>
-  return new Response(body, { status: headers.has('Content-Range') ? 206 : 200, headers })
-}
-
 function serveArtifact(req: Request): Promise<Response> | Response {
   const u = new URL(req.url)
   if (u.host === 'local') {
@@ -494,7 +451,7 @@ function serveArtifact(req: Request): Promise<Response> | Response {
     // link in its place after the core looked at it.
     const opened = signed && openSigned(signed)
     if (!signed || !opened) return new Response('not found', { status: 404 })
-    return localResponse(req, opened, LOCAL_TYPES[extname(signed.path).toLowerCase()] ?? 'application/octet-stream')
+    return localResponse(req, opened, localType(signed.path))
   }
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
   const dir = join(registry.selected().dataDir, 'artifacts', id)
