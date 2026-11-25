@@ -51,6 +51,14 @@ describe('settings ownership and visibility', () => {
     }
   })
 
+  it('owns the Proceed toggle in Conversations as a personal key members can see', () => {
+    const section = settingsStructure(all).find(s => s.id === 'app-conversation')!
+    expect(section.keys).toContain('proceedButton')
+    expect(PERSONAL_SETTINGS).toContain('proceedButton')
+    const member = settingsStructure({ admin: false, owner: false, team: true, servers: true })
+    expect(member.find(s => s.id === 'app-conversation')!.visible).toBe(true)
+  })
+
   it('shows Connections › Traces to an admin only', () => {
     const shown = (admin: boolean): boolean => settingsStructure({ admin, owner: false, team: true, servers: false }).some((s) => s.id === 'connections-traces' && s.visible)
     expect(shown(true)).toBe(true)

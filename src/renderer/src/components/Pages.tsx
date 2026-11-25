@@ -3782,6 +3782,14 @@ export function SettingsPage(): ReactNode {
                 </div>
                 <Toggle on={settings.showThinking === true} onChange={(v) => updateSettings({ showThinking: v })} />
               </div>
+              <div className="key-row">
+                <Icon name="check" />
+                <div className="grow">
+                  <strong>{L('Botão de aprovar com um clique', 'One-click approval button')}</strong>
+                  <p className="muted small">{L('Mostra um botão para aprovar com um clique quando um agente oferece uma só ação. Desligado por padrão. Muda só pra você.', 'Shows a button to approve with one click when an agent offers one action. Off by default. This affects only you.')}</p>
+                </div>
+                <Toggle on={settings.proceedButton === true} onChange={(v) => updateSettings({ proceedButton: v })} />
+              </div>
             </Card>
             <Card title={L('Falar com quem faz o Tucano', 'Talk to the people who make Tucano')}>
               {owner && (

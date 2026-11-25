@@ -15,7 +15,7 @@ const { answer, submit } = vi.hoisted(() => ({
   answer: vi.fn((_id: string, _index: number, _value: unknown) => {}),
   submit: vi.fn(async (_id: string) => {})
 }))
-const state = { you: 'p1', people: [{ id: 'p1', name: 'You' }] }
+const state = { you: 'p1', people: [{ id: 'p1', name: 'You' }], settings: {} as { proceedButton?: boolean } }
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(state),
   teamMode: () => false,
@@ -27,7 +27,7 @@ vi.mock('../src/renderer/src/store', () => ({
 }))
 
 const { createRoot } = await import('react-dom/client')
-const { ProceedCard } = await import('../src/renderer/src/components/Decisions')
+const { NextStepsCard, ProceedCard } = await import('../src/renderer/src/components/Decisions')
 let root: ReturnType<typeof createRoot>
 
 const PROPOSAL = 'They’re still sitting there unstaged; say the word and I’ll restore all six, one branch each.'
@@ -52,6 +52,7 @@ const click = async (el: Element): Promise<void> => act(async () => { el.dispatc
 beforeEach(() => {
   answer.mockReset()
   submit.mockReset().mockResolvedValue(undefined)
+  state.settings = { proceedButton: true }
   root = createRoot(document.getElementById('root')!)
 })
 afterEach(async () => { await act(async () => root.unmount()) })
@@ -66,6 +67,30 @@ describe('the proceed widget', () => {
     expect(html).toContain('class="btn btn--primary proceed__button"')
     expect(html).toContain('aria-label="Approve the proposed next step"')
     expect(html).not.toContain('disabled')
+  })
+
+  it('is absent with the setting off, the default, and is one button with it on', () => {
+    state.settings = {}
+    const off = renderToStaticMarkup(<ProceedCard message={message('m-proceed', true)} />)
+    expect(off).toBe('')
+    expect(count(off, '<button')).toBe(0)
+    expect(off).not.toContain('proceed__button')
+    state.settings = { proceedButton: true }
+    const on = renderToStaticMarkup(<ProceedCard message={message('m-proceed', true)} />)
+    expect(count(on, '<button')).toBe(1)
+    expect(on).toContain('class="btn btn--primary proceed__button"')
+  })
+
+  it('leaves the next steps card alone when the setting is off', () => {
+    state.settings = {}
+    const steps: Message = {
+      ...message('m-steps', true),
+      run: { status: 'done', steps: [], depth: 1, stepsOpen: true, questions: [{ question: 'What comes next?', kind: 'multiple', options: [{ label: 'One' }, { label: 'Two' }], nextSteps: true }] }
+    }
+    const html = renderToStaticMarkup(<NextStepsCard message={steps} />)
+    expect(html).toContain('ask--steps')
+    expect(count(html, '<button')).toBeGreaterThan(0)
+    expect(html).not.toContain('proceed__button')
   })
 
   it('keeps one label across two renders of the same message', () => {

@@ -131,4 +131,9 @@ describe('one-action detector corpus', () => {
     expect(!!hit, message).toBe(c.expected)
     if (c.paragraph && hit) expect(hit.paragraph, message).toBe(c.paragraph)
   })
+
+  it('detects the proposal the display setting only hides', () => {
+    const proposal = cases.find((c) => c.id === 'en-01')!
+    expect(oneActionProposal(proposal.text)?.paragraph).toBe(proposal.text)
+  })
 })

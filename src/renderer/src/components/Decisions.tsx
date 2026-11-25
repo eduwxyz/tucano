@@ -447,11 +447,12 @@ export function ProceedCard({ message }: { message: Message }): ReactNode {
   const target = useStore((s) => personById(s, message.run?.askedTo))
   const me = useStore((s) => personById(s, s.you))
   const mine = !team || !target || target.id === you || admin || covers(target, me)
+  const enabled = useStore((s) => s.settings.proceedButton === true)
   const open = hasOpenProceed(message.run)
   const [approved, setApproved] = useState(!open)
   const [sending, setSending] = useState(false)
   useEffect(() => setApproved(!hasOpenProceed(message.run)), [message.run?.proceedOpen])
-  if (!mine) return null
+  if (!enabled || !mine) return null
   const label = approved ? L('Aprovado', 'Approved') : proceedLabel(message.id)
   const ariaLabel = approved ? 'Approved' : 'Approve the proposed next step'
   const approve = (): void => {

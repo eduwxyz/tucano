@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **A setting turns the Proceed button on.** Off by default, it sits at the bottom of Settings › You › Conversations; with it on, a reply offering one action gets a single approval button.
+
 ## [0.2.48] - 2026-11-25
 
 > **Em português:**
