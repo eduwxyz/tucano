@@ -1,6 +1,6 @@
-// The routines page: the week by default, with a routine that runs several times a day in the
-// "o dia todo" strip (not in the hours), what failed counted on top, and the list that starts with
-// what needs me. The choice of view stays while the app is open. The core is a stand-in.
+// The routines page: the week by default, with every run of a routine at its own hour, what failed
+// counted on top, and the list that starts with what needs me. The choice of view stays while the
+// app is open. The core is a stand-in.
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -69,18 +69,36 @@ const click = async (b: Element): Promise<void> => {
 }
 
 describe('the routines page', () => {
-  it('opens on the week: several-a-day in the strip, one-time in the hours, and what failed on top', async () => {
+  it('opens on the week: each run of a several-times-a-day routine at its hour, and what failed on top', async () => {
     await act(async () => root.render(<RoutinesPage />))
     expect(button(/^Semana$/).getAttribute('aria-checked')).toBe('true')
-    expect(all('.cal__allday').some((t) => t.includes('Vigia'))).toBe(true)
-    expect(all('.cal__ev').some((t) => t.includes('Vigia'))).toBe(false)
+    expect(document.querySelector('.cal__strip')).toBeNull()
+    expect(document.querySelector('.cal__allday')).toBeNull()
+    const vigiaBlocks = all('.cal__ev').filter((t) => t.includes('Vigia'))
+    expect(vigiaBlocks.some((t) => t.includes('09:00'))).toBe(true)
+    expect(vigiaBlocks.some((t) => t.includes('10:00'))).toBe(true)
+    expect(vigiaBlocks.some((t) => t.includes('11:00'))).toBe(true)
     expect(all('.cal__ev').some((t) => t.includes('Briefing'))).toBe(true)
-    expect(document.querySelector('.cal__strip-label')?.textContent).toBe('o dia todo')
     expect(button(/1 falhou/).getAttribute('aria-pressed')).toBe('false')
     await click(button(/1 falhou/))
     expect(document.querySelector('.cal__ev.is-dim')?.textContent).toContain('Briefing')
-    const failedChip = [...document.querySelectorAll('.cal__allday')].find((x) => x.querySelector('i.is-bad'))!
-    expect(failedChip.className).not.toContain('is-dim')
+    const failed = [...document.querySelectorAll('.cal__ev')].find((x) => x.textContent?.includes('Vigia') && x.querySelector('i.is-bad'))!
+    expect(failed.className).not.toContain('is-dim')
+    await click(failed)
+    expect(document.querySelector('.cal-pop h3')?.textContent).toBe('Vigia')
+    expect(document.querySelector('.cal-pop__when')?.textContent).toContain('falhou')
+  })
+
+  it('keeps one block for each routine when they share an hour', async () => {
+    const coletar: Routine = { id: 'r5', name: 'Coletar', agentId: 'a1', conversationId: 'd1', prompt: 'c', schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:00', times: ['09:00'] }, enabled: true, createdAt: 0 }
+    fake = { ...fake, routines: [vigia, coletar], messages: { d1: [] } }
+    await act(async () => root.render(<RoutinesPage />))
+    const together = [...document.querySelectorAll('.cal__col')].filter((col) => {
+      const blocks = [...col.querySelectorAll('.cal__ev')].map((x) => x.textContent ?? '')
+      return blocks.some((t) => t.includes('Vigia') && t.includes('09:00')) && blocks.some((t) => t.includes('Coletar') && t.includes('09:00'))
+    })
+    expect(together.length).toBeGreaterThan(0)
+    expect(together[0]!.querySelectorAll('.cal__ev').length).toBeGreaterThanOrEqual(2)
   })
 
   it('keeps a routine that’s off in the week, greyed, and turns it back on from its own panel', async () => {

@@ -1,6 +1,6 @@
-// The routines page's pure logic: which routines leave the hour grid for the "o dia todo" strip,
-// how the list is split ("precisa de você", "próximas", "desligadas"), and the short words for a
-// schedule and a time. Kept apart from Routines.tsx so it can be tested without React.
+// The routines page's pure logic: the list split ("precisa de você", "próximas", "desligadas"),
+// the marks on a run, and the short words for a schedule and a time. Every run stays in the hour
+// grid. Kept apart from Routines.tsx so it can be tested without React.
 import { L, lang } from '../../../shared/lang'
 import { dateAt, nextRun, timesOf, validDate, type Message, type Routine, type RunStatus, type Schedule } from '../../../shared/types'
 
@@ -36,46 +36,6 @@ export function markOf(o: Pick<Occ, 'status' | 'upcoming' | 'routine'>): Mark {
   if (WAITS.has(o.status)) return 'wait'
   if (OK.has(o.status)) return 'ok'
   return 'off'
-}
-
-// A routine that runs several times a day goes to the strip above the grid: in the grid it would
-// fill every hour of every day and hide the ones that run once.
-export const allDay = (r: Pick<Routine, 'schedule' | 'trigger'>): boolean => !r.trigger && !r.schedule.once && r.schedule.date === undefined && timesOf(r.schedule).length > 1
-
-// The week's occurrences, split: one-time ones in the hour grid, several-a-day ones in the strip.
-// Each one carries its routine: a deleted routine's runs are dropped before they reach here.
-export function splitWeek<T extends Pick<Occ, 'routine'>>(occs: T[]): { grid: T[]; strip: T[] } {
-  const grid: T[] = []
-  const strip: T[] = []
-  for (const o of occs) (o.routine && allDay(o.routine) ? strip : grid).push(o)
-  return { grid, strip }
-}
-
-const nextMidnight = (day: number): number => {
-  const d = new Date(day)
-  d.setDate(d.getDate() + 1)
-  return d.getTime()
-}
-
-// One chip of the strip: a routine on one day, with a tick per run (done, failed, still to come).
-export type StripChip = { routine: Routine; ticks: Occ[] }
-
-// A day's chips, from the strip's occurrences: one per routine, in the order they first run that day.
-export function stripDay(occs: Occ[], day: number): StripChip[] {
-  const end = nextMidnight(day)
-  const byRoutine = new Map<string, StripChip>()
-  for (const o of [...occs].filter((x) => x.routine && x.at >= day && x.at < end).sort((a, b) => a.at - b.at)) {
-    const chip = byRoutine.get(o.routine!.id)
-    if (chip) chip.ticks.push(o)
-    else byRoutine.set(o.routine!.id, { routine: o.routine!, ticks: [o] })
-  }
-  return [...byRoutine.values()]
-}
-
-// What a chip opens: the day's failure if there was one, else the last run, else the next one.
-export const chipOcc = (chip: StripChip): Occ => {
-  const ran = chip.ticks.filter((t) => !t.upcoming)
-  return ran.filter((t) => markOf(t) === 'bad').at(-1) ?? ran.at(-1) ?? chip.ticks[0]!
 }
 
 // ---------- the list ----------
