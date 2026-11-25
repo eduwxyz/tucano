@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { L } from '../../../../shared/lang'
 import { docUrl, type Doc } from '../../../../shared/docs'
 import { call } from '../../rpc'
-import { toast } from '../../store'
+import { navigate, toast } from '../../store'
 import { message } from '../Invite'
 import type { MenuItem } from '../Dialogs'
 import { FolderPicker, NameDialog } from './doc-ui'
@@ -17,6 +17,18 @@ export function downloadDoc(doc: Pick<Doc, 'id' | 'name'>): void {
   a.download = doc.name
   a.click()
   toast(L(`Baixando ${doc.name}…`, `Downloading ${doc.name}…`))
+}
+
+// A document sent on to the wiki, from where it already is: the curator reads it and writes it into the
+// pages, as with a file dropped there. Only from a folder everyone sees (the server checks; `forAll` is
+// the same answer, known here, so the reason is said without a round trip).
+export function sendToWiki(doc: Pick<Doc, 'id' | 'name' | 'status'>, forAll: boolean): void {
+  if (!forAll) return toast(L('Só vai para a Wiki um documento que o time todo vê. Este está numa pasta que nem todos veem.', 'Only a document the whole team sees goes to the Wiki. This one is in a folder not everyone sees.'))
+  if (doc.status === 'review' || doc.status === 'draft') return toast(L('Este documento ainda espera aprovação. Ele vai para a Wiki depois de aprovado.', 'This document is still waiting for approval. It goes to the Wiki once approved.'))
+  call('docToWiki', { id: doc.id }).then(
+    () => toast(L(`O curador está lendo ${doc.name} e vai escrever nas páginas da Wiki.`, `The curator is reading ${doc.name} and will write it into the Wiki's pages.`), { label: L('Abrir a Wiki', 'Open the Wiki'), run: () => navigate({ kind: 'wiki' }) }),
+    (e: unknown) => toast(`${L('Não consegui mandar para a Wiki.', "I couldn't send it to the Wiki.")} ${message(e)}`.trim())
+  )
 }
 
 const extOf = (name: string): string => (name.lastIndexOf('.') > 0 ? name.slice(name.lastIndexOf('.')) : '')
@@ -46,6 +58,7 @@ export function useDocActions(onGone?: (doc: Doc) => void): { items: (doc: Doc, 
   const items = (doc: Doc, may: boolean, open?: () => void): MenuItem[] => [
     ...(open ? ([{ label: L('Abrir', 'Open'), icon: 'eye', onClick: open }] as MenuItem[]) : []),
     { label: L('Baixar', 'Download'), icon: 'down', onClick: () => downloadDoc(doc) },
+    ...(doc.trashedAt ? [] : ([{ label: L('Mandar para a Wiki', 'Send to the Wiki'), icon: 'book', onClick: () => sendToWiki(doc, !!tree?.forAll.includes(doc.folderId)) }] as MenuItem[])),
     ...(may
       ? ([
           { label: L('Renomear', 'Rename'), icon: 'edit', onClick: () => setRenaming(doc) },

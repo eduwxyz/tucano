@@ -198,6 +198,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   docText: { id: 's', version: 'n?' },
   docHistory: { id: 's' },
   docRestoreVersion: { id: 's', n: 'n' },
+  docToWiki: { id: 's' },
   docSearch: { q: 's', folderId: 's?' },
   docByArtifact: {},
   docDecide: { id: 's', ok: 'b', note: 's?', version: 'n?' },

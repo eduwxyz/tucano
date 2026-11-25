@@ -37,6 +37,13 @@ export function effectiveAccess(folders: Folders, folderId: string): { access: F
 
 const best = <T extends 'view' | 'edit' | 'read' | 'write'>(...levels: (T | undefined)[]): T | undefined => levels.reduce<T | undefined>((a, b) => (b && (!a || RANK[b] > RANK[a]) ? b : a), undefined)
 
+// Whether a folder is the whole team's to see: not a personal one, and every person of the workspace may view it.
+// What only some see stays out of what everyone reads: the wiki takes a document only from such a folder.
+export function seenByAll(people: Who[], folders: Folders, folderId: string): boolean {
+  if (!folders.some((f) => f.id === folderId) || effectiveAccess(folders, folderId).privateTo) return false
+  return people.length > 0 && people.every((p) => personMay(p, folders, folderId, 'view'))
+}
+
 // Whether this person may see (`view`) or change (`edit`) what is in the folder. Owners and admins may
 // always, except in someone else's personal folder. 'edit' implies 'view'.
 export function personMay(person: Who, folders: Folders, folderId: string, need: DocLevel): boolean {

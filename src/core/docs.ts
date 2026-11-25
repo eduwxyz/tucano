@@ -7,7 +7,7 @@
 // see a document it says it does not exist, as it would for one that doesn't.
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { agentFolderIds, cleanFolderAccess, effectiveAccess, personMay, visibleFolderIds, type Requester } from '../shared/doc-access'
+import { agentFolderIds, cleanFolderAccess, effectiveAccess, personMay, seenByAll, visibleFolderIds, type Requester } from '../shared/doc-access'
 import { actorOfAgent, actorOfPerson, docKind, folderPath, folderPathWithin, type Doc, type DocEvent, type DocFolder, type DocHit, type DocKind, type DocLevel, type DocOrigin, type DocsTree, type DocVersion, type FolderAccess } from '../shared/docs'
 import { UserError } from '../shared/errors'
 import { L } from '../shared/lang'
@@ -101,7 +101,8 @@ export class Docs extends DocsFiling {
     for (const f of mine) can[f.id] = personMay(person, folders, f.id, 'edit') ? 'edit' : 'view'
     const docs = this.index.docs().filter((d) => seen.has(d.folderId))
     const live = new Set(docs.filter((d) => !d.trashedAt).map((d) => d.id))
-    return { folders: mine, docs, dates: this.index.liveDates().filter((d) => live.has(d.docId)), can }
+    const people = this.deps.people()
+    return { folders: mine, docs, dates: this.index.liveDates().filter((d) => live.has(d.docId)), can, forAll: mine.filter((f) => seenByAll(people, folders, f.id)).map((f) => f.id) }
   }
 
   // Makes a folder (no `id`) or changes one. `access`: left out keeps it; null makes it follow its parent. Only an owner or
@@ -303,6 +304,26 @@ export class Docs extends DocsFiling {
     const seen = new Set([...visibleFolderIds(person, folders)].map((id) => folderPath(folders, id).join(' › ')))
     const events = this.index.events(docId).map((e) => ((e.action === 'moved' || e.action === 'filed') && e.detail && !seen.has(e.detail) ? { ...e, detail: '' } : e))
     return { versions: this.index.versions(docId), events }
+  }
+
+  // A document on its way to the wiki: its name and its bytes, when it may go. The wiki is the whole team's
+  // (and every agent's that reads it), so only what every person of the workspace sees goes there, and
+  // nothing that still waits for a person's yes: the version that counts is the approved one.
+  forWiki(person: Person, docId: string): { name: string; data: Buffer } {
+    this.need()
+    const d = this.docFor(person, docId)
+    if (d.trashedAt) throw trashed()
+    if (!seenByAll(this.deps.people(), this.index.folders(), d.folderId))
+      throw new UserError(L('Só vai para a wiki um documento que o time todo vê. Este está numa pasta que nem todos veem.', "Only a document the whole team sees goes to the wiki. This one is in a folder not everyone sees."))
+    if (d.status === 'review' || d.status === 'draft')
+      throw new UserError(L('Este documento ainda espera aprovação. Ele vai para a wiki depois de aprovado.', 'This document is still waiting for approval. It goes to the wiki once approved.'))
+    return { name: d.name, data: this.bytes(d) }
+  }
+  // It went: said in the document's history, with who sent it.
+  sentToWiki(person: Person, docId: string): void {
+    if (!this.ready || !this.index.doc(docId)) return
+    this.index.addEvent({ docId, at: Date.now(), by: actorOfPerson(person.id), action: 'sent-to-wiki', detail: '' })
+    this.deps.emit()
   }
 
   // Goes back to an older version: its bytes become a new version (nothing is lost).

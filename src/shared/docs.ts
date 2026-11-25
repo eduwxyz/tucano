@@ -113,7 +113,7 @@ export interface DocVersion {
   hash: string
 }
 
-export type DocAction = 'created' | 'version' | 'moved' | 'renamed' | 'trashed' | 'restored' | 'reverted' | 'saved-from-chat' | 'approved' | 'changes-asked' | 'made-official' | 'filed' | 'unfiled'
+export type DocAction = 'created' | 'version' | 'moved' | 'renamed' | 'trashed' | 'restored' | 'reverted' | 'saved-from-chat' | 'approved' | 'changes-asked' | 'made-official' | 'filed' | 'unfiled' | 'sent-to-wiki'
 export interface DocEvent {
   docId: string
   at: number
@@ -158,6 +158,7 @@ export interface DocsTree {
   docs: Doc[]
   dates: DocDate[] // open and reminded ones, for the documents this person sees
   can: Record<string /* folder id */, DocLevel>
+  forAll: string[] // the folders, of these, that every person of the workspace sees: what is in them may go to the wiki
 }
 
 export interface DocHit {

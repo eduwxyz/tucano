@@ -40,7 +40,7 @@ export function DocFolderView({ tree, folder, words, upload }: { tree: DocsTree;
 
   const keep = (list: File[]): void => {
     if (!may) return toast(L('Você só pode ler esta pasta.', 'You can only read this folder.'))
-    if (list.length) void upload.send(folder.id, folder.name, list)
+    if (list.length) void upload.send(folder.id, folder.name, list, tree.forAll.includes(folder.id))
   }
   // The page never opens a dropped file itself, even when the person can only read here.
   const drop = {

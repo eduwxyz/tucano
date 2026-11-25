@@ -186,6 +186,7 @@ export const NEEDS: Record<Method, Need> = {
   docText: 'anyone',
   docHistory: 'anyone',
   docRestoreVersion: 'anyone',
+  docToWiki: 'anyone',
   docSearch: 'anyone',
   docByArtifact: 'anyone',
   docDecide: 'anyone',

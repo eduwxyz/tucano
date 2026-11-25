@@ -2,10 +2,11 @@
 // reads it, and says where it is while it goes. The core checks again; this only spares the wait.
 import { useRef, useState } from 'react'
 import { L } from '../../../../shared/lang'
-import { acceptsDoc, DOC_EXTENSIONS, MAX_DOC_BYTES } from '../../../../shared/docs'
+import { acceptsDoc, DOC_EXTENSIONS, MAX_DOC_BYTES, type Doc } from '../../../../shared/docs'
 import { call } from '../../rpc'
 import { toast } from '../../store'
 import { message } from '../Invite'
+import { sendToWiki } from './DocActions'
 
 export const ACCEPT = DOC_EXTENSIONS.join(',') // for the file picker
 const MEDIA = /\.(mp4|mov|avi|mkv|webm|m4v|mp3|wav|m4a|aac|flac|ogg)$/i
@@ -38,11 +39,12 @@ const base64 = (f: File): Promise<string> =>
     r.readAsDataURL(f)
   })
 
-export function useDocUpload(): { sending: Sending[]; refused: Refusal[]; dismiss: (key: number) => void; send: (folderId: string, folderName: string, files: File[]) => Promise<void> } {
+// `forAll`: the folder is one everyone sees, so what was just kept may go on to the wiki: the notice offers it.
+export function useDocUpload(): { sending: Sending[]; refused: Refusal[]; dismiss: (key: number) => void; send: (folderId: string, folderName: string, files: File[], forAll?: boolean) => Promise<void> } {
   const [sending, setSending] = useState<Sending[]>([])
   const [refused, setRefused] = useState<Refusal[]>([])
   const seq = useRef(0)
-  const send = async (folderId: string, folderName: string, files: File[]): Promise<void> => {
+  const send = async (folderId: string, folderName: string, files: File[], forAll = false): Promise<void> => {
     const ok: { f: File; key: number }[] = []
     const no: Refusal[] = []
     for (const f of files) {
@@ -53,16 +55,19 @@ export function useDocUpload(): { sending: Sending[]; refused: Refusal[]; dismis
     if (no.length) setRefused((r) => [...r, ...no])
     setSending((s) => [...s, ...ok.map(({ f, key }) => ({ key, name: f.name, folderId }))])
     let kept = 0
+    const docs: Doc[] = []
     for (const { f, key } of ok) {
       try {
-        await call('docAdd', { folderId, name: f.name, data: await base64(f) })
+        docs.push(await call('docAdd', { folderId, name: f.name, data: await base64(f) }))
         kept++
       } catch (e) {
         setRefused((r) => [...r, { key: ++seq.current, text: `${f.name}: ${message(e)}` }])
       }
       setSending((s) => s.filter((x) => x.key !== key))
     }
-    if (kept) toast(kept === 1 ? L(`Guardado em ${folderName}.`, `Kept in ${folderName}.`) : L(`${kept} arquivos guardados em ${folderName}.`, `${kept} files kept in ${folderName}.`))
+    // Kept, and one step from the wiki when the folder is everyone's: nobody sends the same file twice.
+    const toWiki = forAll && docs.length ? { label: docs.length === 1 ? L('Mandar para a Wiki', 'Send to the Wiki') : L('Mandar todos para a Wiki', 'Send them all to the Wiki'), run: () => docs.forEach((d) => sendToWiki(d, true)) } : undefined
+    if (kept) toast(kept === 1 ? L(`Guardado em ${folderName}.`, `Kept in ${folderName}.`) : L(`${kept} arquivos guardados em ${folderName}.`, `${kept} files kept in ${folderName}.`), toWiki)
   }
   return { sending, refused, dismiss: (key) => setRefused((r) => r.filter((x) => x.key !== key)), send }
 }
