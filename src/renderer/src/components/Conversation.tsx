@@ -22,6 +22,7 @@ import { canEditChannel,
   agentById,
   approvalsIn,
   askerIn,
+  threadAsksIn,
   messagesIn,
   attachedTo,
   conversationIndex,
@@ -93,7 +94,8 @@ import { canEditChannel,
   confirmQuestion,
   personById,
   teamMode,
-  type Person
+  type Person,
+  type State
 } from '../store'
 import { askWay } from './OrgSectors'
 import { runStep } from '../board'
@@ -2658,13 +2660,25 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   const waiting = useStore((s) => approvalsIn(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
   // The message itself, not just the name: the strip above the field needs what was asked.
+  const mayAnswer = (s: State, q: Message): boolean => !(teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending'))
   const asked = useStore((s) => {
     const q = askerIn(s, conversationId, threadId)
-    if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
-    return q
+    return q && mayAnswer(s, q) ? q : undefined
   })
   const askerId = asked?.author.kind === 'agent' ? asked.author.id : undefined
   const asker = useStore((s) => (askerId ? agentById(s, askerId)?.name : undefined))
+  // In the channel, a question left in one of its threads (but not in the thread already open beside
+  // it, which shows its own): the oldest one, and how many there are. Only the strip points at it;
+  // what's typed here still goes to the channel.
+  const inThreads = useStore((s) => {
+    if (threadId) return undefined
+    const open = s.panel?.kind === 'thread' ? s.panel.id : undefined
+    const qs = threadAsksIn(s, conversationId).filter((q) => q.threadId !== open && mayAnswer(s, q))
+    const first = qs[0]
+    return first ? { q: first, n: qs.length } : undefined
+  })
+  const threadAsker = useStore((s) => (inThreads?.q.author.kind === 'agent' ? agentById(s, inThreads.q.author.id)?.name : undefined))
+  const strip = asked ? { q: asked, who: asker, n: 1 } : inThreads && { q: inThreads.q, who: threadAsker, n: inThreads.n }
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -2879,7 +2893,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
       )}
       {notice}
       {/* Only where it can take you to the card: the intro's short chats have it in plain sight. */}
-      {asked && onJump && <AskStrip asked={asked} who={asker} onOpen={() => onJump(asked.id, asked.threadId)} />}
+      {strip && onJump && <AskStrip asked={strip.q} who={strip.who} inThread={!asked} more={strip.n - 1} onOpen={() => onJump(strip.q.id, strip.q.threadId)} />}
       <div className="composer">
         <AttachedList items={images} onRemove={(i) => setImages(images.filter((_, j) => j !== i))} />
         <div className="composer__field">

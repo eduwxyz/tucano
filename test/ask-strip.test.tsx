@@ -43,6 +43,15 @@ describe('the ask strip', () => {
     expect(html).not.toContain('decis')
   })
 
+  it("from the channel, says the question is in a thread, and how many more wait in others", () => {
+    const one = renderToStaticMarkup(<AskStrip asked={asked({ question: 'Posso subir?' })} who="Lia" inThread onOpen={() => {}} />)
+    expect(one).toContain('numa thread')
+    const three = renderToStaticMarkup(<AskStrip asked={asked({ question: 'Posso subir?' })} who="Lia" inThread more={2} onOpen={() => {}} />)
+    expect(three).toContain('+2 em outras threads')
+    const here = renderToStaticMarkup(<AskStrip asked={asked({ question: 'Posso subir?' })} who="Lia" onOpen={() => {}} />)
+    expect(here).not.toContain('thread')
+  })
+
   it('still makes sense when the agent is gone', () => {
     const html = renderToStaticMarkup(<AskStrip asked={asked()} who={undefined} onOpen={() => {}} />)
     expect(html).toContain('Um agente')

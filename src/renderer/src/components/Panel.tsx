@@ -2,7 +2,7 @@
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
 import { useState, type ReactNode } from 'react'
-import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, closePanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
@@ -417,6 +417,7 @@ export function SidePanel(): ReactNode {
   const canSave = useStore(canSaveArtifact)
   const [reload, setReload] = useState(0)
   const wide = useStore((s) => s.panelWide)
+  const under = useStore((s) => !!s.panelUnder)
   if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
@@ -447,7 +448,7 @@ export function SidePanel(): ReactNode {
           </>
         )}
         <WidenButton />
-        <button className="icon-btn" title={L('Fechar', 'Close')} onClick={() => openPanel(null)}>
+        <button className="icon-btn" title={under ? L('Voltar para a thread', 'Back to the thread') : L('Fechar', 'Close')} onClick={closePanel}>
           <Icon name="x" size={14} />
         </button>
       </header>

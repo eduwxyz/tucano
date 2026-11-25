@@ -137,6 +137,7 @@ export interface State {
   isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
   panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
+  panelUnder: Panel | null // the thread a file, service or browser was opened over: closing that goes back to it
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
@@ -227,6 +228,7 @@ let state: State = {
   isolatedComputers: true,
   panel: null,
   panelWide: false,
+  panelUnder: null,
   dialog: null,
   tabs: {},
   toasts: [],
@@ -395,6 +397,9 @@ export const allWorkingIds = (s: State, conversationId: string): string[] =>
     .working.filter((m) => m.author.kind === 'agent')
     .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
+// The questions still open inside this conversation's threads, oldest first: from the channel, a
+// question asked in a thread is otherwise only a mark on that thread's link, pages up behind the work.
+export const threadAsksIn = (s: State, conversationId: string): Message[] => conversationIndex(s, conversationId).waiting.filter((m) => m.threadId)
 // The approvals still waiting on this person here, oldest first: what the reminder over the field
 // counts, and what Review goes back to. In the thread it counts only the ones asked in it. Whose
 // decision it is comes from the inbox, the core's own answer: a command on someone's lent computer
@@ -1235,7 +1240,21 @@ export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
   link.click()
 }
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
-export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
+// A file, a service or a browser opened from a thread takes the thread's place beside the conversation;
+// what it covered is kept, so closing it goes back there instead of closing everything.
+export const openPanel = (panel: Panel | null): void =>
+  set((s) => ({
+    ...s,
+    panel,
+    panelWide: panel ? s.panelWide : false,
+    panelUnder: panel && panel.kind !== 'thread' ? (s.panel?.kind === 'thread' ? s.panel : s.panel && s.panelUnder) : null
+  }))
+// The panel's close: back to the thread under it, if there is one.
+export const closePanel = (): void => {
+  const under = getState().panelUnder
+  if (under) set((s) => ({ ...s, panel: under, panelUnder: null }))
+  else openPanel(null)
+}
 // The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
 export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
