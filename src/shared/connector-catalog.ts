@@ -103,7 +103,9 @@ export const slackAppLink = (redirectUrl: string): string => `https://api.slack.
 // Microsoft's own MCP servers for Outlook, Teams and OneDrive take only apps registered ahead of time
 // (and a Copilot license), so these run Softeria's open-source server (github.com/softeria/ms-365-mcp-server)
 // on this computer: it talks to Microsoft Graph directly, and its sign-in is a link and a code the agent
-// hands the person (login), with its default app unless the person sets their own. Of its 200-odd tools only these:
+// hands the person (login), with its default app unless the person sets their own. The server comes inside
+// Tucano at a fixed version (package.json) and runs on Tucano's own runtime (core/builtin-servers.ts), so
+// nothing has to be installed and nothing is downloaded when it starts; its command is this name, not a path. Of its 200-odd tools only these:
 // all of them would be about a million characters of schemas in every prompt. Teams channels' messages
 // are left out: reading them takes a permission only a tenant admin grants, and one such scope makes the
 // whole consent need an admin. Sending goes through a draft (send-draft-message), never in one step.
@@ -118,7 +120,9 @@ const MS_PERSONAL = [
   'list-outlook-contacts', 'get-outlook-contact'
 ]
 const MS_WORK = [...MS_PERSONAL, 'list-joined-teams', 'list-team-channels', 'send-channel-message', 'list-chats', 'list-chat-messages', 'send-chat-message', 'search-files', 'search-sharepoint-sites', 'list-sharepoint-site-drives', 'find-meeting-times']
-const MS_SERVER = '@softeria/ms-365-mcp-server'
+export const MS365_COMMAND = 'tucano:ms-365-mcp-server'
+export const MS365_VERSION = '0.191.0' // the one in package.json, which a test holds to
+export const isBuiltin = (command: string | undefined): boolean => command === MS365_COMMAND
 const msNote = (work: boolean): string =>
   L(
     `Na primeira vez, o agente te passa um link da Microsoft e um código pra entrar na sua conta${work ? ' do trabalho' : ''}. A tela da Microsoft mostra o app da Softeria, que faz o servidor; os dados vão direto do seu computador pra Microsoft.${work ? ' Se a sua empresa só libera apps aprovados, um admin precisa aprovar esse uma vez.' : ''}`,
@@ -127,7 +131,7 @@ const msNote = (work: boolean): string =>
 const ms = (id: string, name: string, pt: string, en: string, work: boolean): CatalogEntry =>
   e(id, name, '', 'microsoft', pt, en, 'none', {
     // Personal accounts sign in on "consumers": on the default "common", Microsoft turns down the first renewal and the session dies in about an hour.
-    local: { command: 'npx', args: ['-y', MS_SERVER, ...(work ? ['--org-mode'] : [])], env: { ENABLED_TOOLS: `^(${(work ? MS_WORK : MS_PERSONAL).join('|')})$`, ...(work ? {} : { MS365_MCP_TENANT_ID: 'consumers' }) } },
+    local: { command: MS365_COMMAND, args: work ? ['--org-mode'] : [], env: { ENABLED_TOOLS: `^(${(work ? MS_WORK : MS_PERSONAL).join('|')})$`, ...(work ? {} : { MS365_MCP_TENANT_ID: 'consumers' }) } },
     by: 'Softeria',
     note: () => msNote(work),
     readTools: ['login']
@@ -282,7 +286,7 @@ export function catalogInput(entry: CatalogEntry, values: Record<string, string>
 // The catalog entry a connector came from: by its address (with any {field} in it), or by the package
 // its command runs.
 export function entryOf(c: { kind: 'remote' | 'stdio'; url?: string; command?: string; args?: string[] }, entries: CatalogEntry[] = CATALOG): CatalogEntry | undefined {
-  // The one that says the most: Microsoft 365 is Outlook's command plus --org-mode.
+  // The one that says the most: Microsoft 365 is Outlook.com's command plus --org-mode.
   if (c.kind === 'stdio')
     return entries
       .filter((e) => e.local && e.local.command === c.command && e.local.args.filter((a) => !a.includes('{')).every((a) => c.args?.includes(a)))

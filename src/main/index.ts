@@ -100,7 +100,7 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_MCP_PORT: String(workspace.webhookPort + 100), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_MCP_PORT: String(workspace.webhookPort + 100), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_RUNTIME: process.execPath, TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void

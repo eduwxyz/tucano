@@ -4,7 +4,7 @@
 // Google's and Slack's sign in with an app the person makes once, which the first Connect walks them through.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogCategory, type CatalogEntry } from '../../../shared/connector-catalog'
+import { catalogInput, CATEGORIES, entryOf, isBuiltin, MS365_VERSION, ownAppGuide, searchCatalog, type AppProvider, type CatalogCategory, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
 import { iconFromFile, imageFromClipboard } from '../connector-icon'
 import { addConnector, authorizeConnector, openExternal, ownApp, setConnectorIcon, setOwnApp, toast, useStore, type Connector } from '../store'
@@ -349,8 +349,8 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
         {runs && (
           <p className="warn-box small">
             <Icon name="terminal" size={14} />{' '}
-            {entry.by
-              ? L(`Roda neste computador, com o seu usuário, o servidor de código aberto da ${entry.by}: ${runs}.`, `Runs ${entry.by}'s open-source server on this computer, as your user: ${runs}.`)
+            {isBuiltin(entry.local?.command)
+              ? L(`Já vem dentro do Tucano, sem instalar nada: o servidor de código aberto da ${entry.by ?? '?'}, versão ${MS365_VERSION}, que roda neste computador com o seu usuário.`, `Comes inside Tucano, nothing to install: ${entry.by ?? '?'}'s open-source server, version ${MS365_VERSION}, which runs on this computer as your user.`)
               : L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
           </p>
         )}

@@ -85,8 +85,9 @@ describe('the connector catalog', () => {
     const get = (id: string) => CATALOG.find((c) => c.id === id)!
     const personal = catalogInput(get('outlook'))
     const work = catalogInput(get('microsoft-365'))
-    expect(personal).toMatchObject({ kind: 'stdio', command: 'npx', args: ['-y', '@softeria/ms-365-mcp-server'] })
-    expect(work).toMatchObject({ kind: 'stdio', command: 'npx', args: ['-y', '@softeria/ms-365-mcp-server', '--org-mode'] })
+    // The server comes inside Tucano: its command is a name the core knows, not npx.
+    expect(personal).toMatchObject({ kind: 'stdio', command: 'tucano:ms-365-mcp-server', args: [] })
+    expect(work).toMatchObject({ kind: 'stdio', command: 'tucano:ms-365-mcp-server', args: ['--org-mode'] })
     // A personal account signs in on "consumers", or its session dies at the first renewal.
     expect(personal.env).toMatchObject({ MS365_MCP_TENANT_ID: 'consumers' })
     expect(work.env?.['MS365_MCP_TENANT_ID']).toBeUndefined()
