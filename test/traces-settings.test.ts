@@ -9,7 +9,7 @@ import { flushTelemetry } from '../src/core/telemetry'
 import type { ActivityEntry, Agent, TracesView } from '../src/shared/types'
 import { bootCore, type Client } from './helpers/core'
 import { until } from './helpers/node-link'
-import { attrsOf, collector, type Received } from './helpers/otlp'
+import { arrived, attrsOf, collector, type Received } from './helpers/otlp'
 
 let sink: Awaited<ReturnType<typeof collector>>
 let owner: Client
@@ -117,7 +117,7 @@ describe('traces turned on from the screen', () => {
 
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: 'oi' })
 
-    await until(() => replies('Screen') > 0, 9_000)
+    await arrived(() => replies('Screen') > 0, 9_000)
     const reply = attrsOf(sink.spans.find((s) => s.span.name === 'invoke_agent Screen')!)
     expect(reply).not.toHaveProperty('gen_ai.input.messages') // the text stays home unless asked for
     expect(reply).not.toHaveProperty('gen_ai.output.messages')
@@ -128,7 +128,7 @@ describe('traces turned on from the screen', () => {
     const view = await owner.call<TracesView>('setTraces', { on: true, endpoint: base(), headers: 'Authorization: Basic cGs6c2s=\nx-scope=team a' })
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: 'com chave' })
 
-    await until(() => sink.headers.some((h) => h['authorization'] === 'Basic cGs6c2s='), 9_000)
+    await arrived(() => sink.headers.some((h) => h['authorization'] === 'Basic cGs6c2s='), 9_000)
     expect(sink.headers.at(-1)).toMatchObject({ authorization: 'Basic cGs6c2s=', 'x-scope': 'team a' })
     expect(view.headers).toBe(true)
     expect(db.getSecret('traces.headers')).toMatch(/^plain:/) // through the secret store's cipher (the test mode's marks it, instead of encrypting)
@@ -162,7 +162,7 @@ describe('the conversation text', () => {
     await owner.call('setTraces', { on: true, endpoint: base(), text: true })
 
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: 'qual o prazo do contrato?' })
-    await until(() => replyTo('qual o prazo do contrato?') !== undefined, 9_000)
+    await arrived(() => replyTo('qual o prazo do contrato?') !== undefined, 9_000)
 
     const span = attrsOf(replyTo('qual o prazo do contrato?')!)
     const reply = db.messages().find((m) => m.run?.replyTo === db.messages().find((x) => x.text === 'qual o prazo do contrato?')!.id)!
@@ -174,7 +174,7 @@ describe('the conversation text', () => {
     await owner.call('setTraces', { on: true, endpoint: base(), text: true })
 
     await member.call('sendMessage', { conversationId: 'bia-dm', text: 'minha senha do banco é outra coisa' })
-    await until(() => replyTo('minha senha do banco é outra coisa') !== undefined, 9_000)
+    await arrived(() => replyTo('minha senha do banco é outra coisa') !== undefined, 9_000)
 
     const span = attrsOf(replyTo('minha senha do banco é outra coisa')!)
     expect(span['tucano.run.status']).toBe('done')
@@ -185,12 +185,12 @@ describe('the conversation text', () => {
   it('stops once the admin who turned it on is no longer an admin', async () => {
     await admin.call('setTraces', { on: true, endpoint: base(), text: true })
     await owner.call('sendMessage', { conversationId: 'screen-geral', text: '@Screen enquanto ela é admin' })
-    await until(() => replyTo('@Screen enquanto ela é admin') !== undefined, 9_000)
+    await arrived(() => replyTo('@Screen enquanto ela é admin') !== undefined, 9_000)
     expect(attrsOf(replyTo('@Screen enquanto ela é admin')!)).toHaveProperty('gen_ai.input.messages')
 
     await owner.call('setRole', { id: 'screen-admin', role: 'member' })
     await owner.call('sendMessage', { conversationId: 'screen-geral', text: '@Screen depois que deixou de ser' })
-    await until(() => replyTo('@Screen depois que deixou de ser') !== undefined, 9_000)
+    await arrived(() => replyTo('@Screen depois que deixou de ser') !== undefined, 9_000)
 
     expect(attrsOf(replyTo('@Screen depois que deixou de ser')!)).not.toHaveProperty('gen_ai.input.messages')
     await owner.call('setRole', { id: 'screen-admin', role: 'admin' })
@@ -202,7 +202,7 @@ describe('the conversation text', () => {
     const asked = 'usa a chave rk_live_51Hx9QzLmNoPqRsT e o token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: asked })
-    await until(() => replyTo(asked) !== undefined, 9_000)
+    await arrived(() => replyTo(asked) !== undefined, 9_000)
 
     const input = String(attrsOf(replyTo(asked)!)['gen_ai.input.messages'])
     expect(input).toContain('[cofre:STRIPE_SECRET]')
@@ -213,7 +213,7 @@ describe('the conversation text', () => {
   it('goes only on the reply’s own span, never on its model call or a tool it called', async () => {
     await owner.call('setTraces', { on: true, endpoint: base(), text: true })
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: 'quais os próximos passos?' })
-    await until(() => sink.spans.some((s) => s.span.name === 'execute_tool next_steps'), 9_000)
+    await arrived(() => sink.spans.some((s) => s.span.name === 'execute_tool next_steps'), 9_000)
     await flushTelemetry()
 
     const withText = sink.spans.filter((s) => 'gen_ai.input.messages' in attrsOf(s) || 'gen_ai.output.messages' in attrsOf(s))
@@ -252,7 +252,7 @@ describe('the conversation text', () => {
     const before = own().length
 
     await owner.call('sendMessage', { conversationId: 'screen-dois', text: 'alguém consegue revisar o orçamento de março?' })
-    await until(() => own().length > before, 9_000)
+    await arrived(() => own().length > before, 9_000)
 
     for (const s of own()) expect(Object.keys(attrsOf(s)).filter((k) => k.endsWith('.messages'))).toEqual([])
   }, 15_000)
@@ -261,7 +261,7 @@ describe('the conversation text', () => {
     await owner.call('setTraces', { on: true, endpoint: base(), text: true })
 
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: 'acabou o limite?' })
-    await until(() => replyTo('acabou o limite?') !== undefined, 9_000)
+    await arrived(() => replyTo('acabou o limite?') !== undefined, 9_000)
 
     const span = attrsOf(replyTo('acabou o limite?')!)
     expect(span['tucano.run.status']).toBe('failed')
@@ -272,12 +272,12 @@ describe('the conversation text', () => {
   it('goes again with the same request when the reply is tried again', async () => {
     await owner.call('setTraces', { on: true, endpoint: base(), text: true })
     await owner.call('sendMessage', { conversationId: 'screen-dm', text: 'acabou o limite de novo?' })
-    await until(() => replyTo('acabou o limite de novo?') !== undefined, 9_000)
+    await arrived(() => replyTo('acabou o limite de novo?') !== undefined, 9_000)
     const first = replyTo('acabou o limite de novo?')!
     const reply = db.messages().find((m) => m.run?.trace?.spanId === first.span.spanId)!
 
     await owner.call('retryRun', { messageId: reply.id })
-    await until(() => {
+    await arrived(() => {
       const now = replyTo('acabou o limite de novo?')
       return !!now && now.span.spanId !== first.span.spanId
     }, 9_000)
