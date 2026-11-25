@@ -106,7 +106,7 @@ export interface ServerNote {
   body: string
   conversationId?: string
   threadId?: string
-  page?: 'skills'
+  page?: 'skills' | 'connectors'
   kind?: 'approval' | 'question' | 'done'
   sound?: boolean
 }
@@ -124,8 +124,24 @@ export function serverNote(raw: unknown): ServerNote | null {
     body: typeof n.body === 'string' ? n.body.slice(0, 500) : '',
     ...(conversationId ? { conversationId } : {}),
     ...(threadId ? { threadId } : {}),
-    ...(n.page === 'skills' ? { page: 'skills' as const } : {}),
+    ...(n.page === 'skills' || n.page === 'connectors' ? { page: n.page } : {}),
     ...(kind ? { kind } : {}),
     ...(typeof n.sound === 'boolean' ? { sound: n.sound } : {})
   }
+}
+
+// Where a server's page in the desktop app can take the person, from its own workspace menu: one
+// of this computer's workspaces, or a server (that one, or another). The page gets the names and
+// ids only (DesktopPlaces), and what it asks for comes through here, so nothing else does.
+export type Place = { kind: 'workspace'; id: string } | { kind: 'server'; id: string }
+export interface DesktopPlaces {
+  workspaces: { id: string; name: string }[] // this computer's
+  servers: { id: string; name: string; open: boolean }[] // open: the one on screen
+}
+const PLACE_ID = /^[A-Za-z0-9-]{1,64}$/ // workspaces: uuid7; servers: randomUUID
+export function placeOf(raw: unknown): Place | null {
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+  if ((p.kind !== 'workspace' && p.kind !== 'server') || typeof p.id !== 'string' || !PLACE_ID.test(p.id)) return null
+  return { kind: p.kind, id: p.id }
 }

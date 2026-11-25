@@ -1,14 +1,17 @@
 // The people of a Tucano: who a connection is, what each one may see, and how someone new
 // comes in (an invite, then a key). A desktop has one person, its owner; a server has
 // whoever was invited. A DM is its person's alone: not even the owner reads it.
+import { nodeOf } from '../shared/node-link'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
+import type { InboxDoc, InboxDocDate } from '../shared/docs'
 import { CODE_SPANS, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type PersonAccess, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
 import { maskSecrets } from './step-text'
+import { harnessSummary } from './mcp'
 import { agentsFor, assertAgentVisible, peopleFor, viewedConversations, withinAccess } from './access-policy'
 import { cleanAccess, covers, EVERYTHING, restricted, seesAgent } from '../shared/access'
 
@@ -60,6 +63,52 @@ export function requesterOf(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, 
   if (last?.author.kind === 'person') return db.person(last.author.id) ?? owner
   const handed = threadId ? db.delegationAt(threadId) : undefined
   return (handed && db.person(handed.requestedBy)) || owner
+}
+
+// Whom a reply is for, only when someone is named: a DM's person, the person who wrote last, a personal
+// routine's person (one with no owner set is the Tucano owner's), or whom handed-down work was for. A channel
+// routine, or nothing to go by, is no one: what's a person's own (their lent computer) isn't reached then.
+export function namedRequester(db: Db, conv: Pick<Conversation, 'kind' | 'owner'>, history: Message[], threadId?: string): string | undefined {
+  const dm = dmOwner(conv, db.ownerId())
+  if (dm) return dm
+  const last = [...history].reverse().find((m) => m.author.kind === 'person' || m.author.kind === 'routine')
+  if (last?.author.kind === 'routine') {
+    const r = db.routine(last.author.id)
+    return r && r.scope !== 'channel' ? (r.owner ?? db.ownerId()) : undefined
+  }
+  if (last?.author.kind === 'person') return last.author.id
+  const handed = threadId ? db.delegationAt(threadId) : undefined
+  return handed?.requestedBy
+}
+
+// A lent computer's person, when a connector is one (shared/node-link.ts): unset owner is the Tucano owner.
+export const computerOwner = (db: Db, connectorId: string | undefined): string | undefined => {
+  const n = nodeOf(connectorId ? db.connector(connectorId)?.url : undefined)
+  return n ? (n.owner ?? db.ownerId()) : undefined
+}
+
+// A computer lent to this server (docs/local-node.md), for exactly the agents its person picks, to read and write.
+// Its person decides even without being an admin: an agent reaches it only working for them (runs.ts), and the
+// node's floors stay (a command never below "write"). An admin may too, as with any connector. Returns the
+// agents that changed, saved; throws why not.
+export function shareComputer(db: Db, person: Person, connectorId: string, agentIds: string[]): Agent[] {
+  const owner = computerOwner(db, connectorId)
+  if (!owner) throw new Error(L('Isso não é um computador emprestado.', "That isn't a lent computer."))
+  if (owner !== person.id && !isAdmin(person)) throw new Error(L('Só quem emprestou o computador escolhe os agentes que o usam.', 'Only whoever lent the computer picks the agents that use it.'))
+  const want = new Set(agentIds)
+  const changed: Agent[] = []
+  // Only the agents this person sees: someone who reaches part of the team touches only that part.
+  for (const a of agentsFor(person, db.agents())) {
+    if (a.archived || a.kind === 'tuca') continue
+    const has = (a.grants[connectorId] ?? 'none') !== 'none'
+    if (want.has(a.id) === has) continue
+    const grants = { ...a.grants }
+    if (want.has(a.id)) grants[connectorId] = 'read_write'
+    else delete grants[connectorId]
+    db.saveAgent({ ...a, grants })
+    changed.push(db.agent(a.id)!)
+  }
+  return changed
 }
 
 // The people whose memories ("about me") a reply gets: a DM's person; in a channel, the people who
@@ -206,6 +255,9 @@ export function personNamed(name: string, people: Person[]): Person | undefined 
 }
 
 export class People {
+  // Documentos' part of the inbox, set by the core once Documentos is open (a People made elsewhere, to check access, has none).
+  docsInbox?: (person: Person) => { documents: InboxDoc[]; docDates: InboxDocDate[] }
+
   constructor(private db: Db) {}
 
   owner(): Person {
@@ -228,8 +280,10 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
-    const { sounds: _s, stepsOpen: _so, channelLayout: _c, folded: _f, onboarding: _o, wikiDir: _w, ...rest } = s
-    return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
+    const { sounds: _s, stepsOpen: _so, showThinking: _t, channelLayout: _c, folded: _f, sidebarHidden: _h, navOrder: _no, agentOrder: _ao, sectorOrder: _so2, onboarding: _o, wikiDir: _w, ...rest } = s
+    // Which classifiers exist and which have a key is for those who manage them.
+    const { classifiers: _cl, classifierJobs: _cj, classifierKeys: _ck, ...forMember } = rest
+    return { ...(person.role === 'admin' ? rest : forMember), onboarding: { done: true }, ...this.db.prefs(person.id) }
   }
 
   // A settings change by this person: their display preferences are kept on them (the owner's are
@@ -309,7 +363,9 @@ export class People {
     switch (event.type) {
       case 'message':
         return conversation(event.message.conversationId) && this.visibleAt(person, event.message) ? event : undefined
-      case 'delta': {
+      case 'delta':
+      case 'thinking': {
+        // What the model is thinking reaches exactly who the reply's text reaches.
         const c = this.db.messageConversation(event.id)
         return c && conversation(c) && this.visibleAt(person, this.db.message(event.id) ?? { conversationId: c, at: Infinity }) ? event : undefined
       }
@@ -338,6 +394,12 @@ export class People {
         return { type: 'inbox', inbox: this.inbox(person) }
       case 'delegations':
         return { type: 'delegations', delegations: this.delegations(person) }
+      // What each one let the Tuca do himself: their own.
+      case 'leaves':
+        return { type: 'leaves', leaves: this.db.tucaLeaves(person.id) }
+      // One's own to-dos: theirs alone.
+      case 'tasks':
+        return event.for === person.id ? event : undefined
       case 'settings':
         return { type: 'settings', settings: this.settingsFor(person, event.settings) }
       // Gone from a DM (or someone's own memory): only its person hears of it (its id is no one else's to know).
@@ -355,11 +417,17 @@ export class People {
         return this.agentHidden(person, event.agent.id) ? undefined : event
       case 'people':
         return { type: 'people', people: peopleFor(person, event.people), ...(event.former ? { former: event.former } : {}) }
+      // This computer's lines to the servers it's lent to: its owner's only.
+      case 'node':
+        return person.role === 'owner' ? event : undefined
+      // An agent taken back right after it was made: its id alone, so whoever had it drops it.
+      case 'agent_removed':
       case 'voice':
       case 'connector_removed':
       case 'skill':
       case 'skill_removed':
       case 'wiki':
+      case 'docs': // a signal only: each page reads docs() again and gets what it may see
         return event
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.
@@ -444,7 +512,10 @@ export class People {
 
   // ---------- what waits on someone ----------
 
-  canDecide(person: Person, a: Pick<Approval, 'agentId'>): boolean {
+  canDecide(person: Person, a: Pick<Approval, 'agentId'> & { connectorId?: string }): boolean {
+    // A command or a click on someone's lent computer is theirs alone to allow.
+    const computer = computerOwner(this.db, a.connectorId)
+    if (computer) return computer === person.id
     return can(person, { kind: 'approval', agentOwner: agentOwner(this.db, a.agentId) })
   }
 
@@ -481,7 +552,40 @@ export class People {
     // Asked to them and answered a moment ago by someone else (an admin, whoever covers for them).
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)
     const proposals = isAdmin(person) ? this.forwardedProposals() : []
-    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}) }
+    const harness = this.harnessNotices(person)
+    // Documents never break the inbox: if Documentos can't say, they are left out.
+    let docs: { documents: InboxDoc[]; docDates: InboxDocDate[] } | undefined
+    try {
+      docs = this.docsInbox?.(person)
+    } catch {}
+    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}), ...(harness.length ? { harness } : {}), ...(docs?.documents.length ? { documents: docs.documents } : {}), ...(docs?.docDates.length ? { docDates: docs.docDates } : {}) }
+  }
+
+  // What this person's harnesses changed over MCP since they last looked: one line per harness,
+  // counting each thing once however often it changed ("Claude Code criou ou mudou 3 agentes e 2 rotinas").
+  harnessNotices(person: Pick<Person, 'id'>): NonNullable<Inbox['harness']> {
+    const seen = Number(this.db.meta(`harnessSeen:${person.id}`) ?? 0)
+    // Per harness: what it made and what it changed, each thing once (made wins over changed).
+    const by = new Map<string, { made: Map<string, Set<string>>; changed: Map<string, Set<string>>; at: number }>()
+    for (const e of this.db.activity({ personId: person.id, limit: 200 })) {
+      if (e.at <= seen) break
+      const via = typeof e.detail?.['via'] === 'string' ? e.detail['via'] : undefined
+      if (!via) continue
+      const [kind = '', what = ''] = e.kind.split('.')
+      const one = by.get(via) ?? { made: new Map<string, Set<string>>(), changed: new Map<string, Set<string>>(), at: e.at }
+      if (!by.has(via)) by.set(via, one)
+      const into = /^(created|added|proposed)$/.test(what) ? one.made : one.changed
+      const set = into.get(kind) ?? new Set<string>()
+      set.add(e.target ?? e.id)
+      into.set(kind, set)
+    }
+    const count = (m: Map<string, Set<string>>, minus?: Map<string, Set<string>>): Record<string, number> =>
+      Object.fromEntries([...m].map(([k, set]) => [k, [...set].filter((id) => !minus?.get(k)?.has(id)).length]))
+    return [...by].map(([name, v]) => ({ name, at: v.at, text: harnessSummary(name, count(v.made), count(v.changed, v.made)) }))
+  }
+
+  harnessNoticeSeen(person: Pick<Person, 'id'>, now = Date.now()): void {
+    this.db.setMeta(`harnessSeen:${person.id}`, String(now))
   }
 
   // The cards members sent to the admins that no one has applied or dismissed yet (a reply's cards
@@ -504,7 +608,7 @@ export class People {
   }
 
   // The snapshot as this person gets it: no one else's DMs, their messages or their memories.
-  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations'>, opts: { server?: boolean } = {}): Snapshot {
+  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations' | 'leaves'>, opts: { server?: boolean } = {}): Snapshot {
     const conversations = viewedConversations(this.db, person, this.db.conversations(person.id).filter((c) => this.canSeeConversation(person, c)))
     const seen = new Set(conversations.map((c) => c.id))
     const theirs = base.messages.filter((m) => seen.has(m.conversationId))
@@ -533,6 +637,7 @@ export class People {
       you: person.id,
       inbox: this.inbox(person),
       delegations: this.delegations(person),
+      leaves: this.db.tucaLeaves(person.id),
       ...(opts.server && person.role === 'owner' && !this.db.ownerNamed() ? { needsName: true } : {})
     }
   }

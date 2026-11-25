@@ -134,7 +134,7 @@ curl -fsSL https://github.com/eduwxyz/tucano/releases/latest/download/install.sh
 
 It downloads the latest release and opens it. On a Mac it puts Tucano in **Applications**; on Linux it installs the .deb with apt (it asks for your password) or, without apt, the AppImage in `~/.local/bin` with an entry in the applications menu. Run on Windows (in Git Bash, say), it points you to the PowerShell command above.
 
-**On a server** (a VPS, to keep routines running while your computer sleeps): Tucano can also run without a window and be used from a browser. See [docs/server.md](docs/server.md). This is experimental.
+**On a server** (a VPS, to keep routines running while your computer sleeps): Tucano can also run without a window and be used from a browser. There's a Docker image (`ghcr.io/eduwxyz/tucano`), the one the Tucano Pro servers run. See [docs/server.md](docs/server.md).
 
 From 0.1.2 on, Tucano updates itself: it downloads a new version in the background and shows **Restart** in the sidebar when it's ready (or it goes in the next time you quit). Earlier versions update with the same download or command. On Linux the AppImage and the .deb update themselves too; the .deb asks for your password to put the update in. So does Windows, with no warning.
 

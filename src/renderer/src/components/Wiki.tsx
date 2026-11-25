@@ -5,6 +5,7 @@
 // a page with what links to it, the sources, the review; the editor takes the whole screen.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { repelGrouped } from './wiki-quadtree'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -298,12 +299,15 @@ type Pos = { x: number; y: number }
 type Cam = { x: number; y: number; k: number }
 export type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
 const SPREAD = 1.6 // from the simulation's units to the map's
+const GROUPED_FROM = 400 // pages from which the push between them is grouped (see wiki-quadtree)
 
 // One step of the forces: pages push each other away, links pull, the middle holds them.
 // A page being dragged stays under the pointer and pulls its neighbors along.
 export function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
   const n = bodies.length
-  for (let i = 0; i < n; i++)
+  // a big wiki groups the far pages, or comparing every pair freezes the screen for seconds
+  if (n > GROUPED_FROM) repelGrouped(bodies)
+  else for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
       const a = bodies[i]!
       const b = bodies[j]!
@@ -367,10 +371,13 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const first = bodies.size === 0
     const titles = new Set(graph.nodes.map((n) => n.title))
     for (const t of [...bodies.keys()]) if (!titles.has(t)) bodies.delete(t)
+    // each page's links in the graph's order, so finding one already placed doesn't scan every link
+    const linked = new Map<string, string[]>()
+    for (const [a, b] of graph.edges) (linked.get(a) ?? linked.set(a, []).get(a)!).push(b), (linked.get(b) ?? linked.set(b, []).get(b)!).push(a)
     graph.nodes.forEach((nd, i) => {
       if (bodies.has(nd.title)) return
-      const friend = graph.edges.find(([a, b]) => (a === nd.title && bodies.has(b)) || (b === nd.title && bodies.has(a)))
-      const near = friend ? bodies.get(friend[0] === nd.title ? friend[1] : friend[0])! : null
+      const friend = linked.get(nd.title)?.find((t) => bodies.has(t))
+      const near = friend ? bodies.get(friend)! : null
       // a golden spiral to start from, so the same wiki always lands the same way
       const r = 16 * Math.sqrt(i + 1)
       const a = i * 2.399963
@@ -382,7 +389,7 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const deg = new Uint16Array(list.length)
     for (const [a, b] of links) deg[a]!++, deg[b]!++
     parts.current = { list, links, deg }
-    if (first) for (let it = 0, iters = list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
+    if (first) for (let it = 0, iters = list.length > 6000 ? 80 : list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
     else heat.current = Math.max(heat.current, 0.6)
   }, [graph])
 
@@ -424,14 +431,66 @@ function useSize(): [React.RefObject<HTMLDivElement | null>, { w: number; h: num
 }
 
 const PANEL = 560 // the panel's width; the map keeps what's left of it in view
+const MIN_K = 0.05 // as far as the map zooms out: a big wiki fits whole
+const GHOSTS_UNTIL = 1000 // pages from which the notes nobody wrote yet stay off the map
+const MAX_LABELS = 220 // names on a screen's worth of map, at most
+
+// What the map draws of the graph. A dot per title: the map knows a page by its title, and two
+// pages with the same one (an imported vault has "Untitled" a few times, and the same word in two
+// folders) drew two dots under one key, which left stale copies on the screen at every frame.
+// And a big wiki's links name thousands of notes nobody wrote yet (a vault of vocabulary cards
+// names every word): as dots they're half the map and bury the pages, so past GHOSTS_UNTIL pages
+// they stay off it. The page that links to one still shows it, dashed, in its text.
+export function forTheMap(graph: Graph): Graph {
+  let pages = 0
+  for (const n of graph.nodes) if (!n.missing) pages++
+  const ghosts = pages > GHOSTS_UNTIL && pages < graph.nodes.length
+  const byTitle = new Map<string, Graph['nodes'][number]>()
+  for (const n of graph.nodes) {
+    if (ghosts && n.missing) continue
+    const had = byTitle.get(n.title)
+    if (!had) byTitle.set(n.title, n)
+    else if (n.links > had.links) byTitle.set(n.title, { ...had, links: n.links })
+  }
+  if (byTitle.size === graph.nodes.length) return graph
+  const seen = new Set<string>()
+  const edges = graph.edges.filter(([a, b]) => {
+    const key = a < b ? `${a}\n${b}` : `${b}\n${a}`
+    if (a === b || !byTitle.has(a) || !byTitle.has(b) || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return { ...graph, nodes: [...byTitle.values()], edges }
+}
+
+// Which names fit: the ones asked for first (the page lit and what it links to), then the most
+// linked, each placed only where it doesn't cover one already placed. Zooming in makes room for more.
+export function fitLabels(items: { title: string; x: number; y: number; w: number; first: boolean; links: number }[], max = MAX_LABELS): Set<string> {
+  const CELL = 64
+  const taken = new Map<string, { x0: number; y0: number; x1: number; y1: number }[]>()
+  const out = new Set<string>()
+  const order = [...items].sort((a, b) => Number(b.first) - Number(a.first) || b.links - a.links)
+  for (const it of order) {
+    if (out.size >= max && !it.first) break
+    const box = { x0: it.x - it.w / 2 - 3, y0: it.y - 12, x1: it.x + it.w / 2 + 3, y1: it.y + 5 }
+    const cells: string[] = []
+    for (let cx = Math.floor(box.x0 / CELL); cx <= Math.floor(box.x1 / CELL); cx++) for (let cy = Math.floor(box.y0 / CELL); cy <= Math.floor(box.y1 / CELL); cy++) cells.push(`${cx},${cy}`)
+    const hit = cells.some((c) => taken.get(c)?.some((o) => box.x0 < o.x1 && o.x0 < box.x1 && box.y0 < o.y1 && o.y0 < box.y1))
+    if (hit && !it.first) continue
+    for (const c of cells) (taken.get(c) ?? taken.set(c, []).get(c)!).push(box)
+    out.add(it.title)
+  }
+  return out
+}
 const ease = (p: number): number => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2)
 
 // The whole wiki as a map you can move around: drag the empty map to move it, drag a page to
 // pull it (and what it links to) around, pinch or the mouse wheel (or ⌘/Ctrl + scroll) to zoom. A page picked flies to
 // the middle of what the panel leaves free, with its links lit.
-function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
+function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
   const [ref, size] = useSize()
-  const { bodies, kick } = useBodies(graph)
+  const graph = useMemo(() => forTheMap(whole), [whole])
+  const { bodies, kick, frame } = useBodies(graph)
   const world = (t: string): Pos | undefined => {
     const b = bodies.get(t)
     return b && { x: b.x * SPREAD, y: b.y * SPREAD }
@@ -453,7 +512,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     for (const b of bodies.values()) (x0 = Math.min(x0, b.x * SPREAD)), (x1 = Math.max(x1, b.x * SPREAD)), (y0 = Math.min(y0, b.y * SPREAD)), (y1 = Math.max(y1, b.y * SPREAD))
     if (!isFinite(x0)) return { x: 0, y: 0, k: 1 }
     const a = free()
-    const k = Math.max(0.3, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
+    const k = Math.max(MIN_K, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
     return { k, x: a.w / 2 - ((x0 + x1) / 2) * k, y: a.h / 2 - ((y0 + y1) / 2) * k }
   }
   // What the first frame is drawn with, before the effect that fits the map runs: the camera the fit
@@ -486,7 +545,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     const c = camRef.current
     if (!c) return
     touched.current = true
-    const k = Math.max(0.3, Math.min(3, c.k * f))
+    const k = Math.max(MIN_K, Math.min(3, c.k * f))
     const p = at ?? { x: free().w / 2, y: size.h / 2 }
     setCam({ k, x: p.x - (p.x - c.x) * (k / c.k), y: p.y - (p.y - c.y) * (k / c.k) })
   }
@@ -542,17 +601,126 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   }, [graph])
   const lit = holding ?? hover ?? selected ?? null
   const around = lit ? near.get(lit) : undefined
-  const isNear = (t: string): boolean => !lit || t === lit || !!around?.has(t)
   const kindOf = new Map(graph.nodes.map((n) => [n.title, n.kind]))
   const shown = (t: string): boolean => !only || kindOf.get(t) === only
 
   const k = view?.k ?? 1
+  // Where a page is drawn, before the camera's move: the map is one group the camera slides, so
+  // moving the map changes one attribute instead of redrawing thousands of pages each frame.
   const at = (t: string): Pos | null => {
     const p = world(t)
-    return p && view ? { x: p.x * k + view.x, y: p.y * k + view.y } : null
+    return p ? { x: p.x * k, y: p.y * k } : null
   }
   const scale = 0.8 + 0.2 * Math.min(k, 1.8)
   const many = graph.nodes.length > 40
+  // a ring around each page to hover it by: on a map of thousands it costs more than it helps
+  const crowded = graph.nodes.length > GROUPED_FROM
+  const radius = (nd: Graph['nodes'][number]): number => (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
+  const short = (t: string): string => (t.length > 28 ? `${t.slice(0, 26)}…` : t)
+  // What's far off the screen isn't drawn: a big wiki is thousands of pages, most of them out of
+  // view. The part drawn is the screen and one more screen around it, so moving the map redraws it
+  // only when the view goes past that.
+  const w = Math.max(size.w, 1)
+  const h = Math.max(size.h, 1)
+  const tx = view ? Math.floor(-view.x / w) : 0
+  const ty = view ? Math.floor(-view.y / h) : 0
+  const side = (p: Pos): number => (p.x < (tx - 1) * w ? 1 : p.x > (tx + 2) * w ? 2 : 0) | (p.y < (ty - 1) * h ? 4 : p.y > (ty + 2) * h ? 8 : 0)
+  const pendingKey = [...pending].join('\n')
+  const dot = (nd: Graph['nodes'][number], i: number, p: Pos, o: { label: boolean; lit: boolean; dim: boolean; halo: boolean; hit: boolean }): ReactNode => {
+    const r = radius(nd)
+    return (
+      <g
+        key={nd.title}
+        data-page={nd.title}
+        data-missing={nd.missing ? '1' : undefined}
+        className={`wk-node ${nd.missing ? 'is-missing' : ''} ${o.dim ? 'is-dim' : ''} ${o.lit ? 'is-lit' : ''} ${nd.title === selected ? 'is-sel' : ''} ${nd.title === holding ? 'is-held' : ''}`}
+        style={{ ['--k' as string]: kindColor(nd.kind), ['--i' as string]: i }}
+        transform={`translate(${p.x} ${p.y})`}
+        onPointerEnter={() => !drag.current && setHover(nd.title)}
+        onPointerLeave={() => setHover((h) => (h === nd.title ? null : h))}
+      >
+        {o.hit && <circle className="wk-node__hit" r={r + 12} />}
+        {pending.has(nd.title) && <circle className="wk-node__ping" r={r + 4} />}
+        {o.halo && <circle className="wk-node__halo" r={r + 8} />}
+        <circle className="wk-node__dot" r={r} />
+        {o.label && (
+          <text y={r + 15} textAnchor="middle">
+            {short(nd.title)}
+          </text>
+        )}
+      </g>
+    )
+  }
+  // The whole map, as it is with nothing lit. Lighting a page doesn't touch it: a veil goes over
+  // it and the lit page and its links are drawn again over the veil (below), so hovering over a
+  // map of thousands of pages redraws a few dozen.
+  const base = useMemo(() => {
+    if (!view) return null
+    const named = ((): Set<string> | null => {
+      if (!many) return null
+      const items: Parameters<typeof fitLabels>[0] = []
+      for (const nd of graph.nodes) {
+        const p = at(nd.title)
+        if (!p || side(p)) continue
+        const first = nd.title === selected
+        if (!first && !(k > 1.05 || nd.links >= 3)) continue
+        items.push({ title: nd.title, x: p.x, y: p.y + radius(nd) + 15, w: short(nd.title).length * 6.6, first, links: nd.links })
+      }
+      return fitLabels(items, MAX_LABELS * 9)
+    })()
+    return (
+      <>
+        <g className="wk-canvas__edges">
+          {graph.edges.map(([a, b]) => {
+            const p = at(a)
+            const q = at(b)
+            if (!p || !q || side(p) & side(q)) return null
+            return <line key={`${a}\n${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className={!shown(a) && !shown(b) ? 'is-dim' : ''} />
+          })}
+        </g>
+        {graph.nodes.map((nd, i) => {
+          const p = at(nd.title)
+          if (!p || side(p)) return null
+          const mine = nd.title === selected
+          return dot(nd, i, p, { label: !named || named.has(nd.title), lit: false, dim: !shown(nd.title), halo: !crowded || mine, hit: !crowded || mine })
+        })}
+      </>
+    )
+    // the camera's x and y are left out on purpose: the group around this layer carries them
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, frame, k, tx, ty, w, h, selected, holding, only, pendingKey, !!view])
+  // The lit page and what it links to, over the veil, at full strength.
+  const over = useMemo(() => {
+    if (!view || !lit) return null
+    const index = new Map(graph.nodes.map((n, i) => [n.title, i]))
+    const ids = [lit, ...(around ?? [])].filter((t) => index.has(t))
+    const items: Parameters<typeof fitLabels>[0] = []
+    for (const t of ids) {
+      const nd = graph.nodes[index.get(t)!]!
+      const p = at(t)
+      if (p) items.push({ title: t, x: p.x, y: p.y + radius(nd) + 15, w: short(t).length * 6.6, first: t === lit, links: nd.links })
+    }
+    const named = many ? fitLabels(items) : null
+    const from = at(lit)
+    return (
+      <>
+        <g className="wk-canvas__edges">
+          {from &&
+            ids.slice(1).map((t) => {
+              const q = at(t)
+              return q && <line key={t} x1={from.x} y1={from.y} x2={q.x} y2={q.y} className="is-hot" />
+            })}
+        </g>
+        {ids.map((t) => {
+          const i = index.get(t)!
+          const nd = graph.nodes[i]!
+          const p = at(t)
+          return p && dot(nd, i, p, { label: !named || named.has(t), lit: t === lit, dim: !shown(t), halo: t === lit, hit: false })
+        })}
+      </>
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, lit, around])
   return (
     <div
       ref={ref}
@@ -608,52 +776,22 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     >
       {view && (
         <svg width={size.w} height={size.h}>
-          <g className="wk-canvas__edges">
-            {graph.edges.map(([a, b]) => {
-              const p = at(a)
-              const q = at(b)
-              if (!p || !q) return null
-              const hot = !!lit && (a === lit || b === lit)
-              const off = !shown(a) && !shown(b)
-              return <line key={`${a}\n${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className={hot ? 'is-hot' : lit || off ? 'is-dim' : ''} />
-            })}
-          </g>
-          {graph.nodes.map((nd, i) => {
-            const p = at(nd.title)
-            if (!p) return null
-            const r = (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
-            const label = !many || k > 1.05 || nd.links >= 3 || (!!lit && isNear(nd.title))
-            const dim = !isNear(nd.title) || !shown(nd.title)
-            return (
-              <g
-                key={nd.title}
-                data-page={nd.title}
-                data-missing={nd.missing ? '1' : undefined}
-                className={`wk-node ${nd.missing ? 'is-missing' : ''} ${dim ? 'is-dim' : ''} ${nd.title === lit ? 'is-lit' : ''} ${nd.title === selected ? 'is-sel' : ''} ${nd.title === holding ? 'is-held' : ''}`}
-                style={{ ['--k' as string]: kindColor(nd.kind), ['--i' as string]: i }}
-                transform={`translate(${p.x} ${p.y})`}
-                onPointerEnter={() => !drag.current && setHover(nd.title)}
-                onPointerLeave={() => setHover((h) => (h === nd.title ? null : h))}
-              >
-                <circle className="wk-node__hit" r={r + 12} />
-                {pending.has(nd.title) && <circle className="wk-node__ping" r={r + 4} />}
-                <circle className="wk-node__halo" r={r + 8} />
-                <circle className="wk-node__dot" r={r} />
-                {label && (
-                  <text y={r + 15} textAnchor="middle">
-                    {nd.title.length > 28 ? `${nd.title.slice(0, 26)}…` : nd.title}
-                  </text>
-                )}
-              </g>
-            )
-          })}
+          <g transform={`translate(${view.x} ${view.y})`}>{base}</g>
+          {/* a page lit: a veil over the map, and the page and its links drawn again over the veil;
+              the thousands of pages under it stay as they were, so nothing of them is redrawn */}
+          {over && (
+            <g className="wk-canvas__over">
+              <rect className="wk-canvas__veil" width={size.w} height={size.h} />
+              <g transform={`translate(${view.x} ${view.y})`}>{over}</g>
+            </g>
+          )}
         </svg>
       )}
       <div className="wk-zoom" onPointerDown={(e) => e.stopPropagation()} style={{ right: panel && size.w > 980 ? PANEL + 40 : 16 }}>
         <button title={L('Afastar', 'Zoom out')} onClick={() => zoom(1 / 1.3)}>
           −
         </button>
-        <button title={L('Ver tudo', 'Fit all')} onClick={() => fly(fit(), 500)}>
+        <button title={L('Ver tudo', 'Show all')} onClick={() => fly(fit(), 500)}>
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M1.5 4.5v-3h3M8.5 1.5h3v3M11.5 8.5v3h-3M4.5 11.5h-3v-3" />
           </svg>
@@ -692,6 +830,9 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
   useEffect(() => void Promise.all([call('wikiChanges', { state: 'pending' }), call('wikiChanges', { state: 'conflict' })]).then(([a, b]) => setPending([...a, ...b].filter((c) => c.by !== 'review'))), [rev])
   useEffect(() => void call('wikiSources').then((l) => setReading(l.filter((s) => s.status === 'reading'))), [rev])
   const panel = !!(view.title || view.source || view.tab)
+  // The panel over the whole map, to read a long page; it stays wide from page to page until it's shrunk or closed.
+  const [wide, setWide] = useState(false)
+  useEffect(() => void (!panel && setWide(false)), [panel])
   const close = (): void => navigate({ kind: 'wiki' })
   const [imported, setImported] = useState<WikiImport | { error: string } | 'busy' | null>(null)
   const startImport = (): void => {
@@ -730,6 +871,7 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
       if (e.key === '/') setSearching(true)
       else if (e.key.toLowerCase() === 'n') navigate({ kind: 'wiki', edit: true, title: '' })
       else if (e.key.toLowerCase() === 'e' && view.title) navigate({ kind: 'wiki', title: view.title, edit: true })
+      else if (e.key === 'Escape' && wide) setWide(false)
       else if (e.key === 'Escape' && panel) close()
       else return
       e.preventDefault()
@@ -795,7 +937,7 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
             </button>
           )}
           {data?.git?.readOnly && (
-            <span className="wk-ro" title={L('A chave do Tucano só lê o repositório git: a wiki mostra o que está lá e não aceita escrita.', "Tucano's key only reads the git repository: the wiki shows what's there and takes no writes.")}>
+            <span className="wk-ro" title={L('A chave do Tucano só lê o repositório git: a wiki mostra o que está lá e não aceita escrita.', "The repository key is read-only. Wiki editing is disabled.")}>
               <Icon name="lock" size={12} /> {L('Só leitura', 'Read-only')}
             </span>
           )}
@@ -838,10 +980,20 @@ function WikiShell({ view }: { view: WikiViewState }): ReactNode {
       <div className="wk-stage" {...drop}>
         {data && count === 0 && !panel ? <WikiEmpty onImport={startImport} /> : data && <WikiCanvas graph={data.graph} selected={view.title} pending={touched} only={only} panel={panel} />}
         {panel && content && (
-          <aside className="wk-panel" key={JSON.stringify([view.title, view.tab, view.source])}>
-            <button className="wk-panel__close" title={L('Fechar (Esc)', 'Close (Esc)')} onClick={close}>
-              <Icon name="x" size={15} />
-            </button>
+          <aside className={`wk-panel ${wide ? 'is-wide' : ''}`} key={JSON.stringify([view.title, view.tab, view.source])}>
+            <div className="wk-panel__tools">
+              <button
+                className="wk-panel__btn"
+                title={wide ? L('Voltar pro lado do mapa', 'Back beside the map') : L('Expandir', 'Expand')}
+                aria-pressed={wide}
+                onClick={() => setWide(!wide)}
+              >
+                <Icon name={wide ? 'shrink' : 'expand'} size={14} />
+              </button>
+              <button className="wk-panel__btn" title={L('Fechar (Esc)', 'Close (Esc)')} onClick={close}>
+                <Icon name="x" size={15} />
+              </button>
+            </div>
             {content}
           </aside>
         )}
@@ -909,11 +1061,11 @@ function WikiEmpty({ onImport }: { onImport: () => void }): ReactNode {
           <circle key={i} cx={x} cy={y} r={i === 1 ? 11 : 7} style={{ fill: `var(--c-${c})`, ['--i' as string]: i }} />
         ))}
       </svg>
-      <h2>{L('Tudo o que você sabe, num lugar só', 'Everything you know, in one place')}</h2>
+      <h2>{L('Tudo o que você sabe, num lugar só', "Shared knowledge, linked together")}</h2>
       <p>
         {L(
           'Pessoas, clientes, projetos, decisões. Cada página liga com as outras, e os agentes leem tudo antes de responder. Você escreve, ou deixa o curador escrever pelas conversas e pelos documentos que você traz.',
-          'People, clients, projects, decisions. Each page links to the others, and the agents read it all before replying. You write it, or let the curator write it from the conversations and the documents you bring.'
+          "Link people, projects, and decisions. Write pages yourself or let the curator use your conversations and documents. Agents consult them before replying."
         )}
       </p>
       <div className="wk-empty__actions">
@@ -924,7 +1076,7 @@ function WikiEmpty({ onImport }: { onImport: () => void }): ReactNode {
           <Icon name="folder" size={14} /> {L('Importar do Obsidian', 'Import from Obsidian')}
         </button>
       </div>
-      <small className="muted">{L('Já tem um cofre no Obsidian? Ele entra como está, com pastas, links e anexos. O original fica onde está.', 'Already have an Obsidian vault? It comes in as it is, with folders, links and attachments. The original stays where it is.')}</small>
+      <small className="muted">{L('Já tem um cofre no Obsidian? Ele entra como está, com pastas, links e anexos. O original fica onde está.', "Import an Obsidian vault with its folders, links, and attachments. The original stays unchanged.")}</small>
     </div>
   )
 }
@@ -937,7 +1089,7 @@ function ImportResult({ result, onClose }: { result: WikiImport | { error: strin
         {result === 'busy' ? (
           <div className="wk-import__busy">
             <span className="wk-spin" />
-            <b>{L('Trazendo as notas…', 'Bringing the notes in…')}</b>
+            <b>{L('Trazendo as notas…', "Importing notes…")}</b>
             <small className="muted">{L('Copiando as pastas e lendo os links.', 'Copying the folders and reading the links.')}</small>
           </div>
         ) : 'error' in result ? (
@@ -982,16 +1134,16 @@ function ImportResult({ result, onClose }: { result: WikiImport | { error: strin
               </div>
             )}
             <small className="muted">
-              {L('Os agentes já leem essas páginas e citam elas nas respostas. O cofre original não mudou.', 'The agents already read these pages and cite them in their replies. The original vault is unchanged.')}
+              {L('Os agentes já leem essas páginas e citam elas nas respostas. O cofre original não mudou.', "Agents can now read and cite these pages. The original vault is unchanged.")}
               {result.missing > 0 && ' ' + L(`${result.missing} ${result.missing === 1 ? 'link aponta' : 'links apontam'} pra notas que ainda não existem: aparecem tracejados no mapa.`, `${result.missing} ${result.missing === 1 ? 'link points' : 'links point'} to notes that don't exist yet: they're dashed on the map.`)}
               {result.skipped.length > 0 && ' ' + L(`${result.skipped.length} ${result.skipped.length === 1 ? 'arquivo já existia e ficou' : 'arquivos já existiam e ficaram'} como estava.`, `${result.skipped.length} ${result.skipped.length === 1 ? 'file was already here and was left' : 'files were already here and were left'} as they were.`)}
             </small>
             <div className="wk-row">
               <button className="btn btn--primary btn--sm" onClick={onClose}>
-                {L('Ver o mapa', 'See the map')}
+                {L('Ver o mapa', "View map")}
               </button>
               <button className="btn btn--ghost btn--sm" onClick={() => (onClose(), navigate({ kind: 'wiki', tab: 'review' }))}>
-                {L('Revisar o que chegou', 'Review what came in')}
+                {L('Revisar o que chegou', "Review imported pages")}
               </button>
             </div>
           </>
@@ -1041,7 +1193,7 @@ function WikiSearch({ pages, onClose }: { pages: WikiPageInfo[]; onClose: () => 
           <kbd>esc</kbd>
         </div>
         <div className="wk-palette__list">
-          {!q.trim() && rows.length > 0 && <div className="wk-palette__label">{L('Mexidas há pouco', 'Recently touched')}</div>}
+          {!q.trim() && rows.length > 0 && <div className="wk-palette__label">{L('Mexidas há pouco', "Recently updated")}</div>}
           {rows.map((r, i) => (
             <button key={r.title} className={`wk-palette__row ${i === at ? 'is-on' : ''}`} style={{ ['--k' as string]: kindColor(r.kind) }} onMouseEnter={() => setAt(i)} onClick={() => open(r.title)}>
               <i />
@@ -1099,22 +1251,22 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
         </header>
 
         <section>
-          <h4>{L('O curador', 'The curator')}</h4>
+          <h4>{L('O curador', "Curator")}</h4>
           <div className="wk-setting">
             <span>
-              <b>{L('Guardar das conversas', 'Keep from conversations')}</b>
-              <small>{L('Depois que uma conversa assenta, ele guarda as decisões, os fatos e os resultados nas páginas. Dá pra desligar por canal ou DM, no menu da conversa.', 'Once a conversation settles, it keeps the decisions, facts and results in the pages. It can be turned off per channel or DM, from the conversation menu.')}</small>
+              <b>{L('Guardar das conversas', "Capture conversations")}</b>
+              <small>{L('Depois que uma conversa assenta, ele guarda as decisões, os fatos e os resultados nas páginas. Dá pra desligar por canal ou DM, no menu da conversa.', "Save decisions, facts, and results to wiki pages. Disable per channel or DM in its menu.")}</small>
             </span>
             <Toggle on={capture} onChange={(v) => updateSettings({ wikiCapture: v })} />
           </div>
           <div className="wk-setting">
             <span>
-              <b>{L('Mudar uma página que já existe', 'Changing a page that exists')}</b>
-              <small>{L('Páginas novas sempre entram direto. No automático, o que já estava esperando entra junto. Tudo fica no histórico, com Desfazer.', 'New pages always go in right away. On automatic, what was already waiting goes in too. It all stays in the history, with Undo.')}</small>
+              <b>{L('Mudar uma página que já existe', "Existing page edits")}</b>
+              <small>{L('Páginas novas sempre entram direto. No automático, o que já estava esperando entra junto. Tudo fica no histórico, com Desfazer.', "New pages save immediately. Automatic also applies pending edits. Undo from History.")}</small>
             </span>
             <div className="segmented">
               <button className={edits === 'approve' ? 'is-active' : ''} onClick={() => updateSettings({ wikiEdits: 'approve' })}>
-                {L('Pede aprovação', 'Asks first')}
+                {L('Pede aprovação', "Ask for approval")}
               </button>
               <button className={edits === 'auto' ? 'is-active' : ''} onClick={() => (updateSettings({ wikiEdits: 'auto' }), void call('wikiApplyWaiting').catch((e: Error) => setError(e.message)))}>
                 {L('Automático', 'Automatic')}
@@ -1123,20 +1275,20 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
           </div>
           <div className="wk-setting">
             <span>
-              <b>{L('Revisar sozinha toda semana', 'Review on its own every week')}</b>
-              <small>{L('Procura o que não bate, o que ficou velho e o que está repetido. O que achar espera você em Cuidados.', 'Looks for what disagrees, what got old and what repeats. What it finds waits for you in Care.')}</small>
+              <b>{L('Revisar sozinha toda semana', "Weekly review")}</b>
+              <small>{L('Procura o que não bate, o que ficou velho e o que está repetido. O que achar espera você em Cuidados.', "Find conflicts, outdated facts, and duplicates in Care.")}</small>
             </span>
             <Toggle on={s.wikiReview === 'weekly'} onChange={(v) => updateSettings({ wikiReview: v ? 'weekly' : 'off' })} />
           </div>
         </section>
 
         <section>
-          <h4>{L('A pasta', 'The folder')}</h4>
+          <h4>{L('A pasta', "Storage folder")}</h4>
           <code className="wk-folder" title={dir}>
             <Icon name="folder" size={14} />
             {dir.replace(/^\/Users\/[^/]+/, '~')}
           </code>
-          <small className="muted">{L('Markdown puro: abre no Obsidian, vai pro iCloud ou pro git. Pode ser o seu cofre do Obsidian.', 'Plain Markdown: it opens in Obsidian, goes to iCloud or git. It can be your Obsidian vault.')}</small>
+          <small className="muted">{L('Markdown puro: abre no Obsidian, vai pro iCloud ou pro git. Pode ser o seu cofre do Obsidian.', "Markdown files, compatible with Obsidian, iCloud, and Git.")}</small>
           <div className="wk-row">
             {data && !data.server && (
               <button className="btn btn--sm" onClick={() => void call('openWikiFolder')}>
@@ -1164,7 +1316,7 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
             )}
             {s.wikiDir && !data?.git && (
               <button className="btn btn--ghost btn--sm" onClick={() => move(null)}>
-                {L('Voltar pra pasta do Tucano', "Back to Tucano's folder")}
+                {L('Voltar pra pasta do Tucano', "Use default folder")}
               </button>
             )}
           </div>
@@ -1173,14 +1325,14 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
         </section>
 
         <section>
-          <h4>{L('Trazer o que você já tem', 'Bring what you already have')}</h4>
+          <h4>{L('Trazer o que você já tem', "Import")}</h4>
           <div className="wk-setting">
             <span>
               <b>{L('Importar um cofre do Obsidian', 'Import an Obsidian vault')}</b>
               <small>
                 {window.tucano.upload
-                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', 'Zip the vault’s folder and send it: the notes come in as they are, with their folders, links and attachments.')
-                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', 'The notes come in as they are, with their folders, links and attachments. The original vault stays as it was.')}
+                  ? L('Compacte a pasta do cofre num .zip e envie: as notas entram como estão, com as pastas, os links e os anexos.', "Upload a zipped vault to copy its notes, folders, links, and attachments.")
+                  : L('As notas entram como estão, com as pastas, os links e os anexos. O cofre original não muda.', "Copy notes, folders, links, and attachments. The original vault stays unchanged.")}
               </small>
             </span>
             <button className="btn btn--sm" onClick={onImport}>
@@ -1190,11 +1342,11 @@ function WikiSettingsDialog({ data, onClose, onImport }: { data: WikiData | null
         </section>
 
         <section>
-          <h4>{L('As regras', 'The rules')}</h4>
+          <h4>{L('As regras', "Page rules")}</h4>
           <div className="wk-setting">
             <span>
               <b>{L('Esquema da wiki', 'Wiki schema')}</b>
-              <small>{L('Os tipos de página e como escrever. Os agentes e o curador seguem esta página.', 'The kinds of page and how to write. The agents and the curator follow this page.')}</small>
+              <small>{L('Os tipos de página e como escrever. Os agentes e o curador seguem esta página.', "Page types and writing rules for agents and the curator.")}</small>
             </span>
             <button className="btn btn--sm" onClick={() => (onClose(), navigate({ kind: 'wiki', edit: true }))}>
               {L('Editar', 'Edit')}
@@ -1243,8 +1395,8 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
     return (
       <div className="wk-setting wk-git">
         <span>
-          <b>{L('Sincronizar com git', 'Sync with git')}</b>
-          <small>{L('A wiki vira um clone do seu repositório (o cofre do Obsidian no GitHub, por exemplo): o que muda lá aparece aqui, e o que muda aqui vai pra lá.', 'The wiki becomes a clone of your repository (your Obsidian vault on GitHub, say): what changes there shows up here, and what changes here goes there.')}</small>
+          <b>{L('Sincronizar com git', "Sync with Git")}</b>
+          <small>{L('A wiki vira um clone do seu repositório (o cofre do Obsidian no GitHub, por exemplo): o que muda lá aparece aqui, e o que muda aqui vai pra lá.', "Use a repository as your wiki. Changes sync both ways.")}</small>
         </span>
         <button className="btn btn--sm" onClick={() => setOpen(true)}>
           {L('Configurar…', 'Set up…')}
@@ -1260,7 +1412,7 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
         <div className="wk-git__status">
           <i className={`wk-git__dot wk-git__dot--${st.state === 'error' ? 'bad' : st.state === 'syncing' ? 'busy' : 'ok'}`} />
           <span>
-            <b>{st.state === 'syncing' ? L('Sincronizando…', 'Syncing…') : st.state === 'error' ? L('A sincronização parou', 'Syncing stopped') : L('Sincronizada com git', 'Synced with git')}</b>
+            <b>{st.state === 'syncing' ? L('Sincronizando…', 'Syncing…') : st.state === 'error' ? L('A sincronização parou', 'Syncing stopped') : L('Sincronizada com git', "Synced with Git")}</b>
             <small>
               {setup?.sshUrl ?? ''}
               {st.branch ? ` · ${st.branch}` : ''}
@@ -1301,15 +1453,15 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
           )}
           {setup?.deployKeyUrl && (
             <button className="btn btn--ghost btn--sm" onClick={() => openExternal(setup.deployKeyUrl!)}>
-              {L('Chaves do repositório', "The repository's keys")}
+              {L('Chaves do repositório', "Repository keys")}
             </button>
           )}
           <button
             className="btn btn--ghost btn--sm"
             onClick={() =>
               void confirmDialog({
-                title: L('Desconectar do git?', 'Disconnect from git?'),
-                body: L('A wiki para de sincronizar e o Tucano apaga a chave dele. A pasta continua como está, com as páginas. No repositório, apague também a chave de deploy.', "The wiki stops syncing and Tucano deletes its key. The folder stays as it is, with the pages. In the repository, delete the deploy key too."),
+                title: L('Desconectar do git?', "Disconnect from Git?"),
+                body: L('A wiki para de sincronizar e o Tucano apaga a chave dele. A pasta continua como está, com as páginas. No repositório, apague também a chave de deploy.', "Stop syncing and delete Tucano’s key. Local pages stay. Also remove the deploy key from the repository."),
                 confirm: L('Desconectar', 'Disconnect')
               }).then((ok) => ok && run('sync', call('wikiGitDisconnect'), (v) => (setSt(v), setOpen(false), setTest(null))))
             }
@@ -1331,7 +1483,7 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
     })
   return (
     <div className="wk-git wk-git--setup">
-      <b>{L('Sincronizar com git', 'Sync with git')}</b>
+      <b>{L('Sincronizar com git', "Sync with Git")}</b>
       <label className="wk-git__step">
         <span>{L('1. O endereço SSH do repositório', "1. The repository's SSH address")}</span>
         <div className="wk-row">
@@ -1394,11 +1546,11 @@ function GitSync({ dir, onDir }: { dir: string; onDir: (d: string) => void }): R
                   <div className="wk-git__choices">
                     <button className="wk-git__choice" disabled={!!busy} onClick={() => connect('repo')}>
                       <b>{L('Usar o repositório', 'Use the repository')}</b>
-                      <small>{L('A wiki mostra só o que está no repositório. As páginas daqui ficam na pasta antiga, de backup.', 'The wiki shows only what is in the repository. The pages here stay in the old folder, as a backup.')}</small>
+                      <small>{L('A wiki mostra só o que está no repositório. As páginas daqui ficam na pasta antiga, de backup.', "Show repository pages only. Keep local pages in the old folder as a backup.")}</small>
                     </button>
                     <button className="wk-git__choice" disabled={!!busy} onClick={() => connect('merge')}>
-                      <b>{L('Juntar com as daqui', 'Merge with these')}</b>
-                      <small>{L('As páginas daqui entram no repositório. Nada de lá é sobrescrito: uma página com o mesmo nome entra como "(versão do Tucano)".', 'The pages here go into the repository. Nothing there is overwritten: a page with the same name comes in as "(Tucano’s version)".')}</small>
+                      <b>{L('Juntar com as daqui', "Merge local pages")}</b>
+                      <small>{L('As páginas daqui entram no repositório. Nada de lá é sobrescrito: uma página com o mesmo nome entra como "(versão do Tucano)".', "Add local pages without overwriting repository pages. Name conflicts use “(Tucano’s version)”.")}</small>
                     </button>
                   </div>
                 </>
@@ -1459,7 +1611,7 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
   return (
     <div className={`wiki-op wiki-op--${op.op}`}>
       <div className="wiki-op__head">
-        <span className="wiki-op__verb">{op.op === 'create' ? L('Página nova', 'New page') : op.op === 'append' ? L('Acrescenta em', 'Adds to') : L('Troca em', 'Swaps in')}</span>
+        <span className="wiki-op__verb">{op.op === 'create' ? L('Página nova', 'New page') : op.op === 'append' ? L('Acrescenta em', 'Adds to') : L('Troca em', "Replaces text in")}</span>
         <button className="wiki-link" onClick={() => navigate({ kind: 'wiki', title: op.page })}>
           {op.page}
         </button>
@@ -1468,13 +1620,13 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
       <div ref={box} className={`wiki-diff${folded ? ' is-folded' : ''}`} style={folded ? { maxHeight: DIFF_FOLD } : undefined}>
         {op.op === 'replace' && (
           <div className="wiki-diff__old">
-            <span className="wiki-diff__tag">{L('Sai', 'Out')}</span>
+            <span className="wiki-diff__tag">{L('Sai', "Removed")}</span>
             <div className="md">{md(op.old)}</div>
           </div>
         )}
         <div className={`wiki-diff__new${added.trim() ? '' : ' wiki-diff__new--none'}`}>
-          {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', 'In')}</span>}
-          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', 'Nothing in its place: the passage just leaves the page.')}</p>}
+          {op.op !== 'create' && <span className="wiki-diff__tag">{L('Entra', "Added")}</span>}
+          {added.trim() ? <div className="md">{md(added)}</div> : <p className="muted">{L('Nada no lugar: o trecho só sai da página.', "This passage will be removed from the page without a replacement.")}</p>}
         </div>
       </div>
       {long && (
@@ -1488,7 +1640,7 @@ function OpView({ op }: { op: WikiChange['ops'][number] }): ReactNode {
 const DIFF_FOLD = 360 // px a long change shows before "Ver tudo"; a bit longer than that shows whole
 
 const STATE_LABEL = (s: WikiChange['state']): string =>
-  s === 'pending' ? L('Esperando você', 'Waiting for you') : s === 'conflict' ? L('A página mudou depois', 'The page changed since') : s === 'applied' ? L('Entrou', 'Went in') : s === 'undone' ? L('Desfeita', 'Undone') : L('Recusada', 'Refused')
+  s === 'pending' ? L('Esperando você', 'Waiting for you') : s === 'conflict' ? L('A página mudou depois', 'The page changed since') : s === 'applied' ? L('Entrou', "Applied") : s === 'undone' ? L('Desfeita', 'Undone') : L('Recusada', "Rejected")
 
 export function ChangeCard({ change, compact, bare }: { change: WikiChange; compact?: boolean; bare?: boolean }): ReactNode {
   const [error, setError] = useState('')
@@ -1506,7 +1658,7 @@ export function ChangeCard({ change, compact, bare }: { change: WikiChange; comp
               <>
                 {' · '}
                 <button className="text-btn" onClick={() => navigate({ kind: 'wiki', source: change.source!.file })}>
-                  {L('de onde veio', 'where it came from')}
+                  {L('de onde veio', "source")}
                 </button>
               </>
             )}
@@ -1519,9 +1671,9 @@ export function ChangeCard({ change, compact, bare }: { change: WikiChange; comp
         <div className="wiki-change__actions">
           {change.state === 'conflict' && (
             <>
-              <small className="muted">{L('A página mudou depois dessa sugestão. O curador refaz a mudança sobre a versão nova, sem perder o que mudou.', 'The page changed after this suggestion. The curator makes the change again on the newer version, keeping what changed.')}</small>
+              <small className="muted">{L('A página mudou depois dessa sugestão. O curador refaz a mudança sobre a versão nova, sem perder o que mudou.', "This page has changed. Regenerate the suggestion against its latest version.")}</small>
               <button className="btn btn--primary btn--sm" onClick={() => act(call('wikiRedoChange', { id: change.id }))}>
-                {L('Refazer sobre a versão nova', 'Redo on the newer version')}
+                {L('Refazer sobre a versão nova', "Regenerate change")}
               </button>
             </>
           )}
@@ -1531,7 +1683,7 @@ export function ChangeCard({ change, compact, bare }: { change: WikiChange; comp
             </button>
           )}
           <button className="btn btn--ghost btn--sm" onClick={() => act(call('wikiRefuseChange', { id: change.id }))}>
-            {L('Recusar', 'Refuse')}
+            {L('Recusar', "Reject")}
           </button>
         </div>
       )}
@@ -1573,7 +1725,7 @@ function WikiPending(): ReactNode {
   if (!list) return null
   return (
     <div className="wk-pane">
-      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', 'What the curator wants to change in pages that already exist. Approve, refuse, or change how it works in the settings.')}>
+      <PaneHead icon="hand" title={L('Esperando você', 'Waiting for you')} lede={L('O que o curador quer mudar em páginas que já existem. Aprove, recuse, ou mude o jeito nos ajustes.', "Review proposed edits to existing pages. Approve or reject them, or change approval rules in Wiki settings.")}>
         {list.length > 1 && (
           <button className="btn btn--primary btn--sm" disabled={busy} onClick={() => (setBusy(true), setError(''), void call('wikiApplyWaiting').then((r) => r.left && setError(L(`${r.left} não deu pra aprovar sozinha: a página mudou demais. Refaça cada uma abaixo.`, `${r.left} couldn't be approved on their own: the page changed too much. Redo each one below.`)), (e: Error) => setError(e.message)).finally(() => setBusy(false)))}>
             <Icon name="check" size={13} /> {L(`Aprovar todas (${list.length})`, `Approve all (${list.length})`)}
@@ -1604,14 +1756,14 @@ function WikiPending(): ReactNode {
 // ---------- looking after the wiki ----------
 
 const FINDING_LABEL: Record<WikiFinding['kind'], () => string> = {
-  contradiction: () => L('Não batem', "Don't agree"),
+  contradiction: () => L('Não batem', "Conflicting facts"),
   stale: () => L('Desatualizada', 'Out of date'),
   duplicate: () => L('Repetida', 'Duplicate'),
   link: () => L('Falta ligar', 'Missing link'),
-  broken: () => L('Página por escrever', 'Page to write'),
-  missing: () => L('Sem página', 'No page'),
-  orphan: () => L('Ninguém liga pra elas', 'Nothing links to them'),
-  log: () => L('Parece um registro', 'Reads like a log'),
+  broken: () => L('Página por escrever', "Missing page"),
+  missing: () => L('Sem página', "Missing page"),
+  orphan: () => L('Ninguém liga pra elas', "Unlinked pages"),
+  log: () => L('Parece um registro', "Reads like a log"),
   git: () => L('Repositório git', 'Git repository')
 }
 const FINDING_TONE: Record<WikiFinding['kind'], 'danger' | 'warn' | 'calm'> = { contradiction: 'danger', stale: 'warn', duplicate: 'warn', link: 'calm', broken: 'calm', missing: 'calm', orphan: 'calm', log: 'warn', git: 'warn' }
@@ -1648,11 +1800,11 @@ function WikiReviewPane(): ReactNode {
         <div className="wk-checks">
           {(
             [
-              ['danger', L('Não batem', "Don't agree"), L('Duas páginas dizendo coisas diferentes sobre o mesmo valor, data ou prazo.', 'Two pages saying different things about the same amount, date or deadline.')],
+              ['danger', L('Não batem', "Conflicting facts"), L('Duas páginas dizendo coisas diferentes sobre o mesmo valor, data ou prazo.', "Pages disagree about an amount, date, or deadline.")],
               ['warn', L('Desatualizada', 'Out of date'), L('"Aguardando resposta" numa página, "contrato assinado" em outra.', '"Waiting for an answer" on one page, "contract signed" on another.')],
-              ['warn', L('Repetida', 'Duplicate'), L('Duas páginas sobre a mesma pessoa ou o mesmo projeto. Ela junta, sem perder nada.', 'Two pages about the same person or project. It merges them, losing nothing.')],
-              ['warn', L('Parece um registro', 'Reads like a log'), L('Um histórico que virou diário do que foi feito. Ela resume no que vale hoje.', 'A history that turned into a diary of what was done. It condenses it into what holds today.')],
-              ['calm', L('Solta', 'Loose'), L('Links pra páginas que não existem, nomes sem página, páginas que ninguém cita.', 'Links to missing pages, names with no page, pages nothing cites.')]
+              ['warn', L('Repetida', 'Duplicate'), L('Duas páginas sobre a mesma pessoa ou o mesmo projeto. Ela junta, sem perder nada.', "Merge duplicate pages about the same person or project, preserving their content.")],
+              ['warn', L('Parece um registro', "Reads like a log"), L('Um histórico que virou diário do que foi feito. Ela resume no que vale hoje.', "Condense activity logs into the facts that still apply.")],
+              ['calm', L('Solta', "Unresolved links"), L('Links pra páginas que não existem, nomes sem página, páginas que ninguém cita.', "Missing pages, unresolved names, and unlinked pages.")]
             ] as const
           ).map(([tone, t, d]) => (
             <div key={t} className="wk-check" style={{ ['--tone' as string]: tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--text-3)' }}>
@@ -1668,7 +1820,7 @@ function WikiReviewPane(): ReactNode {
       {r.at && !r.running && sorted.length === 0 && (
         <div className="wk-calm">
           <Icon name="check" size={18} />
-          <span>{L('Tudo em ordem. Nada pra cuidar agora.', 'All in order. Nothing to look after now.')}</span>
+          <span>{L('Tudo em ordem. Nada pra cuidar agora.', "Nothing needs attention.")}</span>
         </div>
       )}
       {sorted.map((f) => (
@@ -1687,7 +1839,7 @@ function WikiReviewPane(): ReactNode {
                 </button>
               )}
               <button className="btn btn--ghost btn--sm" onClick={() => void call('wikiDismissFinding', { id: f.id })}>
-                {L('Deixar assim', 'Leave it')}
+                {L('Deixar assim', "Dismiss")}
               </button>
             </div>
           )}
@@ -1788,7 +1940,7 @@ function AddSources({ errors: dropped }: { errors: string[] }): ReactNode {
           <span className="wk-badge-file" style={{ ['--k' as string]: 'var(--c-indigo)' }}>DOC</span>
           <span className="wk-badge-file" style={{ ['--k' as string]: 'var(--c-green)' }}>XLS</span>
         </span>
-        <b>{L('Um arquivo', 'A file')}</b>
+        <b>{L('Um arquivo', "File")}</b>
         <small>{L('Escolha, ou arraste pra qualquer lugar da wiki', 'Choose one, or drag it anywhere in the wiki')}</small>
         <input type="file" multiple accept={ACCEPT} hidden onChange={(e) => (files(e.target.files), (e.target.value = ''))} />
       </label>
@@ -1798,11 +1950,11 @@ function AddSources({ errors: dropped }: { errors: string[] }): ReactNode {
             <Icon name="globe" size={14} />
           </span>
         </span>
-        <b>{L('Um link', 'A link')}</b>
+        <b>{L('Um link', "Link")}</b>
         <div className="wk-add__line">
           <input placeholder="https://…" value={link} onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addLink()} />
           <button className="btn btn--sm" disabled={!link.trim()} onClick={addLink}>
-            {L('Trazer', 'Bring')}
+            {L('Trazer', "Import")}
           </button>
         </div>
       </div>
@@ -1812,11 +1964,11 @@ function AddSources({ errors: dropped }: { errors: string[] }): ReactNode {
             <Icon name="edit" size={14} />
           </span>
         </span>
-        <b>{L('Uma anotação', 'A note')}</b>
+        <b>{L('Uma anotação', "Note")}</b>
         <div className="wk-add__line">
           <input placeholder={L('A Helena prefere WhatsApp…', 'Helen prefers texting…')} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addNote()} />
           <button className="btn btn--sm" disabled={!note.trim()} onClick={addNote}>
-            {L('Guardar', 'Keep')}
+            {L('Guardar', "Save")}
           </button>
         </div>
       </div>
@@ -1840,7 +1992,7 @@ function WikiSources({ errors }: { errors: string[] }): ReactNode {
   useEffect(() => void call('wikiSources').then(setList), [rev])
   return (
     <div className="wk-pane">
-      <PaneHead icon="book" title={L('Fontes', 'Sources')} lede={L('O material de onde a wiki sai. O curador lê cada fonte e escreve nas páginas, citando de onde veio.', 'What the wiki is made from. The curator reads each source and writes in the pages, citing where it came from.')} />
+      <PaneHead icon="book" title={L('Fontes', 'Sources')} lede={L('O material de onde a wiki sai. O curador lê cada fonte e escreve nas páginas, citando de onde veio.', "The curator uses these sources to write pages with citations.")} />
       <AddSources errors={errors} />
       {list && list.length > 0 && (
         <div className="wk-sources">
@@ -1899,7 +2051,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
         <SourceStatus s={src} />
       </div>
       <h1 className="wk-read__title">{src.title}</h1>
-      {src.private && <p className="muted">{L('Veio da conversa privada de alguém: só essa pessoa lê o que ela diz. Dá pra apagar a fonte, junto com as mudanças feitas dela.', "It came from someone's private conversation: only they read what it says. You can delete the source, along with the changes made from it.")}</p>}
+      {src.private && <p className="muted">{L('Veio da conversa privada de alguém: só essa pessoa lê o que ela diz. Dá pra apagar a fonte, junto com as mudanças feitas dela.', "Private to its author. Deleting this source removes its change history; existing pages stay.")}</p>}
       <div className="wk-row">
         {src.origin.conversationId && (
           <button className="btn btn--sm" onClick={() => navigate({ kind: 'conversation', id: src.origin.conversationId! })}>
@@ -1924,7 +2076,7 @@ function WikiSourceView({ id }: { id: string }): ReactNode {
         {canRemove &&
           (removing ? (
             <button className="btn btn--sm btn--danger" onClick={() => void call('wikiRemoveSource', { id: src.id }).then(() => navigate({ kind: 'wiki', tab: 'sources' }))}>
-              {L('Apagar de vez (as páginas ficam)', 'Delete for good (the pages stay)')}
+              {L('Apagar de vez (as páginas ficam)', "Delete permanently (keep pages)")}
             </button>
           ) : (
             <button className="btn btn--sm" onClick={() => setRemoving(true)}>
@@ -1951,7 +2103,7 @@ export function WikiChip({ id }: { id: string }): ReactNode {
   useEffect(() => void call('wikiChange', { id }).then(setC), [id, rev])
   if (!c || c.state === 'refused') return null
   const pages = [...new Set(c.ops.map((o) => o.page))]
-  const label = c.state === 'applied' ? L('Guardou na wiki', 'Kept in the wiki') : c.state === 'undone' ? L('Desfeito na wiki', 'Undone in the wiki') : c.state === 'conflict' ? L('Mudança na wiki com conflito', 'Wiki change with a conflict') : L('Quer guardar na wiki', 'Wants to keep in the wiki')
+  const label = c.state === 'applied' ? L('Guardou na wiki', "Saved to wiki") : c.state === 'undone' ? L('Desfeito na wiki', 'Undone in the wiki') : c.state === 'conflict' ? L('Mudança na wiki com conflito', 'Wiki change with a conflict') : L('Quer guardar na wiki', "Proposed wiki change")
   return (
     <div className={`memory-chip wiki-chip wiki-chip--${c.state}`}>
       <Icon name="layers" size={13} />
@@ -1971,10 +2123,10 @@ export function WikiChip({ id }: { id: string }): ReactNode {
       {c.state === 'pending' && (
         <>
           <button className="btn btn--xs btn--primary" onClick={() => void call('wikiApplyChange', { id })}>
-            {L('Guardar', 'Keep')}
+            {L('Guardar', "Save")}
           </button>
           <button className="btn btn--xs btn--ghost" onClick={() => navigate({ kind: 'wiki', tab: 'pending' })}>
-            {L('Ver', 'See')}
+            {L('Ver', "View")}
           </button>
         </>
       )}
@@ -2000,7 +2152,7 @@ export function KeepInWiki({ messageId }: { messageId: string }): ReactNode {
           )
         }}
       >
-        {state === 'busy' ? L('Guardando…', 'Keeping…') : state === 'none' ? L('Nada pra guardar', 'Nothing to keep') : L('Guardar na wiki', 'Keep in the wiki')}
+        {state === 'busy' ? L('Guardando…', "Saving…") : state === 'none' ? L('Nada pra guardar', "Nothing to save") : L('Guardar na wiki', "Save to wiki")}
       </button>
       {error && <small className="field__error"> {error}</small>}
     </span>
@@ -2085,7 +2237,7 @@ function WikiPageView({ title, data }: { title: string; data: WikiData | null })
       )}
       {cited.length > 0 && (
         <section className="wk-page__more">
-          <h5>{L('De onde veio', 'Where it came from')}</h5>
+          <h5>{L('De onde veio', "Sources")}</h5>
           {cited.map((c) => {
             const s = sources.find((x) => x.file === c.file)
             return (
@@ -2181,7 +2333,7 @@ function WikiEditor({ title }: { title?: string }): ReactNode {
     <Sheet
       fill
       title={schemaMode ? L('Esquema da wiki', 'Wiki schema') : page ? L('Editando', 'Editing') : L('Nova página', 'New page')}
-      lede={schemaMode ? L('As regras da wiki: os tipos de página e como escrever. Os agentes e o curador seguem esta página.', 'The wiki rules: the kinds of page and how to write. The agents and the curator follow this page.') : L('Markdown. Ligue páginas com [[Título]]; uma que ainda não existe vira um convite pra escrever.', "Markdown. Link pages with [[Title]]; one that doesn't exist yet becomes an invitation to write it.")}
+      lede={schemaMode ? L('As regras da wiki: os tipos de página e como escrever. Os agentes e o curador seguem esta página.', "Page types and writing rules for agents and the curator.") : L('Markdown. Ligue páginas com [[Título]]; uma que ainda não existe vira um convite pra escrever.', "Use Markdown and [[Page title]] links. Missing links let you create a page.")}
       back={{ label: L('Voltar', 'Back'), onClick: back }}
       actions={
         <>
@@ -2205,20 +2357,20 @@ function WikiEditor({ title }: { title?: string }): ReactNode {
                   {k}
                 </button>
               ))}
-              <input className="wiki-editor__kind" placeholder={L('outro tipo…', 'another kind…')} value={kinds.some((k) => fold(k) === fold(kind)) ? '' : kind} onChange={(e) => setKind(e.target.value)} />
+              <input className="wiki-editor__kind" placeholder={L('outro tipo…', "Other type…")} value={kinds.some((k) => fold(k) === fold(kind)) ? '' : kind} onChange={(e) => setKind(e.target.value)} />
             </div>
           </div>
         )}
         {error && <p className="field__error">{error}</p>}
         <div className="wiki-editor__panes">
-          <textarea className="wiki-editor__text" value={body} onChange={(e) => setBody(e.target.value)} spellCheck placeholder={L('Comece com uma frase que diga o que é. Depois, seções com ##.', 'Start with one sentence that says what it is. Then sections with ##.')} />
+          <textarea className="wiki-editor__text" value={body} onChange={(e) => setBody(e.target.value)} spellCheck placeholder={L('Comece com uma frase que diga o que é. Depois, seções com ##.', "Start with a one-sentence summary. Use ## for section headings.")} />
           <div className="wiki-editor__preview wk-doc md">
             {body.trim() ? (
               <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]} components={mdLinks()}>
                 {wikiLinks(body)}
               </Markdown>
             ) : (
-              <p className="muted">{L('A prévia aparece aqui.', 'The preview shows up here.')}</p>
+              <p className="muted">{L('A prévia aparece aqui.', "Preview appears here.")}</p>
             )}
           </div>
         </div>

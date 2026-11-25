@@ -1,0 +1,9 @@
+#!/bin/sh
+# The agents' Chrome inside the container: Tucano finds it at /usr/bin/google-chrome-stable.
+# Chrome's own sandbox needs user namespaces. Where the host gives them to the container
+# (Docker Desktop, Sysbox), it keeps it. Where it doesn't (Docker's default seccomp on Ubuntu),
+# Chrome goes without, and the container stays the wall: opening user namespaces to the whole
+# container would weaken that wall for every process, and an agent there already runs any
+# command it likes, so a page breaking out of Chrome lands where the agent already is.
+if unshare -Ur true 2>/dev/null; then exec /usr/bin/chromium "$@"; fi
+exec /usr/bin/chromium --no-sandbox "$@"

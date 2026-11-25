@@ -1,21 +1,25 @@
 import { useEffect, type ReactNode } from 'react'
 import { L } from '../../shared/lang'
-import { getState, navigate, openDialog, setNav, useStore } from './store'
+import { getState, goBack, goForward, navigate, openDialog, setNav, useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
 import { Lightbox } from './components/Lightbox'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
+import { VaultPage } from './components/Vault'
 import { UsagePage } from './components/Usage'
 import { MemoryPage } from './components/Memory'
 import { WikiView } from './components/Wiki'
 import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
+import { BoardPage } from './components/Board'
 import { OrgPage } from './components/OrgChart'
 import { Onboarding } from './components/Onboarding'
 import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
 import { MissionsPage } from './components/Missions'
+import { Hub, hubTab } from './components/Hubs'
+import { DocumentsView } from './components/docs/Documents'
 import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
 import { AgentCardLayer } from './components/AgentCard'
@@ -30,8 +34,10 @@ export function App(): ReactNode {
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
   const guest = useStore(guestWelcome)
-  const mac = useStore((s) => s.platform === 'mac')
+  // A server's page in the desktop app on a Mac: the window's buttons are over it, as over the app's own.
+  const mac = useStore((s) => s.platform === 'mac') || window.tucano?.places?.os === 'darwin'
   const navOpen = useStore((s) => s.navOpen)
+  const tab = hubTab(view)
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
@@ -46,7 +52,7 @@ export function App(): ReactNode {
     else document.documentElement.dataset['theme'] = theme
   }, [theme])
 
-  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings (Ctrl off a Mac)
+  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings · ⌘[ back · ⌘] forward (Ctrl off a Mac)
   useEffect(() => {
     const keys = (e: KeyboardEvent): void => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
@@ -56,6 +62,8 @@ export function App(): ReactNode {
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
       else if (e.key === 'n' && !e.shiftKey) openDialog({ kind: 'new-channel' })
       else if (e.key === ',') navigate({ kind: 'settings' })
+      else if (e.key === '[') goBack()
+      else if (e.key === ']') goForward()
       else if (/^[1-9]$/.test(e.key) && channels[Number(e.key) - 1]) navigate({ kind: 'conversation', id: channels[Number(e.key) - 1]!.id })
       else return
       e.preventDefault()
@@ -84,7 +92,7 @@ export function App(): ReactNode {
   if (view.kind === 'tuca')
     return (
       <>
-        <Onboarding build from={view.from} />
+        <Onboarding key={view.making ? 'making' : 'tuca'} build from={view.from} making={view.making} />
         <Dialogs />
         <Toasts />
         <CoreDown />
@@ -105,14 +113,23 @@ export function App(): ReactNode {
         {view.kind === 'agent' && <AgentPage key={view.id} id={view.id} />}
         {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
         {view.kind === 'approvals' && <ApprovalsPage />}
-        {view.kind === 'usage' && <UsagePage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
-        {view.kind === 'memory' && <MemoryPage />}
-        {view.kind === 'wiki' && <WikiView />}
-        {view.kind === 'routines' && <RoutinesPage />}
-        {view.kind === 'skills' && <SkillsPage />}
-        {view.kind === 'report' && <ReportPage />}
+        {view.kind === 'vault' && <VaultPage tab={view.tab} />}
+        {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
+        {tab && (
+          <Hub tab={tab}>
+            {tab === 'memory' && <MemoryPage />}
+            {tab === 'wiki' && <WikiView />}
+            {tab === 'skills' && <SkillsPage />}
+            {tab === 'documents' && <DocumentsView />}
+            {tab === 'routines' && <RoutinesPage />}
+            {tab === 'report' && <ReportPage />}
+            {tab === 'usage' && <UsagePage />}
+          </Hub>
+        )}
+        {view.kind === 'wiki' && !tab && <WikiView />}
         {view.kind === 'org' && <OrgPage />}
+        {view.kind === 'board' && <BoardPage />}
         {view.kind === 'settings' && <SettingsPage />}
         {view.kind === 'missions' && <MissionsPage />}
       </main>

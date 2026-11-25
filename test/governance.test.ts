@@ -72,7 +72,7 @@ const agent = (grant: GrantLevel): Agent => ({
 function runner(plan: (turn: Turn, tools: string[]) => Plan, onDb: Db = db): Runner {
   const r = new Runner({
     db: onDb,
-    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
     settings: async () => settings,
     emit: (e) => events.push(e),
     workDir: join(dir, 'work'),
@@ -104,7 +104,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   events = []
   seen = { turns: [], tools: [], results: [], alwaysLoad: [] }
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: (e) => events.push(e), openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })
@@ -160,7 +160,7 @@ describe('grants', () => {
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
     await r.send('d1', 'oi')
     await r.idle()
-    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'propor_agente', 'propor_time', 'propor_ajuste', 'propor_rotina', 'propor_canal', 'agendar_rotina', 'cancelar_rotina', 'tarefas__list_tasks']) // it can ask for more, not take it
+    expect(seen.tools[0]).toEqual(['ask_user', 'next_steps', 'pedir_acesso', 'propor_agente', 'propor_time', 'propor_ajuste', 'propor_rotina', 'propor_canal', 'agendar_rotina', 'cancelar_rotina', 'tarefas__list_tasks']) // it can ask for more, not take it
     // Claude Code keeps the app's own tools in the prompt; the connector's wait behind tool search.
     expect(seen.alwaysLoad[0]).toEqual(seen.tools[0]!.filter((t) => !t.startsWith('tarefas__')))
     expect(seen.results[0]).toMatchObject({ isError: true })
@@ -320,7 +320,7 @@ describe('approvals', () => {
     }
     r = new Runner({
       db,
-      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+      engines: { claude: engine, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
       settings: async () => settings,
       emit: (e) => events.push(e),
       workDir: join(dir, 'work'),
@@ -364,7 +364,7 @@ describe('pause and resume', () => {
         else yield { type: 'done', text: 'feito', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
       }
     }
-    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, antigravity: failing, cursor: failing, grok: failing, cline: failing, hermes: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
+    const r = new Runner({ db, engines: { claude: failing, codex: failing, opencode: failing, pi: failing, antigravity: failing, cursor: failing, grok: failing, cline: failing, hermes: failing, endpoint: failing }, settings: async () => settings, emit: (e) => events.push(e), workDir: join(dir, 'work'), gateway, connectors, routines })
     runnerRef.current = r
     await r.send('d1', 'oi')
     await r.idle()
@@ -487,7 +487,7 @@ describe('pausing and attributing work', () => {
     db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
     const r = new Runner({
       db,
-      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes') },
+      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint') },
       settings: async () => settings,
       emit: () => {},
       workDir: join(dir, 'work')

@@ -1,0 +1,76 @@
+# The server image (Dockerfile, docs/server.md) on GitHub's registry: ghcr.io/eduwxyz/tucano, tagged
+# with the version and `latest`, for x64 and ARM64. It's built when a release is published, each
+# architecture on a runner of its own (no emulation), then joined under one tag. Run it by hand to
+# build an existing release again (`ref` builds it from another commit, for a release from before the image).
+name: Docker image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release tag to build (v0.2.35)'
+        required: true
+      ref:
+        description: 'What to build it from, when not the tag itself (main)'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/tucano
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || env.TAG }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push ${{ matrix.arch }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.TAG }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.title=Tucano
+            org.opencontainers.image.description=Tucano on a server: a team of AI agents you use from a browser or the phone apps
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: One tag for both architectures
+        run: |
+          v="${TAG#v}"
+          docker buildx imagetools create -t "$IMAGE:$v" -t "$IMAGE:latest" "$IMAGE:$TAG-amd64" "$IMAGE:$TAG-arm64"
+          docker buildx imagetools inspect "$IMAGE:$v"

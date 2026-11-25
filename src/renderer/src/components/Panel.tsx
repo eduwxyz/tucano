@@ -1,14 +1,14 @@
 // What agents make on their computers, in the chat: artifact cards and
 // service cards inside messages, and the side panel that opens them.
 import { L, locale } from '../../../shared/lang'
-import { useEffect, useState, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
-import { safeUrl } from '../links'
-import remarkGfm from 'remark-gfm'
-import { agentById, amAdmin, amOwner, getState, openLightbox, artifactUrl, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
+import { useState, type ReactNode } from 'react'
+import { agentById, amAdmin, amOwner, canSaveArtifact, getState, openLightbox, artifactUrl, saveArtifact, saveLabel, browserAction, browserInput, browserOf, reachable, windowless, computerOf, openExternal, openPanel, closePanel, widenPanel, revealArtifact, stopService, useFrame, useStore, workingAgents, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon, ownColor, type IconName } from './ui'
 import { PanelResize } from './SidebarResize'
+import { bytes, FileViewer, parseCsv } from './FileViewer'
+import { SaveToDocs } from './docs/SaveToDocs'
+import { pathText, useDocs, useSavedArtifacts } from './docs/useDocs'
 
 const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
   image: L('Imagem', 'Image'),
@@ -21,38 +21,67 @@ const KIND_LABEL = (): Record<Artifact['kind'], string> => ({
   file: L('Arquivo', 'File')
 })
 
-export const bytes = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
+export { bytes, parseCsv }
 
 // The window's size, with the conversation's other images a key away.
 function showImages(a: Artifact): void {
   const images = getState().artifacts.filter((x) => x.kind === 'image' && x.conversationId === a.conversationId)
-  openLightbox(images.map((x) => ({ url: artifactUrl(x), title: x.title })), Math.max(0, images.findIndex((x) => x.id === a.id)))
+  openLightbox(images.map((x) => ({ url: artifactUrl(x), title: x.title, artifact: { id: x.id, name: x.name } })), Math.max(0, images.findIndex((x) => x.id === a.id)))
 }
 
 export function ArtifactCard({ id }: { id: string }): ReactNode {
   const a = useStore((s) => s.artifacts.find((x) => x.id === id))
   const open = useStore((s) => s.panel?.kind === 'artifact' && s.panel.id === id)
+  const canSave = useStore(canSaveArtifact)
+  const kept = useSavedArtifacts()[id]
+  const { tree } = useDocs()
   if (!a) return null
+  const save = canSave && (
+    <button className="artifact-card__open" title={a.name} onClick={() => saveArtifact(a)}>
+      {saveLabel()}
+    </button>
+  )
   if (a.kind === 'image')
     return (
-      <button className="artifact-image" onClick={() => showImages(a)} title={a.title}>
-        <img src={artifactUrl(a)} alt={a.title} />
-        <span className="artifact-image__caption">{a.title}</span>
-      </button>
-    )
-  return (
-    <button className={`artifact-card ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'artifact', id })}>
-      <span className="artifact-card__icon">
-        <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
-      </span>
-      <span className="artifact-card__text">
-        <strong>{a.title}</strong>
-        <span className="muted small">
-          {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
+      <div className="artifact-image">
+        <button className="artifact-image__show" onClick={() => showImages(a)} title={a.title}>
+          <img src={artifactUrl(a)} alt={a.title} />
+        </button>
+        <span className="artifact-image__caption">
+          <span className="grow">{a.title}</span>
+          {save}
         </span>
-      </span>
-      <span className="artifact-card__open">{L('Abrir', 'Open')}</span>
-    </button>
+      </div>
+    )
+  // On a server, a file no browser shows (a .docx, a .zip) is only good downloaded: the panel would be empty.
+  const onlySave = windowless() && a.kind === 'file'
+  const show = (): void => (onlySave ? saveArtifact(a) : openPanel({ kind: 'artifact', id }))
+  return (
+    <div className={`artifact-card ${open ? 'is-open' : ''}`}>
+      <button className="artifact-card__main" onClick={show}>
+        <span className="artifact-card__icon">
+          <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
+        </span>
+        <span className="artifact-card__text">
+          <strong>{a.title}</strong>
+          <span className="muted small">
+            {KIND_LABEL()[a.kind]} · {a.name} · {bytes(a.size)}
+          </span>
+          {kept && (
+            // On its own line: at the end of the line above it was the first thing a narrow chat cut off.
+            <span className="small artifact-card__kept">
+              <Icon name="check" size={12} /> {L('Guardado em', 'Kept in')} {(tree && pathText(tree, kept.folderId)) || 'Documentos'}
+            </span>
+          )}
+        </span>
+      </button>
+      {!onlySave && (
+        <button className="artifact-card__open" onClick={show}>
+          {L('Abrir', 'Open')}
+        </button>
+      )}
+      {save}
+    </div>
   )
 }
 
@@ -366,6 +395,17 @@ function BrowserPanel({ agentId }: { agentId: string }): ReactNode {
   )
 }
 
+// The panel over the whole page, for reading or working in it at full size, and back beside the conversation.
+export function WidenButton(): ReactNode {
+  const wide = useStore((s) => s.panelWide)
+  const label = wide ? L('Voltar pro lado da conversa', 'Back beside the conversation') : L('Expandir', 'Expand')
+  return (
+    <button className={`icon-btn ${wide ? 'is-active' : ''}`} title={label} aria-label={label} aria-pressed={wide} onClick={() => widenPanel(!wide)}>
+      <Icon name={wide ? 'shrink' : 'expand'} size={14} />
+    </button>
+  )
+}
+
 export function SidePanel(): ReactNode {
   const panel = useStore((s) => s.panel)
   const artifact = useStore((s) => (s.panel?.kind === 'artifact' ? s.artifacts.find((a) => a.id === (s.panel as { id: string }).id) : undefined))
@@ -374,20 +414,29 @@ export function SidePanel(): ReactNode {
   )
   const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
   const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
+  const canSave = useStore(canSaveArtifact)
   const [reload, setReload] = useState(0)
+  const wide = useStore((s) => s.panelWide)
+  const under = useStore((s) => !!s.panelUnder)
   if (!panel || panel.kind === 'thread') return null // a thread is drawn by its conversation
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? L(`Navegador de ${browserName ?? 'agente'}`, `${browserName ?? 'Agent'}'s browser`) : '')
   return (
-    <aside className={`side-panel side-panel--${panel.kind}`}>
-      <PanelResize />
+    <aside className={`side-panel side-panel--${panel.kind} ${wide ? 'is-wide' : ''}`}>
+      {!wide && <PanelResize />}
       <header className="side-panel__head">
         <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
         {service?.url && <code className="side-panel__url">{reachable(service.url)}</code>}
         {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
         <span className="grow" />
+        {artifact && <SaveToDocs artifact={artifact} />}
         {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
+        {artifact && canSave && (
+          <button className="btn btn--sm btn--ghost" title={artifact.name} onClick={() => saveArtifact(artifact)}>
+            <Icon name="down" size={14} /> {saveLabel()}
+          </button>
+        )}
         {service?.url && (
           <>
             <button className="icon-btn" title={L('Recarregar', 'Reload')} onClick={() => setReload((n) => n + 1)}>
@@ -398,7 +447,8 @@ export function SidePanel(): ReactNode {
             </button>
           </>
         )}
-        <button className="icon-btn" title={L('Fechar', 'Close')} onClick={() => openPanel(null)}>
+        <WidenButton />
+        <button className="icon-btn" title={under ? L('Voltar para a thread', 'Back to the thread') : L('Fechar', 'Close')} onClick={closePanel}>
           <Icon name="x" size={14} />
         </button>
       </header>
@@ -419,55 +469,26 @@ export function SidePanel(): ReactNode {
 }
 
 function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
-  const url = artifactUrl(artifact)
-  const [text, setText] = useState<string | null>(null)
-  const textual = artifact.kind === 'markdown' || artifact.kind === 'csv' || artifact.kind === 'text'
-  useEffect(() => {
-    setText(null)
-    if (textual)
-      void call('artifactText', { id: artifact.id }).then(
-        (t) => setText(t ?? L('(o arquivo não abriu: pode ter sido movido ou apagado. Peça pro agente gerar de novo.)', '(the file didn’t open: it may have been moved or deleted. Ask the agent to make it again.)')),
-        () => setText(L('(o arquivo não abriu: pode ter sido movido ou apagado. Peça pro agente gerar de novo.)', '(the file didn’t open: it may have been moved or deleted. Ask the agent to make it again.)'))
-      )
-  }, [artifact.id, textual])
-
-  switch (artifact.kind) {
-    case 'image':
-      return (
-        <div className="side-panel__image">
-          <img src={url} alt={artifact.title} />
-        </div>
-      )
-    case 'video':
-      return (
-        <div className="side-panel__image">
-          <video src={url} controls preload="metadata" />
-        </div>
-      )
-    case 'html':
-      return <iframe src={url} sandbox="allow-scripts allow-popups" title={artifact.title} />
-    case 'pdf':
-      return <iframe src={url} title={artifact.title} />
-    case 'markdown':
-      return <div className="side-panel__doc md">{text !== null && <Markdown urlTransform={safeUrl} remarkPlugins={[remarkGfm]}>{text}</Markdown>}</div>
-    case 'csv':
-      return <div className="side-panel__doc">{text !== null && <CsvTable text={text} tab={artifact.name.endsWith('.tsv')} />}</div>
-    case 'text':
-      return <pre className="side-panel__text">{text}</pre>
-    default:
-      return (
-        <div className="side-panel__empty">
-          <div className="empty">
-            <Icon name="clip" size={22} />
-            <p>{L('Sem visualização pra esse tipo de arquivo', 'No preview for this kind of file')}</p>
-            <p className="muted">
-              {artifact.name} · {bytes(artifact.size)}
-            </p>
-            <RevealArtifact artifactId={artifact.id} />
-          </div>
-        </div>
-      )
-  }
+  return (
+    <FileViewer
+      url={artifactUrl(artifact)}
+      kind={artifact.kind}
+      name={artifact.name}
+      title={artifact.title}
+      size={artifact.size}
+      loadText={() => call('artifactText', { id: artifact.id })}
+      fallback={
+        // On a server the file isn't on this computer: it comes down instead of showing in a folder.
+        windowless() ? (
+          <button className="btn btn--sm btn--primary side-panel__reveal" onClick={() => saveArtifact(artifact)}>
+            <Icon name="down" size={14} /> {L('Baixar', 'Download')}
+          </button>
+        ) : (
+          <RevealArtifact artifactId={artifact.id} />
+        )
+      }
+    />
+  )
 }
 
 // Only the owner at the computer's own window: a member or a web page would open a Finder on a screen it can't see.
@@ -485,52 +506,5 @@ function RevealArtifact({ artifactId }: { artifactId: string }): ReactNode {
     <button className="btn btn--sm side-panel__reveal" onClick={() => revealArtifact(artifactId)}>
       <Icon name="folder" size={14} /> {label}
     </button>
-  )
-}
-
-// Enough CSV for a preview: quoted fields, escaped quotes, first 500 rows.
-export function parseCsv(text: string, sep = ','): string[][] {
-  const rows: string[][] = []
-  let row: string[] = []
-  let field = ''
-  let quoted = false
-  for (let i = 0; i < text.length && rows.length < 500; i++) {
-    const c = text[i]!
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') (field += '"'), i++
-      else if (c === '"') quoted = false
-      else field += c
-    } else if (c === '"') quoted = true
-    else if (c === sep) row.push(field), (field = '')
-    else if (c === '\n' || c === '\r') {
-      if (c === '\r' && text[i + 1] === '\n') i++
-      row.push(field), rows.push(row), (row = []), (field = '')
-    } else field += c
-  }
-  if (field || row.length) row.push(field), rows.push(row)
-  return rows
-}
-
-function CsvTable({ text, tab }: { text: string; tab: boolean }): ReactNode {
-  const [head = [], ...rows] = parseCsv(text, tab ? '\t' : ',')
-  return (
-    <table className="csv">
-      <thead>
-        <tr>
-          {head.map((h, i) => (
-            <th key={i}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
-            {r.map((c, j) => (
-              <td key={j}>{c}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }

@@ -8,8 +8,8 @@ import { useWorkspaceList } from './Workspaces'
 
 const PARTS = (): Record<WorkspacePart, { label: string; about: string }> => ({
   general: { label: L('Configurações gerais', 'General settings'), about: L('Seu nome, o idioma, os modelos do roteador e da memória, limites, horário de silêncio e voz.', 'Your name, the language, the router and memory models, limits, quiet hours and voice.') },
-  context: { label: L('Contexto', 'Context'), about: L('O texto que entra em toda conversa: quem você é, o que faz, o que importa.', 'The text that goes in every conversation: who you are, what you do, what matters.') },
-  wiki: { label: L('Wiki', 'Wiki'), about: L('A mesma wiki, não uma cópia: o que um workspace guarda o outro lê. Sem ela, começa com uma wiki vazia.', 'The same wiki, not a copy: what one workspace keeps the other reads. Without it, it starts with an empty wiki.') },
+  context: { label: L('Contexto', 'Context'), about: L('O texto que entra em toda conversa: quem você é, o que faz, o que importa.', "Shared instructions included in every conversation.") },
+  wiki: { label: L('Wiki', 'Wiki'), about: L('A mesma wiki, não uma cópia: o que um workspace guarda o outro lê. Sem ela, começa com uma wiki vazia.', "Share the same wiki folder across both workspaces. Otherwise, start with an empty wiki.") },
   agents: { label: L('Agentes', 'Agents'), about: L('Instruções, modelos, computadores e pastas emprestadas, sem as memórias nem os arquivos.', 'Instructions, models, computers and lent folders, without their memories or files.') },
   channels: { label: L('Canais', 'Channels'), about: L('Nomes, temas e quem está em cada um, sem as mensagens.', 'Names, topics and who is in each, without the messages.') },
   skills: { label: L('Skills', 'Skills'), about: L('Sem os agentes, as de agentes específicos vêm arquivadas.', 'Without the agents, those of specific agents come archived.') },
@@ -91,7 +91,7 @@ export function WorkspaceManager({ onClose, create = false }: { onClose: () => v
           : draft.parts.agents
             ? L('Com os agentes, um workspace já configurado pula a introdução.', 'With the agents, a set-up workspace skips the introduction.')
             : L('Sem os agentes, começa pela introdução, já com o que veio.', 'Without the agents, it starts with the introduction, from what came.')}</p>
-        <p className="small muted">{L('Nunca vêm: mensagens, memórias, resumos, aprovações, histórico de uso, arquivos dos computadores, sessões do navegador e as contas extras do Claude Code e do Codex (na cópia, os agentes usam o login padrão). O Telegram fica no workspace padrão. Mudanças aqui não alteram o original; pastas emprestadas continuam sendo as mesmas.', 'Never coming: messages, memories, summaries, approvals, usage history, computers’ files, browser sessions and the extra Claude Code and Codex accounts (in the copy, agents use the usual sign-in). Telegram stays in the default workspace. Changes here don’t change the original; lent folders are still the same ones.')}</p>
+        <p className="small muted">{L('Nunca vêm: mensagens, memórias, resumos, aprovações, histórico de uso, arquivos dos computadores, sessões do navegador e as contas extras do Claude Code e do Codex (na cópia, os agentes usam o login padrão). O Telegram fica no workspace padrão. Mudanças aqui não alteram o original; pastas emprestadas continuam sendo as mesmas.', 'The copy excludes messages, memories, summaries, approvals, usage history, computer files, browser sessions and extra Claude Code and Codex accounts. Agents use the default sign-in. Telegram stays in the default workspace. Settings are independent; lent folders remain shared.')}</p>
         {error && <p className="field__error" role="alert">{error}</p>}
       </div>
       <footer className="modal__foot">

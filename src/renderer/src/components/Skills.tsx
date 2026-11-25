@@ -63,7 +63,7 @@ function Skills({ admin }: { admin: boolean }): ReactNode {
 
   if (place.kind === 'review' && pending.length > 0)
     return (
-      <Sheet back={{ label: 'Skills', onClick: toList }} title={L('Propostas', 'Proposals')} lede={L('Dos agentes. Só entram em uso se você aprovar.', 'From the agents. They only go into use if you approve.')}>
+      <Sheet back={{ label: 'Skills', onClick: toList }} title={L('Propostas', 'Proposals')} lede={L('Dos agentes. Só entram em uso se você aprovar.', "Proposed by the agents. They’re used only once you approve.")}>
         {pending.map((k) => (
           <Proposal key={k.id} proposal={k} />
         ))}
@@ -73,7 +73,7 @@ function Skills({ admin }: { admin: boolean }): ReactNode {
   return (
     <Sheet
       title="Skills"
-      lede={L('Receitas que os agentes seguem pra um tipo de tarefa.', 'Recipes the agents follow for a kind of task.')}
+      lede={L('Receitas que os agentes seguem pra um tipo de tarefa.', "Reusable instructions for specific tasks.")}
       actions={
         admin && (
           <>
@@ -100,7 +100,7 @@ function Skills({ admin }: { admin: boolean }): ReactNode {
       {active.length === 0 ? (
         <div className="read-empty">
           <p>{L('Nenhuma skill em uso ainda.', 'No skills in use yet.')}</p>
-          <p>{L('Escreva uma, traga uma das que você já usa no terminal, ou deixe os agentes proporem: quando resolverem algo em vários passos, eles sugerem guardar o caminho.', 'Write one, bring one you already use in the terminal, or let the agents propose: when they solve something in several steps, they suggest keeping the path.')}</p>
+          <p>{L('Escreva uma, traga uma das que você já usa no terminal, ou deixe os agentes proporem: quando resolverem algo em vários passos, eles sugerem guardar o caminho.', "Create a skill, import one from your CLI, or review reusable workflows proposed by agents.")}</p>
         </div>
       ) : (
         <section className="read-group">

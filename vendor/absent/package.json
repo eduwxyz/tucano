@@ -1,0 +1,8 @@
+{
+  "name": "tucano-absent",
+  "version": "0.0.0",
+  "description": "Stands in for optional packages Tucano never uses (the Microsoft connector's Azure Key Vault support): about 27 MB the app doesn't carry.",
+  "main": "index.js",
+  "license": "MIT",
+  "private": true
+}
