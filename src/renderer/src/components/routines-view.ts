@@ -22,10 +22,15 @@ export const FAILED: ReadonlySet<RunStatus> = new Set(['failed', 'limit_reached'
 export const WAITS: ReadonlySet<RunStatus> = new Set(['waiting_approval', 'waiting_input'])
 const OK: ReadonlySet<RunStatus> = new Set(['done'])
 
+// A routine the person turned off, as against one that turned itself off by running its single time:
+// it keeps its place in the week, greyed, so it can be turned back on from its own panel.
+export const isOff = (o: Pick<Occ, 'routine'>): boolean => !!o.routine && !o.routine.enabled && !finished(o.routine)
+
 // How one run looks as a tick or a dot: done, failed, waiting on me, running, still to come, or stopped.
 export type Mark = 'ok' | 'bad' | 'wait' | 'live' | 'todo' | 'off'
-export function markOf(o: Pick<Occ, 'status' | 'upcoming'>): Mark {
-  if (o.upcoming || !o.status) return o.upcoming ? 'todo' : 'off'
+export function markOf(o: Pick<Occ, 'status' | 'upcoming' | 'routine'>): Mark {
+  if (o.upcoming) return isOff(o) ? 'off' : 'todo'
+  if (!o.status) return 'off'
   if (o.status === 'working') return 'live'
   if (FAILED.has(o.status)) return 'bad'
   if (WAITS.has(o.status)) return 'wait'
@@ -38,7 +43,7 @@ export function markOf(o: Pick<Occ, 'status' | 'upcoming'>): Mark {
 export const allDay = (r: Pick<Routine, 'schedule' | 'trigger'>): boolean => !r.trigger && !r.schedule.once && r.schedule.date === undefined && timesOf(r.schedule).length > 1
 
 // The week's occurrences, split: one-time ones in the hour grid, several-a-day ones in the strip.
-// A run of a deleted routine stays in the grid (there's no schedule left to say how often it ran).
+// Each one carries its routine: a deleted routine's runs are dropped before they reach here.
 export function splitWeek<T extends Pick<Occ, 'routine'>>(occs: T[]): { grid: T[]; strip: T[] } {
   const grid: T[] = []
   const strip: T[] = []
@@ -117,13 +122,7 @@ export function listSections(routines: Routine[], runs: Occ[], now: number): Sec
   return { needs, next, off }
 }
 
-// The first line of a reply, without Markdown marks: what the list shows of the last result.
-export const firstLine = (text: string): string =>
-  (text.split('\n').find((l) => l.trim()) ?? '')
-    .replace(/^[#>\-*\s]+/, '')
-    .replace(/[*_`]+/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .trim()
+export { firstLine } from '../../../shared/titles'
 
 // ---------- words ----------
 

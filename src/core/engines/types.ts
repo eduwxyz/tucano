@@ -31,10 +31,14 @@ export interface Usage {
   cacheReadTokens: number
   outputTokens: number
   apiCostUsd?: number
+  responseModel?: string // the model id the harness says answered (claude-sonnet-4-5-…), when it says; a receipt's `model` stays the one asked for
 }
 
 export type EngineEvent =
   | { type: 'text'; delta: string }
+  // The model's own reasoning, when the CLI streams it apart from the reply (Pi's
+  // thinking_delta). Never part of the message text: it is shown as it goes, dim and small.
+  | { type: 'thinking'; delta: string }
   // Running total for the turn so far (everything sent, cache reads included, plus output)
   // and how much of it came from the cache, used to enforce limits mid-turn.
   | { type: 'progress'; tokens: number; cacheRead?: number }

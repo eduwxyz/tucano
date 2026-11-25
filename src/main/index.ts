@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { verifyLocalUrl } from '../core/local-paths'
+import { openSigned, verifyLocalUrl } from '../core/local-paths'
+import { localResponse, localType } from './local-file'
 import { readInstall } from '../core/feedback'
 import { downloadsFolder } from '../core/downloads'
 import { app, BrowserWindow, clipboard, session, type MediaAccessPermissionRequest, dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, Menu, MessageChannelMain, nativeImage, nativeTheme, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, Tray, utilityProcess, type UtilityProcess } from 'electron'
@@ -11,11 +12,11 @@ import { pathToFileURL } from 'node:url'
 import { homedir, hostname } from 'node:os'
 import { L, langOf, setLang, type Lang } from '../shared/lang'
 import { chirpOf, type BrowserOp, type Settings } from '../shared/types'
-import { isAppPage, isOutsideLink } from '../shared/links'
+import { appMayCheck, appMayHave, isAppPage, isOutsideLink } from '../shared/links'
 import { Browsers } from './browser'
 import { Servers } from './servers'
 import { thisDevice } from './redeem'
-import { serverNote } from '../shared/servers'
+import { placeOf, serverNote, type DesktopPlaces } from '../shared/servers'
 import { bundleOf, moveFromAgentDesk, type Moved } from './migrate'
 import { Updates } from './updates'
 import { Workspaces } from './workspaces'
@@ -77,7 +78,11 @@ let registry: Workspaces
 type Runtime = { child: UtilityProcess; browsers: Browsers; ready: Promise<void>; summary: WorkspaceSummary; busy: boolean; wikiFolder: string }
 const cores = new Map<string, Runtime>()
 const workspaceList = (): WorkspaceList => ({ selected: registry.selected().id, workspaces: registry.list().map((w) => cores.get(w.id)?.summary ?? { id: w.id, name: w.name, isDefault: w.isDefault, paused: false, unread: 0, approvals: 0, status: 'starting' }) })
-const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()) }
+const publishWorkspaces = (): void => { mainWindow?.webContents.send('workspaces', workspaceList()); tellPlaces() }
+// A server's page in this window lists this computer's workspaces and the servers in its own menu
+// (src/preload/server.ts): told when their names or which is on screen change, it asks again.
+let toldPlaces = ''
+let tellPlaces = (): void => {} // set once the servers are (below)
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
@@ -95,7 +100,7 @@ function startCore(workspace: Workspace): Runtime {
   }
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: `tucano-core-${workspace.id}`,
-    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
+    env: { ...process.env, TUCANO_DATA: workspace.dataDir, TUCANO_INSTALL_DIR: dataDir(), TUCANO_WORKSPACE_ID: workspace.id, ...(workspace.isDefault ? {} : { TUCANO_WORKSPACE_LABEL: workspace.name }), TUCANO_DEFAULT_WORKSPACE: workspace.isDefault ? '1' : '0', TUCANO_THEME: registry.theme() ?? (workspace.isDefault ? '' : 'system'), TUCANO_WEBHOOK_PORT: String(workspace.webhookPort), TUCANO_GIT_PORT: String(workspace.gitPort), TUCANO_MCP_PORT: String(workspace.webhookPort + 100), TUCANO_PACKAGED: app.isPackaged ? '1' : '0', TUCANO_VERSION: app.getVersion(), TUCANO_WHISPER: whisperDir(), TUCANO_LOCAL_KEY: localKey, TUCANO_LOCALE: systemLocale ?? '', ...(systemProxy ? { TUCANO_SYSTEM_PROXY: systemProxy } : {}) }
   })
   let resolve!: () => void
   let reject!: (e: Error) => void
@@ -470,13 +475,12 @@ function serveArtifact(req: Request): Promise<Response> | Response {
   if (u.host === 'doc') return serveDoc(u)
   if (u.host === 'local') {
     // A file the core checked and signed for the window: see resolveLocal.
-    const path = verifyLocalUrl(localKey, u)
-    if (!path) return new Response('not found', { status: 404 })
-    return net.fetch(pathToFileURL(path).toString(), { headers: req.headers }).then((r) => {
-      const headers = new Headers(r.headers)
-      headers.set('Content-Security-Policy', 'sandbox')
-      return new Response(r.body, { status: r.status, headers })
-    })
+    const signed = verifyLocalUrl(localKey, u)
+    // Read from one descriptor, checked to be the very file that was signed: an agent can't put a
+    // link in its place after the core looked at it.
+    const opened = signed && openSigned(signed)
+    if (!signed || !opened) return new Response('not found', { status: 404 })
+    return localResponse(req, opened, localType(signed.path))
   }
   const [id = '', name = ''] = u.pathname.slice(1).split('/')
   const dir = join(registry.selected().dataDir, 'artifacts', id)
@@ -856,6 +860,7 @@ const servers = new Servers({
   changed: () => {
     setMenu()
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers')
+    tellPlaces()
   },
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
   showLocal: () => showWindow(),
@@ -880,6 +885,36 @@ function machineName(): string {
   machine ||= thisDevice(hostname(), process.platform).name.replace(/-/g, ' ')
   return machine
 }
+// What a server's page lists in its workspace menu: names and ids only, never a token or an address.
+function desktopPlaces(): DesktopPlaces {
+  return {
+    workspaces: workspaceList().workspaces.map((w) => ({ id: w.id, name: w.name })),
+    servers: servers.summary().map((s) => ({ id: s.id, name: s.name, open: s.open }))
+  }
+}
+tellPlaces = () => {
+  const now = JSON.stringify(desktopPlaces())
+  if (now === toldPlaces) return
+  toldPlaces = now
+  servers.tell('server:places', null)
+}
+ipcMain.handle('server:places', (e) => (fromServer(e) ? desktopPlaces() : null))
+// Picked in a server's menu: one of this computer's workspaces (its Tucano on screen, switched to it),
+// or a server. The page only names where; nothing is changed but what's on screen.
+ipcMain.on('server:go', (e, raw: unknown) => {
+  const place = fromServer(e) ? placeOf(raw) : null
+  if (!place) return
+  if (place.kind === 'server') return void servers.show(place.id).catch(console.error)
+  if (!registry.list().some((w) => w.id === place.id)) return
+  servers.showLocal()
+  void switchWorkspace(place.id).catch(console.error)
+})
+// The page draws the way back itself (its workspace menu is on screen), or stopped: the bar goes or comes back.
+ipcMain.on('server:own', (e, on: unknown) => {
+  const frame = e.senderFrame
+  const id = frame && frame === e.sender.mainFrame ? servers.serverOf(e.sender, frame.url) : undefined
+  if (id && typeof on === 'boolean') servers.own(id, on)
+})
 // Settings › Servers, on the app's own page only (fromApp): the list without tokens, pairing with a
 // pasted link, opening and forgetting.
 ipcMain.handle('servers:list', (e) => (fromApp(e) ? servers.summary() : []))
@@ -985,13 +1020,15 @@ if (moved === 'old-app-open' || moved === 'keychain-denied') {
     app.exit(0)
   })
 } else if (primary) app.whenReady().then(() => {
-  // Dictation: audio, for the app's own page. A service open in the side panel or anything else asks in vain.
+  // Only the app's own page, in its main frame, is given anything (dictation: audio only). A service open in
+  // the side panel, a frame, or anything else asks in vain; the system opens only links that may leave the app.
   session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) => {
-    if (permission !== 'media') return done(true)
-    const media = details as MediaAccessPermissionRequest
-    const own = !!BrowserWindow.fromWebContents(contents) && (media.requestingUrl ?? '').startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'file://')
-    done(own && !!media.mediaTypes?.length && media.mediaTypes.every((t) => t === 'audio'))
+    const d = details as MediaAccessPermissionRequest & { externalURL?: string }
+    done(appMayHave({ permission, requestingUrl: d.requestingUrl, isMainFrame: d.isMainFrame, fromWindow: !!BrowserWindow.fromWebContents(contents), mediaTypes: d.mediaTypes, externalURL: d.externalURL }, APP_PAGE))
   })
+  session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) =>
+    appMayCheck({ permission, requestingUrl: details.requestingUrl, isMainFrame: details.isMainFrame, fromWindow: !!contents && !!BrowserWindow.fromWebContents(contents) }, APP_PAGE)
+  )
   setMenu()
   protocol.handle('tucano', serveArtifact)
   // This computer's install (core/feedback.ts), for every workspace: made once. Nothing here yet is a new
@@ -1042,7 +1079,10 @@ app.on('before-quit', () => {
   quitting = true
   void phone?.quit()
   servers.quit()
-  for (const r of cores.values()) r.browsers.quit()
+  for (const r of cores.values()) {
+    r.browsers.quit()
+    r.child.postMessage({ type: 'flush-traces' }) // the last spans leave while the app is closing
+  }
 })
 
 app.on('will-quit', () => {
