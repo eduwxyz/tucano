@@ -412,6 +412,63 @@ describe('changing folders', () => {
   })
 })
 
+// The wiki is the whole team's, and every agent's that reads it: a document goes there from where it is
+// kept, with no second upload, and only when every person of the workspace sees it.
+describe('on the way to the wiki', () => {
+  const wide = (name: string): void => {
+    const f = folder(name)
+    docs.saveFolder(ana, { id: f.id, parentId: f.parentId, name: f.name, rule: f.rule, access: { everyone: 'view', people: {}, sectors: f.access?.sectors ?? {}, agents: {} } })
+  }
+
+  it('says which folders everyone sees, and takes a document only from one of them', async () => {
+    const company = await put(ana, 'Empresa', 'politica.md', 'reembolso em 30 dias')
+    const sector = await put(ana, 'Financeiro', 'contrato.md', 'valor do contrato')
+    expect(docs.tree(ana).forAll).toContain(folder('Empresa').id)
+    expect(docs.tree(ana).forAll).not.toContain(folder('Financeiro').id)
+    const got = docs.forWiki(ana, company.id)
+    expect(got.name).toBe('politica.md')
+    expect(got.data.toString('utf8')).toBe('reembolso em 30 dias')
+    // A member sends it too: they could read it and write it in the wiki by hand.
+    expect(docs.forWiki(maria, company.id).name).toBe('politica.md')
+    expect(await failure(() => docs.forWiki(ana, sector.id))).toBe('Só vai para a wiki um documento que o time todo vê. Este está numa pasta que nem todos veem.')
+  })
+
+  it('follows the folder: opened to everyone it may go, shared with only some it may not', async () => {
+    const doc = await put(ana, 'Financeiro', 'contrato.md', 'valor do contrato')
+    share('Financeiro', { maria: 'view', pedro: 'edit' })
+    expect(await failure(() => docs.forWiki(ana, doc.id))).toContain('nem todos veem') // lia doesn't see it
+    share('Financeiro', { maria: 'view', pedro: 'edit', lia: 'view' })
+    expect(docs.forWiki(ana, doc.id).name).toBe('contrato.md') // every member by name is everyone
+    share('Financeiro', {})
+    wide('Financeiro')
+    expect(docs.forWiki(maria, doc.id).name).toBe('contrato.md')
+    expect(docs.tree(maria).forAll).toContain(folder('Financeiro').id)
+  })
+
+  it("never takes one from a personal folder, a hidden one, the trash, or while it waits for a person's yes", async () => {
+    const mine = docs.tree(maria).folders.find((f) => f.privateTo === 'maria')!
+    const personal = await docs.add(maria, { folderId: mine.id, name: 'diario.md', data: Buffer.from('só meu') })
+    expect(await failure(() => docs.forWiki(maria, personal.id))).toContain('nem todos veem')
+    expect(docs.tree(maria).forAll).not.toContain(mine.id)
+    // Pedro doesn't see Financeiro: for him the document isn't there, whatever he asks of it.
+    const hidden = await put(ana, 'Financeiro', 'contrato.md', 'valor')
+    expect(await failure(() => docs.forWiki(pedro, hidden.id))).toBe(await failure(() => docs.forWiki(pedro, 'nao-existe')))
+    const company = await put(ana, 'Empresa', 'politica.md', 'reembolso')
+    docs.index.putDoc({ ...docs.index.doc(company.id)!, status: 'review' })
+    expect(await failure(() => docs.forWiki(ana, company.id))).toBe('Este documento ainda espera aprovação. Ele vai para a wiki depois de aprovado.')
+    docs.index.putDoc({ ...docs.index.doc(company.id)!, status: null })
+    docs.trash(ana, company.id)
+    expect(await failure(() => docs.forWiki(ana, company.id))).not.toBe('did not fail')
+  })
+
+  it("keeps, in the document's history, who sent it", async () => {
+    const doc = await put(ana, 'Empresa', 'politica.md', 'reembolso')
+    docs.sentToWiki(maria, doc.id)
+    const sent = docs.history(ana, doc.id).events.find((e) => e.action === 'sent-to-wiki')
+    expect(sent?.by).toBe('person:maria')
+  })
+})
+
 describe('versions, names and the trash', () => {
   it('keeps the old bytes readable when a new version comes', async () => {
     const doc = await put(ana, 'Financeiro', 'plano.md', 'versao um')

@@ -35,4 +35,7 @@ Cada novo guardar vira uma versão, com anotação. Em **Versões**, **Ver** mos
 ## O que entra
 PDF, Word (.docx), planilha (.xlsx, .csv), texto (.txt, .md, .json), página (.html) e imagem (png, jpg, gif, webp), até 20 MB. **Não entram** vídeo, áudio nem arquivo compactado. Word e Excel aparecem como texto; **Baixar** traz o original.
 
+## Mandar para a Wiki
+Depois de enviar um arquivo, o aviso traz **Mandar para a Wiki**; a mesma opção fica no **⋯** de cada arquivo. O curador lê o arquivo e escreve nas páginas, sem você enviar de novo. Só vale para arquivo numa pasta que o time todo vê, e depois de aprovado quando a pasta pede aprovação.
+
 Aprovação, rascunho, documento vivo, Chegada, prazos e perguntas aos documentos estão na página **documentos-aprovacao**.

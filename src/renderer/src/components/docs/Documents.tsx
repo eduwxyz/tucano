@@ -152,7 +152,7 @@ function Home({ tree, words, upload, q, lost }: { tree: DocsTree; words: AccessW
           onPick={async (folderId) => {
             const name = pathText(tree, folderId) || L('a pasta', 'the folder')
             navigate({ kind: 'documents', folder: folderId })
-            void upload.send(folderId, name, picked)
+            void upload.send(folderId, name, picked, tree.forAll.includes(folderId))
           }}
           onClose={() => setPicked(null)}
         />
@@ -176,7 +176,7 @@ function FolderCard({ tree, folder, words, upload }: { tree: DocsTree; folder: D
         // Dropped right on a folder: it is kept in that one, not sent to Chegada.
         e.preventDefault()
         if (tree.can[folder.id] !== 'edit') return toast(L('Você pode ver esta pasta, mas não guardar nela.', 'You can see this folder, but not save to it.'))
-        void upload.send(folder.id, folder.name, [...e.dataTransfer.files])
+        void upload.send(folder.id, folder.name, [...e.dataTransfer.files], tree.forAll.includes(folder.id))
       }}
     >
       <span className="dc-folder__top">

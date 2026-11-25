@@ -240,6 +240,7 @@ export interface Api {
   docText(p: { id: string; version?: number }): Promise<{ text: string }> // what the file says, for the viewer (the file itself is served at docUrl)
   docHistory(p: { id: string }): { versions: DocVersion[]; events: DocEvent[] }
   docRestoreVersion(p: { id: string; n: number }): Promise<Doc> // an older version's bytes become a new version
+  docToWiki(p: { id: string }): Promise<WikiSource> // the curator reads it into the wiki's pages, as a file dropped there; only from a folder everyone sees
   docSearch(p: { q: string; folderId?: string }): DocHit[]
   docByArtifact(): Record<string, { docId: string; folderId: string }> // artifacts kept as documents, for "Guardado em…" in the chat
   docDecide(p: { id: string; ok: boolean; note?: string; version?: number }): Promise<Doc> // approves what waits, or asks for changes (note required); the agent that made it is told

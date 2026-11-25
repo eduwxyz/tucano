@@ -3224,6 +3224,15 @@ const api: Handlers = {
   docText: ({ id, version }, ctx) => viaDocsAsync(() => docs.text(ctx.person, id, version)),
   docHistory: ({ id }, ctx) => viaDocs(() => docs.history(ctx.person, id)),
   docRestoreVersion: ({ id, n }, ctx) => viaDocsAsync(() => docs.restoreVersion(ctx.person, id, n)),
+  // The same road as a file dropped on the wiki (wikiAddFile), from where the file already is: no second upload.
+  docToWiki: async ({ id }, ctx) => {
+    const { name, data } = viaDocs(() => docs.forWiki(ctx.person, id))
+    const text = await extractFile(name, data)
+    const src = wiki.addSource({ title: cleanTitle(name) || name, text, kind: 'file', file: { name, data }, by: ctx.person.id, status: 'reading' })
+    bg(curator.ingest(src.id), 'wikiIngest')
+    docs.sentToWiki(ctx.person, id)
+    return src
+  },
   docSearch: ({ q, folderId }, ctx) => viaDocs(() => docs.search(ctx.person, q, folderId)),
   docByArtifact: (_p, ctx) => viaDocs(() => docs.docByArtifact(ctx.person)),
   docDecide: async ({ id, ok, note, version }, ctx) => {
