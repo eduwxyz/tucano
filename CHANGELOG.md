@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.49] - 2026-11-25
+
 > **Em português:**
 > - **Novo:** **Documentos**, uma aba nova em Conhecimento: pastas de arquivos que as pessoas e os agentes guardam, cada uma dizendo quem vê e quem pode guardar. O que um agente entrega deixa de ser um cartão perdido numa conversa: ele guarda numa pasta, o arquivo ganha versões, e numa pasta que pede aprovação fica esperando o seu sim. A **Chegada** recebe qualquer arquivo e o Tuca guarda na pasta certa. O que vai pra lixeira pode voltar; **Apagar de vez** é do dono ou de um admin (numa pasta pessoal, da própria pessoa) e fica registrado em Configurações › Atividade. A busca também responde perguntas a partir dos seus documentos, dizendo de qual arquivo tirou.
 > - **Novo:** **voltar e avançar** entre as telas, pelas setas no topo da barra lateral ou com ⌘[ e ⌘] (Ctrl no Windows e no Linux).
