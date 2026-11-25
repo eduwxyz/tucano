@@ -6,6 +6,7 @@ import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
 import { Lightbox } from './components/Lightbox'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage } from './components/Pages'
+import { VaultPage } from './components/Vault'
 import { UsagePage } from './components/Usage'
 import { MemoryPage } from './components/Memory'
 import { WikiView } from './components/Wiki'
@@ -17,6 +18,7 @@ import { OrgPage } from './components/OrgChart'
 import { Onboarding } from './components/Onboarding'
 import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
 import { MissionsPage } from './components/Missions'
+import { Hub, hubTab } from './components/Hubs'
 import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
 import { AgentCardLayer } from './components/AgentCard'
@@ -31,8 +33,10 @@ export function App(): ReactNode {
   const language = useStore((s) => s.settings.language)
   const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
   const guest = useStore(guestWelcome)
-  const mac = useStore((s) => s.platform === 'mac')
+  // A server's page in the desktop app on a Mac: the window's buttons are over it, as over the app's own.
+  const mac = useStore((s) => s.platform === 'mac') || window.tucano?.places?.os === 'darwin'
   const navOpen = useStore((s) => s.navOpen)
+  const tab = hubTab(view)
 
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'pt-BR'
@@ -85,7 +89,7 @@ export function App(): ReactNode {
   if (view.kind === 'tuca')
     return (
       <>
-        <Onboarding build from={view.from} />
+        <Onboarding key={view.making ? 'making' : 'tuca'} build from={view.from} making={view.making} />
         <Dialogs />
         <Toasts />
         <CoreDown />
@@ -106,13 +110,20 @@ export function App(): ReactNode {
         {view.kind === 'agent' && <AgentPage key={view.id} id={view.id} />}
         {view.kind === 'new-agent' && <AgentPage key={view.fromMessage ?? 'new'} draft={view.draft} fromMessage={view.fromMessage} />}
         {view.kind === 'approvals' && <ApprovalsPage />}
-        {view.kind === 'usage' && <UsagePage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
-        {view.kind === 'memory' && <MemoryPage />}
-        {view.kind === 'wiki' && <WikiView />}
-        {view.kind === 'routines' && <RoutinesPage />}
-        {view.kind === 'skills' && <SkillsPage />}
-        {view.kind === 'report' && <ReportPage />}
+        {view.kind === 'vault' && <VaultPage tab={view.tab} />}
+        {/* Conhecimento and Operação: one header with tabs over the page (Hubs.tsx). */}
+        {tab && (
+          <Hub tab={tab}>
+            {tab === 'memory' && <MemoryPage />}
+            {tab === 'wiki' && <WikiView />}
+            {tab === 'skills' && <SkillsPage />}
+            {tab === 'routines' && <RoutinesPage />}
+            {tab === 'report' && <ReportPage />}
+            {tab === 'usage' && <UsagePage />}
+          </Hub>
+        )}
+        {view.kind === 'wiki' && !tab && <WikiView />}
         {view.kind === 'org' && <OrgPage />}
         {view.kind === 'board' && <BoardPage />}
         {view.kind === 'settings' && <SettingsPage />}

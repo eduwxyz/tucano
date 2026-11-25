@@ -43,7 +43,7 @@ Conhecimento, não registro. Os agentes contam o que fizeram ("enviei o e-mail",
 Não guarde também: conversa fiada, perguntas sem resposta, o que só importa nesta conversa, tarefas em andamento sem conclusão.
 
 Se valer, escreva as mudanças:
-- "create": uma página nova, inteira, no formato do esquema (uma frase de resumo no começo; seções com ##; [[links]] pras outras páginas). Só crie se não houver página sobre isso no índice.
+- "create": uma página nova, inteira, no formato do esquema (uma frase de resumo no começo; seções com ##; [[links]] pras outras páginas). Só crie se não houver página sobre isso no índice. "text" é só o corpo da página: sem bloco de frontmatter (---), o app escreve o tipo e as datas.
 - "replace": troque um trecho exato que ficou errado ou velho. "old" tem que estar na página, letra por letra. Quando um fato mudou (a situação, um prazo, um valor), atualize o que a página diz em vez de acrescentar mais uma linha.
 - "append": acrescente um trecho curto numa seção de uma página que existe (a seção é criada se faltar), pra um fato novo. Um histórico só leva marcos (contrato assinado, obra começou), não cada conversa.
 Escreva só o que é novo: o que já está numa página (inclusive em outra) não se repete; ligue com [[link]]. Não invente nem complete. Datas no formato dd/mm. Pouco e certo é melhor que muito.
@@ -63,7 +63,7 @@ Knowledge, not a record. Agents tell what they did ("I sent the email", "I check
 Don't keep either: small talk, unanswered questions, what matters only in this conversation, tasks in progress with no outcome.
 
 If it's worth it, write the changes:
-- "create": a new page, whole, in the schema's format (a summary sentence first; ## sections; [[links]] to other pages). Only create it if no page in the index is about it.
+- "create": a new page, whole, in the schema's format (a summary sentence first; ## sections; [[links]] to other pages). Only create it if no page in the index is about it. "text" is the page's body only: no frontmatter block (---), the app writes the kind and the dates.
 - "replace": swap an exact passage that became wrong or old. "old" must be on the page, letter by letter. When a fact changed (the status, a deadline, a price), update what the page says instead of adding one more line.
 - "append": add a short passage under a section of an existing page (the section is made if missing), for a new fact. A history only takes milestones (contract signed, work started), not every conversation.
 Write only what is new: what a page already says (even another page) isn't repeated; link to it with [[link]]. Don't make things up or fill gaps. Dates written out, like Jan 12 or Nov 3 (never 12/01). Little and right beats a lot.

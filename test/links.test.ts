@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAppPage, isOutsideLink } from '../src/shared/links'
+import { appMayCheck, appMayHave, isAppPage, isOutsideLink } from '../src/shared/links'
 import { LOCAL_LINK } from '../src/shared/path-text'
 import { safeUrl } from '../src/renderer/src/links'
 
@@ -55,5 +55,28 @@ describe('links in markdown', () => {
   it('leave images as react-markdown does', () => {
     expect(safeUrl('a.png', 'src')).toBe('a.png')
     expect(safeUrl('javascript:alert(1)', 'src')).toBe('')
+  })
+})
+
+describe('what the default session gives a page', () => {
+  const own = { requestingUrl: `${BUILT}#/c/1`, isMainFrame: true, fromWindow: true }
+  it("gives the app's own page, in its main frame, what it asks; the microphone for audio only", () => {
+    expect(appMayHave({ ...own, permission: 'notifications' }, BUILT)).toBe(true)
+    expect(appMayHave({ ...own, permission: 'media', mediaTypes: ['audio'] }, BUILT)).toBe(true)
+    expect(appMayHave({ ...own, permission: 'media', mediaTypes: ['audio', 'video'] }, BUILT)).toBe(false)
+    expect(appMayCheck({ ...own, permission: 'notifications' }, BUILT)).toBe(true)
+  })
+  it('gives nothing to a frame, another page, or a page outside the window', () => {
+    for (const o of [{ ...own, isMainFrame: false }, { ...own, requestingUrl: 'https://example.com/' }, { ...own, fromWindow: false }, { ...own, requestingUrl: DEV }]) {
+      expect(appMayHave({ ...o, permission: 'notifications' }, BUILT)).toBe(false)
+      expect(appMayHave({ ...o, permission: 'media', mediaTypes: ['audio'] }, BUILT)).toBe(false)
+      expect(appMayCheck({ ...o, permission: 'clipboard-read' }, BUILT)).toBe(false)
+    }
+  })
+  it('asks the system to open only a link that may leave the app', () => {
+    expect(appMayHave({ ...own, permission: 'openExternal', externalURL: 'https://tucano.sh' }, BUILT)).toBe(true)
+    expect(appMayHave({ ...own, permission: 'openExternal', externalURL: 'mailto:a@b.c' }, BUILT)).toBe(true)
+    for (const url of ['file:///etc/passwd', 'smb://host/share', 'ms-msdt:/id', undefined]) expect(appMayHave({ ...own, permission: 'openExternal', externalURL: url }, BUILT)).toBe(false)
+    expect(appMayCheck({ ...own, permission: 'openExternal' }, BUILT)).toBe(false)
   })
 })

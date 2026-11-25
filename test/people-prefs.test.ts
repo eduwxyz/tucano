@@ -26,6 +26,7 @@ const base: Settings = {
   sounds: false,
   stepsOpen: false,
   folded: ['section:dms'],
+  sidebarHidden: ['board'],
   channelLayout: { loose: ['c1'], groups: [] },
   seenVersion: '0.2.10',
   onboarding: { done: true }
@@ -76,6 +77,7 @@ describe('display preferences per person', () => {
     expect(s.sounds).toBeUndefined()
     expect(s.stepsOpen).toBeUndefined()
     expect(s.folded).toBeUndefined()
+    expect(s.sidebarHidden).toBeUndefined() // the owner took the Quadro out of their sidebar, not of everyone's
     expect(s.channelLayout).toBeUndefined()
     expect(s.workspaceName).toBe('Ana') // the rest is the Tucano's
   })
@@ -100,7 +102,7 @@ describe('display preferences per person', () => {
 
   it('members may change only their own display preferences', () => {
     const { bia } = team()
-    for (const k of ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
+    for (const k of ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(true)
     for (const k of ['workspaceName', 'context', 'paused', 'routerModel', 'approvalTtlHours']) expect(can(bia, { kind: 'settings', keys: [k] })).toBe(false)
   })
 
