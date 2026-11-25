@@ -4,9 +4,24 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Corrigido:** a barra lateral volta a **mover uma linha quando você arrasta com o mouse**. Desde a 0.2.45 era preciso segurar a linha parada antes de arrastar, e arrastar direto não fazia nada. **Mover para cima** e **Mover para baixo**, no menu do canal, voltam a ter suas setas.
+> - **Corrigido:** com **dois apps em versões diferentes** no mesmo Tucano (o desktop atualizado e uma aba aberta num servidor ainda na versão anterior, por exemplo), cada um regravava a própria versão sem parar, e o servidor ficava ocupado sem ninguém usando.
+> - **Corrigido:** no **OpenCode V2** anterior à versão 2.2.0, o agente ficava sem as ferramentas do Tucano, só com a busca e a leitura da web.
+> - **Corrigido:** uma **janela de diálogo mais alta que a tela** agora rola, e os botões dela ficam ao alcance. As duas buscas também cabem numa janela baixa.
+> - **Corrigido:** no **Quadro**, um card que mudava de coluna deslizava duas ou três vezes.
+> - **Corrigido:** em Configurações › Modelos, um **nome de modelo longo** não cobre mais o botão Salvar ao lado.
+> - **Corrigido:** no Windows, uma skill que veio com o Hermes não é mais tomada por uma skill editada ao importar.
+
 ### Fixed
 
-- **The sidebar moves rows by hand again with a mouse, and its Move up and Move down commands show their arrows again.** Since 0.2.45 a press that started moving cancelled the hold, so dragging a row did nothing and the sidebar only sorted if the row was first held perfectly still for a third of a second. A mouse press now keeps its hold while it drags; a row still lifts only after that hold, so a quick flick moves nothing and a plain click still opens. The channel menu's two reorder commands also lost their glyphs in that release, which left two bare labels in a menu where every other command carries an icon. Alt+Up/Down and the saved orders are unchanged.
+- **The sidebar moves rows by hand again with a mouse, and its Move up and Move down commands show their arrows again.** Since 0.2.45 a press that started moving cancelled the hold, so dragging a row did nothing and the sidebar only sorted if the row was first held perfectly still for a third of a second. A mouse press now keeps its hold while it drags; a row still lifts only after that hold, so a quick flick moves nothing and a plain click still opens. The channel menu's two reorder commands also lost their glyphs in that release, which left two bare labels in a menu where every other command carries an icon. Alt+Up/Down and the saved orders are unchanged. Thanks to @apoapostolov. (#663)
+- **Two apps on different versions no longer write their version back and forth.** The "What's new" check recorded the app's own version as seen whenever it differed from the one on record, older versions included. That record is shared by every app of a workspace, so a desktop app on one version and a browser tab on a server still on another each wrote theirs back as soon as the other did, about 200 times a second each, with the server's processor and disk busy while nobody used it. A version is now recorded only when it is newer than the one on record. Thanks to @rodrigotrombeta. (#520)
+- **OpenCode V2 before 2.2.0 gets Tucano's tools again.** Those versions put every connected server in Code Mode, behind a built-in tool the app turns off, so the agent was left with web fetch and web search only. The app now turns Code Mode off for its own server; newer versions were not affected and don't change. Thanks to @stefanosandes. (#561)
+- **A dialog taller than the window scrolls.** In a short window a dialog's fields spilled out of its card and its last buttons were out of reach. Dialogs, forms and the two search palettes now fit the height there is and scroll inside it. Thanks to @b7s. (#611)
+- **Board: a card slides once when it changes column.** A card that reached Done slid in again from the right, then once more from the left, because its place was measured while the first slide was still running. Thanks to @eialanjones. (#533)
+- **A long model name stays inside its card.** In Settings › Models a long label made the picker as wide as its text, and it covered the Save button next to it. The label is now cut with an ellipsis. Thanks to @stefanosandes. (#529)
+- **On Windows, a skill that came with Hermes is no longer taken for one you edited.** Importing from Hermes tells a stock skill by the hash Hermes recorded for its files, and on Windows Hermes orders those files without regard to case. A skill with mixed-case file names got a different hash and was imported as if it had been changed. Thanks to @apoapostolov. (#512)
 
 ## [0.2.48] - 2026-11-25
 
