@@ -8,6 +8,26 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **The sidebar moves rows by hand again with a mouse, and its Move up and Move down commands show their arrows again.** Since 0.2.45 a press that started moving cancelled the hold, so dragging a row did nothing and the sidebar only sorted if the row was first held perfectly still for a third of a second. A mouse press now keeps its hold while it drags; a row still lifts only after that hold, so a quick flick moves nothing and a plain click still opens. The channel menu's two reorder commands also lost their glyphs in that release, which left two bare labels in a menu where every other command carries an icon. Alt+Up/Down and the saved orders are unchanged.
 
+## [0.2.48] - 2026-11-25
+
+> **Em português:**
+> - **Segurança: cinco correções** ([GHSA-gprv-8xfq-w6xf](https://github.com/eduwxyz/tucano/security/advisories/GHSA-gprv-8xfq-w6xf)). Um arquivo que um agente citou não pode mais ser trocado por um atalho pra outro arquivo depois de conferido. No nível **Normal**, um comando que apaga, publica, faz merge, envia ou paga **pede a sua aprovação**, como o nível promete. Num servidor, o acesso às páginas que os agentes servem passa a ser de cada pessoa, vale 12 horas e acaba quando ela perde o acesso. Um arquivo que o agente mostra sai com os valores do Cofre mascarados. E o limite de notificações por telefone conta o telefone, não o texto do identificador. Atualize.
+> - **Mudou:** no nível Normal, `rm -rf` numa pasta que não se refaz, `git reset --hard`, `git branch -D`, `git merge`, `npm publish` e parecidos agora pedem aprovação antes de rodar. **Aprovar e sempre permitir** no card libera aquele tipo de ação de vez.
+> - **Mudou:** num servidor, uma página de agente que já estava aberta no navegador pede, uma vez, pra ser aberta de novo pelo Tucano.
+
+### Security
+
+- **A file an agent cited can't be swapped for a link to another file after it was checked.** The address the app signs for a cited file now names the file itself, not only its path, and the file is read from the one descriptor that was checked. Before, an agent with a computer could put a link in the file's place, and a person on a server who opened the address again got whatever the link led to, the server's key and database included ([GHSA-gprv-8xfq-w6xf](https://github.com/eduwxyz/tucano/security/advisories/GHSA-gprv-8xfq-w6xf)). Thanks to @leoreinaux.
+- **At the Normal level, a command that deletes, publishes, merges, sends or pays asks for your approval,** as the level says it does. `rm -rf src`, `npm publish`, `gh repo delete` or `terraform destroy` ran right away before, even after the agent had read something from outside. Committing, pushing and opening a pull request still run on their own; a rule set to "does it alone" and the No guardrails level are unchanged. On a lent computer, a terminal allowed for good no longer covers these commands.
+- **On a server, the sign-in to the pages agents serve is each person's own.** It was the same value for everyone, never expired on the server and wasn't checked again, so it outlived the 12 hours and the person's removal. It now names the person, expires on the server, and each request asks again whether that person may see that page.
+- **A file an agent shows carries none of the Cofre's values.** A text file comes out with `[cofre:NAME]` in their place, as a command's output already did; a binary file that holds one is refused, naming the key.
+- **The push relay's limit per phone counts the phone.** A handle written another way (spaces, `+` and `/`) used to get a count of its own.
+- **Hardening.** The desktop window gives a permission only to the app's own page, in its main frame; before, every request that wasn't for the camera or the microphone was granted, whoever in the window asked. Folders lent to an agent's computer are checked again each time it turns on. A page an agent serves can't send Tucano's own cookies, or one for a wider address.
+
+### Changed
+
+- **Folders lent through a link are kept as where they lead.** Once, on the first start with this version: a folder lent as `~/work/app`, where `~/work` leads to another disk, is kept as that place, so the new check doesn't ask for it to be lent again.
+
 ## [0.2.47] - 2026-11-24
 
 > **Em português:**

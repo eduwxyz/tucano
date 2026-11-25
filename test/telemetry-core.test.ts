@@ -7,7 +7,7 @@ import { stopTelemetry } from '../src/core/telemetry'
 import type { Agent, TracesView } from '../src/shared/types'
 import { bootCore, type Client } from './helpers/core'
 import { until } from './helpers/node-link'
-import { attrsOf, collector } from './helpers/otlp'
+import { arrived, attrsOf, collector } from './helpers/otlp'
 
 let sink: Awaited<ReturnType<typeof collector>>
 let owner: Client
@@ -50,7 +50,7 @@ describe('the core with an OTLP endpoint set', () => {
   it('sends a reply as a trace, naming its workspace', async () => {
     await owner.call('sendMessage', { conversationId: 'traced-dm', text: 'bom dia, tudo certo?' })
 
-    await until(() => sink.spans.some((s) => s.span.name === 'invoke_agent Traced'), 9_000)
+    await arrived(() => sink.spans.some((s) => s.span.name === 'invoke_agent Traced'), 9_000)
 
     const reply = sink.spans.find((s) => s.span.name === 'invoke_agent Traced')!
     expect(attrsOf(reply)).toMatchObject({ 'gen_ai.conversation.id': 'traced-dm', 'tucano.operation': 'reply', 'tucano.run.status': 'done' })
@@ -67,7 +67,7 @@ describe('the core with an OTLP endpoint set', () => {
     for (let i = 0; i < WINDOW + 2; i++) db.saveMessage({ id: `old-${i}`, conversationId: 'traced-dm', author: { kind: 'person', id: db.ownerId() }, text: `mensagem ${i}`, at: i + 1 })
     await owner.call('summarizeNow', { conversationId: 'traced-dm' })
     await owner.call('wikiKeepMessage', { messageId: answer.id })
-    await until(() => ['title', 'memory', 'wiki'].every((o) => operations().has(o)), 14_000)
+    await arrived(() => ['title', 'memory', 'wiki'].every((o) => operations().has(o)), 14_000)
 
     await owner.call('testEngine', { model: 'opus' }) // a model none of the calls above use
     await stopTelemetry()

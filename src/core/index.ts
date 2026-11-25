@@ -78,7 +78,7 @@ import { Browser, browserTools, CHAT_ONLY_BROWSER_TOOLS, type BrowserHost } from
 import { downloadsFolder } from './downloads'
 import { findOnPath, isWin, loginShell, onPath, openWindowsConsole, osOf, shellCommand, terminalCommand } from './platform'
 import { ChromeBrowsers, hasChrome } from './chrome'
-import { checkFolder, Computers, folderName, type Shooter } from './computer'
+import { checkFolder, Computers, folderName, lentWhereTheyAre, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Titles } from './titles'
 import { shortTitle } from '../shared/titles'
@@ -983,7 +983,17 @@ const memory = new Memories({ db, engines: operationEngines(engineImpls, { opera
 titles = new Titles({ db, engines: operationEngines(engineImpls, { operation: 'title' }), settings: () => enginesReady.then(settings), emit, workDir: join(dataDir, 'agents') })
 const wikiEngines = operationEngines(engineImpls, { operation: 'wiki' })
 
-const computers = new Computers({ db, dataDir, emit, shoot })
+const computers = new Computers({ db, dataDir, emit, shoot, secrets: (agentId) => vault.openedFor(agentId) })
+
+// Once: folders lent before the computer checked where each really is are kept as where they lead today.
+if (!db.meta('lentReal')) {
+  for (const agent of db.agents()) {
+    const lent = agent.folders ?? []
+    const real = lentWhereTheyAre(lent, { dataDir })
+    if (real.some((f, i) => f.path !== lent[i]!.path)) db.setFolders(agent.id, real)
+  }
+  db.setMeta('lentReal', '1')
+}
 
 // This computer lent to servers' Tucanos (core/node-server.ts, core/node-link.ts): the app calls each server it
 // was paired with and lends it (Settings › Servers), and that server's agents use this computer's terminal, files,
@@ -2966,9 +2976,11 @@ const api: Handlers = {
     if (!agent) return
     const why = checkFolder(path, { dataDir })
     if (why) throw new Error(why)
+    // Kept as where it really is, as addNodeFolder does: the computer checks it is still there when it starts.
+    const real = realpathSync(path)
     const folders = agent.folders ?? []
-    if (folders.some((f) => f.path === path)) return
-    setFolders(agent, [...folders, { name: folderName(path, folders.map((f) => f.name)), path, readOnly: false }])
+    if (folders.some((f) => f.path === real || f.path === path)) return
+    setFolders(agent, [...folders, { name: folderName(real, folders.map((f) => f.name)), path: real, readOnly: false }])
   },
   folderAction: ({ agentId, name, action }) => {
     const agent = db.agent(agentId)
