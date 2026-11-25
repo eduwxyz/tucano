@@ -2,11 +2,12 @@
 // Boletim · Uso e limites). Each is one row in the sidebar; the hub draws a big title and the tabs,
 // and the page below leaves out its own title (hub-context.ts). The view kinds stay what they were,
 // so every link, shortcut and mission that opens one of these pages still lands on it.
-import { useEffect, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
 import type { SidebarPart } from '../../../shared/onboarding'
 import { amAdmin, navigate, pendingMemories, useStore, type View } from '../store'
 import { InHub } from './hub-context'
+import { PageTabs } from './PageTabs'
 import { useSidebarParts } from './Missions'
 
 export type HubId = 'knowledge' | 'operations'
@@ -85,44 +86,18 @@ export function Hub({ tab, children }: { tab: HubTab; children: ReactNode }): Re
     if (fresh) parts.seen(tab as SidebarPart)
   }, [hub, tab, fresh])
   const title = hubTitle(hub)
-  // Arrows walk the tabs, as in any tab list.
-  const keys = (e: KeyboardEvent<HTMLElement>): void => {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
-    const at = tabs.findIndex((t) => t.tab === tab)
-    const next = tabs[(at + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
-    if (!next) return
-    e.preventDefault()
-    navigate({ kind: next.tab })
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`.hub__tab[data-tab="${next.tab}"]`)?.focus())
-  }
   return (
     <section className={`hub hub--${hub}`}>
       <div className="hub__drag" />
       <header className="hub__head">
         <h1 className="hub__title">{title}</h1>
         <p className="hub__lede">{hubLede(hub)}</p>
-        <nav className="hub__tabs" role="tablist" aria-label={title} onKeyDown={keys}>
-          {tabs.map((t) => (
-            <button
-              key={t.tab}
-              role="tab"
-              data-tab={t.tab}
-              aria-selected={t.tab === tab}
-              tabIndex={t.tab === tab ? 0 : -1}
-              className={`hub__tab ${t.tab === tab ? 'is-active' : ''}`}
-              onClick={() => navigate({ kind: t.tab })}
-            >
-              {t.label}
-              {t.badge > 0 ? (
-                <span key={t.badge} className="badge">
-                  {t.badge}
-                </span>
-              ) : t.fresh ? (
-                <span className="nav-item__new">{L('NOVO', 'NEW')}</span>
-              ) : null}
-            </button>
-          ))}
-        </nav>
+        <PageTabs variant="hub" label={title} active={tab} onChange={(id) => navigate({ kind: id })}
+          items={tabs.map((t) => ({ id: t.tab, label: <>
+            {t.label}
+            {t.badge > 0 ? <span key={t.badge} className="badge">{t.badge}</span>
+              : t.fresh ? <span className="nav-item__new">{L('NOVO', 'NEW')}</span> : null}
+          </> }))} />
       </header>
       <div className="hub__body" role="tabpanel" aria-label={tabLabel(tab)}>
         <InHub.Provider value={true}>{children}</InHub.Provider>

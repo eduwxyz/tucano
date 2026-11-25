@@ -7,6 +7,7 @@ import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
+import { PageTabs } from './PageTabs'
 import { AgentVaultKeys, AgentVaultLogins } from './Vault'
 import { COFRE } from '../../../shared/vault'
 import {
@@ -2634,16 +2635,7 @@ function useTab(page: string, tabs: TabList): string {
 // `aside`: what shows at the bar's right end (an agent's "Salvando…" once its head scrolled away).
 function Tabs({ page, tabs, aside }: { page: string; tabs: TabList; aside?: ReactNode }): ReactNode {
   const active = useTab(page, tabs)
-  return (
-    <div className="tabs" role="tablist">
-      {tabs.map(([id, label]) => (
-        <button key={id} role="tab" aria-selected={active === id} className={active === id ? 'is-active' : ''} onClick={() => setTab(page, id)}>
-          {label}
-        </button>
-      ))}
-      {aside && <span className="tabs__aside">{aside}</span>}
-    </div>
-  )
+  return <PageTabs items={tabs.map(([id, label]) => ({ id, label }))} active={active} onChange={(id) => setTab(page, id)} aside={aside} />
 }
 
 // Whom the agent answers to (src/shared/org.ts). With that set, the one above hands it work in its own
