@@ -50,7 +50,7 @@ const card = (text) =>
     }
   }, text)
 
-await win.click('.nav-item:has-text("Connectors")')
+await win.click('.sidebar__tool:has-text("Connectors")') // at the foot of the sidebar since 0.2.37
 await win.waitForSelector('.catalog')
 await shot('01-connectors')
 

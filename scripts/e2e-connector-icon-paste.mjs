@@ -57,7 +57,7 @@ const draw = `const draw = () => {
   return new Promise((ok) => canvas.toBlob(ok, 'image/png'))
 }`
 
-await win.click('.nav-item:has-text("Connectors")')
+await win.click('.sidebar__tool:has-text("Connectors")')
 await win.waitForSelector('.catalog')
 await win.click('button:has-text("Add custom")')
 await win.click('button[role=radio]:has-text("Local")')

@@ -561,6 +561,11 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const [showSaid, setShowSaid] = useState(false)
   const [showAsk, setShowAsk] = useState(false)
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
+  // Each request once: a reply saved before follow-ups stopped being listed again may hold one twice.
+  const handedTo = (message.run?.delegations ?? []).filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i)
+  const hasFooter = !!message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)
+  const resumable = !!message.run && (message.run.status === 'paused' || (CUT.includes(message.run.status) && canContinue(message.run)))
+  const retryable = !!message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit))))
 
   // The same object between renders, or every link would start over.
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
@@ -681,7 +686,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
-        {message.run?.delegations?.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
+        {handedTo.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
         {message.run?.delegation && message.conversationId !== message.run.delegation.conversationId && <DelegationChip at={message.run.delegation} from={agent?.id} />}
         {message.run?.delegation && message.id === message.run.delegation.rootId && <RequestNote at={message.run.delegation} from={agent?.name} />}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
@@ -705,38 +710,30 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </Details>
         )}
         {message.run?.status === 'paused' && (
-          <>
-            <div className="note">
-              {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
-              <span className="muted">{L('O teto por resposta muda em Configurações › Agentes › Limites; não é o limite mensal do agente.', 'The ceiling per reply is set in Settings › Agents › Limits; it isn’t the agent’s monthly limit.')}</span>
-            </div>
-            <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
-              {L('Continuar', 'Continue')}
-            </button>
-          </>
-        )}
-        {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
-            is in the task the new reply reads, so nothing it already did is done twice (#390). */}
-        {message.run && CUT.includes(message.run.status) && canContinue(message.run) && (
-          <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
-            {L('Continuar', 'Continue')}
-          </button>
-        )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
-            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <TryAgain messageId={message.id} />
+          <div className="note">
+            {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
+            <span className="muted">{L('O teto por resposta muda em Configurações › Agentes › Limites; não é o limite mensal do agente.', 'The ceiling per reply is set in Settings › Agents › Limits; it isn’t the agent’s monthly limit.')}</span>
+          </div>
         )}
         {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
-          <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+          <button className="steps__ask-pill retry msg__hire" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
-        {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
+        {(hasFooter || resumable || retryable) && (
           <div className="msg__meta">
-            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
-            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
+            {resumable && (
+              <button className="steps__ask-pill retry msg__hire" aria-label={L('Continuar', 'Continue')} onClick={() => continueRun(message.id)}>
+                <Icon name="play" size={11} /><span className="steps__ask-pill__word">{L('Continuar', 'Continue')}</span>
+              </button>
+            )}
+            {retryable && <TryAgain messageId={message.id} />}
+            {hasFooter && (
+              <>
+                {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+                {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
+              </>
+            )}
           </div>
         )}
         {message.author.kind === 'person' && !message.threadId && <AskedFromHere message={message} />}
@@ -777,11 +774,11 @@ function TryAgain({ messageId }: { messageId: string }): ReactNode {
   }
   return (
     <>
-      <button className="btn btn--xs retry" onClick={() => retry()}>
-        {L('Tentar de novo', 'Try again')}
+      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar de novo', 'Try again')} onClick={() => retry()}>
+        <Icon name="retry" size={11} /><span className="steps__ask-pill__word">{L('Tentar de novo', 'Try again')}</span>
       </button>
-      <button className="btn btn--xs retry" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        {L('Tentar com instruções', 'Try with instructions')}
+      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar com instruções', 'Try with instructions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <Icon name="edit" size={11} /><span className="steps__ask-pill__word">{L('Tentar com instruções', 'Try with instructions')}</span>
       </button>
       {open && (
         <div className="retry-note">
@@ -3116,7 +3113,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           />
           {tools}
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
+            {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('O Tuca passa pra quem do time faz', 'Tuca passes it to whoever on the team does it') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>

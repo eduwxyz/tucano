@@ -142,6 +142,11 @@ export function gate(kinds: readonly ActionKind[], p: Policy): { mode?: ActionMo
 // no rule decides asks (a risky click), else it goes by the class.
 export type Verdict = { run: boolean; off?: boolean; why: 'read' | 'rule' | 'level' | 'class' | 'always' | 'risk' | 'guard' | 'never'; kinds: ActionKind[] }
 
+// A command that deletes, publishes, merges, sends or pays is judged as a sensitive action, so the
+// normal level asks first, as it promises; committing, pushing and opening a PR stay writes.
+const SENSITIVE_SHELL: readonly ActionKind[] = ['delete', 'publish', 'merge', 'send', 'pay']
+export const shellClass = (kinds: readonly ActionKind[]): 'write' | 'sensitive' => (kinds.some((k) => SENSITIVE_SHELL.includes(k)) ? 'sensitive' : 'write')
+
 export function verdict(o: { cls: 'read' | 'write' | 'sensitive'; kinds: readonly ActionKind[]; p: Policy; highRisk?: boolean; alwaysAllowed?: boolean; outside?: boolean; askByDefault?: boolean }): Verdict {
   if (o.cls === 'read' && !o.askByDefault) return { run: true, why: 'read', kinds: [] }
   const g = gate(o.kinds, o.p)

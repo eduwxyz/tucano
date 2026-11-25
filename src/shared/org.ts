@@ -129,8 +129,11 @@ export const anyoneOf = <T extends Node>(agents: T[], id: string): T[] => {
 
 // How `from` asking `to` goes: down its branch, to a colleague, up (to its own boss or its sector's head), to
 // another sector's head, or to someone out of its way in the tree ('other': another sector's member, a loose agent).
-export type AskKind = 'down' | 'peer' | 'up' | 'sector' | 'other'
+// 'front': from the Tuca, who takes the person's requests and passes each to whoever does it. He is in no
+// tree, so it is the person's own request arriving through him, not a favor asked from outside the team.
+export type AskKind = 'down' | 'peer' | 'up' | 'sector' | 'other' | 'front'
 export function askKind(agents: Node[], from: string, to: string): AskKind {
+  if (agents.find((a) => a.id === from)?.kind === 'tuca') return 'front'
   if (from === to) return 'peer' // a head and itself are not two sectors
   if (looseColleaguesOf(agents, from).some((a) => a.id === to)) return 'peer' // two agents in no tree
   // Two heads, whether each tops a tree or both answer to the entry point: one sector asking another.

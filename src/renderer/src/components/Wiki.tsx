@@ -5,6 +5,7 @@
 // a page with what links to it, the sources, the review; the editor takes the whole screen.
 import { L, locale } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { repelGrouped } from './wiki-quadtree'
 import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import { safeUrl } from '../links'
@@ -298,12 +299,15 @@ type Pos = { x: number; y: number }
 type Cam = { x: number; y: number; k: number }
 export type Body = { x: number; y: number; vx: number; vy: number; held?: boolean }
 const SPREAD = 1.6 // from the simulation's units to the map's
+const GROUPED_FROM = 400 // pages from which the push between them is grouped (see wiki-quadtree)
 
 // One step of the forces: pages push each other away, links pull, the middle holds them.
 // A page being dragged stays under the pointer and pulls its neighbors along.
 export function tick(bodies: Body[], links: (readonly [number, number])[], deg: Uint16Array, heat: number): void {
   const n = bodies.length
-  for (let i = 0; i < n; i++)
+  // a big wiki groups the far pages, or comparing every pair freezes the screen for seconds
+  if (n > GROUPED_FROM) repelGrouped(bodies)
+  else for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
       const a = bodies[i]!
       const b = bodies[j]!
@@ -367,10 +371,13 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const first = bodies.size === 0
     const titles = new Set(graph.nodes.map((n) => n.title))
     for (const t of [...bodies.keys()]) if (!titles.has(t)) bodies.delete(t)
+    // each page's links in the graph's order, so finding one already placed doesn't scan every link
+    const linked = new Map<string, string[]>()
+    for (const [a, b] of graph.edges) (linked.get(a) ?? linked.set(a, []).get(a)!).push(b), (linked.get(b) ?? linked.set(b, []).get(b)!).push(a)
     graph.nodes.forEach((nd, i) => {
       if (bodies.has(nd.title)) return
-      const friend = graph.edges.find(([a, b]) => (a === nd.title && bodies.has(b)) || (b === nd.title && bodies.has(a)))
-      const near = friend ? bodies.get(friend[0] === nd.title ? friend[1] : friend[0])! : null
+      const friend = linked.get(nd.title)?.find((t) => bodies.has(t))
+      const near = friend ? bodies.get(friend)! : null
       // a golden spiral to start from, so the same wiki always lands the same way
       const r = 16 * Math.sqrt(i + 1)
       const a = i * 2.399963
@@ -382,7 +389,7 @@ function useBodies(graph: Graph): { bodies: Map<string, Body>; kick: (heat: numb
     const deg = new Uint16Array(list.length)
     for (const [a, b] of links) deg[a]!++, deg[b]!++
     parts.current = { list, links, deg }
-    if (first) for (let it = 0, iters = list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
+    if (first) for (let it = 0, iters = list.length > 6000 ? 80 : list.length > 250 ? 140 : 300; it < iters; it++) tick(list, links, deg, 0.3 + (1 - it / iters))
     else heat.current = Math.max(heat.current, 0.6)
   }, [graph])
 
@@ -424,14 +431,66 @@ function useSize(): [React.RefObject<HTMLDivElement | null>, { w: number; h: num
 }
 
 const PANEL = 560 // the panel's width; the map keeps what's left of it in view
+const MIN_K = 0.05 // as far as the map zooms out: a big wiki fits whole
+const GHOSTS_UNTIL = 1000 // pages from which the notes nobody wrote yet stay off the map
+const MAX_LABELS = 220 // names on a screen's worth of map, at most
+
+// What the map draws of the graph. A dot per title: the map knows a page by its title, and two
+// pages with the same one (an imported vault has "Untitled" a few times, and the same word in two
+// folders) drew two dots under one key, which left stale copies on the screen at every frame.
+// And a big wiki's links name thousands of notes nobody wrote yet (a vault of vocabulary cards
+// names every word): as dots they're half the map and bury the pages, so past GHOSTS_UNTIL pages
+// they stay off it. The page that links to one still shows it, dashed, in its text.
+export function forTheMap(graph: Graph): Graph {
+  let pages = 0
+  for (const n of graph.nodes) if (!n.missing) pages++
+  const ghosts = pages > GHOSTS_UNTIL && pages < graph.nodes.length
+  const byTitle = new Map<string, Graph['nodes'][number]>()
+  for (const n of graph.nodes) {
+    if (ghosts && n.missing) continue
+    const had = byTitle.get(n.title)
+    if (!had) byTitle.set(n.title, n)
+    else if (n.links > had.links) byTitle.set(n.title, { ...had, links: n.links })
+  }
+  if (byTitle.size === graph.nodes.length) return graph
+  const seen = new Set<string>()
+  const edges = graph.edges.filter(([a, b]) => {
+    const key = a < b ? `${a}\n${b}` : `${b}\n${a}`
+    if (a === b || !byTitle.has(a) || !byTitle.has(b) || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return { ...graph, nodes: [...byTitle.values()], edges }
+}
+
+// Which names fit: the ones asked for first (the page lit and what it links to), then the most
+// linked, each placed only where it doesn't cover one already placed. Zooming in makes room for more.
+export function fitLabels(items: { title: string; x: number; y: number; w: number; first: boolean; links: number }[], max = MAX_LABELS): Set<string> {
+  const CELL = 64
+  const taken = new Map<string, { x0: number; y0: number; x1: number; y1: number }[]>()
+  const out = new Set<string>()
+  const order = [...items].sort((a, b) => Number(b.first) - Number(a.first) || b.links - a.links)
+  for (const it of order) {
+    if (out.size >= max && !it.first) break
+    const box = { x0: it.x - it.w / 2 - 3, y0: it.y - 12, x1: it.x + it.w / 2 + 3, y1: it.y + 5 }
+    const cells: string[] = []
+    for (let cx = Math.floor(box.x0 / CELL); cx <= Math.floor(box.x1 / CELL); cx++) for (let cy = Math.floor(box.y0 / CELL); cy <= Math.floor(box.y1 / CELL); cy++) cells.push(`${cx},${cy}`)
+    const hit = cells.some((c) => taken.get(c)?.some((o) => box.x0 < o.x1 && o.x0 < box.x1 && box.y0 < o.y1 && o.y0 < box.y1))
+    if (hit && !it.first) continue
+    for (const c of cells) (taken.get(c) ?? taken.set(c, []).get(c)!).push(box)
+    out.add(it.title)
+  }
+  return out
+}
 const ease = (p: number): number => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2)
 
 // The whole wiki as a map you can move around: drag the empty map to move it, drag a page to
 // pull it (and what it links to) around, pinch or the mouse wheel (or ⌘/Ctrl + scroll) to zoom. A page picked flies to
 // the middle of what the panel leaves free, with its links lit.
-function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
+function WikiCanvas({ graph: whole, selected, pending, only, panel }: { graph: Graph; selected?: string; pending: Set<string>; only: string | null; panel: boolean }): ReactNode {
   const [ref, size] = useSize()
-  const { bodies, kick } = useBodies(graph)
+  const graph = useMemo(() => forTheMap(whole), [whole])
+  const { bodies, kick, frame } = useBodies(graph)
   const world = (t: string): Pos | undefined => {
     const b = bodies.get(t)
     return b && { x: b.x * SPREAD, y: b.y * SPREAD }
@@ -453,7 +512,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     for (const b of bodies.values()) (x0 = Math.min(x0, b.x * SPREAD)), (x1 = Math.max(x1, b.x * SPREAD)), (y0 = Math.min(y0, b.y * SPREAD)), (y1 = Math.max(y1, b.y * SPREAD))
     if (!isFinite(x0)) return { x: 0, y: 0, k: 1 }
     const a = free()
-    const k = Math.max(0.3, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
+    const k = Math.max(MIN_K, Math.min((a.w - 260) / Math.max(1, x1 - x0), (a.h - 180) / Math.max(1, y1 - y0), 1.5))
     return { k, x: a.w / 2 - ((x0 + x1) / 2) * k, y: a.h / 2 - ((y0 + y1) / 2) * k }
   }
   // What the first frame is drawn with, before the effect that fits the map runs: the camera the fit
@@ -486,7 +545,7 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     const c = camRef.current
     if (!c) return
     touched.current = true
-    const k = Math.max(0.3, Math.min(3, c.k * f))
+    const k = Math.max(MIN_K, Math.min(3, c.k * f))
     const p = at ?? { x: free().w / 2, y: size.h / 2 }
     setCam({ k, x: p.x - (p.x - c.x) * (k / c.k), y: p.y - (p.y - c.y) * (k / c.k) })
   }
@@ -542,17 +601,126 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
   }, [graph])
   const lit = holding ?? hover ?? selected ?? null
   const around = lit ? near.get(lit) : undefined
-  const isNear = (t: string): boolean => !lit || t === lit || !!around?.has(t)
   const kindOf = new Map(graph.nodes.map((n) => [n.title, n.kind]))
   const shown = (t: string): boolean => !only || kindOf.get(t) === only
 
   const k = view?.k ?? 1
+  // Where a page is drawn, before the camera's move: the map is one group the camera slides, so
+  // moving the map changes one attribute instead of redrawing thousands of pages each frame.
   const at = (t: string): Pos | null => {
     const p = world(t)
-    return p && view ? { x: p.x * k + view.x, y: p.y * k + view.y } : null
+    return p ? { x: p.x * k, y: p.y * k } : null
   }
   const scale = 0.8 + 0.2 * Math.min(k, 1.8)
   const many = graph.nodes.length > 40
+  // a ring around each page to hover it by: on a map of thousands it costs more than it helps
+  const crowded = graph.nodes.length > GROUPED_FROM
+  const radius = (nd: Graph['nodes'][number]): number => (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
+  const short = (t: string): string => (t.length > 28 ? `${t.slice(0, 26)}…` : t)
+  // What's far off the screen isn't drawn: a big wiki is thousands of pages, most of them out of
+  // view. The part drawn is the screen and one more screen around it, so moving the map redraws it
+  // only when the view goes past that.
+  const w = Math.max(size.w, 1)
+  const h = Math.max(size.h, 1)
+  const tx = view ? Math.floor(-view.x / w) : 0
+  const ty = view ? Math.floor(-view.y / h) : 0
+  const side = (p: Pos): number => (p.x < (tx - 1) * w ? 1 : p.x > (tx + 2) * w ? 2 : 0) | (p.y < (ty - 1) * h ? 4 : p.y > (ty + 2) * h ? 8 : 0)
+  const pendingKey = [...pending].join('\n')
+  const dot = (nd: Graph['nodes'][number], i: number, p: Pos, o: { label: boolean; lit: boolean; dim: boolean; halo: boolean; hit: boolean }): ReactNode => {
+    const r = radius(nd)
+    return (
+      <g
+        key={nd.title}
+        data-page={nd.title}
+        data-missing={nd.missing ? '1' : undefined}
+        className={`wk-node ${nd.missing ? 'is-missing' : ''} ${o.dim ? 'is-dim' : ''} ${o.lit ? 'is-lit' : ''} ${nd.title === selected ? 'is-sel' : ''} ${nd.title === holding ? 'is-held' : ''}`}
+        style={{ ['--k' as string]: kindColor(nd.kind), ['--i' as string]: i }}
+        transform={`translate(${p.x} ${p.y})`}
+        onPointerEnter={() => !drag.current && setHover(nd.title)}
+        onPointerLeave={() => setHover((h) => (h === nd.title ? null : h))}
+      >
+        {o.hit && <circle className="wk-node__hit" r={r + 12} />}
+        {pending.has(nd.title) && <circle className="wk-node__ping" r={r + 4} />}
+        {o.halo && <circle className="wk-node__halo" r={r + 8} />}
+        <circle className="wk-node__dot" r={r} />
+        {o.label && (
+          <text y={r + 15} textAnchor="middle">
+            {short(nd.title)}
+          </text>
+        )}
+      </g>
+    )
+  }
+  // The whole map, as it is with nothing lit. Lighting a page doesn't touch it: a veil goes over
+  // it and the lit page and its links are drawn again over the veil (below), so hovering over a
+  // map of thousands of pages redraws a few dozen.
+  const base = useMemo(() => {
+    if (!view) return null
+    const named = ((): Set<string> | null => {
+      if (!many) return null
+      const items: Parameters<typeof fitLabels>[0] = []
+      for (const nd of graph.nodes) {
+        const p = at(nd.title)
+        if (!p || side(p)) continue
+        const first = nd.title === selected
+        if (!first && !(k > 1.05 || nd.links >= 3)) continue
+        items.push({ title: nd.title, x: p.x, y: p.y + radius(nd) + 15, w: short(nd.title).length * 6.6, first, links: nd.links })
+      }
+      return fitLabels(items, MAX_LABELS * 9)
+    })()
+    return (
+      <>
+        <g className="wk-canvas__edges">
+          {graph.edges.map(([a, b]) => {
+            const p = at(a)
+            const q = at(b)
+            if (!p || !q || side(p) & side(q)) return null
+            return <line key={`${a}\n${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className={!shown(a) && !shown(b) ? 'is-dim' : ''} />
+          })}
+        </g>
+        {graph.nodes.map((nd, i) => {
+          const p = at(nd.title)
+          if (!p || side(p)) return null
+          const mine = nd.title === selected
+          return dot(nd, i, p, { label: !named || named.has(nd.title), lit: false, dim: !shown(nd.title), halo: !crowded || mine, hit: !crowded || mine })
+        })}
+      </>
+    )
+    // the camera's x and y are left out on purpose: the group around this layer carries them
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, frame, k, tx, ty, w, h, selected, holding, only, pendingKey, !!view])
+  // The lit page and what it links to, over the veil, at full strength.
+  const over = useMemo(() => {
+    if (!view || !lit) return null
+    const index = new Map(graph.nodes.map((n, i) => [n.title, i]))
+    const ids = [lit, ...(around ?? [])].filter((t) => index.has(t))
+    const items: Parameters<typeof fitLabels>[0] = []
+    for (const t of ids) {
+      const nd = graph.nodes[index.get(t)!]!
+      const p = at(t)
+      if (p) items.push({ title: t, x: p.x, y: p.y + radius(nd) + 15, w: short(t).length * 6.6, first: t === lit, links: nd.links })
+    }
+    const named = many ? fitLabels(items) : null
+    const from = at(lit)
+    return (
+      <>
+        <g className="wk-canvas__edges">
+          {from &&
+            ids.slice(1).map((t) => {
+              const q = at(t)
+              return q && <line key={t} x1={from.x} y1={from.y} x2={q.x} y2={q.y} className="is-hot" />
+            })}
+        </g>
+        {ids.map((t) => {
+          const i = index.get(t)!
+          const nd = graph.nodes[i]!
+          const p = at(t)
+          return p && dot(nd, i, p, { label: !named || named.has(t), lit: t === lit, dim: !shown(t), halo: t === lit, hit: false })
+        })}
+      </>
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, lit, around])
   return (
     <div
       ref={ref}
@@ -608,45 +776,15 @@ function WikiCanvas({ graph, selected, pending, only, panel }: { graph: Graph; s
     >
       {view && (
         <svg width={size.w} height={size.h}>
-          <g className="wk-canvas__edges">
-            {graph.edges.map(([a, b]) => {
-              const p = at(a)
-              const q = at(b)
-              if (!p || !q) return null
-              const hot = !!lit && (a === lit || b === lit)
-              const off = !shown(a) && !shown(b)
-              return <line key={`${a}\n${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} className={hot ? 'is-hot' : lit || off ? 'is-dim' : ''} />
-            })}
-          </g>
-          {graph.nodes.map((nd, i) => {
-            const p = at(nd.title)
-            if (!p) return null
-            const r = (nd.title === selected || nd.title === holding ? 9 : 5 + Math.sqrt(nd.links) * 2.4) * scale
-            const label = !many || k > 1.05 || nd.links >= 3 || (!!lit && isNear(nd.title))
-            const dim = !isNear(nd.title) || !shown(nd.title)
-            return (
-              <g
-                key={nd.title}
-                data-page={nd.title}
-                data-missing={nd.missing ? '1' : undefined}
-                className={`wk-node ${nd.missing ? 'is-missing' : ''} ${dim ? 'is-dim' : ''} ${nd.title === lit ? 'is-lit' : ''} ${nd.title === selected ? 'is-sel' : ''} ${nd.title === holding ? 'is-held' : ''}`}
-                style={{ ['--k' as string]: kindColor(nd.kind), ['--i' as string]: i }}
-                transform={`translate(${p.x} ${p.y})`}
-                onPointerEnter={() => !drag.current && setHover(nd.title)}
-                onPointerLeave={() => setHover((h) => (h === nd.title ? null : h))}
-              >
-                <circle className="wk-node__hit" r={r + 12} />
-                {pending.has(nd.title) && <circle className="wk-node__ping" r={r + 4} />}
-                <circle className="wk-node__halo" r={r + 8} />
-                <circle className="wk-node__dot" r={r} />
-                {label && (
-                  <text y={r + 15} textAnchor="middle">
-                    {nd.title.length > 28 ? `${nd.title.slice(0, 26)}…` : nd.title}
-                  </text>
-                )}
-              </g>
-            )
-          })}
+          <g transform={`translate(${view.x} ${view.y})`}>{base}</g>
+          {/* a page lit: a veil over the map, and the page and its links drawn again over the veil;
+              the thousands of pages under it stay as they were, so nothing of them is redrawn */}
+          {over && (
+            <g className="wk-canvas__over">
+              <rect className="wk-canvas__veil" width={size.w} height={size.h} />
+              <g transform={`translate(${view.x} ${view.y})`}>{over}</g>
+            </g>
+          )}
         </svg>
       )}
       <div className="wk-zoom" onPointerDown={(e) => e.stopPropagation()} style={{ right: panel && size.w > 980 ? PANEL + 40 : 16 }}>

@@ -189,7 +189,6 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
             {L('Conectados', 'Connected')} <span className="muted">{mineShown.length}</span>
           </h3>
           <div className="catalog__grid">
-<<<<<<< HEAD
             {mineShown.map((c) => {
               const entry = entryOf(c)
               const using = users.filter((a) => (a.grants[c.id] ?? 'none') !== 'none').length

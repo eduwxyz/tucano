@@ -261,12 +261,13 @@ export async function route(opts: {
   threads?: ThreadDigest[]
   team?: boolean
   cwd: string
+  account?: string // the folder of the login it runs on (unset: the harness's usual one)
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
   let text = ''
   let usage: Usage | undefined
   let error: string | undefined
-  for await (const ev of opts.engine.run({ ...routerTurn(opts.model, opts.cwd), prompt: routerPrompt(opts), signal: AbortSignal.timeout(60_000) })) {
+  for await (const ev of opts.engine.run({ ...routerTurn(opts.model, opts.cwd), ...(opts.account ? { account: opts.account } : {}), prompt: routerPrompt(opts), signal: AbortSignal.timeout(60_000) })) {
     if (ev.type === 'text') text += ev.delta
     else if (ev.type === 'done') {
       text = ev.text || text

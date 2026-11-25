@@ -31,6 +31,7 @@ export interface Usage {
   cacheReadTokens: number
   outputTokens: number
   apiCostUsd?: number
+  responseModel?: string // the model id the harness says answered (claude-sonnet-4-5-…), when it says; a receipt's `model` stays the one asked for
 }
 
 export type EngineEvent =

@@ -2,7 +2,8 @@
 // and proposals for what already exists (an agent's change, a routine, a channel). A proposal is a
 // card, like his new agents: applied when his reply ends, with Desfazer, unless it grants access or
 // that's turned off (src/core/tuca-apply.ts); then nothing changes until the person applies it.
-// He sees settings, statuses and error messages, never what was said in a conversation.
+// With ver_estado he sees settings, statuses and error messages, never what was said in a conversation
+// (of the conversations he reads only what comes back from the requests he made: src/core/delegations.ts).
 import { L } from '../shared/lang'
 import { safeLimit } from '../shared/limits'
 import { usedShare } from '../shared/limits'

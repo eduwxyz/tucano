@@ -7,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ChromeBrowsers, hasChrome } from '../src/core/chrome'
 
 // A page that says where its window is, and whether it still has the profile's cookie: a headless
-// Chrome (--headless=new) reports screenX 0, and a real window reports a position outside the screen
-// for a lane that opened one to get past a wall (chrome.ts). The cookie is what shows the window is
-// the same browser, not a new one.
+// Chrome (--headless=new) reports a screenX on the screen (0, or a few pixels in when another Chrome
+// is open on the same machine: 10 on Windows and 22 on macOS, seen in CI on 2026-11-24), and a real
+// window reports a position outside the screen for a lane that opened one to get past a wall
+// (chrome.ts). The cookie is what shows the window is the same browser, not a new one.
 const PAGE = `<!doctype html><title>page</title>
 <p>the site</p>
 <script>document.title = 'x:' + screenX + '|c:' + document.cookie.includes('seen')</script>`
@@ -22,7 +23,11 @@ const screen = (): boolean => (process.platform !== 'linux' || !!process.env['DI
 
 // A site that only lets a real browser through: the lane goes to a window on the page it is on, once
 // per site, and never again for that site — the loop this ends is 143 calls on one host (2026-11-22).
-describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only lets a real browser through', () => {
+//
+// Where a real window lands is the desktop's doing, and on CI's Windows it is now and then still on
+// the screen when the page is first asked (7 of the 12 failed runs read on 2026-11-24 were this file,
+// alone): a failed test here gets two more tries before it counts.
+describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only lets a real browser through', { retry: 2 }, () => {
   let server: Server
   let url = ''
   let other = ''
@@ -47,7 +52,7 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
     await new Promise((r) => server.close(r))
   })
 
-  // Where the window is, as the page sees it: headless is always 0. A real window is asked to sit at
+  // Where the window is, as the page sees it: headless is on the screen. A real window is asked to sit at
   // -24000,-24000, which Windows clamps to the edge of the desktop and keeps off the screen. macOS
   // opens it on the screen and, moved, stops with 40 px still showing (measured 2026-11-22), so there
   // an agent's window can be in the way, and it is why this is read and not assumed.
@@ -57,7 +62,7 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
 
   it('opens the page it is on in a window, keeps the profile, and says so', async () => {
     const headless = await chrome.run('a', 'open', { url })
-    expect(headless.title).toBe('x:0|c:true')
+    expect(headless.title).toContain('c:true')
     expect(outside(headless.title)).toBe(false)
     expect(headless.headful).toBeUndefined()
 
@@ -91,7 +96,8 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
 
     await chrome.run('b', 'hide')
     const back = await chrome.run('b', 'frame')
-    expect(where(back.title)).toBe(0) // headless again, same profile
+    expect(back.headful).toBeUndefined() // headless again, same profile
+    expect(outside(back.title)).toBe(false)
     expect(back.title).toContain('c:true')
     expect(shown).toContain('b:false')
 
@@ -108,7 +114,9 @@ describe.skipIf(!hasChrome() || !screen())('a real window, for a site that only 
       await windowless.run('c', 'open', { url })
       expect((await windowless.run('c', 'headful')).headful).toBe(false)
       expect((await windowless.run('c', 'snapshot')).shown).toBe(false)
-      expect(where((await windowless.run('c', 'frame')).title)).toBe(0)
+      const still = await windowless.run('c', 'frame')
+      expect(still.headful).toBeUndefined()
+      expect(outside(still.title)).toBe(false)
     } finally {
       await windowless.run('c', 'close').catch(() => {})
     }

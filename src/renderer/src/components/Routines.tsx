@@ -30,6 +30,7 @@ import {
   type Routine,
   type State,
   type RoutineInput,
+  OK_STATUSES,
   type RunStatus,
   type Schedule,
   type Trigger,
@@ -850,8 +851,6 @@ function Hook({ token }: { token: string }): ReactNode {
   )
 }
 
-const OK = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval'])
-
 // A routine's card, next to the block: what it does, how it's been going, and what to do with it.
 function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; rect: DOMRect; now: number; onClose: () => void; onEdit: (r: Routine) => void; onDuplicate: (r: Routine) => void }): ReactNode {
   const r = useStore((s) => (occ.routine ? s.routines.find((x) => x.id === occ.routine!.id) : undefined))
@@ -928,7 +927,7 @@ function Popover({ occ, rect, now, onClose, onEdit, onDuplicate }: { occ: Occ; r
           {history.slice(-14).map((h) => (
             <button
               key={h.key}
-              className={h.status === 'working' ? 'is-live' : h.status && WAITS.has(h.status) ? 'is-wait' : h.status && OK.has(h.status) ? 'is-ok' : h.status ? 'is-bad' : ''}
+              className={h.status === 'working' ? 'is-live' : h.status && WAITS.has(h.status) ? 'is-wait' : h.status && OK_STATUSES.has(h.status) ? 'is-ok' : h.status ? 'is-bad' : ''}
               title={`${when(h.at)}${h.status && LAST()[h.status] ? ` · ${LAST()[h.status]!.label}` : ''}`}
               onClick={() => go(h)}
             />

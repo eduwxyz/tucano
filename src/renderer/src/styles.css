@@ -2287,6 +2287,12 @@ h3 {
   color: var(--danger);
   background: var(--danger-soft);
 }
+/* The pointer is already on it, so armed has to look different from hovered. */
+.work-row .icon-btn.is-armed,
+.work-row .icon-btn.is-armed:hover {
+  color: #fff;
+  background: var(--danger);
+}
 .work-row__dot {
   flex: none;
   width: 6px;
@@ -3561,6 +3567,29 @@ h3 {
   min-width: 0;
   border-left: 0;
 }
+/* Expanded Markdown: a wider reading column, not edge-to-edge. Text stays readable;
+   tables and code can break out wider than the text column without a horizontal scrollbar. */
+.side-panel.is-wide .side-panel__doc.md {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(960px, 100%)) minmax(0, 1fr);
+  align-content: start;
+}
+.side-panel.is-wide .side-panel__doc.md > * {
+  grid-column: 2;
+  min-width: 0;
+}
+.side-panel.is-wide .side-panel__doc.md > table,
+.side-panel.is-wide .side-panel__doc.md > pre,
+.side-panel.is-wide .side-panel__doc.md > .md-table-wrap {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 100%;
+  justify-self: center;
+}
+.side-panel.is-wide .side-panel__doc.md > table {
+  width: fit-content;
+  max-width: 100%;
+}
 /* The side panel slides in from its edge. */
 .side-panel {
   --rise: 0;
@@ -3933,6 +3962,72 @@ body.is-resizing webview {
 .msg__meta .receipt,
 .msg__meta .wiki-keep {
   margin: 0;
+}
+/* The reply's footer line holds the action pills first, then the numbers: one row, centred, so a
+   22 px pill and 12 px text share a band instead of hanging from a text baseline. */
+.msg__meta {
+  align-items: center;
+  row-gap: 6px;
+}
+/* The way on from a reply that stopped: Continue, Try again, Try with instructions. Same pill, dim colour, and only
+   under the pointer. A row that ended badly reads as its words and its numbers until someone goes
+   near it. It keeps its space while hidden, so nothing below it jumps when it appears. */
+.msg__hire {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.msg:hover .msg__hire,
+.msg:focus-within .msg__hire {
+  opacity: 1;
+}
+/* A touch screen has no pointer to hover with: there, the pill is simply there. */
+@media (hover: none) {
+  .msg__hire {
+    opacity: 1;
+  }
+}
+/* Action pills share one row under the reply. None carries a top margin here: the row has the air. */
+.msg__meta .msg__hire {
+  margin-top: 0;
+}
+/* While its note is open, the pill that opened it stays, and the note takes a row of its own. */
+.msg__hire[aria-expanded='true'] {
+  opacity: 1;
+}
+.msg__meta .retry-note {
+  order: 1; /* under the pills and the reply's numbers, which stay on their line */
+  flex: 1 1 100%;
+  max-width: none;
+  margin-top: 2px;
+}
+.msg__meta .retry-note textarea {
+  max-width: 560px;
+}
+.steps__ask-pill {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition: var(--transition-ui);
+}
+.steps__ask-pill:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover);
+}
+/* A phone's row spends its width on the reply's own words: a pill that carries a glyph drops its
+   word and keeps the glyph. Every dropped word stays as the button's aria-label. */
+@media (max-width: 760px) {
+  .steps__ask-pill__word {
+    display: none;
+  }
 }
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */
@@ -5728,6 +5823,40 @@ table.csv th {
   font-size: 12.5px;
   user-select: all;
 }
+/* Settings › Traces: two switches, the address with its examples, the headers, and what goes. */
+.traces {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.traces__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.traces__row .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.traces textarea {
+  resize: vertical;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12.5px;
+}
+.traces .hint--warn,
+.traces .note,
+.traces__what {
+  margin: 0;
+}
+.text-btn.traces__remove {
+  align-self: flex-start;
+  margin-top: -4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
 /* Your own endpoint: the address and key, then the models it lists, to tick. */
 .endpoint {
   display: flex;
@@ -5815,6 +5944,7 @@ table.csv th {
   flex-wrap: wrap;
   gap: 8px;
   width: 100%;
+  min-width: 0;
 }
 .model-picker select {
   flex: 0 0 auto;
@@ -5911,6 +6041,8 @@ table.csv th {
 .modal__card {
   width: min(460px, calc(100vw - 32px));
   max-height: calc(100vh - 80px);
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 18px 20px;
@@ -5918,6 +6050,9 @@ table.csv th {
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
+}
+.modal__card > :is(.modal__head, .modal__foot, textarea) {
+  flex-shrink: 0;
 }
 .modal__head {
   display: flex;
@@ -6185,17 +6320,19 @@ table.csv th {
   background: var(--text-3);
   color: var(--panel);
 }
-/* The groups stay at the top while the page scrolls, on the page's own background. */
-.settings-groups {
+/* The groups and subject jumps stay at the top while the page scrolls, on the page's own background. */
+.settings-sticky {
   position: sticky;
   top: 0;
   z-index: 3;
-  display: flex;
-  justify-content: center;
   margin: -8px 0 0;
-  padding: 8px 0 12px;
+  padding: 8px 0 8px;
   background: var(--panel);
   -webkit-app-region: no-drag;
+}
+.settings-groups {
+  display: flex;
+  justify-content: center;
 }
 .settings-groups__bar {
   display: inline-flex;
@@ -6228,7 +6365,7 @@ table.csv th {
   flex-wrap: wrap;
   justify-content: center;
   gap: 2px;
-  margin: 2px 0 6px;
+  margin: 4px 0 0;
 }
 .settings-jumps > a {
   display: inline-flex;
@@ -6413,13 +6550,18 @@ table.csv th {
 }
 .search {
   width: min(560px, calc(100vw - 32px));
+  max-height: calc(86vh - 16px);
+  max-height: calc(100dvh - 14vh - 16px);
+  display: flex;
+  flex-direction: column;
   border-radius: 14px;
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
-  overflow: hidden;
+  overflow-y: auto;
 }
 .search__input {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6449,6 +6591,7 @@ kbd {
   color: var(--text-3);
 }
 .search__list {
+  min-height: 0;
   max-height: 380px;
   overflow-y: auto;
   padding: 6px;
@@ -7193,7 +7336,7 @@ kbd {
 .usage-receipt {
   width: 100%;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 110px 90px 64px 64px 84px;
+  grid-template-columns: 20px minmax(0, 1fr) 96px 84px 76px 44px 60px 104px 84px;
   align-items: center;
   gap: 12px;
   padding: 9px 12px;
@@ -7208,7 +7351,8 @@ kbd {
 .usage-receipt:hover {
   background: var(--hover);
 }
-.usage-receipt .num {
+.usage-receipt .num,
+.exec-step .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -7226,6 +7370,152 @@ kbd {
 .usage-more {
   margin-top: 8px;
 }
+.usage-jump {
+  margin-bottom: 12px;
+}
+
+/* Execuções, in Uso e limites */
+#executions {
+  scroll-margin-top: 16px;
+}
+.exec-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 12px;
+}
+.exec-agent {
+  min-width: 170px;
+  max-width: 240px;
+}
+.exec-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin-bottom: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.exec-stat strong {
+  color: var(--text);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.exec-status {
+  font-size: 12px;
+}
+.exec-status.is-ok {
+  color: var(--ok);
+}
+.exec-status.is-warn {
+  color: var(--warn);
+}
+.exec-status.is-danger {
+  color: var(--danger);
+}
+.exec-steps {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin: 2px 12px 10px 44px;
+  padding: 8px 0 2px 12px;
+  border-left: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.exec-steps > .btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+.exec-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(60px, 180px) 76px;
+  align-items: center;
+  gap: 2px 12px;
+}
+.exec-step__bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.exec-step__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.exec-step.is-error .exec-step__bar i {
+  background: var(--danger);
+}
+.exec-step__error {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* The Boletim's tools */
+.rep-tool {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 64px 44px 56px;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.rep-tool + .rep-tool {
+  border-top: 1px solid var(--border);
+}
+.rep-tool--head {
+  padding: 0 0 6px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.rep-tool .mono {
+  font-size: 12.5px;
+}
+.rep-tool .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rep-tool__p95 {
+  font-weight: 550;
+}
+.rep-tool__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.rep-tool__bar i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.rep-tool .is-danger {
+  color: var(--danger);
+  font-weight: 550;
+}
+@media (max-width: 640px) {
+  .rep-tool {
+    grid-template-columns: minmax(0, 1fr) 56px 36px 48px;
+    gap: 10px;
+  }
+  .rep-tool__bar,
+  .rep-tool--head > :nth-child(2) {
+    display: none;
+  }
+}
+.text-btn.rep-line__runs {
+  padding: 2px 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
 
 @media (max-width: 900px) {
   .usage-agent {
@@ -7238,12 +7528,24 @@ kbd {
   .usage-agent > .icon {
     display: none;
   }
+  /* A phone keeps who, the time and how it ended. */
   .usage-receipt {
-    grid-template-columns: 20px minmax(0, 1fr) 64px 84px;
+    grid-template-columns: 20px minmax(0, 1fr) 76px 72px;
   }
   .usage-receipt > :nth-child(3),
   .usage-receipt > :nth-child(4),
-  .usage-receipt > :nth-child(5) {
+  .usage-receipt > :nth-child(6),
+  .usage-receipt > :nth-child(7),
+  .usage-receipt > :nth-child(9) {
+    display: none;
+  }
+  .exec-steps {
+    margin-left: 12px;
+  }
+  .exec-step {
+    grid-template-columns: minmax(0, 1fr) 76px;
+  }
+  .exec-step__bar {
     display: none;
   }
 }
@@ -8084,6 +8386,7 @@ kbd {
 .form-modal {
   width: min(680px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
+  max-height: calc(100dvh - 64px);
   overflow-y: auto;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -8359,6 +8662,7 @@ kbd {
   width: min(620px, calc(100vw - 32px));
 }
 .skill-add__list {
+  min-height: 0;
   max-height: min(460px, 56vh);
   overflow-y: auto;
   padding: 6px;
@@ -9205,6 +9509,16 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
    animated element is a layer of its own: eighty of them at once is a first frame the compositor can
    leave unpainted until something else invalidates it. */
 .wk-canvas.is-many .wk-node { animation: none; }
+/* thousands of dots fading at once on every hover is what a busy map can't afford */
+.wk-canvas.is-many .wk-node, .wk-canvas.is-many .wk-node text, .wk-canvas.is-many .wk-canvas__edges line { transition: none; }
+/* a page lit: a veil over the map, and the page and its links over the veil */
+.wk-canvas__over { pointer-events: none; }
+.wk-canvas__veil { fill: var(--bg); opacity: 0.8; animation: wk-veil var(--dur-enter) var(--ease-out); }
+@keyframes wk-veil {
+  from {
+    opacity: 0;
+  }
+}
 .wk-canvas.is-many > svg { animation: fade var(--dur-data) var(--ease-out) both; }
 .wk-node__hit { fill: transparent; }
 .wk-node__dot { fill: var(--k); stroke: var(--bg); stroke-width: 2.5; }
@@ -9236,10 +9550,10 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 
 /* search */
 .wk-palette-back { align-items: flex-start; padding-top: 12vh; }
-.wk-palette { width: min(640px, 92vw); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); overflow: hidden; animation: pop var(--dur-base) var(--ease-out) both; }
-.wk-palette__input { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); color: var(--text-3); }
+.wk-palette { width: min(640px, 92vw); max-height: calc(88vh - 16px); max-height: calc(100dvh - 12vh - 16px); display: flex; flex-direction: column; border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); overflow: hidden; animation: pop var(--dur-base) var(--ease-out) both; }
+.wk-palette__input { flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); color: var(--text-3); }
 .wk-palette__input input, .wk-palette__input input:focus { flex: 1; border: 0; outline: 0; box-shadow: none; padding: 0; background: transparent; font: inherit; font-size: 17px; color: var(--text); }
-.wk-palette__list { max-height: 56vh; overflow-y: auto; padding: 8px; }
+.wk-palette__list { min-height: 0; max-height: 56vh; overflow-y: auto; padding: 8px; }
 .wk-palette__label { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 .wk-palette__row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .wk-palette__row.is-on { background: var(--active); }
@@ -9735,6 +10049,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .modal__card.google-setup {
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   overflow-y: auto;
 }
 .google-setup__steps {
@@ -13477,7 +13792,7 @@ button.agent-card__now:hover {
 }
 
 /* ---------- What a person sees (PersonAccess.tsx) ---------- */
-.modal__card.access-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.modal__card.access-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); overflow-y: auto; }
 .access { display: flex; flex-direction: column; gap: 20px; }
 .access :where(button) { border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; background: none; }
 .access-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 1.5; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
@@ -14538,7 +14853,7 @@ button.agent-card__now:hover {
   gap: 2px;
 }
 .sidebar__tool {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -14616,11 +14931,14 @@ button.agent-card__now:hover {
   background: var(--hover);
   color: var(--text);
 }
-/* Room for the gear on hover. A row with the laptop (last in it) keeps that room always, so the gear coming doesn't push the laptop. */
+/* Room for the hover icons (gear, and the computer when this agent has one). */
 .agent-row:hover > .nav-item,
-.agent-row:focus-within > .nav-item,
-.agent-row:has(.nav-item__mac) > .nav-item {
+.agent-row:focus-within > .nav-item {
   padding-right: 32px;
+}
+.agent-row:has(.nav-item__mac):hover > .nav-item,
+.agent-row:has(.nav-item__mac):focus-within > .nav-item {
+  padding-right: 56px;
 }
 .agent-row__gear {
   position: absolute;
@@ -14636,7 +14954,27 @@ button.agent-card__now:hover {
   pointer-events: auto;
 }
 .agent-row .nav-item__mac {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  translate: 0 -50%;
   color: var(--text-3);
+  opacity: 0;
+  pointer-events: none;
+}
+.agent-row:hover .nav-item__mac,
+.agent-row:focus-within .nav-item__mac {
+  opacity: 1;
+  pointer-events: auto; /* its title says where the agent runs */
+}
+/* A touch screen has no hover: where the agent runs stays in sight, with its room kept. */
+@media (hover: none) {
+  .agent-row:has(.nav-item__mac) > .nav-item {
+    padding-right: 56px;
+  }
+  .agent-row .nav-item__mac {
+    opacity: 1;
+  }
 }
 .agent-row.is-archived > .nav-item {
   opacity: 0.6;
@@ -15407,6 +15745,98 @@ button.agent-card__now:hover {
   margin: 1px 0 0;
   font-size: 12.5px;
   color: var(--text-2);
+}
+/* His other conversations: a small menu by "Nova conversa". */
+.onb-tc__convs {
+  position: relative;
+  flex: none;
+}
+.onb-tc__convs-pop {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  --pop-y: -6px;
+  animation: pop var(--dur-base) var(--ease-out) both;
+}
+.onb-tc__conv {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.onb-tc__conv:hover,
+.onb-tc__conv:focus-visible {
+  background: var(--hover);
+}
+.onb-tc__conv.is-on {
+  font-weight: 600;
+}
+.onb-tc__conv-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__conv-when {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+/* What he was let to do himself: the same popover, a row per leave with its way back. */
+.onb-tc__leaves-note {
+  margin: 0;
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.onb-tc__leave {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.onb-tc__leave-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.onb-tc__leave-kind {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.onb-tc__leave-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.onb-tc__leave .link {
+  flex: none;
 }
 .onb-tc__confirm {
   display: flex;
@@ -16803,4 +17233,110 @@ button.agent-card__now:hover {
   flex: none;
   color: var(--accent);
   font-weight: 600;
+}
+
+/* ---------- the Tuca's screen: the team beside his conversation ---------- */
+/* The same card as the proposal: who he passes the requests to. Whoever has a part of the request in
+   hand comes first, with how it stands; the rest are at rest, by what they do. */
+.onb-tc__team-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 28%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.onb-tc__mates {
+  margin: 12px -8px 0;
+  padding: 0;
+  list-style: none;
+}
+.onb-tc__mates > li + li {
+  margin-top: 1px;
+}
+.onb-tc__mate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.onb-tc__mate:hover,
+.onb-tc__mate:focus-visible {
+  background: var(--hover);
+}
+.onb-tc__mate .avatar,
+.onb-tc__mate > svg {
+  flex: none;
+}
+.onb-tc__mate-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.onb-tc__mate-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.onb-tc__mate-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__mate-top .request-note__state {
+  flex: none;
+  font-size: 11.5px;
+}
+.onb-tc__mate-sub {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onb-tc__mate.is-asked .onb-tc__mate-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+/* The rest of the team steps back while a request is in hand. */
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked) {
+  opacity: 0.62;
+}
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked):hover,
+.onb-tc__mates:has(.is-asked) .onb-tc__mate:not(.is-asked):focus-visible {
+  opacity: 1;
+}
+.onb-tc__team .onb-tc__actions {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.onb-tc__back {
+  display: block;
+  margin: 10px auto 0;
+  font-size: 12.5px;
+}
+/* On his screen the request shows once in the conversation, under his reply: the lines under the
+   person's own message would say the same again, and the team card beside it says how it stands now. */
+.onb-tc .asked-here {
+  display: none;
 }

@@ -122,13 +122,7 @@ export function listSections(routines: Routine[], runs: Occ[], now: number): Sec
   return { needs, next, off }
 }
 
-// The first line of a reply, without Markdown marks: what the list shows of the last result.
-export const firstLine = (text: string): string =>
-  (text.split('\n').find((l) => l.trim()) ?? '')
-    .replace(/^[#>\-*\s]+/, '')
-    .replace(/[*_`]+/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .trim()
+export { firstLine } from '../../../shared/titles'
 
 // ---------- words ----------
 

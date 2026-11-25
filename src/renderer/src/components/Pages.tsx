@@ -87,6 +87,7 @@ import {
 } from '../store'
 import { ActivityPane, AdminOnly, PeoplePane } from './People'
 import { HarnessesPane } from './HarnessKeys'
+import { TracesPane } from './Traces'
 import { voiceRefusal } from '../../../shared/voice'
 import { ACTION_KINDS, actionHint, actionMode, AUTONOMY_LEVELS, autonomyHint, autonomyLabel, COMPUTADOR, kindLabel, modeLabel, shellActions, type ActionKind, type ActionMode, type ActionRules, type Autonomy, type Policy } from '../../../shared/actions'
 import { useVoice, VOICE_CHOICES, VOICE_WHERE, VoiceSetup } from './VoiceSetup'
@@ -2274,6 +2275,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
           <span className="muted small mono truncate grow">{address(c)}</span>
         </div>
+        <ConnectorIconPicker c={c} />
         {nodeOf(c.url) ? (
           <ComputerAgents connectorId={c.id} />
         ) : (
@@ -3662,8 +3664,11 @@ export function SettingsPage(): ReactNode {
   return (
     <Page title={L('Configurações', 'Settings')} actions={<SettingsSearchField value={query} onChange={setQuery} />}>
       <div className="settings-page" ref={body}>
-        <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
-        {searching ? <SettingsResults hits={searchSettings(structure, query)} query={query} onPick={pickHit} /> : <SettingsJumps key={tab} sections={settingsTabStructure(tab, structure)} />}
+        <div className="settings-sticky">
+          <SettingsGroups groups={tabs.map(([id]) => id as SettingsPageId)} current={searching ? null : tab} onPick={pickGroup} />
+          {!searching && <SettingsJumps key={tab} sections={settingsTabStructure(tab, structure)} />}
+        </div>
+        {searching && <SettingsResults hits={searchSettings(structure, query)} query={query} onPick={pickHit} />}
         {windowless() && <SettingsWhere />}
 
         {/* ---------- You ---------- */}
@@ -4086,6 +4091,7 @@ export function SettingsPage(): ReactNode {
             <NodeCard />
           </SectionAnchor>
         )}
+        {on('conexoes') && admin && <SectionAnchor id="connections-traces" sections={structure}><TracesPane /></SectionAnchor>}
         {on('conexoes') && <SectionAnchor id="harnesses-keys" sections={structure}><HarnessesPane /></SectionAnchor>}
 
         {/* ---------- Workspace ---------- */}

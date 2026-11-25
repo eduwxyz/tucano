@@ -38,6 +38,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   harnesses: { kind: 'array', max: 1_000, nullable: true },
   classifiers: { kind: 'array', max: 20_000 },
   classifierJobs: { kind: 'object', max: 5_000 },
+  primaryAccounts: { kind: 'object', max: 2_000, nullable: true },
   onboarding: { kind: 'object', max: 2_000, nullable: true },
   folded: { kind: 'array', max: 200_000, nullable: true },
   sidebarHidden: { kind: 'array', max: 500, nullable: true },
