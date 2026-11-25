@@ -5,7 +5,7 @@ import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
-import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, hostUrl, lentProblem, listening, mountArgs } from '../src/core/computer'
+import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, hostUrl, lentProblem, lentWhereTheyAre, listening, mountArgs } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -76,6 +76,30 @@ describe('lent folders', () => {
     expect(lentProblem(lent, { home, dataDir })).toMatch(/Devolva essa pasta/)
     execFileSync('rm', [join(home, 'projetos/app')])
     expect(lentProblem(lent, { home, dataDir })).toMatch(/não existe/)
+  })
+
+  it.runIf(process.platform !== 'win32')('one lent through a link before the check existed is kept as where it leads, once, and passes from then on', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'ad-home-')))
+    mkdirSync(join(home, 'discos/externo/app'), { recursive: true })
+    mkdirSync(join(home, 'projetos/direto'), { recursive: true })
+    mkdirSync(join(home, '.ssh'))
+    symlinkSync(join(home, 'discos/externo'), join(home, 'trabalho')) // ~/trabalho leads to another place
+    symlinkSync(join(home, '.ssh'), join(home, 'projetos/chaves'))
+    const dataDir = join(home, 'dados')
+    const lent = [
+      { name: 'app', path: join(home, 'trabalho/app'), readOnly: false },
+      { name: 'direto', path: join(home, 'projetos/direto'), readOnly: true },
+      { name: 'chaves', path: join(home, 'projetos/chaves'), readOnly: false },
+      { name: 'sumiu', path: join(home, 'projetos/sumiu'), readOnly: false }
+    ]
+    expect(lentProblem(lent.slice(0, 1), { home, dataDir })).toMatch(/Devolva essa pasta/) // what the check alone would say
+    const kept = lentWhereTheyAre(lent, { home, dataDir })
+    expect(kept[0]).toEqual({ name: 'app', path: join(home, 'discos/externo/app'), readOnly: false })
+    expect(kept[1]).toEqual(lent[1]) // already where it is
+    expect(kept[2]).toEqual(lent[2]) // leads to what can't be lent: left as it is, for the check to refuse
+    expect(kept[3]).toEqual(lent[3]) // gone: left as it is too
+    expect(lentProblem(kept.slice(0, 2), { home, dataDir })).toBeNull()
+    expect(lentProblem(kept.slice(2, 3), { home, dataDir })).toMatch(/credenciais/)
   })
 
   it('lends only project folders inside home: not home itself, Library, hidden folders or the app data', () => {

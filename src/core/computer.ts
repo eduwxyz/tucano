@@ -78,6 +78,17 @@ const realOr = (p: string): string => {
   }
 }
 
+// A folder lent before the check above existed was kept as it was typed. One typed through a link
+// (~/work that leads to another disk) would be refused from then on, though nothing changed. So, once
+// (the core, on its first start with the check), each is kept as where it leads now, if that is
+// still a folder that may be lent; one that isn't stays as it is, and the check says why.
+export function lentWhereTheyAre(folders: readonly LentFolder[], opts: { home?: string; dataDir: string }): LentFolder[] {
+  return folders.map((f) => {
+    const now = realOr(f.path)
+    return now !== f.path && !checkFolder(now, opts) ? { ...f, path: now } : f
+  })
+}
+
 // /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
 export function folderName(path: string, taken: string[]): string {
   const base = basename(path).toLowerCase().normalize('NFD').replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '') || 'pasta'
