@@ -12,10 +12,10 @@ Dono e admin marcam uma pasta com **Pedir aprovação nesta pasta** (no **⋯** 
 Um arquivo que uma rotina refaz de tempos em tempos mostra **Vivo**. Em **De onde veio** aparecem a rotina e quando roda; se ela for pausada ou apagada, o aviso diz que parou.
 
 ## Chegada
-Na tela de Documentos, **Chegada** recebe qualquer arquivo, solto ou escolhido no computador. A Tuca lê e guarda na pasta certa.
+Na tela de Documentos, **Chegada** recebe qualquer arquivo, solto ou escolhido no computador. O Tuca lê e guarda na pasta certa.
 - Enquanto lê, aparece em **Guardando…**. Depois, **Guardados agora** mostra onde ficou (por um dia), com **Abrir**, **Mover** e **Tirar daqui** (volta para **Só meus**). Mais de três ficam atrás de **Ver mais**.
 - Sem pasta certa, o arquivo fica em **Só meus** com o motivo e o botão **Escolher pasta**.
-- Soltar direto numa pasta guarda nela, sem passar pela Tuca.
+- Soltar direto numa pasta guarda nela, sem passar pelo Tuca.
 
 ## Prazos e lembretes
 Uma data importante no arquivo ("vence em 12/03") aparece em **Pra você**, em **Prazos nos documentos**, com os dias que faltam.

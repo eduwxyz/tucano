@@ -93,7 +93,7 @@ export function useInboxUpload(): { sending: Sending[]; refused: Refusal[]; dism
       }
       setSending((s) => s.filter((x) => x.key !== key))
     }
-    if (sent) toast(sent === 1 ? L('Recebido. A Tuca já está lendo.', 'Received. Tuca is already reading it.') : L(`${sent} arquivos recebidos. A Tuca já está lendo.`, `${sent} files received. Tuca is already reading them.`))
+    if (sent) toast(sent === 1 ? L('Recebido. O Tuca já está lendo.', 'Received. Tuca is already reading it.') : L(`${sent} arquivos recebidos. O Tuca já está lendo.`, `${sent} files received. Tuca is already reading them.`))
   }
   return { sending, refused, dismiss: (key) => setRefused((r) => r.filter((x) => x.key !== key)), send }
 }

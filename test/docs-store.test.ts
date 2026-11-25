@@ -1,6 +1,6 @@
 // Documentos on a real folder and a real index: the first folders, what is stored, who sees what, who may change
 // folders, and versions, names and the trash.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, sep } from 'node:path'
 import JSZip from 'jszip'
@@ -191,6 +191,25 @@ describe('adding a file', () => {
     expect(existsSync(join(root, 'x.md'))).toBe(false)
     expect(existsSync(join(docs.root, 'x.md'))).toBe(false)
     expect(existsSync(join(docs.root, 'Financeiro', '..', '..', 'x.md'))).toBe(false)
+  })
+
+  // What is read and served is what was kept here, not what a link in its place leads to.
+  it.skipIf(process.platform === 'win32')("gives nothing through a link put in a file's place, or in its folder's", async () => {
+    const secret = join(root, 'chave.txt')
+    writeFileSync(secret, 'SEGREDO')
+    const doc = await put(ana, 'Financeiro', 'notas.md', 'conteudo')
+    const path = docs.fileOf(ana, doc.id)!.path
+    rmSync(path)
+    symlinkSync(secret, path)
+    expect(docs.fileOf(ana, doc.id)).toBeNull()
+    // The folder itself, swapped for a link to one outside that holds a file of the same name.
+    rmSync(path)
+    const outside = join(root, 'fora')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'notas.md'), 'SEGREDO')
+    rmSync(join(docs.root, 'Financeiro'), { recursive: true })
+    symlinkSync(outside, join(docs.root, 'Financeiro'))
+    expect(docs.fileOf(ana, doc.id)).toBeNull()
   })
 
   it('keeps a folder name inside the documents folder too', () => {

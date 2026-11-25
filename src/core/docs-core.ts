@@ -3,7 +3,7 @@
 // <dir>/<its folders' names>/<name>, the versions it replaced are <dir>/.versions/<id>/<n>-<name>, a
 // trashed one is <dir>/.trash/<id>/<name>, and a personal folder lives in <dir>/.private/<person>.
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, resolve } from 'node:path'
 import { approvalNeeded, mayApprove, personMay } from '../shared/doc-access'
 import { acceptsDoc, docKind, folderPath, MAX_DOC_BYTES, OUTSIDE, parseActor, type Doc, type DocAction, type DocFolder, type DocKind, type DocLevel, type DocOrigin, type FolderAccess } from '../shared/docs'
@@ -11,7 +11,7 @@ import { UserError } from '../shared/errors'
 import { L } from '../shared/lang'
 import type { Agent, Artifact, Person } from '../shared/types'
 import { DocsIndex } from './docs-db'
-import { cleanFileName, cleanName, safeJoin, sameName, uniqueName } from './docs-fs'
+import { cleanFileName, cleanName, isInside, safeJoin, sameName, uniqueName } from './docs-fs'
 import { extractFile, MAX_TEXT } from './wiki-extract'
 
 export interface DocsDeps {
@@ -168,11 +168,14 @@ export class DocsCore {
       return null
     }
   }
-  // The file of a document (`version`: an older one), when it is there.
+  // The file of a document (`version`: an older one), when it is there: a file of its own, inside the
+  // documents folder. A link put in its place, or in the place of a folder above it, is not one,
+  // wherever it leads: what is read and served from here is only what was kept here.
   filePath(d: Doc, version?: number): string | null {
     try {
       const p = version && version !== d.version ? this.versionFile(d.id, version) : d.trashedAt ? this.trashPath(d) : this.docPath(this.index.folders(), d)
-      return p && existsSync(p) && statSync(p).isFile() ? p : null
+      if (!p || !existsSync(p) || !lstatSync(p).isFile()) return null
+      return isInside(realpathSync(this.root), realpathSync(p)) ? p : null
     } catch {
       return null
     }

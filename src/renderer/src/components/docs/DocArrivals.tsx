@@ -58,7 +58,7 @@ export function DocArrivals({ tree, upload, dropping }: { tree: DocsTree; upload
         className={`dc-arrival ${dropping ? 'is-over' : ''}`}
         role="button"
         tabIndex={0}
-        aria-label={L('Chegada: escolher arquivos para a Tuca guardar', 'Arrivals: choose files for Tuca to keep')}
+        aria-label={L('Chegada: escolher arquivos para o Tuca guardar', 'Arrivals: choose files for Tuca to keep')}
         onClick={pick}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), pick())}
       >
@@ -67,7 +67,7 @@ export function DocArrivals({ tree, upload, dropping }: { tree: DocsTree; upload
         </span>
         <span className="dc-arrival__text">
           <strong>{L('Chegada', 'Arrivals')}</strong>
-          <span>{L('Solte qualquer arquivo aqui. A Tuca lê e guarda na pasta certa.', 'Drop any file here. Tuca reads it and files it in the right folder.')}</span>
+          <span>{L('Solte qualquer arquivo aqui. O Tuca lê e guarda na pasta certa.', 'Drop any file here. Tuca reads it and files it in the right folder.')}</span>
         </span>
         <span className="btn btn--ghost btn--sm">{L('Escolher arquivos', 'Choose files')}</span>
       </div>
@@ -83,7 +83,7 @@ export function DocArrivals({ tree, upload, dropping }: { tree: DocsTree; upload
                 <div key={d.id} className="dc-arr">
                   <span className="dc-spinner" />
                   <span className="dc-arr__name">{d.name}</span>
-                  <span className="dc-arr__sub">{L('A Tuca está lendo', 'Tuca is reading it')}</span>
+                  <span className="dc-arr__sub">{L('O Tuca está lendo', 'Tuca is reading it')}</span>
                 </div>
               ))}
             </>

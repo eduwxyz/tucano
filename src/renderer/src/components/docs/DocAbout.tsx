@@ -34,7 +34,7 @@ const STEP: Record<DocAction, (who: string, detail: string) => string> = {
   approved: (w) => L(`${w} aprovou`, `${w} approved it`),
   'changes-asked': (w, d) => L(`${w} pediu ajuste${d ? `: ${d}` : ''}`, `${w} asked for changes${d ? `: ${d}` : ''}`),
   'made-official': (w) => L(`${w} marcou como oficial`, `${w} marked it as official`),
-  filed: (_w, d) => L(`a Tuca guardou em ${d || 'uma pasta'}`, `Tuca kept it in ${d || 'a folder'}`),
+  filed: (_w, d) => L(`o Tuca guardou em ${d || 'uma pasta'}`, `Tuca kept it in ${d || 'a folder'}`),
   unfiled: (w) => L(`${w} desfez: voltou para Só meus`, `${w} undid it: back in Only mine`)
 }
 // Events whose detail is already in their sentence.

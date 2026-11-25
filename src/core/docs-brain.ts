@@ -210,7 +210,7 @@ export class DocsBrain {
     const timer = setTimeout(() => {
       this.filed.delete(personId)
       try {
-        this.deps.notify(personId, L('Arquivos guardados', 'Files saved'), n === 1 ? L('A Tuca guardou 1 arquivo. Confira em Documentos.', 'Tuca put away 1 file. See it in Documents.') : L(`A Tuca guardou ${n} arquivos. Confira em Documentos.`, `Tuca put away ${n} files. See them in Documents.`))
+        this.deps.notify(personId, L('Arquivos guardados', 'Files saved'), n === 1 ? L('O Tuca guardou 1 arquivo. Confira em Documentos.', 'Tuca put away 1 file. See it in Documents.') : L(`O Tuca guardou ${n} arquivos. Confira em Documentos.`, `Tuca put away ${n} files. See them in Documents.`))
       } catch (e) {
         console.warn('[docs] notify', e)
       }

@@ -96,7 +96,7 @@ export class DocsFiling extends DocsStatus {
   // Saved in the person's personal folder, waiting to be put away.
   async addInbox(person: Person, p: { name: string; data: Buffer }): Promise<Doc> {
     this.need()
-    if (this.index.docs().filter((d) => d.filing?.state === 'pending' && d.filing.by === person.id).length >= 20) throw new UserError(L('Espere a Tuca guardar os arquivos anteriores antes de mandar mais.', 'Wait for Tuca to file the earlier ones before sending more.'))
+    if (this.index.docs().filter((d) => d.filing?.state === 'pending' && d.filing.by === person.id).length >= 20) throw new UserError(L('Espere o Tuca guardar os arquivos anteriores antes de mandar mais.', 'Wait for Tuca to file the earlier ones before sending more.'))
     let root = this.personalRoot(this.index.folders(), person.id)
     root ??= this.createFolder({ parentId: null, name: L('Só meus', 'Only mine'), rule: L('Seus arquivos pessoais. Só você vê.', 'Your personal files. Only you can see them.'), access: null, privateTo: person.id, by: actorOfPerson(person.id) })
     const doc = await this.create({ folderId: root.id, name: p.name, data: p.data, by: actorOfPerson(person.id), filing: { state: 'pending', by: person.id, at: Date.now() } })
