@@ -4,7 +4,7 @@
 // Google's and Slack's sign in with an app the person makes once, which the first Connect walks them through.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogCategory, type CatalogEntry } from '../../../shared/connector-catalog'
+import { catalogInput, CATEGORIES, entryOf, isBuiltin, MS365_VERSION, ownAppGuide, searchCatalog, type AppProvider, type CatalogCategory, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
 import { iconFromFile, imageFromClipboard } from '../connector-icon'
 import { addConnector, authorizeConnector, openExternal, ownApp, setConnectorIcon, setOwnApp, toast, useStore, type Connector } from '../store'
@@ -18,7 +18,7 @@ const light = (hex: string): boolean => {
 }
 
 // Brands without a mark in Simple Icons, or with only a wordmark: their initial, on their color.
-const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', granola: '3F6212', canva: '00C4CC', context7: '0F172A', exa: '1F40ED', keenable: '005CFF', aave: 'B6509E', coinbase: '0052FF', zapier: 'FF4F00', composio: '1A1A1A', 'azure-devops': '0078D4', cloudwatch: 'E7157B' }
+const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', granola: '3F6212', canva: '00C4CC', context7: '0F172A', exa: '1F40ED', keenable: '005CFF', aave: 'B6509E', coinbase: '0052FF', zapier: 'FF4F00', composio: '1A1A1A', 'azure-devops': '0078D4', cloudwatch: 'E7157B', outlook: '0078D4', 'microsoft-365': 'D83B01' }
 
 export function CatalogLogo({ entry, size = 36 }: { entry: CatalogEntry; size?: number }): ReactNode {
   const logo = LOGOS[entry.id]
@@ -155,7 +155,7 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
 
   const connect = (c: CatalogEntry): void => {
     if (c.app && !apps[c.app.provider]) return setAppSetup({ provider: c.app.provider, then: c })
-    if (c.fields?.length || c.warning) return setSetup(c) // asks something, or says something, first
+    if (c.fields?.length || c.warning || c.note) return setSetup(c) // asks something, or says something, first
     setBusy(c.id)
     setError(null)
     addConnector(catalogInput(c))
@@ -345,9 +345,13 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
           <span className="muted small">{entry.about()}</span>
         </div>
         {entry.warning && <ThirdPartyWarning text={entry.warning()} />}
+        {entry.note && <p className="note small">{entry.note()}</p>}
         {runs && (
           <p className="warn-box small">
-            <Icon name="terminal" size={14} /> {L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
+            <Icon name="terminal" size={14} />{' '}
+            {isBuiltin(entry.local?.command)
+              ? L(`Já vem dentro do Tucano, sem instalar nada: o servidor de código aberto da ${entry.by ?? '?'}, versão ${MS365_VERSION}, que roda neste computador com o seu usuário.`, `Comes inside Tucano, nothing to install: ${entry.by ?? '?'}'s open-source server, version ${MS365_VERSION}, which runs on this computer as your user.`)
+              : L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
           </p>
         )}
         {(entry.fields ?? []).map((f) => (

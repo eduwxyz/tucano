@@ -97,7 +97,7 @@ import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onG
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
 import { ConnectorGrid, ConnectorIconPicker, ConnectorTile, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
-import { entryOf } from '../../../shared/connector-catalog'
+import { entryOf, isBuiltin, MS365_VERSION } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
 import { ruleTool } from '../../../shared/classify'
 import { perCallTool } from '../../../shared/composio'
@@ -2182,7 +2182,9 @@ export const STATUS = (): Record<Connector['status'], { label: string; tone: str
   disconnected: { label: L('desconectado', 'disconnected'), tone: 'tag--warn' }
 })
 
-const address = (c: Connector): string => (c.kind === 'remote' ? (c.url ?? '') : [c.command, ...(c.args ?? [])].join(' '))
+// A server that comes inside Tucano has no command of its own to show: its name and version.
+const address = (c: Connector): string =>
+  c.kind === 'remote' ? (c.url ?? '') : isBuiltin(c.command) ? [`ms-365-mcp-server ${MS365_VERSION}`, ...(c.args ?? [])].join(' ') : [c.command, ...(c.args ?? [])].join(' ')
 
 // The token of a connector, set or replaced without removing it (which would lose the agents' access).
 function ConnectorToken({ id }: { id: string }): ReactNode {

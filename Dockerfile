@@ -9,7 +9,9 @@
 FROM node:24-bookworm-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+# vendor/: stand-ins the lockfile links to (the Microsoft connector's keytar, the Azure packages left out).
 COPY package.json package-lock.json ./
+COPY vendor ./vendor
 RUN ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --ignore-scripts
 COPY . .
 RUN npm run build && npm prune --omit=dev --ignore-scripts
@@ -41,6 +43,7 @@ RUN groupadd -g 10001 tucano && useradd -u 10001 -g tucano -m -d /home/tucano -s
 WORKDIR /opt/tucano
 COPY --from=build /src/package.json ./
 COPY --from=build /src/node_modules ./node_modules
+COPY --from=build /src/vendor ./vendor
 COPY --from=build /src/out ./out
 COPY --from=build /whisper /opt/whisper
 COPY --chmod=755 docker/chrome /usr/bin/google-chrome-stable
