@@ -40,6 +40,7 @@ import {
   type Settings
 } from '../store'
 import { Icon } from './ui'
+import { primaryAccountOf } from '../../../shared/primary-login'
 import { EngineProblem } from './EngineProblem'
 import { Select } from './Select'
 
@@ -292,7 +293,7 @@ function HarnessRow({ engine, st, picked, toggle }: { engine: EngineId; st: Engi
           <code className="harness__cmd">{manual}</code>
         </div>
       )}
-      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', 'Installing in the terminal that opened. Once it finishes, it shows up here on its own.')}</p>}
+      {!st.installed && install === 'started' && <p className="hint harness__body">{L('Instalando no terminal que abriu. Quando terminar, ele aparece aqui sozinho.', "Finish installing in the terminal. Tucano picks it up on its own.")}</p>}
       {!st.installed && install === 'node' && (
         <p className="hint hint--warn harness__body">
           {L(`O ${ENGINES[engine].label} precisa do Node.js. Instale o Node.js e depois clique em Instalar de novo.`, `${ENGINES[engine].label} needs Node.js. Install Node.js, then click Install again.`)}{' '}
@@ -414,7 +415,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
           <p className="hint">
             {L(
               'Um endereço no padrão da OpenAI (/chat/completions) e a chave dele. Os agentes rodam direto nele, sem Claude Code nem Codex, e cada um usa um dos modelos que você marcar.',
-              'An address in OpenAI’s format (/chat/completions) and its key. Agents run straight on it, with no Claude Code or Codex, each on one of the models you tick.'
+              'Enter an OpenAI-compatible address (/chat/completions) and its key. Agents run directly on the selected models, without Claude Code or Codex.'
             )}
           </p>
           <div className="endpoint__presets">
@@ -457,7 +458,7 @@ function EndpointRow({ st, picked, toggle }: { st: EngineStatus; picked: boolean
                   </label>
                 ))}
               </div>
-              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must handle tool calls: that’s how an agent asks another, asks you and uses connectors.')}</p>
+              <p className="hint">{L('O modelo precisa saber chamar ferramentas: é por elas que um agente pede a outro, pergunta a você e usa os conectores.', 'The model must support tool calls so the agent can ask other agents or you, and use connectors.')}</p>
             </>
           )}
           <div className="endpoint__actions">
@@ -565,7 +566,15 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])
   const engines = useStore((s) => s.settings.engines)
+  const settings = useStore((s) => s.settings)
   const os = useStore((s) => s.platform)
+  // The primary login of a harness: its replies go there first, and the other logins follow in order when it runs out.
+  const setPrimary = (engine: AccountEngine, id: string): void => {
+    const next: Partial<Record<AccountEngine, string>> = { ...(settings.primaryAccounts ?? {}) }
+    if (id) next[engine] = id
+    else delete next[engine]
+    updateSettings({ primaryAccounts: next })
+  }
   const [engine, setEngine] = useState<AccountEngine>('claude')
   const [name, setName] = useState('')
   const [manual, setManual] = useState<Record<string, string>>({})
@@ -596,6 +605,18 @@ export function AccountsCard(): ReactNode {
           {!a.loggedIn && (
             <button className="btn btn--sm btn--primary" onClick={() => void loginAccount(a.id).then((r) => setManual((m) => ({ ...m, [a.id]: r.opened ? '' : r.command })))}>
               {L('Entrar', 'Sign in')}
+            </button>
+          )}
+          {primaryAccountOf(settings, a.engine) === a.id ? (
+            <>
+              <span className="muted small">{L('Principal', 'Primary')}</span>
+              <button className="btn btn--ghost btn--sm" onClick={() => setPrimary(a.engine, '')}>
+                {L('Tirar da principal', 'Unset as primary')}
+              </button>
+            </>
+          ) : (
+            <button className="btn btn--ghost btn--sm" disabled={!a.loggedIn} onClick={() => setPrimary(a.engine, a.id)}>
+              {L('Definir como principal', 'Set as primary')}
             </button>
           )}
           {removing === a.id ? (

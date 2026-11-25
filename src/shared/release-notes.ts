@@ -54,6 +54,15 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
+// Whether this app's version should be quietly recorded as seen: only when it is newer than the
+// one on record. seenVersion is shared by every app of a workspace, so an older one (another
+// computer not updated yet, a browser on an older server build) writing its own version back
+// would make the newer one write its version again, and the two would trade it forever.
+export function shouldMarkSeen(version: string | undefined, seen: string | undefined): boolean {
+  if (!version) return false
+  return !seen || compareVersions(version, seen) > 0
+}
+
 // "**Threads.** Every answer … ([#101](…)). Thanks [@x](…)!" → "**Threads.** Every answer …"
 export function shortItem(item: string): string {
   const clean = item

@@ -53,7 +53,14 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   edit: <path d="M4 20h4L19 9l-4-4L4 16v4Z" />,
+  retry: <path d="M4 12a8 8 0 1 0 2.5-5.8L4 8.5M4 4v4.5h4.5" />,
   book: <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15ZM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6" />,
+  key: (
+    <>
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="m10.7 12.3 9.8-9.8M17 6l3 3M14.5 8.5l2 2" />
+    </>
+  ),
   lock: (
     <>
       <rect x="5" y="11" width="14" height="10" rx="2" />
@@ -122,6 +129,7 @@ const PATHS: Record<string, ReactNode> = {
   forward: <path d="M5 12h14M13 6l6 6-6 6" />,
   hand: <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5-2.7L3 15.5a1.6 1.6 0 0 1 2.6-1.8L8 16" />,
   expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />,
+  shrink: <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />,
   users: (
     <>
       <circle cx="9" cy="8" r="3.5" />
@@ -138,7 +146,23 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   thread: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM8 9h8M8 12h5" />,
-  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />
+  ask: <path d="M4 5h16v11H10l-4 4v-4H4V5ZM10 8.6a2 2 0 0 1 3.9.6c0 1.4-1.9 1.7-1.9 3M12 14.2h.01" />,
+  bell: <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0" />,
+  gauge: <path d="M12 14l4-4M3.3 19a10 10 0 1 1 17.4 0" />,
+  server: (
+    <>
+      <rect x="3.5" y="4" width="17" height="7" rx="2" />
+      <rect x="3.5" y="13" width="17" height="7" rx="2" />
+      <path d="M7.5 7.5h.01M7.5 16.5h.01" />
+    </>
+  ),
+  route: (
+    <>
+      <circle cx="6" cy="18.5" r="2" />
+      <circle cx="18" cy="5.5" r="2" />
+      <path d="M8 18.5h8a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h8" />
+    </>
+  )
 }
 
 export type IconName = keyof typeof PATHS
@@ -277,6 +301,13 @@ export function MeAvatar({ initials, size = 32 }: { initials: string; size?: num
   )
 }
 
+// The time today; the date and the time before that.
+export const shortTime = (at: number): string => {
+  const d = new Date(at)
+  const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })} ${hm}`
+}
+
 export const usd = (v: number): string =>
   v < 0.01 && v > 0 ? `US$ ${v.toLocaleString(locale(), { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : `US$ ${v.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -297,6 +328,9 @@ export function duration(ms: number): string {
   const s = Math.round(ms / 1000)
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)} min ${s % 60}s`
 }
+export const durationOrDash = (ms: number | undefined): string => (ms === undefined ? '—' : duration(ms))
+// A share of a whole, to one decimal.
+export const share = (x: number): string => `${(x * 100).toLocaleString(locale(), { maximumFractionDigits: 1 })}%`
 
 // Monday 00:00 of the week `t` is in, and the Monday `n` weeks away.
 export const startOfWeek = (t: number): number => {

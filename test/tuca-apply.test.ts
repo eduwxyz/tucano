@@ -2,8 +2,8 @@
 // (src/core/tuca-apply.ts), and what his prompt says about it.
 import { describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
-import type { Agent, Proposal } from '../src/shared/types'
-import { accessCard, agentStamp, appliesNow, changedSince, splitChange } from '../src/core/tuca-apply'
+import type { Agent, AgentDraft, Proposal, Run } from '../src/shared/types'
+import { accessCard, agentStamp, appliesNow, changedSince, decidedCards, keepDecided, splitChange } from '../src/core/tuca-apply'
 import { builderGuide } from '../src/core/tuca'
 
 const lia = { id: 'a1', name: 'Lia', handle: 'lia', role: 'Suporte', color: 'sky', instructions: 'x', modelId: 'sonnet', effort: 'low', limit: 1000, used: 0, grants: {}, memory: 'auto', computer: false, web: true, archived: false } as Agent
@@ -48,6 +48,27 @@ describe('what Desfazer checks first', () => {
     expect(agentStamp({ ...lia, grants: { c1: 'read' }, used: 500 })).toBe(s)
     expect(agentStamp({ ...lia, instructions: 'y' })).not.toBe(s)
     expect(agentStamp({ ...lia, computer: true })).not.toBe(s)
+  })
+})
+
+describe('a card settled while its reply still works stays settled', () => {
+  const team: Proposal = { id: 'p1', kind: 'team', agents: [] }
+  const channel: Proposal = { id: 'p2', kind: 'channel', name: 'ops', members: [] }
+  const draft = { id: 'd1', name: 'Rafa' } as AgentDraft
+  it("the reply's copy takes what the stored message says of each card, by id, and keeps what it proposed since", () => {
+    const mine: Run = { status: 'working', steps: [], proposals: [team, channel], agentDraft: draft }
+    const stored: Run = { status: 'working', steps: [], proposals: [{ ...team, state: 'applied', appliedId: 'a1' }], agentDraft: { ...draft, state: 'created', agentId: 'a9' } }
+    const kept = keepDecided(mine, stored)
+    expect(kept.proposals).toEqual([{ ...team, state: 'applied', appliedId: 'a1' }, channel])
+    expect(kept.agentDraft).toMatchObject({ state: 'created', agentId: 'a9' })
+    // A card the reply replaced (a new id) is the reply's; nothing stored, nothing changes.
+    expect(keepDecided({ status: 'working', steps: [], proposals: [{ ...team, id: 'p3' }] }, stored).proposals).toEqual([{ ...team, id: 'p3' }])
+    expect(keepDecided(mine, undefined)).toBe(mine)
+  })
+
+  it('tried again, a reply keeps only its settled cards', () => {
+    expect(decidedCards({ status: 'failed', steps: [], proposals: [{ ...team, state: 'applied' }, channel], agentDraft: draft })).toEqual({ proposals: [{ ...team, state: 'applied' }] })
+    expect(decidedCards(undefined)).toEqual({})
   })
 })
 

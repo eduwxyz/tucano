@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } fr
 import Markdown from 'react-markdown'
 import changelog from '../../../../CHANGELOG.md?raw'
 import { L, lang, locale } from '../../../shared/lang'
-import { newsPages, newsSince, type NewsPage } from '../../../shared/release-notes'
+import { newsPages, newsSince, shouldMarkSeen, type NewsPage } from '../../../shared/release-notes'
 import type { UpdateState } from '../../../shared/types'
 import { updateSettings, useStore, workingAgents } from '../store'
 import { Modal } from './Modal'
@@ -57,7 +57,7 @@ export function UpdateNote(): ReactNode {
           <span className="muted small">{workingNote(working)}</span>
         ) : (
           <a href={notes(u.next)} target="_blank" rel="noreferrer">
-            {L('O que mudou', 'What’s new')}
+            {L('O que mudou', 'Changed')}
           </a>
         )}
       </div>
@@ -73,17 +73,17 @@ function status(u: UpdateState): string {
     case 'off':
       return L('As atualizações funcionam no app instalado.', 'Updates work in the installed app.')
     case 'checking':
-      return L('Procurando uma versão nova…', 'Looking for a new version…')
+      return L('Procurando uma versão nova…', "Checking for updates…")
     case 'downloading':
       return L(`Baixando o Tucano ${u.next}… ${u.percent ?? 0}%`, `Downloading Tucano ${u.next}… ${u.percent ?? 0}%`)
     case 'ready':
-      return L(`O Tucano ${u.next} está pronto. Ele entra quando você reiniciar ou fechar o app.`, `Tucano ${u.next} is ready. It goes in when you restart or quit the app.`)
+      return L(`O Tucano ${u.next} está pronto. Ele entra quando você reiniciar ou fechar o app.`, `Tucano ${u.next} is ready. Restart or quit to install.`)
     case 'error':
       return u.errorKind === 'other'
-        ? L('Não deu pra atualizar sozinho. Baixe a versão nova em Releases.', 'Couldn’t update on its own. Download the new version from Releases.')
+        ? L('Não deu pra atualizar sozinho. Baixe a versão nova em Releases.', "Couldn’t update on its own. Download the latest version from Releases.")
         : u.errorKind === 'offline'
-          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', 'No internet to look for a new version. Tucano tries again on its own later.')
-          : L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Couldn’t look for a new version just now. Try again later.')
+          ? L('Sem internet pra procurar uma versão nova. O Tucano tenta de novo sozinho mais tarde.', "No internet connection. Tucano will try checking for updates again later.")
+          : L('Não deu pra procurar uma versão nova agora. Tente de novo mais tarde.', 'Couldn’t check for updates. Try again later.')
     default:
       return u.checkedAt
         ? L(`É a versão mais recente. Conferido ${ago(u.checkedAt)}.`, `It’s the latest version. Checked ${ago(u.checkedAt)}.`)
@@ -170,9 +170,10 @@ export function WhatsNew(): ReactNode {
   const pages = useMemo(() => newsPages(news, lang() === 'pt'), [news])
   const [page, setPage] = useState(0)
   const [closed, setClosed] = useState(false)
-  // A version with nothing written (or an older one, after going back): seen, quietly.
+  // A newer version with nothing written: seen, quietly. Never an older one: another app of the
+  // workspace on a newer version would write its own back, and the two would trade it forever.
   useEffect(() => {
-    if (version && seen !== version && news.length === 0) updateSettings({ seenVersion: version })
+    if (shouldMarkSeen(version, seen) && news.length === 0) updateSettings({ seenVersion: version })
   }, [version, seen, news.length])
   const open = !!version && !closed && news.length > 0
   // ← and → turn the pages (before the page's own keys: the routines' calendar turns weeks with them).

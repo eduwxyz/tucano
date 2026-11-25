@@ -139,6 +139,11 @@ describe('answers', () => {
     expect(answerLabel(deadline, { text: 'sexta' })).toBe('sexta')
     expect(answerLabel(deadline, { skipped: true })).toBe('(pulou)')
   })
+  it('reads a step written by hand as another step, not as something else', () => {
+    const steps: Decision = { question: 'E agora?', kind: 'multiple', nextSteps: true, options: [{ label: 'Rodar a suíte' }, { label: 'Publicar as capturas' }] }
+    expect(answerLabel(steps, { chosen: [0], other: 'Escrever a nota de lançamento' })).toBe('Rodar a suíte, Outro passo: Escrever a nota de lançamento')
+    expect(answerLabel(steps, { other: 'Escrever a nota de lançamento' })).toBe('Outro passo: Escrever a nota de lançamento')
+  })
   it('formats one line per answered decision and leaves the unanswered out', () => {
     expect(formatAnswers([pagination, parts, deadline], [{ chosen: [0] }, null, { skipped: true }])).toBe('- Paginação no menu? → Busca remota\n- Pra quando? → (pulou)')
     expect(formatAnswers([pagination], undefined)).toBe('')

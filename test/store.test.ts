@@ -180,6 +180,14 @@ describe('the navigation history', () => {
     expect(s.navBack).toEqual(before.navBack)
     expect(s.navForward).toEqual(before.navForward)
 
+    // Back, on the Tuca's screen, closes it: to where it was opened from, with the history as it was.
+    store.navigate({ kind: 'tuca', from: where })
+    store.goBack()
+    s = store.getState()
+    expect(s.view).toEqual(where)
+    expect(s.navBack).toEqual(before.navBack)
+    expect(s.navForward).toEqual(before.navForward)
+
     // Leaving the builder for somewhere else steps from where it was opened.
     store.navigate({ kind: 'tuca', from: where })
     store.navigate({ kind: 'conversation', id: 'built' })
@@ -187,5 +195,37 @@ describe('the navigation history', () => {
     expect(s.view).toEqual({ kind: 'conversation', id: 'built' })
     expect(s.navBack).toEqual([...before.navBack, where])
     expect(s.navForward).toEqual([])
+  })
+})
+
+describe('the history, when something in it is removed', () => {
+  it('forgets the page of an agent that is gone, and keeps to its last 50 steps', () => {
+    store.navigate({ kind: 'agent', id: 'gone' })
+    store.navigate({ kind: 'board' })
+    expect(store.getState().navBack).toContainEqual({ kind: 'agent', id: 'gone' })
+    emit({ type: 'agent_removed', id: 'gone' })
+    expect(store.getState().navBack).not.toContainEqual({ kind: 'agent', id: 'gone' })
+    for (let i = 0; i < 60; i++) store.navigate(i % 2 ? { kind: 'board' } : { kind: 'approvals' })
+    expect(store.getState().navBack).toHaveLength(50)
+  })
+})
+
+
+describe('the side panel over the whole page', () => {
+  it('widens only while a panel is open, and closing or leaving brings the conversation back', () => {
+    store.navigate({ kind: 'conversation', id: 'c2' })
+    store.widenPanel(true)
+    expect(store.getState().panelWide).toBe(false) // nothing to widen
+    store.openThread('x1')
+    store.widenPanel(true)
+    expect(store.getState().panelWide).toBe(true)
+    store.openPanel({ kind: 'artifact', id: 'f1' }) // another panel in its place stays wide
+    expect(store.getState().panelWide).toBe(true)
+    store.openPanel(null)
+    expect(store.getState().panelWide).toBe(false)
+    store.openThread('x1')
+    store.widenPanel(true)
+    store.navigate({ kind: 'routines' })
+    expect(store.getState()).toMatchObject({ panel: null, panelWide: false })
   })
 })

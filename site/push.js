@@ -33,6 +33,8 @@ export async function seal(target, env) {
 }
 
 export async function open(handle, env) {
+  // Only the form seal() writes: atob skips spaces and takes + and /, so one handle would have many spellings.
+  if (typeof handle !== 'string' || !/^[A-Za-z0-9_-]+$/.test(handle)) return undefined
   try {
     const all = unb64url(handle)
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: all.slice(0, 12) }, await sealKey(env), all.slice(12))
@@ -98,8 +100,9 @@ export async function send(request, env, fetcher = fetch) {
       const handle = typeof x?.handle === 'string' ? x.handle : ''
       const t = handle && (await open(handle, env))
       if (!t) return void gone.push(handle)
-      // At most so many a minute per phone (a Tucano gone wrong doesn't flood it).
-      if (env.PUSH_LIMIT && !(await env.PUSH_LIMIT.limit({ key: handle.slice(0, 64) })).success) return
+      // At most so many a minute per phone (a Tucano gone wrong doesn't flood it): counted by the phone the
+      // handle opens to, not by its text, since sealing the same phone again gives another handle.
+      if (env.PUSH_LIMIT && !(await env.PUSH_LIMIT.limit({ key: `${t.e}:${t.t}` })).success) return
       const r = await fetcher(`${HOSTS[t.e]}/3/device/${t.t}`, {
         method: 'POST',
         headers: { authorization: `bearer ${auth}`, 'apns-topic': TOPIC, 'apns-push-type': 'alert', 'apns-priority': '10', 'content-type': 'application/json' },
