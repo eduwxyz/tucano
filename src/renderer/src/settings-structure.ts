@@ -29,7 +29,7 @@ type Section = {
 export function settingsStructure({ admin, owner, team, servers }: SettingsAccess) {
   return [
     { id: 'workspace-context', page: 'geral', label: L('Geral', 'General'), icon: 'gear', color: 'var(--c-graphite)', keys: ['workspaceLabel', 'workspaceName', 'context', 'onboarding'], scope: 'workspace', visible: admin },
-    { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'language'], scope: 'mixed', visible: true },
+    { id: 'app-appearance', page: 'geral', label: L('Aparência', 'Appearance'), icon: 'sun', color: 'var(--c-amber)', keys: ['theme', 'themeId', 'language'], scope: 'mixed', visible: true },
     { id: 'app-notifications', page: 'geral', label: L('Notificações', 'Notifications'), icon: 'bell', color: 'var(--c-rose)', keys: ['sounds'], scope: 'personal', visible: true },
     { id: 'app-dictation', page: 'geral', label: L('Ditado', 'Dictation'), icon: 'mic', color: 'var(--c-sky)', keys: ['voice'], scope: 'mixed', visible: admin },
     { id: 'app-conversation', page: 'geral', label: L('Conversas', 'Conversations'), icon: 'thread', color: 'var(--c-indigo)', keys: ['stepsOpen', 'showThinking'], scope: 'personal', visible: true },
@@ -102,7 +102,7 @@ export const settingsTabAliases: Readonly<Record<string, SettingsSectionId>> = {
 function settingsTerms(): Readonly<Record<SettingsSectionId, readonly string[]>> {
   return {
     'workspace-context': [L('Nome do workspace', 'Workspace name'), L('Como os agentes te chamam', 'What the agents call you'), L('Idioma', 'Language'), L('Contexto', 'Context'), L('Rever a introdução', 'See the introduction again'), L('Mostrar as missões', 'Show the missions'), L('Mostrar a barra lateral inteira', 'Show the whole sidebar')],
-    'app-appearance': [L('Tema claro ou escuro', 'Light or dark theme'), L('Idioma', 'Language')],
+    'app-appearance': [L('Tema claro ou escuro', 'Light or dark theme'), L('Temas', 'Themes'), L('Cores', 'Colors'), L('Idioma', 'Language')],
     'app-notifications': [L('Sons', 'Sounds'), L('Testar uma notificação', 'Test a notification')],
     'app-dictation': [L('Modelo do ditado', 'Dictation model'), L('Microfone', 'Microphone'), L('Detectar o idioma', 'Detect the language'), 'whisper'],
     'app-conversation': [L('Mostrar os passos do agente', 'Show the agent’s steps'), L('O que o modelo pensa', "Show reasoning"), L('Raciocínio', 'Reasoning'), L('Pesquisas', 'Surveys'), L('Enviar feedback', 'Send feedback')],
