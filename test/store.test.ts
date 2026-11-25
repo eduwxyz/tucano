@@ -228,4 +228,45 @@ describe('the side panel over the whole page', () => {
     store.navigate({ kind: 'routines' })
     expect(store.getState()).toMatchObject({ panel: null, panelWide: false })
   })
+
+  it('a file opened from a thread closes back to that thread, not to nothing', () => {
+    store.navigate({ kind: 'conversation', id: 'c2' })
+    store.openThread('x1')
+    store.openPanel({ kind: 'artifact', id: 'video' }) // a video posted in the thread
+    expect(store.getState().panel).toEqual({ kind: 'artifact', id: 'video' })
+    store.closePanel()
+    expect(store.getState().panel).toEqual({ kind: 'thread', id: 'x1' })
+    store.closePanel() // the thread's own close: now nothing
+    expect(store.getState().panel).toBe(null)
+    // Opened with no thread under it, or after leaving the conversation, it just closes.
+    store.openPanel({ kind: 'artifact', id: 'video' })
+    store.closePanel()
+    expect(store.getState().panel).toBe(null)
+    store.openThread('x1')
+    store.navigate({ kind: 'routines' })
+    store.navigate({ kind: 'conversation', id: 'c2' })
+    store.openPanel({ kind: 'artifact', id: 'video' })
+    store.closePanel()
+    expect(store.getState().panel).toBe(null)
+  })
+})
+
+describe('questions asked in threads', () => {
+  it("from the channel, finds the questions still open in its threads, oldest first", () => {
+    const ask = (id: string, at: number, threadId?: string, status: 'waiting_input' | 'done' = 'waiting_input'): Message =>
+      msg(id, 'c2', at, { author: { kind: 'agent', id: 'a1' }, ...(threadId ? { threadId } : {}), run: { status, steps: [] } })
+    emit({ type: 'message', message: ask('q-x1', 17, 'x1') })
+    emit({ type: 'message', message: ask('q-x2', 18, 'x2') })
+    emit({ type: 'message', message: ask('q-here', 19) })
+    const s = store.getState()
+    expect(store.threadAsksIn(s, 'c2').map((m) => m.id)).toEqual(['q-x1', 'q-x2'])
+    expect(store.askerIn(s, 'c2')?.id).toBe('q-here') // the channel's own question stays its own
+    expect(store.askerIn(s, 'c2', 'x1')?.id).toBe('q-x1')
+    // Answered, it leaves.
+    emit({ type: 'message', message: ask('q-x1', 17, 'x1', 'done') })
+    emit({ type: 'message', message: ask('q-here', 19, undefined, 'done') })
+    expect(store.threadAsksIn(store.getState(), 'c2').map((m) => m.id)).toEqual(['q-x2'])
+    emit({ type: 'message', message: ask('q-x2', 18, 'x2', 'done') })
+    expect(store.threadAsksIn(store.getState(), 'c2')).toEqual([])
+  })
 })
