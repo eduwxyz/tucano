@@ -357,6 +357,57 @@ describe('what a person sees', () => {
   })
 })
 
+// A personal folder is its person's alone (not the owner's, not an admin's), so nothing that someone else
+// sees is taken into one: it would be gone for them, with no one left to bring it back.
+describe('taking a document to a personal folder', () => {
+  const personalOf = (who: Person, d: Docs = docs): DocFolder => d.tree(who).folders.find((f) => f.privateTo === who.id)!
+  const REFUSED = 'Outras pessoas veem este documento, então ele não vai para uma pasta pessoal. Antes, o dono ou um admin deixa a pasta dele só para você.'
+
+  it('refuses while someone else sees the document, whoever asks', async () => {
+    share('Financeiro', { maria: 'edit' })
+    const doc = await put(maria, 'Financeiro', 'a.md', 'um')
+    // Maria edits the folder, but the owner and the admin see it too.
+    expect(await failure(() => docs.move(maria, doc.id, personalOf(maria).id))).toBe(REFUSED)
+    // The owner too: the admin sees every shared folder.
+    expect(await failure(() => docs.move(ana, doc.id, personalOf(ana).id))).toBe(REFUSED)
+    expect(docs.index.doc(doc.id)!.folderId).toBe(folder('Financeiro').id)
+    expect(readFileSync(join(docs.root, 'Financeiro', 'a.md'), 'utf8')).toBe('um')
+    // An agent working for Maria takes nothing there that she couldn't.
+    expect(await failure(() => docs.moveFor(agents[1]!, maria, doc.id, personalOf(maria).id))).toBe(REFUSED)
+    expect(docs.index.doc(doc.id)!.folderId).toBe(folder('Financeiro').id)
+    // Moving it between the team's folders is as before.
+    expect(docs.move(ana, doc.id, folder('Técnico').id).folderId).toBe(folder('Técnico').id)
+  })
+
+  it('lets it go when nobody else sees it, and says where it came from for the log', async () => {
+    mkdirSync(join(root, 'solo'))
+    const solo = new Docs({ ...deps(), dir: join(root, 'solo', 'documents'), indexPath: join(root, 'solo', 'docs.db'), people: () => [ana] })
+    solo.init()
+    await solo.loaded
+    try {
+      const from = solo.tree(ana).folders.find((f) => f.name === 'Financeiro')!
+      const doc = await solo.add(ana, { folderId: from.id, name: 'a.md', data: Buffer.from('um') })
+      const moved = solo.move(ana, doc.id, personalOf(ana, solo).id)
+      expect(moved.folderId).toBe(personalOf(ana, solo).id)
+      expect(solo.takenToPersonal(doc, moved)).toEqual({ name: 'a.md', folder: 'Financeiro' })
+      // Back to the team's folder is no taking: nothing for the log.
+      const back = solo.move(ana, doc.id, from.id)
+      expect(solo.takenToPersonal(moved, back)).toBeNull()
+    } finally {
+      solo.close()
+    }
+  })
+
+  it("moves freely inside one's own personal folders", async () => {
+    const mine = personalOf(maria)
+    const inner = docs.saveFolder(maria, { parentId: mine.id, name: 'Rascunhos', rule: '' })
+    const doc = await docs.add(maria, { folderId: mine.id, name: 'diario.md', data: Buffer.from('só meu') })
+    const moved = docs.move(maria, doc.id, inner.id)
+    expect(moved.folderId).toBe(inner.id)
+    expect(docs.takenToPersonal(doc, moved)).toBeNull()
+  })
+})
+
 describe('changing folders', () => {
   it('lets a member who may edit a folder make a subfolder in it that follows its access, and rename it', () => {
     share('Financeiro', { maria: 'edit' })
