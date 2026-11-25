@@ -19,6 +19,8 @@ import { artifactKind, COMPUTER_TOOL_NAMES, computerTools, stepFor, type Compute
 import type { Vault } from './vault'
 import { COFRE, keyNameError, loginOrigin, PEDIR_CHAVE } from '../shared/vault'
 import { extractFile } from './wiki-extract'
+import type { Docs } from './docs'
+import { DOCS_TOOL_NAMES, DOCS_TOOLS, docsCall } from './docs-tools'
 import { BUSCAR_NA_WEB, formatResults, LER_PAGINA, readPage, searchWeb, WEB_TOOLS, type WebResult } from './web-tools'
 import { AGENDAR, CANCELAR, outcome, ROUTINE_TOOL_NAMES, whenText, type Routines } from './routines'
 import { noNewsPhrase, noNewsRun } from '../shared/routine-news'
@@ -42,7 +44,7 @@ import { JEV_MODEL, routeJev } from './jev'
 import { chimeIn, ROUTER_HISTORY, route, routerTurn, screenHandoff } from './router'
 import { allowed, approvalHash, callClass, canonical, neverAllowedForGood, permits, runnerAllowed, runnerRules } from './policy'
 import { forReaders, innerActions, linksAccounts, perCallTool } from '../shared/composio'
-import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, toPeopleOnly } from './people'
+import { agentOwner, computerOwner, deciders, namedRequester, dmOwner, mentionedPeople, People, personNamed, presentPeople, promptPeople, requesterOf, routineBehalf, routinePerson, toPeopleOnly } from './people'
 import { can, isAdmin } from './policy-people'
 import { agentsFor } from './access-policy'
 import { covers, restricted, sharedAccess } from '../shared/access'
@@ -54,6 +56,7 @@ import { during, inReplyTool, traceReply, tracing, type ReplyText, type ReplyTra
 import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
+import type { Requester } from '../shared/doc-access'
 import { canContinue, WORKLESS_LABELS } from '../shared/run-progress'
 import { countAsk, jobTurn, MAX_CHIMES, newJob, resumeJob, stopNote, withoutGoal, type Job } from './jobs'
 import { passes } from '../shared/errors'
@@ -337,6 +340,7 @@ export interface RunnerDeps {
   models?: () => { id: string; label: string }[] // what the Tuca may propose; without it, the plans' listed models
   applyNow?: (messageId: string, personId: string) => void // a Tuca reply ended: what it proposed inside the app is applied for that person (Settings.tucaApplyNow); without it, everything stays a card
   wiki?: Pick<Wiki, 'indexText' | 'search' | 'page' | 'count' | 'kinds' | 'view' | 'heldTitles' | 'outOfReach'> // without it, agents have no wiki
+  docs?: Docs // Documentos, for the agents' document tools; without it, agents have none
   wikiCurator?: { afterReply(conversationId: string): void } // reads the conversation after a reply, to keep what lasts
   timers?: { wait(ms: number, signal?: AbortSignal): Promise<void>; now(): number } // how the app waits on a pending result; tests pass a fake clock
   feedbackOn?: () => boolean // feedback to the people who make Tucano can be sent from here (core/feedback.ts); without it, the Tuca can't write one
@@ -1794,6 +1798,12 @@ export class Runner {
     }
     const wikiShown = wikiNow()
     const wiki = this.deps.gateway && wikiShown && wikiAccess(agent) !== 'none' && wikiShown.count() > 0 ? wikiShown : undefined
+    // Documentos: for an agent that reaches at least one folder, working for this person (a routine of the team's: for no one).
+    // A DM is read by its person alone. Any other conversation is read by everyone who sees it, so its documents are only the folders all of them may see.
+    const docsAsker: Person | null = opts.routine ? (routinePerson(db, routineOf) ?? null) : requester
+    const readers = conv.kind === 'dm' ? [] : db.people().filter((p) => sees.canSeeConversation(p, conv))
+    const docsRequester: Requester = conv.kind === 'dm' ? docsAsker : readers.length ? readers : null
+    const docs = this.deps.gateway && this.deps.docs && this.deps.docs.foldersFor(agent, docsRequester, 'read').length > 0 ? this.deps.docs : undefined
 
     const control: Control = { ctl: new AbortController(), msg }
     control.flush = () => flush() // a steer's row goes in after the words streamed so far
@@ -1868,7 +1878,7 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, NEXT_STEPS.name, FAZER_EU.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, PEDIR_CHAVE, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, NEXT_STEPS.name, FAZER_EU.name, VER_IMAGEM.name, LER_ANEXO.name, ACCESS_REQUEST, PEDIR_CHAVE, LEMBRAR.name, BUSCAR_THREADS.name, LER_THREAD.name, ...COMPUTER_TOOL_NAMES, ...BROWSER_TOOL_NAMES, ...APP_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES, ...DOCS_TOOL_NAMES, ...DELEGATION_TOOL_NAMES])
     // How far this agent goes on its own (src/shared/actions.ts): read again at each call, since it may change mid-turn.
     const kindsOf = (t: Pick<ConnectorTool, 'cls' | 'name'>): ActionKind[] => (t.cls === 'read' ? [] : toolActions(t.name))
     const policy: Policy = policyOf(agent, settings)
@@ -2028,6 +2038,7 @@ ${note}`,
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...(wiki ? WIKI_TOOLS : []),
+      ...(docs ? DOCS_TOOLS : []),
       ...(ownWeb ? WEB_TOOLS : [])
     ]
     // The connector tools it called lately, by the steps of its replies ("Linear · list_issues").
@@ -2586,6 +2597,65 @@ ${note}`,
           if (!current) return textResult(L('Você não tem acesso à wiki agora.', 'You do not have wiki access now.'), true)
           const r = wikiCall(current, name, args)
           addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: 'done' })
+          return textResult(r.text, r.error)
+        }
+
+        if (docs && DOCS_TOOL_NAMES.has(name)) {
+          // Access is read again from the current data at every call: a long reply must not keep what changed.
+          const current = db.agent(agent.id)
+          if (!current || current.archived) return textResult(L('Você não tem acesso a Documentos agora.', 'You do not have access to Documents now.'), true)
+          const attach = (a: Artifact): void => {
+            if (!artifactIds.includes(a.id)) artifactIds.push(a.id)
+            msg.run = { ...msg.run!, artifactIds: [...artifactIds] }
+            save()
+          }
+          const r = await docsCall(
+            {
+              docs,
+              agent: current,
+              requester: docsRequester,
+              askedBy: docsAsker?.id,
+              conversationId: conv.id,
+              messageId: msg.id,
+              routineId: routineOf?.id,
+              threadId: msg.threadId,
+              dataDir: this.deps.dataDir ?? '',
+              shown: (id) => {
+                const a = db.artifact(id)
+                return a && a.conversationId === conv.id ? a : undefined
+              },
+              fromComputer:
+                computers && current.computer
+                  ? async (path, title) => {
+                      const out = await computers.call(current, 'show_file', { path, title }, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+                      if (!out.artifact) return { error: resultText(out.result) || L('Não consegui ler esse arquivo no seu computador.', "I couldn't read that file on your computer.") }
+                      attach(out.artifact)
+                      return { artifact: out.artifact }
+                    }
+                  : undefined,
+              ...(this.deps.vault ? { mask: (text: string) => this.deps.vault!.mask(agent.id, text) } : {}),
+              fromText: (fileName, data, title) => {
+                const dataDir = this.deps.dataDir
+                if (!dataDir) return undefined
+                try {
+                  const id = randomUUID()
+                  const safe = fileName.replace(/[\\/]/g, '_')
+                  mkdirSync(join(dataDir, 'artifacts', id), { recursive: true })
+                  writeFileSync(join(dataDir, 'artifacts', id, safe), data)
+                  const artifact: Artifact = { id, agentId: agent.id, conversationId: conv.id, messageId: msg.id, kind: artifactKind(safe), name: safe, title, source: 'docs_guardar', size: data.length, createdAt: Date.now() }
+                  db.saveArtifact(artifact)
+                  this.deps.emit({ type: 'artifact', artifact })
+                  attach(artifact)
+                  return artifact
+                } catch {
+                  return undefined
+                }
+              }
+            },
+            name,
+            args
+          )
+          addSteps({ id: randomUUID(), label: r.step.label, detail: r.step.detail, status: r.error ? 'error' : 'done', ...(r.error ? { error: r.text } : {}) })
           return textResult(r.text, r.error)
         }
 
@@ -3243,6 +3313,8 @@ ${note}`,
       routines: routines?.forAgent(agent.id).filter((r) => visible(r.conversationId)),
       skills: skills && mySkills,
       wiki: wiki ? { pages: wiki.count(), kinds: wiki.kinds() } : undefined,
+      docs: docs?.foldersFor(agent, docsRequester, 'read').map((f) => ({ path: f.path, rule: f.rule })),
+      docsRoutine: !!routineOf,
       connectors: exposed.size > 0,
       github,
       people,

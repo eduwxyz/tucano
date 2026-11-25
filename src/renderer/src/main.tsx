@@ -7,6 +7,7 @@ import { start, useStore } from './store'
 import '@fontsource-variable/inter/opsz.css'
 import '@fontsource-variable/nunito/wght.css' // the first run's headings
 import './styles.css'
+import './docs.css'
 
 void start()
 

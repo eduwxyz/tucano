@@ -88,6 +88,7 @@ export type View =
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
   | { kind: 'skills' }
+  | { kind: 'documents'; folder?: string; doc?: string; q?: string } // Documentos: the home, a folder, or a document (components/docs)
   | { kind: 'report' }
   | { kind: 'org' } // who answers to whom (src/shared/org.ts)
   | { kind: 'board' } // every agent's work as cards (components/Board.tsx)
@@ -108,7 +109,7 @@ export interface State {
   you: string // the person this window is (snapshot.you)
   people: Person[]
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
-  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
+  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent, documents to approve and dates coming up
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
   leaves: TucaLeave[] // what I let the Tuca do himself (src/core/tuca-leave.ts)
   tasks: Task[] | null // my to-dos on the board (Quadro), in order; null until the board first asks
@@ -129,6 +130,7 @@ export interface State {
   routines: Routine[]
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
+  docsRev: number // goes up when a folder or a document changes: Documentos reads again
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
@@ -179,6 +181,7 @@ let state: State = {
   ready: false,
   threadSeen: loadSeen(),
   wikiRev: 0,
+  docsRev: 0,
   voiceRev: 0,
   navOpen: false,
   view: null,
@@ -702,6 +705,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
       case 'wiki':
         return { ...s, wikiRev: s.wikiRev + 1 }
+      case 'docs':
+        return { ...s, docsRev: s.docsRev + 1 }
       case 'voice':
         return { ...s, voiceRev: s.voiceRev + 1 }
       case 'people':
@@ -856,7 +861,9 @@ export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<A
   return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))
 }
 // How many things wait on me (approvals I decide, questions, cards members sent).
-export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)
+// Documents waiting for my yes and dates found in them: they count on my own too, where there is no "Pra você".
+export const docsWaitingCount = (s: Pick<State, 'inbox'>): number => (s.inbox.documents?.length ?? 0) + (s.inbox.docDates?.length ?? 0)
+export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0) + (s.inbox.documents?.length ?? 0) + (s.inbox.docDates?.length ?? 0)
 
 export function conversationTitle(s: State, c: Conversation): string {
   if (c.kind === 'channel') return c.name

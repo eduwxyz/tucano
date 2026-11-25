@@ -5,6 +5,7 @@ import { memorySystem } from '../memory'
 import { titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
+import { answerSystem, catalogSystem } from '../docs-brain'
 import { chimeSystem, handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
@@ -67,6 +68,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
+      } else if (turn.system === catalogSystem()) {
+        reply = JSON.stringify(fakeCatalog(turn.prompt))
+      } else if (turn.system === answerSystem()) {
+        reply = JSON.stringify(fakeAnswer(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (turn.mcpUrl && !back && !HANDS.test(last) && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
@@ -223,6 +228,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
         // A thank-you that mentions someone: the hand-off screening lets no one answer it.
         reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
+      } else if (turn.mcpUrl && /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.test(last)) {
+        // Documentos: "guarde em Empresa: ata.md = texto" saves a file; the two below list and read.
+        const [, pasta, nome, texto] = /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.exec(last)!
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_guardar', { pasta: pasta!.trim(), nome: nome!.trim(), texto: texto!, resumo: texto!.split(/(?<=\.)\s/)[0]!.slice(0, 140) }))
+      } else if (turn.mcpUrl && /^liste os documentos(?: de (.+))?/i.test(last)) {
+        const pasta = /^liste os documentos(?: de (.+))?/i.exec(last)![1]?.trim()
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_listar', pasta ? { pasta } : {}))
+      } else if (turn.mcpUrl && /^leia o documento (.+)/i.test(last)) {
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_ler', { documento: /^leia o documento (.+)/i.exec(last)![1]!.trim() }))
       } else if (turn.mcpUrl && /^rode no computador: (.+)/i.test(last)) {
         // A command on a computer lent to this server (core/node-link.ts), for trying the line end to end.
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'node_bash'), { command: /^rode no computador: (.+)/i.exec(last)![1]! })
@@ -481,6 +495,39 @@ export async function callTool(url: string, name: string, args: Record<string, u
   } finally {
     await client.close()
   }
+}
+
+// The cataloguer (core/docs-brain.ts): a summary from the file's first line, the dates after "vence"/"prazo"/"renova", and the first folder named in the file.
+function fakeCatalog(prompt: string): { resumo: string; datas: { data: string; o_que: string }[]; pasta: number | null; nome: null } {
+  const file = /<<<ARQUIVO\n([\s\S]*?)\nARQUIVO>>>/.exec(prompt)?.[1] ?? ''
+  const name = /^(?:Nome do arquivo|File name): (.*)$/m.exec(prompt)?.[1] ?? ''
+  const datas: { data: string; o_que: string }[] = []
+  for (const m of file.matchAll(/(?:venc\w*|prazo|renova\w*)\D{0,20}?(?:(\d{2})\/(\d{2})\/(\d{4})|(\d{4})-(\d{2})-(\d{2}))/gi)) datas.push({ data: m[4] ? `${m[4]}-${m[5]}-${m[6]}` : `${m[3]}-${m[2]}-${m[1]}`, o_que: 'vencimento' })
+  let pasta: number | null = null
+  const list = /(?:Pastas possíveis|Possible folders):\n([\s\S]*)$/.exec(prompt)?.[1]
+  if (list) {
+    const hay = `${name}\n${file}`.toLowerCase()
+    for (const line of list.split('\n')) {
+      const row = /^(\d+)\. (.*?) — /.exec(line)
+      const last = row?.[2]?.split('/').pop()?.toLowerCase()
+      if (row && last && hay.includes(last)) {
+        pasta = Number(row[1])
+        break
+      }
+    }
+  }
+  // The first line that says something, without what Markdown or a table puts around it.
+  const line = file.split('\n').map((l) => l.replace(/^#+\s*/, '').replace(/[|*_`>]+/g, ' ').replace(/\s+/g, ' ').trim()).find((l) => /\p{L}/u.test(l)) ?? ''
+  return { resumo: line.slice(0, 120), datas, pasta, nome: null }
+}
+
+// A question about the documents: an answer when there is at least one excerpt.
+function fakeAnswer(prompt: string): { achou: boolean; resposta?: string } {
+  // The sentence of the first stretch that has a number in it (a date, a value), else its first one: enough to see an answer with its source.
+  const first = /^\[1\] .*\n<<<TRECHO\n([\s\S]*?)\nTRECHO>>>/m.exec(prompt)?.[1]
+  if (first === undefined) return { achou: false }
+  const said = first.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/).map((x) => x.trim()).filter(Boolean)
+  return { achou: true, resposta: `${(said.find((x) => /\d/.test(x)) ?? said[0] ?? '').slice(0, 200)} [1]` }
 }
 
 // The wiki's curator, for trying it without an engine: a page the stretch names gets a line

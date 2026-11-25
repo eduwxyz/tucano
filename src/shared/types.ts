@@ -5,6 +5,7 @@ import type { ActionRules, Autonomy } from './actions'
 import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
+import type { InboxDoc, InboxDocDate } from './docs'
 import type { PageSigns } from './wall'
 import { L, lang, locale, type Lang } from './lang'
 
@@ -474,6 +475,8 @@ export interface Inbox {
   answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
   harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
+  documents?: InboxDoc[] // documents waiting for this person to approve
+  docDates?: InboxDocDate[] // dates found in documents they look after, coming up
 }
 
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
