@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { executableNames } from '../src/core/platform'
 import { cleanTranscript, ModelDownload, Transcriber, voiceStatus } from '../src/core/transcribe'
 import { voiceRefusal } from '../src/shared/voice'
@@ -52,10 +52,17 @@ describe.runIf(unix)('finding whisper', () => {
 describe.runIf(unix)('transcribing', () => {
   let dir = ''
   let model = ''
+  const systemTmp = process.env['TMPDIR']
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ad-voice-'))
     model = join(dir, 'm.bin')
     writeFileSync(model, '')
+    // Its own temp folder: `leftovers` reads it whole, and a machine's can hold hundreds of thousands of entries.
+    process.env['TMPDIR'] = dir
+  })
+  afterEach(() => {
+    if (systemTmp === undefined) delete process.env['TMPDIR']
+    else process.env['TMPDIR'] = systemTmp
   })
   const status = (bin: string) => ({ bin, model, ready: true })
   const audio = Buffer.from('RIFF').toString('base64')

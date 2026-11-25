@@ -26,6 +26,11 @@ import { L } from '../../shared/lang'
 // - the agent's instructions as the workspace's GEMINI.md, which the CLI reads as rules;
 // - on macOS, the person's keychain linked in, where the CLI keeps its login (nothing else
 //   of ~/Library). Checked with agy 1.5.3: a home with only that is signed in.
+//   With another account (Settings › Accounts), no keychain: that account's own home, where agy
+//   signed in with no keychain to reach and so kept the login in a file
+//   (.gemini/antigravity-cli/antigravity-oauth-token), has that file linked in instead. Checked
+//   with agy 1.5.9: a home with only that link runs a turn, and the person's keychain login is
+//   untouched.
 // The workspace is the turn's own folder, not the agent's: Antigravity walks up from it
 // for GEMINI.md, AGENTS.md and .agents/ (skills, hooks, plugins), and none of the person's
 // may come in. The turn's folder goes when it ends.
@@ -40,7 +45,8 @@ import { L } from '../../shared/lang'
 // text_delta?, usage?, tool_name?, tool_info?:{name, parameters, output?, error?}}};
 // result {result:{status: SUCCESS|ERROR|CANCELED|…, response, error?, usage:{input_tokens,
 // output_tokens, thinking_tokens, cache_read_tokens, total_tokens}}} — the terminal event.
-// input_tokens counts the cache reads in (total = input + output).
+// input_tokens counts the cache reads in (total = input + output) in agy 1.5.3; some runs since report
+// more cache reads than input, so those came apart from it and are added in (usageOf).
 
 const WEB_TOOLS: Record<string, 'search' | 'fetch'> = { search_web: 'search', read_url_content: 'fetch' }
 
@@ -48,7 +54,9 @@ type Raw = Record<string, unknown>
 const obj = (v: unknown): Raw => (v && typeof v === 'object' ? (v as Raw) : {})
 
 function usageOf(u: Raw): Usage {
-  return { inputTokens: num(u['input_tokens']), cacheReadTokens: num(u['cache_read_tokens']), outputTokens: num(u['output_tokens']) + num(u['thinking_tokens']) }
+  const input = num(u['input_tokens'])
+  const cached = num(u['cache_read_tokens'])
+  return { inputTokens: cached > input ? input + cached : input, cacheReadTokens: cached, outputTokens: num(u['output_tokens']) + num(u['thinking_tokens']) }
 }
 
 export function antigravityParser(): Parser {
@@ -179,9 +187,13 @@ export interface AntigravityTurnDirs {
   workspace: string // the CLI's working folder
 }
 
+// Where agy keeps its login in a home it can't reach a keychain from.
+export const ANTIGRAVITY_TOKEN = join('.gemini', 'antigravity-cli', 'antigravity-oauth-token')
+
 // A folder for one turn: a home with the settings, the gateway and the way to the
-// person's login, and a workspace with the agent's instructions.
-export function antigravityTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web'>, os: Os = osOf(), realHome = homedir()): AntigravityTurnDirs {
+// person's login (or to the account's, `turn.account`: its home), and a workspace with the
+// agent's instructions.
+export function antigravityTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 'mcpUrl' | 'web' | 'account'>, os: Os = osOf(), realHome = homedir()): AntigravityTurnDirs {
   const root = join(appDir, randomBytes(8).toString('hex'))
   const home = join(root, 'home')
   const workspace = join(root, 'workspace')
@@ -190,7 +202,14 @@ export function antigravityTurnDirs(appDir: string, turn: Pick<Turn, 'system' | 
   mkdirSync(cli, { recursive: true })
   mkdirSync(config, { recursive: true })
   mkdirSync(workspace, { recursive: true })
-  if (os === 'mac') {
+  if (turn.account) {
+    // The account's login, a file; no keychain, or agy would use the person's own login there.
+    try {
+      symlinkSync(join(turn.account, ANTIGRAVITY_TOKEN), join(home, ANTIGRAVITY_TOKEN))
+    } catch {
+      // without it the CLI says it isn't signed in, and the turn shows that
+    }
+  } else if (os === 'mac') {
     mkdirSync(join(home, 'Library'), { recursive: true })
     try {
       symlinkSync(join(realHome, 'Library', 'Keychains'), join(home, 'Library', 'Keychains'))

@@ -5,6 +5,7 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { leakedError, maskShown, type ShownKey } from './vault'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, posix, sep } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -54,6 +55,38 @@ function folderRefusal(path: string, opts: { home?: string; dataDir: string }): 
   const data = existsSync(opts.dataDir) ? realpathSync(opts.dataDir) : opts.dataDir
   if (data === real || data.startsWith(real + sep) || real.startsWith(data + sep)) return L('Essa pasta tem os dados do próprio Tucano; não dá pra usar.', "That folder holds Tucano's own data; it can't be used.")
   return null
+}
+
+// Checked again each time the computer is turned on, not only when lent: what the path is now (a
+// link put in its place, a folder moved into Library) has to be what was lent, and still lendable.
+export function lentProblem(folders: readonly LentFolder[], opts: { home?: string; dataDir: string }): string | null {
+  for (const f of folders) {
+    const why = checkFolder(f.path, { ...opts, named: true })
+    if (why) return why
+    const now = realpathSync(f.path)
+    if (now !== f.path)
+      return L(`${f.path} agora leva a ${now}, não à pasta emprestada. Devolva essa pasta e empreste de novo.`, `${f.path} now leads to ${now}, not to the folder that was lent. Return that folder and lend it again.`)
+  }
+  return null
+}
+
+const realOr = (p: string): string => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+// A folder lent before the check above existed was kept as it was typed. One typed through a link
+// (~/work that leads to another disk) would be refused from then on, though nothing changed. So, once
+// (the core, on its first start with the check), each is kept as where it leads now, if that is
+// still a folder that may be lent; one that isn't stays as it is, and the check says why.
+export function lentWhereTheyAre(folders: readonly LentFolder[], opts: { home?: string; dataDir: string }): LentFolder[] {
+  return folders.map((f) => {
+    const now = realOr(f.path)
+    return now !== f.path && !checkFolder(now, opts) ? { ...f, path: now } : f
+  })
 }
 
 // /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
@@ -196,8 +229,12 @@ export const noDocker = (): string =>
 export const noDockerAccess = (): string =>
   L('Seu usuário não tem acesso ao Docker. Rode sudo usermod -aG docker $USER, saia e entre de novo na sessão.', "Your user has no access to Docker. Run sudo usermod -aG docker $USER, then log out and back in.")
 // No docker command at all: spawn fails before Docker can say anything.
-export const dockerMissing = (): string =>
-  L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
+// On a server, "this computer" is the server, which a person often didn't set up (Tucano Pro's): the Docker
+// on their own computer isn't reachable from there, but the computer is, lent from the app on it.
+export const dockerMissing = (server = process.env['TUCANO_SERVER'] === '1'): string =>
+  server
+    ? L('Este Tucano roda num servidor sem Docker, então o Linux isolado não funciona aqui. Pra os agentes usarem o seu computador (terminal, pastas e navegador), ligue no app do Tucano nele Configurações › Servidores › Deixar este servidor usar este computador.', "This Tucano runs on a server without Docker, so the isolated Linux doesn't work here. For the agents to use your computer (terminal, folders and browser), turn on Settings › Servers › Let this server use this computer in the Tucano app there.")
+    : L('O Docker não está instalado neste computador. Instale o Docker (docs.docker.com/get-docker).', "Docker isn't installed on this computer. Install Docker (docs.docker.com/get-docker).")
 // A quick docker call that never answered (`late`): the daemon is stuck (on Linux, a service that fails to
 // start behind its socket leaves every docker command waiting).
 export const dockerStuck = (): string =>
@@ -319,7 +356,7 @@ export function hostUrl(url: string, ports: Record<number, number>): string | { 
   try {
     u = new URL(url)
   } catch {
-    return { error: `URL inválida: ${url}` }
+    return { error: L(`URL inválida: ${url}`, `Invalid URL: ${url}`) }
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: L('Só URLs http e https.', 'Only http and https URLs.') }
   if (!['localhost', '127.0.0.1', '0.0.0.0'].includes(u.hostname)) return u.toString()
@@ -337,9 +374,12 @@ const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
 type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
 
-function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Exec> {
+// `-e NAME` for each value passed in the docker client's own environment (docker(…, { env })).
+const envNames = (env?: Record<string, string>): string[] => Object.keys(env ?? {}).flatMap((k) => ['-e', k])
+
+function docker(args: string[], opts: { stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal; env?: Record<string, string> } = {}): Promise<Exec> {
   return new Promise((resolve) => {
-    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'], ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}) })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout = (stdout + d).slice(-2_000_000)))
@@ -380,6 +420,7 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
+  secrets?: (agentId: string) => ShownKey[] // the Cofre's values this agent may have: a file it shows comes out masked
 }
 
 export class Computers {
@@ -393,7 +434,7 @@ export class Computers {
   readonly mac: MacComputer // agents whose computer is this Mac (spec §23)
 
   constructor(private deps: ComputerDeps) {
-    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot })
+    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot, ...(deps.secrets ? { secrets: deps.secrets } : {}) })
     this.prefix = prefixOf(deps.dataDir, 'tucano')
     // Before the app was called Tucano its data folder, next to this one, was agent-desk.
     this.legacy = prefixOf(join(dirname(deps.dataDir), 'agent-desk'), 'agentdesk')
@@ -485,7 +526,8 @@ export class Computers {
   private async doEnsure(agentId: string): Promise<void> {
     await this.adopt(agentId)
     const name = this.name(agentId)
-    const mounts = mountArgs(name, this.deps.db.agent(agentId)?.folders ?? [])
+    // Signed by where each folder really is now: a folder that came to lead elsewhere remakes the container.
+    const mounts = mountArgs(name, (this.deps.db.agent(agentId)?.folders ?? []).map((f) => ({ ...f, path: realOr(f.path) })))
     const sig = mounts.length ? createHash('sha1').update(JSON.stringify(mounts)).digest('hex').slice(0, 12) : ''
     let state = await docker(['inspect', '-f', '{{.State.Running}} {{index .Config.Labels "tucano.mounts"}}', name], { timeoutMs: 15_000 })
     const [running, raw = ''] = state.stdout.trim().split(' ')
@@ -510,6 +552,19 @@ export class Computers {
     if (problem) {
       this.set(agentId, { state: 'no_docker', detail: problem })
       throw new Error(L(`O Docker não está disponível neste computador: ${problem} Peça pro usuário resolver.`, `Docker isn't available on this computer: ${problem} Ask the user to fix it.`))
+    }
+
+    // Before the folders are mounted again (docker start remounts them too): an old container whose
+    // folder no longer checks out goes, keeping what was installed in it.
+    const lentNow = lentProblem(this.deps.db.agent(agentId)?.folders ?? [], { dataDir: this.deps.dataDir })
+    if (lentNow) {
+      if (state.code === 0) {
+        await docker(['commit', name, this.stateImage(agentId)], { timeoutMs: 10 * 60_000 })
+        await docker(['rm', '-f', name], { timeoutMs: 60_000 })
+        this.deps.db.removeServices(agentId)
+        this.ports.delete(agentId)
+      }
+      return this.fail(agentId, lentNow)
     }
 
     if (state.code === 0) {
@@ -623,14 +678,16 @@ export class Computers {
     this.set(agentId, { state: agent?.computer ? 'stopped' : 'off', services: [] })
   }
 
-  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer } = {}): Promise<Exec> {
+  // opts.env: values for this command only. Docker gets their names (-e NAME) and reads each value from
+  // its own environment, so a value is never on a command line another process could list.
+  async exec(agentId: string, command: string, opts: { timeoutSeconds?: number; signal?: AbortSignal; stdin?: string | Buffer; env?: Record<string, string> } = {}): Promise<Exec> {
     const t = Math.min(600, Math.max(1, Math.round(opts.timeoutSeconds ?? 120)))
-    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', this.name(agentId)]
+    const head = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), '-w', WORK, '-e', 'TERM=dumb', ...envNames(opts.env), this.name(agentId)]
     // `timeout` runs inside, so the command stops even if the docker client is killed.
     const run = ['timeout', '-k', '5', String(t), 'bash', '-lc', command]
     const owner = await this.hostOwner(agentId)
     const args = owner ? [...head, 'bash', '-c', ownedBack(run.map(q).join(' '), this.shared(agentId), owner.uid, owner.gid)] : [...head, ...run]
-    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin })
+    return docker(args, { timeoutMs: (t + 15) * 1000, signal: opts.signal, stdin: opts.stdin, env: opts.env })
   }
 
   // The folders this computer writes into that are also the person's: /work and what's lent.
@@ -692,7 +749,7 @@ export class Computers {
     return r.code === 0
   }
 
-  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal, conversationId?: string): Promise<ToolOutcome> {
+  private async startService(agentId: string, args: Record<string, unknown>, signal?: AbortSignal, conversationId?: string, env?: Record<string, string>): Promise<ToolOutcome> {
     const name = typeof args['name'] === 'string' ? args['name'].trim() : ''
     const command = typeof args['command'] === 'string' ? args['command'].trim() : ''
     const port = Number(args['port'])
@@ -707,7 +764,7 @@ export class Computers {
     await docker(['exec', this.name(agentId), 'bash', '-c', `mkdir -p /run/tucano ${WORK}/.logs && : > ${q(log)}`], { timeoutMs: 10_000 })
     // setsid gives the service its own process group, so stopping it stops its children too.
     const script = `echo $$ > /run/tucano/${name}.pid; cd ${WORK}; exec bash -lc ${q(command)} >> ${q(log)} 2>&1`
-    const start = await docker(['exec', '-d', this.name(agentId), 'setsid', 'bash', '-c', script], { timeoutMs: 15_000 })
+    const start = await docker(['exec', '-d', ...envNames(env), this.name(agentId), 'setsid', 'bash', '-c', script], { timeoutMs: 15_000, ...(env ? { env } : {}) })
     if (start.code !== 0) return { result: textResult(L(`Não consegui iniciar: ${start.stderr.trim()}`, `I couldn't start it: ${start.stderr.trim()}`), true) }
     this.deps.db.saveService(agentId, { name, command, port, startedAt: Date.now(), conversationId })
 
@@ -806,11 +863,19 @@ export class Computers {
         return { error: r.stderr.trim() || L(`Não achei ${file.containerPath}.`, `I couldn't find ${file.containerPath}.`) }
       }
     } else writeFileSync(join(dir, name), file.data ?? Buffer.alloc(0))
-    const size = statSync(join(dir, name)).size
+    let size = statSync(join(dir, name)).size
     if (!statSync(join(dir, name)).isFile() || size > MAX_SHOW_BYTES) {
       rmSync(dir, { recursive: true, force: true })
       return { error: tooBig() }
     }
+    // Out of the computer, the masking of what it prints no longer applies: the Cofre's values go here.
+    const checked = maskShown(readFileSync(join(dir, name)), this.deps.secrets?.(agentId) ?? [])
+    if ('leaked' in checked) {
+      rmSync(dir, { recursive: true, force: true })
+      return { error: leakedError(checked.leaked) }
+    }
+    writeFileSync(join(dir, name), checked.data)
+    size = checked.data.length
     const artifact: Artifact = {
       id,
       agentId,
@@ -867,7 +932,8 @@ export class Computers {
 
   // ---------- the tools ----------
 
-  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal }): Promise<ToolOutcome> {
+  // ctx.env: the Cofre's keys this command asked for (src/core/vault.ts), for bash and start_service only.
+  async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal; env?: Record<string, string> }): Promise<ToolOutcome> {
     if (agent.computerKind === 'mac') return this.mac.call(agent, name, args, ctx)
     try {
       await this.ensure(agent.id)
@@ -881,7 +947,7 @@ export class Computers {
         const command = String(args['command'] ?? '').trim()
         if (!command) return { result: textResult(L('Faltou o comando.', 'Missing the command.'), true) }
         const t = Math.min(600, Math.max(1, Number(args['timeout_seconds']) || 120))
-        const r = await this.exec(agent.id, command, { timeoutSeconds: t, signal: ctx.signal })
+        const r = await this.exec(agent.id, command, { timeoutSeconds: t, signal: ctx.signal, ...(ctx.env ? { env: ctx.env } : {}) })
         return { result: textResult(formatExec(r, t), r.code !== 0) }
       }
       case 'read_file':
@@ -891,7 +957,7 @@ export class Computers {
       case 'edit_file':
         return { result: await this.editFile(agent.id, args) }
       case 'start_service':
-        return this.startService(agent.id, args, ctx.signal, ctx.conversationId)
+        return this.startService(agent.id, args, ctx.signal, ctx.conversationId, ctx.env)
       case 'stop_service': {
         const svc = String(args['name'] ?? '')
         if (!this.deps.db.services(agent.id).some((s) => s.name === svc)) return { result: textResult(noService(svc), true) }
