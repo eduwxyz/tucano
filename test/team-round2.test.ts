@@ -349,7 +349,9 @@ describe('10. routed replies in a busy channel', () => {
     db.saveAgent(agent('a1', 'leo'))
     db.saveAgent(agent('a2', 'nico'))
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1', 'a2'] })
-    const { runner, prompts } = rig(db, { routerMs: 250, agentMs: 100 })
+    // Leo's first reply has to be in before the second one is written: 130 ms to spare (it was 50, and
+    // a busy macOS runner in CI missed it on 2026-11-25).
+    const { runner, prompts } = rig(db, { routerMs: 250, agentMs: 20 })
     await runner.send('ch', 'leo: pergunta A sobre deploy')
     await sleep(150)
     await runner.send('ch', 'leo: pergunta B sobre testes')

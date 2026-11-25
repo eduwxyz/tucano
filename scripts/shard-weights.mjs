@@ -11,8 +11,8 @@ import { writeFileSync } from 'node:fs'
 
 const gh = (...args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
 const SYSTEMS = { ubuntu: 'linux', macos: 'darwin', windows: 'win32' }
-// Files quicker than this are left out, and count as light ones (UNKNOWN in shards.ts).
-const LEAST_SECONDS = 2
+// Files quicker than this are left out, and count as quick ones (UNKNOWN in shards.ts).
+const LEAST_SECONDS = 1
 
 const run = process.argv[2] ?? JSON.parse(gh('run', 'list', '--workflow=ci.yml', '--branch=main', '--status=success', '--limit=1', '--json=databaseId'))[0]?.databaseId
 if (!run) throw new Error('no CI run to read')

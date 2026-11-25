@@ -3,8 +3,10 @@
 # A pull request waits for the slowest runner, so each system's tests are split across
 # several, by how long each file takes there (test/helpers/shards.ts): the runners are
 # free for a public repository, and up to 20 run at once (5 of them macOS). Windows runs
-# the same tests several times slower, so it gets the most. A pull request runs the
-# heaviest randomized tests with fewer rounds (TUCANO_QUICK_TESTS); main runs them all.
+# the same tests about twice as slow and takes 40 s to set up, so it gets the most; a
+# fifth runner there would not help, since its longest file alone takes a minute. A pull
+# request runs the heaviest randomized tests with fewer rounds (TUCANO_QUICK_TESTS); main
+# runs them all.
 name: CI
 
 on:
@@ -33,12 +35,10 @@ jobs:
           - { os: macos-latest, shard: 1/3 }
           - { os: macos-latest, shard: 2/3 }
           - { os: macos-latest, shard: 3/3 }
-          - { os: windows-latest, shard: 1/6 }
-          - { os: windows-latest, shard: 2/6 }
-          - { os: windows-latest, shard: 3/6 }
-          - { os: windows-latest, shard: 4/6 }
-          - { os: windows-latest, shard: 5/6 }
-          - { os: windows-latest, shard: 6/6 }
+          - { os: windows-latest, shard: 1/4 }
+          - { os: windows-latest, shard: 2/4 }
+          - { os: windows-latest, shard: 3/4 }
+          - { os: windows-latest, shard: 4/4 }
     runs-on: ${{ matrix.os }}
     env:
       # The tests and the build don't run Electron itself.

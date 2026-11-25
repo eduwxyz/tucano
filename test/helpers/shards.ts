@@ -8,8 +8,9 @@ import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { BaseSequencer, type TestSpecification } from 'vitest/node'
 
-// A file the weights don't know yet (new since they were written) counts as a light one.
-export const UNKNOWN = 1
+// A file the weights don't have is a quick one (they leave out what takes under a second, and those
+// average 0.3 s), or one that is new since they were written.
+export const UNKNOWN = 0.3
 
 // Every machine works this out by itself from the same list, so the answer can only depend on the
 // names and the weights: ties go by name, and to the first machine.
