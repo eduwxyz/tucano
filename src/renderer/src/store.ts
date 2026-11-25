@@ -103,6 +103,8 @@ export interface State {
   threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
+  navBack: View[] // the screens behind this one, newest last: the ← button walks back through them
+  navForward: View[] // the screens ahead after going back, newest last: the → button walks forward
   me: { name: string; initials: string }
   you: string // the person this window is (snapshot.you)
   people: Person[]
@@ -183,6 +185,8 @@ let state: State = {
   voiceRev: 0,
   navOpen: false,
   view: null,
+  navBack: [],
+  navForward: [],
   me: { name: 'Eu', initials: 'EU' },
   you: '',
   people: [],
@@ -640,8 +644,11 @@ function apply(e: CoreEvent): void {
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
-      case 'agent_removed':
-        return { ...s, agents: s.agents.filter((a) => a.id !== e.id) }
+      case 'agent_removed': {
+        // Its page leaves the history with it, like a removed conversation's.
+        const notGone = (v: View): boolean => !(v.kind === 'agent' && v.id === e.id)
+        return { ...s, agents: s.agents.filter((a) => a.id !== e.id), navBack: s.navBack.filter(notGone), navForward: s.navForward.filter(notGone) }
+      }
       case 'conversation': {
         return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
@@ -676,11 +683,15 @@ function apply(e: CoreEvent): void {
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
         const { [e.id]: _gone, ...messages } = s.messages
         const { [e.id]: _from, ...history } = s.history
+        // Never walk back (or forward) into a conversation that no longer exists.
+        const notGone = (v: View): boolean => !(v.kind === 'conversation' && v.id === e.id)
         return {
           ...s,
           conversations: left,
           messages,
           history,
+          navBack: s.navBack.filter(notGone),
+          navForward: s.navForward.filter(notGone),
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
           panel: here ? null : s.panel,
           panelWide: here ? false : s.panelWide
@@ -906,15 +917,81 @@ function fire<M extends Method>(failed: string, method: M, ...params: Params<M> 
 
 export const setNav = (navOpen: boolean): void => set((s) => ({ ...s, navOpen }))
 
+// The same screen again (a conversation's message scroll aside) doesn't start a new step.
+const sameView = (a: View | null, b: View): boolean => {
+  if (!a || a.kind !== b.kind) return false
+  if (a.kind === 'conversation' && b.kind === 'conversation') return a.id === b.id
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+const NAV_STEPS = 50 // how far back the history goes
+
+// A view as it goes into the history: without the "scroll to this message" cue, so going
+// back lands on the conversation itself, not on some old message.
+const cleanView = (v: View): View => (v.kind === 'conversation' ? { kind: 'conversation', id: v.id } : v)
+
+// Every navigation goes here: the current screen steps into the back stack, and the forward
+// stack (a branch we went back from) clears — the same screen again keeps both, like Slack.
+// The Tuca builder is an overlay, not a step: opening it leaves the history alone, closing it
+// (back to `from`) isn't a step either, and leaving it for somewhere else steps from `from`.
 export const navigate = (view: View): void =>
-  set((s) => ({
-    ...s,
-    view,
-    navOpen: false,
-    ...(s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? {} : { panel: null, panelWide: false }),
-    conversations:
-      view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
-  }))
+  set((s) => {
+    const same = sameView(s.view, view)
+    const opening = view.kind === 'tuca'
+    const tuca = s.view?.kind === 'tuca' ? s.view : null
+    const back = tuca ? (tuca.from ?? null) : s.view
+    const returning = tuca !== null && back !== null && sameView(back, view)
+    const push = opening || returning || same ? null : back
+    return {
+      ...s,
+      view,
+      navOpen: false,
+      navBack: push ? [...s.navBack, cleanView(push)].slice(-NAV_STEPS) : s.navBack,
+      navForward: opening || returning || same ? s.navForward : [],
+      ...(same ? {} : { panel: null, panelWide: false }),
+      conversations:
+        view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
+    }
+  })
+
+// The ← button: back to the last screen, this one going onto the forward stack. Not a
+// navigation, so nothing is registered (no loop, and no history lost).
+export const goBack = (): void =>
+  set((s) => {
+    // On the Tuca's screen, back closes it: to where it was opened from, which was never a step.
+    if (s.view?.kind === 'tuca' && s.view.from) return { ...s, view: s.view.from, navOpen: false, panel: null, panelWide: false }
+    const prev = s.navBack.at(-1)
+    if (!prev || !s.view) return s
+    return {
+      ...s,
+      view: prev,
+      navBack: s.navBack.slice(0, -1),
+      navForward: [...s.navForward, cleanView(s.view)].slice(-NAV_STEPS),
+      navOpen: false,
+      panel: null,
+      panelWide: false,
+      conversations:
+        prev.kind === 'conversation' ? s.conversations.map((c) => (c.id === prev.id ? { ...c, unread: 0 } : c)) : s.conversations
+    }
+  })
+
+// The → button: forward again, this one going onto the back stack.
+export const goForward = (): void =>
+  set((s) => {
+    const next = s.navForward.at(-1)
+    if (!next || !s.view) return s
+    return {
+      ...s,
+      view: next,
+      navForward: s.navForward.slice(0, -1),
+      navBack: [...s.navBack, cleanView(s.view)].slice(-NAV_STEPS),
+      navOpen: false,
+      panel: null,
+      panelWide: false,
+      conversations:
+        next.kind === 'conversation' ? s.conversations.map((c) => (c.id === next.id ? { ...c, unread: 0 } : c)) : s.conversations
+    }
+  })
 
 export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
   // optimistic, so typing stays instant; the owner's name given here (the introduction) is the name asked once
@@ -1033,9 +1110,9 @@ export async function openDm(agentId: string): Promise<void> {
 }
 
 // Asks an agent something from somewhere else (the organogram): it goes to its DM, and I stay where I am.
-export async function askAgent(agentId: string, text: string): Promise<string> {
+export async function askAgent(agentId: string, text: string, images: ImageUpload[] = [], files: FileUpload[] = []): Promise<string> {
   const id = await call('openDm', { agentId })
-  sendMessage(id, text)
+  sendMessage(id, text, images, undefined, files)
   return id
 }
 
@@ -1054,6 +1131,7 @@ export const shareComputer = (connectorId: string, agentIds: string[]): void =>
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
+export const setConnectorIcon = (id: string, icon: string): Promise<void> => call('setConnectorIcon', { id, icon })
 export const ownApp = (provider: AppProvider): Promise<{ clientId?: string; redirectUrl: string }> => call('ownApp', { provider })
 export const setOwnApp = (provider: AppProvider, clientId: string, clientSecret: string): Promise<void> => call('setOwnApp', { provider, clientId, clientSecret })
 // On a server the authorization page comes back to be opened here, then pasted back.

@@ -860,6 +860,15 @@ h3 {
   width: 20px;
   height: 20px;
 }
+.icon-btn:disabled {
+  color: var(--text-3);
+  opacity: 0.4;
+  cursor: default;
+}
+.icon-btn:disabled:hover {
+  background: none;
+  color: var(--text-3);
+}
 
 /* ---------- avatars ---------- */
 .avatar {
@@ -10093,6 +10102,27 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   background: var(--bg);
   color: var(--text-2);
 }
+/* A connector's own picture: shown whole, whatever its shape, on the tile's own surface. */
+.catalog__logo--pic {
+  overflow: hidden;
+  background: var(--panel);
+}
+.catalog__logo--pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* The picture and the two buttons that change it, under the connector's state and address. */
+.connector-modal__icon {
+  gap: 8px;
+  margin-bottom: 10px;
+}
+/* The same tile in the steps that pick a connector: it brings its own surface, so the circle goes. */
+.onb-power-row__icon--tile {
+  width: auto;
+  height: auto;
+  background: none;
+}
 .catalog__state {
   display: flex;
   align-items: center;
@@ -13106,28 +13136,47 @@ button.agent-card__now:hover {
 .org-coach + .org-tools + .org-hint {
   display: none;
 }
-.org-ask {
+.org-ask-wrap {
   position: absolute;
   left: 50%;
   bottom: 20px;
   z-index: 5;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   width: min(540px, calc(100% - 420px));
   min-width: 280px;
+  transform: translateX(-50%);
+  cursor: default;
+}
+.orgb.has-side .org-ask-wrap {
+  left: calc((100% - 352px) / 2 + 76px);
+  width: min(540px, calc(100% - 352px - 270px));
+}
+.org-ask-wrap .composer__images {
+  padding: 0 4px;
+}
+.org-ask__note {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--warn);
+}
+.org-ask__note--busy {
+  color: var(--text-2);
+}
+.org-ask {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   height: 48px;
   padding: 0 8px 0 12px;
   border-radius: 15px;
   background: var(--panel);
   box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-lg);
-  transform: translateX(-50%);
-  cursor: default;
   transition: box-shadow var(--dur-fast) var(--ease-out);
 }
-.orgb.has-side .org-ask {
-  left: calc((100% - 352px) / 2 + 76px);
-  width: min(540px, calc(100% - 352px - 270px));
+.org-ask .icon-btn {
+  flex: none;
 }
 .org-ask:focus-within {
   box-shadow: 0 0 0 1.5px var(--text), var(--shadow-lg);

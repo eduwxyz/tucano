@@ -23,6 +23,8 @@ declare global {
       }
       connect: () => void
       pickFolder: (o?: { start?: string; hidden?: boolean }) => Promise<string | null> // start: from the home folder
+      // desktop only: the picture on the clipboard, if there is one.
+      image?: { paste: () => Promise<{ mime: string; data: string } | null> }
       pathOf?: (file: File) => string // a dropped or picked file's path on this computer (desktop only)
       upload?: (file: File, purpose?: 'message') => Promise<string> // a file sent to the server, and where it landed there (server only)
       onNavigate: (cb: (conversationId: string, threadId?: string) => void) => void
