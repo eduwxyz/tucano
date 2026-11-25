@@ -78,6 +78,14 @@ describe('the extensions an agent’s browser can carry', () => {
     expect(document.body.textContent).not.toContain('Downloading')
   })
 
+  it('draws a real glyph beside Defuddle Clip', async () => {
+    await render()
+    // An icon name that is not a PATHS key leaves an empty svg: the row looks fine until the glyph goes missing.
+    const path = rowOf('Defuddle Clip').querySelector('svg.icon path')
+    expect(path).not.toBeNull()
+    expect(path?.getAttribute('d')).toBeTruthy()
+  })
+
   it('turns one on without touching the others, and sends the whole set', async () => {
     settings = { ...base, browserAddOns: { ads: true } }
     await render()

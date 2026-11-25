@@ -18,7 +18,7 @@ const LOOK: Record<AddOn, { icon: IconName; fixes: () => string }> = {
   consent: { icon: 'ask', fixes: () => L('Responde o diálogo de consentimento, inclusive as listas de “interesse legítimo”.', 'Answers the consent dialog, including the “legitimate interest” lists.') },
   popups: { icon: 'layers', fixes: () => L('Tira da frente o que fica por cima da página: barras fixas, gavetas, pop-ups.', 'Clears what sits on top of the page: sticky bars, drawers, pop-ups.') },
   clutter: { icon: 'book', fixes: () => L('Deixa a página só com o que se lê. Muda o desenho da página: o print deixa de ser o do site.', 'Leaves the page as what is readable. It changes how the page looks: a screenshot stops being the site’s.') },
-  defuddle: { icon: 'file-text', fixes: () => L('Extrai o artigo da página como texto limpo, sem menus, anúncios ou rodapés. O agente lê o que importa.', 'Pulls the article out of the page as clean text, no menus, ads or footers. The agent reads what matters.') }
+  defuddle: { icon: 'clip', fixes: () => L('Extrai o artigo da página como texto limpo, sem menus, anúncios ou rodapés. O agente lê o que importa.', 'Pulls the article out of the page as clean text, no menus, ads or footers. The agent reads what matters.') }
 }
 
 export function AgentAddOns(): ReactNode {
