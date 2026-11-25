@@ -237,6 +237,7 @@ export interface Api {
   docRename(p: { id: string; name: string }): Doc
   docTrash(p: { id: string }): Doc
   docRestore(p: { id: string }): Doc
+  docPurge(p: { id: string }): void // out of the trash, for good: the owner's or an admin's (in a personal folder, its person's)
   docText(p: { id: string; version?: number }): Promise<{ text: string }> // what the file says, for the viewer (the file itself is served at docUrl)
   docHistory(p: { id: string }): { versions: DocVersion[]; events: DocEvent[] }
   docRestoreVersion(p: { id: string; n: number }): Promise<Doc> // an older version's bytes become a new version

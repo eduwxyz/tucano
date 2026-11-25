@@ -99,6 +99,8 @@
 .dc-trash { margin-top: 28px; }
 .dc-trash__list { margin-top: 8px; }
 .dc-trash .dc-row__main { opacity: 0.7; }
+/* The one thing here that has no way back says so by its colour. */
+.dc-trash__purge { color: var(--danger); }
 
 /* drop on a folder, and files on their way */
 .dc-drop { position: absolute; inset: 10px; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 8px; border-radius: var(--radius-lg); border: 2px dashed var(--accent); background: var(--accent-soft); color: var(--text); pointer-events: none; animation: dc-fade var(--dur-fast) var(--ease-out); }

@@ -194,6 +194,7 @@ export const SHAPES: Record<Method, Record<string, string>> = {
   docRename: { id: 's', name: 's' },
   docTrash: { id: 's' },
   docRestore: { id: 's' },
+  docPurge: { id: 's' },
   docText: { id: 's', version: 'n?' },
   docHistory: { id: 's' },
   docRestoreVersion: { id: 's', n: 'n' },

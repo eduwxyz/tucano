@@ -239,6 +239,21 @@ export class Docs extends DocsFiling {
     return next
   }
 
+  // Out of the trash, for good: the file, its older versions and what the index kept of it. It can't be
+  // undone, so in a shared folder it is the owner's or an admin's; in a personal folder, its person's.
+  // Gives back what it was called and where it was, for the team's log: nothing, for a personal folder.
+  purge(person: Person, docId: string): { name: string; folder: string } | null {
+    this.need()
+    const d = this.docFor(person, docId, 'edit')
+    if (!d.trashedAt) throw new UserError(L('Mande o arquivo para a lixeira antes de apagar de vez.', 'Send the file to the trash before deleting it for good.'))
+    const folders = this.index.folders()
+    const personal = this.privateOf(folders, d.folderId)
+    if (!personal && !isAdmin(person)) throw onlyAdmin()
+    this.purgeDoc(d)
+    this.deps.emit()
+    return personal ? null : { name: d.name, folder: folderPath(folders, d.folderId).join(' › ') }
+  }
+
   // What the file says, as text, for the viewer (`version`: an older one).
   async text(person: Person, docId: string, version?: number): Promise<{ text: string }> {
     this.need()
