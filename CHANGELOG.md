@@ -4,6 +4,8 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.48] - 2026-11-25
+
 > **Em português:**
 > - **Segurança: cinco correções** ([GHSA-gprv-8xfq-w6xf](https://github.com/eduwxyz/tucano/security/advisories/GHSA-gprv-8xfq-w6xf)). Um arquivo que um agente citou não pode mais ser trocado por um atalho pra outro arquivo depois de conferido. No nível **Normal**, um comando que apaga, publica, faz merge, envia ou paga **pede a sua aprovação**, como o nível promete. Num servidor, o acesso às páginas que os agentes servem passa a ser de cada pessoa, vale 12 horas e acaba quando ela perde o acesso. Um arquivo que o agente mostra sai com os valores do Cofre mascarados. E o limite de notificações por telefone conta o telefone, não o texto do identificador. Atualize.
 > - **Mudou:** no nível Normal, `rm -rf` numa pasta que não se refaz, `git reset --hard`, `git branch -D`, `git merge`, `npm publish` e parecidos agora pedem aprovação antes de rodar. **Aprovar e sempre permitir** no card libera aquele tipo de ação de vez.
