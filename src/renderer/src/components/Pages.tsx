@@ -95,7 +95,7 @@ import { HermesImport } from './HermesImport'
 import { AccountPicker, AccountsCard, HarnessList, HarnessMcps, ModelPicker, onGateway, OutsideGateway, usableEngines } from './Harness'
 import { AppsCard } from './Apps'
 import { AgentModelsPanel } from './AgentModelsPanel'
-import { ConnectorGrid, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
+import { ConnectorGrid, ConnectorIconPicker, ConnectorTile, OwnAppSetup, ThirdPartyWarning } from './ConnectorStore'
 import { entryOf } from '../../../shared/connector-catalog'
 import { directReports, possibleBosses } from '../../../shared/org'
 import { ruleTool } from '../../../shared/classify'
@@ -874,7 +874,11 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                 return (
                   <Row
                     key={c.id}
-                    label={c.name}
+                    label={
+                      <span className="lrow__channel">
+                        <ConnectorTile c={c} size={18} /> {c.name}
+                      </span>
+                    }
                     sub={
                       c.status === 'needs_auth' ? (
                         <span className="lrow__warn">
@@ -2214,7 +2218,7 @@ export function ConnectorsPage(): ReactNode {
           <div className="table">
             {connectors.map((c) => (
               <div key={c.id} className="table__row">
-                <Icon name="plug" size={15} />
+                <ConnectorTile c={c} size={20} />
                 <span className="grow">
                   <strong>{c.name}</strong> <span className="muted small">· {L(`${c.tools.filter((t) => t.enabled).length} ferramentas`, `${c.tools.filter((t) => t.enabled).length} tools`)}</span>
                 </span>
@@ -2271,6 +2275,7 @@ function ConnectorDetails({ c, onClose }: { c: Connector; onClose: () => void })
           <span className={`tag ${STATUS()[c.status].tone}`}>{STATUS()[c.status].label}</span>
           <span className="muted small mono truncate grow">{address(c)}</span>
         </div>
+        <ConnectorIconPicker c={c} />
         {nodeOf(c.url) ? (
           <ComputerAgents connectorId={c.id} />
         ) : (
