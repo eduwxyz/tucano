@@ -272,6 +272,25 @@ describe('docsCall', () => {
       expect(cards).toEqual([])
     })
 
+    // The company folder is read by every agent and saved in by none: a folder under it that the agent
+    // saves in is listed by its path, and that path has to work.
+    it('saves by the path docs_listar prints, when the folder sits under one the agent only reads', async () => {
+      const company = docs.index.folders().find((f) => f.name === 'Empresa')!
+      mk('Relatorios', { parentId: company.id })
+      const listed = await call('docs_listar', {})
+      expect(listed.text).toContain('Empresa/Relatorios')
+      const r = await save({ pasta: 'Empresa/Relatorios', nome: 'a.md', texto: 'x' })
+      expect(r.error).toBeUndefined()
+      expect(find('a.md')?.folderId).toBe(docs.index.folders().find((f) => f.name === 'Relatorios')!.id)
+    })
+
+    it("keeps none of the Cofre's values in a text the agent saves", async () => {
+      mk('Financeiro')
+      const r = await save({ pasta: 'Financeiro', nome: 'a.md', texto: 'a chave é sk-live-123' }, { mask: (t) => t.replace('sk-live-123', '[cofre:STRIPE]') })
+      expect(r.error).toBeUndefined()
+      expect((await docs.text(ana, find('a.md')!.id)).text).toBe('a chave é [cofre:STRIPE]')
+    })
+
     it('asks for the folder and for the summary', async () => {
       mk('Financeiro')
       const noFolder = await save({ texto: 'x', nome: 'a.md' })

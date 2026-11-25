@@ -259,7 +259,7 @@ export class HomeLink {
       void core.docFile(who.id, doc[1]!, v).then(
         (found) => {
           if (!found || !normalize(found.path).startsWith(resolve(join(core.dataDir(), 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
-          res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES[extname(found.path).toLowerCase()] ?? 'application/octet-stream', 'content-security-policy': ARTIFACT_CSP })
+          res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES[extname(found.path).toLowerCase()] ?? 'application/octet-stream', 'content-security-policy': ARTIFACT_CSP, 'cache-control': 'private, no-store' })
           createReadStream(found.path).on('error', () => res.destroy()).pipe(res)
         },
         () => res.writeHead(404, BASE_HEADERS).end()

@@ -1,7 +1,7 @@
 // Documentos around the documents: files dropped for the cataloguer to put away, dates found in documents, the passages
 // that answer a question, and what happens when the folder is changed outside Tucano or the index cannot be opened.
 // Real folder, real index.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -136,6 +136,7 @@ describe('files dropped for the cataloguer', () => {
   })
 
   it('lets the person who dropped a file take it back to their personal folder, and no one else', async () => {
+    share('Financeiro', { maria: 'edit' })
     const doc = await drop(maria, 'a.md', 'um')
     expect(() => docs.unfile(maria, doc.id)).toThrow() // still waiting: nothing to take back
     docs.fileInto(doc.id, folder('Financeiro').id, undefined, actorOfAgent('fina'))
@@ -147,6 +148,25 @@ describe('files dropped for the cataloguer', () => {
     expect(docs.history(maria, doc.id).events.map((e) => e.action)).toContain('unfiled')
     expect(existsSync(join(docs.root, '.private', 'maria', 'a.md'))).toBe(true)
     expect(() => docs.unfile(maria, doc.id)).toThrow() // it is back already
+  })
+
+  // Taking it back moves the document, with every version, to the person's own folder. It is theirs to
+  // take only while they may still change it where it is.
+  it('does not let them take back a file that has since left their reach', async () => {
+    share('Financeiro', { maria: 'edit' })
+    const moved = await drop(maria, 'a.md', 'um')
+    docs.fileInto(moved.id, folder('Financeiro').id, undefined, actorOfAgent('fina'))
+    docs.move(ana, moved.id, folder('Técnico').id)
+    await docs.newVersion(ana, moved.id, { data: Buffer.from('o que a diretoria escreveu depois') })
+    expect(() => docs.unfile(maria, moved.id)).toThrow()
+    expect(stored(moved.id).folderId).toBe(folder('Técnico').id)
+    expect((await docs.text(ana, moved.id)).text).toContain('diretoria')
+
+    const lost = await drop(maria, 'b.md', 'dois')
+    docs.fileInto(lost.id, folder('Financeiro').id, undefined, actorOfAgent('fina'))
+    share('Financeiro', {})
+    expect(() => docs.unfile(maria, lost.id)).toThrow()
+    expect(stored(lost.id).folderId).toBe(folder('Financeiro').id)
   })
 
   it('takes at most 20 waiting files from a person, and counts each person on their own', async () => {
@@ -303,6 +323,29 @@ describe('the folder changed outside Tucano', () => {
     expect(docs.tree(adm).docs.some((d) => d.name === 'a.md')).toBe(true)
     expect(docs.tree(maria).folders.some((f) => f.name === 'Novo')).toBe(false)
     expect(docs.tree(maria).docs.some((d) => d.name === 'a.md')).toBe(false)
+  })
+
+  // A restore, or a copy, writes every file with the current time. The bytes are the ones on record:
+  // each is read once to see that, and the time it was read at is kept, so the next scans leave it alone.
+  it('reads once a file that only got a newer time, and still sees a later edit', async () => {
+    const doc = await put(ana, 'Financeiro', 'a.md', 'primeiro')
+    const path = join(docs.root, 'Financeiro', 'a.md')
+    const later = new Date(Date.now() + 60_000)
+    utimesSync(path, later, later)
+    await docs.scan()
+    expect(docs.index.doc(doc.id)!.version).toBe(1)
+    expect(docs.index.diskTimes().get(doc.id)).toBe(Math.floor(statSync(path).mtimeMs))
+    // The same time again: nothing to read. Proven by bytes that changed under that very time and size.
+    writeFileSync(path, 'PRIMEIRO')
+    utimesSync(path, later, later)
+    await docs.scan()
+    expect(docs.index.doc(doc.id)!.version).toBe(1)
+    // A newer time, as any real edit brings: read, and a new version.
+    const after = new Date(Date.now() + 120_000)
+    utimesSync(path, after, after)
+    await docs.scan()
+    expect(docs.index.doc(doc.id)!.version).toBe(2)
+    expect(readFileSync(path, 'utf8')).toBe('PRIMEIRO')
   })
 
   it('makes a new version of a file edited on disk', async () => {

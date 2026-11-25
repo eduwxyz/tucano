@@ -28,7 +28,25 @@ export interface DocsDeps {
 }
 
 export const sha = (data: Buffer): string => createHash('sha256').update(data).digest('hex')
-const stripHtml = (h: string): string => h.slice(0, 2_000_000).replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)
+// A web page's text, read once from start to end. A pattern that looks for the end of each script, style
+// or tag goes over the rest of the file again for every opening that has none, and a small file made only
+// of openings then holds the whole app: so a block is cut by where it starts and where it ends, and a
+// tag never reads past the next "<".
+function withoutBlocks(h: string): string {
+  const open = /<(script|style)\b/gi
+  let out = ''
+  let at = 0
+  for (let m = open.exec(h); m; m = open.exec(h)) {
+    out += `${h.slice(at, m.index)} `
+    const close = new RegExp(`</${m[1]}\\s*>`, 'gi')
+    close.lastIndex = open.lastIndex
+    if (!close.exec(h)) return out // it never ends: the rest is the block's, not the page's
+    at = close.lastIndex
+    open.lastIndex = at
+  }
+  return out + h.slice(at)
+}
+const stripHtml = (h: string): string => withoutBlocks(h.slice(0, 2_000_000)).replace(/<[^<>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)
 // The first words of a text, on one line, as a document's summary when no one wrote one.
 export const summaryOf = (text: string): string => text.replace(/^#+\s*/gm, '').replace(/[|*_`>]+/g, ' ').replace(/(^|\s)-{3,}(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140)
 const safeSegment = (id: string): string => id.replace(/[^\w-]/g, '_')
@@ -168,6 +186,15 @@ export class DocsCore {
       return null
     }
   }
+  // Where a file is about to be written or moved to: its folder made, and inside the documents folder by
+  // the folders as they are on the disk, with no link standing where the file goes. safeJoin compares
+  // names; a link in a folder's place passes it and leads the write out.
+  private place(path: string): string {
+    const dir = dirname(path)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    if (!isInside(realpathSync(this.root), realpathSync(dir)) || lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new UserError(L('Esse caminho não vale.', 'That path is not valid.'))
+    return path
+  }
   // The file of a document (`version`: an older one), when it is there: a file of its own, inside the
   // documents folder. A link put in its place, or in the place of a folder above it, is not one,
   // wherever it leads: what is read and served from here is only what was kept here.
@@ -286,8 +313,7 @@ export class DocsCore {
     if (!folders.some((f) => f.id === p.folderId)) throw new UserError(L('Essa pasta não existe mais.', 'That folder no longer exists.'))
     const text = await this.indexable(file.name, file.kind, p.data)
     const name = uniqueName(file.name, this.nameTaken(folders, p.folderId))
-    const path = safeJoin(this.folderDir(folders, p.folderId), name)
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+    const path = this.place(safeJoin(this.folderDir(folders, p.folderId), name))
     writeFileSync(path, p.data, { mode: 0o600 })
     return this.record({ folderId: p.folderId, name, kind: file.kind, data: p.data, text, summary: p.summary, origin: p.origin ?? {}, by: p.by, note: p.note ?? '', action: p.action ?? 'created', ...(p.draft ? { draft: true } : {}), ...(p.filing ? { filing: p.filing } : {}) })
   }
@@ -322,11 +348,9 @@ export class DocsCore {
     const renamed = !!p.name && sameName(file.name) !== sameName(d.name)
     const name = renamed ? uniqueName(file.name, this.nameTaken(folders, d.folderId, d)) : d.name
     const current = this.docPath(folders, d)
-    if (existsSync(current)) {
-      mkdirSync(this.versionDir(d.id), { recursive: true, mode: 0o700 })
-      copyFileSync(current, this.versionPath(d, d.version))
-    }
-    const path = safeJoin(this.folderDir(folders, d.folderId), name)
+    // The version kept is the document's own file: not what a link in its place leads to.
+    if (this.filePath(d)) copyFileSync(current, this.place(this.versionPath(d, d.version)))
+    const path = this.place(safeJoin(this.folderDir(folders, d.folderId), name))
     writeFileSync(path, p.data, { mode: 0o600 })
     if (renamed && path !== current) rmSync(current, { force: true })
     const at = Date.now()
@@ -354,10 +378,7 @@ export class DocsCore {
     const from = this.docPath(folders, d)
     const next: Doc = { ...d, folderId, name: wanted, updatedBy: by, updatedAt: Date.now(), ...this.statusOnMove(folders, d, folderId, by) }
     const to = this.docPath(folders, next)
-    if (from !== to) {
-      mkdirSync(dirname(to), { recursive: true, mode: 0o700 })
-      renameSync(from, to)
-    }
+    if (from !== to) renameSync(from, this.place(to))
     this.index.putDoc(next)
     const moved = folderId !== d.folderId
     this.index.addEvent({ docId: d.id, at: next.updatedAt, by, action: moved ? 'moved' : 'renamed', detail: moved ? folderPath(folders, folderId).join(' › ') : d.name })
@@ -368,8 +389,7 @@ export class DocsCore {
 
   trashDoc(d: Doc, by: string): Doc {
     const from = this.docPath(this.index.folders(), d)
-    const to = this.trashPath(d)
-    mkdirSync(dirname(to), { recursive: true, mode: 0o700 })
+    const to = this.place(this.trashPath(d))
     if (existsSync(from)) renameSync(from, to)
     const next: Doc = { ...d, trashedAt: Date.now(), updatedBy: by, updatedAt: Date.now() }
     this.index.putDoc(next)
@@ -384,8 +404,7 @@ export class DocsCore {
     if (!existsSync(from)) throw new UserError(L('O arquivo não está mais no disco.', 'The file is no longer on the disk.'))
     const name = uniqueName(d.name, this.nameTaken(folders, d.folderId, { ...d, trashedAt: Date.now() }))
     const next: Doc = { ...d, name, trashedAt: null, updatedBy: by, updatedAt: Date.now() }
-    const to = this.docPath(folders, next)
-    mkdirSync(dirname(to), { recursive: true, mode: 0o700 })
+    const to = this.place(this.docPath(folders, next))
     renameSync(from, to)
     rmSync(dirname(from), { recursive: true, force: true })
     this.index.putDoc(next)

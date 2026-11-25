@@ -2633,6 +2633,7 @@ ${note}`,
                       return { artifact: out.artifact }
                     }
                   : undefined,
+              ...(this.deps.vault ? { mask: (text: string) => this.deps.vault!.mask(agent.id, text) } : {}),
               fromText: (fileName, data, title) => {
                 const dataDir = this.deps.dataDir
                 if (!dataDir) return undefined

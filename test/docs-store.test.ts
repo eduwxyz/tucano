@@ -148,6 +148,26 @@ describe('adding a file', () => {
     expect(ids(docs.search(ana, 'pangolim').map((h) => h.doc))).toEqual([doc.id])
   })
 
+  it('reads a web page for the search without its tags, scripts and styles', async () => {
+    const page = '<html><head><style>p { color: red }</style><script>var segredoDoScript = 1</script></head><body><h1>Relatório</h1><p>A girafa &amp; a zebra &lt;juntas&gt;.</p><SCRIPT>outroScript()</SCRIPT></body></html>'
+    const doc = await put(ana, 'Financeiro', 'pagina.html', page)
+    const { text } = await docs.text(ana, doc.id)
+    expect(text).toBe('Relatório A girafa & a zebra <juntas>.')
+    expect(ids(docs.search(ana, 'girafa').map((h) => h.doc))).toEqual([doc.id])
+    expect(docs.search(ana, 'segredoDoScript')).toEqual([])
+  })
+
+  // A page is read once, from start to end: an opening with no end must not send the reading back over the
+  // rest of the file for each one (200 KB of them used to hold the whole app for about 20 s).
+  it('reads a web page made of openings that never close in the time its size takes', async () => {
+    for (const piece of ['<', '<script', '<style>', '<a href="x" ']) {
+      const started = Date.now()
+      const doc = await put(ana, 'Financeiro', 'ruim.html', piece.repeat(Math.ceil(200_000 / piece.length)))
+      await docs.text(ana, doc.id)
+      expect(Date.now() - started).toBeLessThan(1500)
+    }
+  }, 60_000)
+
   it('uses the first words of the text as the summary, or the one it was given', async () => {
     const auto = await put(ana, 'Financeiro', 'a.md', '# Notas\n\nzebrinha azul')
     expect(auto.summary).toBe('Notas zebrinha azul')
@@ -210,6 +230,23 @@ describe('adding a file', () => {
     rmSync(join(docs.root, 'Financeiro'), { recursive: true })
     symlinkSync(outside, join(docs.root, 'Financeiro'))
     expect(docs.fileOf(ana, doc.id)).toBeNull()
+    // And nothing is written through it: not a new file, not a new version over the one outside.
+    expect(await failure(() => put(ana, 'Financeiro', 'plantado.md', 'x'))).toBe('Esse caminho não vale.')
+    expect(await failure(() => docs.newVersion(ana, doc.id, { data: Buffer.from('por cima') }))).toBe('Esse caminho não vale.')
+    expect(existsSync(join(outside, 'plantado.md'))).toBe(false)
+    expect(readFileSync(join(outside, 'notas.md'), 'utf8')).toBe('SEGREDO')
+  })
+
+  it.skipIf(process.platform === 'win32')('keeps as a version only the file itself, and writes the new one in its place, not through a link', async () => {
+    const secret = join(root, 'chave.txt')
+    writeFileSync(secret, 'SEGREDO')
+    const doc = await put(ana, 'Financeiro', 'notas.md', 'conteudo')
+    const path = join(docs.root, 'Financeiro', 'notas.md')
+    rmSync(path)
+    symlinkSync(secret, path)
+    expect(await failure(() => docs.newVersion(ana, doc.id, { data: Buffer.from('por cima') }))).toBe('Esse caminho não vale.')
+    expect(readFileSync(secret, 'utf8')).toBe('SEGREDO')
+    expect(existsSync(join(docs.root, '.versions', doc.id))).toBe(false)
   })
 
   it('keeps a folder name inside the documents folder too', () => {
@@ -401,6 +438,16 @@ describe('versions, names and the trash', () => {
     expect((await docs.text(ana, doc.id)).text).toBe('versao um')
     expect((await docs.text(ana, doc.id, 2)).text).toBe('versao dois')
     await expect(docs.restoreVersion(ana, doc.id, 3)).rejects.toThrow() // it is the current one
+  })
+
+  it('does not name, in the history, a folder the reader cannot see', async () => {
+    share('Financeiro', { maria: 'view' })
+    const doc = await put(ana, 'Financeiro', 'a.md', 'um')
+    docs.move(ana, doc.id, folder('Técnico').id)
+    docs.move(ana, doc.id, folder('Financeiro').id)
+    const moves = (who: Person): string[] => docs.history(who, doc.id).events.filter((e) => e.action === 'moved').map((e) => e.detail).sort()
+    expect(moves(ana)).toEqual(['Financeiro', 'Técnico'])
+    expect(moves(maria)).toEqual(['', 'Financeiro'])
   })
 
   it('lists the versions, newest first, and what happened to the document', async () => {

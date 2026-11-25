@@ -604,7 +604,8 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     const v = Number(url.searchParams.get('v')) || undefined
     void ask<{ path: string; kind: string } | null>({ type: 'doc-file', person: who.person ?? ownerId ?? '', doc: docMatch[1]!, ...(v ? { v } : {}) }).then((found) => {
       if (!found || !normalize(found.path).startsWith(resolve(join(dataDir, 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
-      file(res, found.path, { 'content-security-policy': ARTIFACT_CSP, ...(found.kind === 'html' ? { 'content-type': 'text/html; charset=utf-8' } : {}) })
+      // A document is its readers' alone: nothing between the server and the browser keeps a copy of it.
+      file(res, found.path, { 'content-security-policy': ARTIFACT_CSP, 'cache-control': 'private, no-store', ...(found.kind === 'html' ? { 'content-type': 'text/html; charset=utf-8' } : {}) })
     })
     return
   }

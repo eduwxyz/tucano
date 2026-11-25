@@ -8,7 +8,7 @@
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { agentFolderIds, cleanFolderAccess, personMay, visibleFolderIds, type Requester } from '../shared/doc-access'
-import { actorOfAgent, actorOfPerson, docKind, folderPathWithin, type Doc, type DocEvent, type DocFolder, type DocHit, type DocKind, type DocLevel, type DocOrigin, type DocsTree, type DocVersion, type FolderAccess } from '../shared/docs'
+import { actorOfAgent, actorOfPerson, docKind, folderPath, folderPathWithin, type Doc, type DocEvent, type DocFolder, type DocHit, type DocKind, type DocLevel, type DocOrigin, type DocsTree, type DocVersion, type FolderAccess } from '../shared/docs'
 import { UserError } from '../shared/errors'
 import { L } from '../shared/lang'
 import type { Agent, Person } from '../shared/types'
@@ -252,7 +252,12 @@ export class Docs extends DocsFiling {
   history(person: Person, docId: string): { versions: DocVersion[]; events: DocEvent[] } {
     this.need()
     this.docFor(person, docId)
-    return { versions: this.index.versions(docId), events: this.index.events(docId) }
+    // Where it was moved or put away is said only when the reader sees that folder: a name is enough
+    // to say a folder is there, and whoever reads this document may not see the place it once passed through.
+    const folders = this.index.folders()
+    const seen = new Set([...visibleFolderIds(person, folders)].map((id) => folderPath(folders, id).join(' › ')))
+    const events = this.index.events(docId).map((e) => ((e.action === 'moved' || e.action === 'filed') && e.detail && !seen.has(e.detail) ? { ...e, detail: '' } : e))
+    return { versions: this.index.versions(docId), events }
   }
 
   // Goes back to an older version: its bytes become a new version (nothing is lost).

@@ -135,11 +135,13 @@ export class DocsFiling extends DocsStatus {
     this.deps.emit()
   }
 
-  // The person takes back what was put away for them: it returns to their personal folder.
+  // The person takes back what was put away for them: it returns to their personal folder, with every
+  // version. Theirs to take only while they may still change it where it is: once it was moved out of
+  // their reach, or their access went, it would bring along what others wrote in it since.
   unfile(person: Person, docId: string): Doc {
     this.need()
-    const d = this.index.doc(docId)
-    if (!d || d.trashedAt || d.filing?.by !== person.id || d.filing.state !== 'filed') throw new UserError(L('Esse arquivo não foi guardado para você.', "This file wasn't put away for you."))
+    const d = this.docFor(person, docId, 'edit')
+    if (d.trashedAt || d.filing?.by !== person.id || d.filing.state !== 'filed') throw new UserError(L('Esse arquivo não foi guardado para você.', "This file wasn't put away for you."))
     const root = this.personalRoot(this.index.folders(), person.id)
     if (!root) throw readOnly()
     const by = actorOfPerson(person.id)

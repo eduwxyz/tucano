@@ -109,6 +109,7 @@ export interface DocsCtx {
   shown: (id: string) => Artifact | undefined // a file shown in this conversation (undefined for another one's)
   fromComputer?: (path: string, title: string) => Promise<{ artifact: Artifact } | { error: string }> // show_file: copies out of the agent's computer, attaches the card
   fromText: (name: string, data: Buffer, title: string) => Artifact | undefined // writes the bytes to the artifact store, attaches the card
+  mask?: (text: string) => string // the Cofre's values out of a text the agent wrote, as they are out of a file it shows
 }
 export type DocsResult = { text: string; error?: boolean; step: { label: string; detail: string } }
 
@@ -136,7 +137,8 @@ async function guardar(c: DocsCtx, a: Record<string, unknown>): Promise<DocsResu
   const fail = (text: string, detail = ''): DocsResult => ({ text, error: true, step: { label, detail } })
   const arquivo = arg(a, 'arquivo')
   const mostrado = arg(a, 'mostrado')
-  const textoRaw = typeof a['texto'] === 'string' ? a['texto'] : ''
+  // What is kept is read by everyone the folder is shared with: a value of the Cofre has no place in it.
+  const textoRaw = typeof a['texto'] === 'string' ? (c.mask ? c.mask(a['texto']) : a['texto']) : ''
   const pasta = arg(a, 'pasta')
   const substitui = arg(a, 'substitui')
   const resumo = one(arg(a, 'resumo'))
@@ -145,9 +147,11 @@ async function guardar(c: DocsCtx, a: Record<string, unknown>): Promise<DocsResu
   if (!pasta && !substitui) return fail(L('Faltou a pasta. Veja as pastas e a regra de cada uma com docs_listar.', 'Missing the folder. See the folders and their rules with docs_listar.'))
   if (!resumo) return fail(L('Faltou o resumo: uma linha dizendo o que é este arquivo.', 'Missing the summary: one line saying what this file is.'))
   // The folder (or, with substitui, the document) must be one this person may save in. Checked before any card is made, so a refused save leaves none behind.
+  // A path is walked through what the agent reads (a folder it saves in can sit under one it only reads), as docs_listar prints it.
   const writable = new Set(c.docs.foldersFor(c.agent, c.requester, 'write').map((x) => x.id))
-  if (pasta && !c.docs.resolveFolder(pasta, writable)) return fail(L('Não achei essa pasta entre as que você pode guardar. Use docs_listar para ver as pastas e suas regras.', "I didn't find that folder among the ones you may save in. Use docs_listar to see the folders and their rules."))
-  if (substitui && !c.docs.resolveDoc(substitui, writable)) return fail(L('Não achei esse documento entre os que você pode atualizar. Use docs_buscar para achá-lo.', "I didn't find that document among the ones you may update. Use docs_buscar to find it."))
+  const readable = new Set(c.docs.foldersFor(c.agent, c.requester, 'read').map((x) => x.id))
+  if (pasta && !c.docs.resolveFolder(pasta, writable, undefined, readable)) return fail(L('Não achei essa pasta entre as que você pode guardar. Use docs_listar para ver as pastas e suas regras.', "I didn't find that folder among the ones you may save in. Use docs_listar to see the folders and their rules."))
+  if (substitui && !c.docs.resolveDoc(substitui, writable, undefined, readable)) return fail(L('Não achei esse documento entre os que você pode atualizar. Use docs_buscar para achá-lo.', "I didn't find that document among the ones you may update. Use docs_buscar to find it."))
   let name = arg(a, 'nome').replace(/[/\\]/g, '_')
   const sourceName = arquivo ? basename(arquivo) : ''
   let artifact: Artifact | undefined

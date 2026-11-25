@@ -109,6 +109,8 @@ export class DocsIndex {
     // A docs.db made before these columns existed gets them here (rows read back as null / false / '').
     this.ensureColumn('folders', 'needs_approval', 'INTEGER NOT NULL DEFAULT 0')
     for (const [c, t] of [['status', 'TEXT'], ['official_version', 'INTEGER'], ['status_by', 'TEXT'], ['status_at', 'INTEGER'], ['status_note', "TEXT NOT NULL DEFAULT ''"], ['routine_id', 'TEXT'], ['cataloged_at', 'INTEGER'], ['filing', 'TEXT'], ['summary_auto', 'INTEGER NOT NULL DEFAULT 0']] as const) this.ensureColumn('docs', c, t)
+    // The time on disk of a file read and found to be the bytes on record (see docs-scan.ts).
+    this.ensureColumn('docs', 'disk_at', 'INTEGER')
   }
 
   private ensureColumn(table: string, column: string, type: string): void {
@@ -155,6 +157,15 @@ export class DocsIndex {
         'INSERT INTO docs (id, folder_id, name, kind, summary, size, hash, version, origin, created_by, created_at, updated_by, updated_at, trashed_at, status, official_version, status_by, status_at, status_note, routine_id, cataloged_at, filing) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET folder_id = excluded.folder_id, name = excluded.name, kind = excluded.kind, summary = excluded.summary, size = excluded.size, hash = excluded.hash, version = excluded.version, origin = excluded.origin, updated_by = excluded.updated_by, updated_at = excluded.updated_at, trashed_at = excluded.trashed_at, status = excluded.status, official_version = excluded.official_version, status_by = excluded.status_by, status_at = excluded.status_at, status_note = excluded.status_note, routine_id = excluded.routine_id, cataloged_at = excluded.cataloged_at, filing = excluded.filing'
       )
       .run(d.id, d.folderId, d.name, d.kind, d.summary, d.size, d.hash, d.version, JSON.stringify(d.origin), d.createdBy, d.createdAt, d.updatedBy, d.updatedAt, d.trashedAt, d.status, d.officialVersion, d.statusBy, d.statusAt, d.statusNote, d.routineId, d.catalogedAt, d.filing ? JSON.stringify(d.filing) : null)
+  }
+  // Files whose time on disk is newer than the last change on record, yet hold the same bytes (a restore
+  // or a copy writes every file with the current time): the time they were checked at, so the scan reads
+  // each of them once and not again at every pass.
+  diskTimes(): Map<string, number> {
+    return new Map((this.db.prepare('SELECT id, disk_at FROM docs WHERE disk_at IS NOT NULL').all() as Row[]).map((r) => [String(r['id']), Number(r['disk_at'])]))
+  }
+  setDiskAt(id: string, at: number): void {
+    this.db.prepare('UPDATE docs SET disk_at = ? WHERE id = ?').run(at, id)
   }
   // Whether a document's summary is the automatic first-characters one (the cataloguer may replace it).
   summaryAuto(id: string): boolean {

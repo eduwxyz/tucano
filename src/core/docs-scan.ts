@@ -125,6 +125,7 @@ export async function scanDocs(core: DocsCore): Promise<boolean> {
 
   const seen = new Set<string>()
   const loose: typeof files = []
+  const checked = index.diskTimes()
   for (const f of files) {
     const d = byKey.get(`${f.folder.id}\n${sameName(f.name)}`)
     if (!d) {
@@ -135,9 +136,14 @@ export async function scanDocs(core: DocsCore): Promise<boolean> {
     try {
       // Read again only what looks changed: another size, or touched after the last change we know of.
       const st = statSync(f.path)
-      if ((st.size === d.size && Math.floor(st.mtimeMs) <= d.updatedAt) || st.size > MAX_DOC_BYTES) continue
+      const onDisk = Math.floor(st.mtimeMs)
+      if ((st.size === d.size && (onDisk <= d.updatedAt || onDisk === checked.get(d.id))) || st.size > MAX_DOC_BYTES) continue
       const data = readFileSync(f.path)
-      if (sha(data) === d.hash) continue
+      if (sha(data) === d.hash) {
+        // The same bytes under a newer time: read this once, not at every scan from now on.
+        index.setDiskAt(d.id, onDisk)
+        continue
+      }
       const text = await core.indexable(d.name, d.kind, data)
       if (!unchanged(d)) continue // someone saved it meanwhile: their version stands
       // The old bytes are already overwritten: this version has no earlier copy to go back to.
