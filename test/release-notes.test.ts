@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { compareVersions, newsPages, newsSince, parseChangelog, parsePt, shortItem, type ReleaseNotes } from '../src/shared/release-notes'
+import { compareVersions, newsPages, newsSince, parseChangelog, parsePt, shortItem, shouldMarkSeen, type ReleaseNotes } from '../src/shared/release-notes'
 
 const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
 
@@ -69,6 +69,17 @@ describe('release notes', () => {
     expect(newsSince(sample, '0.3.1').map((r) => r.version)).toEqual(['0.3.1'])
     expect(newsSince(sample, '0.3.1', '0.3.1')).toEqual([])
     expect(newsSince(sample, '0.9.0')).toEqual([]) // a version with no section: nothing to show
+  })
+
+  it('records a version as seen only when it is newer than the one on record', () => {
+    expect(shouldMarkSeen('0.2.35', undefined)).toBe(true) // nothing seen yet
+    expect(shouldMarkSeen('0.2.35', '0.2.29')).toBe(true) // an update
+    expect(shouldMarkSeen('0.2.35', '0.2.35')).toBe(false) // already there
+    expect(shouldMarkSeen(undefined, '0.2.29')).toBe(false) // version not known yet
+    // An older app of the same workspace never writes its version back over a newer one: the newer
+    // one would answer with its own, and the two would trade it forever.
+    expect(shouldMarkSeen('0.2.29', '0.2.35')).toBe(false)
+    expect(shouldMarkSeen('0.2.9', '0.2.10')).toBe(false) // by number, not by text
   })
 
   it('takes the Portuguese topics as written: never splits a paragraph into sentences', () => {

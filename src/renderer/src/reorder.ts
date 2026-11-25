@@ -1,7 +1,8 @@
 // Sorting the sidebar's own rows (the items at the top, the channels, the agents, the sectors) by
 // hand: press and hold a row to pick it up, then let go over the row it should come before. Not a
 // drag from the first pixel, because these rows are buttons: a slightly short drag would open the
-// conversation instead of moving it. With the keyboard, Alt+↑/↓ moves the row it is on.
+// conversation instead of moving it. With the keyboard, Alt+↑/↓ moves the row it is on. A mouse that
+// starts dragging at once keeps its hold running, since dragging is how a person moves a row with one.
 //
 // Two things learned the hard way on this project: take the pointer capture once the row is picked
 // up (a control that re-renders under a held pointer loses the gesture to a boundary event), and
@@ -11,6 +12,10 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 
 const HOLD_MS = 350
 const SLOP = 6 // px a pointer may wander while it holds; more is a scroll or a selection, not a hold
+// A finger or a pen that moves before the hold lifts is scrolling the list, so the press is off. A
+// mouse is not: dragging is how a person moves a row with one, and its hold keeps running.
+const wandered = (e: ReactPointerEvent, from: { x: number; y: number } | null): boolean =>
+  e.pointerType !== 'mouse' && !!from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > SLOP
 
 export interface HoldReorder {
   picked: string | null // the row the pointer picked up
@@ -117,10 +122,9 @@ export function useHoldReorder({ onDrop, onNudge, group }: { onDrop: (id: string
       },
       onPointerMove: (e) => {
         if (!carrying.current) {
-          // Moved off before the hold: a scroll or a selection. Nothing is picked up, even if the
-          // pointer is let go somewhere this row never hears about.
-          const at = pressedAt.current
-          if (timer.current && at && Math.hypot(e.clientX - at.x, e.clientY - at.y) > SLOP) cancel()
+          // Wandered off before the hold: nothing is picked up, even if the pointer is let go somewhere
+          // this row never hears about. The hold still decides when a row lifts, for every pointer.
+          if (timer.current && wandered(e, pressedAt.current)) cancel()
           return
         }
         const at = rowAt(e.clientX, e.clientY)

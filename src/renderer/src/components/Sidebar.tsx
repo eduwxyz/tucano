@@ -12,6 +12,8 @@ import {
   openTuca,
   isTeam,
   deleteConversation,
+  goBack,
+  goForward,
   markRead,
   navigate,
   openDialog,
@@ -25,6 +27,7 @@ import {
   amOwner,
   canEditChannel,
   inboxCount,
+  docsWaitingCount,
   initials,
   personById,
   roleLabel,
@@ -288,6 +291,8 @@ export function Sidebar(): ReactNode {
   const agents = useStore((s) => s.agents)
   const settings = useStore((s) => s.settings)
   const platform = useStore((s) => s.platform)
+  const canBack = useStore((s) => s.navBack.length > 0)
+  const canForward = useStore((s) => s.navForward.length > 0)
   const people = useStore((s) => s.people)
   const you = useStore((s) => s.you)
   // With a team: who I am, what waits on me, and only what my role may change.
@@ -298,7 +303,7 @@ export function Sidebar(): ReactNode {
   // A new install's sidebar starts short and grows with the missions (Missions.tsx).
   const parts = useSidebarParts()
   const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
-  const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length + docsWaitingCount(s)))
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
   const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
@@ -405,8 +410,10 @@ export function Sidebar(): ReactNode {
   ]
   const channelMenuRest = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
-    { label: L('Mover para cima', 'Move up'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
-    { label: L('Mover para baixo', 'Move down'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
+    // Both ways to move a channel say which way they go with an arrow: a label alone reads as two dead
+    // rows in a menu where every other command carries a glyph. (Upstream 0.2.45 lost the two icons.)
+    { label: L('Mover para cima', 'Move up'), icon: 'up', onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), icon: 'down', onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
     ...arranged.groups.filter((g) => !g.channels.includes(c)).map((g): MenuItem => ({ label: L(`Mover para ${g.name}`, `Move to ${g.name}`), onClick: () => saveLayout(moveChannel(channels, layout, c.id, { group: g.id })) })),
     ...(arranged.groups.some((g) => g.channels.includes(c)) ? [{ label: L('Tirar do grupo', 'Take out of the group'), onClick: () => saveLayout(moveChannel(channels, layout, c.id, {})) }] : []),
     { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
@@ -492,6 +499,22 @@ export function Sidebar(): ReactNode {
     <aside className="sidebar">
       <div className="sidebar__drag" />
       <div className="workspace">
+        <button
+          className="icon-btn"
+          disabled={!canBack}
+          title={L(`Voltar (${shortcut(platform, '[')})`, `Back (${shortcut(platform, '[')})`)}
+          onClick={goBack}
+        >
+          <Icon name="back" />
+        </button>
+        <button
+          className="icon-btn"
+          disabled={!canForward}
+          title={L(`Avançar (${shortcut(platform, ']')})`, `Forward (${shortcut(platform, ']')})`)}
+          onClick={goForward}
+        >
+          <Icon name="forward" />
+        </button>
         <WorkspaceMenu />
       </div>
 

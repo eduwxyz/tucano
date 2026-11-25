@@ -81,7 +81,8 @@ describe('in a browser (Tucano as a server)', () => {
       { href, download: 'Comparativo_Email_Reluzir_BRAXT.docx' }
     ])
     expect(store.openPanel).not.toHaveBeenCalled()
-    expect(fire).not.toHaveBeenCalled()
+    // The card asks where the file was kept (Documentos); the download itself asks the core for nothing.
+    expect(fire).not.toHaveBeenCalledWith('saveArtifact', expect.anything())
   })
 
   it('a file the browser shows keeps Open (the panel), with Download beside it', async () => {

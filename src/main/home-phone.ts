@@ -80,6 +80,10 @@ export function homePhone(deps: {
       child?.postMessage({ person, ...(o?.device ? { device: o.device } : {}) }, [port1])
       return { post: (data) => port2.postMessage(data), close: () => port2.close() }
     },
+    docFile: async (person, doc, v) => {
+      const r = await ask({ type: 'doc-file', person, doc, ...(v ? { v } : {}) })
+      return (r?.['data'] as { path: string; kind: string } | null | undefined) ?? undefined
+    },
     dataDir: () => deps.workspace(current())?.dataDir ?? deps.selected().dataDir
   }
 
@@ -130,7 +134,7 @@ export function homePhone(deps: {
     },
     // The core's answers to the questions above; true when the message was one.
     fromCore(msg: { type?: string; id?: string }): boolean {
-      if ((msg.type === 'auth-result' || msg.type === 'device-key-result') && msg.id && waits.has(msg.id)) {
+      if ((msg.type === 'auth-result' || msg.type === 'device-key-result' || msg.type === 'doc-file-result') && msg.id && waits.has(msg.id)) {
         waits.get(msg.id)!(msg as Record<string, unknown>)
         return true
       }
