@@ -5,6 +5,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Novo:** **Documentos**, uma aba nova em Conhecimento: pastas de arquivos que as pessoas e os agentes guardam, cada uma dizendo quem vê e quem pode guardar. O que um agente entrega deixa de ser um cartão perdido numa conversa: ele guarda numa pasta, o arquivo ganha versões, e numa pasta que pede aprovação fica esperando o seu sim. A **Chegada** recebe qualquer arquivo e o Tuca guarda na pasta certa. A busca também responde perguntas a partir dos seus documentos, dizendo de qual arquivo tirou.
+> - **Novo:** **voltar e avançar** entre as telas, pelas setas no topo da barra lateral ou com ⌘[ e ⌘] (Ctrl no Windows e no Linux).
+> - **Novo:** na página **Time**, a caixa de pedir aceita **imagens e arquivos**: o clipe, colar, ou arrastar o arquivo pra cima da página.
+> - **Novo:** um conector pode ter **a sua própria imagem**, escolhida ou colada na janela dele. Um servidor adicionado à mão deixa de aparecer como um terminal preto.
 > - **Corrigido:** a barra lateral volta a **mover uma linha quando você arrasta com o mouse**. Desde a 0.2.45 era preciso segurar a linha parada antes de arrastar, e arrastar direto não fazia nada. **Mover para cima** e **Mover para baixo**, no menu do canal, voltam a ter suas setas.
 > - **Corrigido:** com **dois apps em versões diferentes** no mesmo Tucano (o desktop atualizado e uma aba aberta num servidor ainda na versão anterior, por exemplo), cada um regravava a própria versão sem parar, e o servidor ficava ocupado sem ninguém usando.
 > - **Corrigido:** no **OpenCode V2** anterior à versão 2.2.0, o agente ficava sem as ferramentas do Tucano, só com a busca e a leitura da web.
@@ -12,6 +16,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > - **Corrigido:** no **Quadro**, um card que mudava de coluna deslizava duas ou três vezes.
 > - **Corrigido:** em Configurações › Modelos, um **nome de modelo longo** não cobre mais o botão Salvar ao lado.
 > - **Corrigido:** no Windows, uma skill que veio com o Hermes não é mais tomada por uma skill editada ao importar.
+
+### Added
+
+- **Documents: folders of files the team and its agents keep.** A fourth tab in **Knowledge**. Each folder says who sees it and who may save in it: people view or edit; agents read or write, by sector, one by one, or all of them; and everyone has a personal folder that is theirs alone, not an admin's. The files are real files on the computer, under the data folder, with their versions and a trash. An agent saves what it delivers straight into a folder (`docs_guardar`, with `docs_listar`, `docs_buscar`, `docs_ler` and `docs_mover`), reading the folder's rule first, and working for someone it reaches only what both may see. A folder can ask for approval: what an agent saves there waits for a person's yes, and until then agents read the last approved version. **Arrivals** takes any file and files it by each folder's rule, into a folder its person may edit; a date found in a document becomes a suggested reminder; and the search box answers a question from the documents the person may see, with the file each answer came from. The file panel in a conversation has **Keep in Documents**. Documents are in the backup. Thanks to @eialanjones. (#574)
+- **Back and forward between screens.** Two arrows at the top of the sidebar, and ⌘[ / ⌘] (Ctrl+[ / Ctrl+] on Windows and Linux), walk the screens you were on. Opening the same screen again adds no step, a removed conversation or agent leaves the history, and on the Tuca's screen back closes it. Thanks to @jonatas-caram-ifood. (#359)
+- **Attach images and files when asking from the Team page.** The box at the bottom of **Time** took text only. It now takes what a conversation takes: the clip button, paste, and dragging a file over the page, with the same limits. The request goes to the agent's DM with the attachments, and you stay on the board watching it travel down the lines. Thanks to @eialanjones. (#406)
+- **A connector can wear its own picture.** In a connector's window, **Choose image** or **Paste image** takes a PNG, JPEG, WebP, GIF or SVG and shows it on the connector's tile everywhere it appears; **Use the default** takes it away. A server added by hand used to be a black terminal or a globe whatever it was. The picture is shrunk to 96 px and kept in the database, so a backup carries it. Thanks to @apoapostolov. (#353)
 
 ### Fixed
 
