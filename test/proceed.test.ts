@@ -8,7 +8,6 @@ const proposals: [string, string][] = [
   ['Want me to trigger that now?', 'trigger that'],
   ['your call on bef82566', 'bef82566'],
   ['say so and I stop committing', 'stop committing'],
-  ['Ready when you are', 'Ready when you are'],
   ['just say yes or no', 'just say yes or no'],
   ['Next, at your word: I can take the first polish item', 'first polish item'],
   ['They’re still sitting there unstaged; say the word and I’ll restore all six, one branch each.', 'restore all six'],
@@ -26,7 +25,10 @@ const notProposals: string[] = [
   'Say the word and I’ll do the first item. At your word, I’ll do the second.',
   'Here are the branches:\n- one\n- two\nSay the word and I’ll restore them.',
   '```\nsay the word and I will run it\n```',
-  'Your call on bef82566, but I will not change it.'
+  'Your call on bef82566, but I will not change it.',
+  'Ready when you are',
+  'Whenever you are ready, I can open the PR.',
+  'You have the word: I can open the PR.'
 ]
 
 describe('one-action proposals in a finished reply', () => {
@@ -53,6 +55,13 @@ describe('the approval word', () => {
     expect(PROCEED_LABELS.length).toBeGreaterThanOrEqual(20)
     expect(PROCEED_LABELS.length).toBeLessThanOrEqual(30)
     expect(new Set(PROCEED_LABELS).size).toBe(PROCEED_LABELS.length)
+  })
+
+  it('uses approvals of the action, not words that hand the turn over', () => {
+    expect(PROCEED_LABELS).not.toContain('Você tem a palavra')
+    expect(PROCEED_LABELS).not.toContain('Com prazer')
+    expect(PROCEED_LABELS).not.toContain('Pronto quando você estiver')
+    expect(PROCEED_LABELS).toEqual(expect.arrayContaining(['Pode seguir', 'Eu aprovo', 'Vamos fazer']))
   })
 
   it('picks the same phrase for the same message every time', () => {
