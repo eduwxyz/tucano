@@ -192,7 +192,11 @@ export function BoardPage(): ReactNode {
       const id = el.dataset.card!
       if (el.classList.contains('ghost')) continue
       const r = el.getBoundingClientRect()
-      const p = { x: r.left - box.left, y: r.top - box.top }
+      // Where the card rests, not where a slide still running (or a hover lift) shows it: measured
+      // mid-slide, the next render would take that for a move and slide it back from the other side.
+      const t = getComputedStyle(el).transform
+      const m = t && t !== 'none' ? new DOMMatrix(t) : undefined
+      const p = { x: r.left - box.left - (m ? m.m41 + ((1 - m.m11) * el.offsetWidth) / 2 : 0), y: r.top - box.top - (m ? m.m42 + ((1 - m.m22) * el.offsetHeight) / 2 : 0) }
       next.set(id, p)
       const was = rects.current.get(id)
       if (!was) {
