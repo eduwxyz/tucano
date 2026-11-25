@@ -716,14 +716,14 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </div>
         )}
         {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
-          <button className="steps__ask-pill retry msg__hire" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+          <button className="steps__ask-pill retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
         {(hasFooter || resumable || retryable) && (
           <div className="msg__meta">
             {resumable && (
-              <button className="steps__ask-pill retry msg__hire" aria-label={L('Continuar', 'Continue')} onClick={() => continueRun(message.id)}>
+              <button className="steps__ask-pill retry" aria-label={L('Continuar', 'Continue')} onClick={() => continueRun(message.id)}>
                 <Icon name="play" size={11} /><span className="steps__ask-pill__word">{L('Continuar', 'Continue')}</span>
               </button>
             )}
@@ -774,10 +774,10 @@ function TryAgain({ messageId }: { messageId: string }): ReactNode {
   }
   return (
     <>
-      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar de novo', 'Try again')} onClick={() => retry()}>
+      <button className="steps__ask-pill retry" aria-label={L('Tentar de novo', 'Try again')} onClick={() => retry()}>
         <Icon name="retry" size={11} /><span className="steps__ask-pill__word">{L('Tentar de novo', 'Try again')}</span>
       </button>
-      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar com instruções', 'Try with instructions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button className="steps__ask-pill retry" aria-label={L('Tentar com instruções', 'Try with instructions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Icon name="edit" size={11} /><span className="steps__ask-pill__word">{L('Tentar com instruções', 'Try with instructions')}</span>
       </button>
       {open && (

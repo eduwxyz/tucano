@@ -3969,31 +3969,16 @@ body.is-resizing webview {
   align-items: center;
   row-gap: 6px;
 }
-/* The way on from a reply that stopped: Continue, Try again, Try with instructions. Same pill, dim colour, and only
-   under the pointer. A row that ended badly reads as its words and its numbers until someone goes
-   near it. It keeps its space while hidden, so nothing below it jumps when it appears. */
-.msg__hire {
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-.msg:hover .msg__hire,
-.msg:focus-within .msg__hire {
-  opacity: 1;
-}
-/* A touch screen has no pointer to hover with: there, the pill is simply there. */
-@media (hover: none) {
-  .msg__hire {
-    opacity: 1;
-  }
-}
+/* The way on from a reply that stopped: Continue, Try again, Try with instructions. Same pill, dim
+   colour, and in sight: a conversation holds several sessions, one under the other, and a reply that
+   ended with nothing to act on is a session nobody can go on with. Only the numbers stay quiet until
+   the pointer reaches them (.receipt__line); a control never waits for it. The steer of a reply still
+   working is in that same row, in sight, for the same reason. */
 /* Action pills share one row under the reply. None carries a top margin here: the row has the air. */
-.msg__meta .msg__hire {
+.msg__meta .retry {
   margin-top: 0;
 }
-/* While its note is open, the pill that opened it stays, and the note takes a row of its own. */
-.msg__hire[aria-expanded='true'] {
-  opacity: 1;
-}
+/* While its note is open, the note takes a row of its own. */
 .msg__meta .retry-note {
   order: 1; /* under the pills and the reply's numbers, which stay on their line */
   flex: 1 1 100%;
