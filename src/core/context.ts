@@ -8,7 +8,7 @@ import { L, lang, locale } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import { ACCESS_REQUEST, CODE_SPANS, describeSchedule, PROJECTS_DIR, type Agent, type AgentApp, type Conversation, type Memory, type Message, type Person, type Routine, type Settings, type Skill } from '../shared/types'
 import type { ToolDef } from './gateway'
-import { describeQuestions, hasOpenSteps, isNextSteps, questionsOf } from '../shared/questions'
+import { describeQuestions, hasOpenProceed, hasOpenSteps, isNextSteps, isProceed, questionsOf } from '../shared/questions'
 import { osOf, shellCommand, systemName } from './platform'
 import { kindLabel, levelOf, policyOf, type ActionKind, type Autonomy } from '../shared/actions'
 
@@ -508,6 +508,14 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
     return L(`(próximos passos que você propôs num card: ${steps})`, `(next steps you proposed on a card: ${steps})`)
   }
 
+  // One action offered in the reply itself is not a question from ask_user.
+  const proceedLine = (m: Message): string => {
+    const proposal = questionsOf(m.run).find(isProceed)?.question ?? ''
+    return hasOpenProceed(m.run)
+      ? L(`(ação que você propôs, ainda sem resposta da pessoa, não faça sem ela pedir: ${proposal})`, `(one action you proposed, not approved by the person yet, don't do it unless they ask: ${proposal})`)
+      : L(`(ação que a pessoa aprovou e pediu para você fazer: ${proposal})`, `(one action the person approved and asked you to do: ${proposal})`)
+  }
+
   // A question asked with ask_user is part of what the agent said.
   const body = (m: Message): string =>
     [
@@ -515,8 +523,9 @@ export function transcriptBlocks(opts: TranscriptOpts): { blocks: string[]; bloc
       ...(images?.get(m.id) ?? []).map((n) => L(`[imagem anexada: ${n}]`, `[attached image: ${n}]`)),
       ...(files?.get(m.id) ?? []).map((n) => L(`[arquivo anexado: ${n}]`, `[attached file: ${n}]`)),
       questionsOf(m.run).some(isNextSteps) && nextStepsLine(m),
-      questionsOf(m.run).length > 0 && !questionsOf(m.run).some(isNextSteps) && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`),
-      m.run?.cancelled && !questionsOf(m.run).some(isNextSteps) && L('(a pergunta foi cancelada: ninguém respondeu, siga sem a resposta)', '(the question was cancelled: no one answered, go on without the answer)')
+      questionsOf(m.run).some(isProceed) && proceedLine(m),
+      questionsOf(m.run).length > 0 && !questionsOf(m.run).some(isNextSteps) && !questionsOf(m.run).some(isProceed) && L(`(pergunta enviada a ${m.run?.askedTo ? personName(m.run.askedTo) : me} pela ferramenta ask_user: ${describeQuestions(questionsOf(m.run))})`, `(question sent to ${m.run?.askedTo ? personName(m.run.askedTo) : me} with the ask_user tool: ${describeQuestions(questionsOf(m.run))})`),
+      m.run?.cancelled && !questionsOf(m.run).some(isNextSteps) && !questionsOf(m.run).some(isProceed) && L('(a pergunta foi cancelada: ninguém respondeu, siga sem a resposta)', '(the question was cancelled: no one answered, go on without the answer)')
     ]
       .filter(Boolean)
       .join('\n\n')

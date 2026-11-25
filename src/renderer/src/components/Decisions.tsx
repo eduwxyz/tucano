@@ -7,7 +7,8 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { L } from '../../../shared/lang'
-import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { answerLabel, draftAnswer, firstUnanswered, hasOpenProceed, isAnswered, isNextSteps, MAX_QUESTION_LENGTH, questionsOf, recommendedAnswers, type Answer, type AnswerDraft, type Decision } from '../../../shared/questions'
+import { proceedLabel } from '../../../shared/proceed'
 import { covers } from '../../../shared/access'
 import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
@@ -434,6 +435,40 @@ export function NextStepsCard({ message, agentName }: { message: Message; agentN
   const who = agentName ?? L('O agente', 'The agent')
   const byline = team && target ? (target.id === you ? L(`${who} sugere a você`, `${who} suggests to you`) : L(`${who} sugere a ${target.name}`, `${who} suggests to ${target.name}`)) : undefined
   return <AskCard id={message.id} questions={questionsOf(message.run)} saved={message.run?.answers} mode={mine ? 'answer' : 'view'} badge={L('Opcional', 'Optional')} {...(byline ? { byline } : {})} />
+}
+
+// A one-action proposal on a finished reply: one accent button, nothing else. The click sends the
+// approval through the same answer RPC as a card, but the core starts the next turn from the proposal
+// instead of writing a prompt in the conversation.
+export function ProceedCard({ message }: { message: Message }): ReactNode {
+  const team = useStore(teamMode)
+  const you = useStore((s) => s.you)
+  const admin = useStore(amAdmin)
+  const target = useStore((s) => personById(s, message.run?.askedTo))
+  const me = useStore((s) => personById(s, s.you))
+  const mine = !team || !target || target.id === you || admin || covers(target, me)
+  const open = hasOpenProceed(message.run)
+  const [approved, setApproved] = useState(!open)
+  const [sending, setSending] = useState(false)
+  useEffect(() => setApproved(!hasOpenProceed(message.run)), [message.run?.proceedOpen])
+  if (!mine) return null
+  const label = approved ? L('Aprovado', 'Approved') : proceedLabel(message.id)
+  const ariaLabel = approved ? 'Approved' : 'Approve the proposed next step'
+  const approve = (): void => {
+    if (!open || approved || sending) return
+    setApproved(true)
+    setSending(true)
+    answerDecision(message.id, 0, { text: L('Aprovado', 'Approved') })
+    void submitDecisions(message.id).finally(() => setSending(false))
+  }
+  return (
+    <div className="proceed">
+      <button type="button" className="btn btn--primary proceed__button" disabled={approved || sending} aria-label={ariaLabel} title={ariaLabel} onClick={approve}>
+        <Icon name="check" size={14} />
+        {label}
+      </button>
+    </div>
+  )
 }
 
 // Next steps a newer card took the place of: closed, and neither answered nor dismissed by anyone.
