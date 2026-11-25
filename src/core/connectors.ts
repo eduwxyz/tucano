@@ -12,7 +12,7 @@ import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } fr
 import { L } from '../shared/lang'
 import { causeText, friendly, netProblem, netText, type Friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
-import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
+import { entryOf, ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
@@ -730,11 +730,15 @@ export class ConnectorManager {
     const client = this.live.get(id)?.client
     if (!client) return
     const listed: Parameters<Db['syncTools']>[1] = []
+    // A tool the catalog knows only reads (Microsoft's sign-in, which hands the person a code): a reader may call it too.
+    const c = this.deps.db.connector(id)
+    const reads = new Set((c && entryOf(c)?.readTools) ?? [])
     let cursor: string | undefined
     do {
       const page = await client.listTools(cursor ? { cursor } : undefined)
       for (const t of page.tools) {
-        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
+        const known = reads.has(t.name) ? ('read' as const) : undefined
+        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: known ?? classify(t), legacyCls: known ?? legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
       }
       cursor = page.nextCursor
     } while (cursor)

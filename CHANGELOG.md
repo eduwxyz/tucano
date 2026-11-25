@@ -5,8 +5,13 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 ## [Unreleased]
 
 > **Em português:**
+> - **Novo:** **Outlook, OneDrive e Teams** na loja de conectores, numa categoria **Microsoft**: **Outlook.com** pra uma conta pessoal (e-mail, agenda, OneDrive, To Do e contatos) e **Microsoft 365** pra uma do trabalho ou escola (o mesmo, mais Teams e SharePoint). Na primeira vez, o agente te passa um link e um código pra entrar na conta.
 > - **Corrigido:** uma **pergunta deixada numa thread** agora aparece também no canal, na faixa em cima do campo de mensagem, com "numa thread" (ou quantas há em outras threads). **Responder** abre a thread certa e leva até a pergunta. Antes, do canal, ela era só uma marca no link da thread, lá em cima, atrás de prints e logs.
 > - **Corrigido:** um **vídeo ou arquivo aberto de dentro de uma thread** fecha de volta pra thread, em vez de fechar o painel lateral inteiro.
+
+### Added
+
+- **Outlook, OneDrive and Teams in the connector store**, under a new **Microsoft** category: **Outlook.com** for a personal account (email, calendar, OneDrive, Excel, To Do and contacts) and **Microsoft 365** for a work or school one (the same, plus Teams chats and channels, SharePoint and meeting times). Microsoft's own MCP servers take only apps registered ahead of time, so both run Softeria's open-source server ([ms-365-mcp-server](https://github.com/softeria/ms-365-mcp-server)) on this computer, which talks to Microsoft Graph directly; it needs Node.js. The first time, the agent hands you a Microsoft link and a code; an agent allowed only to read can do that sign-in too. Of the server's 200-odd tools, about a million characters of schemas, the connector brings a short list (43 for a personal account, 53 for work): sending email goes through a draft, and sending it asks for approval; reading Teams channel messages is left out, since it needs a permission only a tenant admin grants. A company that allows only approved apps needs an admin to approve Softeria's once. A new **microsoft** page in the guide says all this.
 
 ### Fixed
 
