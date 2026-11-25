@@ -12,6 +12,8 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, 'site/**'],
     // Split across CI's machines by how long each file takes, not by how many there are.
     sequence: { sequencer: ByWeight },
+    // No waiting for the disk on each write to a database the test throws away (src/core/db.ts).
+    env: { TUCANO_DB_SYNC: 'off' },
     testTimeout: process.platform === 'win32' ? 60_000 : 5_000,
     hookTimeout: process.platform === 'win32' ? 60_000 : 10_000
   }

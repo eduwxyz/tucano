@@ -738,6 +738,13 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
+// The tests write thousands of small transactions to databases they throw away, and waiting for the
+// disk on each one is most of their time on Windows. TUCANO_DB_SYNC=off (vitest.config.ts) skips that
+// wait: nothing a test reads depends on surviving a power cut. Nobody else sets it.
+export const unsynced = (db: DatabaseSync): void => {
+  if (process.env['TUCANO_DB_SYNC'] === 'off') db.exec('PRAGMA synchronous = OFF')
+}
+
 export class Db {
   private db: DatabaseSync
   // The file was new: the first run, when the starter team goes in. Not merely
@@ -748,6 +755,7 @@ export class Db {
     this.db = new DatabaseSync(file)
     this.keepStatements()
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
+    unsynced(this.db)
     try { this.migrate(file) }
     catch (error) { this.db.close(); throw error }
   }
