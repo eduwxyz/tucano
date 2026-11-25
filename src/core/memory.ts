@@ -700,6 +700,13 @@ export class Memories {
     if (clean) this.propose({ scope, text: clean, origin: 'me', messageIds: [], active: true })
   }
 
+  // Sent by a person's harness over MCP (src/core/mcp.ts): their AI wrote it and may have read it
+  // elsewhere, so it waits for them to accept it, like an agent's proposal does.
+  suggest(scope: MemoryScope, text: string): void {
+    const clean = text.trim().slice(0, MAX_MEMORY_CHARS)
+    if (clean) this.propose({ scope, text: clean, origin: 'me', messageIds: [], active: false })
+  }
+
   edit(id: string, text: string): void {
     const m = this.deps.db.memory(id)
     const clean = text.trim().slice(0, MAX_MEMORY_CHARS)

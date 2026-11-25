@@ -6,7 +6,7 @@
 - À mão: **Novo agente (formulário)** no ⌘K (Ctrl+K). Preencha e **Criar agente**.
 
 ## O que o Tuca faz na hora
-Agentes, times, canais e rotinas novos, e mudanças de nome, função, instruções, modelo, esforço e web entram quando o Tuca termina de responder. O card vira um recibo com **Desfazer**: apaga o que foi criado e volta o que mudou, por 24 horas. Se o agente já trabalhou, alguém mexeu depois ou o canal tem conversa, ele diz por que não desfaz.
+Agentes, times, canais e rotinas novos, e mudanças de nome, função, instruções, modelo, esforço e web entram quando o Tuca termina de responder. O card vira um recibo com **Desfazer** (por 24 horas): apaga o que foi criado e volta o que mudou. Se o agente já trabalhou, alguém mexeu depois ou o canal tem conversa, ele diz por que não desfaz.
 - Conectores e limite do mês ficam num card à parte: só valem quando você clica **Aplicar**.
 - Membro de um time: agentes esperam um admin.
 - Desligar: **Configurações › Agentes** › **Aplicar mudanças do Tuca na hora, com Desfazer**. Desligado, tudo espera **Aplicar** (ou **Criar**).
@@ -20,7 +20,7 @@ Clique no agente na barra lateral (ou **Ver perfil** na conversa). Ela tem quatr
 - **Onde roda e modelo**: motor, modelo, **Esforço de raciocínio** (mais esforço pensa mais e gasta mais), **Modelo reserva** e **Conta**.
 - **Limite mensal (milhões de tokens)**: conferido antes de cada turno. **Máx. rotinas ligadas**: quantas rotinas ele pode ter ligadas ao mesmo tempo (10 por padrão).
 
-**Canais e skills** (Channels and skills): **Onde participa** e as skills que ele usa. Fora desses canais, ele responde quando chamado com @handle.
+**Canais e skills** (Channels and skills): **Onde participa**, **Entra sozinho quando algo é da área dele**, **Time** e as skills. Fora desses canais, responde quando chamado com @handle.
 
 **Ferramentas** (Tools) — muda na hora, sem salvar:
 - **Ferramentas e acesso**: um nível por conector, **Sem acesso**, **Ler** ou **Ler e escrever**. O que fica de fora nem aparece pro modelo. Ferramentas sensíveis viram pedido de aprovação (veja **aprovacoes**).
@@ -35,5 +35,5 @@ Clique no agente na barra lateral (ou **Ver perfil** na conversa). Ela tem quatr
 No menu do agente na barra lateral (clique com o botão direito), **Arquivar…**. Ele sai da barra lateral, para de responder e as rotinas dele desligam. Histórico e recibos ficam. Pra voltar: **Arquivados**, no fim da lista de agentes, **Reativar** (as rotinas você liga de novo em Rotinas).
 
 ## Quando dá errado
-- Não responde: veja se o motor dele está **Pronto** em Configurações › Modelos e se ele não bateu o limite do mês (**Uso e limites**).
+- Não responde: veja se o motor dele está **Pronto** em Configurações › Modelos e se ele não bateu o limite do mês.
 - Num canal, não é escolhido: confira se ele está no canal (**Adicionar ou remover agentes…**) e se o **Papel** descreve o que ele faz; ou chame com @.

@@ -202,7 +202,7 @@ describe('a run the app died under, read at the next startup', () => {
     expect(db.message(bare.id)?.run?.status).toBe('done')
   })
 
-  it('leaves it to the person when that is turned off, waits while everything is paused, and skips old ones', async () => {
+  it('leaves it to the person when that is turned off, waits while everything is paused, and goes on however old it is', async () => {
     clock = Date.now() - 10_000
     const asked = put('d1', { kind: 'person', id: db.ownerId() }, 'guarde a preferência')
     const run: Run = { status: 'working', task: asked.text, depth: 1, steps: [step('Saved to memory', 'done')] }
@@ -228,7 +228,7 @@ describe('a run the app died under, read at the next startup', () => {
     await r.idle()
     expect(db.message(cut.id)?.run?.status).toBe('done')
 
-    // Cut over half a day ago: the person may no longer want it.
+    // Cut over half a day ago: it goes on too, however long it was, reading first what changed since.
     clock = Date.now() - 13 * 3_600_000
     const old = put('d1', { kind: 'agent', id: 'a1' }, 'Antigo.', { ...run, status: 'interrupted' }, asked.id)
     const resumed = () => turns.filter((t) => t.prompt.includes('because the app closed in the middle of it')).length
@@ -236,8 +236,9 @@ describe('a run the app died under, read at the next startup', () => {
     r.resumeInterrupted([old.id])
     await new Promise((res) => setTimeout(res, 20))
     await r.idle()
-    expect(resumed()).toBe(before)
-    expect(db.message(old.id)?.run?.status).toBe('interrupted')
+    expect(resumed()).toBe(before + 1)
+    expect(turns.at(-1)!.prompt).toContain('read what was written here since')
+    expect(db.message(old.id)?.run?.status).toBe('done')
   })
 
   it('and one that had only thought has nothing to go on with', () => {

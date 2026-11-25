@@ -52,7 +52,7 @@ export function OrgAsk({ agent, busy, sent, onSent, onError }: { agent: Agent; b
             e.preventDefault()
             void add(files)
           }}
-          placeholder={sent === agent.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Follow it on the lines.`) : L(`Pedir algo a ${agent.name}…`, `Ask ${agent.name} something…`)}
+          placeholder={sent === agent.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Track progress along the lines.`) : L(`Pedir algo a ${agent.name}…`, `Ask ${agent.name} something…`)}
           aria-label={L(`Pedir algo a ${agent.name}`, `Ask ${agent.name} something`)}
         />
         <AttachButton add={(files) => void add(files)} />

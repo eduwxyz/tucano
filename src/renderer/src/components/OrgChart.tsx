@@ -8,7 +8,7 @@ import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
 import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyLayout, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
-import { amAdmin, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
+import { amAdmin, isTeam, navigate, openDm, openThread, makeWithTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
 import { OrgAsk } from './OrgAsk'
 import { Sheet } from './Pages'
@@ -368,7 +368,7 @@ export function OrgPage(): ReactNode {
                 {L('Organizar', 'Tidy up')}
               </button>
             )}
-            <button className="btn btn--primary btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
+            <button className="btn btn--primary btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={makeWithTuca}>
               <Icon name="plus" size={14} /> {L('Novo agente', 'New agent')}
             </button>
           </>
@@ -758,7 +758,7 @@ function Details({
           <input type="checkbox" checked={!!agent.entry} disabled={!admin} onChange={(e) => onEntry(e.target.checked)} />
           <span>
             <b>{L('Porta de entrada', 'Entry point')}</b>
-            <small>{L('Você fala com ele, e ele passa cada parte ao setor certo. Os times abaixo dele são os setores.', 'You talk to it, and it passes each part to the right sector. The teams below it are the sectors.')}</small>
+            <small>{L('Você fala com ele, e ele passa cada parte ao setor certo. Os times abaixo dele são os setores.', 'Talk to the entry point to send work to the right sector. The teams below it are sectors.')}</small>
           </span>
         </label>
       )}
@@ -811,7 +811,7 @@ function Coach({ agents, admin, onPick }: { agents: Agent[]; admin: boolean; onP
         <p className="muted small">{L('Só um admin monta o organograma.', 'Only an admin sets up the organogram.')}</p>
       ) : agents.length < 2 ? (
         <div className="wk-empty__actions">
-          <button className="btn btn--primary" onClick={openTuca}>
+          <button className="btn btn--primary" onClick={makeWithTuca}>
             <Icon name="plus" size={14} /> {L('Criar agentes com o Tuca', 'Create agents with Tuca')}
           </button>
         </div>

@@ -25,6 +25,7 @@ vi.mock('../src/renderer/src/store', () => ({
   openDm: (id: string) => go({ dm: id }),
   openThread: (id: string) => go({ thread: id }),
   openTuca: () => go('tuca'),
+  makeWithTuca: () => go('tuca'),
   workingOn: () => busy
 }))
 vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, MeAvatar: () => null, Icon: () => null, ago: () => 'há 2 min', ownColor: () => ({}) }))

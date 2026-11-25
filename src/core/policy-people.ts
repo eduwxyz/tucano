@@ -14,7 +14,7 @@ export const ownerError = (): string => L('Só o dono do Tucano pode fazer isso.
 
 // What a person may change of the settings without being an admin: how the app looks to them.
 // Each person's own (kept on them, see People.settingsFor); the owner's are the settings themselves.
-export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'channelLayout', 'folded', 'sidebarHidden', 'language', 'seenVersion', 'onboarding']
+export const PERSONAL_SETTINGS: readonly (keyof Settings)[] = ['theme', 'sounds', 'stepsOpen', 'showThinking', 'channelLayout', 'folded', 'sidebarHidden', 'navOrder', 'agentOrder', 'sectorOrder', 'language', 'seenVersion', 'onboarding']
 export const isPersonalSetting = (k: string): boolean => (PERSONAL_SETTINGS as readonly string[]).includes(k)
 
 export type Action =
@@ -93,6 +93,7 @@ export const NEEDS: Record<Method, Need> = {
   stopRun: 'anyone',
   retryRun: 'anyone',
   continueRun: 'anyone',
+  continueJob: 'anyone',
   createChannel: 'anyone',
   renameChannel: 'anyone',
   setTopic: 'anyone',
@@ -123,6 +124,7 @@ export const NEEDS: Record<Method, Need> = {
   editThreadSummary: 'anyone',
   summarizeThreadNow: 'anyone',
   setWikiCapture: 'anyone',
+  setProactive: 'anyone',
   setThreads: 'anyone',
   decideApproval: 'target',
   addMemory: 'target',
@@ -139,9 +141,18 @@ export const NEEDS: Record<Method, Need> = {
   survey: 'owner', // one answer per install: the owner's
   answerSurvey: 'owner',
   updateSettings: 'target', // personal preferences, anyone; the rest, admins
-  browserLogins: 'admin', // the logins saved for an agent's browser, like a connector's token
-  saveBrowserLogin: 'admin',
-  removeBrowserLogin: 'admin',
+  // The Cofre: each person has their own keys; the team's are checked inside (src/core/vault.ts: only an admin changes them).
+  vaultKeys: 'anyone',
+  vaultUses: 'anyone',
+  saveVaultKey: 'anyone',
+  removeVaultKey: 'anyone',
+  setVaultKeyAgent: 'anyone',
+  importVaultKeys: 'anyone',
+  vaultLogins: 'anyone',
+  saveVaultLogin: 'anyone',
+  removeVaultLogin: 'anyone',
+  setVaultLoginAgent: 'anyone',
+  answerKeyRequest: 'anyone', // anyone who sees the card's conversation (checked inside)
   browserAction: 'target', // a browser working for a conversation one sees; otherwise admins
   browserInput: 'target',
   // the team's knowledge: anyone reads and writes pages; the curator's decisions and the wiki's place are the admins'
@@ -190,13 +201,17 @@ export const NEEDS: Record<Method, Need> = {
   setDelegation: 'anyone',
   inbox: 'anyone',
   answerQuestion: 'target',
+  removeTucaLeave: 'anyone', // only one's own is found (db.removeTucaLeave)
+  setConversationTitle: 'anyone', // only one's own conversations with the Tuca (checked there)
   confirmQuestion: 'target',
   answerDecision: 'target', // who may answer the question (Runner.decidable)
   submitDecisions: 'target',
+  cancelQuestion: 'target',
   // agents, skills and the team
   setAgentModels: 'admin',
   saveAgent: 'admin',
   archiveAgent: 'admin',
+  deleteAgent: 'admin',
   createFromDraft: 'admin',
   computerAction: 'target', // looking again at its state, anyone who sees the agent; the rest, admins (admitComputer)
   stopService: 'admin',
@@ -260,6 +275,7 @@ export const NEEDS: Record<Method, Need> = {
   addNodeFolder: 'owner',
   removeNodeFolder: 'owner',
   nodeLog: 'owner',
+  setClassifierKey: 'admin',
   voiceDownload: 'admin',
   voiceCancelDownload: 'admin',
   voiceRemoveModel: 'admin',
@@ -273,6 +289,11 @@ export const NEEDS: Record<Method, Need> = {
   openBackups: 'admin',
   report: 'admin',
   usage: 'admin',
+  executions: 'admin',
+  executionSteps: 'admin',
+  traces: 'admin',
+  setTraces: 'admin',
+  testTraces: 'admin',
   // people
   createInvite: 'admin',
   revokeInvite: 'admin',
@@ -281,6 +302,12 @@ export const NEEDS: Record<Method, Need> = {
   myDevices: 'anyone', // one's own
   setPush: 'anyone', // one's own device's (ctx.device)
   removeDevice: 'anyone', // one's own (the core looks only among theirs)
+  harnessKeys: 'anyone', // one's own harness keys (src/core/mcp.ts): each acts as its person
+  createHarnessKey: 'anyone',
+  removeHarnessKey: 'anyone',
+  mcpInfo: 'anyone',
+  connectHarness: 'owner', // the desktop's: its config files are the owner's
+  harnessNoticeSeen: 'anyone',
   removePerson: 'target',
   setRole: 'target',
   setPersonAccess: 'target', // the admins change members' (the owner, admins' too: always everything)

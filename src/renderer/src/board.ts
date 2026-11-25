@@ -6,6 +6,7 @@
 import { L } from '../../shared/lang'
 import { isTeam, type Agent, type Delegation, type Inbox, type Message, type Run } from '../../shared/types'
 import { canContinue } from '../../shared/run-progress'
+import { isNextSteps, questionsOf } from '../../shared/questions'
 import { shortTitle } from '../../shared/titles'
 import { mineIn } from './components/waiting'
 
@@ -110,7 +111,8 @@ export function boardCards(input: BoardInput, now = Date.now()): BoardCard[] {
         const before = lastAgent.get(place(m))
         const k = before && cardOf.get(before.id)
         // What a person writes right after an agent asked there is the answer: the reply to it goes on the same card.
-        if (k && asked(before)) answers.set(m.id, k)
+        // After a next-steps card, only what was sent from that card: anything else is new work.
+        if (k && (questionsOf(before.run).some(isNextSteps) ? before.run?.answerMessage === m.id : asked(before))) answers.set(m.id, k)
       }
       if (m.author.kind !== 'agent' || !m.run) continue
       // What opens a part in its agent's channel, an answer given there in the asker's name, what brings
@@ -251,13 +253,15 @@ export function costOf(c: BoardCard, now = Date.now()): { ms: number; tokens: nu
   return { ms, tokens }
 }
 
-// The words of the last thing a card's agent is doing ("Rodando os testes"), while it works.
-export function liveStep(c: BoardCard): string | undefined {
-  const run = c.last?.run
+// The words of the last thing a reply is doing ("Rodando os testes"), while it works.
+export function runStep(run: Run | undefined): string | undefined {
   if (run?.status !== 'working') return undefined
   const s = [...run.steps].reverse().find((x) => x.status === 'running') ?? run.steps.at(-1)
   return s?.label
 }
+
+// The same, for a card's agent.
+export const liveStep = (c: BoardCard): string | undefined => runStep(c.last?.run)
 
 // The family of a card: the request and every part of it (for the hover that lights them up).
 export function familyOf(cards: BoardCard[], id: string): Set<string> {

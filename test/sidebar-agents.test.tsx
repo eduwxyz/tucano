@@ -199,3 +199,36 @@ describe('the agents grouped by sector', () => {
     expect(agentRows()).toHaveLength(2)
   })
 })
+
+// The person's own order (reorder.ts, list-order.ts): the agents within each sector, the sectors, and
+// the items at the top, where one taken out of the sidebar stays out.
+describe('the sidebar in the order the person left it', () => {
+  const team = [agent({ sectorName: 'Pesquisa' }), agent({ id: 'a2', name: 'Theo', handle: 'theo', reportsTo: 'a1' }), agent({ id: 'a3', name: 'Duda', handle: 'duda' })]
+  const keyOn = (el: Element, key: string): Promise<void> =>
+    act(async () => {
+      const ev = new window.Event('keydown', { bubbles: true, cancelable: true })
+      Object.defineProperties(ev, { key: { value: key }, altKey: { value: true } })
+      el.dispatchEvent(ev)
+    })
+
+  it('keeps each sector in its order, and the sectors in theirs', async () => {
+    await render({ agents: team, conversations: [], settings: { agentOrder: ['a2', 'a1'], sectorOrder: ['none'] } as State['settings'] })
+    const groups = [...document.querySelectorAll('.agent-sector')].map((g) => [...g.querySelectorAll('.nav-item__label')].map((x) => x.textContent))
+    expect(groups).toEqual([['Duda'], ['Theo', 'Lia']])
+  })
+
+  it('steps an agent with Alt+arrows within its sector, never into the next one', async () => {
+    await render({ agents: team, conversations: [] })
+    await keyOn(row('Theo'), 'ArrowUp')
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ agentOrder: ['a2', 'a1', 'a3'] })
+    vi.mocked(store.updateSettings).mockClear()
+    await keyOn(row('Theo'), 'ArrowDown') // last in its sector: Duda is in another one
+    expect(store.updateSettings).toHaveBeenLastCalledWith({ agentOrder: ['a1', 'a2', 'a3'] })
+  })
+
+  it('draws the top items in their order, and one taken out stays out', async () => {
+    await render({ agents: [agent({})], conversations: [], settings: { navOrder: ['operations', 'board', 'approvals'], sidebarHidden: ['approvals'] } as State['settings'] })
+    const top = [...document.querySelectorAll('.top-row')].map((r) => r.getAttribute('data-order-id'))
+    expect(top).toEqual([null, 'operations', 'board', 'knowledge']) // the Tuca stays first, unsortable; Aprovações stays out
+  })
+})
