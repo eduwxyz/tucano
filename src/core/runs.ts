@@ -35,7 +35,7 @@ import type { Engine, TurnImage } from './engines/types'
 import { accountDir } from './engines/detect'
 import { outOfQuota } from './engines/cli'
 import { loginsInOrder, nextLogin, noLoginLeft, primaryAccountOf, Spent, USUAL_LOGIN } from '../shared/primary-login'
-import { ALWAYS_LOAD, textResult, type Gateway, type Session, type ToolDef } from './gateway'
+import { ALWAYS_LOAD, missingArgs, textResult, type Gateway, type Session, type ToolDef } from './gateway'
 import { Followups, replyKey } from './followups'
 import { sessionConfig, Sessions, type SessionPlan, type Shown } from './sessions'
 import { formatAnswers, MAX_DESCRIPTION_LENGTH, MAX_LABEL_LENGTH, MAX_OPTIONS, MAX_QUESTION_LENGTH, MAX_QUESTIONS, MAX_STEPS, MIN_OPTIONS, hasOpenSteps, isNextSteps, parseNextSteps, parseQuestions, questionHeadline, questionsAsText, questionsOf, type Answer, type Decision } from '../shared/questions'
@@ -3253,6 +3253,15 @@ ${note}`,
             ),
             true
           )
+        }
+        // Without what the tool requires: said with its parameters, counted as a failed call (the brake
+        // still stops a model that keeps guessing), and nothing runs. See missingArgs.
+        const def = toolDefs.find((t) => t.name === name)
+        const lacking = def ? missingArgs(def, args) : undefined
+        if (lacking) {
+          addSteps({ id: randomUUID(), label: L('Chamada sem parâmetro', 'Call missing a parameter'), detail: name, status: 'error', tool: name, error: resultText(lacking).split('\n')[0] })
+          if (++failing >= ERRORS_STOP) halt('errors')
+          return lacking
         }
         inFlight++
         acted = true
