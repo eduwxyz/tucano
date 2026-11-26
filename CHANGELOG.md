@@ -7,9 +7,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** **ditar a resposta de uma decisão.** O microfone fica no cantinho do campo de resposta, numa pergunta de texto ou em "Outra coisa…" depois de aberta, e funciona como no campo de mensagem (⌥Espaço no Mac, Ctrl+Espaço no Windows e no Linux). Nada é enviado até você confirmar.
 > - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
+> - **Novo:** um agente **pede o acesso que falta** (computador, navegador, uma pasta) num card na conversa, e você aprova ali, em vez de ele mandar você procurar nas configurações. Isso nunca entra sozinho, nem quando o Tuca aplica o resto na hora; um computador neste Mac vem com um aviso.
 
 ### Added
 
+- **An agent asks for the access it lacks on a card.** An agent missing a computer, a browser or a folder could only tell the person to go find it in its settings. `propor_ajuste` now takes `computador` (`linux`, `mac` or `nenhum`), `navegador` and `pastas` (a path, read-only unless `escrita`), and agents are told to ask for themselves this way. These count as access, with connectors and the month's limit: they always wait for a click, even with the Tuca's apply-right-away. Folders follow the same rules as **Lend folder** (inside the home folder, no hidden folders, Library or Tucano's data), are checked again when applied and set apart from `saveAgent`; **Undo** puts them back. The card says what each lets the agent do, and warns when the computer is this Mac, where the agent runs as the person.
 - **Dictate the answer to a decision.** The decisions card had no microphone, so an agent's question in words could only be answered by typing, or by dictating in the message field, which answered the whole card at once. The microphone now sits in the corner of the field the answer is written in: a text decision's, or **Something else** once open. It works as in the message field (click, or ⌥Space on a Mac and Ctrl+Space elsewhere; Esc cancels), puts the words at the cursor, and sends nothing until you confirm; while it records, the time and how to finish show in the card's footer, in place of the keys.
 
 ### Fixed

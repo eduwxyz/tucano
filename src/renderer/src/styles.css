@@ -12725,6 +12725,17 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 5px;
 }
+/* A computer on this Mac, asked on a card: the one access that runs as the person. */
+.proposal__risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning, #d9480f);
+}
+.proposal__risk .icon {
+  flex: none;
+  margin-top: 2px;
+}
 /* Above the Tuca's chat on the builder screen: "Nova conversa", and its confirmation */
 .onb-tuca__bar {
   display: flex;

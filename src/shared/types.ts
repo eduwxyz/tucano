@@ -359,7 +359,12 @@ export interface UndoInfo {
 }
 
 // What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit' | 'computer' | 'computerKind' | 'browser' | 'folders'>>
+// What grants access or spends money: connectors, the month's limit, a computer (a shell), a
+// browser, folders lent to the computer. Asked for on a card, these always wait for a person's click.
+export const ACCESS_CHANGES: readonly string[] = ['grants', 'limit', 'computer', 'computerKind', 'browser', 'folders']
+export const isAccessChange = (k: string): boolean => ACCESS_CHANGES.includes(k)
+export const onlyAccessChanges = (c: AgentChanges): boolean => Object.keys(c).every(isAccessChange)
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
