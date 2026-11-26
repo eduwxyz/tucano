@@ -108,7 +108,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
       return `- ${ENGINES[e].label}: ${state}${st.version ? ` · v${st.version}` : ''}${st.route === 'gateway' ? L(` · pelo gateway ${st.gateway ?? ''}`, ` · through gateway ${st.gateway ?? ''}`) : ''}${st.warning ? ` · ${st.warning}` : ''}`
     })
     const accounts = (s.accounts ?? []).map((a) => `- ${a.name} (${ENGINES[a.engine].label}): ${a.loggedIn ? L('com login', 'signed in') : L('sem login', 'not signed in')}`)
-    out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning})`)
+    out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning}) · ${L('reserva padrão dos agentes', "agents' default reserve")}: ${s.defaultFallbackModel ? reserveName(s.defaultFallbackModel) : L('nenhum (Configurações › Modelos)', 'none (Settings › Models)')}`)
   }
   if (show('connectors')) {
     const status: Record<Connector['status'], string> = { connected: L('conectado', 'connected'), connecting: L('conectando', 'connecting'), needs_auth: L('pede login', 'needs sign-in'), error: L('com erro', 'error'), disconnected: L('desconectado', 'disconnected') }
@@ -123,7 +123,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
       const share = usedShare(a.used, a.limit)
       const pct = share === undefined ? undefined : Math.round(share * 100)
       const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
-      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${a.fallbackModelId ? ` · ${L('reserva', 'reserve')} ${reserveName(a.fallbackModelId)}` : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
     })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
   }
@@ -168,6 +168,7 @@ export const PROPOR_AJUSTE: ToolDef = {
         instrucoes: { type: 'string', description: L(`As instruções novas, inteiras. Até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres é a recomendação, não um limite.`, `The new instructions, whole. ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters is a recommendation, not a limit.`) },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
         esforco: { type: 'string', enum: EFFORTS },
+        modelo_reserva: { type: 'string', description: L('O modelo reserva: quando o principal fica sem limite, a resposta segue nele. O id de um modelo da lista, ou "nenhum" pra tirar (aí vale o reserva padrão do workspace, se houver).', 'The reserve model: when the main one runs out of quota, the reply goes on with it. The id of a model from the list, or "nenhum" to remove it (then the workspace default reserve applies, if any).') },
         web: { type: 'boolean' },
         conectores: {
           type: 'array',
@@ -272,6 +273,12 @@ export function pendingAgents(run: { agentDraft?: AgentDraft; proposal?: Proposa
   return [...(run?.agentDraft && !run.agentDraft.state ? [run.agentDraft.name] : []), ...teams]
 }
 
+// A reserve model as the state shows it: its harness and name, and its id to propose with.
+const reserveName = (id: string): string => {
+  const m = modelInfo(id)
+  return m ? `${ENGINES[m.engine].label} · ${m.label} (${id})` : id
+}
+
 export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string } {
   const reason = text(args, 'motivo', 300) || undefined
   if (tool === PROPOR_AJUSTE.name) {
@@ -292,6 +299,13 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       changes.modelId = model
     }
     if (EFFORTS.includes(args['esforco'] as Effort) && args['esforco'] !== agent.effort) changes.effort = args['esforco'] as Effort
+    const reserve = text(args, 'modelo_reserva', 200)
+    if (reserve) {
+      // '' clears it (a key left undefined would be lost when the card is saved).
+      const next = /^(nenhum|none|-)$/i.test(reserve) ? '' : reserve
+      if (next && (!modelInfo(next) || !ctx.usable(next))) return { error: L(`O modelo "${reserve}" não dá pra usar agora. Use um da lista.`, `The model "${reserve}" can't be used now. Use one from the list.`) }
+      if (next !== (agent.fallbackModelId ?? '')) changes.fallbackModelId = next
+    }
     if (typeof args['web'] === 'boolean' && args['web'] !== (agent.web !== false)) changes.web = args['web']
     if (args['conectores'] !== undefined) {
       const g = grantsFrom(args['conectores'], ctx.connectors)

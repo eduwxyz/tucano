@@ -359,7 +359,7 @@ export interface UndoInfo {
 }
 
 // What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit' | 'fallbackModelId'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
@@ -592,6 +592,7 @@ export interface Settings {
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
+  defaultFallbackModel?: string // the reserve model of every agent with none of its own (Settings › Models)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
   classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
   classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off

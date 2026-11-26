@@ -269,6 +269,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
       if (c.role !== undefined) rows.push([L('Função', 'Role'), was.role || '—', c.role])
       if (c.modelId !== undefined) rows.push([L('Modelo', 'Model'), modelName(was.modelId ?? ''), modelName(c.modelId)])
       if (c.effort !== undefined) rows.push([L('Esforço', 'Effort'), level(was.effort ?? agent.effort), level(c.effort)])
+      if (c.fallbackModelId !== undefined) rows.push([L('Modelo reserva', 'Reserve model'), was.fallbackModelId ? modelName(was.fallbackModelId) : L('nenhum', 'none'), c.fallbackModelId ? modelName(c.fallbackModelId) : L('nenhum', 'none')])
       if (c.web !== undefined) rows.push(['Web', was.web !== false ? L('ligada', 'on') : L('desligada', 'off'), c.web ? L('ligada', 'on') : L('desligada', 'off')])
       if (c.grants !== undefined) rows.push([L('Conectores', 'Connectors'), grantList(was.grants ?? {}), grantList(c.grants)])
       // 0 is no limit, so the card says that instead of a figure that reads as "set it to zero".
@@ -411,7 +412,7 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
   // What was done, in the first person, once it applied by itself: the card is its receipt.
   const receipt = (): string => {
     if (p.kind === 'agent') {
-      const FIELDS: Record<string, string> = { name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit') }
+      const FIELDS: Record<string, string> = { name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit'), fallbackModelId: L('modelo reserva', 'reserve model') }
       return L(`Mudei ${agentOf(p.agentId)?.name ?? 'o agente'}: ${Object.keys(p.changes).map((k) => FIELDS[k] ?? k).join(', ')}.`, `I changed ${agentOf(p.agentId)?.name ?? 'the agent'}: ${Object.keys(p.changes).map((k) => FIELDS[k] ?? k).join(', ')}.`)
     }
     if (p.kind === 'routine') return L(`Criei a rotina “${p.routine.name}”.`, `I made the routine “${p.routine.name}”.`)
@@ -551,7 +552,7 @@ function ProposalGroup({ message, withDraft }: { message: Message; withDraft: bo
     }
   }
   const nameOf = (id: string): string => agents.find((a) => a.id === id)?.name ?? L('um agente', 'an agent')
-  const FIELDS = (): Record<string, string> => ({ name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit') })
+  const FIELDS = (): Record<string, string> => ({ name: L('nome', 'name'), role: L('função', 'role'), instructions: L('instruções', 'instructions'), modelId: L('modelo', 'model'), effort: L('esforço', 'effort'), web: 'web', grants: L('conectores', 'connectors'), limit: L('limite', 'limit'), fallbackModelId: L('modelo reserva', 'reserve model') })
   // One line per card, as "apply all" will do it.
   const line = (it: Item): string => {
     if (it.draft) return L(`Criar o agente ${draft!.name}`, `Create the agent ${draft!.name}`)

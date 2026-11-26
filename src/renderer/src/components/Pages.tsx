@@ -4060,6 +4060,29 @@ export function SettingsPage(): ReactNode {
                 </Field>
               )}
             </Card>
+            {/* One reserve for the whole team, instead of setting it agent by agent. */}
+            <Card
+              title={L('Modelo reserva', 'Reserve model')}
+              lead={L(
+                'Quando o modelo de um agente fica sem limite, a resposta segue neste. Vale pra todos os agentes que não têm um reserva próprio (o da página do agente vence).',
+                "When an agent's model runs out of quota, the reply goes on with this one. It applies to every agent without a reserve of its own (the one on the agent's page wins)."
+              )}
+            >
+              <div className="key-row">
+                <Toggle
+                  label={L('Modelo reserva padrão', 'Default reserve model')}
+                  on={!!settings.defaultFallbackModel}
+                  onChange={(v) => updateSettings({ defaultFallbackModel: v ? (MODELS.find((m) => m.engine !== modelInfo(settings.routerModel)?.engine && settings.engines[m.engine]?.loggedIn)?.id ?? MODELS[0]!.id) : null } as unknown as Partial<typeof settings>)}
+                />
+                <div className="grow">
+                  {settings.defaultFallbackModel ? (
+                    <ModelSelect value={settings.defaultFallbackModel} onChange={(defaultFallbackModel) => updateSettings({ defaultFallbackModel })} />
+                  ) : (
+                    <span className="muted small">{L('Desligado: só os agentes com reserva próprio trocam de modelo.', 'Off: only agents with a reserve of their own switch models.')}</span>
+                  )}
+                </div>
+              </div>
+            </Card>
           </SectionAnchor>
         )}
 

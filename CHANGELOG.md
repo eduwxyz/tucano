@@ -7,9 +7,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** **ditar a resposta de uma decisão.** O microfone fica no cantinho do campo de resposta, numa pergunta de texto ou em "Outra coisa…" depois de aberta, e funciona como no campo de mensagem (⌥Espaço no Mac, Ctrl+Espaço no Windows e no Linux). Nada é enviado até você confirmar.
 > - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
+> - **Novo:** um **modelo reserva padrão** em Configurações › Modelos, pra todos os agentes que não têm um próprio (o da página do agente vence). E o **Tuca** agora configura o reserva de um agente pelo card de ajuste: antes ele não conseguia.
 
 ### Added
 
+- **A reserve model for the whole team.** Setting a reserve meant opening each agent's page, one by one, and asking the Tuca to do it for all of them failed: `propor_ajuste` had no field for it, so he tried until he stopped. **Settings › Models** now has a **Reserve model** card: a default for every agent without one of its own (the one on the agent's page still wins). `propor_ajuste` takes `modelo_reserva` (or "nenhum" to remove it), the card shows it as a before and after row, and the state the Tuca reads shows each agent's reserve and the default.
 - **Dictate the answer to a decision.** The decisions card had no microphone, so an agent's question in words could only be answered by typing, or by dictating in the message field, which answered the whole card at once. The microphone now sits in the corner of the field the answer is written in: a text decision's, or **Something else** once open. It works as in the message field (click, or ⌥Space on a Mac and Ctrl+Space elsewhere; Esc cancels), puts the words at the cursor, and sends nothing until you confirm; while it records, the time and how to finish show in the card's footer, in place of the keys.
 
 ### Fixed
