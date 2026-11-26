@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
+import { asDisplayed, asSaid } from '../src/shared/types'
 import type { Agent, EngineId, GrantLevel, Message, Settings } from '../src/shared/types'
 import { ConnectorManager } from '../src/core/connectors'
 import { Db } from '../src/core/db'
@@ -212,6 +213,40 @@ describe('a reply that has ended', () => {
     expect(turns).toHaveLength(3)
     expect(turns.slice(1).every((turn) => turn.session?.resume === true && turn.session?.id === turns[0]!.session?.id)).toBe(true)
     began.mockRestore()
+  })
+
+  it('moves the prompt with the followed row in the window, leaving stored order and what the agent read alone', async () => {
+    let n = 0
+    const { engine, turns } = recorder({ sessions: true, reply: () => `Answer ${++n}` })
+    const r = runnerWith(engine)
+    await r.send('d1', 'first request')
+    await r.idle()
+    const first = agentMessages()[0]!
+    await r.send('d1', 'second request')
+    await r.idle()
+    const firstPrompt = mine()[0]!
+    const secondPrompt = mine()[1]!
+    const second = agentMessages()[1]!
+    const stored = db.messages().map((m) => m.id)
+    const read = turns.map((t) => t.prompt)
+    expect(asDisplayed(db.messages()).map((m) => m.id)).toEqual([firstPrompt.id, first.id, secondPrompt.id, second.id])
+
+    await follow(r, first.id, 'go on from there')
+    await r.idle()
+
+    // Nothing new is posted: the rows stay where they were written, and the agent's earlier reads stay.
+    expect(db.messages().map((m) => m.id)).toEqual(stored)
+    expect(turns).toHaveLength(3)
+    expect(turns.slice(0, 2).map((t) => t.prompt)).toEqual(read)
+    expect(turns[2]!.prompt).toContain('go on from there')
+    expect(asSaid(db.messages()).map((m) => m.id)).toEqual([firstPrompt.id, secondPrompt.id, second.id, first.id])
+
+    // The window puts the originating prompt right above the row that now ends last.
+    const shown = asDisplayed(db.messages())
+    expect(shown.map((m) => m.id)).toEqual([secondPrompt.id, second.id, firstPrompt.id, first.id])
+    expect(shown[3]!.id).toBe(first.id) // the same row, with its rounds kept
+    expect(shown[3]!.run!.rounds).toHaveLength(2)
+    expect(shown[3]!.run!.replyTo).toBe(firstPrompt.id)
   })
 
   it('keeps only the newest three rounds after four follows', async () => {

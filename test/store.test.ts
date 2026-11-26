@@ -98,6 +98,30 @@ describe("the window's messages", () => {
     expect(store.messagesIn(store.getState(), 'c1')).toEqual([])
     expect(store.messagesIn(store.getState(), 'c2').map((m) => m.id)).toEqual(['x1'])
   })
+
+  it('moves a followed session down the timeline with the prompt that started it', () => {
+    const said = (id: string, at: number, extra: Partial<Message> = {}): Message => msg(id, 'c3', at, extra)
+    const answer = (id: string, at: number, endedAt: number, replyTo: string, threadId?: string): Message =>
+      said(id, at, { author: { kind: 'agent', id: 'a1' }, run: { status: 'done', steps: [], endedAt, replyTo }, ...(threadId ? { threadId } : {}) })
+    emit({ type: 'message', message: said('first-prompt', 1) })
+    emit({ type: 'message', message: answer('first', 2, 5, 'first-prompt') })
+    emit({ type: 'message', message: said('later-prompt', 6) })
+    emit({ type: 'message', message: answer('later', 7, 8, 'later-prompt') })
+    expect(store.timelineOf(store.getState(), 'c3').map((m) => m.id)).toEqual(['first-prompt', 'first', 'later-prompt', 'later'])
+
+    // Follow changes the end of that same row: it and its prompt go below the ones written later.
+    emit({ type: 'message', message: answer('first', 2, 20, 'first-prompt') })
+    expect(store.timelineOf(store.getState(), 'c3').map((m) => m.id)).toEqual(['later-prompt', 'later', 'first-prompt', 'first'])
+
+    // The same pairing inside a thread, without taking a prompt from the timeline.
+    emit({ type: 'message', message: said('root', 30) })
+    emit({ type: 'message', message: said('thread-prompt', 31, { threadId: 'root' }) })
+    emit({ type: 'message', message: answer('thread-answer', 32, 40, 'thread-prompt', 'root') })
+    const s = store.getState()
+    expect(store.timelineOf(s, 'c3').map((m) => m.id)).toEqual(['later-prompt', 'later', 'first-prompt', 'first', 'root'])
+    expect(store.repliesOf(s, 'c3', 'root').map((m) => m.id)).toEqual(['thread-prompt', 'thread-answer'])
+    expect(store.messagesIn(s, 'c3').map((m) => m.id)).toEqual(['first-prompt', 'first', 'later-prompt', 'later', 'root', 'thread-prompt', 'thread-answer'])
+  })
 })
 
 describe('the navigation history', () => {

@@ -75,6 +75,47 @@ describe('a reply that kept going', () => {
     expect(outputs()).toEqual(['Answer 1', 'Answer 2', 'Answer 3'])
   })
 
+  it('gives each round its own reasoning container, under that round’s own steps', async () => {
+    const rounds = [
+      { id: 'r1', steps: [step('tool-1'), thinking(1)], text: 'Answer 1' }, // no reasoning was kept
+      { id: 'r2', steps: [step('tool-2'), thinking(2)], text: 'Answer 2', thought: 'Reasoning kept with round two' },
+      { id: 'r3', steps: [step('tool-3'), thinking(3)], text: '' }
+    ]
+    live.thought = 'Live reasoning of round three'
+    await draw(message(rounds))
+
+    const blocks = [...document.querySelectorAll('.msg__round')]
+    expect(blocks).toHaveLength(3)
+    expect(blocks[0]!.querySelector('.thought')).toBeNull() // an old round with no thought of its own
+    const older = blocks[1]!.querySelector('.thought')
+    expect(older?.textContent).toContain('Reasoning kept with round two')
+    expect(older?.textContent).not.toContain('Live reasoning of round three')
+
+    const newest = blocks[2]!.querySelector('.thought')
+    expect(newest?.textContent).toContain('Live reasoning of round three')
+    expect(newest?.previousElementSibling?.classList.contains('steps__list')).toBe(true)
+
+    // Opened, the older round's container follows its own steps, not the newest round's.
+    await act(async () => blocks[1]!.querySelector('.steps__toggle')!.dispatchEvent(new window.Event('click', { bubbles: true })))
+    expect(blocks[1]!.querySelector('.steps__list')!.nextElementSibling).toBe(older)
+  })
+
+  it('keeps each finished round’s reasoning with it and hides the stream when thinking is off', async () => {
+    const rounds = [
+      { id: 'r1', steps: [thinking(1)], text: 'Answer 1', thought: 'Reasoning kept with round one' },
+      { id: 'r2', steps: [thinking(2)], text: 'Answer 2', thought: 'Reasoning kept with round two' }
+    ]
+    live.thought = 'The words of a different round, never shown here'
+    await draw(message(rounds, { status: 'done' }))
+
+    expect(thoughts()).toEqual(['Reasoning kept with round one', 'Reasoning kept with round two'])
+    expect([...document.querySelectorAll('.thought')].some((el) => el.textContent?.includes('different round'))).toBe(false)
+
+    fake.settings.showThinking = false
+    await draw(message(rounds, { status: 'done' }))
+    expect(document.querySelectorAll('.thought')).toHaveLength(0)
+  })
+
   it('does not make or remove a round when the reply has a Proceed or next-steps card', async () => {
     const rounds = [round(1), round(2, 2), round(3, 3)]
     await draw(message(rounds))

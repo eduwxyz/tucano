@@ -559,6 +559,37 @@ export function asSaid(messages: Message[]): Message[] {
   return [...messages.filter((m) => !working(m)).sort((a, b) => saidAt(a) - saidAt(b)), ...messages.filter(working).sort((a, b) => a.at - b.at)]
 }
 
+// The conversation as the window draws it: a reply's prompt sits right above the reply, so the two
+// move together when the reply's end moves them. Only rows of this list, in the same conversation and
+// thread, count; a prompt already paired stays with its first reply. The array given is untouched,
+// and so is `asSaid`, which is what agents read.
+export function asDisplayed(messages: Message[]): Message[] {
+  const shown = asSaid(messages)
+  const byId = new Map(messages.map((m) => [m.id, m]))
+  const promptOf = new Map<string, string>() // reply → prompt
+  const taken = new Set<string>()
+  for (const m of shown) {
+    const id = m.run?.replyTo
+    if (!id || taken.has(id)) continue
+    const prompt = byId.get(id)
+    if (!prompt || prompt.conversationId !== m.conversationId || prompt.threadId !== m.threadId || prompt.run?.status === 'working') continue
+    promptOf.set(m.id, id)
+    taken.add(id)
+  }
+  const out: Message[] = []
+  const emitted = new Set<string>()
+  const add = (m: Message): void => {
+    if (emitted.has(m.id)) return
+    emitted.add(m.id)
+    const id = promptOf.get(m.id)
+    if (id) add(byId.get(id)!)
+    out.push(m)
+  }
+  for (const m of shown) if (!taken.has(m.id)) add(m) // a paired prompt waits for its reply
+  for (const m of shown) add(m) // a prompt no reply pulled keeps its place
+  return out
+}
+
 // A thread's own summary, kept on its first message. `until`: the `at` of the last message it covers.
 export interface ThreadSummary {
   text: string
