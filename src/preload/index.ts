@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('tucano', {
     duplicate: (id: string, name?: string, parts?: object) => ipcRenderer.invoke('workspaces:duplicate', id, name, parts),
     setPaused: (paused: boolean, id?: string) => ipcRenderer.invoke('workspaces:pause', paused, id),
     switch: (id: string) => ipcRenderer.invoke('workspaces:switch', id),
+    setPicture: (id: string, picture: string) => ipcRenderer.invoke('workspaces:setPicture', id, picture),
     subscribe: (cb: (list: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, list: unknown): void => cb(list)
       ipcRenderer.on('workspaces', listener)

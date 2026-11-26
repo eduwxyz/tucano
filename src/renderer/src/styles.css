@@ -517,6 +517,7 @@ h3 {
 .workspace-manager__list { min-height: 0; max-height: 50vh; overflow-y: auto; }
 .workspace-manager__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
 .workspace-manager__row + .workspace-manager__row { border-top: 1px solid var(--border); }
+.workspace-manager__lead { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .workspace-manager__name { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left; }
 .workspace-manager__name > span:first-child { overflow-wrap: anywhere; font-weight: 600; }
 .workspace-manager__id { font-size: 11px; color: var(--text-3); }
@@ -526,12 +527,31 @@ h3 {
 .workspace-manager__carry input { margin-top: 3px; }
 .workspace-manager__carry span { display: flex; flex-direction: column; gap: 2px; }
 .workspace-manager__carry small { font-size: 12px; line-height: 1.4; }
-.workspace-manager__row > .row { flex-shrink: 0; }
+.workspace-manager__row > .row { flex-shrink: 0; margin-left: auto; }
 .workspace-manager__switch[aria-pressed='true'] { background: var(--ok-soft); color: var(--ok); }
 .workspace-manager__pause[aria-pressed='true'] { background: var(--warn-soft); color: var(--warn); }
 .workspace-manager__row .workspace-manager__delete { color: var(--danger); }
 .workspace-manager__row .workspace-manager__delete:hover { background: var(--danger-soft); }
 .workspace-manager__row .workspace-manager__delete:disabled { color: var(--text-3); background: transparent; cursor: not-allowed; }
+/* The workspace's own picture: one 40 px target before the name, with the edit glyph on the tile. */
+.workspace-manager__pic { position: relative; flex: 0 0 40px; box-sizing: border-box; width: 40px; height: 40px; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--hover); color: var(--text-3); display: grid; place-items: center; overflow: hidden; cursor: pointer; }
+.workspace-manager__pic img { width: 100%; height: 100%; object-fit: cover; }
+.workspace-manager__pic-empty { display: grid; place-items: center; }
+.workspace-manager__pic-edit { position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit; background: #0009; color: #fff; opacity: 0; transition: opacity 120ms ease; pointer-events: none; }
+.workspace-manager__pic:hover .workspace-manager__pic-edit,
+.workspace-manager__pic:focus-visible .workspace-manager__pic-edit { opacity: 1; box-shadow: inset 0 0 0 2px var(--accent); }
+/* The list scrolls: an outer ring would be cut on the left. The accent lives inside the face. */
+.workspace-manager__pic:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.modal__card.workspace-picture { width: min(520px, calc(100vw - 32px)); }
+.workspace-picture__body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.workspace-picture__placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 150px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 12px; background: var(--bg-2); overflow: hidden; }
+.workspace-picture__placeholder img { max-width: 100%; max-height: 150px; object-fit: contain; border-radius: 8px; }
+.workspace-picture__url-row, .workspace-picture__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.workspace-picture__url-row input { flex: 1 1 220px; min-width: 0; }
+@media (max-width: 520px) {
+  .workspace-picture__actions .btn, .workspace-picture__url-row .btn { flex: 1 1 auto; }
+  .workspace-manager__row { gap: 8px; }
+}
 .workspace-danger .card { border-color: var(--danger); }
 .workspace-danger .card__head h2 { color: var(--danger); }
 .workspace-danger__section + .workspace-danger__section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }

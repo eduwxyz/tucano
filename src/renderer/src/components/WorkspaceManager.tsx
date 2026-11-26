@@ -4,6 +4,7 @@ import { ALL_PARTS, suggestWorkspaceCopyName, sortWorkspaces, WORKSPACE_PARTS, w
 import { updateSettings, useStore } from '../store'
 import { Modal } from './Modal'
 import { Icon } from './ui'
+import { WorkspacePictureModal, WorkspaceThumbnail } from './WorkspacePicture'
 import { useWorkspaceList } from './Workspaces'
 
 const PARTS = (): Record<WorkspacePart, { label: string; about: string }> => ({
@@ -29,6 +30,7 @@ export function WorkspaceManager({ onClose, create = false }: { onClose: () => v
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
   const api = window.tucano.workspaces
   const available = list?.workspaces.filter((w) => w.status === 'ready') ?? []
   const allPaused = available.length > 0 && available.every((w) => w.paused)
@@ -100,7 +102,9 @@ export function WorkspaceManager({ onClose, create = false }: { onClose: () => v
       </footer>
     </Modal>
   }
-  return <Modal key="manager" title={L('Gerenciar workspaces', 'Manage workspaces')} onClose={close} className="workspace-manager" actions={
+  const editing = workspaces.find((w) => w.id === editingId)
+  return <>
+    <Modal key="manager" title={L('Gerenciar workspaces', 'Manage workspaces')} onClose={close} className="workspace-manager" actions={
     <button className="btn btn--sm" disabled={busy || !available.length} title={allPaused ? L('Ativar todas as rotinas', 'Resume all routines') : L('Pausar todas as rotinas', 'Pause all routines')} aria-label={allPaused ? L('Ativar todas as rotinas', 'Resume all routines') : L('Pausar todas as rotinas', 'Pause all routines')} onClick={() => void perform(() => api.setPaused(!allPaused))}>
       <Icon name={allPaused ? 'play' : 'pause'} size={14} />{allPaused ? L('Retomar todos', 'Resume all') : L('Pausar todos', 'Pause all')}
     </button>
@@ -115,9 +119,12 @@ export function WorkspaceManager({ onClose, create = false }: { onClose: () => v
         const pauseTitle = w.paused ? L(`Retomar as rotinas de ${w.name}`, `Resume ${w.name}'s routines`) : L(`Pausar as rotinas de ${w.name}`, `Pause ${w.name}'s routines`)
         const deleteTitle = w.isDefault ? L('O workspace padrão não pode ser excluído.', 'The default workspace cannot be deleted.') : L(`Excluir ${w.name}`, `Delete ${w.name}`)
         return <div className="workspace-manager__row" key={w.id}>
-          <div className="workspace-manager__name">
-            <span>{w.name}</span>
-            <span className="workspace-manager__id" title={w.id}>{w.id.slice(-7)}</span>
+          <div className="workspace-manager__lead">
+            <WorkspaceThumbnail workspace={w} onEdit={() => setEditingId(w.id)} />
+            <div className="workspace-manager__name">
+              <span>{w.name}</span>
+              <span className="workspace-manager__id" title={w.id}>{w.id.slice(-7)}</span>
+            </div>
           </div>
           <div className="row">
             <button className="icon-btn workspace-manager__switch" disabled={busy || selected} aria-pressed={selected} title={switchTitle} aria-label={switchTitle} onClick={() => void perform(() => api.switch(w.id))}><Icon name="check" size={16} /></button>
@@ -133,5 +140,7 @@ export function WorkspaceManager({ onClose, create = false }: { onClose: () => v
       <button className="btn btn--ghost btn--sm" disabled={busy} onClick={onClose}>{L('Fechar', 'Close')}</button>
       <button className="btn btn--primary btn--sm" disabled={busy || !list} onClick={() => { setError(''); setDraft(newDraft()) }}><Icon name="plus" size={14} />{L('Criar workspace', 'Create Workspace')}</button>
     </footer>
-  </Modal>
+    </Modal>
+    {editing && <WorkspacePictureModal workspace={editing} onClose={() => setEditingId(null)} />}
+  </>
 }

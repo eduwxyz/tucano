@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isTheme, type Workspace } from '../shared/workspaces'
+import { isTheme, type Workspace, type WorkspaceParts } from '../shared/workspaces'
+import { validateWorkspacePicture } from '../shared/workspace-picture'
 import type { Settings } from '../shared/types'
 
 const UUID7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -63,6 +64,9 @@ export class Workspaces {
         ports.add(port)
       }
       if (w.isDefault && (w.webhookPort !== this.defaultPorts.webhookPort || w.gitPort !== this.defaultPorts.gitPort)) fail()
+      if (w.picture !== undefined) {
+        try { validateWorkspacePicture(w.picture) } catch { fail() }
+      }
     }
     if (r.workspaces.filter((w) => w.isDefault).length !== 1 || !ids.has(r.selected)) fail()
   }
@@ -108,6 +112,26 @@ export class Workspaces {
     const clean = name.trim()
     if (!clean || this.get(id).name === clean) return
     this.save({ ...this.state, workspaces: this.list().map((w) => w.id === id ? { ...w, name: clean } : w) })
+  }
+
+  // The picture belongs to this workspace's own entry: a duplicate starts without one, and deleting
+  // the workspace takes its picture with it. Empty clears it back to the neutral thumbnail.
+  picture(id: string): string | undefined { return this.get(id).picture }
+
+  setPicture(id: string, picture: string): void {
+    const clean = picture.trim()
+    validateWorkspacePicture(clean)
+    if ((this.get(id).picture ?? '') === clean) return
+    this.save({ ...this.state, workspaces: this.list().map((w) => w.id === id ? { ...w, picture: clean || undefined } : w) })
+  }
+
+  // A duplicate carries the picture with General settings, the part that holds the person's name
+  // and language. `undefined` means the core copied every part; a copy without General starts with
+  // the neutral tile. Main calls this only after the new workspace has been created successfully.
+  copyPicture(from: string, to: string, parts?: WorkspaceParts): void {
+    if (parts && !parts.general) return
+    const picture = this.get(from).picture
+    if (picture) this.setPicture(to, picture)
   }
 
   // Main must stop the owning core, processes and browser sessions first.
