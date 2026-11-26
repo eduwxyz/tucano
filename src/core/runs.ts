@@ -1553,7 +1553,7 @@ export class Runner {
     const thinking = (): Step => {
       const id = randomUUID()
       thoughts.add(id)
-      return { id, label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running' }
+      return { id, label: L('Pensando', 'Thinking'), detail: engineLabel, status: 'running', kind: 'thinking' }
     }
     // Back to thinking once a tool is done, unless another call it started beside it (engines run tool
     // calls in parallel) still runs: that one adds the row when it ends, so there's only ever one.

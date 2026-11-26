@@ -116,6 +116,7 @@ import { useWorkspaceList } from './Workspaces'
 import { SettingsGroups, SettingsJumps, SettingsResults, SettingsSubject, SettingsSubjectTitle, glideTo } from './SettingsLayout'
 import { searchSettings, settingsGroups, settingsGroupLabel, settingsStructure, settingsTabAliases, settingsTabStructure, type SettingsPageId, type SettingsSection, type SettingsSectionId } from '../settings-structure'
 import { workspaceLabel } from '../../../shared/workspaces'
+import { stepsKeep, STEPS_LATEST, STEPS_LATEST_MAX, STEPS_LATEST_MIN, type StepsMode } from '../../../shared/steps'
 import exportSkill from '../assets/tucano-export-skill.md?raw'
 import { dayLabel, daySummary, exceptionCount, groupHistory, type HistoryGroup, type HistoryStatus } from '../approval-history'
 import { ACCESS_REQUEST, type Approval } from '../../../shared/types'
@@ -290,6 +291,40 @@ const MEMORY_MODES = (): { value: MemoryMode; label: string; hint: string }[] =>
   { value: 'approve', label: L('Pede aprovação', 'Asks for approval'), hint: L('Cada memória nova espera você guardar.', 'Each new memory waits for you to keep it.') },
   { value: 'read', label: L('Só lê', 'Read only'), hint: L('Usa as memórias, mas não guarda novas.', 'Uses memories but doesn’t keep new ones.') }
 ]
+// How a reply's steps read, in the order they go from "everything" to "nothing": the labels carry
+// the number the person chose, since that is what "the latest few" means on this computer.
+const STEPS_CHOICES = (keep: number): { value: StepsMode; label: string; hint: string }[] => [
+  { value: 'all', label: L('Todos', 'All steps'), hint: L('Cada passo, do jeito que sempre foi.', 'Show every step.') },
+  {
+    value: 'latest',
+    label: L(`Últimos ${keep}`, `Last ${keep}`),
+    hint: L('A resposta mostra só os mais novos, numa janela que rola sozinha; os mais antigos somem no topo, desbotando.', 'Show recent steps in an auto-scrolling panel. Older steps fade out.')
+  },
+  {
+    value: 'one-line',
+    label: L('Uma linha', 'One line'),
+    hint: L('Uma linha com o passo atual e seu alvo. Clique para abrir os detalhes. Bom pra canal cheio, com vários agentes ao mesmo tempo.', 'Show the current step and target on one line. Click to expand.')
+  }
+]
+
+// One choice among the three, or — on an agent's own page — "same as the app" before them.
+function StepsModePick({ value, keep, onChange, follow, label }: { value?: StepsMode; keep: number; onChange: (v: StepsMode | undefined) => void; follow?: boolean; label: string }): ReactNode {
+  return (
+    <div className="segmented segmented--wide steps-pick" role="radiogroup" aria-label={label}>
+      {follow && (
+        <button role="radio" aria-checked={!value} className={!value ? 'is-active' : ''} onClick={() => onChange(undefined)}>
+          {L('Do app', 'App setting')}
+        </button>
+      )}
+      {STEPS_CHOICES(keep).map((c) => (
+        <button key={c.value} role="radio" aria-checked={value === c.value} className={value === c.value ? 'is-active' : ''} onClick={() => onChange(c.value)}>
+          {c.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const LEVELS = (): { value: GrantLevel; label: string }[] => [
   { value: 'none', label: L('Sem acesso', 'No access') },
   { value: 'read', label: L('Ler', 'Read') },
@@ -426,6 +461,8 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
   const globalRules = useStore((s) => s.settings.actionRules)
   const globalAutonomy = useStore((s) => s.settings.autonomy)
   const globalGuard = useStore((s) => s.settings.outsideGuard)
+  // How many steps "the latest few" keeps, so this agent's choice reads with the same number.
+  const stepsLatest = useStore((s) => s.settings.stepsLatest)
 
   const memberOf = (agentId: string): string[] => channels.filter((c) => c.members.includes(agentId)).map((c) => c.id)
   const [draft, setDraft] = useState<Agent>(() => existing ?? proposed ?? newAgentDraft())
@@ -915,6 +952,32 @@ export function AgentPage({ id, draft: proposed, fromMessage }: { id?: string; d
                   </Row>
                 )
               })}
+            </Section>
+          )}
+
+          {pane('ferramentas') && (
+            <Section
+              title={L('Passos na resposta', 'Steps in a reply')}
+              help={L(
+                'Como as respostas deste agente mostram os passos: todos, só os últimos, ou uma linha com a atividade atual. O padrão é a configuração do app.',
+                'Show all steps, recent steps, or a single activity line. Default follows app settings.'
+              )}
+            >
+              <Row label={L('Passos na resposta', 'Steps in a reply')} className="lrow--wide">
+                <StepsModePick
+                  value={draft.steps}
+                  keep={stepsKeep(stepsLatest)}
+                  follow
+                  label={L(`Como as respostas de ${draft.name || 'o agente'} mostram os passos`, `How ${draft.name || 'the agent'}'s replies show their steps`)}
+                  onChange={(v) => patch({ steps: v }, true)}
+                />
+              </Row>
+              <p className="hint">
+                {L(
+                  'Uma linha não esconde o trabalho: o botão de parar e o tempo continuam ali. Abrir a lista dos passos vale para a resposta, não fica salvo.',
+                  'One line doesn’t hide the work: the stop button and the time stay there. Opening the steps list is per reply, not saved.'
+                )}
+              </p>
             </Section>
           )}
 
@@ -3727,10 +3790,8 @@ export function SettingsPage(): ReactNode {
 
         {on('geral') && (
           <SectionAnchor id="app-appearance" sections={structure}>
-            <Card title={L('Aparência', 'Appearance')} section="app-appearance" lead={L('Como o Tucano aparece pra você. Muda só pra você.', 'Tucano’s appearance for you only.')}>
-              <div className="key-row">
-                <Icon name="sun" />
-                <div className="grow">
+            <Card title={L('Aparência', 'Appearance')} section="app-appearance" lead={L('Como o Tucano aparece pra você. Muda só pra você.', 'Tucano’s appearance for you only.')}>              <div className="key-row">
+                <Icon name="sun" />                <div className="grow">
                   <strong>{L('Tema', 'Theme')}</strong>
                   <p className="muted small">{L('Do sistema segue o claro e o escuro do computador ao longo do dia.', 'System follows the computer’s light or dark theme.')}</p>
                 </div>
@@ -3772,7 +3833,6 @@ export function SettingsPage(): ReactNode {
         )}
 
         {on('geral') && admin && <SectionAnchor id="app-dictation" sections={structure}><VoiceCard /></SectionAnchor>}
-
         {on('geral') && (
           <SectionAnchor id="app-conversation" sections={structure}>
             <Card title={L('Conversas', 'Conversations')} section="app-conversation">

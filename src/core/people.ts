@@ -280,10 +280,19 @@ export class People {
     if (person.role === 'owner') return s
     // The introduction sets the Tucano up (models, agents): theirs only if they ask to see it again.
     // The wiki's folder is a path on the owner's machine.
+<<<<<<< HEAD
+<<<<<<< HEAD
     const { sounds: _s, stepsOpen: _so, showThinking: _t, channelLayout: _c, folded: _f, sidebarHidden: _h, navOrder: _no, agentOrder: _ao, sectorOrder: _so2, onboarding: _o, wikiDir: _w, ...rest } = s
     // Which classifiers exist and which have a key is for those who manage them.
     const { classifiers: _cl, classifierJobs: _cj, classifierKeys: _ck, ...forMember } = rest
     return { ...(person.role === 'admin' ? rest : forMember), onboarding: { done: true }, ...this.db.prefs(person.id) }
+=======
+    const { sounds: _s, stepsOpen: _so, showThinking: _t, channelLayout: _c, folded: _f, sidebarHidden: _h, onboarding: _o, wikiDir: _w, ...rest } = s
+=======
+    const { sounds: _s, stepsOpen: _so, showThinking: _t, steps: _st, stepsLatest: _sl, channelLayout: _c, folded: _f, sidebarHidden: _h, onboarding: _o, wikiDir: _w, ...rest } = s
+>>>>>>> d61414ef (Let a reply show every step, the latest few, or one line with the count)
+    return { ...rest, onboarding: { done: true }, ...this.db.prefs(person.id) }
+>>>>>>> 2ee0ff45 (Show the model's thinking only when the person asked for it)
   }
 
   // A settings change by this person: their display preferences are kept on them (the owner's are

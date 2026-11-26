@@ -275,7 +275,6 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 - **The Quadro's "stopped on" row no longer draws the agent's name over the text.** The row borrowed the chat message's class, a grid with a 34px first column, so a name like "UI Architect" spilled over "parou em …".
 - **Dictation on a server says where the audio becomes text.** Settings and the microphone's balloon said "on this computer, offline" on Tucano Pro too, where it's the server, on shared processors: the Recommended model took 47 s for 8 s of speech there and the Light one 9 s, so a person waiting gave up. On a server they now say it runs on the server, and that the Light model is much faster there.
-
 ## [0.2.41] - 2026-11-19
 
 > **Em português:**
