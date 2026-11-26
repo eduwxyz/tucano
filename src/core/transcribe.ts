@@ -86,7 +86,9 @@ export class ModelDownload {
     this.progress = { model: id, received: 0, total: m.bytes }
     this.changed()
     mkdirSync(this.dir, { recursive: true })
-    const part = join(this.dir, `${m.file}.part`)
+    // Named after this process: the folder is shared by every workspace, and two downloading at once
+    // must not write into the same file.
+    const part = join(this.dir, `${m.file}.${process.pid}.part`)
     let last = 0
     try {
       const res = await this.fetcher(MODEL_URL(m.file), { signal: abort.signal, redirect: 'follow' })

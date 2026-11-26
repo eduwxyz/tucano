@@ -920,7 +920,7 @@ const transcriber = new Transcriber()
 // Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads. That
 // folder is the desktop's, for every workspace, so a new workspace doesn't download hundreds of MB again; a model a
 // workspace downloaded into its own folder before is still found there.
-const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(process.env['TUCANO_INSTALL_DIR'] || dataDir, 'voice'), own: join(dataDir, 'voice') }
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(installDir, 'voice'), own: join(dataDir, 'voice') }
 const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
 const dictation = async () => {
   const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)

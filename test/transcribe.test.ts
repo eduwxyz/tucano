@@ -157,7 +157,7 @@ describe('turning dictation on: the model download', () => {
     const d = new ModelDownload(dir, () => changes.push(d.progress?.received ?? -1), serve(body), models)
     await d.start('recommended')
     expect(existsSync(join(dir, 'ggml-test-turbo.bin'))).toBe(true)
-    expect(existsSync(join(dir, 'ggml-test-turbo.bin.part'))).toBe(false)
+    expect(readdirSync(dir).filter((f) => f.endsWith('.part'))).toEqual([])
     expect(d.progress).toBeNull()
     expect(d.error).toBeNull()
     expect(changes.at(-1)).toBe(-1) // the last word: done
