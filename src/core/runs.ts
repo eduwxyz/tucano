@@ -1273,12 +1273,14 @@ export class Runner {
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
+      const cwd = join(this.deps.workDir, '_router')
+      mkdirSync(cwd, { recursive: true })
       // The router's model out of quota or not ready: the channel's agents' reserve models pick
       // instead, as their replies would move to them, so a channel doesn't go quiet while a DM still answers.
       const onReserve = async (why: string): Promise<void> => {
         const reserves = routerReserves(members, settings, model.engine)
         for (const alt of reserves) {
-          const rr = await during({ operation: 'router', sessionId: trigger, conversationId: conv.id }, () => route({ ...input, engine: engines[alt.engine], model: alt.id, cwd: join(this.deps.workDir, '_router') }))
+          const rr = await during({ operation: 'router', sessionId: trigger, conversationId: conv.id }, () => route({ ...input, engine: engines[alt.engine], model: alt.id, cwd }))
           if (rr.usage) db.addReceipt({ ...rr.usage, model: alt.id, ms: rr.ms, messageId: note.id, agentId: 'router', engine: alt.engine, at: Date.now() })
           if (!('error' in rr)) return this.routed(conv, note, rr.agents, trigger, `${rr.reason}${fellBack} · ${L(`o ${ENGINES[model.engine].label} não pôde, decidiu o ${alt.label}`, `${ENGINES[model.engine].label} couldn't, ${alt.label} decided`)}`, parallel)
         }
@@ -1286,11 +1288,8 @@ export class Runner {
       }
       // The router's logins: the primary one first when one is set, then the others in order, each tried once.
       const logins = loginsInOrder(settings, model.engine)
-      mkdirSync(join(this.deps.workDir, '_router'), { recursive: true })
       if (!status.installed || !logins.some((login) => login.ready)) return await onReserve(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
 
-      const cwd = join(this.deps.workDir, '_router')
-      mkdirSync(cwd, { recursive: true })
       const tried = new Set<string>()
       let r: Awaited<ReturnType<typeof route>> | undefined
       for (let login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried }); login; login = nextLogin(logins, { engine: model.engine, spent: this.spent, now: Date.now(), tried })) {
