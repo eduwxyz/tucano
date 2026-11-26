@@ -1,14 +1,18 @@
 // Domain types shared by the core (utility process) and the renderer.
+import type { UplinkStatus } from './node-link'
 import type { AvatarDefinition } from 'open-bot-avatar'
 import type { ActionRules, Autonomy } from './actions'
+import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
+import type { InboxDoc, InboxDocDate } from './docs'
+import type { PageSigns } from './wall'
 import { L, lang, locale, type Lang } from './lang'
 
 export type AgentColor = 'sky' | 'indigo' | 'violet' | 'rose' | 'amber' | 'green' | 'teal' | 'graphite'
 export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
-export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'qg'
+export type EngineId = 'claude' | 'codex' | 'opencode' | 'pi' | 'antigravity' | 'cursor' | 'grok' | 'cline' | 'hermes' | 'endpoint' | 'qg'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
 export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
@@ -45,7 +49,7 @@ export interface EngineStatus {
   warning?: string // e.g. logged in with an API key instead of a subscription
   // Where it sends requests, read from its own config: the person's plan, a gateway
   // (a company's, or a provider like OpenCode Go), an API key, or the providers it has logins for.
-  route?: 'plan' | 'gateway' | 'apikey' | 'providers'
+  route?: 'plan' | 'gateway' | 'apikey' | 'providers' | 'endpoint'
   gateway?: string // the gateway's host
   off?: boolean // the person didn't pick this harness: no agent runs on it
   soon?: boolean // the app can't run agents on it yet
@@ -91,12 +95,15 @@ export interface Agent {
   outsideGuard?: boolean // false: what goes out (a send, a post, a payment) runs on its rules even after reading something from outside; unset: Settings'
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
+  deleted?: true // deleted for good (deleteAgent): always archived too; only its name and look stay, for the messages it wrote
   kind?: 'tuca' // the agent that builds the others: it proposes, the person creates
   owner?: string // the person who gets its approvals: whoever created it (the Tucano's owner for older agents)
   reportsTo?: string // the agent it answers to (src/shared/org.ts): that one, and whoever is above it, may hand it work in its own channel; unset: no one
   sectorName?: string // on a sector's head (src/shared/org.ts headsOf): the sector's name; unset: "Setor de <name>"
   sectorDoes?: string // on a sector's head: what the sector handles, in one line, read by the other heads
   entry?: boolean // the person chose it as an entry point (src/shared/org.ts entriesOf): it answers to no agent, is in no sector, and the teams below it are sectors
+  proactive?: boolean // false: the router never calls it in on its own when something is its to do (src/core/router.ts chimeIn); on unless false
+  oneAtATime?: true // its replies go one at a time, wherever they are: the next waits for the one running (src/core/runs.ts, enqueue)
 }
 
 // One of the person's apps given to an agent, by the name the system shows.
@@ -132,6 +139,10 @@ export interface Conversation {
   threads?: boolean // true: each message's answers go in its thread; unset: in the conversation, like a chat
   owner?: string // a DM's person: one DM per agent and person, and only they read it
   createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
+  proactive?: boolean // false: no agent is called in here on its own, only who is mentioned or picked; on unless false
+  title?: string // a conversation with the Tuca: what it is about, in a few words (the person has several, one per request)
+  createdAt?: number
+  lastAt?: number // when something was last said there, as the core knew when it sent this
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -154,8 +165,13 @@ export interface Step {
   error?: string // why it failed, in the tool's own words
   input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
   output?: string // what came back, in a few words ("120 rows")
+  keys?: string[] // the Cofre's keys the command used, by name (src/core/vault.ts)
+  tool?: string // the tool that ran, by its own name (no connector): set on tool calls since Execuções
   status: StepStatus
   ms?: number
+  // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran,
+  // between two calls, and its row carries their words (src/core/runs.ts, `steerIn`).
+  kind?: 'steer'
 }
 
 export interface Receipt {
@@ -165,14 +181,50 @@ export interface Receipt {
   outputTokens: number
   ms: number
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
+  responseModel?: string // the model id the harness says answered; `model` stays the one asked for
 }
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
+
+// What the Tuca asks leave to do himself, when no one on the team does it (fazer_eu_mesmo, src/core/tuca-leave.ts):
+// on the reply whose question card asks it. `state`: how the person answered, once they did.
+export interface LeaveAsk {
+  kind: string // the kind of thing, in a few words ("pesquisa de preços"): what "no need to ask again" holds for
+  what: string // what he said he would do, in one sentence
+  web?: true // he will search and read web pages
+  grants?: Record<string, GrantLevel> // the connectors he will use, by id
+  instead?: string // the colleague whose part this is and who did not finish it: asked for this once only, or the person waits for them
+  state?: 'once' | 'always' | 'colleague' | 'wait'
+}
+
+// What a person let the Tuca do himself. It is theirs, never his: each person's Tuca works with what that
+// person allowed, and they take it back whenever they want.
+export interface TucaLeave {
+  id: string
+  person: string
+  conversationId?: string // given for that conversation only ("Pode fazer"); unset: for good, for that kind of thing
+  kind: string
+  what: string
+  web?: true
+  grants?: Record<string, GrantLevel>
+  instead?: string // given in the place of a colleague who had not finished: it lets him use what he asked for there, and is no kind of thing he may do himself
+  uses: number // times he did it himself under this leave
+  suggested?: true // he was already told to suggest a colleague for this kind of thing
+  at: number
+}
+
+// What the Tuca wrote for the people who make Tucano (propor_feedback). Never sent by him: the card opens
+// the "Enviar feedback" window with it, and the person sends it from there.
+export interface FeedbackDraft {
+  kind: 'bug' | 'idea' | 'other'
+  message: string
+}
 
 export interface Run {
   status: RunStatus
   steps: Step[]
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
+  startedAt?: number // when this attempt started, on a reply tried again (its message keeps the first `at`)
   receipt?: Receipt
   approvalId?: string
   outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
@@ -180,10 +232,14 @@ export interface Run {
   errorDetail?: string // the raw text behind it (a CLI's stderr), shown folded
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   replyTo?: string // the message (a person's) it answers, when one did
+  handed?: string // the request (Delegation) this reply works on: what it ends with goes back to whoever asked
   answeredBy?: string // who answered its question (another person than the one asked, maybe)
   question?: string // asked with ask_user, as plain text (every decision, numbered); answered by the next human message here
   questions?: Decision[] // the same decisions, structured (one to four, with options): read them with questionsOf
   answers?: (Answer | null)[] // what was answered on the card so far, by decision, before sending
+  stepsOpen?: true // its next-steps card can still be answered; the reply itself is done and waits on no one
+  stepsReplaced?: true // the same agent proposed a newer card in the same place: this one closed unanswered, and nobody dismissed it
+  cancelled?: true // the person dismissed the question on its card (Cancelar): no one answered it, and the agent wasn't woken
   answeredInText?: true // the reply had text of its own, beyond the decisions answered
   answerMessage?: string // the message that sent the decisions answered on the card (the agent reads it; the card shows it)
   answerTyped?: string // what that message had beyond them, written in the message box
@@ -195,13 +251,22 @@ export interface Run {
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  job?: string // the job it is part of: what a message set off, until it's done (src/core/jobs.ts)
+  trace?: { traceId: string; spanId: string; linkedTo?: { traceId: string; spanId: string } } // its OpenTelemetry span, when traces are on: a reply it asks for links here, and linkedTo is the one that asked for it
+  autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
+  retryAt?: number // 'failed' on something that passes (a network, a plan's window, a computer off): when it tries again by itself
+  retries?: number // how many times it already tried again by itself
   task?: string // what this reply was asked beyond the conversation; kept only while it can be tried again or go on
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
+  feedbackDraft?: FeedbackDraft // a bug or an idea for the people who make Tucano, written by the Tuca with propor_feedback: the person reviews and sends it
+  leave?: LeaveAsk // the Tuca's question on this reply asks leave to do something himself (fazer_eu_mesmo): what for, and how it was answered
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back
   delegations?: DelegationRef[] // the work this reply handed to the agents below its author
+  routineAsk?: string // a routine's run: the message the routine posted, which this reply answers
+  noNews?: true // a routine's run that found nothing new (it answered only noNewsPhrase): the conversation folds these into one line
 }
 
 // Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.
@@ -210,8 +275,26 @@ export interface DelegationRef {
   to: string // the agent doing it
   conversationId: string
   rootId: string
+  threadId?: string // the thread it is worked in, when it was asked inside another's (rootId is then the asking message)
   back?: 'result' // on the message that brought the answer back to where it was asked: shown folded there
 }
+
+// A to-do on the board (Quadro): written before it starts, by one person, for an agent. Starting it posts it
+// as that person's message to the agent (its DM, or a channel it's in), and from there it's that reply's card.
+export interface Task {
+  id: string
+  owner: string // the person whose list it is
+  title: string
+  notes?: string // what the agent should know: it goes in the message, under the title
+  agentId?: string // who does it; unset until picked
+  conversationId?: string // where it's posted; unset: the agent's DM
+  dueAt?: number
+  position: number // its place in the list, smallest first
+  createdAt: number
+}
+export type TaskInput = Pick<Task, 'title'> & Partial<Pick<Task, 'id' | 'notes' | 'agentId' | 'conversationId' | 'dueAt' | 'position'>>
+export const MAX_TASK_TITLE = 300
+export const MAX_TASK_NOTES = 8_000
 
 // A piece of work an agent handed to one below it (src/shared/org.ts), in that one's channel: a thread
 // there, opened by `rootId`. What it ends with goes back to where it was asked from, and whoever asked
@@ -221,7 +304,8 @@ export interface Delegation {
   from: string // the agent that asked
   to: string // the agent asked
   conversationId: string // where the work is done
-  rootId: string // the message that opened its thread there
+  rootId: string // the message that asked for it there: it opens its thread, or sits in `threadId`
+  threadId?: string // the thread it is worked in, when asked inside one already there (a request's, in the same channel)
   originConversationId: string // where it was asked from
   originThreadId?: string
   originMessageId: string // the reply that asked
@@ -237,12 +321,14 @@ export interface Delegation {
   result?: string // the message it ended with
   told?: boolean // whoever asked has heard how it ended
   lateTold?: boolean // whoever asked has heard it's past its deadline
+  approval?: string // the approval its work last stopped on, shown with the request where it was asked from
   createdAt: number
   endedAt?: number
 }
 
 // An agent the Tuca proposes. Nothing exists until the person creates it.
 export interface AgentDraft {
+  id?: string // given when proposed: the core applies a card once by it (unset on cards from before)
   name: string
   role: string
   color: AgentColor
@@ -254,15 +340,30 @@ export interface AgentDraft {
   grants: Record<string, GrantLevel> // connector id → level; least access by default
   task?: string // a first task to try it with
   reason?: string
-  state?: 'created' | 'dismissed'
+  state?: 'created' | 'dismissed' | 'undone'
   agentId?: string // once created
+  auto?: true // created by itself when the Tuca proposed it (Settings.tucaApplyNow), not by a click
+  undo?: UndoInfo // once created: how to take it back
+}
+
+// How long a change the Tuca applied can be taken back with Desfazer.
+export const UNDO_HOURS = 24
+
+// What taking an applied card back needs: until when, and what to check first, so a later change
+// to the same thing is never thrown away. `prior`: an agent's fields as they were just before;
+// `stamps`: what each thing it made looked like right after (an agent's or a routine's, by id).
+export interface UndoInfo {
+  until: number
+  prior?: AgentChanges
+  stamps?: Record<string, string>
 }
 
 // What the Tuca may propose to change in an agent that exists.
 export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
-// with Aplicar and Descartar. Nothing changes until the person applies it. `appliedId`: the agent,
+// with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
+// inside the app (Settings.tucaApplyNow): that applies when his reply ends, and the card offers Desfazer. `appliedId`: the agent,
 // routine or channel it made or changed; `error`: why applying it didn't work.
 // A reply may hold several (a group under it, each applied on its own or all at once). `needs`: agents
 // proposed in the same reply (by name: propor_agente's card or a team's) that must exist first; a
@@ -272,7 +373,7 @@ export type Proposal = (
   | { kind: 'routine'; routine: RoutineInput }
   | { kind: 'channel'; name: string; topic?: string; members: string[]; threads?: boolean }
   | { kind: 'team'; agents: AgentDraft[]; channel?: { name: string; topic?: string; threads?: boolean }; agentIds?: string[] } // several agents at once, and a channel with them; agentIds: the ones it made, in order
-) & { reason?: string; state?: 'applied' | 'dismissed'; appliedId?: string; error?: string; needs?: string[] }
+) & { id?: string; reason?: string; state?: 'applied' | 'dismissed' | 'undone'; appliedId?: string; error?: string; needs?: string[]; auto?: true; undo?: UndoInfo } // id: given when proposed, the core applies a card once by it (unset on cards from before); auto: applied by itself, as the Tuca proposed it; undo: how to take it back
 
 // What "apply all" did, card by card: applied, failed (with why), sent to the admins (a member's
 // agents and teams); `draft`: the reply's new-agent card, when it went too.
@@ -373,6 +474,9 @@ export interface Inbox {
   questions: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[]
   answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
+  harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
+  documents?: InboxDoc[] // documents waiting for this person to approve
+  docDates?: InboxDocDate[] // dates found in documents they look after, coming up
 }
 
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
@@ -423,6 +527,13 @@ export interface Message {
   routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
   threadId?: string // a reply in a thread: the id of the message that started it (threads are one level deep)
   threadSummary?: ThreadSummary // on the message that started a thread: what the thread has covered
+  title?: string // on a request: what it's about in a few words, made when work on it starts (src/core/titles.ts)
+  via?: string // a person's message a harness sent over MCP: the harness key's name ("Claude Code"). The agent reads it; the screens don't show it
+  stop?: { job: string } // the note left where a job stopped on its brakes (src/core/jobs.ts): it carries Continuar
+  // A prompt of mine waiting its turn (its conversation had all its replies at once running, or its agent
+  // goes one at a time): 'queue' while it waits, unset once its reply goes. Kept in the database, so it
+  // outlives a restart (runs.ts, resumeQueued).
+  sendMode?: 'queue'
 }
 
 // When a message was said: a reply when it ended, anything else when it was written. `at` stays when it
@@ -468,19 +579,33 @@ export interface LocalInfo {
   download?: string // on a server, where the file isn't on this computer: to save it here
 }
 
+export interface EndpointSettings {
+  baseUrl: string // e.g. https://openrouter.ai/api/v1, http://localhost:11434/v1
+  models: string[] // the ones the agents may run on
+  hasKey?: boolean // computed: a key is saved
+}
+
 export interface Settings {
+  node?: { apps?: AgentApp[]; folders?: string[]; device?: string } // this computer lent to servers' Tucanos (core/node-server.ts): the apps and folders it lends, and its id there
   workspaceName: string // the person's name: what the agents call them
   workspaceLabel?: string // the workspace's own name, in the switcher; unset: workspaceName
   context: string
   engines: Record<EngineId, EngineStatus>
-  routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
-  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
+  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
+  classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
+  classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
+  classifierKeys?: Record<string, boolean> // computed: which classifiers have a key saved (never the key itself)
+  // An address in OpenAI's format the agents run on with no harness: its base URL and the models picked
+  // from what it lists. The key is a secret (ENDPOINT_SECRET); `hasKey` only says one is saved.
+  endpoint?: EndpointSettings
   voice?: VoiceSettings
   channelLayout?: ChannelLayout // the person's order and groups in the sidebar
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
+  repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once
   wikiCapture?: boolean // the curator reads the conversations and keeps what lasts; on when unset
   wikiEdits?: 'approve' | 'auto' // changing a page that exists: waits for me (the default) or goes in
   wikiReview?: 'weekly' | 'off' // reviews the wiki on its own once a week; by hand only otherwise (the default)
@@ -495,8 +620,8 @@ export interface Settings {
   language: Lang // the app's, and the language agents answer in
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  autoContinue?: boolean // a reply that paused at its cap while it was getting somewhere, or that the app cut when it closed, goes on by itself (default on)
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
-  chainDepth?: number // agent replies in a row from one human message; default CHAIN_DEPTH
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
   paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
@@ -518,10 +643,20 @@ export interface Settings {
     guest?: { by?: string } // someone just invited: their own short welcome first (who invited them)
   }
   folded?: string[] // the ids of what I folded in the sidebar
+  sidebarHidden?: string[] // what I took out of the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: none
+  navOrder?: string[] // my order for the items at the top of the sidebar (sidebar-top.ts TOP_ITEMS); unset: as they come
+  agentOrder?: string[] // my order for the agents in the sidebar, by agent id, kept within each sector; unset: as they come
+  sectorOrder?: string[] // my order for the sidebar's sectors, by the head's id ('none' for agents in no sector); unset: as they come
   sounds?: boolean // the toucan's chirp on a notification; unset: on
   stepsOpen?: boolean // a reply's steps open while the agent works; unset: on
+  // The model's reasoning, dim and small under the steps, as it arrives. Unset: off, so nobody
+  // meets a reply's guts unless they went looking for them (it is the agent's, not the answer's).
+  showThinking?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  primaryAccounts?: Partial<Record<AccountEngine, string>> // the primary login of a harness with accounts (its id, or unset: the usual login); the reply goes there first
+  surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
+  tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
 
 // Which chirp a notification plays: a knock when an agent needs me, two notes when the work
@@ -534,8 +669,12 @@ export function chirpOf(kind: 'approval' | 'question' | 'done' | undefined, soun
 
 // Another login of a harness (a work account beside a personal one), in a folder of its own
 // in the app's data: Claude Code's CLAUDE_CONFIG_DIR (with its own Keychain entry), Codex's
-// CODEX_HOME. The person signs in through the CLI itself; the app never sees the credentials.
-export const ACCOUNT_ENGINES = ['claude', 'codex'] as const satisfies readonly EngineId[]
+// CODEX_HOME, Antigravity's home (HOME) with no keychain in it, where agy keeps the login in a file
+// (only on a Mac: elsewhere its login goes to the system's store, whatever the home).
+// The person signs in through the CLI itself; the app never sees the credentials.
+export const ACCOUNT_ENGINES = ['claude', 'codex', 'antigravity'] as const satisfies readonly EngineId[]
+// Where a harness may have another account: Antigravity's only on a Mac.
+export const accountsOn = (engine: AccountEngine, os: Os): boolean => engine !== 'antigravity' || os === 'mac'
 export type AccountEngine = (typeof ACCOUNT_ENGINES)[number]
 export interface Account {
   id: string
@@ -546,7 +685,23 @@ export interface Account {
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).
-export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear' | 'input'
+export type BrowserOp =
+  | 'open'
+  | 'snapshot'
+  | 'click'
+  | 'type'
+  | 'fill'
+  | 'key'
+  | 'scroll'
+  | 'back'
+  | 'text'
+  | 'frame'
+  | 'show'
+  | 'hide'
+  | 'close'
+  | 'clear'
+  | 'input'
+  | 'headful' // the page is a bot check: the same lane, in a real window (chrome.ts)
 
 // What I do on the agent's browser from the panel, when it has no window of its own
 // (Tucano as a server): x and y are fractions of the screen.
@@ -576,7 +731,9 @@ export interface BrowserReply {
   elements?: BrowserElement[]
   text?: string
   shown?: boolean // the window is open for me
+  headful?: boolean // drawn in a real window because this site only lets a real browser through (not a takeover)
   point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
+  signs?: PageSigns // what the page is when it isn't the page: a bot check, a refusal, a wall (shared/wall.ts)
 }
 
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.
@@ -634,6 +791,7 @@ export const MAX_AGENT_ROUTINES = 10
 export const routineCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.max(1, Math.round(n as number)) : MAX_AGENT_ROUTINES)
 
 export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const AUTO_CONTINUES = 10 // times in a row a reply that paused while getting somewhere goes on by itself: a backstop, since each time it must have moved
 export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
 export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
 export const REPEAT_STOP = 5 // ...and then the reply stops
@@ -643,16 +801,13 @@ export const SAME_TOOL_STOP = 60 // ...and past it, that tool is refused for the
 export const SLEEPS_FREE = 1 // commands that start by sleeping 20 s or more: the first runs, the next ones are refused
 export const SLEEPS_STOP = 4 // refused sleeps in a reply before it stops
 export const PENDING_WAIT_MINUTES = 5 // a connector result still running (a SQL statement) is awaited by the app this long
-export const CHAIN_DEPTH = 3 // agent replies chained from one human message before Tucano stops them
-export const MAX_CHAIN_DEPTH = 10
-// Agents mentioning each other can't loop and burn tokens with nobody watching: a whole number from 1 to MAX_CHAIN_DEPTH, whatever reached the core.
-export const chainDepthCap = (n: number | undefined): number => (Number.isFinite(n) ? Math.min(MAX_CHAIN_DEPTH, Math.max(1, Math.round(n as number))) : CHAIN_DEPTH)
 
 // What a reply counts against limits: a token read from the cache costs about a
-// tenth of a new one, so it counts a tenth.
+// tenth of a new one, so it counts a tenth. The input counts the cache reads in; more cache reads than
+// input means they came apart from it (an Antigravity receipt): the input is all new then.
 export const CACHE_READ_WEIGHT = 0.1
 export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number; outputTokens: number }): number =>
-  Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
+  Math.round((u.cacheReadTokens > u.inputTokens ? u.inputTokens + u.cacheReadTokens * CACHE_READ_WEIGHT : u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT)) + u.outputTokens)
 
 // `windows`: the install command for PowerShell, where the POSIX one doesn't run.
 export const ENGINES: Record<EngineId, { label: string; cli: string; login: string; install: string; min?: string; windows?: string; site: string }> = {
@@ -665,6 +820,9 @@ export const ENGINES: Record<EngineId, { label: string; cli: string; login: stri
   grok: { label: 'Grok', cli: 'grok', login: 'grok login', install: 'curl -fsSL https://x.ai/cli/install.sh | bash', site: 'https://x.ai/cli' },
   cline: { label: 'Cline CLI', cli: 'cline', login: 'cline auth', install: 'npm install -g cline', site: 'https://docs.cline.bot/cli/cli-reference' },
   hermes: { label: 'Hermes', cli: 'hermes', login: 'hermes setup', install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', min: '0.22.0', site: 'https://hermes-agent.nousresearch.com' },
+  // No program to install: the app itself talks to an address in OpenAI's format (OpenRouter, OmniRoute,
+  // Ollama, LM Studio, vLLM…) with a key, and runs each reply's tools itself (src/core/engines/endpoint.ts).
+  endpoint: { label: 'Endpoint', cli: '', login: '', install: '', site: 'https://openrouter.ai' },
   qg: { label: 'QG', cli: 'qg', login: 'qg login', install: 'npm install -g @quebragalho/cli', site: 'https://quebragalho.com.br' }
 }
 export const ENGINE_IDS = Object.keys(ENGINES) as EngineId[]
@@ -760,6 +918,8 @@ export interface ConnectorTool {
   enabled: boolean
   highRisk: boolean
   isNew: boolean // appeared after the first sync; starts disabled until reviewed
+  floor?: ToolClass // the server says it's at least this (a node's command or file write): the class can't go below it
+  lockedHighRisk?: boolean // the server marks it high risk (a computer's owner did, on a node): it can't be unmarked here
 }
 
 export type ConnectorAuth = 'none' | 'token' | 'oauth'
@@ -774,6 +934,9 @@ export interface Connector {
   args?: string[]
   envKeys?: string[] // names only; values are secrets
   auth: ConnectorAuth
+  // The picture this connector wears in the app, as a data URL (an image picked by the person): a
+  // server added by hand is otherwise a terminal or a globe. Empty: the store's mark, or its kind's icon.
+  icon?: string
   status: ConnectorStatus
   error?: string
   errorDetail?: string // the raw error and its causes (a certificate's code, the DNS's), under "Ver detalhes"
@@ -806,6 +969,11 @@ export interface HarnessMcp {
 
 export type ApprovalState = 'pending' | 'approved' | 'refused' | 'expired'
 
+// What became of the call once it was approved: it ran and went through, it ran and came back an
+// error, or nothing ran (a computer that was off, an access that changed, a refusal). Left out
+// while the call is on its way, so a card can say "approved, waiting" without inventing a result.
+export type ApprovalResult = 'done' | 'error' | 'not_run'
+
 // The approval an agent asks with pedir_acesso: a grant, not a tool call.
 export const ACCESS_REQUEST = 'pedir_acesso'
 
@@ -824,6 +992,7 @@ export interface Approval {
   state: ApprovalState
   reason?: string
   outcome?: string // short summary of what happened when it ran
+  result?: ApprovalResult // what became of the call: not written until it's over
   createdAt: number
   expiresAt: number
   decidedAt?: number
@@ -938,7 +1107,8 @@ export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string =>
 
 export interface Schedule {
   days: number[] // 0 = Sunday … 6 = Saturday
-  time: string // "HH:MM", Mac local time
+  time: string // "HH:MM", Mac local time; with `times`, the first of them
+  times?: string[] // several times a day (a week's days or a day of the month): every one, sorted, two or more; unset with one
   once?: boolean // runs at the next matching time, then turns itself off
   date?: string // "YYYY-MM-DD": that day only, at `time` (always once; `days` is its weekday)
   monthDay?: number // 1–31: every month on that day (a shorter month's last day), at `time`
@@ -1025,8 +1195,21 @@ export const isoDay = (at: number): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// The first time after `after` that matches the schedule.
+// How many times one routine runs a day, at most.
+export const MAX_TIMES = 12
+
+// A schedule's times of day: `times` when it has several, else its one `time`.
+export const timesOf = (s: Pick<Schedule, 'time' | 'times'>): string[] => (s.times && s.times.length > 1 ? s.times : [s.time])
+
+// Times as a schedule keeps them: valid, each once, in order.
+export const cleanTimes = (list: string[]): string[] => [...new Set(list.map((t) => t.trim()).filter(validTime))].sort()
+
+// The first time after `after` that matches the schedule (the earliest of its times).
 export function nextRun(s: Schedule, after: number): number | undefined {
+  if (s.times && s.times.length > 1 && s.date === undefined && !s.once) {
+    const all = s.times.map((time) => nextRun({ ...s, time, times: undefined }, after)).filter((t): t is number => t !== undefined)
+    return all.length ? Math.min(...all) : undefined
+  }
   if (!validTime(s.time)) return undefined
   if (s.date !== undefined) {
     if (!validDate(s.date)) return undefined
@@ -1057,8 +1240,9 @@ const ordinal = (n: number): string => `${n}${n % 10 === 1 && n !== 11 ? 'st' : 
 
 export function describeSchedule(s: Schedule): string {
   const days = [...new Set(s.days)].sort()
-  const hour = L(s.time.replace(/^0(\d)/, '$1').replace(':00', 'h'), s.time.replace(/^0(\d)/, '$1'))
   const and = L(' e ', ' and ')
+  const one = (t: string): string => L(t.replace(/^0(\d)/, '$1').replace(':00', 'h'), t.replace(/^0(\d)/, '$1'))
+  const hour = (s.date === undefined && !s.once ? timesOf(s) : [s.time]).map(one).join(', ').replace(/, ([^,]+)$/, `${and}$1`)
   const when =
     days.length === 7
       ? L('Todo dia', 'Every day')
@@ -1100,6 +1284,23 @@ export interface Skill {
   source?: string // linked to a SKILL.md of the user's Claude Code or Codex: read from there, not edited here
   createdAt: number
   updatedAt: number
+}
+
+// This computer lent to servers' Tucanos: what it lends, and how each server's line is doing.
+export interface NodeInfo {
+  apps: AgentApp[] // the apps the node lends the servers' agents
+  folders: string[] // the folders it lends: the servers' file tools reach only these (absolute, real paths)
+  links: UplinkStatus[] // one per server it's lent to (Settings › Servers)
+}
+
+// One call the server made on this computer as a node, kept here for the owner to read (newest first).
+export interface NodeLogEntry {
+  at: number // when it started (ms)
+  tool: string // node_bash, node_read_file, navegador_clicar, premiere_pro__export…
+  summary: string // the command, the path, or the arguments, cut short and with secrets masked
+  ok: boolean
+  ms: number
+  error?: string // why it failed or was refused (outside the lent folders…)
 }
 
 // A skill already on this Mac (Claude Code, its plugins, Codex), that can be linked.
@@ -1182,6 +1383,63 @@ export interface UsageReport {
   models: { model: string; engine: EngineId; tokens: number }[] // biggest first
 }
 
+// Uso e limites › Execuções: finished agent replies, one row each (src/core/executions.ts).
+export interface ExecutionRow {
+  id: string // the reply's message
+  conversationId: string
+  agentId: string
+  preview: string // the reply's first line
+  status: RunStatus
+  at: number
+  model?: string
+  ms?: number
+  tokens?: number // counted; unset when it ended before reporting usage
+  tools: number
+}
+
+// A step as Execuções shows it: what ran, how long and how it ended, without what the agent said or got back.
+export type ExecutionStep = Pick<Step, 'id' | 'label' | 'detail' | 'tool' | 'status' | 'ms' | 'error'>
+
+// A tool over a week, in the Boletim. Only steps since tools were recorded count.
+export interface ToolStat {
+  tool: string
+  uses: number
+  p95?: number // ms; unset if none of its calls has a time
+  errorRate: number // 0 to 1
+}
+
+export const EXECUTION_DAYS: readonly number[] = [1, 7, 30] // the periods Execuções offers
+
+// Settings › Connections › Traces, as an admin's page sees it. Headers are never sent back: only whether some are saved.
+export interface TracesView {
+  on: boolean
+  endpoint: string // the base address, as typed: /v1/traces is added when sending
+  text: boolean // the prompt and final reply go too
+  headers: boolean
+  fromEnv?: string // the server's environment configures traces: its endpoint's origin, and the screen is read-only
+}
+
+export type TracesTest = { ok: true } | { ok: false; status?: number } // status: what the backend answered; none: it couldn't be reached
+export const OK_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval']) // a reply that went fine
+export type ExecutionFilter = 'ok' | 'failed' | 'stopped'
+export interface ExecutionQuery {
+  days: number // how far back
+  agentId?: string
+  status?: ExecutionFilter
+  beforeAt?: number // with beforeId: the page after this row
+  beforeId?: string
+}
+export type ExecutionCursor = Pick<ExecutionRow, 'at' | 'id'>
+
+export interface ExecutionPage {
+  rows: ExecutionRow[]
+  next?: ExecutionCursor // there's more after this page
+  count: number // all that the filters select, past this page
+  p50?: number // ms; unset with nothing selected
+  p95?: number
+  errorRate?: number // 0 to 1
+}
+
 // One calendar week; skills are rated over the six weeks up to it.
 export interface Report {
   since: number // Monday 00:00
@@ -1189,11 +1447,12 @@ export interface Report {
   agents: AgentReport[]
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
+  tools: ToolStat[] // in replies the viewer may read
 }
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'
-export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => a.wiki ?? 'read'
 export interface WikiPageInfo {
   title: string
   kind: string // the page's tipo, from its frontmatter

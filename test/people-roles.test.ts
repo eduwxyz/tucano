@@ -24,7 +24,7 @@ const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-roles-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const approval = (id: string, conversationId: string, requestedBy: string, agentId = 'a1'): Approval => ({ id, hash: id, agentId, conversationId, messageId: 'x', connectorId: 'c', connectorName: 'Linear', tool: 'create_issue', args: {}, why: '', highRisk: false, state: 'pending', createdAt: 1, expiresAt: Date.now() + 60_000, requestedBy })
 const ready = { installed: true, loggedIn: true }
-const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
+const settings: Settings = { workspaceName: 'Ana', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' }
 
 class FakePort implements PortLike {
   got: CoreEvent[] = []
@@ -65,6 +65,8 @@ describe('the permissions policy', () => {
       expect(() => admit(dani, m), m).not.toThrow()
       expect(() => admit(ana, m), m).not.toThrow()
     }
+    // Hermes reads the server's own ~/.hermes (the owner's SOUL.md and USER.md): never an invited admin.
+    expect([NEEDS.hermesPreview, NEEDS.importHermes]).toEqual(['owner', 'owner'])
     for (const m of (Object.keys(NEEDS) as Method[]).filter((x) => NEEDS[x] === 'owner')) {
       expect(() => admit(dani, m), m).toThrow()
       expect(() => admit(ana, m), m).not.toThrow()
@@ -110,7 +112,9 @@ describe('approvals: who decides', () => {
     expect(people.inbox(carl).approvals.map((x) => x.id)).toEqual(['p1'])
     expect(db.person(bia.id)).toMatchObject({ delegateTo: carl.id })
     // Over: no longer.
-    people.setDelegation(bia, carl.id, Date.now() + 1, Date.now())
+    // One clock reading for both: read twice, a millisecond can pass in between and make `until` already over.
+    const now = Date.now()
+    people.setDelegation(bia, carl.id, now + 1, now)
     db.setDelegation(bia.id, carl.id, Date.now() - 1)
     expect(people.canDecide(carl, a)).toBe(false)
     expect(() => people.setDelegation(bia, bia.id, Date.now() + 1000)).toThrow()
@@ -124,7 +128,7 @@ describe('approvals: who decides', () => {
     const turns: Turn[] = []
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', async *run(t) { turns.push(t); yield* base.run(t) } }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), qg: fakeEngine('qg') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint'), qg: fakeEngine('qg') } as Record<EngineId, Engine>
     const runner = new Runner({ db, engines, settings: async () => ({ ...settings, language: 'en' }), emit: () => {}, workDir: dir() })
     db.saveAgent({ ...agent('a1', 'lia'), owner: bia.id })
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })
@@ -241,7 +245,7 @@ describe('what a DM leaks: browsers, computers, files', () => {
 
   it('a cited file on a server is signed for one person', () => {
     const url = new URL(localUrl('chave', '/tmp/a.png', 'tucano://local', 'bia'))
-    expect(verifyLocal('chave', url)).toEqual({ path: '/tmp/a.png', person: 'bia' })
+    expect(verifyLocal('chave', url)).toMatchObject({ path: '/tmp/a.png', person: 'bia' })
     expect(verifyLocalUrl('chave', url)).toBeNull() // not an unsigned (desktop) address
     const forged = new URL(url.href.replace(/\/[^/]+$/, `/${Buffer.from('ana').toString('base64url')}`))
     expect(verifyLocal('chave', forged)).toBeNull()
@@ -301,7 +305,7 @@ describe('questions, mentions and memory between people', () => {
     events = []
     const base = fakeEngine('claude', { delayMs: 1 })
     const claude: Engine = { id: 'claude', async *run(t) { turns.push(t); yield* base.run(t) } }
-    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), qg: fakeEngine('qg') } as Record<EngineId, Engine>
+    const engines = { claude, codex: fakeEngine('codex'), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint'), qg: fakeEngine('qg') } as Record<EngineId, Engine>
     runner = new Runner({ db, engines, settings: async () => settings, emit: (e) => events.push(e), workDir: dir(), gateway, notify: (title, _b, conversationId, _k, _t, to) => void notes.push({ title, conversationId, to }) })
     db.saveAgent(agent('a1', 'lia'))
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1'] })
@@ -417,6 +421,20 @@ describe('questions, mentions and memory between people', () => {
     await runner.send('ch', '@lia peça pra bia', [], undefined, ana.id)
     await runner.idle()
     expect(notes.find((n) => n.title === 'Lia te mencionou')).toMatchObject({ to: [bia.id] })
+  })
+
+  it('cancelling a decisions card: only who may answer it; the question leaves the inbox without waking the agent', async () => {
+    await runner.send('ch', '@lia me ajuda a decidir, decida com a Bia', [], undefined, ana.id)
+    await runner.idle()
+    const [asked] = lia()
+    const before = turns.length
+    expect(() => runner.cancelQuestion(asked!.id, carl)).toThrow('Essa pergunta não é pra você.')
+    runner.cancelQuestion(asked!.id, bia)
+    await runner.idle()
+    expect(db.message(asked!.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.question(asked!.id)?.state).toBe('closed')
+    expect(people.inbox(bia).questions).toHaveLength(0)
+    expect(turns).toHaveLength(before)
   })
 
   // ask_user with options (decisions): answered on the card, one at a time, only by who may answer the question.

@@ -1,0 +1,8 @@
+{
+  "name": "keytar",
+  "version": "7.9.0-tucano",
+  "description": "Tucano's stand-in for keytar inside the Microsoft 365 connector: hands over the cache key Tucano keeps in its own vault. Not the real keytar.",
+  "main": "index.js",
+  "license": "MIT",
+  "private": true
+}

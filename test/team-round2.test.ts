@@ -14,14 +14,14 @@ import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
 import { Memories, memorySystem } from '../src/core/memory'
 import { People } from '../src/core/people'
-import { handoffSystem, routerSystem } from '../src/core/router'
+import { chimeSystem, handoffSystem, routerSystem } from '../src/core/router'
 import { Runner } from '../src/core/runs'
 
 const dir = (): string => mkdtempSync(join(tmpdir(), 'tucano-round2-'))
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({ id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra })
 const ready = { installed: true, loggedIn: true }
-const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
-const enginesWith = (claude: Engine): Record<EngineId, Engine> => ({ claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), qg: fakeEngine('qg') }) as Record<EngineId, Engine>
+const settings = (name = 'Ana'): Settings => ({ workspaceName: name, context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'auto', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt' })
+const enginesWith = (claude: Engine): Record<EngineId, Engine> => ({ claude, codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint'), qg: fakeEngine('qg') }) as Record<EngineId, Engine>
 
 // Ana (owner), Bruno (member), Carla (admin).
 function team(file = ':memory:'): { db: Db; people: People; ana: Person; bruno: Person; carla: Person } {
@@ -303,7 +303,7 @@ describe('10. routed replies in a busy channel', () => {
           yield { type: 'done', text: JSON.stringify({ handles: handle ? [handle] : [], reason: 'teste' }), usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }
-        if (t.system === handoffSystem() || t.system === memorySystem()) {
+        if (t.system === handoffSystem() || t.system === chimeSystem() || t.system === memorySystem()) {
           yield { type: 'done', text: '{"handles":[],"reason":"x","summary":"x","memories":[]}', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
           return
         }
@@ -349,7 +349,9 @@ describe('10. routed replies in a busy channel', () => {
     db.saveAgent(agent('a1', 'leo'))
     db.saveAgent(agent('a2', 'nico'))
     db.createConversation({ id: 'ch', kind: 'channel', name: 'geral', members: ['a1', 'a2'] })
-    const { runner, prompts } = rig(db, { routerMs: 250, agentMs: 100 })
+    // Leo's first reply has to be in before the second one is written: 130 ms to spare (it was 50, and
+    // a busy macOS runner in CI missed it on 2026-11-25).
+    const { runner, prompts } = rig(db, { routerMs: 250, agentMs: 20 })
     await runner.send('ch', 'leo: pergunta A sobre deploy')
     await sleep(150)
     await runner.send('ch', 'leo: pergunta B sobre testes')

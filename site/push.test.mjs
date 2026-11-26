@@ -48,3 +48,40 @@ test('without the key set, nothing is sent; texts are clipped for Apple', async 
   assert.equal((await send(post('send', { targets: [{ handle }], title: 'x' }), { PUSH_SEAL: env.PUSH_SEAL })).status, 503)
   assert.equal(payload({ title: 'x'.repeat(500), body: 'y'.repeat(5000) }).aps.alert.body.length, 1000)
 })
+
+test('the limit per phone counts the phone, however its handle is spelled or sealed', async () => {
+  const counts = new Map()
+  const limited = { ...env, PUSH_LIMIT: { limit: async ({ key }) => (counts.set(key, (counts.get(key) ?? 0) + 1), { success: counts.get(key) <= 60 }) } }
+  let delivered = 0
+  const fake = async () => (delivered++, new Response('', { status: 200 }))
+  const handle = await seal({ t: TOKEN, e: 'production' }, env)
+  // Spellings atob would read as the same bytes: spaces put in, + and / for - and _.
+  const spaced = (i) => `${handle.slice(0, 1 + (i % 10))}    ${handle.slice(1 + (i % 10))}` // four keep the padding atob expects
+  const std = handle.replace(/-/g, '+').replace(/_/g, '/')
+  for (const h of [spaced(0), std === handle ? `${handle}+` : std]) {
+    const r = await send(post('send', { targets: [{ handle: h }], title: 'x' }), limited, fake)
+    assert.deepEqual(await r.json(), { sent: 0, gone: [h] }) // refused as not a handle
+  }
+  // And handles sealed anew for the same phone, each a different text.
+  for (let i = 0; i < 100; i++) {
+    const h = i % 2 ? handle : await seal({ t: TOKEN, e: 'production' }, env)
+    await send(post('send', { targets: [{ handle: h }], title: 'x' }), limited, fake)
+  }
+  assert.equal(delivered, 60)
+})
+
+test('100 sends of one handle with spaces or + and / put in deliver at most 60', async () => {
+  const counts = new Map()
+  const limited = { ...env, PUSH_LIMIT: { limit: async ({ key }) => (counts.set(key, (counts.get(key) ?? 0) + 1), { success: counts.get(key) <= 60 }) } }
+  let delivered = 0
+  const fake = async () => (delivered++, new Response('', { status: 200 }))
+  const handle = await seal({ t: TOKEN, e: 'sandbox' }, env)
+  for (let i = 0; i < 100; i++) {
+    const at = 1 + (i % 60) // inside the first 64 characters, which were the old key
+    const h = i % 3 === 0 ? handle : i % 3 === 1 ? `${handle.slice(0, at)}    ${handle.slice(at)}` : `${handle.slice(0, at)}\n\n\n\n${handle.slice(at)}`.replace(/-/g, '+').replace(/_/g, '/')
+    await send(post('send', { targets: [{ handle: h }], title: 'x' }), limited, fake)
+  }
+  assert.ok(delivered <= 60)
+  assert.equal(await open(`${handle.slice(0, 5)}    ${handle.slice(5)}`, env), undefined)
+  assert.equal(await open(`${handle}+`, env), undefined)
+})

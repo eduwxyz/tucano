@@ -13,7 +13,7 @@
 // session is written to that home and deleted with thread/delete when the session goes, and at the
 // next start whatever an earlier run left of the agents' threads (see `clean`).
 import { spawn, type ChildProcess } from 'node:child_process'
-import { closeSync, existsSync, openSync, readdirSync, readSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isWin, killTree, spawnable } from '../platform'
@@ -364,6 +364,7 @@ interface Host {
   key: string
   home: string
   server: AppServer
+  login: number // the login file's time when this process started
   loaded: Set<string> // threads loaded in it
   turns: number
   timer?: NodeJS.Timeout
@@ -389,9 +390,22 @@ interface Spare {
 // Why the app-server can't take a turn at all (an old CLI): then the turn goes to exec.
 export class Unsupported extends Error {}
 
+// When the login file (auth.json) was last written. A process reads it once, when it starts, and keeps
+// the token it found. A new login rewrites it and revokes that token (401 token_revoked), so a process
+// that started before keeps failing every turn until it is replaced. 0: no login file to compare.
+const loginAt = (home: string): number => {
+  try {
+    return statSync(join(home, 'auth.json')).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
 export class CodexApp {
   private hosts = new Map<string, Promise<Host>>()
+  private running = new Set<Promise<Host>>() // every process not gone yet, a replaced one with threads left included
   private servers = new Map<string, AppServer>() // each host's process, to tell a dead one before its exit comes
+  private logins = new Map<string, number>() // by host key: the login file's time when that process started
   private kept = new Map<string, Kept>() // by session id
   private spares = new Map<string, Spare>()
   private removing = new Set<Promise<void>>()
@@ -409,10 +423,13 @@ export class CodexApp {
   private host(bin: string, l: Launch): Promise<Host> {
     const key = JSON.stringify([bin, l.key])
     const had = this.hosts.get(key)
-    if (had && this.servers.get(key)?.alive !== false) return had
+    // Reused only while the login is the one it started with; after a new login, a new process.
+    if (had && this.servers.get(key)?.alive !== false && this.logins.get(key) === loginAt(l.home)) return had
     const server = new AppServer({ bin, args: l.args, cwd: l.cwd, env: l.env })
     this.servers.set(key, server)
-    const host: Host = { bin, key, home: l.home, server, loaded: new Set(), turns: 0 }
+    const login = loginAt(l.home)
+    this.logins.set(key, login)
+    const host: Host = { bin, key, home: l.home, server, login, loaded: new Set(), turns: 0 }
     const ready = server.ready.then(
       () => host,
       (e: unknown) => {
@@ -423,12 +440,17 @@ export class CodexApp {
       }
     )
     this.hosts.set(key, ready)
+    this.running.add(ready)
     const later = this.later
     this.later = undefined
     later?.(bin)
     void server.exited().then(() => {
+      this.running.delete(ready)
       if (this.hosts.get(key) === ready) this.hosts.delete(key)
-      if (this.servers.get(key) === server) this.servers.delete(key)
+      if (this.servers.get(key) === server) {
+        this.servers.delete(key)
+        this.logins.delete(key)
+      }
       if (host.timer) clearTimeout(host.timer)
       for (const k of this.kept.values()) if (k.host === host) this.unpark(k)
       for (const [sk, s] of this.spares) if (s.host === host) this.dropSpare(sk)
@@ -555,9 +577,10 @@ export class CodexApp {
     const { prompt: _p, blocks: _b, images: _i, signal: _s, session: _n, ...shape } = turn
     const sk = JSON.stringify([bin, l.key, this.setup.thread(shape)])
     const spare = this.spares.get(sk)
+    if (spare && this.stale(spare.host)) this.dropSpare(sk) // warmed before a new login: its process has the old one
     let host: Host
     let threadId: string
-    if (spare?.host.server.alive) {
+    if (spare?.host.server.alive && !this.stale(spare.host)) {
       this.spares.delete(sk)
       clearTimeout(spare.timer)
       host = spare.host
@@ -628,7 +651,7 @@ export class CodexApp {
   // The thread loaded in a process with this turn's settings: as it is, or resumed from disk.
   private async load(bin: string, k: Kept, l: Launch): Promise<string | undefined> {
     const key = JSON.stringify([bin, l.key])
-    if (k.host?.server.alive && k.host.key === key) return
+    if (k.host?.server.alive && k.host.key === key && !this.stale(k.host)) return
     if (k.host) {
       this.unpark(k) // another process (the provider changed): it leaves that one first
       await k.busy
@@ -653,6 +676,12 @@ export class CodexApp {
     // Waiting past the cap: the one waiting longest is unloaded.
     const idle = [...this.kept.values()].filter((x) => x.host && x.timer).sort((a, b) => a.usedAt - b.usedAt)
     for (const x of idle.slice(0, Math.max(0, idle.length - MAX_IDLE))) this.unpark(x)
+  }
+
+  // A process that started before the login file was last written (see loginAt). Read from the process
+  // itself: the time by key moves to its replacement, and threads still on this one would look current.
+  private stale(host: Host): boolean {
+    return host.login !== loginAt(host.home)
   }
 
   // Unloaded; what comes next for the thread waits for that (a resume, its deletion).
@@ -770,7 +799,8 @@ export class CodexApp {
     for (const s of this.spares.values()) clearTimeout(s.timer)
     this.kept.clear()
     this.spares.clear()
-    for (const h of this.hosts.values()) void h.then((host) => host.server.killNow(), () => {})
+    for (const h of this.running) void h.then((host) => host.server.killNow(), () => {})
+    this.running.clear()
     this.hosts.clear()
   }
 }

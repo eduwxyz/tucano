@@ -32,8 +32,8 @@ export const kindLabel = (k: ActionKind): string =>
     send: L('Enviar mensagem', 'Send a message'),
     publish: L('Publicar ou colocar no ar', 'Publish or deploy'),
     pay: L('Pagar ou transferir', 'Pay or transfer'),
-    browser: L('Clique arriscado no navegador', 'A risky click in the browser'),
-    apps: L('Ação arriscada nos apps', 'A risky action in an app')
+    browser: L('Clique arriscado no navegador', "Risky browser clicks"),
+    apps: L('Ação arriscada nos apps', "Risky app actions")
   })[k]
 
 export const actionHint = (k: ActionKind): string =>
@@ -65,7 +65,7 @@ export const actionVerb = (k: ActionKind): string =>
     apps: L('agir num app', 'act in an app')
   })[k]
 
-export const modeLabel = (m: ActionMode): string => ({ ask: L('Pede aprovação', 'Asks first'), auto: L('Faz sozinho', 'Does it alone'), off: L('Nunca', 'Never') })[m]
+export const modeLabel = (m: ActionMode): string => ({ ask: L('Pede aprovação', "Ask first"), auto: L('Faz sozinho', "Automatic"), off: L('Nunca', 'Never') })[m]
 
 // Only known kinds with known modes: what a saved rule set may hold.
 export function cleanRules(value: unknown): ActionRules {
@@ -89,9 +89,9 @@ export const isAutonomy = (v: unknown): v is Autonomy => typeof v === 'string' &
 export const autonomyLabel = (a: Autonomy): string => ({ careful: L('Cuidadoso', 'Careful'), normal: L('Normal', 'Normal'), free: L('Sem travas', 'No guardrails') })[a]
 export const autonomyHint = (a: Autonomy): string =>
   ({
-    careful: L('Pede aprovação antes de qualquer coisa que mude algo: escrever num conector, commit, push, um clique arriscado.', 'Asks before anything that changes something: writing in a connector, a commit, a push, a risky click.'),
-    normal: L('Lê e escreve sozinho; pede antes do que é sensível: enviar, apagar, publicar, pagar, um clique arriscado.', 'Reads and writes on its own; asks before what’s sensitive: sending, deleting, publishing, paying, a risky click.'),
-    free: L('Faz tudo sozinho, sem pedir. O que você marcou como alto risco ainda pede.', 'Does everything on its own, without asking. What you marked high risk still asks.')
+    careful: L('Pede aprovação antes de qualquer coisa que mude algo: escrever num conector, commit, push, um clique arriscado.', "Ask before changes, including connector writes, commits, pushes, and risky clicks."),
+    normal: L('Lê e escreve sozinho; pede antes do que é sensível: enviar, apagar, publicar, pagar, um clique arriscado.', "Allow reads and writes; ask before sending, deleting, publishing, paying, or risky clicks."),
+    free: L('Faz tudo sozinho, sem pedir. O que você marcou como alto risco ainda pede.', "Act without approval, except for tools marked high risk.")
   })[a]
 
 // What a level says about a kind; undefined: the tool's class decides (sensitive asks), as before levels.
@@ -137,9 +137,15 @@ export function gate(kinds: readonly ActionKind[], p: Policy): { mode?: ActionMo
 }
 
 // What happens to one call. `cls`: the tool's class (a command is a write); `alwaysAllowed`: approved
-// for good from a card; `outside`: the turn has read something from outside; `askByDefault`: what
+// for good from a card, which holds even after something from outside (only careful, an "ask" rule,
+// "never" or a high-risk tool still stop it); `outside`: the turn has read something from outside; `askByDefault`: what
 // no rule decides asks (a risky click), else it goes by the class.
 export type Verdict = { run: boolean; off?: boolean; why: 'read' | 'rule' | 'level' | 'class' | 'always' | 'risk' | 'guard' | 'never'; kinds: ActionKind[] }
+
+// A command that deletes, publishes, merges, sends or pays is judged as a sensitive action, so the
+// normal level asks first, as it promises; committing, pushing and opening a PR stay writes.
+const SENSITIVE_SHELL: readonly ActionKind[] = ['delete', 'publish', 'merge', 'send', 'pay']
+export const shellClass = (kinds: readonly ActionKind[]): 'write' | 'sensitive' => (kinds.some((k) => SENSITIVE_SHELL.includes(k)) ? 'sensitive' : 'write')
 
 export function verdict(o: { cls: 'read' | 'write' | 'sensitive'; kinds: readonly ActionKind[]; p: Policy; highRisk?: boolean; alwaysAllowed?: boolean; outside?: boolean; askByDefault?: boolean }): Verdict {
   if (o.cls === 'read' && !o.askByDefault) return { run: true, why: 'read', kinds: [] }
@@ -149,7 +155,9 @@ export function verdict(o: { cls: 'read' | 'write' | 'sensitive'; kinds: readonl
   if (g.mode === 'ask') return { run: false, why: 'rule', kinds: g.kinds }
   const level = levelOf(o.p)
   // Let through by a rule or by the level: unless what goes out came after something from outside.
-  const loose = (why: Verdict['why'], kinds: readonly ActionKind[], outbound: boolean): Verdict => (outbound && o.p.guard !== false && o.outside ? { run: false, why: 'guard', kinds: [...kinds] } : { run: true, why, kinds: [...kinds] })
+  // A tool the person allowed for good ("sempre permitir") still runs then: that choice holds always.
+  const loose = (why: Verdict['why'], kinds: readonly ActionKind[], outbound: boolean): Verdict =>
+    outbound && o.p.guard !== false && o.outside ? (o.alwaysAllowed ? { run: true, why: 'always', kinds: [...kinds] } : { run: false, why: 'guard', kinds: [...kinds] }) : { run: true, why, kinds: [...kinds] }
   if (g.mode === 'auto') return loose('rule', g.kinds, g.kinds.some((k) => OUTBOUND.includes(k)))
   // No rule decides: the level, then the class.
   if (level === 'careful') return { run: false, why: 'level', kinds: g.kinds }

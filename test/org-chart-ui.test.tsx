@@ -1,6 +1,6 @@
 import { parseHTML } from 'linkedom'
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Agent, Conversation, Delegation, Message } from '../src/shared/types'
 import type { State } from '../src/renderer/src/store'
 const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>')
@@ -11,7 +11,7 @@ let busy = new Map<string, Message>()
 let admin = true
 const save = vi.fn(async (_agent: Agent, _channels: string[]) => {})
 const settings = vi.fn((_patch: { orgLayout?: Record<string, { x: number; y: number }> | null }) => {})
-const asked = vi.fn(async (_agent: string, _text: string) => 'dm')
+const asked = vi.fn(async (_agent: string, _text: string, _images: unknown[], _files: unknown[]) => 'dm')
 const go = vi.fn()
 vi.mock('../src/renderer/src/store', () => ({
   useStore: (select: (s: unknown) => unknown) => select(fake),
@@ -19,12 +19,13 @@ vi.mock('../src/renderer/src/store', () => ({
   isTeam: (a: Agent) => !a.archived && a.kind !== 'tuca',
   saveAgent: (a: Agent, c: string[]) => save(a, c),
   updateSettings: (p: never) => settings(p),
-  askAgent: (id: string, text: string) => asked(id, text),
+  askAgent: (id: string, text: string, images: unknown[] = [], files: unknown[] = []) => asked(id, text, images, files),
   navigate: (v: unknown) => go(v),
   setTab: () => {},
   openDm: (id: string) => go({ dm: id }),
   openThread: (id: string) => go({ thread: id }),
   openTuca: () => go('tuca'),
+  makeWithTuca: () => go('tuca'),
   workingOn: () => busy
 }))
 vi.mock('../src/renderer/src/components/ui', () => ({ AgentAvatar: () => null, MeAvatar: () => null, Icon: () => null, ago: () => 'há 2 min', ownColor: () => ({}) }))
@@ -223,6 +224,43 @@ it('moves a card with its branch, and keeps the board as I left it', async () =>
   expect(settings.mock.calls[1]![0].orgLayout).toMatchObject({ bento: { x: before.bento!.x + 30, y: before.bento!.y }, nico: before.nico })
 })
 
+it('moves and zooms the board straight on the page, and keeps the view once the move ends', async () => {
+  vi.useFakeTimers()
+  try {
+    const board = document.querySelector('.orgb')!
+    const stage = document.querySelector<HTMLElement>('.orgb__stage')!
+    const label = document.querySelector('.org-tools__k')!
+    const wheel = async (extra: Record<string, unknown>) =>
+      act(async () => {
+        const e = new window.Event('wheel', { bubbles: true, cancelable: true })
+        Object.assign(e, { clientX: 0, clientY: 0, deltaX: 0, deltaY: 0, ...extra })
+        board.dispatchEvent(e)
+      })
+    // Two fingers: the board slides at once, and only while it moves is it a layer of its own.
+    await wheel({ deltaX: 30, deltaY: 10 })
+    expect(stage.style.transform).toBe('translate(-30px, -10px) scale(1)')
+    expect(board.classList.contains('is-panning')).toBe(true)
+    // A pinch zooms where the pointer is, and the zoom reads right away.
+    await wheel({ deltaY: -20, ctrlKey: true })
+    expect(label.textContent).toBe(`${Math.round(Math.exp(0.2) * 100)}%`)
+    // A moment without the wheel ends the move: the view is kept, and the layer goes.
+    await act(async () => void vi.advanceTimersByTime(200))
+    expect(board.classList.contains('is-panning')).toBe(false)
+    expect(stage.getAttribute('style')).toContain(`scale(${Math.exp(0.2)})`)
+    // A drag on the board goes on from there.
+    await ptr(board, 'pointerdown', 100, 100)
+    await ptr(document, 'pointermove', 140, 100)
+    // (the zoom kept the corner under the pointer where it was: the board's origin moved with it)
+    const f = Math.exp(0.2)
+    expect(stage.style.transform).toBe(`translate(${-30 * f + 40}px, ${-10 * f}px) scale(${f})`)
+    await ptr(document, 'pointerup', 140, 100)
+    expect(board.classList.contains('is-panning')).toBe(false)
+    expect(stage.getAttribute('style')).toContain(`translate(${-30 * f + 40}px, ${-10 * f}px)`)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 it('draws the board as it was left, and tidies it up when asked', async () => {
   expect([...document.querySelectorAll('button')].some((b) => b.textContent === 'Organizar')).toBe(false)
   fake = { ...fake, settings: { orgLayout: { me: { x: 0, y: 0 }, orion: { x: 500, y: 40 }, clara: { x: 10, y: 300 }, gone: { x: 9, y: 9 } } } }
@@ -266,13 +304,55 @@ it('asks whoever is at the top, or the agent picked, without leaving the board',
   expect(box().getAttribute('placeholder')).toBe('Pedir algo a orion…')
   await type(box(), '  veja por que a conversão caiu  ')
   await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
-  expect(asked).toHaveBeenCalledWith('orion', 'veja por que a conversão caiu')
+  expect(asked).toHaveBeenCalledWith('orion', 'veja por que a conversão caiu', [], [])
   expect(box().getAttribute('placeholder')).toContain('Enviado a orion')
   await pick('clara')
   expect(box().getAttribute('placeholder')).toContain('clara')
   await type(box(), 'responda o Fulano')
   await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) })
-  expect(asked).toHaveBeenLastCalledWith('clara', 'responda o Fulano')
+  expect(asked).toHaveBeenLastCalledWith('clara', 'responda o Fulano', [], [])
+})
+
+// linkedom has no FileReader: this one reads the same bytes through Blob, as the browser's does.
+const previousFileReader = globalThis.FileReader
+afterAll(() => Object.assign(globalThis, { FileReader: previousFileReader }))
+class BlobReader {
+  result: string | null = null
+  error: unknown = null
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  readAsDataURL(blob: Blob): void {
+    void blob.arrayBuffer().then((buf) => ((this.result = `data:${blob.type};base64,${Buffer.from(buf).toString('base64')}`), this.onload?.()), () => this.onerror?.())
+  }
+}
+
+it('sends a file along with the question, or alone, and clears the chips after', async () => {
+  Object.assign(globalThis, { FileReader: BlobReader })
+  const picker = (): HTMLInputElement => document.querySelector('.org-ask input[type="file"]')!
+  const submit = async (): Promise<void> => void (await act(async () => { document.querySelector('.org-ask')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })) }))
+  const attach = async (name: string, body: string): Promise<void> => {
+    Object.defineProperty(picker(), 'files', { configurable: true, value: [new File([body], name, { type: 'text/plain' })] })
+    await act(async () => { picker().dispatchEvent(new window.Event('change', { bubbles: true })) })
+  }
+  const send = (): HTMLButtonElement => document.querySelector('.org-ask button.btn--primary')!
+  expect(send().disabled).toBe(true)
+  await attach('notas.txt', 'conversão caiu')
+  expect(document.querySelector('.composer__file-name')?.textContent).toBe('notas.txt')
+  expect(send().disabled).toBe(false) // an attachment alone can go
+  // Taking one off is only that: its button sits outside the form, so it sends nothing.
+  await attach('rascunho.txt', 'x')
+  expect(document.querySelectorAll('.composer__file')).toHaveLength(2)
+  const calls = asked.mock.calls.length
+  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('.composer__file-x')].at(-1)!.click() })
+  expect(asked.mock.calls.length).toBe(calls)
+  expect(document.querySelectorAll('.composer__file')).toHaveLength(1)
+  await type(document.querySelector('.org-ask input[type="text"]')!, 'olhe isto')
+  await submit()
+  expect(asked).toHaveBeenCalledWith('orion', 'olhe isto', [], [{ name: 'notas.txt', data: Buffer.from('conversão caiu').toString('base64') }])
+  expect(document.querySelector('.org-ask-wrap .composer__images')).toBeNull() // the box is empty again
+  await attach('so-arquivo.txt', 'oi')
+  await submit()
+  expect(asked).toHaveBeenLastCalledWith('orion', '', [], [{ name: 'so-arquivo.txt', data: Buffer.from('oi').toString('base64') }])
 })
 
 it('shows what is under way: the request, the line it travels and what each one is doing', async () => {

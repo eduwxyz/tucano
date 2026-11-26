@@ -80,7 +80,7 @@ const computers = {
 function runner(plan: (turn: Turn, tools: string[]) => Plan): Runner {
   return new Runner({
     db,
-    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), qg: fakeEngine('qg') },
+    engines: { claude: scripted(plan, seen), codex: fakeEngine('codex', { delayMs: 1 }), opencode: fakeEngine('opencode'), pi: fakeEngine('pi'), antigravity: fakeEngine('antigravity'), cursor: fakeEngine('cursor'), grok: fakeEngine('grok'), cline: fakeEngine('cline'), hermes: fakeEngine('hermes'), endpoint: fakeEngine('endpoint'), qg: fakeEngine('qg') },
     settings: async () => settings,
     emit: () => {},
     workDir: join(dir, 'work'),
@@ -112,7 +112,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   seen = { turns: [], tools: [], results: [] }
   ran = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', autonomy: 'careful' } // careful: every kind asks unless a rule says otherwise
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready, opencode: ready, pi: ready, antigravity: ready, cursor: ready, grok: ready, cline: ready, hermes: ready, endpoint: ready, qg: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system', language: 'pt', autonomy: 'careful' } // careful: every kind asks unless a rule says otherwise
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: () => {}, openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })
@@ -375,6 +375,59 @@ describe('levels', () => {
     await r.send('d1', 'cria uma tarefa')
     await r.idle()
     expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: 'create_task' })
+  })
+})
+
+describe('commands at normal', () => {
+  // Reads the list on "lista" (something from outside), then runs the command.
+  const readsThenRuns = (command: string) => (turn: Turn): Plan =>
+    turn.prompt.includes('aprovou') ? null : turn.prompt.includes('roda') ? { tool: 'bash', args: { command } } : turn.prompt.includes('lista') ? { tool: 'tarefas__list_tasks', args: {} } : null
+  const destructive = ['rm -rf src', 'npm publish', 'gh repo delete x/y --yes', 'terraform destroy']
+
+  for (const command of destructive) {
+    it(`"${command}" asks first at normal, as the level promises`, async () => {
+      settings = { ...settings, autonomy: undefined }
+      const r = runner(runs(command))
+      await r.send('d1', 'faça')
+      await r.idle()
+      expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: 'bash', args: { command } })
+      expect(ran).toEqual([])
+    })
+
+    it(`"${command}" asks first at normal after reading something from outside too`, async () => {
+      settings = { ...settings, autonomy: undefined }
+      const r = runner(readsThenRuns(command))
+      await r.send('d1', 'lista as tarefas')
+      await r.idle()
+      expect(agentMessages()[0]!.run!.outside).toBe(true)
+      await r.send('d1', 'roda o comando')
+      await r.idle()
+      expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: 'bash', args: { command } })
+      expect(ran).toEqual([])
+    })
+  }
+
+  it('a commit still runs right away at normal', async () => {
+    settings = { ...settings, autonomy: undefined }
+    const r = runner(runs('git add -A && git commit -m "x"'))
+    await r.send('d1', 'salva')
+    await r.idle()
+    expect(ran).toEqual(['git add -A && git commit -m "x"'])
+    expect(db.approvals()).toEqual([])
+  })
+
+  it('"faz sozinho" for deleting still lets a delete run, and no guardrails still runs one', async () => {
+    settings = { ...settings, autonomy: undefined, actionRules: { delete: 'auto' } }
+    const r = runner(runs('rm -rf build'))
+    await r.send('d1', 'limpa')
+    await r.idle()
+    expect(ran).toEqual(['rm -rf build'])
+    settings = { ...settings, autonomy: 'free', actionRules: undefined }
+    const f = runner(runs('rm -rf dist'))
+    await f.send('d1', 'limpa')
+    await f.idle()
+    expect(ran).toEqual(['rm -rf build', 'rm -rf dist'])
+    expect(db.approvals()).toEqual([])
   })
 })
 

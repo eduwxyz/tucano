@@ -4,7 +4,7 @@
 import { L } from '../../../shared/lang'
 import { freshParts, MISSIONS, missionsDone, partShows, shortSidebar, type MissionFacts, type MissionId, type SidebarPart } from '../../../shared/onboarding'
 import type { ReactNode } from 'react'
-import { getState, isTeam, navigate, openTuca, updateSettings, useStore, type State, type View } from '../store'
+import { getState, isTeam, makeWithTuca, navigate, openTuca, updateSettings, useStore, type State, type View } from '../store'
 import { Icon, TucaMark } from './ui'
 
 // Whether one of the team's agents (not the Tuca) finished a reply, and whether an agent's question
@@ -76,7 +76,7 @@ const go = (id: MissionId): View | 'tuca' => {
 }
 const doIt = (id: MissionId): void => {
   const to = go(id)
-  if (to === 'tuca') openTuca()
+  if (to === 'tuca') (id === 'second' ? makeWithTuca : openTuca)() // a second agent: the Tuca's screen, ready to build one
   else navigate(to)
 }
 
@@ -185,7 +185,7 @@ export function MissionsPage(): ReactNode {
         <button className="missions-link missions-link--quiet" onClick={() => (updateSettings({ onboarding: { ...(onboarding ?? { done: true }), checklistHidden: true } }), navigate({ kind: 'approvals' }))}>
           {L('Esconder as missões', 'Hide the missions')}
         </button>{' '}
-        <span>{L('Voltam em Configurações.', 'They come back in Settings.')}</span>
+        <span>{L('Voltam no menu do nome do workspace, no topo.', 'They come back from the workspace’s menu, at the top.')}</span>
       </p>
     </div>
   )

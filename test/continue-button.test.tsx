@@ -18,6 +18,7 @@ vi.mock('open-bot-avatar/dom', () => ({ mountAvatar: () => new Proxy({}, { get: 
 let fake: State
 const continueRun = vi.fn(async () => {})
 const retryRun = vi.fn(async () => {})
+const continueJob = vi.fn(async () => {})
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
   return {
@@ -26,6 +27,7 @@ vi.mock('../src/renderer/src/store', async (original) => {
     getState: () => fake,
     continueRun,
     retryRun,
+    continueJob,
     setTab: vi.fn(),
     navigate: vi.fn(),
     voiceStatus: vi.fn(() => new Promise(() => {}))
@@ -49,6 +51,7 @@ beforeEach(() => {
   setLang('en')
   continueRun.mockClear()
   retryRun.mockClear()
+  continueJob.mockClear()
   const mount = document.getElementById('root')!
   mount.innerHTML = ''
   root = undefined
@@ -98,5 +101,40 @@ describe('a reply the app cut', () => {
     expect(continueRun).toHaveBeenCalledWith('m1')
     // And it is not the same thing as trying again from the beginning.
     expect(retryRun).not.toHaveBeenCalled()
+  })
+})
+
+describe('a piece of work stopped on its brakes', () => {
+  const note = (stop?: { job: string }): Message => ({ id: 'n1', conversationId: 'd1', author: { kind: 'system' }, text: '**I stopped this work**: 3 replies in a row brought nothing new.\n\n**Done so far**\n- Lia: Ran the tests\n\nTo go on, click Continue, or write here what to change.', at: 3, ...(stop ? { stop } : {}) })
+
+  it('shows the whole note with Continue, which goes on with the work', async () => {
+    fake = { ...fake, messages: { d1: [note({ job: 'j1' })] } }
+    await render(<ConversationView id="d1" />)
+    expect(document.querySelector('.system-line--stop')?.textContent).toContain('Done so far')
+    const button = [...document.querySelectorAll('button.retry')].find((b) => b.textContent?.trim() === 'Continue')
+    await act(async () => (button as unknown as { click: () => void }).click())
+    expect(continueJob).toHaveBeenCalledWith('n1')
+  })
+
+  it('once someone went on, the note stays without the button', async () => {
+    fake = { ...fake, messages: { d1: [note()] } }
+    await render(<ConversationView id="d1" />)
+    expect(buttons()).not.toContain('Continue')
+  })
+})
+
+describe("a request's line", () => {
+  it("says what the one doing it is on right now, while it works", async () => {
+    const rev: Agent = { ...agent(), id: 'a2', name: 'Rev', handle: 'rev' }
+    const ch: Conversation = { id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] }
+    const asked: Message = { id: 'm1', conversationId: 'c1', author: { kind: 'agent', id: 'a1' }, text: '', at: 2, run: { status: 'done', steps: [], delegations: [{ id: 'dl1', to: 'a2', conversationId: 'c1', rootId: 'm1' }] } }
+    const doing: Message = { id: 'm2', conversationId: 'c1', threadId: 'm1', author: { kind: 'agent', id: 'a2' }, text: '', at: 3, run: { status: 'working', steps: [step('Read the diff', 'done'), step('Running the tests', 'running')] } }
+    const open = { id: 'dl1', from: 'a1', to: 'a2', conversationId: 'c1', rootId: 'm1', originConversationId: 'c1', originMessageId: 'm1', requestedBy: 'ana', text: 'review it', state: 'open' as const, createdAt: 2 }
+    fake = { ...fake, agents: [agent(), rev], conversations: [ch], messages: { c1: [asked, doing] }, delegations: [open] }
+    await render(<ConversationView id="c1" />)
+    expect(document.querySelector('.delegation-chip .request-note__state')?.textContent).toBe('working · Running the tests')
+    fake = { ...fake, messages: { c1: [asked, { ...doing, run: { ...doing.run!, status: 'done' } }] } }
+    await render(<ConversationView id="c1" />)
+    expect(document.querySelector('.delegation-chip .request-note__state')?.textContent).toBe('working')
   })
 })

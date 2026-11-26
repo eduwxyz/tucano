@@ -22,7 +22,11 @@ contextBridge.exposeInMainWorld('tucano', {
     }
   },
   connect: (): void => ipcRenderer.send('core:connect'),
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
+  pickFolder: (o?: { start?: string; hidden?: boolean }): Promise<string | null> => ipcRenderer.invoke('pick-folder', o) as Promise<string | null>,
+  // The picture on the clipboard, so a connector's icon can be pasted in instead of picked.
+  image: {
+    paste: (): Promise<{ mime: string; data: string } | null> => ipcRenderer.invoke('image:fromClipboard') as Promise<{ mime: string; data: string } | null>
+  },
   // A picked file's path, so the core reads a big .zip in parts instead of through the page.
   pathOf: (file: File): string => webUtils.getPathForFile(file),
   // A click on a notification opens its conversation, and the thread it's about.
@@ -30,8 +34,8 @@ contextBridge.exposeInMainWorld('tucano', {
     ipcRenderer.on('navigate', (_e, id: unknown, thread: unknown) => typeof id === 'string' && cb(id, typeof thread === 'string' ? thread : undefined))
   },
   // …or a screen (a skill proposal opens Skills).
-  onNavigatePage: (cb: (page: 'skills') => void): void => {
-    ipcRenderer.on('navigate-page', (_e, page: unknown) => page === 'skills' && cb(page))
+  onNavigatePage: (cb: (page: 'skills' | 'servers') => void): void => {
+    ipcRenderer.on('navigate-page', (_e, page: unknown) => (page === 'skills' || page === 'servers') && cb(page))
   },
   // The core's process ended: the page says so and offers to reload, which starts a new one.
   onCoreDown: (cb: () => void): void => {
@@ -41,6 +45,8 @@ contextBridge.exposeInMainWorld('tucano', {
   testNotify: (): Promise<unknown> => ipcRenderer.invoke('notify:test'),
   // The conversation on screen: the Mac doesn't notify about the one you're reading.
   viewing: (conversationId: string | null): void => ipcRenderer.send('viewing', conversationId),
+  // "Enviar feedback": a picture of this window, before the dialog opens over it (null: it didn't work).
+  capture: (): Promise<unknown> => ipcRenderer.invoke('window:capture'),
   // The app's own updates.
   updateState: (): Promise<unknown> => ipcRenderer.invoke('update:state'),
   onUpdate: (cb: (state: unknown) => void): void => {
@@ -66,6 +72,8 @@ contextBridge.exposeInMainWorld('tucano', {
     open: (id: string): void => ipcRenderer.send('servers:open', id),
     local: (): void => ipcRenderer.send('servers:local'),
     forget: (id: string): Promise<unknown> => ipcRenderer.invoke('servers:forget', id),
+    setNode: (id: string, on: boolean): void => ipcRenderer.send('servers:node', id, on),
+    openAgents: (id: string): void => ipcRenderer.send('servers:agents', id),
     // Returns how to stop listening: each screen showing the list listens while it's open.
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
