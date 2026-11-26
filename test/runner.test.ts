@@ -152,11 +152,22 @@ describe('Runner', () => {
   it('reports a router failure and asks for a mention', async () => {
     settings.routerModel = 'gpt-5.6-luna'
     settings.engines.codex = { installed: true, loggedIn: false }
+    settings.engines.claude = { installed: true, loggedIn: false } // the agents' own harness can't pick either
     const r = runner()
     await r.send('c1', 'alguém?')
     await r.idle()
     expect(agentMessages()).toHaveLength(0)
     expect(db.messages().at(-1)?.text).toContain('Mencione um agente')
+  })
+
+  // The router's harness out, the agents' still up: one of their models picks, and the channel answers.
+  it("picks with an agent's model when the router's harness can't", async () => {
+    settings.routerModel = 'gpt-5.6-luna'
+    settings.engines.codex = { installed: true, loggedIn: false }
+    const r = runner()
+    await r.send('c1', 'alguém?')
+    await r.idle()
+    expect(db.messages().some((m) => m.author.kind === 'system' && /não pôde, decidiu o Sonnet/.test(m.text))).toBe(true)
   })
 
   it('an agent mentioning another hands it the turn, and a ping-pong that moves nothing stops after 3 replies', async () => {

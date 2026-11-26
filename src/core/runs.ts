@@ -1273,9 +1273,21 @@ export class Runner {
 
       const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
+      // The router's model out of quota or not ready: the channel's agents' reserve models pick
+      // instead, as their replies would move to them, so a channel doesn't go quiet while a DM still answers.
+      const onReserve = async (why: string): Promise<void> => {
+        const reserves = routerReserves(members, settings, model.engine)
+        for (const alt of reserves) {
+          const rr = await during({ operation: 'router', sessionId: trigger, conversationId: conv.id }, () => route({ ...input, engine: engines[alt.engine], model: alt.id, cwd: join(this.deps.workDir, '_router') }))
+          if (rr.usage) db.addReceipt({ ...rr.usage, model: alt.id, ms: rr.ms, messageId: note.id, agentId: 'router', engine: alt.engine, at: Date.now() })
+          if (!('error' in rr)) return this.routed(conv, note, rr.agents, trigger, `${rr.reason}${fellBack} · ${L(`o ${ENGINES[model.engine].label} não pôde, decidiu o ${alt.label}`, `${ENGINES[model.engine].label} couldn't, ${alt.label} decided`)}`, parallel)
+        }
+        fail(why)
+      }
       // The router's logins: the primary one first when one is set, then the others in order, each tried once.
       const logins = loginsInOrder(settings, model.engine)
-      if (!status.installed || !logins.some((login) => login.ready)) return fail(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
+      mkdirSync(join(this.deps.workDir, '_router'), { recursive: true })
+      if (!status.installed || !logins.some((login) => login.ready)) return await onReserve(L(`o ${ENGINES[model.engine].label} não está pronto`, `${ENGINES[model.engine].label} isn't ready`))
 
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
@@ -1290,8 +1302,8 @@ export class Runner {
         this.spent.mark(model.engine, login.id, Date.now())
       }
       const label = ENGINES[model.engine].label
-      if (!r) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
-      if ('error' in r && tried.size > 1 && outOfQuota(r.error)) return fail(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if (!r) return await onReserve(noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }))
+      if ('error' in r && outOfQuota(r.error)) return await onReserve(tried.size > 1 ? noLoginLeft(logins, { engine: model.engine, label, spent: this.spent, now: Date.now() }) : friendly(r.error, { engine: label, doing: L('escolher quem responde', 'picking who answers') }).text)
       // In the words an agent's failure uses (the plan's limit, a login, the network), not the CLI's own.
       if ('error' in r) return fail(friendly(r.error, { engine: ENGINES[model.engine].label, doing: L('escolher quem responde', 'picking who answers') }).text)
       this.routed(conv, note, r.agents, trigger, `${r.reason}${fellBack}`, parallel)
@@ -4835,4 +4847,21 @@ ${note}`,
       this.checkIdle()
     }
   }
+}
+
+// Models that may pick who answers in a channel when the router's own can't: the reserve
+// models of the channel's agents, then their main ones, on another harness that's signed in.
+export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
+  const ids = [...members.map((a) => a.fallbackModelId), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
+  const seen = new Set<string>()
+  const list: NonNullable<ReturnType<typeof modelInfo>>[] = []
+  for (const id of ids) {
+    const m = usable(modelInfo(id))
+    if (!m || m.engine === out || seen.has(m.id)) continue
+    const st = settings.engines[m.engine]
+    if (!st?.installed || !st.loggedIn) continue
+    seen.add(m.id)
+    list.push(m)
+  }
+  return list.slice(0, 2)
 }

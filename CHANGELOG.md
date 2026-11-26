@@ -7,6 +7,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** **ditar a resposta de uma decisão.** O microfone fica no cantinho do campo de resposta, numa pergunta de texto ou em "Outra coisa…" depois de aberta, e funciona como no campo de mensagem (⌥Espaço no Mac, Ctrl+Espaço no Windows e no Linux). Nada é enviado até você confirmar.
 > - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
+> - **Corrigido:** com o modelo do **roteador** sem limite (o Haiku, quando o Claude acaba), um **canal** ficava sem resposta, enquanto a DM com o mesmo agente seguia no modelo reserva. Agora o reserva dos agentes do canal escolhe quem responde, e a mensagem diz isso.
 
 ### Added
 
@@ -14,6 +15,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A channel answers when the router's model is out.** The router picked who answers with its own model only, Haiku by default: with Claude out of quota it gave up with "mention an agent", while a DM to the same agent moved to its reserve and answered. It now picks with the channel agents' reserve models (then their main ones) on another harness that is signed in, and its note says so ("Claude Code couldn't, Grok 4.7 decided").
 - **Dictation drops the sounds whisper names.** A noise could come out as "*Loud noise*" or "[BLANK_AUDIO]" in the middle of a sentence, and went into the text. Sounds between asterisks or brackets are left out now; a multiplication like "2 * 3" or words in parentheses are kept.
 
 ## [0.2.50] - 2026-11-25
