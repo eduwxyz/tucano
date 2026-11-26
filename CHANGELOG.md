@@ -4,12 +4,16 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [0.2.50] - 2026-11-25
+
 > **Em português:**
 > - **Novo:** **Outlook, OneDrive e Teams** na loja de conectores, numa categoria **Microsoft**: **Outlook.com** pra uma conta pessoal (e-mail, agenda, OneDrive, To Do e contatos) e **Microsoft 365** pra uma do trabalho ou escola (o mesmo, mais Teams e SharePoint). Já vem dentro do Tucano, sem instalar nada. Na primeira vez, o agente te passa um link e um código pra entrar na conta.
 > - **Novo:** **ditar a resposta de uma decisão.** O microfone fica no cantinho do campo de resposta, numa pergunta de texto ou em "Outra coisa…" depois de aberta, e funciona como no campo de mensagem (⌥Espaço no Mac, Ctrl+Espaço no Windows e no Linux). Nada é enviado até você confirmar.
 > - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
 > - **Corrigido:** uma **pergunta deixada numa thread** agora aparece também no canal, na faixa em cima do campo de mensagem, com "numa thread" (ou quantas há em outras threads). **Responder** abre a thread certa e leva até a pergunta. Antes, do canal, ela era só uma marca no link da thread, lá em cima, atrás de prints e logs.
 > - **Corrigido:** um **vídeo ou arquivo aberto de dentro de uma thread** fecha de volta pra thread, em vez de fechar o painel lateral inteiro.
+> - **Corrigido:** em **Uso**, um limite que zera daqui a uma semana ou mais mostra a data ("zera 30/11, 21:00"), não só o dia da semana. O limite de IA do mês dizia "zera seg, 21:00" numa segunda e parecia zerar naquela noite.
+> - **Mais seguro:** o computador novo de um agente não deixa um programa ganhar privilégios, limita quantos processos podem rodar e perde permissões de rede e de sistema que ele não usa. O `apt` e as pastas emprestadas continuam funcionando.
 
 ### Added
 
@@ -22,6 +26,11 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 - **Dictation drops the sounds whisper names.** A noise could come out as "*Loud noise*" or "[BLANK_AUDIO]" in the middle of a sentence, and went into the text. Sounds between asterisks or brackets are left out now; a multiplication like "2 * 3" or words in parentheses are kept.
 - **A question left in a thread shows from the channel too.** The strip above the message field only showed a question asked where you were typing, so from a channel a question an agent asked inside one of its threads was only a mark on that thread's link, pages up behind the work. Now the channel's strip shows the oldest such question with "in a thread" (or how many more wait in other threads), and **Answer** opens that thread at the question. It steps aside while that thread is open beside the channel, which shows its own. What you type in the channel still goes to the channel. Thanks to Leo Miranda for the report.
 - **A file opened from a thread closes back to the thread.** A video, file, service or browser opened from a thread took the thread's place on the side, and its close button closed the whole panel. It now says "Back to the thread" and goes back there.
+- **Usage gives the date of a reset a week or more away.** The reset line named only the weekday, which fits Claude's and Codex's windows of up to a week but not a monthly limit: on a Monday, a limit renewing the Monday after read "resets Mon, 21:00" and passed for that same night. It now names the weekday within the six days ahead and the date beyond that.
+
+### Security
+
+- **An agent's new computer is harder to break out of.** Every computer made from now on runs with `no-new-privileges`, a limit of 2048 processes against fork bombs, and without the `NET_RAW`, `MKNOD` and `AUDIT_WRITE` capabilities. Root inside keeps what `apt` needs and what handing a lent folder's files back needs (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`). Computers made before keep running as they were until they are made again. Thanks to Raphaell Dyego.
 
 ## [0.2.49] - 2026-11-25
 
