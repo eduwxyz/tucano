@@ -2550,7 +2550,8 @@ export function useDictation(insert: (text: string) => void, setNote: (note: str
   return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
 }
 
-export function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
+// `clock={false}`: where the button sits inside a field, the time goes elsewhere (the decisions card's footer).
+export function VoiceButton({ controls, state, clock = true }: { controls: DictationControls; state: DictationState; clock?: boolean }): ReactNode {
   const platform = useStore((s) => s.platform)
   const hidden = useStore((s) => !!s.settings.voice?.hidden)
   const status = useVoice()
@@ -2605,13 +2606,13 @@ export function VoiceButton({ controls, state }: { controls: DictationControls; 
       >
         <Icon name="mic" size={15} />
       </button>
-      {on && <RecordingClock since={controls.startedAt()} />}
+      {on && clock && <RecordingClock since={controls.startedAt()} />}
     </span>
   )
 }
 
 // While it records: for how long, and how to end it.
-function RecordingClock({ since }: { since: number }): ReactNode {
+export function RecordingClock({ since }: { since: number }): ReactNode {
   const [, tick] = useState(0)
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 500)

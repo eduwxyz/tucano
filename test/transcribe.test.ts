@@ -105,6 +105,12 @@ describe.runIf(unix)('transcribing', () => {
   it('drops what whisper prints for silence', () => {
     expect(cleanTranscript('[BLANK_AUDIO]\n (Música) \n')).toBe('')
     expect(cleanTranscript(' Primeira linha\n [inaudível]\n segunda linha\n')).toBe('Primeira linha segunda linha')
+    // Sounds whisper names between asterisks, on a line or in the middle of one, are not words either.
+    expect(cleanTranscript(" Hi, I'm talking here, etc. All right. *Loud noise*\n")).toBe("Hi, I'm talking here, etc. All right.")
+    expect(cleanTranscript(' *risos*\n')).toBe('')
+    expect(cleanTranscript(' Bom dia [BLANK_AUDIO] tudo bem?\n')).toBe('Bom dia tudo bem?')
+    // What is said is kept as said: a word in parentheses or a multiplication isn't a sound.
+    expect(cleanTranscript(' Custa 2 * 3 reais (mais ou menos).\n')).toBe('Custa 2 * 3 reais (mais ou menos).')
   })
 })
 

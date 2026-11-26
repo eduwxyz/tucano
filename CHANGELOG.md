@@ -4,6 +4,18 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+> **Em português:**
+> - **Novo:** **ditar a resposta de uma decisão.** O microfone fica no cantinho do campo de resposta, numa pergunta de texto ou em "Outra coisa…" depois de aberta, e funciona como no campo de mensagem (⌥Espaço no Mac, Ctrl+Espaço no Windows e no Linux). Nada é enviado até você confirmar.
+> - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
+
+### Added
+
+- **Dictate the answer to a decision.** The decisions card had no microphone, so an agent's question in words could only be answered by typing, or by dictating in the message field, which answered the whole card at once. The microphone now sits in the corner of the field the answer is written in: a text decision's, or **Something else** once open. It works as in the message field (click, or ⌥Space on a Mac and Ctrl+Space elsewhere; Esc cancels), puts the words at the cursor, and sends nothing until you confirm; while it records, the time and how to finish show in the card's footer, in place of the keys.
+
+### Fixed
+
+- **Dictation drops the sounds whisper names.** A noise could come out as "*Loud noise*" or "[BLANK_AUDIO]" in the middle of a sentence, and went into the text. Sounds between asterisks or brackets are left out now; a multiplication like "2 * 3" or words in parentheses are kept.
+
 ## [0.2.50] - 2026-11-25
 
 > **Em português:**
