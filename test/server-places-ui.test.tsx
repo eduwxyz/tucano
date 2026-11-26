@@ -167,6 +167,21 @@ describe("the desktop app's own menu", () => {
     expect(plain.textContent).toBe('E')
   })
 
+  it('returns the header to the initial when its picture fails, then tries again after the picture changes', async () => {
+    const bad = 'https://example.com/broken.png'
+    const good = 'data:image/png;base64,iVBORw0KGgo='
+    const img = (await withHeader(bad)).querySelector('img')!
+    expect(img.getAttribute('src')).toBe(bad)
+    expect(document.querySelector('.workspace__logo')!.getAttribute('aria-hidden')).toBeNull()
+    await act(async () => { img.dispatchEvent(new window.Event('error')) })
+    const failed = document.querySelector('.workspace__logo')!
+    expect(failed.querySelector('img')).toBeNull()
+    expect(failed.textContent).toBe('E')
+    const retried = await withHeader(good)
+    expect(retried.querySelector('img')?.getAttribute('src')).toBe(good)
+    expect(retried.textContent).toBe('')
+  })
+
   it('names its workspaces "on this computer" once there are servers', async () => {
     const list = { selected: 'w1', workspaces: [{ id: 'w1', name: 'Eduardo', isDefault: true, paused: false, unread: 0, approvals: 0, status: 'ready' }] }
     const servers = { list: vi.fn(async () => [{ id: 's1', name: 'kobi.tucano.pro', origin: 'https://kobi.tucano.pro', open: false, node: false }]), onChanged: () => () => {}, open: vi.fn() }

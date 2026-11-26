@@ -23,11 +23,11 @@ export function useWorkspaceList(): { list: WorkspaceList | null; error: string 
   return { list, error }
 }
 
-// A workspace's mark in the switcher: its own picture when it loads, else the name's first letter.
-// The key at the call site remounts this tile when the picture value changes, clearing a failed one.
-function WorkspaceLogo({ name, picture }: { name: string; picture?: string }): ReactNode {
+// A workspace's mark in the header or switcher: its own picture when it loads, else the name's first
+// letter. The key at the call site remounts the mark when the picture value changes, clearing a failed one.
+function WorkspaceMark({ name, picture, className, decorative = false }: { name: string; picture?: string; className: string; decorative?: boolean }): ReactNode {
   const [failed, setFailed] = useState(false)
-  return <span className="ws-menu__logo" aria-hidden="true">{picture && !failed ? <img src={picture} alt="" onError={() => setFailed(true)} /> : name.slice(0, 1)}</span>
+  return <span className={className} aria-hidden={decorative || undefined}>{picture && !failed ? <img src={picture} alt="" onError={() => setFailed(true)} /> : name.slice(0, 1)}</span>
 }
 
 // On a server's page in the desktop app: this computer's workspaces and the servers, for the menu.
@@ -121,7 +121,7 @@ export function WorkspaceMenu(): ReactNode {
   return (
     <div className="workspace-picker ws-menu" ref={root}>
       <button ref={button} className="workspace-picker__button" title={name} aria-label={L(`${name}: workspaces e ajustes`, `${name}: workspaces and settings`)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="workspace__logo">{selectedPicture ? <img src={selectedPicture} alt="" /> : name.slice(0, 1)}</span>
+        <WorkspaceMark key={selectedPicture ?? ''} className="workspace__logo" name={name} picture={selectedPicture} />
         {onServer ? (
           <span className="workspace__text">
             <span className="workspace__name">{name}</span>
@@ -153,7 +153,7 @@ export function WorkspaceMenu(): ReactNode {
             </div>
           </div>
           {workspaces.map((w) => <button key={w.id} className="menu__item" role="menuitemradio" aria-checked={w.id === selectedId} disabled={busy} onClick={() => void perform(() => api.switch(w.id))}>
-            <WorkspaceLogo key={w.picture ?? ''} name={w.name} picture={w.picture} />
+            <WorkspaceMark key={w.picture ?? ''} className="ws-menu__logo" name={w.name} picture={w.picture} decorative />
             <span className="grow">{w.name}</span>
             {w.status === 'failed' ? <span className="muted small">{L('Tentar de novo', 'Retry')}</span> : <>
               {!!w.approvals && <span className="badge" title={L('Aprovações', 'Approvals')}>{w.approvals}</span>}
