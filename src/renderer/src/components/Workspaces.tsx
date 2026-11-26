@@ -23,6 +23,13 @@ export function useWorkspaceList(): { list: WorkspaceList | null; error: string 
   return { list, error }
 }
 
+// A workspace's mark in the switcher: its own picture when it loads, else the name's first letter.
+// The key at the call site remounts this tile when the picture value changes, clearing a failed one.
+function WorkspaceLogo({ name, picture }: { name: string; picture?: string }): ReactNode {
+  const [failed, setFailed] = useState(false)
+  return <span className="ws-menu__logo" aria-hidden="true">{picture && !failed ? <img src={picture} alt="" onError={() => setFailed(true)} /> : name.slice(0, 1)}</span>
+}
+
 // On a server's page in the desktop app: this computer's workspaces and the servers, for the menu.
 // Elsewhere (the app's own page, a browser) none: null.
 function useDesktopPlaces(): DesktopPlaces | null {
@@ -146,7 +153,7 @@ export function WorkspaceMenu(): ReactNode {
             </div>
           </div>
           {workspaces.map((w) => <button key={w.id} className="menu__item" role="menuitemradio" aria-checked={w.id === selectedId} disabled={busy} onClick={() => void perform(() => api.switch(w.id))}>
-            <span className="ws-menu__logo" aria-hidden="true">{w.name.slice(0, 1)}</span>
+            <WorkspaceLogo key={w.picture ?? ''} name={w.name} picture={w.picture} />
             <span className="grow">{w.name}</span>
             {w.status === 'failed' ? <span className="muted small">{L('Tentar de novo', 'Retry')}</span> : <>
               {!!w.approvals && <span className="badge" title={L('Aprovações', 'Approvals')}>{w.approvals}</span>}
