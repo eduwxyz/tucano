@@ -63,6 +63,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Google: Gmail, Calendar, Drive, Docs and Sheets',
     summary: 'Connecting the Google services: the app the person creates in Google Cloud once, the 6 steps (with the Developer Preview enrolment), the unverified-app warning and what to check when Google refuses.'
   },
+  microsoft: {
+    title: 'Microsoft: Outlook, OneDrive, Teams and SharePoint',
+    summary: "Connecting a Microsoft account: Outlook.com (personal) or Microsoft 365 (work or school), the sign-in by code, Softeria's app, what a company may require and what is left out."
+  },
   limites: {
     title: 'Limits, usage and pause',
     summary: "Each agent's monthly limit, the ceiling per reply, when a piece of work stops, replies that are cut or try again, Usage and limits, Report, pausing everything and quiet hours."

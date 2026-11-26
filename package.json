@@ -1,6 +1,6 @@
 {
   "name": "tucano",
-  "version": "0.2.49",
+  "version": "0.2.50",
   "private": true,
   "description": "Tucano: your team of AI agents on your computer, with scopes, approvals and budgets.",
   "homepage": "https://tucano.sh",
@@ -50,11 +50,15 @@
     "vitest": "^4.1.12"
   },
   "dependencies": {
+    "@azure/identity": "file:vendor/absent",
+    "@azure/keyvault-secrets": "file:vendor/absent",
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/nunito": "^5.3.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@softeria/ms-365-mcp-server": "0.191.0",
     "electron-updater": "^6.8.11",
     "gsap": "^3.14.2",
+    "keytar": "file:vendor/keytar",
     "qrcode-generator": "^2.0.4",
     "smol-toml": "^1.9.1",
     "yaml": "^2.9.1"
@@ -167,5 +171,10 @@
         ]
       }
     ]
+  },
+  "overrides": {
+    "@azure/identity": "$@azure/identity",
+    "@azure/keyvault-secrets": "$@azure/keyvault-secrets",
+    "keytar": "$keytar"
   }
 }

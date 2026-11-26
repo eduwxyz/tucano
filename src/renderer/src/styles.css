@@ -3276,10 +3276,35 @@ h3 {
   font-size: 13.5px;
   color: var(--text);
 }
+.ask__field {
+  position: relative;
+}
 .ask__text {
   width: 100%;
   resize: vertical;
   min-height: 60px;
+  padding-right: 40px; /* the microphone's corner */
+}
+/* Dictation sits in the field's corner, quiet until it's used. */
+.ask__mic {
+  position: absolute;
+  right: 6px; /* over the resize grip, clear of it */
+  bottom: 10px;
+  display: inline-flex;
+}
+.ask__mic .voice-btn:not(.is-recording) {
+  color: var(--text-3);
+}
+.ask__mic .voice-btn:not(.is-recording):hover {
+  color: var(--text);
+}
+.ask__mic .voice-pop {
+  left: auto;
+  right: -8px;
+}
+.ask__mic--inline {
+  position: static;
+  margin: -4px -4px -4px 0;
 }
 .ask__foot {
   display: flex;
@@ -3291,6 +3316,11 @@ h3 {
 }
 .ask__hint {
   margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
   font-size: 11.5px;
   color: var(--text-3);
 }

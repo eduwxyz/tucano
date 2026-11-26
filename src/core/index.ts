@@ -979,7 +979,10 @@ const connectors = new ConnectorManager({
   // A provider that takes only a loopback address back (Canva's): on that server, the address the person pastes.
   localCallbackUrl: () => gateway.url('/oauth/callback'),
   // Slack's app registers its address once: the workspace's webhook port, which doesn't change.
-  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`)
+  fixedCallbackUrl: () => (serverMode && publicUrl?.startsWith('https://') ? `${publicUrl}/oauth/callback` : `http://localhost:${runtimePorts.webhook}/oauth/callback`),
+  // The Microsoft connector's server, inside Tucano: its sign-in under the data folder, run by the app itself.
+  builtinRoot: join(dataDir, 'connectors'),
+  runtime: process.env['TUCANO_RUNTIME'] || process.execPath
 })
 const oauthCallback = async (url: URL): Promise<string> => {
   const code = url.searchParams.get('code')

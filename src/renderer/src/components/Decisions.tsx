@@ -11,6 +11,8 @@ import { answerLabel, draftAnswer, firstUnanswered, isAnswered, isNextSteps, MAX
 import { covers } from '../../../shared/access'
 import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
+import { RecordingClock, useDictation, VoiceButton } from './Conversation'
+import { canRecord } from '../voice'
 import { decisionKey } from './decision-keys'
 
 type Step = number | 'review'
@@ -259,6 +261,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
   // "Something else" opens a field in its row; open from the start when it already has an answer.
   const [writing, setWriting] = useState(() => !!(drafts.get(draftId)?.other ?? answer?.other))
   const otherField = useRef<HTMLInputElement>(null)
+  const platform = useStore((st) => st.platform)
   const textField = useRef<HTMLTextAreaElement>(null)
   const body = useRef<HTMLDivElement>(null)
   // Moving on from a decision I just answered keeps the keyboard here; the card never takes it from the message box by itself.
@@ -275,13 +278,42 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
     setFocus(options.length) // the field takes the focus as it opens (autoFocus)
     setWriting(true)
   }
+  // Dictation, as in the message box: what's said goes into the answer being written, at the cursor.
+  // The microphone sits in the corner of the field it writes into: a text decision's, or "Something else"
+  // once open. Nothing is sent until it's confirmed.
+  const [note, setNote] = useState('')
+  const said = useRef(draft)
+  said.current = draft
+  const insert = (words: string): void => {
+    const into = question.kind === 'text' ? 'text' : 'other'
+    const el = into === 'text' ? textField.current : otherField.current
+    const cur = said.current[into]
+    const start = el && document.activeElement === el ? (el.selectionStart ?? cur.length) : cur.length
+    const end = el && document.activeElement === el ? (el.selectionEnd ?? start) : start
+    const before = cur.slice(0, start)
+    const glue = before && !/\s$/.test(before) ? ' ' : ''
+    const next = { ...said.current, [into]: `${before}${glue}${words}${cur.slice(end)}` }
+    drafts.set(draftId, next)
+    setDraft(next)
+  }
+  const [voice, voiceControls] = useDictation(insert, setNote, draftId)
+  const speaks = question.kind === 'text' || writing // a field to write into is showing
+  const mic = <VoiceButton controls={voiceControls} state={voice} clock={false} />
+
   const typed = draftAnswer(question, draft)
   const confirm = (): void => {
+    if (voice !== 'idle') return // still listening or turning it into text: the answer isn't all there yet
     if (typed) onAnswer(typed)
   }
   const skip = (): void => onAnswer({ skipped: true })
 
   const keys = (e: KeyboardEvent): void => {
+    if (speaks && e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
+      e.preventDefault()
+      if (!e.repeat) voiceControls.press()
+      return
+    }
+    if (e.key === 'Escape' && voice !== 'idle') return voiceControls.cancel() // Esc drops the recording first, the card stays
     const action = decisionKey(
       { key: e.key, shift: e.shiftKey, modifier: e.metaKey || e.ctrlKey || e.altKey, composing: e.nativeEvent.isComposing, inField: inField(e), onBody: e.target === e.currentTarget },
       focus,
@@ -319,7 +351,10 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
     <div className="ask__body" ref={body} tabIndex={-1} onKeyDown={keys}>
       <Title q={question} />
       {question.kind === 'text' ? (
-        <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => edit({ text: e.target.value })} />
+        <div className="ask__field">
+          <textarea ref={textField} className="ask__text" rows={2} value={text} placeholder={L('Sua resposta', 'Your answer')} onChange={(e) => edit({ text: e.target.value })} />
+          <span className="ask__mic">{mic}</span>
+        </div>
       ) : (
         <div className="ask-options" role={multiple ? 'group' : 'radiogroup'} aria-label={question.question}>
           {options.map((o, i) => {
@@ -344,6 +379,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
             <label className={`ask-option ask-option--other is-open ${other.trim() ? 'is-on' : ''}`} onMouseEnter={() => setFocus(options.length)}>
               <span className="ask-option__key">{options.length + 1}</span>
               <input ref={otherField} className="ask-option__input" autoFocus={focus === options.length} value={other} placeholder={L('Escreva sua resposta…', 'Write your answer…')} onChange={(e) => edit({ other: e.target.value })} />
+              <span className="ask__mic ask__mic--inline">{mic}</span>
             </label>
           ) : (
             <button className={`ask-option ask-option--other ${focus === options.length ? 'is-focus' : ''}`} onMouseEnter={() => setFocus(options.length)} onClick={openOther}>
@@ -358,8 +394,14 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
           )}
         </div>
       )}
+      {note && (
+        <p className="ask__note" role="status">
+          {note}
+        </p>
+      )}
       <div className="ask__foot">
-        <span className="ask__hint">{keyHint}</span>
+        {/* While it listens, the time and how to end it take the keys' place. */}
+        <span className="ask__hint">{voice === 'recording' ? <RecordingClock since={voiceControls.startedAt()} /> : voice === 'idle' ? keyHint : ''}</span>
         {/* Skipping would wake the agent just to say so: a next-steps card only has Cancel, which closes it quietly. */}
         {!steps && (
           <button className="btn btn--ghost btn--sm" onClick={skip}>

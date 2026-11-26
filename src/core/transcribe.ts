@@ -133,12 +133,14 @@ export class ModelDownload {
   }
 }
 
-// What whisper prints for silence, not words.
+// What whisper prints for silence, not words: a whole line in brackets or parentheses.
 const NOT_SPEECH = /^[[(][^\])]*[\])]$/
+// And sounds it names inside a line: [BLANK_AUDIO], *Loud noise*. Asterisks only around words, so "2 * 3" stays.
+const SOUND = /\[[^\]\n]{1,40}\]|\*[^*\s][^*\n]{0,38}[^*\s]\*|\*[^*\s]\*/g
 export const cleanTranscript = (out: string): string =>
   out
     .split('\n')
-    .map((l) => l.trim())
+    .map((l) => l.replace(SOUND, ' ').replace(/\s+/g, ' ').trim())
     .filter((l) => l && !NOT_SPEECH.test(l))
     .join(' ')
 

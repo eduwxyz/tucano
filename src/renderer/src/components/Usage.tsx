@@ -1,7 +1,7 @@
 // Uso e limites: this month at a glance (by day, by agent, by model), the
 // Claude and Codex subscriptions' windows, and where each agent will end the month.
 import { L, locale } from '../../../shared/lang'
-import { windowNow } from '../../../shared/quota-window'
+import { resetsIn, windowNow } from '../../../shared/quota-window'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { agentById, amAdmin, ENGINES, isTeam, loadUsage, modelInfo, navigate, receipts, useStore, workingOn, type Agent, type EngineId, type EngineStatus, type UsageReport } from '../store'
 import { Executions, toExecutions } from './Executions'
@@ -13,16 +13,6 @@ const DAY = 86_400_000
 const APP = 'app' // the chart's one color for the app's own turns: router, memory, the Tuca
 const MODEL_COLORS = ['var(--accent)', 'var(--c-violet)', 'var(--c-teal)', 'var(--c-sky)', 'var(--text-3)']
 
-const until = (at: number): string => {
-  const left = at - Date.now()
-  if (left <= 0) return L('agora', 'now')
-  const total = Math.round(left / 60_000) // in whole minutes, so it never says "1 h 60 min"
-  const h = Math.floor(total / 60)
-  const m = total % 60
-  if (h < 24) return L(`em ${h ? `${h} h ` : ''}${m} min`, `in ${h ? `${h} h ` : ''}${m} min`)
-  const d = new Date(at)
-  return `${d.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')}, ${d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}`
-}
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 // When a window that's over started over: the time today, the date before that.
 const resetAt = (at: number): string => {
@@ -318,7 +308,7 @@ function Ring({ label, w }: { label: string; w: { utilization: number; resetsAt:
       <div>
         <span className="muted small">{label}</span>
         <strong>{L(`${Math.round(pct * 100)}% usado`, `${Math.round(pct * 100)}% used`)}</strong>
-        <span className="muted small">{reset ? resetAt(w.resetsAt) : `${L('zera', 'resets')} ${until(w.resetsAt)}`}</span>
+        <span className="muted small">{reset ? resetAt(w.resetsAt) : `${L('zera', 'resets')} ${resetsIn(w.resetsAt)}`}</span>
       </div>
     </div>
   )

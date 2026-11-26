@@ -7,7 +7,8 @@ import type { Message } from '../src/shared/types'
 
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
-  return { ...real, answerDecision: () => {}, submitDecisions: async () => {} }
+  // The card reads the store (the microphone, as in the message box): the state as it starts, without a React store behind it.
+  return { ...real, answerDecision: () => {}, submitDecisions: async () => {}, useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T): T => select(real.getState()) }
 })
 
 const steps = (): Decision[] => [
