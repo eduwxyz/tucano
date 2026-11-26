@@ -1,0 +1,148 @@
+{
+  "data": "C:\\Users\\theap\\AppData\\Local\\Temp\\tucano-avatar-ZOrdOa",
+  "bitmapBytes": 1049476,
+  "sizes": {
+    "1440x900": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "initial": {
+        "exists": true,
+        "box": {
+          "width": 26,
+          "height": 26
+        },
+        "beforeName": true,
+        "img": false,
+        "naturalWidth": 0,
+        "naturalHeight": 0,
+        "srcChars": 0,
+        "initial": "T"
+      },
+      "managerEmpty": {
+        "exists": true,
+        "box": {
+          "width": 40,
+          "height": 40
+        },
+        "img": false,
+        "naturalWidth": 0,
+        "srcChars": 0
+      },
+      "resized": {
+        "img": true,
+        "naturalWidth": 80,
+        "srcChars": 31862,
+        "toasts": 0
+      },
+      "managerPicture": {
+        "exists": true,
+        "box": {
+          "width": 40,
+          "height": 40
+        },
+        "img": true,
+        "naturalWidth": 80,
+        "srcChars": 31862
+      },
+      "headerPicture": {
+        "exists": true,
+        "box": {
+          "width": 26,
+          "height": 26
+        },
+        "beforeName": true,
+        "img": true,
+        "naturalWidth": 80,
+        "naturalHeight": 80,
+        "srcChars": 31862,
+        "initial": null
+      },
+      "rejected": {
+        "toasts": [
+          "That is not an image (PNG, JPEG, WebP, GIF or SVG) or a safe https address."
+        ],
+        "pictureStill": true
+      }
+    },
+    "420x900": {
+      "viewport": {
+        "width": 420,
+        "height": 900
+      },
+      "initial": {
+        "exists": true,
+        "box": {
+          "width": 26,
+          "height": 26
+        },
+        "beforeName": true,
+        "img": false,
+        "naturalWidth": 0,
+        "naturalHeight": 0,
+        "srcChars": 0,
+        "initial": "T"
+      },
+      "managerEmpty": {
+        "exists": true,
+        "box": {
+          "width": 40,
+          "height": 40
+        },
+        "img": false,
+        "naturalWidth": 0,
+        "srcChars": 0
+      },
+      "resized": {
+        "img": true,
+        "naturalWidth": 80,
+        "srcChars": 31862,
+        "toasts": 0
+      },
+      "managerPicture": {
+        "exists": true,
+        "box": {
+          "width": 40,
+          "height": 40
+        },
+        "img": true,
+        "naturalWidth": 80,
+        "srcChars": 31862
+      },
+      "headerPicture": {
+        "exists": true,
+        "box": {
+          "width": 26,
+          "height": 26
+        },
+        "beforeName": true,
+        "img": true,
+        "naturalWidth": 80,
+        "naturalHeight": 80,
+        "srcChars": 31862,
+        "initial": null
+      },
+      "rejected": {
+        "toasts": [
+          "That is not an image (PNG, JPEG, WebP, GIF or SVG) or a safe https address."
+        ],
+        "pictureStill": true
+      }
+    }
+  },
+  "window": {
+    "title": "Tucano",
+    "visibility": "visible",
+    "sidebar": true,
+    "width": 1266,
+    "height": 783,
+    "visible": true
+  },
+  "stored": {
+    "pictureChars": 31862,
+    "prefix": "data:image/png;base64,"
+  },
+  "errors": [],
+  "commit_context": "approval packet for Eduardo PR 689 avatar-picture polish; worktree apoapostolov/avatar-image-pr"
+}

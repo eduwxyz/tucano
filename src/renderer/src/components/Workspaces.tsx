@@ -77,6 +77,9 @@ export function WorkspaceMenu(): ReactNode {
   const desktop = window.tucano?.places
   const places = useDesktopPlaces()
   const onServer = windowless()
+  // The header wears the selected workspace's own picture. A server page has no local workspace to
+  // draw: it keeps the initial, the way it did before pictures.
+  const selectedPicture = onServer ? undefined : list?.workspaces.find((w) => w.id === selectedId)?.picture
   useEffect(() => {
     if (!desktop || !places) return
     desktop.own(true)
@@ -111,7 +114,7 @@ export function WorkspaceMenu(): ReactNode {
   return (
     <div className="workspace-picker ws-menu" ref={root}>
       <button ref={button} className="workspace-picker__button" title={name} aria-label={L(`${name}: workspaces e ajustes`, `${name}: workspaces and settings`)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="workspace__logo">{name.slice(0, 1)}</span>
+        <span className="workspace__logo">{selectedPicture ? <img src={selectedPicture} alt="" /> : name.slice(0, 1)}</span>
         {onServer ? (
           <span className="workspace__text">
             <span className="workspace__name">{name}</span>

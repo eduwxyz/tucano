@@ -14,9 +14,30 @@ const { window, document } = parseHTML('<!doctype html><html><body><div id="root
 Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true, matchMedia: () => ({ matches: false }) })
 Object.assign(document, { oninput: null })
 
+// linkedom has no canvas: the picker draws a picked bitmap there before storing it. A stand-in
+// writes a long data URL at 96 px and a short one at 80 px, so the retry is exercised for real.
+const drawn: number[] = []
+const createElement = document.createElement.bind(document)
+Object.assign(document, {
+  createElement: (tag: string) => {
+    if (tag !== 'canvas') return createElement(tag)
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ drawImage: vi.fn() }),
+      toDataURL: () => {
+        drawn.push(Math.max(canvas.width, canvas.height))
+        return `data:image/png;base64,${'A'.repeat(Math.max(canvas.width, canvas.height) * 350)}`
+      }
+    }
+    return canvas
+  }
+})
+
 const PNG = 'data:image/png;base64,iVBORw0KGgo='
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
 const svgFile = () => ({ name: 'mark.svg', type: 'image/svg+xml', size: SVG.length, text: async () => SVG })
+const bitmapFile = () => ({ name: 'noisy.png', type: 'image/png', size: 1_000 }) as unknown as File
 const setPicture = vi.fn(async (id: string, value: string) => {
   validateWorkspacePicture(value)
   const found = list?.workspaces.find((w) => w.id === id)
@@ -47,9 +68,11 @@ beforeEach(() => {
   setPicture.mockClear()
   paste.mockClear()
   vi.mocked(store.toast).mockClear()
+  drawn.length = 0
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 500, height: 400, close: vi.fn() })))
   root = createRoot(document.getElementById('root')!)
 })
-afterEach(async () => { await act(async () => root.unmount()); vi.clearAllMocks() })
+afterEach(async () => { await act(async () => root.unmount()); vi.clearAllMocks(); vi.unstubAllGlobals() })
 
 const tick = (): Promise<void> => act(async () => new Promise((r) => setTimeout(r, 10)))
 const fire = async (el: Element | null | undefined, type: string, props: object = {}): Promise<void> => {
@@ -120,6 +143,20 @@ describe('a workspace picture', () => {
     await typeInto(input('.workspace-picture__url'), 'https://example.com/mark.png')
     await fire(byText('Add'), 'click')
     expect(setPicture).toHaveBeenCalledWith(expect.any(String), 'https://example.com/mark.png')
+  })
+
+  it('shrinks an oversized bitmap, stores the smaller PNG and shows no toast', async () => {
+    await openModal()
+    const file = input('.workspace-picture__file')
+    Object.defineProperty(file, 'files', { value: { 0: bitmapFile(), length: 1, item: () => bitmapFile() }, configurable: true })
+    await fire(file, 'change')
+    expect(drawn).toEqual([96, 80])
+    expect(setPicture).toHaveBeenCalledTimes(1)
+    const saved = setPicture.mock.calls[0]![1]
+    expect(saved.startsWith('data:image/png;base64,')).toBe(true)
+    expect(saved.length).toBeLessThanOrEqual(32_000)
+    expect(document.querySelector('.workspace-picture__placeholder img')?.getAttribute('src')).toBe(saved)
+    expect(store.toast).not.toHaveBeenCalled()
   })
 
   it('clears back to the default and shows a rejected address instead of storing it', async () => {

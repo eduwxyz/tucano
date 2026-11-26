@@ -102,6 +102,18 @@ describe("a server's page in the desktop app", () => {
     expect(desk.own).not.toHaveBeenCalled()
   })
 
+  it('keeps the initial in the header, even when a local workspace has a picture', async () => {
+    const list = { selected: '01936b2e-0000-7000-8000-000000000001', workspaces: [
+      { id: '01936b2e-0000-7000-8000-000000000001', name: 'Eduardo', isDefault: true, paused: false, unread: 0, approvals: 0, status: 'ready' as const, picture: 'data:image/png;base64,iVBORw0KGgo=' }
+    ] }
+    Object.assign(window, { __TUCANO_WEB__: true, tucano: { places: desk, workspaces: { list: async () => list, subscribe: () => () => {} } } })
+    await act(async () => root.render(<WorkspaceMenu />))
+    await settle()
+    const logo = document.querySelector('.workspace-picker__button .workspace__logo')!
+    expect(logo.querySelector('img')).toBeNull()
+    expect(logo.textContent).toBe('K')
+  })
+
   it('in a browser: on the server, with no places to list', async () => {
     Object.assign(window, { __TUCANO_WEB__: true, tucano: {} })
     await act(async () => root.render(<WorkspaceMenu />))
@@ -112,6 +124,31 @@ describe("a server's page in the desktop app", () => {
 })
 
 describe("the desktop app's own menu", () => {
+  const withHeader = async (picture?: string): Promise<Element> => {
+    const list = { selected: 'w1', workspaces: [{ id: 'w1', name: 'Eduardo', isDefault: true, paused: false, unread: 0, approvals: 0, status: 'ready' as const, picture }] }
+    fake = { ...fake, settings: { ...fake.settings, workspaceName: 'Eduardo' } }
+    const servers = { list: vi.fn(async () => [{ id: 's1', name: 'kobi.tucano.pro', origin: 'https://kobi.tucano.pro', open: false, node: false }]), onChanged: () => () => {}, open: vi.fn() }
+    Object.assign(window, { tucano: { workspaces: { list: async () => list, subscribe: () => () => {} }, servers } })
+    await act(async () => root.render(<WorkspaceMenu />))
+    await settle()
+    return document.querySelector('.workspace-picker__button .workspace__logo')!
+  }
+
+  it('wears the selected workspace picture before its name, and the initial when there is none', async () => {
+    const picture = 'data:image/png;base64,iVBORw0KGgo='
+    const logo = await withHeader(picture)
+    expect(logo.querySelector('img')?.getAttribute('src')).toBe(picture)
+    expect(logo.textContent).toBe('')
+    const button = logo.parentElement!
+    const name = button.querySelector('.workspace__name')!
+    expect([...button.children].indexOf(logo)).toBeLessThan([...button.children].indexOf(name))
+
+    await act(async () => root.render(<div />))
+    const plain = await withHeader()
+    expect(plain.querySelector('img')).toBeNull()
+    expect(plain.textContent).toBe('E')
+  })
+
   it('names its workspaces "on this computer" once there are servers', async () => {
     const list = { selected: 'w1', workspaces: [{ id: 'w1', name: 'Eduardo', isDefault: true, paused: false, unread: 0, approvals: 0, status: 'ready' }] }
     const servers = { list: vi.fn(async () => [{ id: 's1', name: 'kobi.tucano.pro', origin: 'https://kobi.tucano.pro', open: false, node: false }]), onChanged: () => () => {}, open: vi.fn() }
