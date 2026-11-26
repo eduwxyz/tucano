@@ -12,6 +12,7 @@ import { covers } from '../../../shared/access'
 import { amAdmin, answerDecision, cancelQuestion, personById, submitDecisions, teamMode, useStore, type Message } from '../store'
 import { Icon } from './ui'
 import { RecordingClock, useDictation, VoiceButton } from './Conversation'
+import { canRecord } from '../voice'
 import { decisionKey } from './decision-keys'
 
 type Step = number | 'review'
@@ -307,7 +308,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
   const skip = (): void => onAnswer({ skipped: true })
 
   const keys = (e: KeyboardEvent): void => {
-    if (speaks && e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey)) {
+    if (speaks && e.code === 'Space' && (platform === 'mac' ? e.altKey : e.ctrlKey) && canRecord()) {
       e.preventDefault()
       if (!e.repeat) voiceControls.press()
       return
