@@ -7,6 +7,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 > **Em português:**
 > - **Novo:** **ditar a resposta de uma decisão.** O microfone fica no cantinho do campo de resposta, numa pergunta de texto ou em "Outra coisa…" depois de aberta, e funciona como no campo de mensagem (⌥Espaço no Mac, Ctrl+Espaço no Windows e no Linux). Nada é enviado até você confirmar.
 > - **Corrigido:** o ditado não escreve mais os sons que o whisper anota, como "*Loud noise*" ou "[BLANK_AUDIO]", no meio da frase.
+> - **Corrigido:** um agente que **errava o nome de um parâmetro** de uma ferramenta (comum no Grok) recebia só "Faltou o que buscar" e tentava de novo até parar com "8 ferramentas falharam seguidas". Agora a resposta diz o que faltou e lista os parâmetros da ferramenta, e ele acerta na próxima.
 
 ### Added
 
@@ -14,6 +15,7 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ### Fixed
 
+- **A call missing a parameter says which, with the tool's parameters.** Grok reaches Tucano's tools through `use_tool`, often by a name it read without the schema, and guessed parameter names (`query` for `busca`). The tool's own "missing what to search for" didn't say which, so it guessed again until "8 tools failed in a row" stopped the reply, and some agents sent real "schema" test messages to their teammates to work the format out. A call without what its tool requires now gets back what is missing, what was sent and the tool's parameters; nothing runs, and it still counts toward that stop. Grok is also told to look a tool's parameters up before its first call and never to call one just to test it.
 - **Dictation drops the sounds whisper names.** A noise could come out as "*Loud noise*" or "[BLANK_AUDIO]" in the middle of a sentence, and went into the text. Sounds between asterisks or brackets are left out now; a multiplication like "2 * 3" or words in parentheses are kept.
 
 ## [0.2.50] - 2026-11-25
