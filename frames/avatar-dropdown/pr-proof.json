@@ -1,0 +1,381 @@
+{
+  "kind": "pr",
+  "worktree": "C:/Users/theap/orca/workspaces/tucano/avatar-dropdown-pr",
+  "data": "C:\\Users\\theap\\AppData\\Local\\Temp\\tucano-avatar-pr-Cdb8lC",
+  "profile": "C:\\Users\\theap\\AppData\\Local\\Temp\\tucano-avatar-pr-Cdb8lC\\electron",
+  "viewportSizes": [
+    "1440x900",
+    "420x900"
+  ],
+  "window": {
+    "title": "Tucano",
+    "visibility": "visible",
+    "sidebarVisible": true,
+    "viewport": {
+      "width": 1266,
+      "height": 783
+    }
+  },
+  "frames": [
+    {
+      "state": "initial",
+      "width": 1440,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-1440x900-dropdown-initial.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": null,
+        "text": "T",
+        "ariaHidden": null
+      },
+      "detail": {
+        "expanded": "true",
+        "tiles": [
+          {
+            "name": "Theap",
+            "checked": true,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": null,
+            "text": "T",
+            "ariaHidden": "true"
+          },
+          {
+            "name": "Zeta",
+            "checked": false,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": null,
+            "text": "Z",
+            "ariaHidden": "true"
+          }
+        ]
+      }
+    },
+    {
+      "state": "pictures",
+      "width": 1440,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-1440x900-dropdown-pictures.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": {
+          "w": 26,
+          "h": 26,
+          "naturalWidth": 16,
+          "naturalHeight": 16,
+          "srcLength": 186,
+          "alt": "",
+          "objectFit": "cover"
+        },
+        "text": "",
+        "ariaHidden": null
+      },
+      "detail": {
+        "expanded": "true",
+        "tiles": [
+          {
+            "name": "Theap",
+            "checked": true,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": {
+              "w": 18,
+              "h": 18,
+              "naturalWidth": 16,
+              "naturalHeight": 16,
+              "srcLength": 186,
+              "alt": "",
+              "objectFit": "contain",
+              "borderRadius": "5px"
+            },
+            "text": "",
+            "ariaHidden": "true"
+          },
+          {
+            "name": "Zeta",
+            "checked": false,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": {
+              "w": 18,
+              "h": 18,
+              "naturalWidth": 16,
+              "naturalHeight": 16,
+              "srcLength": 186,
+              "alt": "",
+              "objectFit": "contain",
+              "borderRadius": "5px"
+            },
+            "text": "",
+            "ariaHidden": "true"
+          }
+        ]
+      }
+    },
+    {
+      "state": "failed-https",
+      "width": 1440,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-1440x900-dropdown-failed-https.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": null,
+        "text": "T",
+        "ariaHidden": null
+      },
+      "detail": {
+        "expanded": "true",
+        "tiles": [
+          {
+            "name": "Theap",
+            "checked": true,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": null,
+            "text": "T",
+            "ariaHidden": "true"
+          },
+          {
+            "name": "Zeta",
+            "checked": false,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": {
+              "w": 18,
+              "h": 18,
+              "naturalWidth": 16,
+              "naturalHeight": 16,
+              "srcLength": 186,
+              "alt": "",
+              "objectFit": "contain",
+              "borderRadius": "5px"
+            },
+            "text": "",
+            "ariaHidden": "true"
+          }
+        ]
+      }
+    },
+    {
+      "state": "header-failed-https",
+      "width": 1440,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-1440x900-header-failed-https.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": null,
+        "text": "T",
+        "ariaHidden": null
+      },
+      "detail": null
+    },
+    {
+      "state": "initial",
+      "width": 420,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-420x900-dropdown-initial.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": null,
+        "text": "T",
+        "ariaHidden": null
+      },
+      "detail": {
+        "expanded": "true",
+        "tiles": [
+          {
+            "name": "Theap",
+            "checked": true,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": null,
+            "text": "T",
+            "ariaHidden": "true"
+          },
+          {
+            "name": "Zeta",
+            "checked": false,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": null,
+            "text": "Z",
+            "ariaHidden": "true"
+          }
+        ]
+      }
+    },
+    {
+      "state": "pictures",
+      "width": 420,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-420x900-dropdown-pictures.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": {
+          "w": 26,
+          "h": 26,
+          "naturalWidth": 16,
+          "naturalHeight": 16,
+          "srcLength": 186,
+          "alt": "",
+          "objectFit": "cover"
+        },
+        "text": "",
+        "ariaHidden": null
+      },
+      "detail": {
+        "expanded": "true",
+        "tiles": [
+          {
+            "name": "Theap",
+            "checked": true,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": {
+              "w": 18,
+              "h": 18,
+              "naturalWidth": 16,
+              "naturalHeight": 16,
+              "srcLength": 186,
+              "alt": "",
+              "objectFit": "contain",
+              "borderRadius": "5px"
+            },
+            "text": "",
+            "ariaHidden": "true"
+          },
+          {
+            "name": "Zeta",
+            "checked": false,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": {
+              "w": 18,
+              "h": 18,
+              "naturalWidth": 16,
+              "naturalHeight": 16,
+              "srcLength": 186,
+              "alt": "",
+              "objectFit": "contain",
+              "borderRadius": "5px"
+            },
+            "text": "",
+            "ariaHidden": "true"
+          }
+        ]
+      }
+    },
+    {
+      "state": "failed-https",
+      "width": 420,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-420x900-dropdown-failed-https.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": null,
+        "text": "T",
+        "ariaHidden": null
+      },
+      "detail": {
+        "expanded": "true",
+        "tiles": [
+          {
+            "name": "Theap",
+            "checked": true,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": null,
+            "text": "T",
+            "ariaHidden": "true"
+          },
+          {
+            "name": "Zeta",
+            "checked": false,
+            "tile": {
+              "w": 18,
+              "h": 18
+            },
+            "img": {
+              "w": 18,
+              "h": 18,
+              "naturalWidth": 16,
+              "naturalHeight": 16,
+              "srcLength": 186,
+              "alt": "",
+              "objectFit": "contain",
+              "borderRadius": "5px"
+            },
+            "text": "",
+            "ariaHidden": "true"
+          }
+        ]
+      }
+    },
+    {
+      "state": "header-failed-https",
+      "width": 420,
+      "height": 900,
+      "frame": "C:\\git\\_notes\\tucano-ingest\\avatar-dropdown-pr\\pr-420x900-header-failed-https.png",
+      "header": {
+        "box": {
+          "w": 26,
+          "h": 26
+        },
+        "img": null,
+        "text": "T",
+        "ariaHidden": null
+      },
+      "detail": null
+    }
+  ],
+  "pageErrors": [
+    "Loading the image 'https://example.invalid/broken.png' violates the following Content Security Policy directive: \"img-src 'self' data: tucano:\". The action has been blocked.",
+    "Loading the image 'https://example.invalid/broken.png' violates the following Content Security Policy directive: \"img-src 'self' data: tucano:\". The action has been blocked.",
+    "Loading the image 'https://example.invalid/broken.png' violates the following Content Security Policy directive: \"img-src 'self' data: tucano:\". The action has been blocked.",
+    "Loading the image 'https://example.invalid/broken.png' violates the following Content Security Policy directive: \"img-src 'self' data: tucano:\". The action has been blocked."
+  ]
+}
