@@ -9,7 +9,7 @@ import { nodeOf } from '../shared/node-link'
 import type { CoreEvent } from '../shared/rpc'
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { GrantLevel, LeaveAsk, TucaLeave } from '../shared/types'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, PENDING_WAIT_MINUTES, REPEAT_STOP, REPEAT_WARN, SAME_TOOL_STOP, SAME_TOOL_WARN, SLEEPS_FREE, SLEEPS_STOP, RUN_BUDGET_PCT, AUTO_CONTINUES, RUN_STALL_MINUTES, MAX_FOLLOW_ROUNDS, IMAGE_MIMES, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, type FileUpload, type Account, type Agent, type Approval, type Artifact, type ImageUpload, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Person, type Question, type Routine, type Run, type RunRound, type RunStatus, type Settings, type Step, wikiAccess, MAX_PROPOSALS, proposalKey, proposalsOf } from '../shared/types'
 import { BUSCAR_THREADS, clock, HISTORY_LIMIT, LER_THREAD, liveContext, mentioned, NO_LIVE, snip, systemPrompt, transcript, transcriptBlocks, type GitHubAccess, type PromptOpts } from './context'
 import { BUSCAR_MEMORIAS, contextWindow, LEMBRAR, searchThreads, type Memories } from './memory'
 import { WIKI_TOOL_NAMES, WIKI_TOOLS, wikiCall, type Wiki } from './wiki'
@@ -438,13 +438,34 @@ const tracedTools = (session: Session, reply: ReplyTrace, where: { sessionId: st
 // `replyTo`: the message a person wrote that this reply answers (a mention's, a DM's), kept on its run.
 // `routineAsk`: on a routine's run, the message the routine posted (the reply keeps it, so the conversation shows them together).
 // `askedIn`: the agent's reply that handed this one the turn or called it in, for its trace's link.
-type ReplyOpts = { askedIn?: string; depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string } // for: whom it's for, when it isn't read from the conversation (an answer back)
+type ReplyOpts = { askedIn?: string; depth: number; job?: string; autoContinued?: number; existing?: Message; task?: string; work?: string; routine?: boolean; routineAsk?: string; threadId?: string; trigger?: string; replyTo?: string; for?: Person; handed?: string; followUp?: string } // for: whom it's for, when it isn't read from the conversation (an answer back); followUp: the instruction a finished reply goes on with
 
 // What a person wrote into a reply that was already running (`send` with mode 'steer'): the agent
 // reads it with its next tool result, and the reply's own chain carries it, in their words, from the
 // moment it's given. It is not a message of theirs: nothing of it is posted, so a reply that ends
 // before taking one leaves it in its chain, marked as not read (see `steerLeftovers`).
 type SteerNote = { id: string; who: string; text: string }
+// In the chain, the instruction a finished reply goes on with: the person's words, in a row of their
+// own. It is a steer's row, because it is one: the same direction, given to a reply that had ended.
+const followUpStep = (instruction: string): Step => ({
+  id: randomUUID(),
+  kind: 'steer',
+  label: L('Você pediu para seguir', 'You asked it to go on'),
+  input: instruction,
+  status: 'done'
+})
+// What the agent is told: the task it already had, then the instruction, and the one rule that makes
+// it a continuation rather than a repetition.
+export const followUpTask = (task: string | undefined, instruction: string): string =>
+  [
+    task,
+    L(
+      `Esta é uma continuação da sua última resposta nesta conversa: ela já tinha terminado e a pessoa pediu para você seguir dali. Não comece de novo nem refaça o que já está feito; siga do que já foi dito. A direção de agora: ${instruction}`,
+      `This carries on from your last reply in this conversation: it had already finished and the person asked you to go on from there. Don't start over or redo what's done; go on from what has been said. The direction now: ${instruction}`
+    )
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 // A reply waiting for its agent to finish there. Only a send the person marked as queued waits, and
 // what goes on with a reply the person is already reading (an approval's outcome, a question's
 // refusal, a browser hand-back): a message of theirs, a routine, a retry and a reply going on past
@@ -691,10 +712,14 @@ export class Runner {
     // tool call, and drawn in its own chain, in their words. It comes from that reply's own pill
     // (Conversation.tsx), never from the message field, which writes to the conversation. So it is taken here,
     // before any message of mine exists: nothing of a steer ever shows up in the channel or the DM as
-    // something to answer. With no reply running there — or with a picture or a file, which a tool
-    // result can't carry — there is nothing to steer, and the text goes on as a prompt like any other.
-    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0 && this.steerIn(conv.id, thread, { who: writer.name, text: typed }, opts.steerTo))
-      return
+    // something to answer. The same pill on a reply that has ended is a Follow: nothing is running to
+    // steer, so that reply goes on from where it stopped, with the instruction (`followIn`). With
+    // neither — or with a picture or a file, which a tool result can't carry — the text goes on as a
+    // prompt like any other.
+    if (opts.mode === 'steer' && typed && !asked && pictures.length === 0 && docs.length === 0) {
+      if (this.steerIn(conv.id, thread, { who: writer.name, text: typed }, opts.steerTo)) return
+      if (this.followIn(conv.id, thread, typed, opts.steerTo)) return
+    }
 
     const mine: Message = { id: opts.id ?? randomUUID(), conversationId, author: { kind: 'person', id: writer.id }, text: body, at: Date.now(), ...(thread ? { threadId: thread } : {}), ...(opts.via ? { via: opts.via } : {}) }
     // An answer goes in the thread of what it answers. A message of mine outside one opens it
@@ -941,6 +966,24 @@ export class Runner {
       taken = true
     }
     return taken
+  }
+
+  // A reply that has ended goes on where it stopped, with the instruction from its own pill (send mode
+  // `steer`, `steerTo`): it isn't a message of the person's and it isn't a new reply. The same row keeps
+  // working, its text and steps stay, and the session it ended with is resumed (`reply`, `followUp`).
+  private followIn(conversationId: string, threadId: string | undefined, instruction: string, replyId: string | undefined): boolean {
+    const { db } = this.deps
+    if (!replyId || this.paused) return false
+    const msg = db.message(replyId)
+    if (!msg?.run || msg.author.kind !== 'agent' || msg.conversationId !== conversationId) return false
+    if (msg.run.status !== 'done') return false // one that stopped, failed or waits has its own way on
+    if ((msg.threadId ?? undefined) !== (threadId ?? undefined)) return false // the pill's reply, in its own place
+    if (this.controllers.has(msg.id)) return false // already going on from this one
+    const agent = db.agent(msg.author.id)
+    const conv = db.conversation(msg.conversationId)
+    if (!agent || !conv) return false
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg, followUp: instruction }), true, agent)
+    return true
   }
 
   // A steer's row changes state where the reply's work does: taken with a call (done), or left unread
@@ -1558,9 +1601,34 @@ export class Runner {
     // Back to thinking once a tool is done, unless another call it started beside it (engines run tool
     // calls in parallel) still runs: that one adds the row when it ends, so there's only ever one.
     const andThink = (steps: Step[]): Step[] => (steps.some((s) => s.status === 'running') ? steps : [...steps, thinking()])
-    msg.text = ''
-    // "Try again" passes no task: it repeats the one of the reply it's redoing.
-    const task = opts.task ?? opts.existing?.run?.task
+    const followUp = opts.followUp?.trim() || undefined
+    // A reply that goes on keeps what it already said and did: the new turn starts under it, never
+    // instead of it. Each turn is a round with its own instruction row, toolchain, reasoning and
+    // words. A reply saved before rounds existed has none: its whole chain and text are the first
+    // round, so old replies need no migration.
+    const rounds: RunRound[] | undefined = followUp
+      ? opts.existing?.run?.rounds?.length
+        ? opts.existing.run.rounds.map((r) => ({ ...r, steps: [...r.steps] }))
+        : opts.existing?.run
+          ? [{ id: opts.existing.run.steps[0]?.id ?? opts.existing.id, steps: [...opts.existing.run.steps], text: opts.existing.text }]
+          : []
+      : undefined
+    // Only the newest rounds stay. A fourth pushes out the oldest one with its Follow row,
+    // toolchain, reasoning and output, so the flat steps and text follow what was kept.
+    const dropped = rounds && rounds.length >= MAX_FOLLOW_ROUNDS ? rounds.splice(0, rounds.length - MAX_FOLLOW_ROUNDS + 1) : []
+    const droppedText = dropped.map((r) => r.text).filter(Boolean).join('\n\n')
+    const past = followUp ? (droppedText && msg.text.startsWith(droppedText) ? msg.text.slice(droppedText.length).replace(/^\n\n/, '') : msg.text) : ''
+    const pastSteps = followUp ? rounds!.flatMap((r) => r.steps).map((s): Step => (s.status === 'running' ? { ...s, status: 'done' } : s)) : []
+    let roundText = ''
+    let roundThought = ''
+    const kept = (text: string): string => {
+      roundText = text.trim()
+      return past && text.trim() ? `${past}\n\n${text}` : past || text
+    }
+    if (!followUp) msg.text = ''
+    // "Try again" passes no task: it repeats the one of the reply it's redoing. A follow-up adds the
+    // instruction to it, so the turn knows both what was asked and where to go on from.
+    const task = opts.task ?? (followUp ? followUpTask(opts.existing?.run?.task, followUp) : opts.existing?.run?.task)
     // The request it works on, kept on every save: what it ends with goes back to whoever asked.
     const handedId = opts.handed ?? opts.existing?.run?.handed
     // How many times in a row the work went on by itself to get here: kept, so it stops going on at the cap.
@@ -1581,10 +1649,25 @@ export class Runner {
     const linkedTo = tracing() ? (this.askingSpan(opts.askedIn ?? (handedId ? db.delegation(handedId)?.originMessageId : undefined)) ?? opts.existing?.run?.trace?.linkedTo) : undefined
     const replyTrace = (traced.reply = traceReply({ agent: { id: agent.id, name: agent.name }, engine: engineId, model: modelName, effort: agent.effort, conversationId: conv.id, jobId, ...(linkedTo ? { linkedTo } : {}) }))
     const spanOn = replyTrace ? { trace: { ...replyTrace.ref, ...(linkedTo ? { linkedTo } : {}) } } : {} // where a reply this one asks for links back to
-    msg.run = { status: 'working', depth: opts.depth, steps: [thinking()], ...again, ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...spanOn, ...decidedCards(opts.existing?.run) }
+    const instruction = followUp ? followUpStep(followUp) : undefined
+    const opening = thinking()
+    const openingSteps = [...(instruction ? [instruction] : []), opening]
+    if (rounds) rounds.push({ id: instruction?.id ?? opening.id, steps: [...openingSteps], text: '' })
+    msg.run = { status: 'working', depth: opts.depth, steps: [...pastSteps, ...openingSteps], ...again, ...(rounds ? { rounds } : {}), ...(replyTo ? { replyTo } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...spanOn, ...decidedCards(opts.existing?.run) }
     // Only a new execution replaces this reply's reasoning; tool/steering updates do not.
     let attemptStart = true
     const save = (patch: Partial<Message> = {}): void => {
+      if (rounds && patch.run) {
+        // The flat chain is authoritative while the reply runs; the last round is whatever it
+        // holds after the earlier rounds' steps. Store its words and reasoning with it.
+        const before = rounds.slice(0, -1).reduce((n, r) => n + r.steps.length, 0)
+        const current = rounds[rounds.length - 1]!
+        current.steps = (patch.run.steps ?? msg.run!.steps).slice(before)
+        current.text = roundText
+        if (roundThought) current.thought = roundThought
+        const keptRounds = rounds.map((r) => ({ ...r, steps: [...r.steps] }))
+        patch = { ...patch, run: { ...patch.run, rounds: keptRounds, steps: keptRounds.flatMap((r) => r.steps) } }
+      }
       this.update(msg, patch, attemptStart)
       attemptStart = false
     }
@@ -1682,7 +1765,10 @@ export class Runner {
       return msg
     }
 
+    // Saved first with what the reply already said, so a transcript a session can't resume from is
+    // whole; then cleared, so this turn's words stream in from empty and go under it on the way out.
     save()
+    msg.text = ''
 
     const cwd = join(this.deps.workDir, agent.id)
     mkdirSync(cwd, { recursive: true })
@@ -1856,6 +1942,7 @@ export class Runner {
       if (timer) clearTimeout(timer)
       timer = null
       if (thought) {
+        roundThought += thought // reasoning outlives the live renderer cache when this round ends
         emit({ type: 'thinking', id: msg.id, text: thought })
         thought = ''
       }
@@ -3352,7 +3439,7 @@ ${note}`,
     const config = sessionConfig({ engine: engineId, model: modelName, effort: agent.effort, account: account?.id ?? '', web: agent.web !== false, system, tools: toolDefs.map(({ _meta: _m, ...t }) => t), gateway: !!this.deps.gateway })
     const shown: Shown[] = [...blockOf].map(([id, i]) => ({ id, block: blocks[i]! }))
     const writing = history.some((m) => m.author.kind === 'agent' && m.run?.status === 'working')
-    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing, task: !!task }) : undefined
+    let plan = engines[engineId].sessions && !writing ? this.sessions.begin(sessionKey, { config, shown, live, restart: !!opts.existing && !followUp, task: !!task }) : undefined
     let lost: SessionPlan | undefined // given up on in the middle (the reserve took the reply)
     // An engine whose daemon holds the MCP connection between turns keeps the URL it was given
     // (Hermes): its token is the agent's, not the turn's. Every other engine gets a fresh one, or
@@ -3374,7 +3461,18 @@ ${note}`,
       const sent = [...lead, ...at.map((i) => withFiles[i]!)]
       return { prompt: sent.join('\n\n'), blocks: sent, images: images.flatMap((img) => (pos.has(img.block) ? [{ ...img, block: pos.get(img.block)! }] : [])) }
     }
-    let input = plan?.resume ? since(plan) : whole
+    // A follow-up whose session can't go on (it went stale, or what it saw changed): its own last answer
+    // is the message this turn answers, so the transcript above holds everything but that answer. It goes
+    // with the task instead, or the reply would be asked to carry on from something it can't see.
+    const carried = (i: typeof whole): typeof whole =>
+      followUp && past.trim() && !plan?.resume
+        ? {
+            prompt: `${i.prompt}\n\n${L('A sua última resposta nesta conversa, que você continua agora, foi:', 'Your last reply in this conversation, which you carry on now, was:')}\n\n${past}`,
+            blocks: [...i.blocks, past],
+            images: i.images
+          }
+        : i
+    let input = carried(plan?.resume ? since(plan) : whole)
     try {
       for (;;) {
         try {
@@ -3517,7 +3615,7 @@ ${note}`,
     const handedNow = handed ? this.handedIn(msg) : undefined
     const base = { endedAt, ...attempt, depth: opts.depth, work, receipt, question, questions, ...(delegated.length ? { delegations: delegated } : {}), ...(question && (askedTo.id !== requester.id || db.people().length > 1) ? { askedTo: askedTo.id } : {}), approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined, browser: msg.run?.browser, agentDraft: msg.run?.agentDraft, feedbackDraft: msg.run?.feedbackDraft, ...(msg.run?.leave ? { leave: msg.run.leave } : {}), proposal: msg.run?.proposal, proposals: msg.run?.proposals, ...(outside ? { outside: true } : {}), ...(replyTo ? { replyTo } : {}), ...(handedId ? { handed: handedId } : {}), ...(routineAskId ? { routineAsk: routineAskId } : {}), job: jobId, ...spanOn }
     if (control.reason === 'stopped') {
-      save({ run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
+      save({ text: kept(msg.text), run: { ...base, ...again, status: 'stopped', steps: closeThinking('error', L('Parado', 'Stopped')) } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall' || control.reason === 'sleeping') {
       const why = {
         loop: L(`repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`, `I repeated the same thing, with the same result, ${REPEAT_STOP} times. It looked like a loop`),
@@ -3526,12 +3624,12 @@ ${note}`,
         stall: L(`fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`, `I went ${Math.round(stallMs / 60_000)} minutes without any sign of life, stuck`)
       }[control.reason]
       save({
-        text: msg.text ? `${msg.text} …` : '',
+        text: kept(msg.text ? `${msg.text} …` : ''),
         run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Parou', 'Stopped')), error: L(`Parei: ${why}.`, `I stopped: ${why}.`) }
       })
     } else if (control.reason === 'computer') {
       save({
-        text: msg.text ? `${msg.text} …` : '',
+        text: kept(msg.text ? `${msg.text} …` : ''),
         run: {
           ...base,
           ...again,
@@ -3543,12 +3641,12 @@ ${note}`,
     } else if (overBudget && control.reason !== 'limit') {
       // Wrapped up at the budget, or cut past it: either way it can go on from here.
       save({
-        text: msg.text.trim() ? msg.text : (result?.text ?? ''),
+        text: kept(msg.text.trim() ? msg.text : (result?.text ?? '')),
         run: { ...base, ...again, status: 'paused', budget, steps: closeThinking('done', L('Pausou', 'Paused')) }
       })
     } else if (control.reason === 'limit') {
       save({
-        text: msg.text ? `${msg.text} …` : '',
+        text: kept(msg.text ? `${msg.text} …` : ''),
         run: { ...base, ...again, status: 'limit_reached', steps: closeThinking('error', L('Parou no limite de tokens', 'Stopped at the token limit')), error: L('Cheguei no meu limite de tokens deste mês no meio da resposta.', 'I hit my token limit for this month in the middle of the reply.') }
       })
     } else if (result) {
@@ -3559,7 +3657,7 @@ ${note}`,
       const up = question && handedNow && askedTo.id === requester.id ? handedNow : undefined
       if (question && !up) this.asked(agent, msg, question, askedTo, requester, confirming, settings)
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
-      const text = msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '') // said it all before its last tool
+      const text = kept(msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? '')) // said it all before its last tool
       // A card of next steps goes on a reply that's done: it asks nothing of anyone, so it's no question,
       // no inbox item and no slot. An approval or a question in the same turn is what counts instead.
       const carded = !!proposed && !questions && !waiting
@@ -3644,7 +3742,7 @@ ${note}`,
     } else {
       // What happened and what to do; the CLI's own words go folded under it.
       const failure = error === null ? { text: L('O motor terminou sem resposta.', 'The engine ended without a reply.') } : friendly(thrown ?? error, { engine: ENGINES[engineId].label, doing: L('responder', 'replying') })
-      save({ run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: failure.text, ...(failure.detail ? { errorDetail: failure.detail } : {}) } })
+      save({ text: kept(msg.text), run: { ...base, ...again, status: 'failed', steps: closeThinking('error', L('Falhou', 'Failed')), error: failure.text, ...(failure.detail ? { errorDetail: failure.detail } : {}) } })
     }
     // Stopped short on its own (a loop, the limit, a failure): you'd want to know. Not when you stopped it.
     // Unless it failed on something that passes (the network, a plan's window, its computer off): then it

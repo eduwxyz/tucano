@@ -362,6 +362,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
+      } else if (/carries on from your last reply in this conversation|continuação da sua última resposta nesta conversa/i.test(turn.prompt)) {
+        // A reply going on from where it stopped (src/core/runs.ts, `followIn`): it says so instead of
+        // repeating, paragraph for paragraph, the answer it already gave.
+        reply = L('Segui dali: o resto do que faltava está feito.', 'I went on from there: the rest of what was missing is done.')
       } else {
         reply = `Resposta de teste (${id} · ${turn.model}). Recebi ${turn.prompt.length} caracteres de contexto.`
       }
