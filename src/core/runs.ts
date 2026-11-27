@@ -4861,9 +4861,10 @@ ${note}`,
 }
 
 // Models that may pick who answers in a channel when the router's own can't: the reserve
-// models of the channel's agents, then their main ones, on another harness that's signed in.
-export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
-  const ids = [...members.map((a) => a.fallbackModelId), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
+// models of the channel's agents (the workspace's default reserve for one without its own), then
+// their main ones, on another harness that's signed in.
+export function routerReserves(members: Agent[], settings: Pick<Settings, 'engines' | 'defaultFallbackModel'>, out: EngineId): NonNullable<ReturnType<typeof modelInfo>>[] {
+  const ids = [...members.map((a) => a.fallbackModelId || settings.defaultFallbackModel), ...members.map((a) => a.modelId)].filter((id): id is string => !!id)
   const seen = new Set<string>()
   const list: NonNullable<ReturnType<typeof modelInfo>>[] = []
   for (const id of ids) {
