@@ -173,6 +173,12 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
     setAnswers(recommended)
     send()
   }
+  // The recommendation button now leads the footer row, before Skip and Cancel.
+  const recommend = recommended && (
+    <button className="btn btn--sm" disabled={sending} onKeyDown={(e) => e.stopPropagation()} onClick={goRecommended}>
+      <Icon name="check" size={12} /> {L('Pode seguir com a recomendação', 'Go with the recommendation')}
+    </button>
+  )
 
   const commit = (index: number, answer: Answer | null): void => {
     setEngaged(true)
@@ -232,23 +238,16 @@ function Answering({ id, questions, saved, badge, byline, steps, extra }: { id: 
         </div>
       )}
       {step === 'review' ? (
-        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} />
+        <Review takeFocus={engaged} questions={questions} answers={answers} onEdit={(i) => (setEngaged(true), setStep(i))} onSend={send} onCancel={cancelAsk} sending={sending} recommend={recommend} />
       ) : (
-        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} />
-      )}
-      {recommended && (
-        <div className="ask__recommend">
-          <button className="btn btn--sm" disabled={sending} onClick={goRecommended}>
-            <Icon name="check" size={12} /> {L('Pode seguir com a recomendação', 'Go with the recommendation')}
-          </button>
-        </div>
+        <DecisionStep key={step} draftId={draftKey(id, step)} question={questions[step]!} answer={answers[step] ?? null} last={questions.length === 1} takeFocus={engaged} onAnswer={(a) => commit(step, a)} onCancel={cancelAsk} recommend={recommend} />
       )}
       {extra}
     </section>
   )
 }
 
-function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void }): ReactNode {
+function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, onCancel, recommend }: { draftId: string; question: Decision; answer: Answer | null; last: boolean; takeFocus: boolean; onAnswer: (a: Answer) => void; onCancel: () => void; recommend?: ReactNode }): ReactNode {
   const options = question.options ?? []
   const [draft, setDraft] = useState<AnswerDraft>(() => drafts.get(draftId) ?? { chosen: answer?.chosen ?? [], other: answer?.other ?? '', text: answer?.text ?? '' })
   const { chosen, other, text } = draft
@@ -400,6 +399,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
         </p>
       )}
       <div className="ask__foot">
+        {recommend && <div className="ask__recommend ask__recommend--foot">{recommend}</div>}
         {/* While it listens, the time and how to end it take the keys' place. */}
         <span className="ask__hint">{voice === 'recording' ? <RecordingClock since={voiceControls.startedAt()} /> : voice === 'idle' ? keyHint : ''}</span>
         {/* Skipping would wake the agent just to say so: a next-steps card only has Cancel, which closes it quietly. */}
@@ -421,7 +421,7 @@ function DecisionStep({ draftId, question, answer, last, takeFocus, onAnswer, on
   )
 }
 
-function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean }): ReactNode {
+function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sending, recommend }: { takeFocus: boolean; questions: Decision[]; answers: (Answer | null)[]; onEdit: (i: number) => void; onSend: () => void; onCancel: () => void; sending: boolean; recommend?: ReactNode }): ReactNode {
   // Reached from the last decision, Send has the keyboard; on a card that just showed up, nothing does.
   const sendButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -442,6 +442,7 @@ function Review({ takeFocus, questions, answers, onEdit, onSend, onCancel, sendi
         ))}
       </ol>
       <div className="ask__foot">
+        {recommend && <div className="ask__recommend ask__recommend--foot">{recommend}</div>}
         <span className="ask__hint">{L('Clique numa resposta pra mudar', 'Click an answer to change it')}</span>
         <button ref={sendButton} className="btn btn--primary btn--sm" disabled={sending} onClick={onSend}>
           <Icon name="send" size={12} /> {L('Enviar', 'Send')}
