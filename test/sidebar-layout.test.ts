@@ -100,7 +100,7 @@ it.skipIf(!existsSync(chromium.executablePath()))('lines up system lines with th
   } finally { await browser.close() }
 })
 
-it.skipIf(!existsSync(chromium.executablePath()))('keeps marked rows inside a fold, and hides the quiet ones', async () => {
+it.skipIf(!existsSync(chromium.executablePath()))('keeps the rows that wait on the person inside a fold, and hides the rest', async () => {
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -108,7 +108,7 @@ it.skipIf(!existsSync(chromium.executablePath()))('keeps marked rows inside a fo
       <style>${readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')}</style>
       <div class="section is-folded">
         <div class="channel-group is-folded">
-          <button class="nav-item is-attention">working</button>
+          <button class="nav-item is-attention">asked in a channel</button>
           <button class="nav-item is-unread">unread</button>
           <button class="nav-item is-active">where you are</button>
           <button class="nav-item">quiet</button>
@@ -120,8 +120,8 @@ it.skipIf(!existsSync(chromium.executablePath()))('keeps marked rows inside a fo
       </div>`)
     const display = await page.locator('.nav-item').evaluateAll((els) => els.map((el) => [el.textContent, getComputedStyle(el).display]))
     expect(display).toEqual([
-      ['working', 'flex'],
-      ['unread', 'flex'],
+      ['asked in a channel', 'flex'],
+      ['unread', 'none'],
       ['where you are', 'flex'],
       ['quiet', 'none'],
       ['asked me', 'flex'],

@@ -719,9 +719,10 @@ h3 {
 .fold-toggle[aria-expanded='true'] svg {
   transform: rotate(90deg);
 }
-/* What's folded goes, except where you are and what needs you: the row you're in, unread rows and
-   rows with work or an ask never disappear from under you. A next-steps card alone is none of these. */
-.is-folded .nav-item:not(.is-active):not(.is-unread):not(.is-attention) {
+/* What's folded goes, except where you are and what waits on you: the row you're in and a row with a
+   question or an approval never disappear from under you. Unread and work in progress stay in the
+   header's badges, so folding still quiets the group. A next-steps card alone is none of these. */
+.is-folded .nav-item:not(.is-active):not(.is-attention) {
   display: none;
 }
 /* A row that shows up (a new one, or its section unfolding) rises into place. */
@@ -14944,7 +14945,7 @@ button.agent-card__now:hover {
 .section.is-folded .agent-sector__head {
   display: none;
 }
-.is-folded .agent-row:not(:has(> .nav-item.is-active, > .nav-item.is-unread, > .nav-item.is-attention)) {
+.is-folded .agent-row:not(:has(> .nav-item.is-active, > .nav-item.is-attention)) {
   display: none;
 }
 .is-folded .agent-sector__more {

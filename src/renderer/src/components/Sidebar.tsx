@@ -711,8 +711,8 @@ const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
   const waiting = useWaitingTitle(id)
-  // Work or an ask waits on the person here: the row stays in place while its folder is folded.
-  const attention = working || !!waiting
+  // A question or approval waits on the person here: the row stays in place while its folder is folded.
+  const attention = !!waiting
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''} ${attention ? 'is-attention' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
@@ -760,7 +760,7 @@ const AgentRow = memo(function AgentRow({ id, dm, unread, owner }: { id: string;
   const working = useStore((s) => !!dm && isWorking(s, dm))
   const waiting = useWaitingTitle(dm)
   const waits = useStore((s) => (dm ? waitingCount(s, dm) : 0))
-  const attention = !!dm && (working || waits > 0)
+  const attention = !!dm && waits > 0
   if (!agent) return null
   // No monthly limit, no dot: undefined share, so nothing here can read as spent.
   const pct = usedShare(agent.used, agent.limit)

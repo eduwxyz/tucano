@@ -41,8 +41,8 @@ const section = (label: string): Element => [...document.querySelectorAll('.sect
 const agentRows = (): Element[] => [...section('Agentes').querySelectorAll('.agent-row > .nav-item')]
 const row = (name: string): Element => agentRows().find((r) => r.querySelector('.nav-item__label')?.textContent === name)!
 const channelRow = (name: string): Element => [...section('Canais').querySelectorAll('.channel-row > .nav-item')].find((r) => r.querySelector('.nav-item__label')?.textContent === name)!
-// The fold CSS keeps a row when it is active, unread or marked as needing attention.
-const shown = (nav: Element): boolean => ['is-active', 'is-unread', 'is-attention'].some((c) => nav.classList.contains(c))
+// The fold CSS keeps a row when it is active or marked as waiting on the person (a question or an approval).
+const shown = (nav: Element): boolean => ['is-active', 'is-attention'].some((c) => nav.classList.contains(c))
 const click = (el: Element): Promise<void> => act(async () => void el.dispatchEvent(new window.Event('click', { bubbles: true })))
 
 beforeEach(() => (root = createRoot(document.getElementById('root')!)))
@@ -244,15 +244,18 @@ describe('rows that stay in a folded sidebar', () => {
   const folder = (): Element => [...document.querySelectorAll('.channel-group.is-folded')].find((g) => g.querySelector('.fold-toggle span')?.textContent === 'Projetos')!
   const sector = (): Element => [...document.querySelectorAll('.agent-sector.is-folded')].find((g) => g.querySelector('.fold-toggle span')?.textContent === 'Pesquisa')!
 
-  it('keeps a working channel in a folded group, but not a quiet one', async () => {
+  it('keeps a channel with a question in a folded group, but not a working or a quiet one', async () => {
     await render({
-      conversations: [ch('c1', 'geral'), ch('c2', 'aleatorio')],
-      messages: { c1: [msg('m1', 'c1', 'a1', 'working')] },
-      settings: { ...inGroup(['c1', 'c2']), folded: ['group:g1'] } as State['settings']
+      conversations: [ch('c1', 'geral'), ch('c2', 'aleatorio'), ch('c3', 'pedidos')],
+      messages: { c1: [msg('m1', 'c1', 'a1', 'working')], c3: [msg('m3', 'c3', 'a1', 'waiting_input')] },
+      settings: { ...inGroup(['c1', 'c2', 'c3']), folded: ['group:g1'] } as State['settings']
     })
     expect(folder()).toBeDefined()
-    expect(channelRow('geral').className).toContain('is-attention')
-    expect(shown(channelRow('geral'))).toBe(true)
+    expect(channelRow('pedidos').className).toContain('is-attention')
+    expect(shown(channelRow('pedidos'))).toBe(true)
+    // Work going on doesn't wait on the person: the fold keeps it out of sight.
+    expect(channelRow('geral').className).not.toContain('is-attention')
+    expect(shown(channelRow('geral'))).toBe(false)
     expect(shown(channelRow('aleatorio'))).toBe(false)
   })
 
@@ -284,7 +287,7 @@ describe('rows that stay in a folded sidebar', () => {
     expect(shown(row('Lia'))).toBe(false)
   })
 
-  it('keeps a channel and a DM with unread only in a folded section and group', async () => {
+  it('folds away a channel and a DM with unread only: the header badge counts them', async () => {
     await render({
       agents: [agent({})],
       conversations: [ch('c1', 'geral', 2), dm({ unread: 3 })],
@@ -294,12 +297,12 @@ describe('rows that stay in a folded sidebar', () => {
     expect(section('Agentes').className).toContain('is-folded')
     expect(folder()).toBeDefined()
     expect(channelRow('geral').className).toContain('is-unread')
-    expect(shown(channelRow('geral'))).toBe(true)
+    expect(shown(channelRow('geral'))).toBe(false)
     expect(row('Lia').className).toContain('is-unread')
-    expect(shown(row('Lia'))).toBe(true)
+    expect(shown(row('Lia'))).toBe(false)
   })
 
-  it('keeps the row when a thread reply raises the conversation unread count', async () => {
+  it('a thread reply that raises the unread count does not bring the row back', async () => {
     const conversation = ch('c1', 'geral')
     const messages = { c1: [msg('m1', 'c1', 'a1', 'done'), { ...msg('m2', 'c1', 'a1', 'done'), threadId: 'm1' }] }
     const state = { conversations: [conversation], messages, settings: { ...inGroup(['c1']), folded: ['group:g1'] } as State['settings'] }
@@ -307,7 +310,7 @@ describe('rows that stay in a folded sidebar', () => {
     expect(shown(channelRow('geral'))).toBe(false)
     await render({ ...state, conversations: [{ ...conversation, unread: 1 }] })
     expect(channelRow('geral').className).toContain('is-unread')
-    expect(shown(channelRow('geral'))).toBe(true)
+    expect(shown(channelRow('geral'))).toBe(false)
   })
 
   it('still keeps the channel row the person is in, in a folded section and group', async () => {
