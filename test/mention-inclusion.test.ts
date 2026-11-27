@@ -34,6 +34,7 @@ const runner = (): Runner => {
 }
 
 const by = (id: string, conversationId: string): Message[] => db.messages().filter((m) => m.author.kind === 'agent' && m.author.id === id && m.conversationId === conversationId)
+const replies = (id: string, conversationId: string): Message[] => by(id, conversationId).filter((m) => !!m.run?.replyTo) // an agent's handoff has no prompt to answer
 const cards = (): Message[] => db.messages().filter((m) => !!m.run?.inclusion)
 const lastCard = (): Message => cards().at(-1)!
 const approve = async (r: Runner, index: number, byId = db.ownerId()): Promise<void> => {
@@ -105,14 +106,73 @@ describe('the @-to-include card', () => {
     expect(db.question(lastCard().id)?.state).toBe('answered')
   })
 
-  it('applies in a DM as well as a channel', async () => {
+  it('a channel mention still offers exactly one card with Include and Skip', async () => {
+    const r = runner()
+    await r.send('ch', '@nina olhe o build', [], undefined, db.ownerId())
+    await r.idle()
+    expect(cards()).toHaveLength(1)
+    const [decision] = questionsOf(lastCard().run)
+    expect(decision?.options?.map((o) => o.label)).toEqual(['Include', 'Skip'])
+    expect(db.conversations().filter((c) => c.teamUp)).toHaveLength(0)
+  })
+
+  it('a DM mention opens one named room where both agents and the person work, with no card', async () => {
     const r = runner()
     await r.send('dm', '@nina ajude aqui', [], undefined, db.ownerId())
     await r.idle()
-    expect(cards()).toHaveLength(1)
-    await approve(r, 0)
-    expect(db.conversation('dm')?.members).toEqual(expect.arrayContaining(['orion', 'nina']))
-    expect(by('nina', 'dm')).toHaveLength(1)
+    expect(cards()).toHaveLength(0) // no inclusion card in a DM
+    const rooms = db.conversations().filter((c) => c.teamUp)
+    expect(rooms).toHaveLength(1) // one throwaway team room
+    const room = rooms[0]!
+    expect(room.kind).toBe('channel')
+    expect(room.name).toBe('team-up-orion-nina') // 18 characters, from both handles
+    expect(room.name.length).toBeLessThanOrEqual(22) // the sidebar's 22-character limit
+    expect(room.members).toEqual(expect.arrayContaining(['orion', 'nina']))
+    expect(room.createdBy).toBe(db.ownerId()) // the person who wrote the mention is in the room
+    expect(room.teamUp?.privateTo).toBe(db.ownerId()) // the DM's private audience carries over
+    expect(replies('orion', room.id)).toHaveLength(1) // the DM's own agent works here
+    expect(replies('nina', room.id)).toHaveLength(1) // the mentioned agent works here
+    expect(turns.some((t) => t.prompt.includes('ajude aqui'))).toBe(true) // the request reached both
+  })
+
+  it('a DM keeps its own agent and members and carries one pointer line to the new room', async () => {
+    const r = runner()
+    await r.send('dm', '@nina olhe isto', [], undefined, db.ownerId())
+    await r.idle()
+    const room = db.conversations().find((c) => c.teamUp)!
+    expect(db.conversation('dm')?.members).toEqual(['orion']) // no agent added to the DM
+    expect(db.conversation('dm')?.name).toBe('orion')
+    const pointers = db.messages().filter((m) => m.conversationId === 'dm' && m.author.kind === 'system' && m.text.includes(`#${room.name}`))
+    expect(pointers).toHaveLength(1) // one short handoff line
+    expect(cards()).toHaveLength(0)
+    expect(by('nina', 'dm')).toHaveLength(0)
+    expect(by('orion', 'dm')).toHaveLength(0) // both replies are in the team room
+  })
+
+  it('names a DM team from up to three handles inside 22 characters', async () => {
+    db.saveAgent(agent('very-long-handle-one'))
+    db.saveAgent(agent('very-long-handle-two'))
+    db.saveAgent(agent('very-long-handle-three'))
+    const r = runner()
+    await r.send('dm', '@very-long-handle-one @very-long-handle-two @very-long-handle-three juntos', [], undefined, db.ownerId())
+    await r.idle()
+    const room = db.conversations().find((c) => c.teamUp)!
+    expect(room.name.length).toBeLessThanOrEqual(22) // characters, beside the unread badge
+    expect(room.name.startsWith('team-up-')).toBe(true)
+    expect(room.members).toEqual(expect.arrayContaining(['orion', 'very-long-handle-one', 'very-long-handle-two', 'very-long-handle-three']))
+    expect(room.createdBy).toBe(db.ownerId())
+    expect(cards()).toHaveLength(0)
+  })
+
+  it('opens no room and no card for a hidden agent mentioned in a DM', async () => {
+    db.addPerson({ id: 'bia', name: 'Bia', role: 'member', about: '', access: { mode: 'picked', sectors: [], agents: ['orion'], channels: [] } })
+    const r = runner()
+    await r.send('dm', '@nina ajude aqui', [], undefined, 'bia')
+    await r.idle()
+    expect(cards()).toHaveLength(0)
+    expect(db.conversations().filter((c) => c.teamUp)).toHaveLength(0) // no room for an out-of-reach name
+    expect(by('nina', 'dm')).toHaveLength(0)
+    expect(db.conversation('dm')?.members).toEqual(['orion'])
   })
 
   it('gives a hidden agent no card at all', async () => {

@@ -726,9 +726,20 @@ export class Runner {
     // It names the doer with @, but that @ is not a request to add them to this conversation.
     const delegation = DELEGATION_LINE.test(typed)
     if (outsiders.length && !asked && !delegation) {
-      const deadlineAt = Date.now() + this.deadlineMs(await this.deps.settings())
-      this.offerInclusion(conv, replyIn, mine, writer, outsiders, deadlineAt)
-      return
+      if (conv.kind === 'dm') {
+        // A DM keeps its own agent alone. The mention opens a throwaway named room where both work:
+        // no card here, and no one joins the DM. The same reach and private-audience checks above
+        // decide who may be called.
+        const owner = may[0]
+        if (owner) {
+          await this.dmMentionRoom(conv, replyIn, mine, writer, owner, outsiders)
+          return
+        }
+      } else {
+        const deadlineAt = Date.now() + this.deadlineMs(await this.deps.settings())
+        this.offerInclusion(conv, replyIn, mine, writer, outsiders, deadlineAt)
+        return
+      }
     }
     const answerers = this.answering(conv, may, responders)
 
@@ -1269,6 +1280,9 @@ export class Runner {
   // One card for every outside agent named in the message: Include brings them all in together, Skip
   // leaves the room as it was. The Tuca owns the card only because a Decision needs an agent's message.
   private offerInclusion(conv: Conversation, threadId: string | undefined, source: Message, writer: Person, outsiders: Agent[], deadlineAt: number): void {
+    // A DM never gets an inclusion card, whichever route reaches here. A mention there opens a
+    // named team room instead; the DM's member list stays as it was.
+    if (conv.kind === 'dm') return
     const { db, emit } = this.deps
     // A fresh workspace may not have talked to the Tuca yet: the card is his, so he is made here.
     let tuca = db.agents().find((a) => a.kind === 'tuca' && !a.archived)
@@ -4677,38 +4691,65 @@ ${note}`,
     requester: Person,
     wanted: string
   ): { channel: Conversation; teamUp: TeamUp } | { error: string } {
+    return this.openTeamUpRoom({ by: agent, guests: [to, ...witnesses], witnesses, source, msg, requester, title: wanted })
+  }
+
+  // A person's @ in a DM opens the same kind of named room and both agents work there. The DM keeps
+  // its own agent alone: only a line pointing at the room is written in it. The name comes from the
+  // handles, and the person who wrote the mention is a member of the room.
+  private async dmMentionRoom(conv: Conversation, threadId: string | undefined, msg: Message, writer: Person, owner: Agent, guests: Agent[]): Promise<void> {
+    const title = `team-up ${[owner, ...guests].map((g) => g.handle).join(' ')}`
+    const source = { ...conv, name: L(`DM com ${owner.name}`, `DM with ${owner.name}`) }
+    const room = this.openTeamUpRoom({ by: owner, guests, witnesses: [], source, msg, requester: writer, title })
+    const names = guests.map((g) => `@${g.handle}`).join(', ')
+    this.post(conv.id, threadId, L(`Trouxe ${names} para #${room.channel.name}; o trabalho continua lá.`, `Brought ${names} into #${room.channel.name}; the work continues there.`))
+    const cap = await this.repliesAtOnce()
+    const answer = async (): Promise<unknown> => {
+      let before: Promise<Message | undefined> | undefined
+      for (const agent of [owner, ...guests]) {
+        const go = (): Promise<Message | undefined> => this.startReply(agent, room.channel, { depth: 1, replyTo: room.handoff.id, task: msg.text }, { urgent: true, parallel: true })
+        before = before ? before.then(go, go) : go()
+      }
+      return before ?? Promise.resolve()
+    }
+    this.runIn(room.channel.id, answer, room.handoff, cap)
+  }
+
+  // The one room builder for pedir's named room and a DM mention: same name limit, same handoff,
+  // same private audience, same six-hour reuse. `createdBy` is the person who asked for the room.
+  private openTeamUpRoom(opts: { by: Agent; guests: Agent[]; witnesses: Agent[]; source: Conversation; msg: Message; requester: Person; title: string }): { channel: Conversation; teamUp: TeamUp; handoff: Message } {
+    const { by, guests, witnesses, source, msg, requester, title } = opts
     const { db } = this.deps
-    const guests = [to, ...witnesses]
-    const all = [agent.id, ...guests.map((g) => g.id)]
+    const all = [by.id, ...guests.map((g) => g.id)]
     const now = Date.now()
     const seen = db.conversations().filter((c) => c.teamUp && (c.teamUp.privateTo ? c.teamUp.privateTo === requester.id : true))
-    const existing = seen.find((c) => c.teamUp && reusable(c.teamUp, source.id, agent.id, all, now))
+    const existing = seen.find((c) => c.teamUp && reusable(c.teamUp, source.id, by.id, all, now))
     if (existing?.teamUp) {
       const ids = [...new Set([...existing.members, ...all])]
       db.setMembers(existing.id, ids, Object.fromEntries([
         ...ids.map((id) => [id, 'answer' as MemberMode]),
         ...witnesses.map((w) => [w.id, 'mention' as MemberMode])
       ]))
-      return { channel: db.conversation(existing.id)!, teamUp: existing.teamUp }
+      return { channel: db.conversation(existing.id)!, teamUp: existing.teamUp, handoff: db.recentMessages(existing.id, 1).at(-1) ?? msg }
     }
     const taken = (name: string): boolean => db.conversations().some((c) => c.name === name)
-    const name = teamUpName(guests, taken, wanted)
+    const name = teamUpName(guests, taken, title)
     const mode: Record<string, MemberMode> = Object.fromEntries([
       ...db.agents().filter((a) => source.members.includes(a.id)).map((a) => [a.id, source.modes?.[a.id] ?? 'answer' as MemberMode]),
       ...all.map((id) => [id, 'answer' as MemberMode]),
       ...witnesses.map((w) => [w.id, 'mention' as MemberMode])
     ])
-    const up: TeamUp = { from: source.id, title: wanted, by: agent.id, at: now, guests: all, privateTo: inheritedAudience(source, db.ownerId()) }
-    db.createConversation({ id: randomUUID(), kind: 'channel', name, topic: teamUpTopic(agent.name, source.name), members: Object.keys(mode), modes: mode, teamUp: up, wikiCapture: false, createdBy: requester.id, createdAt: now })
+    const up: TeamUp = { from: source.id, title: title || name, by: by.id, at: now, guests: all, privateTo: inheritedAudience(source, db.ownerId()) }
+    db.createConversation({ id: randomUUID(), kind: 'channel', name, topic: teamUpTopic(by.name, source.name), members: Object.keys(mode), modes: mode, teamUp: up, wikiCapture: false, createdBy: requester.id, createdAt: now })
     const room = db.conversations().find((c) => c.name === name && c.teamUp?.at === now)!
     const carried: Carried[] = pickCarried(contextWindow(db, msg, 24).messages.filter((m) => m.text.trim()).map((m) => ({
       name: m.author.kind === 'agent' ? db.agent(m.author.id)?.name ?? m.author.id : m.author.kind === 'person' ? db.person(m.author.id)?.name ?? requester.name : L('Quem pediu', 'Who asked'),
       text: m.text,
       at: m.at
     }))).kept
-    this.say(agent.id, room.id, undefined, carriedText({ by: agent.name, guests: guests.map((g) => `@${g.handle}`), source: source.name, messages: carried }))
+    const handoff = this.say(by.id, room.id, undefined, carriedText({ by: by.name, guests: guests.map((g) => `@${g.handle}`), source: source.name, messages: carried }))
     this.deps.emit({ type: 'conversation', conversation: room })
-    return { channel: room, teamUp: up }
+    return { channel: room, teamUp: up, handoff }
   }
 
   // The request becomes a thread in the channel of whoever does it, and they start on it.

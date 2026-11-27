@@ -1482,7 +1482,7 @@ function setFolders(agent: Agent, folders: NonNullable<Agent['folders']>): void 
 }
 
 // A team-up room closes after its quiet days are up, unless a reply is still running there. Messages
-// are never deleted by age. 0 says keep every room.
+// are never deleted by age. 0 never expires, the default.
 function sweepTeamUps(): void {
   const days = teamUpDays(settings().teamUpDays)
   if (!days) return

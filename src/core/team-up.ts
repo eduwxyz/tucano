@@ -1,5 +1,5 @@
-// A team-up is a normal channel an agent opens through `pedir` to carry work across to others. These
-// are only rules: naming, clipping and expiry. The runner orchestrates; this module holds no database.
+// A team-up is a normal channel opened by `pedir` or by a person's @ in a DM. These are only rules:
+// naming, clipping and expiry. The runner orchestrates; this module holds no database.
 import { L } from '../shared/lang'
 import { channelName, TEAM_UP_CHARS, TEAM_UP_DAYS, TEAM_UP_MESSAGES, TEAM_UP_NAME_MAX, TEAM_UP_REUSE_MS, type TeamUp } from '../shared/types'
 
@@ -8,11 +8,12 @@ export const TEAM_UP_LINE = 900 // one long reply cannot take the whole carry bu
 export const TEAM_UP_HEAD_ROOM = 500 // characters kept for the handoff's heading and labels
 export { TEAM_UP_CHARS, TEAM_UP_DAYS, TEAM_UP_MESSAGES, TEAM_UP_NAME_MAX, TEAM_UP_REUSE_MS }
 
-// Who an agent called in, and how long the room stays quiet before it closes. `days` 0 keeps every room.
+// Who an agent called in, and how long the room stays quiet before it closes. `days` 0 never expires.
+// A new message refreshes the deadline through the conversation's last message time; see staleTeamUps.
 export const teamUpDays = (set: number | undefined): number => (typeof set === 'number' && Number.isFinite(set) ? Math.max(0, Math.round(set)) : TEAM_UP_DAYS)
 
-// Rooms with a team_up whose last message (the handoff when nobody answered) is old enough. A room with
-// a reply running is left out by the caller, which knows what is working.
+// Rooms with a team_up whose last message (the handoff when nobody answered) is old enough. A newer
+// message pushes the deadline out. A room with a reply running is left out by the caller.
 export function staleTeamUps(
   conversations: { id: string; teamUp?: { at: number } }[],
   lastAt: (id: string) => number | undefined,

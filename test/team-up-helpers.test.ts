@@ -1,5 +1,6 @@
 // The rules of a team-up room, with their numbers and units: 22 characters in the sidebar, 24
-// carried messages, 12,000 characters, six hours of reuse, seven quiet days. No clock sleeps here.
+// carried messages, 12,000 characters, six hours of reuse, 5, 14 or 30 quiet days. Zero never
+// expires. No clock sleeps here.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setLang } from '../src/shared/lang'
 import { TEAM_UP_CHARS, TEAM_UP_DAYS, TEAM_UP_MESSAGES, TEAM_UP_NAME_MAX, TEAM_UP_REUSE_MS, TEAM_UP_WITNESSES, type Agent, type Delegation } from '../src/shared/types'
@@ -59,16 +60,27 @@ describe('team-up rules', () => {
     expect(reusable(up, 'dm', 'wrench', ['bento'], 2_000)).toBe(false)
   })
 
-  it('closes after seven quiet days, and zero keeps every room', () => {
-    expect(TEAM_UP_DAYS).toBe(7) // days
-    expect(teamUpDays(undefined)).toBe(7)
+  it('closes at 5, 14 or 30 quiet days, and zero never expires', () => {
+    expect(TEAM_UP_DAYS).toBe(0) // days; no expiry is the default
+    expect(teamUpDays(undefined)).toBe(0)
+    expect(teamUpDays(5)).toBe(5) // days
+    expect(teamUpDays(14)).toBe(14) // days
+    expect(teamUpDays(30)).toBe(30) // days
     expect(teamUpDays(0)).toBe(0)
     expect(teamUpDays(-3)).toBe(0)
     const rooms = [{ id: 'room', teamUp: { at: 0 } }]
-    expect(staleTeamUps(rooms, () => 0, { days: 7, now: 7 * DAY - 1 })).toEqual([])
-    expect(staleTeamUps(rooms, () => 0, { days: 7, now: 7 * DAY })).toEqual(['room'])
-    expect(staleTeamUps(rooms, () => 0, { days: 7, now: 30 * DAY })).toEqual(['room'])
+    expect(staleTeamUps(rooms, () => 0, { days: 5, now: 5 * DAY - 1 })).toEqual([])
+    expect(staleTeamUps(rooms, () => 0, { days: 5, now: 5 * DAY })).toEqual(['room'])
+    expect(staleTeamUps(rooms, () => 0, { days: 14, now: 14 * DAY })).toEqual(['room'])
+    expect(staleTeamUps(rooms, () => 0, { days: 30, now: 30 * DAY })).toEqual(['room'])
     expect(staleTeamUps(rooms, () => 0, { days: 0, now: 30 * DAY })).toEqual([])
+  })
+
+  it('lets a newer message push the deadline out by its own age', () => {
+    const rooms = [{ id: 'room', teamUp: { at: 0 } }]
+    expect(staleTeamUps(rooms, () => 13 * DAY, { days: 14, now: 14 * DAY })).toEqual([]) // 13-day-old message
+    expect(staleTeamUps(rooms, () => 13 * DAY, { days: 14, now: 27 * DAY })).toEqual(['room']) // 14 days after it
+    expect(staleTeamUps(rooms, () => 29 * DAY, { days: 14, now: 30 * DAY })).toEqual([])
   })
 
   it('passes a private audience through nested rooms', () => {
