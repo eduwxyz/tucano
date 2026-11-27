@@ -2,10 +2,12 @@
 import type { Answer } from './questions'
 import type { HermesPreview } from './hermes-import'
 import type { Lang } from './lang'
+import type { ExecutionFilter, ExecutionPage, ExecutionStep, TracesTest, TracesView } from './types'
 import type { BackupSummary, WikiChange, WikiGitSetup, WikiGitStatus, WikiGitTest, WikiHit, WikiPage, WikiImport, WikiPageInfo, WikiReview, WikiSource, WikiVersion, NodeInfo, NodeLogEntry } from './types'
+import type { Doc, DocAnswer, DocEvent, DocFolder, DocHit, DocsTree, DocVersion, FolderAccess } from './docs'
 import type { AppProvider, CatalogCategory, CatalogView, OwnAppGuide } from './connector-catalog'
 import type { Connectable, HarnessConnect, HarnessKey, HarnessLevel, McpInfo } from './harness-keys'
-import type { Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
+import type { TucaLeave, Task, TaskInput, Os, Account, AccountEngine, ActivityEntry, Delegation, Device, Inbox, Agent, BrowserInput, Approval, Artifact, ImageUpload, FileUpload, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, HarnessMcp, Conversation, EngineId, Invite, Memory, Person, PersonAccess, Role, MemoryScope, Message, Routine, RoutineInput, Report, Settings, SetupState, LoginKey, LoginScreen, LocalSkill, Skill, SkillInput, SkillVersion, Trigger, UsageReport, LocalInfo, VoiceModelId, VoiceStatus, ProposalsResult, AgentApp } from './types'
 import type { EnvPair, KeyRequestAnswer, VaultKey, VaultKeyInput, VaultLogin, VaultLoginInput, VaultUse } from './vault'
 
 export interface Snapshot {
@@ -34,6 +36,7 @@ export interface Snapshot {
   needsName?: boolean // a server's first access: the owner hasn't said their name yet (setMyName)
   inbox: Inbox // what waits on this person: approvals they can decide, questions to them
   delegations?: Delegation[] // work handed down the tree (src/shared/org.ts) that is open, or ended in the last day, in channels this person sees
+  leaves?: TucaLeave[] // what this person let the Tuca do himself (src/core/tuca-leave.ts)
 }
 
 export interface Api {
@@ -64,7 +67,8 @@ export interface Api {
   saveTask(p: { task: TaskInput }): Task // new (no id) at the top, or changed; throws why not (an agent I don't see, an empty title)
   removeTask(p: { id: string }): void
   startTask(p: { id: string }): { conversationId: string } // posts it as my message to its agent (its DM, or the channel set) and takes it off the list
-  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the agent behind the builder screen, with this person's conversation with him, as it was; fresh starts a new one ("Nova conversa")
+  ensureTuca(p: { modelId?: string; fresh?: boolean }): { agentId: string; conversationId: string } // the Tuca, with this person's conversation with him that was last talked in; fresh starts another ("Nova conversa") and keeps the rest
+  setConversationTitle(p: { id: string; title: string }): void // names one of my conversations with the Tuca; '': back to what I first asked there
   createFromDraft(p: { messageId: string }): { agentId: string; conversationId: string } // the agent a Tuca card proposed
   applyProposal(p: { messageId: string; index?: number }): { id: string } // what a Tuca card proposed changing: the agent, routine or channel it touched; index: which of the reply's cards (unset: the first)
   dismissProposal(p: { messageId: string; index?: number }): void
@@ -105,6 +109,7 @@ export interface Api {
   removeConnector(p: { id: string }): void
   reconnectConnector(p: { id: string }): void
   setConnectorToken(p: { id: string; token: string }): Promise<void>
+  setConnectorIcon(p: { id: string; icon: string }): Promise<void> // the picture it wears; empty goes back
   connectorCatalog(): { categories: { id: CatalogCategory; name: string }[]; entries: CatalogView[]; added: string[] } // the store, as data (the phone); added: the entries already connected
   addCatalogConnector(p: { id: string; values?: Record<string, string> }): Promise<string> // a store entry, with what it asks, filled in by the core
   ownAppGuide(p: { provider: AppProvider }): Promise<{ guide: OwnAppGuide; clientId?: string }> // the steps to make one's own Google or Slack app (the phone)
@@ -186,6 +191,11 @@ export interface Api {
   openBackups(): void
   report(p: { week?: number }): Report // the calendar week starting at `week` (a Monday); this one by default
   usage(): UsageReport
+  executions(p: { days: number; agentId?: string; status?: ExecutionFilter; beforeAt?: number; beforeId?: string }): ExecutionPage // finished replies the viewer may read, a page at a time
+  executionSteps(p: { messageId: string }): ExecutionStep[]
+  traces(): TracesView // Settings › Connections › Traces
+  setTraces(p: { on: boolean; endpoint: string; text?: boolean; headers?: string | null }): Promise<TracesView> // headers: one per line, "Name: value"; left out, the saved ones stay; null removes them
+  testTraces(p: { endpoint: string; headers?: string }): Promise<TracesTest> // one test trace with the form's values; headers left out: the saved ones
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
   // The wiki: pages in a folder of Markdown, linked, searched and kept with their history.
@@ -217,6 +227,30 @@ export interface Api {
   wikiAddLink(p: { url: string }): Promise<WikiSource>
   wikiAddNote(p: { text: string; title?: string }): WikiSource
   wikiOpenOriginal(p: { id: string }): { name: string; data: string } | null // on a server: the file itself (base64), to download
+  // Documentos: files in folders that say who sees them. Access is checked inside the core (core/docs.ts), per person.
+  docs(): DocsTree // what I see: folders, documents (the trashed too), and what I may do in each folder
+  docFolderSave(p: { id?: string; parentId: string | null; name: string; rule: string; access?: FolderAccess | null; needsApproval?: boolean }): DocFolder // no id: makes one; access left out keeps it, null follows the parent; needsApproval left out keeps it (access and approval: owner and admins only)
+  docFolderRemove(p: { id: string }): void // an empty one
+  docAdd(p: { folderId: string; name: string; data: string; summary?: string }): Promise<Doc> // data: base64
+  docSaveArtifact(p: { artifactId: string; folderId: string }): Promise<Doc> // keeps a file an agent showed in the chat; one kept already comes back as is
+  docMove(p: { id: string; folderId: string; name?: string }): Doc
+  docRename(p: { id: string; name: string }): Doc
+  docTrash(p: { id: string }): Doc
+  docRestore(p: { id: string }): Doc
+  docPurge(p: { id: string }): void // out of the trash, for good: the owner's or an admin's (in a personal folder, its person's)
+  docText(p: { id: string; version?: number }): Promise<{ text: string }> // what the file says, for the viewer (the file itself is served at docUrl)
+  docHistory(p: { id: string }): { versions: DocVersion[]; events: DocEvent[] }
+  docRestoreVersion(p: { id: string; n: number }): Promise<Doc> // an older version's bytes become a new version
+  docToWiki(p: { id: string }): Promise<WikiSource> // the curator reads it into the wiki's pages, as a file dropped there; only from a folder everyone sees
+  docSearch(p: { q: string; folderId?: string }): DocHit[]
+  docByArtifact(): Record<string, { docId: string; folderId: string }> // artifacts kept as documents, for "Guardado em…" in the chat
+  docDecide(p: { id: string; ok: boolean; note?: string; version?: number }): Promise<Doc> // approves what waits, or asks for changes (note required); the agent that made it is told
+  docMakeOfficial(p: { id: string }): Doc // a draft (or one waiting) that counts as it is
+  docInboxAdd(p: { name: string; data: string }): Promise<Doc> // a file dropped for the cataloguer to put away; data: base64
+  docUnfile(p: { id: string }): Doc // takes back what was put away: back to my personal folder
+  docDateDismiss(p: { id: string }): void // a date found in a document that I don't want to hear about
+  docRemind(p: { id: string }): Promise<{ routineId: string }> // a reminder routine for a date found in a document
+  docAsk(p: { q: string; folderId?: string; docId?: string }): Promise<DocAnswer> // an answer from the documents I see, with its sources
   wikiIngestAgain(p: { id: string }): void
   wikiReview(): WikiReview // the last review and what it found that's still open
   wikiRunReview(): void // reviews now, in the background; a 'wiki' event when done
@@ -259,6 +293,7 @@ export interface Api {
   activity(p: { personId?: string; kind?: string; before?: number }): ActivityEntry[] // admins: newest first, a page at a time (before: the last page's oldest `at`)
   inbox(): Inbox
   answerQuestion(p: { id: string; text: string }): void // a question an agent asked me (or someone I cover for)
+  removeTucaLeave(p: { id: string }): void // takes back something I let the Tuca do himself
   confirmQuestion(p: { id: string; ok: boolean }): void // in my DM: may the agent ask that person?
   answerDecision(p: { messageId: string; index: number; answer: Answer | null }): void // one of a question's decisions answered on the card (null clears it), kept until sent
   submitDecisions(p: { messageId: string }): void // sends the decisions answered on the card, as my message
@@ -311,12 +346,14 @@ export type CoreEvent =
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }
   | { type: 'wiki' } // a page changed: here, by an agent or in another app
+  | { type: 'docs' } // a folder or a document changed: each page reads docs() again (it gets only what it may see)
   | { type: 'people'; people: Person[]; former?: Pick<Person, 'id' | 'name'>[] } // someone joined, left or changed their name
   | { type: 'inbox'; inbox?: Inbox } // what waits on this person changed (each gets their own)
   | { type: 'delegations'; delegations?: Delegation[] } // work handed down the tree changed (each gets what they may see)
+  | { type: 'leaves'; leaves?: TucaLeave[] } // what a person let the Tuca do himself changed (each gets their own)
 
 // Every kind of event, so a test can go through them all (people.ts's eventFor decides each one's audience).
-export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'thinking', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'people', 'inbox', 'delegations'] as const satisfies readonly CoreEvent['type'][]
+export const CORE_EVENT_TYPES = ['voice', 'node', 'tasks', 'message', 'delta', 'thinking', 'agent', 'agent_removed', 'conversation', 'settings', 'connector', 'connector_removed', 'approval', 'memory', 'memory_removed', 'computer', 'browser', 'browser_frame', 'artifact', 'routine', 'routine_removed', 'conversation_removed', 'skill', 'skill_removed', 'wiki', 'docs', 'people', 'inbox', 'delegations', 'leaves'] as const satisfies readonly CoreEvent['type'][]
 // …and none left out: a new kind of event fails to compile here until it's listed.
 type _AllListed = Exclude<CoreEvent['type'], (typeof CORE_EVENT_TYPES)[number]> extends never ? true : never
 export const _allEventsListed: _AllListed = true

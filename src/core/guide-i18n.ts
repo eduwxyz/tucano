@@ -51,9 +51,21 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
     title: 'Harnesses (MCP)',
     summary: 'Connect your harness (Claude Code, Codex, Cursor, OpenCode) to Tucano over MCP: from there it understands the team, talks to the agents and sets Tucano up.'
   },
+  documentos: {
+    title: 'Documents',
+    summary: "The team's files, each in its folder: the folder rule, who sees it (people and agents), showing versus saving, versions, the trash and the accepted types."
+  },
+  'documentos-aprovacao': {
+    title: 'Approval, Chegada and dates in Documents',
+    summary: 'Folders that ask for approval, drafts and the official version, living documents, Chegada for dropping files in, dates and reminders, and asking the documents questions.'
+  },
   google: {
     title: 'Google: Gmail, Calendar, Drive, Docs and Sheets',
     summary: 'Connecting the Google services: the app the person creates in Google Cloud once, the 6 steps (with the Developer Preview enrolment), the unverified-app warning and what to check when Google refuses.'
+  },
+  microsoft: {
+    title: 'Microsoft: Outlook, OneDrive, Teams and SharePoint',
+    summary: "Connecting a Microsoft account: Outlook.com (personal) or Microsoft 365 (work or school), the sign-in by code, Softeria's app, what a company may require and what is left out."
   },
   limites: {
     title: 'Limits, usage and pause',
@@ -102,6 +114,10 @@ export const GUIDE_EN: Record<string, { title: string; summary: string }> = {
   time: {
     title: 'Team (several people in one Tucano)',
     summary: 'Using the same Tucano with other people: inviting, roles, what belongs to whom, For you, calling a person, who covers for me, routines, Activity, removing someone and the first invite.'
+  },
+  tuca: {
+    title: 'The Tuca',
+    summary: 'What the Tuca does with a request, when he asks leave to do it himself, and the conversations with him.'
   },
   'wiki-git': {
     title: 'Wiki in git',

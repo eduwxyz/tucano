@@ -5,6 +5,7 @@ import type { ActionRules, Autonomy } from './actions'
 import type { ClassifierConfig, ClassifierJob } from './classifiers'
 import type { ChannelLayout } from './channel-layout'
 import type { Answer, Decision } from './questions'
+import type { InboxDoc, InboxDocDate } from './docs'
 import type { PageSigns } from './wall'
 import { L, lang, locale, type Lang } from './lang'
 
@@ -139,6 +140,9 @@ export interface Conversation {
   owner?: string // a DM's person: one DM per agent and person, and only they read it
   createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
   proactive?: boolean // false: no agent is called in here on its own, only who is mentioned or picked; on unless false
+  title?: string // a conversation with the Tuca: what it is about, in a few words (the person has several, one per request)
+  createdAt?: number
+  lastAt?: number // when something was last said there, as the core knew when it sent this
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
@@ -162,6 +166,7 @@ export interface Step {
   input?: string // what the call asked, the argument that says it (the SQL, the path), as it was sent
   output?: string // what came back, in a few words ("120 rows")
   keys?: string[] // the Cofre's keys the command used, by name (src/core/vault.ts)
+  tool?: string // the tool that ran, by its own name (no connector): set on tool calls since Execuções
   status: StepStatus
   ms?: number
   // Not a tool call: something the person wrote. `steer` was handed to the reply while it ran,
@@ -176,9 +181,37 @@ export interface Receipt {
   outputTokens: number
   ms: number
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
+  responseModel?: string // the model id the harness says answered; `model` stays the one asked for
 }
 
 export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
+
+// What the Tuca asks leave to do himself, when no one on the team does it (fazer_eu_mesmo, src/core/tuca-leave.ts):
+// on the reply whose question card asks it. `state`: how the person answered, once they did.
+export interface LeaveAsk {
+  kind: string // the kind of thing, in a few words ("pesquisa de preços"): what "no need to ask again" holds for
+  what: string // what he said he would do, in one sentence
+  web?: true // he will search and read web pages
+  grants?: Record<string, GrantLevel> // the connectors he will use, by id
+  instead?: string // the colleague whose part this is and who did not finish it: asked for this once only, or the person waits for them
+  state?: 'once' | 'always' | 'colleague' | 'wait'
+}
+
+// What a person let the Tuca do himself. It is theirs, never his: each person's Tuca works with what that
+// person allowed, and they take it back whenever they want.
+export interface TucaLeave {
+  id: string
+  person: string
+  conversationId?: string // given for that conversation only ("Pode fazer"); unset: for good, for that kind of thing
+  kind: string
+  what: string
+  web?: true
+  grants?: Record<string, GrantLevel>
+  instead?: string // given in the place of a colleague who had not finished: it lets him use what he asked for there, and is no kind of thing he may do himself
+  uses: number // times he did it himself under this leave
+  suggested?: true // he was already told to suggest a colleague for this kind of thing
+  at: number
+}
 
 // What the Tuca wrote for the people who make Tucano (propor_feedback). Never sent by him: the card opens
 // the "Enviar feedback" window with it, and the person sends it from there.
@@ -191,6 +224,7 @@ export interface Run {
   status: RunStatus
   steps: Step[]
   endedAt?: number // when this reply ended, however it ended: where the conversation shows it (saidAt)
+  startedAt?: number // when this attempt started, on a reply tried again (its message keeps the first `at`)
   receipt?: Receipt
   approvalId?: string
   outside?: boolean // it read something from outside (a connector's answer, a page, an app, the web, a trigger's event): what goes out after asks first, with the guard on
@@ -218,6 +252,7 @@ export interface Run {
   browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
   job?: string // the job it is part of: what a message set off, until it's done (src/core/jobs.ts)
+  trace?: { traceId: string; spanId: string; linkedTo?: { traceId: string; spanId: string } } // its OpenTelemetry span, when traces are on: a reply it asks for links here, and linkedTo is the one that asked for it
   autoContinued?: number // how many times in a row the work went on by itself to get to this reply (AUTO_CONTINUES caps it)
   retryAt?: number // 'failed' on something that passes (a network, a plan's window, a computer off): when it tries again by itself
   retries?: number // how many times it already tried again by itself
@@ -225,6 +260,7 @@ export interface Run {
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
   agentDraft?: AgentDraft // an agent the Tuca proposed with propor_agente, shown as a card
   feedbackDraft?: FeedbackDraft // a bug or an idea for the people who make Tucano, written by the Tuca with propor_feedback: the person reviews and sends it
+  leave?: LeaveAsk // the Tuca's question on this reply asks leave to do something himself (fazer_eu_mesmo): what for, and how it was answered
   proposal?: Proposal // what an agent proposed, from before a reply could hold several (read both with proposalsOf)
   proposals?: Proposal[] // what an agent proposed in this reply (changes to agents, routines, channels, teams), shown as a group of cards
   delegation?: DelegationRef // on the message that opens a piece of handed work in its agent's channel, on an answer given there in the asker's name, and on what brings its answer or its question back
@@ -323,7 +359,12 @@ export interface UndoInfo {
 }
 
 // What the Tuca may propose to change in an agent that exists.
-export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit'>>
+export type AgentChanges = Partial<Pick<Agent, 'name' | 'role' | 'instructions' | 'modelId' | 'effort' | 'web' | 'grants' | 'limit' | 'computer' | 'computerKind' | 'browser' | 'folders' | 'fallbackModelId'>>
+// What grants access or spends money: connectors, the month's limit, a computer (a shell), a
+// browser, folders lent to the computer. Asked for on a card, these always wait for a person's click.
+export const ACCESS_CHANGES: readonly string[] = ['grants', 'limit', 'computer', 'computerKind', 'browser', 'folders']
+export const isAccessChange = (k: string): boolean => ACCESS_CHANGES.includes(k)
+export const onlyAccessChanges = (c: AgentChanges): boolean => Object.keys(c).every(isAccessChange)
 
 // A change an agent proposes to what exists, or a new routine, channel or team: a card under its message
 // with Aplicar and Descartar. Nothing changes until the person applies it, except what the Tuca changes
@@ -439,6 +480,8 @@ export interface Inbox {
   answered?: (Omit<Question, 'conversationId' | 'threadId'> & { conversationId?: string; threadId?: string; decisions?: Decision[]; answers?: (Answer | null)[] })[] // to me, answered by someone else a moment ago (the page keeps what I was typing)
   proposals?: InboxProposal[] // admins: what a member asked to apply (agents and teams are theirs)
   harness?: { name: string; text: string; at: number }[] // what my harnesses changed over MCP since I last looked ("Claude Code criou 3 agentes")
+  documents?: InboxDoc[] // documents waiting for this person to approve
+  docDates?: InboxDocDate[] // dates found in documents they look after, coming up
 }
 
 // A Tuca card a member couldn't apply, sent to the admins: the card alone, not the DM it came from.
@@ -554,6 +597,7 @@ export interface Settings {
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for the classifier chosen in Settings › Classifiers (falls back to Haiku)
+  defaultFallbackModel?: string // the reserve model of every agent with none of its own (Settings › Models)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core); kept for installs from before Settings › Classifiers
   classifiers?: ClassifierConfig[] // Settings › Classifiers: the model pairs that answer typed questions, one key each
   classifierJobs?: Partial<Record<ClassifierJob, string>> // which classifier serves each job; a job left out is off
@@ -616,6 +660,7 @@ export interface Settings {
   showThinking?: boolean
   seenVersion?: string // the last version whose news I closed; an update past it shows what's new once
   accounts?: Account[] // more logins of Claude Code or Codex, beside the one each already has
+  primaryAccounts?: Partial<Record<AccountEngine, string>> // the primary login of a harness with accounts (its id, or unset: the usual login); the reply goes there first
   surveys?: boolean // the owner sees the small surveys in the sidebar's foot (core/feedback.ts); unset: on
   tucaApplyNow?: boolean // what the Tuca changes inside the app (agents, teams, channels, routines) applies at once, with Desfazer; access waits for a click. Unset: on
 }
@@ -831,6 +876,7 @@ const model = (id: string, engine: EngineId, label: string, pt: string, en: stri
 export const MODELS: Model[] = [
   model('sonnet', 'claude', 'Sonnet', 'Bom pra maioria', 'Good for most things'),
   model('opus', 'claude', 'Opus', 'Tarefas longas e difíceis', 'Long, hard tasks'),
+  model('fable', 'claude', 'Fable', 'O mais capaz, pros problemas mais difíceis', 'The most capable, for the hardest problems'),
   model('haiku', 'claude', 'Haiku', 'Rápido, gasta pouco do plano', 'Fast, uses little of the plan'),
   model('gpt-5.6-luna', 'codex', 'GPT-5.6 Luna', 'Bom pra maioria', 'Good for most things'),
   model('gpt-5.6-terra', 'codex', 'GPT-5.6 Terra', 'Problemas difíceis', 'Hard problems'),
@@ -894,6 +940,9 @@ export interface Connector {
   args?: string[]
   envKeys?: string[] // names only; values are secrets
   auth: ConnectorAuth
+  // The picture this connector wears in the app, as a data URL (an image picked by the person): a
+  // server added by hand is otherwise a terminal or a globe. Empty: the store's mark, or its kind's icon.
+  icon?: string
   status: ConnectorStatus
   error?: string
   errorDetail?: string // the raw error and its causes (a certificate's code, the DNS's), under "Ver detalhes"
@@ -1340,6 +1389,63 @@ export interface UsageReport {
   models: { model: string; engine: EngineId; tokens: number }[] // biggest first
 }
 
+// Uso e limites › Execuções: finished agent replies, one row each (src/core/executions.ts).
+export interface ExecutionRow {
+  id: string // the reply's message
+  conversationId: string
+  agentId: string
+  preview: string // the reply's first line
+  status: RunStatus
+  at: number
+  model?: string
+  ms?: number
+  tokens?: number // counted; unset when it ended before reporting usage
+  tools: number
+}
+
+// A step as Execuções shows it: what ran, how long and how it ended, without what the agent said or got back.
+export type ExecutionStep = Pick<Step, 'id' | 'label' | 'detail' | 'tool' | 'status' | 'ms' | 'error'>
+
+// A tool over a week, in the Boletim. Only steps since tools were recorded count.
+export interface ToolStat {
+  tool: string
+  uses: number
+  p95?: number // ms; unset if none of its calls has a time
+  errorRate: number // 0 to 1
+}
+
+export const EXECUTION_DAYS: readonly number[] = [1, 7, 30] // the periods Execuções offers
+
+// Settings › Connections › Traces, as an admin's page sees it. Headers are never sent back: only whether some are saved.
+export interface TracesView {
+  on: boolean
+  endpoint: string // the base address, as typed: /v1/traces is added when sending
+  text: boolean // the prompt and final reply go too
+  headers: boolean
+  fromEnv?: string // the server's environment configures traces: its endpoint's origin, and the screen is read-only
+}
+
+export type TracesTest = { ok: true } | { ok: false; status?: number } // status: what the backend answered; none: it couldn't be reached
+export const OK_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'waiting_input', 'waiting_approval']) // a reply that went fine
+export type ExecutionFilter = 'ok' | 'failed' | 'stopped'
+export interface ExecutionQuery {
+  days: number // how far back
+  agentId?: string
+  status?: ExecutionFilter
+  beforeAt?: number // with beforeId: the page after this row
+  beforeId?: string
+}
+export type ExecutionCursor = Pick<ExecutionRow, 'at' | 'id'>
+
+export interface ExecutionPage {
+  rows: ExecutionRow[]
+  next?: ExecutionCursor // there's more after this page
+  count: number // all that the filters select, past this page
+  p50?: number // ms; unset with nothing selected
+  p95?: number
+  errorRate?: number // 0 to 1
+}
+
 // One calendar week; skills are rated over the six weeks up to it.
 export interface Report {
   since: number // Monday 00:00
@@ -1347,11 +1453,12 @@ export interface Report {
   agents: AgentReport[]
   skills: SkillReport[]
   work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
+  tools: ToolStat[] // in replies the viewer may read
 }
 
 // ---------- the wiki ----------
 export type WikiAccess = 'none' | 'read'
-export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => (a.kind === 'tuca' ? 'none' : (a.wiki ?? 'read'))
+export const wikiAccess = (a: Pick<Agent, 'wiki' | 'kind'>): WikiAccess => a.wiki ?? 'read'
 export interface WikiPageInfo {
   title: string
   kind: string // the page's tipo, from its frontmatter

@@ -1062,7 +1062,12 @@ function AskGoal({ name, onPick, onOwn, onManual, onBack }: { name: string; onPi
         <div className="intro-ask">
           <TucaMark size={56} />
           <div className="intro-ask__bubbles">
-            <Bubble>{first ? L(`Pronto, ${first}! Agora vamos montar o seu primeiro agente.`, `Done, ${first}! Now let’s build your first agent.`) : L('Pronto! Agora vamos montar o seu primeiro agente.', 'Done! Now let’s build your first agent.')}</Bubble>
+            {/* Who he is from now on, before what he does first: with no one on the team yet, that is building the first agent. */}
+            <Bubble>
+              {first
+                ? L(`Pronto, ${first}! Eu sou o Tuca: você me pede, e eu passo pra quem do seu time faz. Como ainda não tem ninguém, vamos montar o seu primeiro agente.`, `Done, ${first}! I’m Tuca: you ask me, and I pass it to whoever on your team does it. There’s no one yet, so let’s build your first agent.`)
+                : L('Pronto! Eu sou o Tuca: você me pede, e eu passo pra quem do seu time faz. Como ainda não tem ninguém, vamos montar o seu primeiro agente.', 'Done! I’m Tuca: you ask me, and I pass it to whoever on your team does it. There’s no one yet, so let’s build your first agent.')}
+            </Bubble>
             <Bubble strong>
               <span id="intro-goal-q">{L('Qual é a primeira coisa que você queria tirar das suas costas?', 'What’s the first thing you’d like off your plate?')}</span>
             </Bubble>

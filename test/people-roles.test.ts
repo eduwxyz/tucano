@@ -245,7 +245,7 @@ describe('what a DM leaks: browsers, computers, files', () => {
 
   it('a cited file on a server is signed for one person', () => {
     const url = new URL(localUrl('chave', '/tmp/a.png', 'tucano://local', 'bia'))
-    expect(verifyLocal('chave', url)).toEqual({ path: '/tmp/a.png', person: 'bia' })
+    expect(verifyLocal('chave', url)).toMatchObject({ path: '/tmp/a.png', person: 'bia' })
     expect(verifyLocalUrl('chave', url)).toBeNull() // not an unsigned (desktop) address
     const forged = new URL(url.href.replace(/\/[^/]+$/, `/${Buffer.from('ana').toString('base64url')}`))
     expect(verifyLocal('chave', forged)).toBeNull()

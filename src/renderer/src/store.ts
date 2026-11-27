@@ -12,6 +12,7 @@ import type { AppProvider } from '../../shared/connector-catalog'
 import {
   artifactUrl,
   asSaid,
+  type TucaLeave,
   type Account,
   type AccountEngine,
   MAX_AGENT_ROUTINES,
@@ -71,21 +72,23 @@ import { covers } from '../../shared/access'
 import { call, connect, disconnect } from './rpc'
 import { hashToView, viewToHash } from './address'
 
+import type { ExecutionPage, ExecutionQuery, ExecutionStep, TracesTest, TracesView } from '../../shared/types'
 export * from '../../shared/types'
 
 export type View =
   | { kind: 'conversation'; id: string; message?: string } // `message`: scroll to it and flash it
   | { kind: 'agent'; id: string }
   | { kind: 'new-agent'; draft?: Agent; fromMessage?: string } // a draft from a Tuca card, to edit before creating
-  | { kind: 'tuca'; from?: View } // the builder screen: a new agent with the Tuca; closing goes back to `from`
+  | { kind: 'tuca'; from?: View; making?: boolean } // the Tuca's screen; closing goes back to `from`. making: opened to make an agent, so the proposal is beside the chat
   | { kind: 'approvals' }
-  | { kind: 'usage' }
+  | { kind: 'usage'; executions?: { agentId?: string; days?: number } } // `executions`: go to that list, filtered
   | { kind: 'connectors' }
   | { kind: 'vault'; tab?: 'keys' | 'logins' | 'log' } // the Cofre (components/Vault.tsx)
   | { kind: 'memory' }
   | { kind: 'wiki'; title?: string; edit?: boolean; tab?: 'pages' | 'pending' | 'sources' | 'review'; source?: string } // the wiki's home (a tab), a page (being edited), or a source
   | { kind: 'routines' }
   | { kind: 'skills' }
+  | { kind: 'documents'; folder?: string; doc?: string; q?: string } // Documentos: the home, a folder, or a document (components/docs)
   | { kind: 'report' }
   | { kind: 'org' } // who answers to whom (src/shared/org.ts)
   | { kind: 'board' } // every agent's work as cards (components/Board.tsx)
@@ -100,12 +103,15 @@ export interface State {
   threadSeen: Record<string, number> // thread root id → when I last had it open (what came after is new)
   navOpen: boolean // on a phone, the sidebar slid in over the view
   view: View | null
+  navBack: View[] // the screens behind this one, newest last: the ← button walks back through them
+  navForward: View[] // the screens ahead after going back, newest last: the → button walks forward
   me: { name: string; initials: string }
   you: string // the person this window is (snapshot.you)
   people: Person[]
   former: Pick<Person, 'id' | 'name'>[] // those who left: their names, for what they wrote before
-  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent
+  inbox: Inbox // what waits on me: approvals I can decide, questions to me, (admins) cards members sent, documents to approve and dates coming up
   delegations: Delegation[] // work handed down the tree (src/shared/org.ts): open, or ended in the last day
+  leaves: TucaLeave[] // what I let the Tuca do himself (src/core/tuca-leave.ts)
   tasks: Task[] | null // my to-dos on the board (Quadro), in order; null until the board first asks
   needsName: boolean // a server's first access: the owner says what the agents call them
   settings: Settings
@@ -124,12 +130,14 @@ export interface State {
   routines: Routine[]
   skills: Skill[]
   wikiRev: number // goes up when a wiki page changes: the wiki screens read again
+  docsRev: number // goes up when a folder or a document changes: Documentos reads again
   voiceRev: number // goes up when dictation's model changes (downloading, done, removed)
   platform: Os
   packaged: boolean
   isolatedComputers: boolean
   panel: Panel | null // the side panel next to a conversation
   panelWide: boolean // that panel over the whole page, the conversation set aside until it's shrunk or closed
+  panelUnder: Panel | null // the thread a file, service or browser was opened over: closing that goes back to it
   dialog: Dialog | null // a small window: a channel's members, name or topic; archived agents; new channel; search
   tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
@@ -174,15 +182,19 @@ let state: State = {
   ready: false,
   threadSeen: loadSeen(),
   wikiRev: 0,
+  docsRev: 0,
   voiceRev: 0,
   navOpen: false,
   view: null,
+  navBack: [],
+  navForward: [],
   me: { name: 'Eu', initials: 'EU' },
   you: '',
   people: [],
   former: [],
   inbox: { approvals: [], questions: [] },
   delegations: [],
+  leaves: [],
   tasks: null,
   needsName: false,
   settings: {
@@ -216,6 +228,7 @@ let state: State = {
   isolatedComputers: true,
   panel: null,
   panelWide: false,
+  panelUnder: null,
   dialog: null,
   tabs: {},
   toasts: [],
@@ -384,6 +397,9 @@ export const allWorkingIds = (s: State, conversationId: string): string[] =>
     .working.filter((m) => m.author.kind === 'agent')
     .map((m) => m.id)
 export const askerIn = (s: State, conversationId: string, threadId?: string): Message | undefined => conversationIndex(s, conversationId).waiting.findLast((m) => m.threadId === threadId)
+// The questions still open inside this conversation's threads, oldest first: from the channel, a
+// question asked in a thread is otherwise only a mark on that thread's link, pages up behind the work.
+export const threadAsksIn = (s: State, conversationId: string): Message[] => conversationIndex(s, conversationId).waiting.filter((m) => m.threadId)
 // The approvals still waiting on this person here, oldest first: what the reminder over the field
 // counts, and what Review goes back to. In the thread it counts only the ones asked in it. Whose
 // decision it is comes from the inbox, the core's own answer: a command on someone's lent computer
@@ -633,8 +649,11 @@ function apply(e: CoreEvent): void {
       }
       case 'agent':
         return { ...s, agents: upsert(s.agents, e.agent) }
-      case 'agent_removed':
-        return { ...s, agents: s.agents.filter((a) => a.id !== e.id) }
+      case 'agent_removed': {
+        // Its page leaves the history with it, like a removed conversation's.
+        const notGone = (v: View): boolean => !(v.kind === 'agent' && v.id === e.id)
+        return { ...s, agents: s.agents.filter((a) => a.id !== e.id), navBack: s.navBack.filter(notGone), navForward: s.navForward.filter(notGone) }
+      }
       case 'conversation': {
         return { ...s, conversations: upsert(s.conversations, e.conversation) }
       }
@@ -669,11 +688,15 @@ function apply(e: CoreEvent): void {
         const first = left.find((c) => c.kind === 'channel') ?? left[0]
         const { [e.id]: _gone, ...messages } = s.messages
         const { [e.id]: _from, ...history } = s.history
+        // Never walk back (or forward) into a conversation that no longer exists.
+        const notGone = (v: View): boolean => !(v.kind === 'conversation' && v.id === e.id)
         return {
           ...s,
           conversations: left,
           messages,
           history,
+          navBack: s.navBack.filter(notGone),
+          navForward: s.navForward.filter(notGone),
           view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
           panel: here ? null : s.panel,
           panelWide: here ? false : s.panelWide
@@ -687,6 +710,8 @@ function apply(e: CoreEvent): void {
         return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
       case 'wiki':
         return { ...s, wikiRev: s.wikiRev + 1 }
+      case 'docs':
+        return { ...s, docsRev: s.docsRev + 1 }
       case 'voice':
         return { ...s, voiceRev: s.voiceRev + 1 }
       case 'people':
@@ -695,6 +720,8 @@ function apply(e: CoreEvent): void {
         return { ...s, inbox: e.inbox ?? s.inbox }
       case 'delegations':
         return { ...s, delegations: e.delegations ?? s.delegations }
+      case 'leaves':
+        return { ...s, leaves: e.leaves ?? s.leaves }
     }
   })
   // A full message carries all its text so far: what streamed before it is in there.
@@ -779,6 +806,7 @@ export async function start(): Promise<void> {
       you: snap.you,
       inbox: snap.inbox ?? { approvals: [], questions: [] },
       delegations: snap.delegations ?? [],
+      leaves: snap.leaves ?? [],
       people: snap.people,
       former: snap.former ?? []
     }
@@ -838,7 +866,9 @@ export const canDecide = (s: Pick<State, 'people' | 'you' | 'agents'>, a: Pick<A
   return !!owner && (owner.id === s.you || covers(owner, personById(s, s.you)))
 }
 // How many things wait on me (approvals I decide, questions, cards members sent).
-export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0)
+// Documents waiting for my yes and dates found in them: they count on my own too, where there is no "Pra você".
+export const docsWaitingCount = (s: Pick<State, 'inbox'>): number => (s.inbox.documents?.length ?? 0) + (s.inbox.docDates?.length ?? 0)
+export const inboxCount = (s: Pick<State, 'inbox'>): number => s.inbox.approvals.length + s.inbox.questions.length + (s.inbox.proposals?.length ?? 0) + (s.inbox.documents?.length ?? 0) + (s.inbox.docDates?.length ?? 0)
 
 export function conversationTitle(s: State, c: Conversation): string {
   if (c.kind === 'channel') return c.name
@@ -892,15 +922,81 @@ function fire<M extends Method>(failed: string, method: M, ...params: Params<M> 
 
 export const setNav = (navOpen: boolean): void => set((s) => ({ ...s, navOpen }))
 
+// The same screen again (a conversation's message scroll aside) doesn't start a new step.
+const sameView = (a: View | null, b: View): boolean => {
+  if (!a || a.kind !== b.kind) return false
+  if (a.kind === 'conversation' && b.kind === 'conversation') return a.id === b.id
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+const NAV_STEPS = 50 // how far back the history goes
+
+// A view as it goes into the history: without the "scroll to this message" cue, so going
+// back lands on the conversation itself, not on some old message.
+const cleanView = (v: View): View => (v.kind === 'conversation' ? { kind: 'conversation', id: v.id } : v)
+
+// Every navigation goes here: the current screen steps into the back stack, and the forward
+// stack (a branch we went back from) clears — the same screen again keeps both, like Slack.
+// The Tuca builder is an overlay, not a step: opening it leaves the history alone, closing it
+// (back to `from`) isn't a step either, and leaving it for somewhere else steps from `from`.
 export const navigate = (view: View): void =>
-  set((s) => ({
-    ...s,
-    view,
-    navOpen: false,
-    ...(s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? {} : { panel: null, panelWide: false }),
-    conversations:
-      view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
-  }))
+  set((s) => {
+    const same = sameView(s.view, view)
+    const opening = view.kind === 'tuca'
+    const tuca = s.view?.kind === 'tuca' ? s.view : null
+    const back = tuca ? (tuca.from ?? null) : s.view
+    const returning = tuca !== null && back !== null && sameView(back, view)
+    const push = opening || returning || same ? null : back
+    return {
+      ...s,
+      view,
+      navOpen: false,
+      navBack: push ? [...s.navBack, cleanView(push)].slice(-NAV_STEPS) : s.navBack,
+      navForward: opening || returning || same ? s.navForward : [],
+      ...(same ? {} : { panel: null, panelWide: false }),
+      conversations:
+        view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
+    }
+  })
+
+// The ← button: back to the last screen, this one going onto the forward stack. Not a
+// navigation, so nothing is registered (no loop, and no history lost).
+export const goBack = (): void =>
+  set((s) => {
+    // On the Tuca's screen, back closes it: to where it was opened from, which was never a step.
+    if (s.view?.kind === 'tuca' && s.view.from) return { ...s, view: s.view.from, navOpen: false, panel: null, panelWide: false }
+    const prev = s.navBack.at(-1)
+    if (!prev || !s.view) return s
+    return {
+      ...s,
+      view: prev,
+      navBack: s.navBack.slice(0, -1),
+      navForward: [...s.navForward, cleanView(s.view)].slice(-NAV_STEPS),
+      navOpen: false,
+      panel: null,
+      panelWide: false,
+      conversations:
+        prev.kind === 'conversation' ? s.conversations.map((c) => (c.id === prev.id ? { ...c, unread: 0 } : c)) : s.conversations
+    }
+  })
+
+// The → button: forward again, this one going onto the back stack.
+export const goForward = (): void =>
+  set((s) => {
+    const next = s.navForward.at(-1)
+    if (!next || !s.view) return s
+    return {
+      ...s,
+      view: next,
+      navForward: s.navForward.slice(0, -1),
+      navBack: [...s.navBack, cleanView(s.view)].slice(-NAV_STEPS),
+      navOpen: false,
+      panel: null,
+      panelWide: false,
+      conversations:
+        next.kind === 'conversation' ? s.conversations.map((c) => (c.id === next.id ? { ...c, unread: 0 } : c)) : s.conversations
+    }
+  })
 
 export function updateSettings(patch: Partial<Omit<Settings, 'engines'>>): void {
   // optimistic, so typing stays instant; the owner's name given here (the introduction) is the name asked once
@@ -996,10 +1092,14 @@ export async function createChannel(name: string, threads?: boolean): Promise<vo
 
 // The Tuca and his DM, made if missing.
 export const ensureTuca = (modelId?: string, fresh = false): Promise<{ agentId: string; conversationId: string }> => call('ensureTuca', { modelId, fresh })
+// Takes back something I let the Tuca do himself: he asks again the next time.
+export const removeTucaLeave = (id: string): Promise<void> => call('removeTucaLeave', { id })
 // The agent a Tuca card proposed, created with a DM of its own.
 export const createFromDraft = (messageId: string): Promise<{ agentId: string; conversationId: string }> => call('createFromDraft', { messageId })
 // The builder screen, in place of the app; closing it comes back here.
 export const openTuca = (): void => navigate({ kind: 'tuca', from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
+// The same screen, opened to make an agent (the + by Agentes): the proposal sits beside the chat from the start.
+export const makeWithTuca = (): void => navigate({ kind: 'tuca', making: true, from: state.view?.kind === 'tuca' ? state.view.from : (state.view ?? undefined) })
 // One card of a reply (index: which), or every one still open (draft: its new-agent card too).
 export const applyProposal = (messageId: string, index = 0): Promise<{ id: string }> => call('applyProposal', { messageId, index })
 export const dismissProposal = (messageId: string, index = 0): void => void call('dismissProposal', { messageId, index }).catch(() => {})
@@ -1015,9 +1115,9 @@ export async function openDm(agentId: string): Promise<void> {
 }
 
 // Asks an agent something from somewhere else (the organogram): it goes to its DM, and I stay where I am.
-export async function askAgent(agentId: string, text: string): Promise<string> {
+export async function askAgent(agentId: string, text: string, images: ImageUpload[] = [], files: FileUpload[] = []): Promise<string> {
   const id = await call('openDm', { agentId })
-  sendMessage(id, text)
+  sendMessage(id, text, images, undefined, files)
   return id
 }
 
@@ -1036,6 +1136,7 @@ export const shareComputer = (connectorId: string, agentIds: string[]): void =>
 export const removeConnector = (id: string): void => void fire(L('Não consegui remover o conector.', "I couldn't remove the connector."), 'removeConnector', { id })
 export const reconnectConnector = (id: string): void => void fire(L('Não consegui reconectar.', "I couldn't reconnect."), 'reconnectConnector', { id })
 export const setConnectorToken = (id: string, token: string): Promise<void> => call('setConnectorToken', { id, token })
+export const setConnectorIcon = (id: string, icon: string): Promise<void> => call('setConnectorIcon', { id, icon })
 export const ownApp = (provider: AppProvider): Promise<{ clientId?: string; redirectUrl: string }> => call('ownApp', { provider })
 export const setOwnApp = (provider: AppProvider, clientId: string, clientSecret: string): Promise<void> => call('setOwnApp', { provider, clientId, clientSecret })
 // On a server the authorization page comes back to be opened here, then pasted back.
@@ -1139,7 +1240,21 @@ export const saveArtifact = (a: Pick<Artifact, 'id' | 'name'>): void => {
   link.click()
 }
 export const openLocal = (messageId: string, path: string, how: 'open' | 'reveal'): void => void call('openLocal', { messageId, path, how })
-export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel, panelWide: panel ? s.panelWide : false }))
+// A file, a service or a browser opened from a thread takes the thread's place beside the conversation;
+// what it covered is kept, so closing it goes back there instead of closing everything.
+export const openPanel = (panel: Panel | null): void =>
+  set((s) => ({
+    ...s,
+    panel,
+    panelWide: panel ? s.panelWide : false,
+    panelUnder: panel && panel.kind !== 'thread' ? (s.panel?.kind === 'thread' ? s.panel : s.panel && s.panelUnder) : null
+  }))
+// The panel's close: back to the thread under it, if there is one.
+export const closePanel = (): void => {
+  const under = getState().panelUnder
+  if (under) set((s) => ({ ...s, panel: under, panelUnder: null }))
+  else openPanel(null)
+}
 // The panel over the whole page, or back beside the conversation. Closing it always brings the conversation back.
 export const widenPanel = (wide: boolean): void => set((s) => ({ ...s, panelWide: wide && !!s.panel }))
 export const openThread = (messageId: string): void => openPanel({ kind: 'thread', id: messageId })
@@ -1231,6 +1346,12 @@ export const backupNow = (): Promise<string> => call('backupNow')
 export const openBackups = (): void => void fire(L('Não consegui abrir a pasta de backups.', "I couldn't open the backups folder."), 'openBackups')
 export const loadReport = (week?: number): Promise<Report> => call('report', { week })
 export const loadUsage = (): Promise<UsageReport> => call('usage')
+export const loadExecutions = (q: ExecutionQuery): Promise<ExecutionPage> => call('executions', q)
+export const loadExecutionSteps = (messageId: string): Promise<ExecutionStep[]> => call('executionSteps', { messageId })
+// Settings › Connections › Traces (admins).
+export const loadTraces = (): Promise<TracesView> => call('traces')
+export const saveTraces = (p: { on: boolean; endpoint: string; text?: boolean; headers?: string | null }): Promise<TracesView> => call('setTraces', p)
+export const testTraces = (p: { endpoint: string; headers?: string }): Promise<TracesTest> => call('testTraces', p)
 export const removeRoutine = (id: string): void => void fire(L('Não consegui remover a rotina.', "I couldn't remove the routine."), 'removeRoutine', { id })
 // People: who I am, who comes in (admins), who covers for me.
 export const setMyName = (name: string, about?: string): Promise<void> => call('setMyName', { name, ...(about !== undefined ? { about } : {}) })

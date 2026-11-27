@@ -84,11 +84,12 @@ describe('A. leaving the Tuca and coming back keeps the conversation', () => {
     expect((await inConv(ana, first.conversationId)).find((m) => m.id === card.id)?.run?.agentDraft?.state).toBe('dismissed')
   })
 
-  it('"Nova conversa" starts another on purpose: the old one goes, the new one has only his hello', async () => {
+  it('"Nova conversa" starts another on purpose: the old one is kept, the new one has only his hello', async () => {
     const fresh = await ana.call<Tuca>('ensureTuca', { fresh: true })
     expect(fresh.conversationId).not.toBe(first.conversationId)
     const snap = await ana.call<Snap>('snapshot')
-    expect(snap.conversations.some((c) => c.id === first.conversationId)).toBe(false)
+    expect(snap.conversations.some((c) => c.id === first.conversationId)).toBe(true) // one per request: nothing is lost
+    expect(snap.messages.some((m) => m.conversationId === first.conversationId && m.author.kind === 'person')).toBe(true)
     expect(snap.messages.filter((m) => m.conversationId === fresh.conversationId).map((m) => m.author.kind)).toEqual(['agent'])
     // And from then on, that's the one he opens.
     expect((await ana.call<Tuca>('ensureTuca', {})).conversationId).toBe(fresh.conversationId)

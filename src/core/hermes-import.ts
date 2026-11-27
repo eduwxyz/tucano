@@ -247,8 +247,13 @@ const CACHE_DIRS = new Set(['__pycache__', '.pytest_cache', '.mypy_cache', '.ruf
 const SECRET_NAME = /^(\.env(\..*)?|auth\.json|.*\.(pem|key))$/i
 const HASH_FILES = 300
 const HASH_BYTES = 5_000_000
+const pathPart = (part: string): string => (process.platform === 'win32' ? part.toLowerCase() : part)
 const cmpParts = (a: string[], b: string[]): number => {
-  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i]! < b[i]! ? -1 : 1
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const left = pathPart(a[i]!)
+    const right = pathPart(b[i]!)
+    if (left !== right) return left < right ? -1 : 1
+  }
   return a.length - b.length
 }
 

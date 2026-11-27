@@ -1,4 +1,5 @@
 import { configDefaults, defineConfig } from 'vitest/config'
+import { ByWeight } from './test/helpers/shards.ts'
 
 // On Windows, tests that write a lot to SQLite run several times slower (the summary
 // tests took 6 s on GitHub's runner), so they get more time there than vitest's 5 s.
@@ -9,6 +10,10 @@ import { configDefaults, defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     exclude: [...configDefaults.exclude, 'site/**'],
+    // Split across CI's machines by how long each file takes, not by how many there are.
+    sequence: { sequencer: ByWeight },
+    // No waiting for the disk on each write to a database the test throws away (src/core/db.ts).
+    env: { TUCANO_DB_SYNC: 'off' },
     testTimeout: process.platform === 'win32' ? 60_000 : 5_000,
     hookTimeout: process.platform === 'win32' ? 60_000 : 10_000
   }

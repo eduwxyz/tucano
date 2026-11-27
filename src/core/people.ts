@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { L } from '../shared/lang'
 import { MENTION } from '../shared/mention-text'
 import type { CoreEvent, Snapshot, Wire } from '../shared/rpc'
+import type { InboxDoc, InboxDocDate } from '../shared/docs'
 import { CODE_SPANS, scopePerson, type Agent, type Approval, type Artifact, type BrowserView, type ComputerInfo, type Connector, type Conversation, type Delegation, type Inbox, type InboxProposal, type Memory, type Message, type Person, type PersonAccess, type Question, type Role, type Routine, type RoutineInput, type Settings, proposalsOf } from '../shared/types'
 import type { Db } from './db'
 import { can, isAdmin, isPersonalSetting, must } from './policy-people'
@@ -254,6 +255,9 @@ export function personNamed(name: string, people: Person[]): Person | undefined 
 }
 
 export class People {
+  // Documentos' part of the inbox, set by the core once Documentos is open (a People made elsewhere, to check access, has none).
+  docsInbox?: (person: Person) => { documents: InboxDoc[]; docDates: InboxDocDate[] }
+
   constructor(private db: Db) {}
 
   owner(): Person {
@@ -390,6 +394,9 @@ export class People {
         return { type: 'inbox', inbox: this.inbox(person) }
       case 'delegations':
         return { type: 'delegations', delegations: this.delegations(person) }
+      // What each one let the Tuca do himself: their own.
+      case 'leaves':
+        return { type: 'leaves', leaves: this.db.tucaLeaves(person.id) }
       // One's own to-dos: theirs alone.
       case 'tasks':
         return event.for === person.id ? event : undefined
@@ -420,6 +427,7 @@ export class People {
       case 'skill':
       case 'skill_removed':
       case 'wiki':
+      case 'docs': // a signal only: each page reads docs() again and gets what it may see
         return event
       default: {
         // A kind of event no one decided on yet doesn't compile, and reaches no one.
@@ -545,7 +553,12 @@ export class People {
     const answered = this.db.answeredQuestions(now - ANSWERED_SHOWN_MS).filter((q) => q.askedTo === person.id && q.answeredBy !== person.id).map(shown)
     const proposals = isAdmin(person) ? this.forwardedProposals() : []
     const harness = this.harnessNotices(person)
-    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}), ...(harness.length ? { harness } : {}) }
+    // Documents never break the inbox: if Documentos can't say, they are left out.
+    let docs: { documents: InboxDoc[]; docDates: InboxDocDate[] } | undefined
+    try {
+      docs = this.docsInbox?.(person)
+    } catch {}
+    return { approvals, questions, ...(answered.length ? { answered } : {}), ...(proposals.length ? { proposals } : {}), ...(harness.length ? { harness } : {}), ...(docs?.documents.length ? { documents: docs.documents } : {}), ...(docs?.docDates.length ? { docDates: docs.docDates } : {}) }
   }
 
   // What this person's harnesses changed over MCP since they last looked: one line per harness,
@@ -595,7 +608,7 @@ export class People {
   }
 
   // The snapshot as this person gets it: no one else's DMs, their messages or their memories.
-  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations'>, opts: { server?: boolean } = {}): Snapshot {
+  snapshotFor(person: Person, base: Omit<Snapshot, 'people' | 'former' | 'you' | 'needsName' | 'conversations' | 'inbox' | 'delegations' | 'leaves'>, opts: { server?: boolean } = {}): Snapshot {
     const conversations = viewedConversations(this.db, person, this.db.conversations(person.id).filter((c) => this.canSeeConversation(person, c)))
     const seen = new Set(conversations.map((c) => c.id))
     const theirs = base.messages.filter((m) => seen.has(m.conversationId))
@@ -624,6 +637,7 @@ export class People {
       you: person.id,
       inbox: this.inbox(person),
       delegations: this.delegations(person),
+      leaves: this.db.tucaLeaves(person.id),
       ...(opts.server && person.role === 'owner' && !this.db.ownerNamed() ? { needsName: true } : {})
     }
   }

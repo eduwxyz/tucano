@@ -5,6 +5,7 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { leakedError, maskShown, type ShownKey } from './vault'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, posix, sep } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -54,6 +55,48 @@ function folderRefusal(path: string, opts: { home?: string; dataDir: string }): 
   const data = existsSync(opts.dataDir) ? realpathSync(opts.dataDir) : opts.dataDir
   if (data === real || data.startsWith(real + sep) || real.startsWith(data + sep)) return L('Essa pasta tem os dados do próprio Tucano; não dá pra usar.', "That folder holds Tucano's own data; it can't be used.")
   return null
+}
+
+// Checked again each time the computer is turned on, not only when lent: what the path is now (a
+// link put in its place, a folder moved into Library) has to be what was lent, and still lendable.
+export function lentProblem(folders: readonly LentFolder[], opts: { home?: string; dataDir: string }): string | null {
+  for (const f of folders) {
+    const why = checkFolder(f.path, { ...opts, named: true })
+    if (why) return why
+    const now = realpathSync(f.path)
+    if (now !== f.path)
+      return L(`${f.path} agora leva a ${now}, não à pasta emprestada. Devolva essa pasta e empreste de novo.`, `${f.path} now leads to ${now}, not to the folder that was lent. Return that folder and lend it again.`)
+  }
+  return null
+}
+
+const realOr = (p: string): string => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+// A folder lent before the check above existed was kept as it was typed. One typed through a link
+// (~/work that leads to another disk) would be refused from then on, though nothing changed. So, once
+// (the core, on its first start with the check), each is kept as where it leads now, if that is
+// still a folder that may be lent; one that isn't stays as it is, and the check says why.
+export function lentWhereTheyAre(folders: readonly LentFolder[], opts: { home?: string; dataDir: string }): LentFolder[] {
+  return folders.map((f) => {
+    const now = realOr(f.path)
+    return now !== f.path && !checkFolder(now, opts) ? { ...f, path: now } : f
+  })
+}
+
+// A folder an agent asks for on a card: "~/…" or a full path, checked as lending it would be.
+// Its real path, or why it can't be lent.
+export function folderToLend(raw: string, dataDir: string, home = homedir()): { path?: string; error?: string } {
+  const given = raw.trim()
+  const path = given === '~' ? home : given.startsWith('~/') ? join(home, given.slice(2)) : given
+  if (!path.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(path)) return { error: L(`"${given}": mande o caminho inteiro, como ~/Documentos/projeto.`, `"${given}": send the whole path, like ~/Documents/project.`) }
+  const why = checkFolder(path, { home, dataDir, named: true })
+  return why ? { error: why } : { path: realpathSync(path) }
 }
 
 // /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
@@ -337,6 +380,17 @@ export function hostUrl(url: string, ports: Record<number, number>): string | { 
 
 const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
+// Limits every computer gets. None of them gets in the way of what agents do (root, apt,
+// npm, servers, chown of lent folders): no gaining privileges through setuid programs, a
+// ceiling on processes against fork bombs, and no raw sockets, device files or audit writes.
+export const HARDENING = [
+  '--security-opt', 'no-new-privileges',
+  '--pids-limit', '2048',
+  '--cap-drop', 'NET_RAW',
+  '--cap-drop', 'MKNOD',
+  '--cap-drop', 'AUDIT_WRITE'
+]
+
 // ---------- docker ----------
 
 type Exec = { code: number; stdout: string; stderr: string; late?: boolean } // late: killed by its timeout
@@ -387,6 +441,7 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
+  secrets?: (agentId: string) => ShownKey[] // the Cofre's values this agent may have: a file it shows comes out masked
 }
 
 export class Computers {
@@ -400,7 +455,7 @@ export class Computers {
   readonly mac: MacComputer // agents whose computer is this Mac (spec §23)
 
   constructor(private deps: ComputerDeps) {
-    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot })
+    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot, ...(deps.secrets ? { secrets: deps.secrets } : {}) })
     this.prefix = prefixOf(deps.dataDir, 'tucano')
     // Before the app was called Tucano its data folder, next to this one, was agent-desk.
     this.legacy = prefixOf(join(dirname(deps.dataDir), 'agent-desk'), 'agentdesk')
@@ -492,7 +547,8 @@ export class Computers {
   private async doEnsure(agentId: string): Promise<void> {
     await this.adopt(agentId)
     const name = this.name(agentId)
-    const mounts = mountArgs(name, this.deps.db.agent(agentId)?.folders ?? [])
+    // Signed by where each folder really is now: a folder that came to lead elsewhere remakes the container.
+    const mounts = mountArgs(name, (this.deps.db.agent(agentId)?.folders ?? []).map((f) => ({ ...f, path: realOr(f.path) })))
     const sig = mounts.length ? createHash('sha1').update(JSON.stringify(mounts)).digest('hex').slice(0, 12) : ''
     let state = await docker(['inspect', '-f', '{{.State.Running}} {{index .Config.Labels "tucano.mounts"}}', name], { timeoutMs: 15_000 })
     const [running, raw = ''] = state.stdout.trim().split(' ')
@@ -517,6 +573,19 @@ export class Computers {
     if (problem) {
       this.set(agentId, { state: 'no_docker', detail: problem })
       throw new Error(L(`O Docker não está disponível neste computador: ${problem} Peça pro usuário resolver.`, `Docker isn't available on this computer: ${problem} Ask the user to fix it.`))
+    }
+
+    // Before the folders are mounted again (docker start remounts them too): an old container whose
+    // folder no longer checks out goes, keeping what was installed in it.
+    const lentNow = lentProblem(this.deps.db.agent(agentId)?.folders ?? [], { dataDir: this.deps.dataDir })
+    if (lentNow) {
+      if (state.code === 0) {
+        await docker(['commit', name, this.stateImage(agentId)], { timeoutMs: 10 * 60_000 })
+        await docker(['rm', '-f', name], { timeoutMs: 60_000 })
+        this.deps.db.removeServices(agentId)
+        this.ports.delete(agentId)
+      }
+      return this.fail(agentId, lentNow)
     }
 
     if (state.code === 0) {
@@ -546,6 +615,7 @@ export class Computers {
           '--init',
           '--memory', '3g',
           '--cpus', '2',
+          ...HARDENING,
           '-w', WORK,
           '-v', `${folder}:${WORK}`,
           ...mounts,
@@ -815,11 +885,19 @@ export class Computers {
         return { error: r.stderr.trim() || L(`Não achei ${file.containerPath}.`, `I couldn't find ${file.containerPath}.`) }
       }
     } else writeFileSync(join(dir, name), file.data ?? Buffer.alloc(0))
-    const size = statSync(join(dir, name)).size
+    let size = statSync(join(dir, name)).size
     if (!statSync(join(dir, name)).isFile() || size > MAX_SHOW_BYTES) {
       rmSync(dir, { recursive: true, force: true })
       return { error: tooBig() }
     }
+    // Out of the computer, the masking of what it prints no longer applies: the Cofre's values go here.
+    const checked = maskShown(readFileSync(join(dir, name)), this.deps.secrets?.(agentId) ?? [])
+    if ('leaked' in checked) {
+      rmSync(dir, { recursive: true, force: true })
+      return { error: leakedError(checked.leaked) }
+    }
+    writeFileSync(join(dir, name), checked.data)
+    size = checked.data.length
     const artifact: Artifact = {
       id,
       agentId,

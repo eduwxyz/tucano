@@ -72,6 +72,26 @@ describe('the reserve model', () => {
     expect(codex.turns).toHaveLength(1)
   })
 
+  // The workspace's reserve (Settings › Models): for an agent without one of its own; an agent's own wins.
+  it("an agent without a reserve of its own moves to the workspace's", async () => {
+    db.saveAgent(agent())
+    settings.defaultFallbackModel = 'gpt-5.6-luna'
+    const r = runner(failing("You've hit your limit · resets 5pm"))
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(reply().run?.status).toBe('done')
+    expect(reply().run?.receipt?.model).toBe('gpt-5.6-luna')
+    expect(codex.turns).toHaveLength(1)
+  })
+
+  it("an agent's own reserve wins over the workspace's", async () => {
+    settings.defaultFallbackModel = 'grok:grok-4.7'
+    const r = runner(failing('usage limit reached'))
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(reply().run?.receipt?.model).toBe('gpt-5.6-luna')
+  })
+
   it('starts on the main model again on the next reply', async () => {
     const claude = failing('usage limit reached')
     const r = runner(claude)

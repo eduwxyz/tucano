@@ -43,6 +43,7 @@ function fakeCore(dir: string): HomeCore & { keys: string[]; posted: unknown[]; 
     posted,
     say: (m) => listener?.(m),
     auth: async (key) => (keys.includes(key) ? OWNER : undefined),
+    docFile: async () => undefined,
     deviceKey: async () => {
       const k = `p_${'k'.repeat(42)}${keys.length}`
       keys.push(k)
@@ -174,6 +175,7 @@ describe('HomeLink, a phone disconnected from the computer', () => {
     const hub = new Hub<P>(people, db)
     // The core as home-phone.ts wires it, minus Electron: a port the hub knows by person and device.
     const core: HomeCore = {
+      docFile: async () => undefined,
       auth: async (key) => people.authenticate(key) ?? (db.removedKey(createHash('sha256').update(key).digest('base64url')) ? { removed: true } : undefined),
       deviceKey: async (label) => people.deviceKey(null, label)?.key,
       open: (person, onMessage, o) => {
