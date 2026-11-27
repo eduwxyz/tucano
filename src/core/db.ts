@@ -717,7 +717,10 @@ const COLUMNS: [string, string, string][] = [
   // What a conversation with the Tuca is about, in a few words: the person has several, one per request.
   ['conversations', 'title', 'TEXT'],
   // What became of an approved call: 'done', 'error' or 'not_run' (src/shared/types.ts).
-  ['approvals', 'result', 'TEXT']
+  ['approvals', 'result', 'TEXT'],
+  // The picture a connector wears: a small image as a data URL (src/renderer/src/connector-icon.ts).
+  // Empty: the store's mark, or the icon of its kind.
+  ['connectors', 'icon', 'TEXT']
 ]
 
 
@@ -1661,8 +1664,14 @@ export class Db {
       args: JSON.parse(str(r['args']) || '[]') as string[],
       envKeys: JSON.parse(str(r['env_keys']) || '[]') as string[],
       auth: str(r['auth']) as ConnectorAuth,
+      icon: r['icon'] ? str(r['icon']) : undefined,
       tools: this.tools(id).map(({ inputSchema: _, ...t }) => t)
     }
+  }
+
+  // The picture a connector wears; null goes back to the store's mark (or the icon of its kind).
+  setConnectorIcon(id: string, icon: string | null): void {
+    this.db.prepare('UPDATE connectors SET icon = ? WHERE id = ?').run(icon, id)
   }
 
   saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth }): void {

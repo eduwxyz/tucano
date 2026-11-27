@@ -10,10 +10,10 @@ import { InHub } from './hub-context'
 import { useSidebarParts } from './Missions'
 
 export type HubId = 'knowledge' | 'operations'
-export type HubTab = 'memory' | 'wiki' | 'skills' | 'routines' | 'report' | 'usage'
+export type HubTab = 'memory' | 'wiki' | 'skills' | 'documents' | 'routines' | 'report' | 'usage'
 
 const TABS: Record<HubId, HubTab[]> = {
-  knowledge: ['memory', 'wiki', 'skills'],
+  knowledge: ['memory', 'wiki', 'skills', 'documents'],
   operations: ['routines', 'report', 'usage']
 }
 
@@ -30,7 +30,7 @@ const hubLede = (hub: HubId): string =>
   hub === 'knowledge' ? L('O que o time sabe e consulta antes de trabalhar.', 'What the team knows and checks before working.') : L('O que roda sozinho e como o time está indo.', 'What runs on its own and how the team is doing.')
 
 const tabLabel = (tab: HubTab): string =>
-  ({ memory: L('Memória', 'Memory'), wiki: 'Wiki', skills: 'Skills', routines: L('Rotinas', 'Routines'), report: L('Boletim', 'Report'), usage: L('Uso e limites', 'Usage and limits') })[tab]
+  ({ memory: L('Memória', 'Memory'), wiki: 'Wiki', skills: 'Skills', documents: L('Documentos', 'Documents'), routines: L('Rotinas', 'Routines'), report: L('Boletim', 'Report'), usage: L('Uso e limites', 'Usage and limits') })[tab]
 
 export interface Tab {
   tab: HubTab
@@ -52,13 +52,14 @@ export function useHubTabs(hub: HubId): Tab[] {
     memory: parts.shows('memory') || suggestions > 0,
     wiki: parts.shows('wiki'),
     skills: parts.shows('skills') || proposals > 0,
+    documents: parts.shows('wiki'), // it comes with the wiki: it doesn't open the hub on a short sidebar by itself
     routines: parts.shows('routines'),
     report: admin && parts.shows('report'),
     usage: admin && parts.shows('usage')
   }
   const badges: Partial<Record<HubTab, number>> = { memory: suggestions, skills: proposals }
   const open = TABS[hub].some((t) => shows[t] || t === current)
-  const allowed: Record<HubTab, boolean> = { memory: true, wiki: true, skills: true, routines: true, report: admin, usage: admin }
+  const allowed: Record<HubTab, boolean> = { memory: true, wiki: true, skills: true, documents: true, routines: true, report: admin, usage: admin }
   return TABS[hub]
     .filter((t) => open && (allowed[t] || t === current))
     .map((t) => ({ tab: t, label: tabLabel(t), badge: badges[t] ?? 0, fresh: parts.fresh(t as SidebarPart) }))
@@ -85,6 +86,8 @@ export function Hub({ tab, children }: { tab: HubTab; children: ReactNode }): Re
     if (fresh) parts.seen(tab as SidebarPart)
   }, [hub, tab, fresh])
   const title = hubTitle(hub)
+  // A document open takes the whole panel: no title, no tabs.
+  const bare = useStore((s) => s.view?.kind === 'documents' && !!s.view.doc)
   // Arrows walk the tabs, as in any tab list.
   const keys = (e: KeyboardEvent<HTMLElement>): void => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
@@ -96,7 +99,7 @@ export function Hub({ tab, children }: { tab: HubTab; children: ReactNode }): Re
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`.hub__tab[data-tab="${next.tab}"]`)?.focus())
   }
   return (
-    <section className={`hub hub--${hub}`}>
+    <section className={`hub hub--${hub} ${bare ? 'is-doc' : ''}`}>
       <div className="hub__drag" />
       <header className="hub__head">
         <h1 className="hub__title">{title}</h1>

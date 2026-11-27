@@ -12,6 +12,8 @@ import {
   openTuca,
   isTeam,
   deleteConversation,
+  goBack,
+  goForward,
   markRead,
   navigate,
   openDialog,
@@ -25,6 +27,7 @@ import {
   amOwner,
   canEditChannel,
   inboxCount,
+  docsWaitingCount,
   initials,
   personById,
   roleLabel,
@@ -288,6 +291,8 @@ export function Sidebar(): ReactNode {
   const agents = useStore((s) => s.agents)
   const settings = useStore((s) => s.settings)
   const platform = useStore((s) => s.platform)
+  const canBack = useStore((s) => s.navBack.length > 0)
+  const canForward = useStore((s) => s.navForward.length > 0)
   const people = useStore((s) => s.people)
   const you = useStore((s) => s.you)
   // With a team: who I am, what waits on me, and only what my role may change.
@@ -298,7 +303,7 @@ export function Sidebar(): ReactNode {
   // A new install's sidebar starts short and grows with the missions (Missions.tsx).
   const parts = useSidebarParts()
   const fresh = (p: SidebarPart): (() => void) | undefined => (parts.fresh(p) ? () => parts.seen(p) : undefined)
-  const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length))
+  const pending = useStore((s) => (teamMode(s) ? inboxCount(s) : pendingApprovals(s).length + docsWaitingCount(s)))
   const agentOf = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const channels = conversations.filter((c) => c.kind === 'channel')
   const dms = conversations.filter((c) => c.kind === 'dm' && agentOf(c.name)?.kind !== 'tuca')
@@ -405,8 +410,10 @@ export function Sidebar(): ReactNode {
   ]
   const channelMenuRest = (c: (typeof channels)[number]): MenuItem[] => [
     'separator',
-    { label: L('Mover para cima', 'Move up'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
-    { label: L('Mover para baixo', 'Move down'), onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
+    // Both ways to move a channel say which way they go with an arrow: a label alone reads as two dead
+    // rows in a menu where every other command carries a glyph. (Upstream 0.2.45 lost the two icons.)
+    { label: L('Mover para cima', 'Move up'), icon: 'up', onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, -1)) },
+    { label: L('Mover para baixo', 'Move down'), icon: 'down', onClick: () => saveLayout(nudgeChannel(channels, layout, c.id, 1)) },
     ...arranged.groups.filter((g) => !g.channels.includes(c)).map((g): MenuItem => ({ label: L(`Mover para ${g.name}`, `Move to ${g.name}`), onClick: () => saveLayout(moveChannel(channels, layout, c.id, { group: g.id })) })),
     ...(arranged.groups.some((g) => g.channels.includes(c)) ? [{ label: L('Tirar do grupo', 'Take out of the group'), onClick: () => saveLayout(moveChannel(channels, layout, c.id, {})) }] : []),
     { label: L('Novo grupo com este canal', 'New group with this channel'), icon: 'plus', onClick: () => newGroup(c.id) },
@@ -492,6 +499,22 @@ export function Sidebar(): ReactNode {
     <aside className="sidebar">
       <div className="sidebar__drag" />
       <div className="workspace">
+        <button
+          className="icon-btn"
+          disabled={!canBack}
+          title={L(`Voltar (${shortcut(platform, '[')})`, `Back (${shortcut(platform, '[')})`)}
+          onClick={goBack}
+        >
+          <Icon name="back" />
+        </button>
+        <button
+          className="icon-btn"
+          disabled={!canForward}
+          title={L(`Avançar (${shortcut(platform, ']')})`, `Forward (${shortcut(platform, ']')})`)}
+          onClick={goForward}
+        >
+          <Icon name="forward" />
+        </button>
         <WorkspaceMenu />
       </div>
 
@@ -688,8 +711,10 @@ const ChannelItem = memo(function ChannelItem({ id, name, unread }: { id: string
   const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => isWorking(s, id))
   const waiting = useWaitingTitle(id)
+  // A question or approval waits on the person here: the row stays in place while its folder is folded.
+  const attention = !!waiting
   return (
-    <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
+    <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''} ${attention ? 'is-attention' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
       <span className="nav-item__label">{name}</span>
       {waiting ? <WaitingMark title={waiting} /> : <LiveDot working={working} />}
@@ -735,13 +760,14 @@ const AgentRow = memo(function AgentRow({ id, dm, unread, owner }: { id: string;
   const working = useStore((s) => !!dm && isWorking(s, dm))
   const waiting = useWaitingTitle(dm)
   const waits = useStore((s) => (dm ? waitingCount(s, dm) : 0))
+  const attention = !!dm && waits > 0
   if (!agent) return null
   // No monthly limit, no dot: undefined share, so nothing here can read as spent.
   const pct = usedShare(agent.used, agent.limit)
   const settingsLabel = L(`Ajustes de ${agent.name}`, `${agent.name}'s settings`)
   return (
     <>
-      <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => (dm ? navigate({ kind: 'conversation', id: dm }) : agent.archived ? navigate({ kind: 'agent', id }) : void openDm(id))}>
+      <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''} ${attention ? 'is-attention' : ''}`} onClick={() => (dm ? navigate({ kind: 'conversation', id: dm }) : agent.archived ? navigate({ kind: 'agent', id }) : void openDm(id))}>
         <AgentAvatar agent={agent} size={18} busy={working} />
         <span className="nav-item__label">{agent.name}</span>
         <RoleMeta role={agent.role} owner={owner} />

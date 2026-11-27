@@ -4,7 +4,7 @@ import { LOGOS } from '../src/renderer/src/connector-logos'
 
 describe('the connector catalog', () => {
   it('lists each service once, at an https address, in a category that exists', () => {
-    expect(CATALOG.length).toBe(50)
+    expect(CATALOG.length).toBe(52)
     expect(new Set(CATALOG.map((c) => c.id)).size).toBe(CATALOG.length)
     const remote = CATALOG.filter((c) => !c.local)
     expect(new Set(remote.map((c) => c.url)).size).toBe(remote.length)
@@ -72,11 +72,39 @@ describe('the connector catalog', () => {
       ['snowflake', { account: 'a', database: 'b', schema: 'c', server: 'd', token: 't' }],
       ['metabase', { site: 'https://bi.acme.com' }],
       ['azure-devops', { organization: 'contoso' }],
-      ['cloudwatch', { profile: 'p', region: 'r' }]
+      ['cloudwatch', { profile: 'p', region: 'r' }],
+      ['outlook', {}],
+      ['microsoft-365', {}]
     ] as const)
       expect(entryOf(catalogInput(get(id), values))?.id, id).toBe(id)
     expect(entryOf({ kind: 'remote', url: 'https://bi.acme.com/api/other' })).toBeUndefined()
     expect(entryOf({ kind: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres'] })).toBeUndefined()
+  })
+
+  it("runs Softeria's server for Microsoft, with a short list of its tools and the sign-in a reader may use", () => {
+    const get = (id: string) => CATALOG.find((c) => c.id === id)!
+    const personal = catalogInput(get('outlook'))
+    const work = catalogInput(get('microsoft-365'))
+    // The server comes inside Tucano: its command is a name the core knows, not npx.
+    expect(personal).toMatchObject({ kind: 'stdio', command: 'tucano:ms-365-mcp-server', args: [] })
+    expect(work).toMatchObject({ kind: 'stdio', command: 'tucano:ms-365-mcp-server', args: ['--org-mode'] })
+    // A personal account signs in on "consumers", or its session dies at the first renewal.
+    expect(personal.env).toMatchObject({ MS365_MCP_TENANT_ID: 'consumers' })
+    expect(work.env?.['MS365_MCP_TENANT_ID']).toBeUndefined()
+    // An exact list, as one anchored pattern: the server's 200-odd tools are about a million characters of schemas.
+    const listed = (env: Record<string, string> | undefined): string[] => /^\^\((.+)\)\$$/.exec(env?.['ENABLED_TOOLS'] ?? '')![1]!.split('|')
+    expect(listed(personal.env)).toContain('login')
+    expect(listed(personal.env)).toContain('send-draft-message')
+    expect(listed(personal.env)).not.toContain('send-mail') // sending goes through a draft
+    expect(listed(personal.env)).not.toContain('send-chat-message') // Teams is work only
+    expect(listed(work.env)).toEqual(expect.arrayContaining(['list-chats', 'send-chat-message', 'search-sharepoint-sites']))
+    expect(listed(work.env)).not.toContain('list-channel-messages') // takes a permission only an admin grants
+    for (const id of ['outlook', 'microsoft-365']) {
+      expect(get(id).readTools).toEqual(['login'])
+      expect(get(id).by).toBe('Softeria') // not "the official server"
+      expect(get(id).note?.()).toMatch(/código|code/)
+    }
+    expect(get('microsoft-365').note?.()).toMatch(/admin/)
   })
 
   it('warns, before connecting, when the data goes through a third party', () => {

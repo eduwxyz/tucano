@@ -14,6 +14,7 @@ import { answerDecision, cancelQuestion, continueRun, isTeam, loadTasks, navigat
 import { ApprovalCard, QuestionCard, ReplyText } from './Conversation'
 import { ArtifactCard } from './Panel'
 import { ago, AgentAvatar, tokens as tokenWords } from './ui'
+import { DocBoardLine } from './docs/DocBoardLine'
 
 type Col = 'todo' | 'doing' | 'you' | 'done'
 type Group = 'none' | 'agent' | 'sector'
@@ -192,7 +193,11 @@ export function BoardPage(): ReactNode {
       const id = el.dataset.card!
       if (el.classList.contains('ghost')) continue
       const r = el.getBoundingClientRect()
-      const p = { x: r.left - box.left, y: r.top - box.top }
+      // Where the card rests, not where a slide still running (or a hover lift) shows it: measured
+      // mid-slide, the next render would take that for a move and slide it back from the other side.
+      const t = getComputedStyle(el).transform
+      const m = t && t !== 'none' ? new DOMMatrix(t) : undefined
+      const p = { x: r.left - box.left - (m ? m.m41 + ((1 - m.m11) * el.offsetWidth) / 2 : 0), y: r.top - box.top - (m ? m.m42 + ((1 - m.m22) * el.offsetHeight) / 2 : 0) }
       next.set(id, p)
       const was = rects.current.get(id)
       if (!was) {
@@ -803,6 +808,7 @@ function CardView({ c, ctx, focus, fresh, fam, onOpen, onDecide, onCancel }: { c
       <>
         <div className="bd-done-row"><Face agent={a} /><div className="bd-c-title">{c.title}</div><span className="time">{c.endedAt ? new Date(c.endedAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
         <div className={`bd-res ${c.state === 'stopped' || cancelled ? 'stopped' : ''}`}><Check /><span>{result}</span></div>
+        <DocBoardLine artifactIds={c.replies.flatMap((r) => r.run?.artifactIds ?? [])} />
       </>
     )
   } else if (c.column === 'you') {

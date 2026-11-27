@@ -719,8 +719,10 @@ h3 {
 .fold-toggle[aria-expanded='true'] svg {
   transform: rotate(90deg);
 }
-/* What's folded goes, except where you are: the row you're in never disappears from under you. */
-.is-folded .nav-item:not(.is-active) {
+/* What's folded goes, except where you are and what waits on you: the row you're in and a row with a
+   question or an approval never disappear from under you. Unread and work in progress stay in the
+   header's badges, so folding still quiets the group. A next-steps card alone is none of these. */
+.is-folded .nav-item:not(.is-active):not(.is-attention) {
   display: none;
 }
 /* A row that shows up (a new one, or its section unfolding) rises into place. */
@@ -859,6 +861,15 @@ h3 {
 .icon-btn--sm {
   width: 20px;
   height: 20px;
+}
+.icon-btn:disabled {
+  color: var(--text-3);
+  opacity: 0.4;
+  cursor: default;
+}
+.icon-btn:disabled:hover {
+  background: none;
+  color: var(--text-3);
 }
 
 /* ---------- avatars ---------- */
@@ -1354,6 +1365,33 @@ h3 {
 }
 .msg__body {
   min-width: 0;
+}
+/* The reply's own Markdown on the clipboard, at the foot of a finished reply: a dim glyph with no frame
+   of its own, and the check it turns into for a moment after the press. */
+.msg__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.msg__copy:hover,
+.msg__copy:focus-visible,
+.msg__copy.is-copied {
+  background: var(--bubble);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .msg__copy {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 /* My messages: a bubble on the right, no avatar or name. */
 .msg--me {
@@ -3205,6 +3243,17 @@ h3 {
   justify-content: flex-end;
   margin-top: 8px;
 }
+/* In the footer it leads the row; on small screens it takes a row of its own. */
+.ask__recommend--foot {
+  flex: none;
+  justify-content: flex-start;
+  margin-top: 0;
+}
+@media (max-width: 760px) {
+  .ask__recommend--foot {
+    flex: 1 1 100%;
+  }
+}
 /* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */
 .ask-option__pill {
   flex: none;
@@ -3267,10 +3316,35 @@ h3 {
   font-size: 13.5px;
   color: var(--text);
 }
+.ask__field {
+  position: relative;
+}
 .ask__text {
   width: 100%;
   resize: vertical;
   min-height: 60px;
+  padding-right: 40px; /* the microphone's corner */
+}
+/* Dictation sits in the field's corner, quiet until it's used. */
+.ask__mic {
+  position: absolute;
+  right: 6px; /* over the resize grip, clear of it */
+  bottom: 10px;
+  display: inline-flex;
+}
+.ask__mic .voice-btn:not(.is-recording) {
+  color: var(--text-3);
+}
+.ask__mic .voice-btn:not(.is-recording):hover {
+  color: var(--text);
+}
+.ask__mic .voice-pop {
+  left: auto;
+  right: -8px;
+}
+.ask__mic--inline {
+  position: static;
+  margin: -4px -4px -4px 0;
 }
 .ask__foot {
   display: flex;
@@ -3282,6 +3356,11 @@ h3 {
 }
 .ask__hint {
   margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
   font-size: 11.5px;
   color: var(--text-3);
 }
@@ -3710,7 +3789,9 @@ h3 {
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: 560px;
+  /* Never wider than the chat it is in: a long file name is cut with "…", it doesn't push the card under the panel. */
+  max-width: min(560px, 100%);
+  min-width: 0;
   margin-top: 8px;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -3750,7 +3831,19 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.artifact-card__text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifact-card__text .artifact-card__kept {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ok);
+}
 .artifact-card__open {
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--accent);
   flex-shrink: 0;
@@ -4028,6 +4121,11 @@ body.is-resizing webview {
   .steps__ask-pill__word {
     display: none;
   }
+}
+/* The glyph belongs to the footer line's own height, not to a 32 px button of its own. */
+.msg__meta .msg__copy {
+  min-width: 0;
+  min-height: 0;
 }
 
 /* The message whose thread is open on the side, lit, so the two sides read as one. */
@@ -5944,6 +6042,7 @@ table.csv th {
   flex-wrap: wrap;
   gap: 8px;
   width: 100%;
+  min-width: 0;
 }
 .model-picker select {
   flex: 0 0 auto;
@@ -6040,6 +6139,8 @@ table.csv th {
 .modal__card {
   width: min(460px, calc(100vw - 32px));
   max-height: calc(100vh - 80px);
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 18px 20px;
@@ -6047,6 +6148,9 @@ table.csv th {
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
+}
+.modal__card > :is(.modal__head, .modal__foot, textarea) {
+  flex-shrink: 0;
 }
 .modal__head {
   display: flex;
@@ -6544,13 +6648,18 @@ table.csv th {
 }
 .search {
   width: min(560px, calc(100vw - 32px));
+  max-height: calc(86vh - 16px);
+  max-height: calc(100dvh - 14vh - 16px);
+  display: flex;
+  flex-direction: column;
   border-radius: 14px;
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
-  overflow: hidden;
+  overflow-y: auto;
 }
 .search__input {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6580,6 +6689,7 @@ kbd {
   color: var(--text-3);
 }
 .search__list {
+  min-height: 0;
   max-height: 380px;
   overflow-y: auto;
   padding: 6px;
@@ -8374,6 +8484,7 @@ kbd {
 .form-modal {
   width: min(680px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
+  max-height: calc(100dvh - 64px);
   overflow-y: auto;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -8649,6 +8760,7 @@ kbd {
   width: min(620px, calc(100vw - 32px));
 }
 .skill-add__list {
+  min-height: 0;
   max-height: min(460px, 56vh);
   overflow-y: auto;
   padding: 6px;
@@ -9536,10 +9648,10 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 
 /* search */
 .wk-palette-back { align-items: flex-start; padding-top: 12vh; }
-.wk-palette { width: min(640px, 92vw); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); overflow: hidden; animation: pop var(--dur-base) var(--ease-out) both; }
-.wk-palette__input { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); color: var(--text-3); }
+.wk-palette { width: min(640px, 92vw); max-height: calc(88vh - 16px); max-height: calc(100dvh - 12vh - 16px); display: flex; flex-direction: column; border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border); overflow: hidden; animation: pop var(--dur-base) var(--ease-out) both; }
+.wk-palette__input { flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); color: var(--text-3); }
 .wk-palette__input input, .wk-palette__input input:focus { flex: 1; border: 0; outline: 0; box-shadow: none; padding: 0; background: transparent; font: inherit; font-size: 17px; color: var(--text); }
-.wk-palette__list { max-height: 56vh; overflow-y: auto; padding: 8px; }
+.wk-palette__list { min-height: 0; max-height: 56vh; overflow-y: auto; padding: 8px; }
 .wk-palette__label { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 .wk-palette__row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .wk-palette__row.is-on { background: var(--active); }
@@ -10035,6 +10147,7 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
 .modal__card.google-setup {
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   overflow-y: auto;
 }
 .google-setup__steps {
@@ -10063,6 +10176,27 @@ button.wk-pill.is-on { box-shadow: 0 0 0 1.5px var(--k); background: color-mix(i
   height: 36px;
   background: var(--bg);
   color: var(--text-2);
+}
+/* A connector's own picture: shown whole, whatever its shape, on the tile's own surface. */
+.catalog__logo--pic {
+  overflow: hidden;
+  background: var(--panel);
+}
+.catalog__logo--pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* The picture and the two buttons that change it, under the connector's state and address. */
+.connector-modal__icon {
+  gap: 8px;
+  margin-bottom: 10px;
+}
+/* The same tile in the steps that pick a connector: it brings its own surface, so the circle goes. */
+.onb-power-row__icon--tile {
+  width: auto;
+  height: auto;
+  background: none;
 }
 .catalog__state {
   display: flex;
@@ -12636,6 +12770,17 @@ button.agent-card__now:hover {
   align-items: center;
   gap: 5px;
 }
+/* A computer on this Mac, asked on a card: the one access that runs as the person. */
+.proposal__risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning, #d9480f);
+}
+.proposal__risk .icon {
+  flex: none;
+  margin-top: 2px;
+}
 /* Above the Tuca's chat on the builder screen: "Nova conversa", and its confirmation */
 .onb-tuca__bar {
   display: flex;
@@ -13077,28 +13222,47 @@ button.agent-card__now:hover {
 .org-coach + .org-tools + .org-hint {
   display: none;
 }
-.org-ask {
+.org-ask-wrap {
   position: absolute;
   left: 50%;
   bottom: 20px;
   z-index: 5;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   width: min(540px, calc(100% - 420px));
   min-width: 280px;
+  transform: translateX(-50%);
+  cursor: default;
+}
+.orgb.has-side .org-ask-wrap {
+  left: calc((100% - 352px) / 2 + 76px);
+  width: min(540px, calc(100% - 352px - 270px));
+}
+.org-ask-wrap .composer__images {
+  padding: 0 4px;
+}
+.org-ask__note {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--warn);
+}
+.org-ask__note--busy {
+  color: var(--text-2);
+}
+.org-ask {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   height: 48px;
   padding: 0 8px 0 12px;
   border-radius: 15px;
   background: var(--panel);
   box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-lg);
-  transform: translateX(-50%);
-  cursor: default;
   transition: box-shadow var(--dur-fast) var(--ease-out);
 }
-.orgb.has-side .org-ask {
-  left: calc((100% - 352px) / 2 + 76px);
-  width: min(540px, calc(100% - 352px - 270px));
+.org-ask .icon-btn {
+  flex: none;
 }
 .org-ask:focus-within {
   box-shadow: 0 0 0 1.5px var(--text), var(--shadow-lg);
@@ -13756,7 +13920,7 @@ button.agent-card__now:hover {
 }
 
 /* ---------- What a person sees (PersonAccess.tsx) ---------- */
-.modal__card.access-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.modal__card.access-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); overflow-y: auto; }
 .access { display: flex; flex-direction: column; gap: 20px; }
 .access :where(button) { border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; background: none; }
 .access-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 1.5; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
@@ -14865,7 +15029,7 @@ button.agent-card__now:hover {
 .section.is-folded .agent-sector__head {
   display: none;
 }
-.is-folded .agent-row:not(:has(> .nav-item.is-active)) {
+.is-folded .agent-row:not(:has(> .nav-item.is-active, > .nav-item.is-attention)) {
   display: none;
 }
 .is-folded .agent-sector__more {

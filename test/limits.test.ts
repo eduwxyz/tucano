@@ -93,6 +93,35 @@ describe('a loop', () => {
     expect(reply().run?.error).toBe('Parei: 8 ferramentas falharam seguidas.')
   })
 
+  // A model that guesses a tool's parameter names (Grok calls tools through use_tool, by a name it read
+  // without the schema): each call says which is missing and lists the parameters, runs nothing, and still
+  // counts, so one that keeps guessing is stopped as before.
+  it('a call missing a required parameter gets the parameters back, runs nothing, and counts toward the stop', async () => {
+    let ran = 0
+    bash = () => (ran++, textResult('ok'))
+    const replies: string[] = []
+    const guessing: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        for (let i = 0; i < 20 && !turn.signal.aborted; i++) {
+          const r = (await callTool(turn.mcpUrl!, 'bash', { cmd: `tentativa ${i}` }).catch(() => null)) as CallToolResult | null
+          if (r) replies.push((r.content[0] as { text: string }).text)
+        }
+        yield { type: 'done', text: 'pronto', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    const r = runner(guessing)
+    await r.send('d1', 'roda os testes')
+    await r.idle()
+    expect(ran).toBe(0)
+    expect(replies[0]).toContain('Faltou "command" em bash. Nada foi feito.')
+    expect(replies[0]).toContain('Você mandou: cmd.')
+    expect(replies[0]).toMatch(/- command \(string, obrigatório\)/)
+    expect(replies).toHaveLength(8)
+    expect(reply().run?.error).toBe('Parei: 8 ferramentas falharam seguidas.')
+    expect(labels()).toContain('Chamada sem parâmetro')
+  })
+
   it('the same web search over and over is a loop too', async () => {
     const searching: Engine = {
       id: 'claude',
