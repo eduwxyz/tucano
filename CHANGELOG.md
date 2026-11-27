@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings tabs answer clicks wherever the page is scrolled.** Once the page scrolled, the tabs and subject jumps parked at the very top, under the strip that drags the window, and on a Mac a click there moved the window instead: the tabs only worked back at the top of the page. They now park just below that strip, which takes the page's background on Settings, and a subject jump lands under them as before.
+
 ## [0.2.52] - 2026-11-27
 
 > **Em português:**
