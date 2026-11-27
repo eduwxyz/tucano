@@ -2386,6 +2386,10 @@ const api: Handlers = {
     emitConversations([id])
   },
   setChannelMembers: ({ id, agentIds, modes }, ctx) => {
+    const conv = db.conversation(id)
+    if (conv?.kind !== 'channel') return
+    if (!mayEditChannel(ctx.person, conv, db.ownerId())) throw new Error(channelEditError())
+    assertChannelVisible(db, ctx.person, conv)
     saveChannelMembers(db, ctx.person, { id, agentIds, ...(modes ? { modes } : {}) })
     emitConversations([id])
   },
