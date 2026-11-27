@@ -1,7 +1,7 @@
 // What a conversation is waiting on me for: agents that asked something, and agents that ask
 // for approval. The sidebar marks the conversation, and says who, until I answer.
 import { L } from '../../../shared/lang'
-import type { Inbox, Message } from '../../../shared/types'
+import type { Delegation, Inbox, Message } from '../../../shared/types'
 
 export interface Waiting {
   asked: string[] // agent ids, each once
@@ -14,6 +14,13 @@ export const mineIn =
   (inbox: Inbox) =>
   (m: Message): boolean =>
     m.run?.status === 'waiting_input' ? inbox.questions.some((q) => q.id === m.id) : inbox.approvals.some((a) => a.id === m.run?.approvalId)
+
+// A question left on handed work that went up to whoever asked for it (src/core/delegations.ts) waits on
+// that agent, not on me: it answers it, or asks me in its own conversation.
+export const notWentUp =
+  (delegations: Delegation[]) =>
+  (m: Message): boolean =>
+    m.run?.status !== 'waiting_input' || !delegations.some((d) => d.state === 'open' && d.asking === m.id && d.askingTold)
 
 // Every row of the sidebar asks on every change, and a reply streaming changes the messages at each
 // word: a conversation's are read once per change (of them, or of what's mine).

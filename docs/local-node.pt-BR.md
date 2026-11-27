@@ -9,9 +9,10 @@ Obrigado ao [@pedrojaques99](https://github.com/pedrojaques99), que desenhou e c
 ## Como ligar
 
 1. No app de desktop, conecte o servidor em **Configurações › Servidores** (com o link que ele dá), se ainda não conectou.
-2. Embaixo do servidor, ligue **Deixar este servidor usar este computador**.
-3. Em **O que este computador empresta**, empreste as pastas dos seus projetos.
-4. No Tucano do servidor, em **Conectores**, aparece o seu computador (ex.: "MacBook Pro de Eduardo"). Em **Ferramentas**, dê acesso aos agentes que vão usá-lo.
+2. Embaixo do servidor, ligue **Deixar este servidor usar este computador**. Sem nenhuma pasta emprestada, o app já pede uma: escolha a pasta dos seus projetos. Outras pastas, e os apps que ele empresta, ficam em **O que este computador empresta**.
+3. Clique em **Escolher os agentes**, logo embaixo da chave: o servidor abre em **Conectores**, com o seu computador (ex.: "MacBook Pro de Eduardo") no topo. Ligue cada agente que vai usá-lo, ou **Dar acesso a todos**.
+
+Também dá pra liberar um agente só, na página dele (**Ferramentas › Computador › Seu computador**). Você escolhe os agentes do seu computador mesmo sem ser admin do servidor: um agente só alcança o seu computador quando trabalha pra você.
 
 Pronto. Não precisa abrir porta, configurar rede nem copiar chave: o app liga para o servidor, com o mesmo acesso que ele já usa para abrir o servidor nesta janela. Funciona de qualquer rede (casa, escritório, 4G) e atravessa qualquer roteador.
 

@@ -52,6 +52,29 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((c) => c.trim()))
 }
 
+// A .docx or .xlsx is a zip. Before handing one to a parser, its own table of contents says how big it
+// gets once opened: a few kilobytes can unpack into gigabytes and take the whole app down with them.
+const MAX_UNZIPPED = 200 * 1024 * 1024
+const MAX_ZIP_ENTRIES = 5000
+export function checkZip(data: Buffer): void {
+  const tooBig = (): Error => new Error(L('Esse arquivo é grande demais por dentro para ser lido.', 'This file is too big inside to be read.'))
+  let end = -1
+  for (let k = data.length - 22; k >= 0 && k >= data.length - 22 - 65535; k--) if (data.readUInt32LE(k) === 0x06054b50) { end = k; break }
+  if (end < 0) return // not a zip we can read the contents of: the parser says what's wrong with it
+  const entries = data.readUInt16LE(end + 10)
+  let at = data.readUInt32LE(end + 16)
+  if (entries === 0xffff || at === 0xffffffff || entries > MAX_ZIP_ENTRIES) throw tooBig()
+  let total = 0
+  for (let k = 0; k < entries; k++) {
+    if (at + 46 > data.length || data.readUInt32LE(at) !== 0x02014b50) return
+    const size = data.readUInt32LE(at + 24)
+    if (size === 0xffffffff) throw tooBig()
+    total += size
+    if (total > MAX_UNZIPPED) throw tooBig()
+    at += 46 + data.readUInt16LE(at + 28) + data.readUInt16LE(at + 30) + data.readUInt16LE(at + 32)
+  }
+}
+
 export async function extractFile(name: string, data: Buffer): Promise<string> {
   if (data.length > MAX_FILE) throw new Error(L(`O arquivo passa de ${MAX_FILE / 1024 / 1024} MB.`, `The file is over ${MAX_FILE / 1024 / 1024} MB.`))
   const ext = extname(name).toLowerCase()
@@ -65,11 +88,13 @@ export async function extractFile(name: string, data: Buffer): Promise<string> {
     return out
   }
   if (ext === '.docx') {
+    checkZip(data)
     const mammoth = await import('mammoth')
     const { value } = await mammoth.extractRawText({ buffer: data })
     return clip(value)
   }
   if (ext === '.xlsx') {
+    checkZip(data)
     const { default: ExcelJS } = await import('exceljs')
     const book = new ExcelJS.Workbook()
     await book.xlsx.load(data as unknown as ArrayBuffer)

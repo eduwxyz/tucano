@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Agent, EngineId, Settings } from '../src/shared/types'
+import { AUTO_CONTINUES, countedTokens, type Agent, type EngineId, type Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { callTool, fakeEngine } from '../src/core/engines/fake'
 import type { Engine, EngineEvent, Turn } from '../src/core/engines/types'
@@ -93,6 +93,35 @@ describe('a loop', () => {
     expect(reply().run?.error).toBe('Parei: 8 ferramentas falharam seguidas.')
   })
 
+  // A model that guesses a tool's parameter names (Grok calls tools through use_tool, by a name it read
+  // without the schema): each call says which is missing and lists the parameters, runs nothing, and still
+  // counts, so one that keeps guessing is stopped as before.
+  it('a call missing a required parameter gets the parameters back, runs nothing, and counts toward the stop', async () => {
+    let ran = 0
+    bash = () => (ran++, textResult('ok'))
+    const replies: string[] = []
+    const guessing: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        for (let i = 0; i < 20 && !turn.signal.aborted; i++) {
+          const r = (await callTool(turn.mcpUrl!, 'bash', { cmd: `tentativa ${i}` }).catch(() => null)) as CallToolResult | null
+          if (r) replies.push((r.content[0] as { text: string }).text)
+        }
+        yield { type: 'done', text: 'pronto', usage: { inputTokens: 1, cacheReadTokens: 0, outputTokens: 1 } }
+      }
+    }
+    const r = runner(guessing)
+    await r.send('d1', 'roda os testes')
+    await r.idle()
+    expect(ran).toBe(0)
+    expect(replies[0]).toContain('Faltou "command" em bash. Nada foi feito.')
+    expect(replies[0]).toContain('Você mandou: cmd.')
+    expect(replies[0]).toMatch(/- command \(string, obrigatório\)/)
+    expect(replies).toHaveLength(8)
+    expect(reply().run?.error).toBe('Parei: 8 ferramentas falharam seguidas.')
+    expect(labels()).toContain('Chamada sem parâmetro')
+  })
+
   it('the same web search over and over is a loop too', async () => {
     const searching: Engine = {
       id: 'claude',
@@ -175,6 +204,66 @@ describe('the budget per reply', () => {
     expect(seen.turns.at(-1)!.prompt).toContain('- Chegou no teto da resposta: 100 mil tokens')
   })
 
+  // Runs a command that works, then spends past the budget and wraps up: a reply that got somewhere.
+  const working = (tokens: number, seen: { turns: Turn[] }): Engine => ({
+    id: 'claude',
+    async *run(turn) {
+      seen.turns.push(turn)
+      await callTool(turn.mcpUrl!, 'bash', { command: 'swift test' })
+      yield { type: 'progress', tokens, cacheRead: 0 }
+      yield { type: 'text', delta: 'Rodei os testes; falta o filtro.' }
+      yield { type: 'done', text: 'Rodei os testes; falta o filtro.', usage: { inputTokens: tokens, cacheReadTokens: 0, outputTokens: 0 } }
+    }
+  })
+  const agentReplies = () => db.messages().filter((m) => m.author.kind === 'agent')
+
+  it(`goes on by itself when it paused while getting somewhere, ${AUTO_CONTINUES} times in a row at most, then waits`, async () => {
+    settings = { ...settings, runBudgetPct: 1 } // 10 mil per reply: the month's limit lasts the whole test
+    const seen: { turns: Turn[] } = { turns: [] }
+    const r = runner(working(12_000, seen))
+    await r.send('d1', 'investiga o bug')
+    await r.idle()
+    expect(seen.turns).toHaveLength(AUTO_CONTINUES + 1)
+    expect(seen.turns[1]!.prompt).toContain(`como estava avançando, segue sozinho agora (1 de ${AUTO_CONTINUES} vezes seguidas`)
+    expect(seen.turns[AUTO_CONTINUES]!.prompt).toContain(`(${AUTO_CONTINUES} de ${AUTO_CONTINUES} vezes seguidas`)
+    const replies = agentReplies()
+    expect(replies[0]!.run).toMatchObject({ status: 'done' })
+    expect(replies[0]!.run!.steps.at(-1)?.label).toBe('Continuou sozinho')
+    expect(replies[1]!.run).toMatchObject({ status: 'done', autoContinued: 1 })
+    // The last paused too, and now it's the person's call.
+    expect(replies.at(-1)!.run).toMatchObject({ status: 'paused', autoContinued: AUTO_CONTINUES })
+    // Continuing by hand starts the count over.
+    await r.continue(replies.at(-1)!.id)
+    await r.idle()
+    expect(seen.turns).toHaveLength(2 * (AUTO_CONTINUES + 1))
+  })
+
+  it('waits for the person when the month has no room for another reply that size, or when that is turned off', async () => {
+    const seen: { turns: Turn[] } = { turns: [] }
+    db.addReceipt({ model: 'sonnet', inputTokens: 850_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, messageId: 'before', agentId: 'a1', engine: 'claude', at: Date.now() })
+    const r = runner(working(120_000, seen))
+    await r.send('d1', 'investiga o bug')
+    await r.idle()
+    expect(seen.turns).toHaveLength(1) // 970k used: another 100k would pass the 1M of the month
+    expect(reply().run?.status).toBe('paused')
+
+    db.addReceipt({ model: 'sonnet', inputTokens: -970_000, cacheReadTokens: 0, outputTokens: 0, ms: 1, messageId: 'reset', agentId: 'a1', engine: 'claude', at: Date.now() })
+    settings = { ...settings, autoContinue: false }
+    await r.send('d1', 'investiga de novo')
+    await r.idle()
+    expect(seen.turns).toHaveLength(2)
+    expect(reply().run?.status).toBe('paused')
+  })
+
+  it('does not go on by itself when nothing it tried came back well', async () => {
+    const seen: { refused?: string; turns: Turn[] } = { turns: [] }
+    const r = runner(spending(120_000, 0, seen)) // its only command is refused past the cap
+    await r.send('d1', 'investiga o bug')
+    await r.idle()
+    expect(seen.turns).toHaveLength(1)
+    expect(reply().run?.status).toBe('paused')
+  })
+
   it('counts a token read from the cache as a tenth', async () => {
     const seen: { refused?: string; turns: Turn[] } = { turns: [] }
     const r = runner(spending(500_000, 480_000, seen)) // 20k new + 480k cached: counts 68k
@@ -183,6 +272,12 @@ describe('the budget per reply', () => {
     expect(seen.refused).toBeUndefined()
     expect(reply().run?.status).toBe('done')
     expect(db.usedThisMonth('a1')).toBe(68_000)
+  })
+
+  it('never goes below zero with a receipt whose cache reads came apart from its input (Antigravity)', () => {
+    db.addReceipt({ model: 'antigravity:gemini/x', inputTokens: 88_353, cacheReadTokens: 734_883, outputTokens: 2_602, ms: 1, messageId: 'split', agentId: 'a1', engine: 'antigravity', at: Date.now() })
+    expect(db.usedThisMonth('a1')).toBe(Math.round(88_353 + 734_883 * 0.1 + 2_602)) // the new input whole, the cache a tenth
+    expect(countedTokens({ inputTokens: 88_353, cacheReadTokens: 734_883, outputTokens: 2_602 })).toBe(db.usedThisMonth('a1'))
   })
 
   it('cuts a reply that keeps spending far past it', async () => {
@@ -244,7 +339,7 @@ describe('keeping the Mac awake', () => {
 })
 
 describe('usage alert', () => {
-  it('warns once, in the conversation and with a notification, when an agent crosses 80% of its limit', async () => {
+  it('warns once, in the conversation and without a notification, when an agent crosses 80% of its limit', async () => {
     db.saveAgent(agent({ limit: 10_000 }))
     db.addReceipt({ model: 'sonnet', inputTokens: 7_900, cacheReadTokens: 0, outputTokens: 0, ms: 1, messageId: 'old', agentId: 'a1', engine: 'claude', at: Date.now() })
     const r = runner(fakeEngine('claude', { delayMs: 1 }))
@@ -254,8 +349,9 @@ describe('usage alert', () => {
     await r.idle()
     const alerts = db.messages().filter((m) => m.author.kind === 'system' && m.text.includes('do limite do mês'))
     expect(alerts).toHaveLength(1)
-    expect(alerts[0]!.text).toMatch(/\*\*Lia\*\* já usou 8\d% do limite do mês \(\d+ mil de 10 mil tokens\)/)
-    expect(notes.filter((n) => n.includes('limite'))).toEqual([expect.stringMatching(/^Lia usou 8\d% do limite do mês$/)])
+    expect(alerts[0]!.text).toMatch(/\*\*Lia\*\* já usou [89]\d% do limite do mês \(\d+ mil de 10 mil tokens\)/)
+    // The line in the conversation is enough: no push for it (the person hears only of what needs them).
+    expect(notes.filter((n) => n.includes('limite'))).toEqual([])
   })
 })
 

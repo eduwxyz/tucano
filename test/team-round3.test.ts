@@ -136,7 +136,9 @@ describe('G. every event reaches only who may see what it is about', () => {
       node: { event: { type: 'node', info: { apps: [], folders: ['/Users/ana/segredo'], links: [] } }, is: 'hidden' },
       message: { event: { type: 'message', message }, is: 'hidden' },
       delta: { event: { type: 'delta', id: 'm-dm', text: 'segredo' }, is: 'hidden' },
+      thinking: { event: { type: 'thinking', id: 'm-dm', text: 'segredo' }, is: 'hidden' },
       agent: { event: { type: 'agent', agent: db.agent('a1')! }, is: 'shown' },
+      agent_removed: { event: { type: 'agent_removed', id: 'a9' }, is: 'shown' },
       conversation: { event: { type: 'conversation', conversation: db.conversation('dm-ana')! }, is: 'hidden' },
       settings: { event: { type: 'settings', settings }, is: 'own' },
       connector: { event: { type: 'connector', connector: { id: 'c1', name: 'Linear', kind: 'remote', status: 'connected', tools: [] } as unknown as Connector }, is: 'shown' },
@@ -154,9 +156,11 @@ describe('G. every event reaches only who may see what it is about', () => {
       skill: { event: { type: 'skill', skill: { id: 's1', name: 'x' } as unknown as Skill }, is: 'shown' },
       skill_removed: { event: { type: 'skill_removed', id: 's1' }, is: 'shown' },
       wiki: { event: { type: 'wiki' }, is: 'shown' },
+      docs: { event: { type: 'docs' }, is: 'shown' },
       people: { event: { type: 'people', people: db.people() }, is: 'shown' },
       inbox: { event: { type: 'inbox' }, is: 'own' },
       delegations: { event: { type: 'delegations' }, is: 'own' },
+      leaves: { event: { type: 'leaves' }, is: 'own' },
       tasks: { event: { type: 'tasks', for: ana.id }, is: 'hidden' }
     }
     expect(Object.keys(cases).sort()).toEqual([...CORE_EVENT_TYPES].sort())

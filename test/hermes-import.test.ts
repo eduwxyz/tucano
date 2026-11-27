@@ -333,6 +333,32 @@ describe('Hermes import: skills that came with Hermes', () => {
     const edited = readHermes(folder({ ...files, 'skills/arxiv/a/y.md': 'changed', 'skills/.bundled_manifest': 'arxiv:92ba43b2689b01fb940eb54d045fa49a\n' }))
     expect(edited.profiles[0]!.agent.skills.map((k) => k.name)).toEqual(['arxiv'])
   })
+
+  it('matches Hermes Path ordering for mixed-case filenames and nested paths', () => {
+    const files = {
+      'skills/stock/A.txt': 'alpha\n',
+      'skills/stock/b.txt': 'beta\n',
+      'skills/stock/SKILL.md': '---\nname: stock\ndescription: bundled\n---\n# Stock\n',
+      'skills/stock/docs/Readme.md': 'reference\n'
+    }
+    // Python tools/skills_sync.py dir_hash vector: PureWindowsPath sorts A, b, docs/Readme, SKILL.
+    // The POSIX vector preserves that platform's case-sensitive Path ordering.
+    const hash = process.platform === 'win32' ? 'aa0b0819f33b35c68ab78dd13eaf7923' : 'de6ef0ac9a328d6ae31d73f9c6dfd2a2'
+    const unchanged = readHermes(folder({
+      'SOUL.md': 'x',
+      ...files,
+      'skills/.bundled_manifest': `stock:${hash}\n`
+    })).profiles[0]!.agent
+    expect(unchanged.skills.map((k) => k.name)).toEqual([])
+
+    const edited = readHermes(folder({
+      'SOUL.md': 'x',
+      ...files,
+      'skills/stock/b.txt': 'changed\n',
+      'skills/.bundled_manifest': `stock:${hash}\n`
+    })).profiles[0]!.agent
+    expect(edited.skills.map((k) => k.name)).toEqual(['stock'])
+  })
 })
 
 describe('Hermes import: many skills', () => {

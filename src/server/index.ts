@@ -16,15 +16,16 @@ import type { Socket } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { serveArtifact } from './artifact-http'
 import { Forwarder, isPrivate } from './forward'
-import { ARTIFACT_CSP, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
+import { ARTIFACT_CSP, attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
 import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { applyRestore } from '../core/restore'
-import { verifyLocal } from '../core/local-paths'
+import { openSigned, signedFor, verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
 import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
@@ -135,7 +136,8 @@ function fromCore(msg: CoreRequest): void {
     return
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
-  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'mcp-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'doc-file-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
@@ -226,7 +228,13 @@ function sawComputers(list: Computer[]): void {
 // address> (preview.ts): only the ports the agents' computers say they serve, never this server's.
 const publicHost = publicUrl.startsWith('https://') ? new URL(publicUrl).host : ''
 const preview = publicHost
-  ? new Preview(Buffer.from(kept('preview.key', () => randomBytes(32).toString('base64')), 'base64'), publicHost, (p) => p !== port && [...servicePorts.values()].some((l) => l.includes(p)))
+  ? new Preview(
+      Buffer.from(kept('preview.key', () => randomBytes(32).toString('base64')), 'base64'),
+      publicHost,
+      (p) => p !== port && [...servicePorts.values()].some((l) => l.includes(p)),
+      // Asked again on every request: the cache is short, and forgets a person removed or changed (personNotice).
+      (person, p) => grants.may(person, { port: p })
+    )
   : undefined
 
 // The server's own connection to the core, to follow the services.
@@ -256,6 +264,22 @@ function index(): string {
     .replace('<title>', '<meta name="viewport" content="width=device-width, initial-scale=1" />\n    <script src="./tucano-web.js"></script>\n    <title>')
 }
 
+
+// One MCP request, answered by the core's door (the desktop's is the same door, on 127.0.0.1). A wait for an
+// agent's answer is at most 45 s (mcp.ts), well inside this timeout and a proxy's.
+const MCP_MAX_BODY = 256 * 1024
+function mcpRequest(req: IncomingMessage, res: ServerResponse): void {
+  body(req, MCP_MAX_BODY)
+    .then((text) => ask<{ status: number; headers: Record<string, string>; body: string }>({ type: 'mcp', method: req.method ?? 'GET', auth: req.headers.authorization ?? '', body: text }, 70_000))
+    .then(
+      (out) => {
+        if (res.headersSent) return
+        if (!out) return void res.writeHead(503, { ...BASE_HEADERS, 'retry-after': '5' }).end()
+        res.writeHead(out.status, { ...BASE_HEADERS, ...out.headers }).end(out.body)
+      },
+      () => !res.headersSent && res.writeHead(413, BASE_HEADERS).end()
+    )
+}
 
 function oauthCallback(url: URL, res: ServerResponse): void {
   const id = randomUUID()
@@ -303,6 +327,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // signed in (the desktop app sends it to the system's). What makes it count is the state, made
   // by the core for that one request and good once.
   if (url.pathname === '/oauth/callback') return oauthCallback(url, res)
+  // A harness's MCP (src/core/mcp.ts): its own key in the Authorization header, checked by the core.
+  // No cookie and no page: whoever calls is a program, never a browser signed in here.
+  if (url.pathname === '/mcp' || url.pathname === '/mcp/') return mcpRequest(req, res)
   // A one-time code (pair-codes.ts), traded for a key of the device's own: the phone posts it here,
   // and so does the page a browser's /?code= opens (opening it spends nothing: see pair-http.ts).
   // No sign-in: the code is what counts, and a wrong one counts as a guess.
@@ -520,8 +547,9 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     const p = Number(pv[1])
     if (p === port || ![...servicePorts.values()].some((l) => l.includes(p))) return void res.writeHead(404, BASE_HEADERS).end()
     // A page started by a reply in someone's DM is theirs alone.
-    void grants.may(who.person ?? ownerId, { port: p }).then((ok) =>
-      ok ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
+    const person = who.person ?? ownerId
+    void grants.may(person, { port: p }).then((ok) =>
+      ok && person ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, person, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
     )
     return
   }
@@ -549,32 +577,36 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
   if (url.pathname.startsWith('/local/')) {
     // Signed for one person: anyone else (a link passed on) gets nothing.
     const signed = verifyLocal(localKey, new URL(url.pathname.replace(/^\/local/, ''), 'tucano://local'))
-    const path = signed && (signed.person ? signed.person === (who.person ?? ownerId) : who.owner) ? signed.path : null
-    let size = -1
-    try {
-      size = path && statSync(path).isFile() ? statSync(path).size : -1
-    } catch {}
-    if (!path || size < 0) return void res.writeHead(404, BASE_HEADERS).end()
+    // Opened once and served from that descriptor: only the file the core checked, never a link put in its place.
+    const opened = signed && signedFor(signed, who.person ?? ownerId, !!who.owner) ? openSigned(signed) : null
+    if (!signed || !opened) return void res.writeHead(404, BASE_HEADERS).end()
     const saving = url.searchParams.has('download')
     res.writeHead(200, {
       ...BASE_HEADERS,
-      'content-type': saving ? 'application/octet-stream' : (TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'),
-      'content-length': String(size),
+      'content-type': saving ? 'application/octet-stream' : (TYPES[extname(signed.path).toLowerCase()] ?? 'application/octet-stream'),
+      'content-length': String(opened.size),
       'content-security-policy': 'sandbox',
-      ...(saving ? { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}` } : {})
+      ...(saving ? { 'content-disposition': attachment(basename(signed.path)) } : {})
     })
-    return void createReadStream(path).on('error', () => res.destroy()).pipe(res)
+    const stream = createReadStream('', { fd: opened.fd }).on('error', () => res.destroy())
+    res.on('close', () => stream.destroy()) // a request dropped halfway doesn't keep the descriptor open
+    return void stream.pipe(res)
   }
 
-  // What the agents showed in the chat, sandboxed as on the desktop.
-  const art = /^\/artifact\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
-  if (art) {
-    const dir = join(dataDir, 'artifacts', art[1]!)
-    const name = decodedPath(art[2]!)
-    const path = name === undefined ? '' : normalize(join(dir, name))
-    if (!path.startsWith(dir + sep)) return void res.writeHead(404, BASE_HEADERS).end()
-    // Only who sees the conversation it was shown in (someone else's DM: not found).
-    void grants.may(who.person ?? ownerId, { artifact: art[1]! }).then((ok) => (ok ? file(res, path, { 'content-security-policy': ARTIFACT_CSP }) : res.writeHead(404, BASE_HEADERS).end()))
+  // What the agents showed in the chat, sandboxed as on the desktop, or saved (?download).
+  // Only who sees the conversation it was shown in (someone else's DM: not found).
+  if (serveArtifact(res, url, { dataDir, may: (id) => grants.may(who.person ?? ownerId, { artifact: id }), type: (path) => TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream' })) return
+
+  // A document (Documentos): the core says where its file is when this person may see it (`v`: an older version).
+  // A refusal and a missing file answer the same, so nothing says a document is there.
+  const docMatch = /^\/doc\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
+  if (docMatch) {
+    const v = Number(url.searchParams.get('v')) || undefined
+    void ask<{ path: string; kind: string } | null>({ type: 'doc-file', person: who.person ?? ownerId ?? '', doc: docMatch[1]!, ...(v ? { v } : {}) }).then((found) => {
+      if (!found || !normalize(found.path).startsWith(resolve(join(dataDir, 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
+      // A document is its readers' alone: nothing between the server and the browser keeps a copy of it.
+      file(res, found.path, { 'content-security-policy': ARTIFACT_CSP, 'cache-control': 'private, no-store', ...(found.kind === 'html' ? { 'content-type': 'text/html; charset=utf-8' } : {}) })
+    })
     return
   }
 
@@ -650,7 +682,7 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
   let toConversation = () => {}
   let toPage = () => {}
   const desktop = window.tucanoDesktop
-  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : n.page === 'skills' && toPage('skills')))
+  if (desktop) desktop.onOpen((n) => (n.conversationId ? toConversation(n.conversationId, n.threadId) : (n.page === 'skills' || n.page === 'connectors') && toPage(n.page)))
   const notifyState = () =>
     desktop ? 'on' : !('Notification' in window) ? 'unsupported' : !window.isSecureContext ? 'insecure' : Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'blocked' : 'ask'
   const notify = (n) => {
@@ -694,13 +726,21 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
       const head = el('header', 'modal__head')
       head.append(el('strong', '', t('Escolher pasta no servidor', 'Choose a folder on the server')))
       const where = el('p', 'small muted mono modal__lead')
+      // The person's own folders aren't here: they're lent from the app on their computer.
+      const mine = el('p', 'small muted', t('Estas são as pastas do servidor. Pra uma pasta do seu computador, ligue no app do Tucano nele Configurações › Servidores › Deixar este servidor usar este computador e empreste a pasta por lá.', "These are the server's folders. For a folder on your computer, turn on Settings › Servers › Let this server use this computer in the Tucano app there, and lend the folder from it."))
       const list = el('div', 'folder-pick')
       list.style.cssText = 'max-height:320px;overflow:auto;display:grid;gap:2px;margin:8px 0'
       const foot = el('footer', 'modal__foot')
       const cancel = el('button', 'btn btn--ghost btn--sm', t('Cancelar', 'Cancel'))
       const choose = el('button', 'btn btn--primary btn--sm', t('Escolher esta pasta', 'Choose this folder'))
       foot.append(el('span', 'grow'), cancel, choose)
-      card.append(head, where, list, foot)
+      // In the desktop app, one click there: this computer's Tucano, on Settings › Servers.
+      if (desktop && desktop.openLending) {
+        const lend = el('button', 'btn btn--ghost btn--sm', t('Abrir no Tucano deste computador', "Open in this computer's Tucano"))
+        lend.onclick = () => (close(null), desktop.openLending())
+        foot.prepend(lend)
+      }
+      card.append(head, where, list, mine, foot)
       shade.append(card)
       document.body.append(shade)
       let current = ''
@@ -762,7 +802,14 @@ const WEB = `${INSECURE_CONTEXT_SHIM}(() => {
     updateState: async () => (desktop && desktop.updateState && (await desktop.updateState())) || { version: ${JSON.stringify(version)}, status: 'off' },
     onUpdate: (cb) => { if (desktop && desktop.onUpdate) desktop.onUpdate(cb) },
     checkUpdates: () => { if (desktop && desktop.checkUpdates) desktop.checkUpdates() },
-    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() }
+    installUpdate: () => { if (desktop && desktop.installUpdate) desktop.installUpdate() },
+    // In the desktop app: this computer's Tucano, on Settings › Servers, to lend it here.
+    openLending: desktop && desktop.openLending ? () => desktop.openLending() : undefined,
+    // In the desktop app: its workspaces and servers, in this page's own workspace menu (the app's bar
+    // over the page goes away while the menu draws them). An older app has none of it: the bar stays.
+    places: desktop && desktop.places
+      ? { list: () => desktop.places(), onChanged: (cb) => desktop.onPlaces(cb), go: (p) => desktop.go(p), own: (on) => desktop.own(on), os: desktop.os }
+      : undefined
   }
 })()
 `

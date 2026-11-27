@@ -2,6 +2,8 @@
 // client of these servers: agents reach them through the gateway, never
 // directly, so every call passes the grant and approval checks first.
 import { randomBytes, randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { auth, UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -12,7 +14,8 @@ import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } fr
 import { L } from '../shared/lang'
 import { causeText, friendly, netProblem, netText, type Friendly } from '../shared/errors'
 import type { CoreEvent } from '../shared/rpc'
-import { ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
+import { entryOf, isBuiltin, ownAppOf, type AppProvider, type CatalogEntry } from '../shared/connector-catalog'
+import { builtinLaunch, forgetBuiltin, newCacheKey } from './builtin-servers'
 import type { Connector, ConnectorInput, ConnectorStatus, ConnectorTool } from '../shared/types'
 import type { Db } from './db'
 import { classify, legacyClassify } from './policy'
@@ -20,6 +23,7 @@ import { floorOf, saysHighRisk } from '../shared/classify'
 import { nodeOf } from '../shared/node-link'
 import { unreadable, type Secrets } from './secrets'
 import { OpError, resolveOp, resolveOpRefs } from './onepassword'
+import { VAULT_REF } from '../shared/vault'
 
 const CALL_TIMEOUT_MS = 120_000
 // A server that doesn't answer the handshake shows an error instead of "conectando…" for a minute.
@@ -30,6 +34,13 @@ const MAX_STDIO_FAILURES = 3
 const RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 60_000, 300_000]
 // How long a renewal's answer is kept for another request that renews with the same refresh token.
 const RENEWAL_KEEP_MS = 60_000
+
+// A connector's own picture: an image inline, as a data URL, and no bigger than this (the renderer
+// shrinks what the person picks to 96 px, which lands far below the cap; the cap is the guard for the
+// pictures that go straight to the core, from a phone or a script). Small because the connector list
+// goes out on every change and travels to the phone: a picture here is a mark, not a photograph.
+const ICON_DATA_URL = /^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/
+const ICON_MAX_CHARS = 32_000
 
 // The authorization page sent the browser back without a code: why, and what to do.
 export function notAuthorized(url: URL): string {
@@ -193,8 +204,16 @@ export interface ConnectorDeps {
   emit: (e: CoreEvent) => void
   openUrl: (url: string) => void
   oauthCallbackUrl: () => string
+  // Where the browser goes back to for a provider that takes only a loopback address (Canva's) when
+  // oauthCallbackUrl isn't one (a server on its https address): there, the person pastes where the page ended.
+  localCallbackUrl?: () => string
   readOp?: (ref: string) => Promise<string> // a 1Password reference's value (the op CLI; tests fake it)
+  vaultValue?: (name: string) => Promise<string | undefined> // a team key of the Cofre, for a variable that says cofre:NAME
   callTimeoutMs?: number // how long a tool call may take; tests shorten it
+  // Servers that come inside Tucano (core/builtin-servers.ts): where each keeps its state, and what runs
+  // them (the app's own executable as Node on the desktop; node on a server).
+  builtinRoot?: string
+  runtime?: string
   // Where a sign-in with the person's own app comes back: Slack takes only the address registered in the
   // app, port and all, which the gateway's (new on each launch) can't be.
   fixedCallbackUrl?: () => string
@@ -285,6 +304,18 @@ const CLIENT_ID: Record<AppProvider, { re: RegExp; pt: string; en: string }> = {
 // redirect without the port keeps the registration — and the refresh token, which
 // belongs to the client that got it — across restarts, instead of signing in again.
 // Only an http loopback address loses its port; anything else must match whole.
+// Whether an authorization page turns its redirect address away: an error page that names it ("Invalid redirect
+// URI.", redirect_uri_mismatch) instead of the sign-in. No answer, or any other, isn't a no.
+export async function refusesRedirect(page: string): Promise<boolean> {
+  try {
+    const r = await fetch(page, { redirect: 'manual', signal: AbortSignal.timeout(8_000) })
+    if (r.status < 400 || r.status >= 500) return false
+    return /redirect/i.test((await r.text()).slice(0, 4_000))
+  } catch {
+    return false
+  }
+}
+
 export const sameLoopbackRedirect = (a: string, b: string): boolean => {
   const shape = (u: string): string => {
     try {
@@ -298,10 +329,47 @@ export const sameLoopbackRedirect = (a: string, b: string): boolean => {
   return shape(a) === shape(b)
 }
 
+// The Microsoft server's sign-in, said to the agent in so many words. Before anyone signs in, every call
+// fails with "No accounts found. Please login first.", and an agent took that to mean the person had to
+// sign in somewhere else; the login tool's answer reads like an error too ("device_code_required"). The
+// sign-in is the agent's to start: login hands over a link and a code, which only the person can use.
+export function microsoftHint(name: string, tool: string, r: CallToolResult): string | undefined {
+  const text = (r.content ?? []).map((x) => (x.type === 'text' ? x.text : '')).join(' ')
+  if (tool === 'login' && /device_code_required/.test(text))
+    return L(
+      `Isto não é um erro: é o login do ${name}. Passe à pessoa o link e o código abaixo, como estão (ela abre o link, digita o código e entra na conta da Microsoft) e espere ela dizer que entrou. Depois, chame verify-login e siga com o que ela pediu.`,
+      `This is not an error: it is ${name}'s sign-in. Give the person the link and the code below, as they are (they open the link, type the code and sign in to their Microsoft account) and wait for them to say they did. Then call verify-login and go on with what they asked.`
+    )
+  if (r.isError && /login first|no accounts found|no valid token|not (logged|signed) in/i.test(text))
+    return L(
+      `Ninguém entrou na conta da Microsoft neste conector (${name}) ainda. Quem começa o login é você: chame a ferramenta login dele agora. Ela devolve um link e um código, que você passa à pessoa.`,
+      `No one has signed in to a Microsoft account on this connector (${name}) yet. Starting the sign-in is yours: call its login tool now. It returns a link and a code, which you give the person.`
+    )
+  return undefined
+}
+
 export class ConnectorManager {
+  // A variable that says cofre:NAME takes the team key of that name from the Cofre (src/core/vault.ts), read
+  // on each connection, so changing the key there changes it here too.
+  private async fromVault(env: Record<string, string>): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(env)) {
+      const name = v.trim().startsWith(VAULT_REF) ? v.trim().slice(VAULT_REF.length).trim() : undefined
+      if (name === undefined) {
+        out[k] = v
+        continue
+      }
+      const value = await this.deps.vaultValue?.(name)
+      if (value === undefined) throw new Error(L(`A variável ${k} aponta pra ${VAULT_REF}${name}, que não está entre as chaves do time no Cofre.`, `The ${k} variable points to ${VAULT_REF}${name}, which isn't among the team's keys in the Vault.`))
+      out[k] = value
+    }
+    return out
+  }
+
   private live = new Map<string, Live>()
   private oauthStates = new Map<string, { connectorId: string; transport: StreamableHTTPClientTransport }>()
   private authUrls = new Map<string, string>() // a connector's last authorization page
+  private loopbackOnly = new Set<string>() // connectors whose authorization page turned the server's own address away
   private doneStates = new Set<string>() // finished already (the callback got there first): not an expired one
   private closing = false // the app is quitting: nothing reconnects
   // Renewals under way or just done, by token endpoint and refresh token. A server that rotates refresh tokens
@@ -314,6 +382,20 @@ export class ConnectorManager {
   private freshSignIn = new Map<string, string>()
 
   constructor(private deps: ConnectorDeps) {}
+
+  private builtinRoot(): string {
+    return this.deps.builtinRoot ?? join(tmpdir(), 'tucano-connectors')
+  }
+
+  // The key a built-in server's sign-in is encrypted with: made once, kept in the vault with the connector's
+  // other secrets (and removed with them).
+  private async cacheKey(id: string): Promise<string> {
+    const saved = await this.deps.secrets.get(key(id, 'cache-key'))
+    if (saved) return saved
+    const made = newCacheKey()
+    await this.deps.secrets.set(key(id, 'cache-key'), made)
+    return made
+  }
 
   list(): Connector[] {
     return this.deps.db.connectors().map((c) => this.withStatus(c))
@@ -397,6 +479,21 @@ export class ConnectorManager {
     return provider === 'slack' && this.deps.fixedCallbackUrl ? this.deps.fixedCallbackUrl() : this.deps.oauthCallbackUrl()
   }
 
+  // The picture a connector wears instead of the store's mark (or the icon of its kind). Empty: back
+  // to those. It is a data URL because it lives in the database: a backup, an export and a restore of
+  // the computer carry it, and there is no folder of loose pictures to keep in step.
+  async setIcon(id: string, icon: string): Promise<void> {
+    const c = this.deps.db.connector(id)
+    if (!c) throw new Error(L('Esse conector não existe mais.', 'That connector no longer exists.'))
+    const value = icon.trim()
+    if (value && !ICON_DATA_URL.test(value))
+      throw new Error(L('Isso não é uma imagem (PNG, JPEG, WebP, GIF ou SVG).', 'That is not an image (PNG, JPEG, WebP, GIF or SVG).'))
+    if (value.length > ICON_MAX_CHARS)
+      throw new Error(L('A imagem é grande demais para um ícone. Escolha uma menor.', 'That image is too big for an icon. Pick a smaller one.'))
+    this.deps.db.setConnectorIcon(id, value || null)
+    this.emitConnector(id)
+  }
+
   // Sets or replaces the token of a connector that signs in with one, and connects with it.
   async setToken(id: string, token: string): Promise<void> {
     const c = this.deps.db.connector(id)
@@ -412,6 +509,7 @@ export class ConnectorManager {
     clearTimeout(this.live.get(id)?.retry)
     await this.disconnect(id)
     this.live.delete(id)
+    if (isBuiltin(this.deps.db.connector(id)?.command)) forgetBuiltin(this.builtinRoot(), id) // its sign-in goes with it
     this.deps.db.removeConnector(id)
     this.deps.emit({ type: 'connector_removed', id })
   }
@@ -516,8 +614,11 @@ export class ConnectorManager {
           }
         }
       } else {
-        const env = await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp)
-        transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
+        const env = await this.fromVault(await resolveOpRefs((await this.deps.secrets.getJson<Record<string, string>>(key(id, 'env'))) ?? {}, this.deps.readOp))
+        if (isBuiltin(c.command)) {
+          const run = builtinLaunch({ id, command: c.command!, args: c.args ?? [] }, { root: this.builtinRoot(), runtime: this.deps.runtime ?? process.execPath, cacheKey: await this.cacheKey(id), env: { ...getDefaultEnvironment(), ...env } })
+          transport = new StdioClientTransport({ command: run.command, args: run.args, env: run.env, cwd: run.cwd, stderr: 'ignore' })
+        } else transport = new StdioClientTransport({ command: c.command!, args: c.args, env: { ...getDefaultEnvironment(), ...env }, stderr: 'ignore' })
       }
     } catch (e) {
       // A 1Password secret that wasn't read, or a saved one the system's key won't open: it needs you, so no retries.
@@ -673,11 +774,15 @@ export class ConnectorManager {
     const client = this.live.get(id)?.client
     if (!client) return
     const listed: Parameters<Db['syncTools']>[1] = []
+    // A tool the catalog knows only reads (Microsoft's sign-in, which hands the person a code): a reader may call it too.
+    const c = this.deps.db.connector(id)
+    const reads = new Set((c && entryOf(c)?.readTools) ?? [])
     let cursor: string | undefined
     do {
       const page = await client.listTools(cursor ? { cursor } : undefined)
       for (const t of page.tools) {
-        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: classify(t), legacyCls: legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
+        const known = reads.has(t.name) ? ('read' as const) : undefined
+        listed.push({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema as Record<string, unknown>, cls: known ?? classify(t), legacyCls: known ?? legacyClassify(t), floor: floorOf(t), highRisk: saysHighRisk(t) })
       }
       cursor = page.nextCursor
     } while (cursor)
@@ -699,7 +804,7 @@ export class ConnectorManager {
     try {
       const r = (await l.client.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult
       l.failures = 0
-      return this.explained(id, r)
+      return this.explained(id, r, name)
     } catch (e) {
       let failure = e
       if (staleSession(e)) {
@@ -707,7 +812,7 @@ export class ConnectorManager {
         const again = this.live.get(id)?.client
         if (again) {
           try {
-            return this.explained(id, (await again.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult)
+            return this.explained(id, (await again.callTool({ name, arguments: args }, undefined, { timeout })) as CallToolResult, name)
           } catch (e2) {
             failure = e2
           }
@@ -757,8 +862,9 @@ export class ConnectorManager {
   }
 
   // A failed result with a known cause gets that cause first, in words the agent can pass on.
-  private explained(id: string, r: CallToolResult): CallToolResult {
-    const hint = r.isError ? googleHint(this.deps.db.connector(id)?.url, errorReason(r)) : undefined
+  private explained(id: string, r: CallToolResult, tool: string): CallToolResult {
+    const c = this.deps.db.connector(id)
+    const hint = isBuiltin(c?.command) ? microsoftHint(c!.name, tool, r) : r.isError ? googleHint(c?.url, errorReason(r)) : undefined
     return hint ? { ...r, content: [{ type: 'text', text: hint }, ...(r.content ?? [])] } : r
   }
 
@@ -776,6 +882,16 @@ export class ConnectorManager {
       if (this.live.get(id)?.client) return undefined
     }
     await this.connect(id, true).catch(() => {})
+    // A provider that takes only a loopback address back (Canva's) answers the server's own with an error page:
+    // the sign-in starts again with the loopback one, and the person pastes where the page ended.
+    const page = this.authUrls.get(id)
+    const local = this.deps.localCallbackUrl?.()
+    if (page && local && !this.loopbackOnly.has(id) && new URL(page).searchParams.get('redirect_uri') !== local && (await refusesRedirect(page))) {
+      this.oauthStates.delete(new URL(page).searchParams.get('state') ?? '')
+      this.authUrls.delete(id)
+      this.loopbackOnly.add(id)
+      await this.connect(id, true).catch(() => {})
+    }
     return this.authUrls.get(id)
   }
 
@@ -870,7 +986,8 @@ export class ConnectorManager {
   // `own`: a server that signs in with the person's own app (Google's, Slack's) instead of registering one.
   private oauthProvider(id: string, transport: () => StreamableHTTPClientTransport, interactive: boolean, own?: CatalogEntry['app'], renewal?: Renewal): OAuthClientProvider {
     const { secrets } = this.deps
-    const redirectUrl = own ? this.redirectFor(own.provider) : this.deps.oauthCallbackUrl()
+    const local = this.deps.localCallbackUrl?.()
+    const redirectUrl = own ? this.redirectFor(own.provider) : local && this.loopbackOnly.has(id) ? local : this.deps.oauthCallbackUrl()
     // Signing in again (someone clicked Authorize) goes on past a saved value the system's key won't open:
     // the new sign-in takes its place. In the background it stops the attempt, and the value stays.
     const read = async <T>(k: string): Promise<T | undefined> => {
@@ -909,7 +1026,8 @@ export class ConnectorManager {
           return app && { client_id: app.clientId, client_secret: app.clientSecret }
         }
         const info = await read<OAuthClientInformationMixed & { redirect_uris?: string[] }>(key(id, 'oauth_client'))
-        const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl))
+        // A renewal sends no address: the app registered with the loopback one (above) renews after a restart too.
+        const fits = (u: string): boolean => (interactive ? u === redirectUrl : sameLoopbackRedirect(u, redirectUrl) || (!!local && sameLoopbackRedirect(u, local)))
         return info && (!info.redirect_uris || info.redirect_uris.some(fits)) ? info : undefined
       },
       saveClientInformation: (info) => (own ? undefined : secrets.setJson(key(id, 'oauth_client'), { ...info, redirect_uris: [redirectUrl] })),

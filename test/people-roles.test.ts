@@ -112,7 +112,9 @@ describe('approvals: who decides', () => {
     expect(people.inbox(carl).approvals.map((x) => x.id)).toEqual(['p1'])
     expect(db.person(bia.id)).toMatchObject({ delegateTo: carl.id })
     // Over: no longer.
-    people.setDelegation(bia, carl.id, Date.now() + 1, Date.now())
+    // One clock reading for both: read twice, a millisecond can pass in between and make `until` already over.
+    const now = Date.now()
+    people.setDelegation(bia, carl.id, now + 1, now)
     db.setDelegation(bia.id, carl.id, Date.now() - 1)
     expect(people.canDecide(carl, a)).toBe(false)
     expect(() => people.setDelegation(bia, bia.id, Date.now() + 1000)).toThrow()
@@ -243,7 +245,7 @@ describe('what a DM leaks: browsers, computers, files', () => {
 
   it('a cited file on a server is signed for one person', () => {
     const url = new URL(localUrl('chave', '/tmp/a.png', 'tucano://local', 'bia'))
-    expect(verifyLocal('chave', url)).toEqual({ path: '/tmp/a.png', person: 'bia' })
+    expect(verifyLocal('chave', url)).toMatchObject({ path: '/tmp/a.png', person: 'bia' })
     expect(verifyLocalUrl('chave', url)).toBeNull() // not an unsigned (desktop) address
     const forged = new URL(url.href.replace(/\/[^/]+$/, `/${Buffer.from('ana').toString('base64url')}`))
     expect(verifyLocal('chave', forged)).toBeNull()
@@ -419,6 +421,20 @@ describe('questions, mentions and memory between people', () => {
     await runner.send('ch', '@lia peça pra bia', [], undefined, ana.id)
     await runner.idle()
     expect(notes.find((n) => n.title === 'Lia te mencionou')).toMatchObject({ to: [bia.id] })
+  })
+
+  it('cancelling a decisions card: only who may answer it; the question leaves the inbox without waking the agent', async () => {
+    await runner.send('ch', '@lia me ajuda a decidir, decida com a Bia', [], undefined, ana.id)
+    await runner.idle()
+    const [asked] = lia()
+    const before = turns.length
+    expect(() => runner.cancelQuestion(asked!.id, carl)).toThrow('Essa pergunta não é pra você.')
+    runner.cancelQuestion(asked!.id, bia)
+    await runner.idle()
+    expect(db.message(asked!.id)?.run).toMatchObject({ status: 'done', cancelled: true })
+    expect(db.question(asked!.id)?.state).toBe('closed')
+    expect(people.inbox(bia).questions).toHaveLength(0)
+    expect(turns).toHaveLength(before)
   })
 
   // ask_user with options (decisions): answered on the card, one at a time, only by who may answer the question.

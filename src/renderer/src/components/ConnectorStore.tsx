@@ -2,11 +2,12 @@
 // in through the browser (or needs no sign-in); a service that asks a few things first (its address,
 // a token) asks them in a window; anything else goes in by hand, with "Adicionar personalizado".
 // Google's and Slack's sign in with an app the person makes once, which the first Connect walks them through.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../shared/lang'
-import { catalogInput, CATEGORIES, entryOf, ownAppGuide, searchCatalog, type AppProvider, type CatalogEntry } from '../../../shared/connector-catalog'
+import { catalogInput, CATEGORIES, entryOf, isBuiltin, MS365_VERSION, ownAppGuide, searchCatalog, type AppProvider, type CatalogCategory, type CatalogEntry } from '../../../shared/connector-catalog'
 import { LOGOS } from '../connector-logos'
-import { addConnector, authorizeConnector, openExternal, ownApp, setOwnApp, useStore, type Connector } from '../store'
+import { iconFromFile, imageFromClipboard } from '../connector-icon'
+import { addConnector, authorizeConnector, openExternal, ownApp, setConnectorIcon, setOwnApp, toast, useStore, type Connector } from '../store'
 import { Modal } from './Modal'
 import { Icon } from './ui'
 
@@ -17,7 +18,7 @@ const light = (hex: string): boolean => {
 }
 
 // Brands without a mark in Simple Icons, or with only a wordmark: their initial, on their color.
-const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', granola: '3F6212', canva: '00C4CC', context7: '0F172A', exa: '1F40ED', keenable: '005CFF', aave: 'B6509E', coinbase: '0052FF', zapier: 'FF4F00', composio: '1A1A1A', 'azure-devops': '0078D4', cloudwatch: 'E7157B' }
+const OWN_COLOR: Record<string, string> = { jam: 'FF2D55', monday: '6161FF', granola: '3F6212', canva: '00C4CC', context7: '0F172A', exa: '1F40ED', keenable: '005CFF', aave: 'B6509E', coinbase: '0052FF', zapier: 'FF4F00', composio: '1A1A1A', 'azure-devops': '0078D4', cloudwatch: 'E7157B', outlook: '0078D4', 'microsoft-365': 'D83B01' }
 
 export function CatalogLogo({ entry, size = 36 }: { entry: CatalogEntry; size?: number }): ReactNode {
   const logo = LOGOS[entry.id]
@@ -33,6 +34,93 @@ export function CatalogLogo({ entry, size = 36 }: { entry: CatalogEntry; size?: 
         <b style={{ fontSize: size * 0.44 }}>{entry.name[0]}</b>
       )}
     </span>
+  )
+}
+
+// The tile a connector wears: the picture set on it, else the store's mark when it is a service the
+// store knows, else the icon of its kind — a terminal for a server that runs here, a globe for one on
+// the network. That last one is what a server added by hand wore before it could have a picture.
+export function ConnectorTile({ c, size = 36 }: { c: Pick<Connector, 'kind' | 'url' | 'command' | 'args' | 'icon'>; size?: number }): ReactNode {
+  if (c.icon) {
+    return (
+      <span className="catalog__logo catalog__logo--pic" style={{ width: size, height: size }} aria-hidden>
+        <img src={c.icon} alt="" width={size} height={size} />
+      </span>
+    )
+  }
+  const entry = entryOf(c)
+  if (entry) return <CatalogLogo entry={entry} size={size} />
+  return (
+    <span className="catalog__logo catalog__logo--own" style={{ width: size, height: size }} aria-hidden>
+      <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} size={Math.round(size * 0.5)} />
+    </span>
+  )
+}
+
+// The picture a connector wears, changed where the connector is: pick an image from this computer, see
+// it on the tile, or take it away and go back to the store's mark. The image is shrunk to 128 px and
+// kept in the database, so a backup carries it.
+export function ConnectorIconPicker({ c }: { c: Connector }): ReactNode {
+  const [busy, setBusy] = useState(false)
+  const file = useRef<HTMLInputElement>(null)
+  const save = async (value: Promise<string> | string): Promise<void> => {
+    setBusy(true)
+    try {
+      await setConnectorIcon(c.id, await value)
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : L('Não consegui usar essa imagem.', "I couldn't use that image."))
+    } finally {
+      setBusy(false)
+    }
+  }
+  // A picture copied anywhere else and pasted here: the same shrink-and-keep path as a picked file,
+  // so the clipboard is only another way in, never another kind of icon.
+  const paste = async (file: File | null): Promise<void> => {
+    if (!file) return toast(L('Não há imagem na área de transferência.', 'There is no image on the clipboard.'))
+    await save(iconFromFile(file))
+  }
+  return (
+    <div
+      className="row connector-modal__icon"
+      onPaste={(e) => {
+        const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'))
+        const file = item?.getAsFile()
+        if (file) {
+          e.preventDefault()
+          void paste(file)
+        }
+      }}
+    >
+      <ConnectorTile c={c} size={30} />
+      <input
+        ref={file}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+        hidden
+        onChange={(e) => {
+          const picked = e.target.files?.[0]
+          e.target.value = '' // the same file again still counts as a choice
+          if (picked) void save(iconFromFile(picked))
+        }}
+      />
+      <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => file.current?.click()}>
+        {L('Escolher imagem', 'Choose image')}
+      </button>
+      <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void imageFromClipboard().then(paste)}>
+        {L('Colar imagem', 'Paste image')}
+      </button>
+      {c.icon && (
+        <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void save('')}>
+          {L('Usar o padrão', 'Use the default')}
+        </button>
+      )}
+      <span className="muted small grow">
+        {L(
+          'PNG, JPEG, WebP, GIF ou SVG, escolhido ou colado da área de transferência. O ícone aparece na lista de conectores.',
+          'PNG, JPEG, WebP, GIF or SVG, picked or pasted from the clipboard. The icon shows in the connector list.'
+        )}
+      </span>
+    </div>
   )
 }
 
@@ -57,10 +145,17 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
   const words = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
   const mine = connectors.filter((c) => !words || `${c.name} ${entryOf(c)?.about() ?? ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(words))
   const found = searchCatalog(query).filter((e) => !connectors.some((c) => entryOf(c)?.id === e.id))
+  // One category at a time, picked on top, instead of scrolling past all of them. "All" shows what's connected too.
+  const [picked, setOnly] = useState<CatalogCategory | null>(null)
+  const counts = CATEGORIES().map((cat) => ({ ...cat, n: found.filter((c) => c.category === cat.id).length })).filter((cat) => cat.n > 0)
+  // A search that leaves nothing in the picked category shows all again, rather than an empty page.
+  const only = counts.length > 1 && counts.some((cat) => cat.id === picked) ? picked : null
+  const shown = only ? found.filter((c) => c.category === only) : found
+  const mineShown = only ? [] : mine
 
   const connect = (c: CatalogEntry): void => {
     if (c.app && !apps[c.app.provider]) return setAppSetup({ provider: c.app.provider, then: c })
-    if (c.fields?.length || c.warning) return setSetup(c) // asks something, or says something, first
+    if (c.fields?.length || c.warning || c.note) return setSetup(c) // asks something, or says something, first
     setBusy(c.id)
     setError(null)
     addConnector(catalogInput(c))
@@ -70,29 +165,37 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
 
   return (
     <section className="catalog">
-      <label className="catalog__search">
-        <Icon name="search" size={14} />
-        <input value={query} placeholder={L('Buscar conectores', 'Search connectors')} aria-label={L('Buscar conectores', 'Search connectors')} onChange={(e) => setQuery(e.target.value)} />
-      </label>
-      {mine.length > 0 && (
+      <div className="catalog__top">
+        <label className="catalog__search">
+          <Icon name="search" size={14} />
+          <input value={query} placeholder={L('Buscar conectores', 'Search connectors')} aria-label={L('Buscar conectores', 'Search connectors')} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+        {counts.length > 1 && (
+          <div className="catalog__cats" role="group" aria-label={L('Categorias', 'Categories')}>
+            <button className={`chip ${only === null ? 'is-on' : ''}`} aria-pressed={only === null} onClick={() => setOnly(null)}>
+              {L('Todos', 'All')}
+            </button>
+            {counts.map((cat) => (
+              <button key={cat.id} className={`chip ${only === cat.id ? 'is-on' : ''}`} aria-pressed={only === cat.id} onClick={() => setOnly(only === cat.id ? null : cat.id)}>
+                {cat.name} <span className="catalog__count">{cat.n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {mineShown.length > 0 && (
         <div className="catalog__group">
           <h3>
-            {L('Conectados', 'Connected')} <span className="muted">{mine.length}</span>
+            {L('Conectados', 'Connected')} <span className="muted">{mineShown.length}</span>
           </h3>
           <div className="catalog__grid">
-            {mine.map((c) => {
+            {mineShown.map((c) => {
               const entry = entryOf(c)
               const using = users.filter((a) => (a.grants[c.id] ?? 'none') !== 'none').length
               const fresh = c.tools.filter((t) => t.isNew).length
               return (
                 <div key={c.id} className="catalog__card is-mine" role="button" tabIndex={0} onClick={() => onManage(c.id)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onManage(c.id))}>
-                  {entry ? (
-                    <CatalogLogo entry={entry} />
-                  ) : (
-                    <span className="catalog__logo catalog__logo--own" aria-hidden>
-                      <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} size={18} />
-                    </span>
-                  )}
+                  <ConnectorTile c={c} />
                   <span className="catalog__text">
                     <strong>{c.name}</strong>
                     <span className="small catalog__state">
@@ -129,11 +232,11 @@ export function ConnectorGrid({ status, onManage, query: initial = '' }: { statu
           </div>
         </div>
       )}
-      {found.length === 0 && mine.length === 0 && (
+      {shown.length === 0 && mineShown.length === 0 && (
         <p className="muted small">{L(`Nada com “${query}” aqui. Se o serviço tem um servidor MCP, use Adicionar personalizado.`, `Nothing with “${query}” here. If the service has an MCP server, use Add custom.`)}</p>
       )}
       {CATEGORIES().map((cat) => {
-        const entries = found.filter((c) => c.category === cat.id)
+        const entries = shown.filter((c) => c.category === cat.id)
         if (!entries.length) return null
         return (
           <div key={cat.id} className="catalog__group">
@@ -242,9 +345,13 @@ function ConnectorSetup({ entry, onClose, onAdded }: { entry: CatalogEntry; onCl
           <span className="muted small">{entry.about()}</span>
         </div>
         {entry.warning && <ThirdPartyWarning text={entry.warning()} />}
+        {entry.note && <p className="note small">{entry.note()}</p>}
         {runs && (
           <p className="warn-box small">
-            <Icon name="terminal" size={14} /> {L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
+            <Icon name="terminal" size={14} />{' '}
+            {isBuiltin(entry.local?.command)
+              ? L(`Já vem dentro do Tucano, sem instalar nada: o servidor de código aberto da ${entry.by ?? '?'}, versão ${MS365_VERSION}, que roda neste computador com o seu usuário.`, `Comes inside Tucano, nothing to install: ${entry.by ?? '?'}'s open-source server, version ${MS365_VERSION}, which runs on this computer as your user.`)
+              : L(`Roda o servidor oficial neste computador, com o seu usuário: ${runs}.`, `Runs the official server on this computer, as your user: ${runs}.`)}
           </p>
         )}
         {(entry.fields ?? []).map((f) => (

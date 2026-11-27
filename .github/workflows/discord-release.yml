@@ -1,0 +1,37 @@
+# A published release, told on Discord with what's in it (scripts/discord-release.mjs). It replaces
+# the repository's GitHub-format Discord webhook, which only said "New release published".
+name: Discord release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'A release already out, to post again (e.g. v0.2.36)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/discord-release.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Post to Discord
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          DISCORD_RELEASE_ROLE: '1568453984941907998' # @Release Pings
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          # By hand, the release comes from gh by its tag; on a release, from the event.
+          if [ -n "$TAG" ]; then unset GITHUB_EVENT_PATH; fi
+          node scripts/discord-release.mjs

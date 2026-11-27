@@ -1,7 +1,9 @@
 // What the Tuca has besides building agents: a look at how the workspace is doing (ver_estado),
 // and proposals for what already exists (an agent's change, a routine, a channel). A proposal is a
-// card with Aplicar and Descartar, like his new agents: nothing changes until the person applies it.
-// He sees settings, statuses and error messages, never what was said in a conversation.
+// card, like his new agents: applied when his reply ends, with Desfazer, unless it grants access or
+// that's turned off (src/core/tuca-apply.ts); then nothing changes until the person applies it.
+// With ver_estado he sees settings, statuses and error messages, never what was said in a conversation
+// (of the conversations he reads only what comes back from the requests he made: src/core/delegations.ts).
 import { L } from '../shared/lang'
 import { safeLimit } from '../shared/limits'
 import { usedShare } from '../shared/limits'
@@ -40,6 +42,30 @@ export const VER_ESTADO: ToolDef = {
   get inputSchema() {
     return { type: 'object' as const, properties: { area: { type: 'string', enum: [...AREAS] } } }
   }
+}
+
+// ---------- propor_feedback ----------
+
+export const FEEDBACK_MAX = 5_000 // what the "Enviar feedback" window takes (core/feedback.ts)
+
+export const PROPOR_FEEDBACK: ToolDef = {
+  name: 'propor_feedback',
+  get description() {
+    return L(
+      'Escreve um feedback pra quem faz o Tucano: um bug do app, ou uma ideia pra ele. Aparece como um card; a pessoa revisa e envia ela mesma, você nunca envia. Só sobre o Tucano, não sobre o trabalho dos agentes dela. Escreva no idioma da pessoa, curto e concreto: o que ela fez, o que esperava, o que aconteceu (ou a ideia e pra quê). Sem o conteúdo das conversas, nomes ou dados pessoais.',
+      "Writes feedback for the people who make Tucano: a bug in the app, or an idea for it. It shows as a card; the person reviews and sends it themselves, you never send it. Only about Tucano, not about her agents' work. Write in the person's language, short and concrete: what they did, what they expected, what happened (or the idea and what it's for). No conversation content, names or personal data."
+    )
+  },
+  get inputSchema() {
+    return { type: 'object' as const, properties: { tipo: { type: 'string', enum: ['bug', 'idea', 'other'] }, texto: { type: 'string' } }, required: ['tipo', 'texto'] }
+  }
+}
+
+export function feedbackFrom(args: Record<string, unknown>): { draft?: { kind: 'bug' | 'idea' | 'other'; message: string }; error?: string } {
+  const kind = args['tipo'] === 'idea' || args['tipo'] === 'other' ? args['tipo'] : 'bug'
+  const message = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
+  if (!message) return { error: L('Escreva o texto do feedback em `texto`.', 'Write the feedback in `texto`.') }
+  return { draft: { kind, message: message.slice(0, FEEDBACK_MAX) } }
 }
 
 export interface StateInput {
@@ -82,7 +108,7 @@ export function workspaceState(area: unknown, x: StateInput): string {
       return `- ${ENGINES[e].label}: ${state}${st.version ? ` · v${st.version}` : ''}${st.route === 'gateway' ? L(` · pelo gateway ${st.gateway ?? ''}`, ` · through gateway ${st.gateway ?? ''}`) : ''}${st.warning ? ` · ${st.warning}` : ''}`
     })
     const accounts = (s.accounts ?? []).map((a) => `- ${a.name} (${ENGINES[a.engine].label}): ${a.loggedIn ? L('com login', 'signed in') : L('sem login', 'not signed in')}`)
-    out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning})`)
+    out.push(`## ${L('Motores', 'Harnesses')}\n${lines.join('\n')}${accounts.length ? `\n${L('Contas extras', 'Extra accounts')}:\n${accounts.join('\n')}` : ''}\n${L('Roteador', 'Router')}: ${s.routerModel} · ${L('memória', 'memory')}: ${s.memoryModel} (${s.memoryLearning}) · ${L('reserva padrão dos agentes', "agents' default reserve")}: ${s.defaultFallbackModel ? reserveName(s.defaultFallbackModel) : L('nenhum (Configurações › Modelos)', 'none (Settings › Models)')}`)
   }
   if (show('connectors')) {
     const status: Record<Connector['status'], string> = { connected: L('conectado', 'connected'), connecting: L('conectando', 'connecting'), needs_auth: L('pede login', 'needs sign-in'), error: L('com erro', 'error'), disconnected: L('desconectado', 'disconnected') }
@@ -90,14 +116,14 @@ export function workspaceState(area: unknown, x: StateInput): string {
     out.push(`## ${L('Conectores', 'Connectors')}\n${lines.join('\n') || L('nenhum adicionado', 'none added')}`)
   }
   if (show('agents')) {
-    const lines = x.agents.map((a) => {
+    const lines = x.agents.filter((a) => !a.deleted).map((a) => {
       const m = modelInfo(a.modelId)
       const grants = Object.entries(a.grants).map(([id, g]) => `${x.connectors.find((c) => c.id === id)?.name ?? id} (${g === 'read_write' ? L('escrita', 'write') : g === 'read' ? L('leitura', 'read') : g})`)
       // With no monthly limit (0) there is no month to be a percentage of: say so, rather than "0%".
       const share = usedShare(a.used, a.limit)
       const pct = share === undefined ? undefined : Math.round(share * 100)
       const pending = x.approvals.filter((p) => p.agentId === a.id && p.state === 'pending').length
-      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
+      return `- ${a.name} (@${a.handle}${a.role ? `, ${a.role}` : ''})${a.archived ? L(' · ARQUIVADO', ' · ARCHIVED') : ''}: ${m ? `${ENGINES[m.engine].label} · ${m.label}` : a.modelId} · ${L('esforço', 'effort')} ${a.effort} · ${pct === undefined ? L('sem limite do mês', 'no monthly limit') : L(`${pct}% do limite do mês`, `${pct}% of the month's limit`)}${pct !== undefined && pct >= 100 ? L(' (ESGOTADO)', ' (USED UP)') : ''} · ${grants.length ? grants.join(', ') : L('sem conectores', 'no connectors')} · ${a.web !== false ? 'web' : L('sem web', 'no web')}${a.computer ? ` · ${a.computerKind === 'mac' ? L('este computador', 'this computer') : 'Docker'}` : ''}${a.browser ? L(' · navegador', ' · browser') : ''}${a.fallbackModelId ? ` · ${L('reserva', 'reserve')} ${reserveName(a.fallbackModelId)}` : ''}${pending ? L(` · ${pending} aprovação(ões) esperando`, ` · ${pending} approval(s) waiting`) : ''}`
     })
     out.push(`## ${L('Agentes', 'Agents')}\n${lines.join('\n') || L('nenhum ainda', 'none yet')}`)
   }
@@ -128,8 +154,8 @@ export const PROPOR_AJUSTE: ToolDef = {
   name: 'propor_ajuste',
   get description() {
     return L(
-      'Propõe mudar um agente que já existe. Vira um card com o antes e o depois, Aplicar e Descartar: nada muda até a pessoa aplicar. Mande só o que muda; instruções vão inteiras.',
-      'Proposes changing an agent that exists. It becomes a card with before and after, Apply and Discard: nothing changes until the person applies it. Send only what changes; instructions go whole.'
+      'Propõe mudar um agente que já existe, num card com o antes e o depois. Com "aplicar na hora", muda quando sua resposta termina e a pessoa pode desfazer; conectores e limite do mês sempre esperam ela confirmar. Mande só o que muda; instruções vão inteiras.',
+      'Proposes changing an agent that exists, as a card with before and after. With "apply right away", it changes when your reply ends and the person can undo it; connectors and the monthly limit always wait for them to confirm. Send only what changes; instructions go whole.'
     )
   },
   get inputSchema() {
@@ -142,6 +168,7 @@ export const PROPOR_AJUSTE: ToolDef = {
         instrucoes: { type: 'string', description: L(`As instruções novas, inteiras. Até ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('pt-BR')} caracteres é a recomendação, não um limite.`, `The new instructions, whole. ${RECOMMENDED_INSTRUCTION_LENGTH.toLocaleString('en-US')} characters is a recommendation, not a limit.`) },
         modelo: { type: 'string', description: L('O id de um modelo da lista "Modelos que dá pra usar".', 'The id of a model from the "Models you can use" list.') },
         esforco: { type: 'string', enum: EFFORTS },
+        modelo_reserva: { type: 'string', description: L('O modelo reserva: quando o principal fica sem limite, a resposta segue nele. O id de um modelo da lista, ou "nenhum" pra tirar (aí vale o reserva padrão do workspace, se houver).', 'The reserve model: when the main one runs out of quota, the reply goes on with it. The id of a model from the list, or "nenhum" to remove it (then the workspace default reserve applies, if any).') },
         web: { type: 'boolean' },
         conectores: {
           type: 'array',
@@ -160,8 +187,8 @@ export const PROPOR_ROTINA: ToolDef = {
   name: 'propor_rotina',
   get description() {
     return L(
-      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos, numa data específica ou todo mês num dia), como um card com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
-      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time, on a specific date, or every month on a day), as a card with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
+      'Cria uma rotina num horário pra um agente (um pedido que ele faz sozinho nos dias e na hora escolhidos, numa data específica ou todo mês num dia), num card: com "aplicar na hora", criada quando sua resposta termina, com Desfazer; senão, com Aplicar e Descartar. Use em vez de explicar como criar uma rotina. Gatilhos (webhook, conector) a pessoa liga em Rotinas.',
+      'Makes a scheduled routine for an agent (a request it does on its own on the chosen days and time, on a specific date, or every month on a day), as a card: with "apply right away", made when your reply ends, with Undo; otherwise with Apply and Discard. Use it instead of explaining how to make a routine. Triggers (webhook, connector) the person sets in Routines.'
     )
   },
   get inputSchema() {
@@ -188,7 +215,7 @@ export const PROPOR_ROTINA: ToolDef = {
 export const PROPOR_CANAL: ToolDef = {
   name: 'propor_canal',
   get description() {
-    return L('Propõe um canal novo, com os agentes que ficam nele. Vira um card com Aplicar e Descartar.', 'Proposes a new channel, with the agents in it. It becomes a card with Apply and Discard.')
+    return L('Propõe um canal novo, com os agentes que ficam nele, num card: com "aplicar na hora", criado quando sua resposta termina, com Desfazer; senão, com Aplicar e Descartar.', 'Proposes a new channel, with the agents in it, as a card: with "apply right away", made when your reply ends, with Undo; otherwise with Apply and Discard.')
   },
   get inputSchema() {
     return {
@@ -246,6 +273,12 @@ export function pendingAgents(run: { agentDraft?: AgentDraft; proposal?: Proposa
   return [...(run?.agentDraft && !run.agentDraft.state ? [run.agentDraft.name] : []), ...teams]
 }
 
+// A reserve model as the state shows it: its harness and name, and its id to propose with.
+const reserveName = (id: string): string => {
+  const m = modelInfo(id)
+  return m ? `${ENGINES[m.engine].label} · ${m.label} (${id})` : id
+}
+
 export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: ProposalCtx): { proposal?: Proposal; error?: string } {
   const reason = text(args, 'motivo', 300) || undefined
   if (tool === PROPOR_AJUSTE.name) {
@@ -266,6 +299,13 @@ export function proposalFrom(tool: string, args: Record<string, unknown>, ctx: P
       changes.modelId = model
     }
     if (EFFORTS.includes(args['esforco'] as Effort) && args['esforco'] !== agent.effort) changes.effort = args['esforco'] as Effort
+    const reserve = text(args, 'modelo_reserva', 200)
+    if (reserve) {
+      // '' clears it (a key left undefined would be lost when the card is saved).
+      const next = /^(nenhum|none|-)$/i.test(reserve) ? '' : reserve
+      if (next && (!modelInfo(next) || !ctx.usable(next))) return { error: L(`O modelo "${reserve}" não dá pra usar agora. Use um da lista.`, `The model "${reserve}" can't be used now. Use one from the list.`) }
+      if (next !== (agent.fallbackModelId ?? '')) changes.fallbackModelId = next
+    }
     if (typeof args['web'] === 'boolean' && args['web'] !== (agent.web !== false)) changes.web = args['web']
     if (args['conectores'] !== undefined) {
       const g = grantsFrom(args['conectores'], ctx.connectors)

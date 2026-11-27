@@ -1,5 +1,5 @@
-// A new agent, step by step: the Tuca's builder screen (from the sidebar), where he proposes one and
-// the person sets what it can use and its first task; and the introduction's "Prefiro configurar do
+// A new agent, step by step: the Tuca's builder screen (from the sidebar), where he proposes one beside
+// the chat and the person makes it at once or first sets what it can use and its first task; and the introduction's "Prefiro configurar do
 // zero" (Intro.tsx), the same form from a template, which hands the agent back to the introduction.
 import { L } from '../../../shared/lang'
 import { instructionLengthNote } from '../../../shared/instructions'
@@ -9,16 +9,23 @@ import {
   MODELS,
   customModel,
   getState,
+  createFromDraft,
   dmWith,
   modelInfo,
   usable,
   navigate,
   newAgentDraft,
+  openDm,
+  askAgent,
+  amAdmin,
+  undoProposal,
   saveAgent,
   sendMessage,
   slug,
   ensureTuca,
+  removeTucaLeave,
   settleDraft,
+  isTeam,
   messagesIn,
   proposalsOf,
   useStore,
@@ -26,16 +33,23 @@ import {
   type AgentColor,
   type AgentDraft,
   type GrantLevel,
+  type Message,
   type State,
   type View
 } from '../store'
 import { ModelPicker, usableEngines } from './Harness'
 import { ColorPicker, LookPicker, Toggle } from './Pages'
 import { Composer, MessageList } from './Conversation'
-import { draftAgent, UseDraft } from './Tuca'
+import { draftAgent, EFFORT, UseDraft } from './Tuca'
+import { describeRoutine } from './Routines'
 import { AutonomyPick } from './AutonomyPick'
 import { autonomyChosen, FIRST_AUTONOMY, storedAutonomy } from '../../../shared/onboarding'
-import { AgentAvatar, Icon, type IconName } from './ui'
+import { AgentAvatar, ago, Icon, type IconName } from './ui'
+import { ConnectorTile } from './ConnectorStore'
+import { lastSaid, tucaConversations, tucaTitle } from '../tuca-conversations'
+import { leaveRows, type LeaveRow } from '../tuca-leaves'
+import { latestAsk, newestDraft, subjectOf, tucaStage, type Subject, type TucaStage, type Want } from '../tuca-screen'
+import { TeamSide } from './TucaTeam'
 
 type Computer = 'none' | 'linux' | 'mac'
 
@@ -156,7 +170,8 @@ export interface ManualIntro {
   onCreate: (agent: Agent, task: string) => Promise<void>
 }
 
-export function Onboarding({ build = false, from, manual }: { build?: boolean; from?: View; manual?: ManualIntro } = {}): ReactNode {
+// `making`: opened to make an agent (the + by Agentes), so the proposal is beside the chat from the start.
+export function Onboarding({ build = false, from, manual, making = false }: { build?: boolean; from?: View; manual?: ManualIntro; making?: boolean } = {}): ReactNode {
   const settings = useStore((s) => s.settings)
   const handles = useStore((s) => s.agents.map((a) => a.handle))
   const connectors = useStore((s) => s.connectors)
@@ -178,6 +193,25 @@ export function Onboarding({ build = false, from, manual }: { build?: boolean; f
   // Agentes, a mission, the command menu) opens the same one, messages, cards and what was being
   // typed, and his session goes on. "Nova conversa" starts another on purpose.
   const [tucaConv, setTucaConv] = useState<{ id?: string; error?: string }>({})
+
+  // The Tuca's screen (not the form). Beside his conversation sits what it is about: the team he passes
+  // requests to, or the proposal of an agent while he builds one, and only then the named steps on top.
+  const withTuca = build && !hand
+  const tucaAt = useStore((s) => (tucaConv.id ? tucaStage(newestDraft(messagesIn(s, tucaConv.id))) : 'talk'))
+  // What the person asked this screen for: to make an agent (until they go back to the team), and which
+  // made agent's card they already closed.
+  const [want, setWant] = useState<Want>(making ? { build: {} } : {})
+  // "To make an agent" holds until something asked after that is passed on: here is what was asked last.
+  const lastAsk = (): string => (tucaConv.id ? (latestAsk(messagesIn(getState(), tucaConv.id))?.id ?? '') : '')
+  useEffect(() => {
+    if (tucaConv.id && want.build && want.build.asked === undefined) setWant({ build: { asked: lastAsk() } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tucaConv.id])
+  const subject = useStore((s): Subject => {
+    const tuca = s.agents.find((a) => a.kind === 'tuca')
+    return tucaConv.id && tuca ? subjectOf(s, tuca.id, tucaConv.id, messagesIn(s, tucaConv.id), want) : 'build'
+  })
+  const newest = useStore((s) => (tucaConv.id ? newestDraft(messagesIn(s, tucaConv.id))?.id : undefined))
 
   const models = readyModels(settings.engines)
   const ready = usableEngines(settings)
@@ -263,24 +297,31 @@ export function Onboarding({ build = false, from, manual }: { build?: boolean; f
   return (
     <div className="onb">
       <div className="onb__drag" />
-      <header className="onb__top">
-        <div className="onb__dots" aria-label={L(`Passo ${at + 1} de ${steps.length}`, `Step ${at + 1} of ${steps.length}`)}>
-          {steps.map((s, i) => (
-            <span key={s} className={i === at ? 'is-now' : i < at ? 'is-done' : ''} />
-          ))}
-        </div>
+      <header className={`onb__top ${withTuca ? 'onb__top--steps' : ''}`}>
+        {withTuca ? (
+          <>
+            <span />
+            {step !== 'agent' || subject === 'build' ? <TucaSteps stage={step === 'agent' ? tucaAt : 'proposal'} detail={step === 'powers' ? L('acesso', 'access') : step === 'first' ? L('primeira tarefa', 'first task') : undefined} /> : <span />}
+          </>
+        ) : (
+          <div className="onb__dots" aria-label={L(`Passo ${at + 1} de ${steps.length}`, `Step ${at + 1} of ${steps.length}`)}>
+            {steps.map((s, i) => (
+              <span key={s} className={i === at ? 'is-now' : i < at ? 'is-done' : ''} />
+            ))}
+          </div>
+        )}
         <button className="btn btn--ghost btn--sm" onClick={close}>
           {manual ? L('Voltar', 'Back') : L('Fechar', 'Close')}
         </button>
       </header>
 
       <div className="onb__scroll">
-        <div className="onb__stage" key={step} data-dir={dir}>
+        <div className={`onb__stage ${withTuca && step === 'agent' ? 'onb__stage--tuca' : ''}`} key={step} data-dir={dir}>
           {step === 'agent' &&
             (hand ? (
               <MakeAgent agent={agent} handle={handle} template={template} pick={pick} patch={patch} computer={computer} onBack={() => (manual ? manual.onBack() : setManual(false))} onNext={next} />
             ) : (
-              <MeetTuca conv={tucaConv} onUse={useDraft} onManual={() => setManual(true)} />
+              <MeetTuca conv={tucaConv} setConv={(id) => setTucaConv({ id })} onUse={useDraft} onManual={() => setManual(true)} subject={subject} onBuild={() => setWant({ build: { asked: lastAsk() } })} onTeam={() => setWant({ closed: newest })} />
             ))}
           {step === 'powers' && <Powers agent={agent} handle={handle} patch={patch} computer={computer} setComputer={setComputer} grants={grants} setGrants={setGrants} onBack={back} onNext={next} />}
           {step === 'first' && <FirstTask agent={agent} handle={handle} computer={computer} manual={!!manual} tasks={tasks} task={task} setTask={setTask} busy={busy} error={error} onBack={back} onFinish={() => void finish()} />}
@@ -309,35 +350,197 @@ function Nav({ onBack, onNext, next = L('Continuar', 'Continue'), disabled }: { 
 
 // ---------- 4. the agent ----------
 
-// A new agent, made with the Tuca: he asks, proposes a card, "Usar esse agente" fills it in.
-// He starts on his own model; changing it keeps the conversation (he goes on from it on the new one).
-// "Nova conversa" starts over: asked first when cards there weren't applied yet.
-function MeetTuca({ conv: session, onUse, onManual }: { conv: { id?: string; error?: string }; onUse: (d: AgentDraft, messageId: string) => void; onManual: () => void }): ReactNode {
-  const [conv, setConv] = useState(session.id)
+// The top of the builder screen with the Tuca: where you are, by name. `detail`: which part of the
+// proposal is being set (its access, its first task) once it left the chat.
+function TucaSteps({ stage, detail }: { stage: TucaStage; detail?: string }): ReactNode {
+  const steps = [L('Conversa', 'Conversation'), L('Proposta', 'Proposal'), L('Pronto', 'Done')]
+  const now = stage === 'talk' ? 0 : stage === 'proposal' ? 1 : 2
+  return (
+    <ol className="onb-steps" aria-label={L(`Passo ${now + 1} de 3: ${steps[now]}`, `Step ${now + 1} of 3: ${steps[now]}`)}>
+      {steps.map((s, i) => (
+        <li key={s} className={i < now ? 'is-done' : i === now ? 'is-now' : ''} aria-current={i === now ? 'step' : undefined}>
+          <span className="onb-steps__n">{i < now || stage === 'done' ? <Icon name="check" size={11} /> : i + 1}</span>
+          {s}
+          {i === now && detail && <span className="onb-steps__detail"> · {detail}</span>}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+// Ways to start. With a team: two requests he passes on, one for a new agent, one for what else he does
+// (look into what broke). With no one yet: two to make an agent, two of what else he does.
+// A click sends it, so the conversation starts at once; he asks for the rest.
+const REQUESTS = (): { label: string; say: string }[] => [
+  { label: L('Um aviso pros meus clientes', 'A notice to my customers'), say: L('Preciso de um aviso curto pros meus clientes sobre uma novidade.', 'I need a short notice to my customers about some news.') },
+  { label: L('Pesquisar um assunto pra mim', 'Look into a subject for me'), say: L('Quero que alguém pesquise um assunto pra mim e me traga um resumo.', 'I want someone to look into a subject for me and bring me a summary.') },
+  { label: L('Um agente novo no time', 'A new agent on the team'), say: L('Quero um agente novo no time.', 'I want a new agent on the team.') },
+  { label: L('Por que uma rotina falhou?', 'Why did a routine fail?'), say: L('Por que uma rotina falhou?', 'Why did a routine fail?') }
+]
+const SUGGESTIONS = (): { label: string; say: string }[] => [
+  { label: L('Triar os tickets de suporte toda manhã', 'Triage the support tickets every morning'), say: L('Quero alguém pra triar os tickets de suporte toda manhã.', 'I want someone to triage the support tickets every morning.') },
+  { label: L('Resumir meu dia às 18h', 'Sum up my day at 6 pm'), say: L('Quero alguém pra resumir o meu dia todo dia às 18h.', 'I want someone to sum up my day every day at 6 pm.') },
+  { label: L('Por que uma rotina falhou?', 'Why did a routine fail?'), say: L('Por que uma rotina falhou?', 'Why did a routine fail?') },
+  { label: L('Como funcionam as aprovações?', 'How do approvals work?'), say: L('Como funcionam as aprovações?', 'How do approvals work?') }
+]
+
+const modelName = (id: string): string => {
+  const m = modelInfo(id)
+  if (!m) return id || '—'
+  return m.id ? `${ENGINES[m.engine].label} · ${m.label}` : ENGINES[m.engine].label
+}
+
+// The Tuca's model as a chip in his field: it opens the same picker, above it.
+function ModelChip({ value, onPick, note, applying }: { value: string; onPick: (v: string) => void; note: string; applying: boolean }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    // A pick in the picker's own menu (drawn outside, over the page) isn't a click outside.
+    const down = (e: MouseEvent): void => {
+      const t = e.target as Element | null
+      if (box.current?.contains(t) || t?.closest?.('.select__menu')) return
+      setOpen(false)
+    }
+    // Escape closes the picker's menu first, then this (caught before the menu closes).
+    const key = (e: KeyboardEvent): void => void (e.key === 'Escape' && !document.querySelector('.select__menu') && setOpen(false))
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key, true)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      window.removeEventListener('keydown', key, true)
+    }
+  }, [open])
+  return (
+    <span className="onb-tc__model" ref={box}>
+      <button className={`onb-tc__chip ${open ? 'is-open' : ''}`} title={note} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)}>
+        {applying && <span className="onb-tc__dot" aria-hidden />}
+        {value ? modelName(value) : L('Escolher o modelo', 'Pick the model')}
+        <Icon name="caret" size={12} />
+      </button>
+      {open && (
+        <div className="onb-tc__pop" role="dialog" aria-label={L('Modelo do Tuca', 'Tuca’s model')}>
+          <b>{L('Modelo do Tuca', 'Tuca’s model')}</b>
+          <ModelPicker value={value} onChange={onPick} />
+          <span className="hint">{applying ? L('Chamando o Tuca com esse modelo…', 'Calling Tuca with this model…') : note}</span>
+        </div>
+      )}
+    </span>
+  )
+}
+
+// The person's other conversations with the Tuca, to go back to one: each is kept, one per request.
+function TucaConversations({ current, onPick }: { current?: string; onPick: (id: string) => void }): ReactNode {
+  // As text: the rows are made new at every look, and a string is the same while nothing in them changed.
+  const rows = useStore((s) => JSON.stringify(tucaConversations(s).map((c) => ({ id: c.id, title: tucaTitle(s, c), at: lastSaid(s, c) }))))
+  const list = JSON.parse(rows) as { id: string; title: string; at: number }[]
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent): void => void (!box.current?.contains(e.target as Element | null) && setOpen(false))
+    const key = (e: KeyboardEvent): void => void (e.key === 'Escape' && setOpen(false))
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      window.removeEventListener('keydown', key)
+    }
+  }, [open])
+  if (list.length < 2) return null
+  return (
+    <span className="onb-tc__convs" ref={box}>
+      <button className="btn btn--ghost btn--sm" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>
+        {L(`Conversas (${list.length})`, `Conversations (${list.length})`)} <Icon name="caret" size={12} />
+      </button>
+      {open && (
+        <div className="onb-tc__convs-pop" role="menu" aria-label={L('Suas conversas com o Tuca', 'Your conversations with Tuca')}>
+          {list.map((c) => (
+            <button key={c.id} role="menuitemradio" aria-checked={c.id === current} className={`onb-tc__conv ${c.id === current ? 'is-on' : ''}`} onClick={() => (setOpen(false), onPick(c.id))}>
+              <span className="onb-tc__conv-title">{c.title}</span>
+              <span className="onb-tc__conv-when">{ago(c.at)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
+// What the person let the Tuca do himself, with a way to take each back: he asks again the next time.
+// In sight only while there is something to take back.
+function TucaLeavesMenu(): ReactNode {
+  const rows = useStore((s) => JSON.stringify(leaveRows(s)))
+  const list = JSON.parse(rows) as LeaveRow[]
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent): void => void (!box.current?.contains(e.target as Element | null) && setOpen(false))
+    const key = (e: KeyboardEvent): void => void (e.key === 'Escape' && setOpen(false))
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', down)
+      window.removeEventListener('keydown', key)
+    }
+  }, [open])
+  if (!list.length) return null
+  return (
+    <span className="onb-tc__convs" ref={box}>
+      <button className="btn btn--ghost btn--sm" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} title={L('O que você deixou o Tuca fazer ele mesmo. Dá pra retirar.', 'What you let Tuca do himself. You can take it back.')}>
+        {L(`Liberado (${list.length})`, `Allowed (${list.length})`)} <Icon name="caret" size={12} />
+      </button>
+      {open && (
+        <div className="onb-tc__convs-pop" role="dialog" aria-label={L('O que o Tuca pode fazer ele mesmo', 'What Tuca may do himself')}>
+          <p className="onb-tc__leaves-note">{L('O que você deixou o Tuca fazer ele mesmo, quando ninguém do time faz. Retirando, ele volta a perguntar.', 'What you let Tuca do himself, when no one on the team does it. Take one back and he asks again.')}</p>
+          {list.map((l) => (
+            <div key={l.id} className="onb-tc__leave">
+              <span className="onb-tc__leave-text">
+                <span className="onb-tc__leave-kind">{l.kind}</span>
+                <span className="onb-tc__leave-sub">
+                  {L(`Usando ${l.uses}`, `Using ${l.uses}`)} · {l.where}
+                </span>
+              </span>
+              <button className="link" onClick={() => void removeTucaLeave(l.id)}>
+                {L('Retirar', 'Take back')}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
+// With the Tuca: he takes a request and passes it on, or asks and proposes an agent, and the card beside
+// the chat fills in with what he proposes. He starts on his own model; changing it keeps the conversation
+// (he goes on from it on the new one). "Nova conversa" starts another: this one stays in "Conversas".
+function MeetTuca({ conv: session, setConv, onUse, onManual, subject, onBuild, onTeam }: { conv: { id?: string; error?: string }; setConv: (id: string) => void; onUse: (d: AgentDraft, messageId: string) => void; onManual: () => void; subject: Subject; onBuild: () => void; onTeam: () => void }): ReactNode {
+  const conv = session.id
   const tuca = useStore((s) => s.agents.find((a) => a.kind === 'tuca'))
+  // What he proposes inside the app is made when his reply ends (not in the introduction, nor when turned off).
+  const applyNow = useStore((s) => s.settings.tucaApplyNow !== false && s.settings.onboarding?.done !== false && amAdmin(s))
   const [model, setModel] = useState(tuca?.modelId ?? '')
   const [applying, setApplying] = useState(false)
   const [modelError, setModelError] = useState('')
   const typed = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => setConv(session.id), [session.id])
   useEffect(() => {
     if (!model && tuca?.modelId) setModel(tuca.modelId)
   }, [model, tuca?.modelId])
   useEffect(() => () => clearTimeout(typed.current), [])
   const error = session.error ?? ''
   const messages = useStore((s) => (conv ? messagesIn(s, conv) : []))
-  const latest = [...messages].reverse().find((m) => m.run?.agentDraft && !m.run.agentDraft.state)?.run?.agentDraft
-  // Cards not applied or discarded yet: starting over drops them, so it asks first.
-  const unsettled = messages.reduce((n, m) => n + (m.run?.agentDraft && !m.run.agentDraft.state ? 1 : 0) + proposalsOf(m.run).filter((p) => !p.state).length, 0)
   const said = messages.some((m) => m.author.kind === 'person')
-  const [confirmNew, setConfirmNew] = useState(false)
   const [starting, setStarting] = useState(false)
+  const hasTeam = useStore((s) => s.agents.some(isTeam))
+  const building = subject === 'build'
 
+  // Another conversation: this one is kept as it is, cards and all, and stays in "Conversas".
   async function startOver(): Promise<void> {
     setStarting(true)
     try {
       setConv((await ensureTuca(undefined, true)).conversationId)
-      setConfirmNew(false)
     } catch (e) {
       setModelError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -375,81 +578,216 @@ function MeetTuca({ conv: session, onUse, onManual }: { conv: { id?: string; err
     typed.current = setTimeout(() => void start(value), 900)
   }
 
+  const note = conv
+    ? L('Trocar o modelo mantém a conversa: ele continua de onde parou.', 'Changing the model keeps the conversation: he goes on from where you left off.')
+    : L('Escolha com qual modelo o Tuca conversa com você, passa os pedidos e monta os agentes.', 'Pick the model Tuca uses to talk with you, pass requests on and build the agents.')
+  const chip = <ModelChip value={model} onPick={pick} note={note} applying={applying} />
+
   return (
-    <div className="onb__split">
-      <section className="onb__main">
-        <span className="onb__kicker">{L('Tuca · Novo agente', 'Tuca · New agent')}</span>
-        <h1>{L('Conte pro Tuca o que você quer delegar', 'Tell Tuca what you want to delegate')}</h1>
-        <p className="onb__lead">
-          {L('Ele faz duas ou três perguntas e propõe um agente. Nada é criado sem você.', 'He asks two or three questions and proposes an agent. Nothing is created without you.')}
-        </p>
-        <div className="onb__field onb__field--tuca-model">
-          <span>{L('Modelo do Tuca', 'Tuca’s model')}</span>
-          <ModelPicker value={model} onChange={pick} />
-          <span className="hint">
-            {applying
-              ? L('Chamando o Tuca com esse modelo…', 'Calling Tuca with this model…')
-              : conv
-                ? L('Trocar o modelo mantém a conversa: ele continua de onde parou.', 'Changing the model keeps the conversation: he goes on from where you left off.')
-                : L('Escolha com qual modelo o Tuca conversa com você e monta os agentes.', 'Pick the model Tuca uses to talk with you and build the agents.')}
-          </span>
-          {modelError && <p className="hint hint--warn">{modelError}</p>}
-        </div>
-        {conv && tuca && (
-          <div className="onb-tuca__bar">
-            {confirmNew ? (
-              <>
-                <span className="small">
-                  {unsettled
-                    ? L(`${unsettled === 1 ? 'Tem 1 proposta que você não aplicou' : `Tem ${unsettled} propostas que você não aplicou`}. Começar uma conversa nova apaga esta, com ${unsettled === 1 ? 'ela' : 'elas'}.`, `There ${unsettled === 1 ? 'is 1 proposal you haven’t applied' : `are ${unsettled} proposals you haven’t applied`}. Starting a new conversation deletes this one, with ${unsettled === 1 ? 'it' : 'them'}.`)
-                    : L('Começar uma conversa nova apaga esta.', 'Starting a new conversation deletes this one.')}
-                </span>
-                <button className="btn btn--sm btn--danger" disabled={starting} onClick={() => void startOver()}>
-                  {L('Começar do zero', 'Start over')}
-                </button>
-                <button className="btn btn--ghost btn--sm" disabled={starting} onClick={() => setConfirmNew(false)}>
-                  {L('Manter esta', 'Keep this one')}
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="muted small">{said ? L('A conversa fica aqui quando você sai e volta.', 'The conversation stays here when you leave and come back.') : ''}</span>
-                <button className="btn btn--ghost btn--sm" disabled={!said || starting} onClick={() => (unsettled ? setConfirmNew(true) : void startOver())} title={L('Começa outra conversa com o Tuca, do zero', 'Starts another conversation with Tuca, from scratch')}>
-                  <Icon name="plus" size={13} /> {L('Nova conversa', 'New conversation')}
-                </button>
-              </>
-            )}
+    <div className="onb-tc">
+      <section className="onb-tc__main">
+        <header className="onb-tc__head">
+          <AgentAvatar agent={tuca ?? { name: 'Tuca', color: 'amber', kind: 'tuca' }} size={36} />
+          <div className="grow">
+            <h1 className="onb-tc__title">Tuca</h1>
+            <p className="onb-tc__lede">{L('Recebe seus pedidos, passa pra quem do time faz e cuida do Tucano.', 'Takes your requests, passes them to whoever on the team does it, and looks after Tucano.')}</p>
           </div>
-        )}
-        <div className="onb-tuca">
+          {conv && tuca && <TucaLeavesMenu />}
+          {conv && tuca && <TucaConversations current={conv} onPick={setConv} />}
+          {conv && tuca && (
+            <button
+              className="btn btn--ghost btn--sm"
+              disabled={!said || starting}
+              onClick={() => void startOver()}
+              title={L('Começa outra conversa com o Tuca. Esta continua guardada, em Conversas.', 'Starts another conversation with Tuca. This one is kept, under Conversations.')}
+            >
+              <Icon name="plus" size={13} /> {L('Nova conversa', 'New conversation')}
+            </button>
+          )}
+        </header>
+        <div className={`onb-tc__chat ${said ? '' : 'is-fresh'}`}>
           {conv && tuca ? (
             <UseDraft.Provider value={onUse}>
               <MessageList messages={messages} conversationId={conv} />
-              <Composer conversationId={conv} members={[tuca]} placeholder={L('Ex.: quero alguém pra triar os tickets de suporte toda manhã', 'E.g. I want someone to triage the support tickets every morning')} />
+              {!said && (
+                <div className="onb-tc__ideas" aria-label={L('Sugestões pra começar', 'Ideas to start with')}>
+                  {(building ? SUGGESTIONS() : REQUESTS()).map((s) => (
+                    <button key={s.label} className="onb-tc__idea" onClick={() => sendMessage(conv, s.say)}>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Composer conversationId={conv} members={[tuca]} tools={chip} placeholder={said ? L('Responda ou escreva outra coisa…', 'Reply or write something else…') : building ? L('Ex.: quero alguém pra triar os tickets de suporte toda manhã', 'E.g. I want someone to triage the support tickets every morning') : L('Ex.: preciso de um aviso curto pros meus clientes', 'E.g. I need a short notice to my customers')} />
             </UseDraft.Provider>
           ) : (
-            <p className="muted onb-tuca__wait">{error || L('Chamando o Tuca…', 'Calling Tuca…')}</p>
+            <div className="onb-tc__wait">
+              <p className="muted">{error || L('Chamando o Tuca…', 'Calling Tuca…')}</p>
+              {chip}
+            </div>
           )}
         </div>
-        <div className="onb__nav">
-          <span />
-          <button className="btn btn--ghost" onClick={onManual}>
-            {L('Prefiro montar eu mesmo', 'I’d rather build it myself')}
-          </button>
+        <div className="onb-tc__foot">
+          <span>
+            {!building && L('O Tuca passa pra quem do time faz. ', 'Tuca passes it to whoever on the team does it. ')}
+            {applyNow ? L('O que ele cria entra na hora, e dá pra desfazer.', 'What Tuca creates takes effect immediately and can be undone.') : L('Nada é criado sem você.', 'Nothing is created without you.')}
+          </span>
+          {modelError && <span className="hint hint--warn">{modelError}</span>}
+          {building && (
+            <button className="onb-tc__manual" onClick={onManual}>
+              {L('Prefiro montar eu mesmo', 'I’d rather build it myself')}
+            </button>
+          )}
         </div>
       </section>
-      <aside className="onb__aside">
-        {latest ? (
-          <AgentCard agent={draftAgent(latest)} handle={slug(latest.name)} computer="none" />
-        ) : (
-          <div className="onb-card onb-card--empty">
-            {tuca && <AgentAvatar agent={tuca} size={64} />}
-            <h2>Tuca</h2>
-            <span className="muted">{L('Monta agentes', 'Builds agents')}</span>
-            <p className="muted small">{L('A proposta dele aparece aqui: nome, o que faz, modelo e o que pode acessar.', 'His proposal shows up here: name, what it does, model and what it can access.')}</p>
-          </div>
-        )}
+      <aside className="onb-tc__aside">
+        {building || !conv || !tuca ? <ProposalSide message={newestDraft(messages)} model={model} onUse={onUse} onTeam={hasTeam ? onTeam : undefined} /> : <TeamSide key={conv} conversationId={conv} tucaId={tuca.id} onBuild={onBuild} />}
       </aside>
+    </div>
+  )
+}
+
+// Beside the chat: the proposal filling in. Before the Tuca proposes, its rows wait ("—") and the
+// model is his own (a proposal that names none gets his). With a proposal, "Criar agente" makes it as
+// proposed (and tries its first task); "Editar antes" sets its access and first task first.
+function ProposalSide({ message, model, onUse, onTeam }: { message?: Message; model: string; onUse: (d: AgentDraft, messageId: string) => void; onTeam?: () => void }): ReactNode {
+  const stage = tucaStage(message)
+  const d = stage === 'talk' ? undefined : message?.run?.agentDraft
+  const connectors = useStore((s) => s.connectors)
+  const created = useStore((s) => (d?.agentId ? s.agents.find((a) => a.id === d.agentId) : undefined))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [more, setMore] = useState(false)
+  useEffect(() => (setError(''), setMore(false)), [message?.id])
+  // Its schedule, when he proposed a routine for it in the same reply.
+  const routines = d && message ? proposalsOf(message.run).flatMap((p) => (p.kind === 'routine' && (p.needs?.some((n) => n.toLowerCase() === d.name.toLowerCase()) || (!!d.agentId && p.routine.agentId === d.agentId)) ? [p.routine] : [])) : []
+  const access = d ? Object.entries(d.grants).map(([id, level]) => `${connectors.find((c) => c.id === id)?.name ?? L('conector', 'connector')} (${level === 'read_write' ? L('leitura e escrita', 'read and write') : L('leitura', 'read')})`) : []
+  const does = d?.instructions.split('\n').find((l) => l.trim())?.trim() ?? ''
+
+  async function create(): Promise<void> {
+    if (!message || !d || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const { conversationId } = await createFromDraft(message.id)
+      // As "Criar e testar" does: the first task goes out, and the screen shows it made.
+      if (d.task) sendMessage(conversationId, d.task)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Made by itself when his reply ended: taken back, the card is a conversation again.
+  async function undo(): Promise<void> {
+    if (!message || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await undoProposal(message.id, undefined, true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const rows: { label: string; value: ReactNode; quiet?: boolean; title?: string }[] = [
+    { label: L('Nome', 'Name'), value: d ? (d.role ? `${d.name} · ${d.role}` : d.name) : '—' },
+    {
+      label: L('O que faz', 'What it does'),
+      value: d ? (
+        <span className={`onb-tc__does ${more ? 'is-open' : ''}`} onClick={() => setMore(!more)} title={more ? undefined : L('Ver tudo', 'Show all')}>
+          {more ? d.instructions : does}
+        </span>
+      ) : (
+        '—'
+      )
+    },
+    { label: L('Quando', 'When'), value: d ? (routines.length ? routines.map((r) => describeRoutine(r)).join('; ') : L('Quando você pedir', 'When you ask')) : '—' },
+    { label: L('Acesso', 'Access'), value: d ? [d.web ? L('Web', 'Web') : L('Sem web', 'No web'), access.length ? access.join(', ') : L('sem conectores', 'no connectors')].join(' · ') : '—' },
+    {
+      label: L('Modelo', 'Model'),
+      value: d ? `${modelName(d.modelId)} · ${EFFORT()[d.effort]}` : model ? modelName(model) : '—',
+      quiet: !d,
+      title: d ? undefined : L('Se ele não escolher outro, o agente usa o modelo do Tuca.', 'Unless Tuca chooses another model, the agent uses Tuca’s model.')
+    }
+  ]
+
+  return (
+    <div className={`onb-tc__card is-${stage}`}>
+      <div className="onb-tc__card-head" key={d ? `${message?.id}-${stage}` : 'empty'}>
+        {d ? <AgentAvatar agent={created ?? { name: d.name, color: d.color }} size={36} /> : <span className="onb-tc__ghost" aria-hidden />}
+        <div className="grow">
+          <strong>{created?.name ?? d?.name ?? L('Proposta', 'Proposal')}</strong>
+          <span className="muted small">
+            {stage === 'done' ? L('Entrou no time', 'Joined the team') : d ? L('Proposta do Tuca, pronta pra criar', 'Tuca’s proposal, ready to create') : L('Vai se montando enquanto vocês conversam', 'Updates as you talk to Tuca')}
+          </span>
+        </div>
+      </div>
+      <dl className="onb-tc__rows">
+        {rows.map((r) => (
+          <div key={r.label} title={r.title}>
+            <dt>{r.label}</dt>
+            <dd className={r.value === '—' ? 'is-empty' : r.quiet ? 'is-quiet' : ''}>{r.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {error && <p className="note note--error">{error}</p>}
+      {stage === 'done' ? (
+        <div className="onb-tc__actions">
+          {created && (
+            <>
+              {/* Made by itself as he proposed it: its first test waits for this click, as "Criar agente" would send it. */}
+              {d?.auto && d.task ? (
+                <button className="btn btn--primary onb-tc__go" onClick={() => void askAgent(created.id, d.task!).then((id) => navigate({ kind: 'conversation', id }))}>
+                  {L(`Testar ${created.name}`, `Try ${created.name}`)}
+                </button>
+              ) : (
+                <button className="btn btn--primary onb-tc__go" onClick={() => void openDm(created.id)}>
+                  {L(`Abrir conversa com ${created.name}`, `Open conversation with ${created.name}`)}
+                </button>
+              )}
+              {d?.auto && d.task && <p className="hint">“{d.task}”</p>}
+              <div className="onb-tc__more">
+                <button className="link" onClick={() => navigate({ kind: 'agent', id: created.id })}>
+                  {L('Ver perfil', 'See profile')}
+                </button>
+                {d?.undo && Date.now() < d.undo.until && message && (
+                  <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void undo()}>
+                    {L('Desfazer', 'Undo')}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="onb-tc__actions">
+          <button className="btn btn--primary onb-tc__go" disabled={!d || busy} onClick={() => void create()}>
+            {busy ? L('Criando…', 'Creating…') : L('Criar agente', 'Create agent')}
+          </button>
+          {d && message && (
+            <>
+              {d.task && <p className="hint">{L(`Ao criar, ele já faz um teste: “${d.task}”`, `Once created, it tries a first task: “${d.task}”`)}</p>}
+              <div className="onb-tc__more">
+                <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => onUse(d, message.id)} title={L('Escolher o que ele pode usar e a primeira tarefa antes de criar', 'Pick what it can use and its first task before creating it')}>
+                  {L('Editar antes', 'Edit first')}
+                </button>
+                <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => settleDraft(message.id)}>
+                  {L('Descartar', 'Discard')}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {onTeam && stage !== 'proposal' && (
+        <button className="link onb-tc__back" onClick={onTeam}>
+          {L('Ver o time', 'See the team')}
+        </button>
+      )}
     </div>
   )
 }
@@ -642,8 +980,8 @@ function Powers(p: {
               const level = p.grants[c.id] ?? 'read' // reading is safe to start with
               return (
                 <div key={c.id} className="onb-power-row">
-                  <span className="onb-power-row__icon">
-                    <Icon name={c.kind === 'stdio' ? 'terminal' : 'plug'} size={18} />
+                  <span className="onb-power-row__icon onb-power-row__icon--tile">
+                    <ConnectorTile c={c} size={22} />
                   </span>
                   <div>
                     <strong>{c.name}</strong>

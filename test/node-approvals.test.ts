@@ -223,6 +223,18 @@ describe("a node's command and file write keep their class on the server", () =>
     expect(db.agent('a1')?.actionRules?.delete).toBeUndefined()
   })
 
+  it('at normal, a delete on the node asks first and a commit runs', async () => {
+    const r = runner(calls({ tool: NODE_BASH, args: { command: 'rm -rf x' } }))
+    await r.send('d1', 'limpa')
+    await r.idle()
+    expect(db.approvals()[0]).toMatchObject({ state: 'pending', tool: NODE_BASH, highRisk: true })
+    expect(ran).toEqual([])
+    const c = runner(calls({ tool: NODE_BASH, args: { command: 'git commit -m x' } }))
+    await c.send('d1', 'salva')
+    await c.idle()
+    expect(ran).toEqual(['git commit -m x'])
+  })
+
   it('a reader gets no command on the node, even after the card says "read"', async () => {
     db.saveAgent(agent({ grant: 'read' }))
     db.updateTool(nodeId, NODE_BASH, { cls: 'read' })

@@ -41,7 +41,8 @@ describe("an agent's page a member only looks at", () => {
   })
 
   it('has no "takes effect right away" and no "authorize in the browser"', () => {
-    for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).toContain('Muda na hora, sem precisar salvar.')
+    // Everything saves by itself now, so no one is told "no need to save" any more.
+    for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'ana')).not.toContain('Muda na hora')
     expect(page('ferramentas', 'ana')).toContain('Autorizar no navegador')
     for (const tab of ['ferramentas', 'memoria']) expect(page(tab, 'bia')).not.toContain('Muda na hora')
     const tools = page('ferramentas', 'bia')
@@ -102,10 +103,15 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
   it('the activity log says in words what happened to a wiki source, a channel, a DM, a summary', () => {
     const at = 1
     expect(activityText({ id: '1', at, personId: 'ana', kind: 'wiki.source_removed', detail: { title: 'Ata de março' } }, fake, new Map())).toBe('apagou a fonte “Ata de março” da wiki')
+    // A document deleted for good leaves nothing behind but this line: what it was called and where it was.
+    expect(activityText({ id: '3', at, personId: 'ana', kind: 'document.deleted', target: 'd1', detail: { name: 'contrato.pdf', folder: 'Empresa › Contratos' } }, fake, new Map())).toBe('apagou de vez o documento “contrato.pdf”, de Empresa › Contratos')
     expect(activityText({ id: '2', at, personId: 'ana', kind: 'wiki.source_removed', detail: { private: true } }, fake, new Map())).toBe('apagou uma fonte da wiki que veio de uma conversa privada')
     expect(activityText({ id: '2b', at, personId: 'ana', kind: 'wiki.source_removed' }, fake, new Map())).toBe('apagou uma fonte da wiki')
     expect(activityText({ id: '3', at, personId: 'ana', kind: 'channel.deleted', detail: { name: 'vendas' } }, fake, new Map())).toBe('excluiu o canal #vendas')
     expect(activityText({ id: '4', at, personId: 'ana', kind: 'dm.deleted' }, fake, new Map())).toBe('apagou uma conversa privada')
+    // Documents: what leaves the team's folders for a personal one, and a change of who sees a folder.
+    expect(activityText({ id: '4b', at, personId: 'ana', kind: 'document.to_personal', target: 'd1', detail: { name: 'contrato.pdf', folder: 'Financeiro' } }, fake, new Map())).toBe('levou o documento “contrato.pdf”, de Financeiro, para a pasta pessoal')
+    expect(activityText({ id: '4c', at, personId: 'ana', kind: 'document.folder_access', target: 'f1', detail: { name: 'Financeiro' } }, fake, new Map())).toBe('mudou quem vê a pasta “Financeiro” em Documentos')
     expect(activityText({ id: '5', at, personId: 'ana', kind: 'channel.summary_edited', target: 'ch' }, fake, new Map())).toBe('editou o resumo de um canal')
   })
 
@@ -123,10 +129,11 @@ describe('the words and the layout a person reads (round 2, 13)', () => {
     const css = readFileSync(join(import.meta.dirname, '..', 'src', 'renderer', 'src', 'styles.css'), 'utf8')
     expect(css).toMatch(/\.history-row__what \{[^}]*min-width: 0;[^}]*overflow-wrap: anywhere;/)
     expect(css).toMatch(/\.history-row > :not\(\.history-row__what\):not\(\.history-row__outcome\) \{[^}]*flex-shrink: 0;/)
-    const { HistoryRow } = await import('../src/renderer/src/components/Pages')
+    const { HistoryRow, approvalWhat } = await import('../src/renderer/src/components/Pages')
+    const { groupHistory } = await import('../src/renderer/src/approval-history')
     fake = { ...fake, approvals: [{ id: 'ap', hash: 'h', agentId: 'a1', conversationId: 'ch', messageId: 'm', connectorName: 'GitLab', tool: 'mcp__gitlab__create_merge_request_with_a_really_long_name', args: {}, why: '', highRisk: false, state: 'approved', createdAt: 1, expiresAt: 2, decidedAt: 3 } as never] }
-    const html = renderToStaticMarkup(<HistoryRow id="ap" />)
-    expect(html).toContain('class="table__row history-row"')
+    const html = renderToStaticMarkup(<HistoryRow group={groupHistory(fake.approvals, approvalWhat)[0]!.rows[0]!} />)
+    expect(html).toContain('class="history-row history-row--approved')
     expect(html).toContain('class="history-row__what"')
   })
 
