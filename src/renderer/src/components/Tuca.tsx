@@ -38,6 +38,7 @@ import {
   undoProposal,
   undoProposals,
   UNDO_HOURS,
+  windowless,
   type UndoInfo
 } from '../store'
 import { AgentAvatar, Icon, monthlyLimitText } from './ui'
@@ -213,6 +214,8 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
   const connectors = useStore((s) => s.connectors)
   const conversations = useStore((s) => s.conversations)
   const replaced = useStore((s) => replacedLater(s, message, p))
+  const platform = useStore((s) => s.platform)
+  const server = windowless()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [sent, setSent] = useState('')
@@ -236,7 +239,10 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
   const by = (message.author.kind === 'agent' && agentOf(message.author.id)?.name) || 'Tuca'
   const grantList = (g: Record<string, string>): string =>
     Object.entries(g).map(([id, level]) => `${connectors.find((c) => c.id === id)?.name ?? L('conector', 'connector')} (${level === 'read_write' ? L('leitura e escrita', 'read and write') : L('leitura', 'read')})`).join(', ') || L('nenhum', 'none')
-  const computerText = (on: boolean | undefined, kind: Agent['computerKind']): string => (!on ? L('nenhum', 'none') : kind === 'mac' ? L('este Mac (roda como você)', 'this Mac (runs as you)') : L('Linux isolado', 'isolated Linux'))
+  // "mac" is right on the machine the app runs on: this Mac, this computer, or the server (Tucano Pro), as the agent page names it.
+  const here: 'mac' | 'computer' | 'server' = server ? 'server' : platform === 'mac' ? 'mac' : 'computer'
+  const directly = here === 'server' ? L('direto no servidor', 'right on the server') : here === 'mac' ? L('este Mac (roda como você)', 'this Mac (runs as you)') : L('este computador (roda como você)', 'this computer (runs as you)')
+  const computerText = (on: boolean | undefined, kind: Agent['computerKind']): string => (!on ? L('nenhum', 'none') : kind === 'mac' ? directly : L('Linux isolado', 'isolated Linux'))
   const folderList = (fs: LentFolder[]): string => fs.map((f) => `${f.path.replace(/^\/(Users|home)\/[^/]+/, '~')} (${f.readOnly ? L('leitura', 'read') : L('leitura e escrita', 'read and write')})`).join(', ') || L('nenhuma', 'none')
   const modelName = (id: string): string => {
     const m = modelInfo(id)
@@ -307,9 +313,12 @@ export function ProposalCard({ message, index = 0, proposal }: { message: Messag
             ))}
           </div>
         )}
-        {onMac && !p.state && (
+        {onMac && !p.state && here !== 'server' && (
           <p className="hint proposal__risk">
-            <Icon name="shield" size={12} /> {L('No Mac, o agente roda como você: vê e muda seus arquivos e usa os programas daqui. Se não precisar de algo que só existe neste Mac, prefira o Linux isolado.', 'On the Mac the agent runs as you: it sees and changes your files and uses the programs here. Unless it needs something only this Mac has, prefer the isolated Linux.')}
+            <Icon name="shield" size={12} />{' '}
+            {here === 'mac'
+              ? L('No Mac, o agente roda como você: vê e muda seus arquivos e usa os programas daqui. Se não precisar de algo que só existe neste Mac, prefira o Linux isolado.', 'On the Mac the agent runs as you: it sees and changes your files and uses the programs here. Unless it needs something only this Mac has, prefer the isolated Linux.')
+              : L('Direto no computador, o agente roda como você: vê e muda seus arquivos e usa os programas daqui. Se não precisar de algo que só existe neste computador, prefira o Linux isolado.', 'Right on the computer the agent runs as you: it sees and changes your files and uses the programs here. Unless it needs something only this computer has, prefer the isolated Linux.')}
           </p>
         )}
         {c.instructions !== undefined && (

@@ -90,3 +90,35 @@ describe('these always wait for a click', () => {
     expect(changedSince(now, { computerKind: 'mac' })).toEqual(['computerKind'])
   })
 })
+
+describe('only the computers that exist where the app runs', () => {
+  const on = (a: Agent, machine: { linux: boolean; here: 'mac' | 'computer' | 'server' }, args: Record<string, unknown>) => proposalFrom('propor_ajuste', { agente: 'dev', ...args }, { ...ctxFor(a), machine })
+  const pro = { linux: false, here: 'server' as const }
+
+  it('on a server without Docker (Tucano Pro), an isolated Linux is refused and says what there is', () => {
+    const r = on(agent(), pro, { computador: 'linux' })
+    expect(r.proposal).toBeUndefined()
+    expect(r.error).toMatch(/não tem Linux isolado/)
+    expect(r.error).toMatch(/direto no servidor/)
+  })
+
+  it('on that server, the computer right on it can be asked for', () => {
+    const r = on(agent(), pro, { computador: 'mac', motivo: 'Rodar os scripts' })
+    expect(r.error).toBeUndefined()
+    expect((r.proposal as Extract<Proposal, { kind: 'agent' }>).changes).toEqual({ computer: true, computerKind: 'mac' })
+  })
+
+  it('on that server, folders are refused: they go to an isolated Linux', () => {
+    const r = on(agent({ computer: true, computerKind: 'mac' }), pro, { pastas: [{ caminho: '~/Workspace/social-posts' }] })
+    expect(r.proposal).toBeUndefined()
+    expect(r.error).toMatch(/não dá pra emprestar pastas/)
+  })
+
+  it('right on the computer, folders are not asked for: the agent already reaches them', () => {
+    const r = on(agent({ computer: true, computerKind: 'mac' }), { linux: true, here: 'mac' }, { pastas: [{ caminho: '~/Workspace/social-posts' }] })
+    expect(r.proposal).toBeUndefined()
+    expect(r.error).toMatch(/já alcança/)
+    // Asking for the isolated Linux with them is fine.
+    expect(on(agent({ computer: true, computerKind: 'mac' }), { linux: true, here: 'mac' }, { computador: 'linux', pastas: [{ caminho: '~/Workspace/social-posts' }] }).error).toBeUndefined()
+  })
+})

@@ -1285,6 +1285,8 @@ const runner = new Runner({
   emit,
   workDir: join(dataDir, 'agents'),
   dataDir,
+  // What an agent can ask for on a card: an isolated Linux only where Docker is (never inside a server's container).
+  machine: { linux: !serverMode || onPath('docker'), here: serverMode ? 'server' : osOf() === 'mac' ? 'mac' : 'computer' },
   gateway,
   connectors,
   memory,

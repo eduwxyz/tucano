@@ -28,7 +28,7 @@ import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills
 import { availableModels, builderGuide, builderSection, draftFrom, helperSection, PROPOR_AGENTE, PROPOR_TIME, teamFrom } from './tuca'
 import { appliesNow, decidedCards, keepDecided } from './tuca-apply'
 import { LER_GUIA, readGuide } from './guide'
-import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState } from './tuca-help'
+import { feedbackFrom, pendingAgents, PROPOR_FEEDBACK, proposalFrom, PROPOSAL_TOOLS, VER_ESTADO, workspaceState, type Machine } from './tuca-help'
 import { covering, FAZER_EU, forRole, leaveChoice, leaveDecision, leaveFrom, leaveSection, leavesFor, leaveTask, leaveTools, newLeave, shouldSuggest, suggestNote, timesDone, withLeaves, type LeaveChoice } from './tuca-leave'
 import type { Db } from './db'
 import type { Engine, TurnImage } from './engines/types'
@@ -321,6 +321,7 @@ export interface RunnerDeps {
   emit: (e: CoreEvent) => void
   workDir: string // per-agent empty directories live here
   dataDir?: string // the app's data: images I attach are kept in its artifact store; without it, they're dropped
+  machine?: Machine // which computers an agent can ask for on a card (src/core/tuca-help.ts)
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
@@ -2423,7 +2424,7 @@ ${note}`,
           const r =
             name === PROPOR_TIME.name
               ? teamFrom(args, { usable, fallbackModel: (db.agent(agent.id) ?? agent).modelId, connectors: this.deps.connectors?.list() ?? [], channels: db.conversations().filter((c) => c.kind === 'channel').map((c) => c.name) })
-              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run), ...(this.deps.dataDir ? { folder: (path: string) => folderToLend(path, this.deps.dataDir!) } : {}) })
+              : proposalFrom(name, args, { agents: agentsFor(requester, db.agents()).filter((a) => !a.archived && a.kind !== 'tuca'), conversations: db.conversations().filter((c) => (dmOwner(c, db.ownerId()) ?? requester.id) === requester.id), connectors: this.deps.connectors?.list() ?? [], usable, pending: pendingAgents(msg.run), ...(this.deps.dataDir ? { folder: (path: string) => folderToLend(path, this.deps.dataDir!) } : {}), ...(this.deps.machine ? { machine: this.deps.machine } : {}) })
           if (!r.proposal) return textResult(r.error!, true)
           // Its cards as they are now: the person may have applied or discarded one meanwhile.
           msg.run = keepDecided(msg.run!, db.message(msg.id)?.run)

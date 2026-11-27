@@ -180,8 +180,8 @@ export const PROPOR_AJUSTE: ToolDef = {
           type: 'string',
           enum: ['nenhum', 'linux', 'mac'],
           description: L(
-            'Um computador dá shell (terminal), instalar programas e rodar código. "linux": um container isolado, o certo quase sempre. "mac": este Mac, rodando como a pessoa, com os arquivos dela; só quando precisar de algo que só existe aqui. "nenhum" tira.',
-            'A computer gives a shell (terminal), installing programs and running code. "linux": an isolated container, almost always the right one. "mac": this Mac, running as the person, with their files; only when something exists only here. "nenhum" takes it away.'
+            'Um computador dá shell (terminal), instalar programas e rodar código. "linux": um container isolado, o certo quase sempre. "mac": direto na máquina onde o Tucano roda (este computador, rodando como a pessoa e com os arquivos dela; no Tucano Pro, o servidor); só quando precisar de algo que só existe ali, ou quando não houver Linux isolado. "nenhum" tira.',
+            'A computer gives a shell (terminal), installing programs and running code. "linux": an isolated container, almost always the right one. "mac": right on the machine Tucano runs on (this computer, running as the person and with their files; on Tucano Pro, the server); only when something exists only there, or when there is no isolated Linux. "nenhum" takes it away.'
           )
         },
         navegador: { type: 'boolean', description: L('Um navegador próprio, que abre páginas, clica e digita.', 'A browser of its own, that opens pages, clicks and types.') },
@@ -249,12 +249,20 @@ export const PROPOR_CANAL: ToolDef = {
   }
 }
 
+// Where the app runs: whether an isolated Linux can be had (Docker is there), and what "mac", right on
+// the machine, is there: this Mac, this computer (Windows, Linux), or the server (Tucano Pro, no Docker).
+export interface Machine {
+  linux: boolean
+  here: 'mac' | 'computer' | 'server'
+}
+
 export interface ProposalCtx {
   agents: Agent[] // the team, not archived
   conversations: Conversation[]
   connectors: Connector[]
   usable: (modelId: string) => boolean
   folder?: (path: string) => { path?: string; error?: string } // a folder asked for, checked as lending it: its real path
+  machine?: Machine // which computers exist where the app runs; without it, both kinds can be asked for
   pending?: string[] // names of the agents proposed earlier in this same reply (a new-agent card, a team): not made yet
 }
 
@@ -297,6 +305,15 @@ function accessFrom(agent: Agent, args: Record<string, unknown>, ctx: ProposalCt
   const pc = text(args, 'computador', 10).toLowerCase()
   if (pc && !['nenhum', 'none', 'linux', 'mac'].includes(pc)) return { changes, error: L('computador: "nenhum", "linux" ou "mac".', 'computador: "nenhum", "linux" or "mac".') }
   const wantKind = pc === 'linux' || pc === 'mac' ? pc : undefined
+  const noLinux = ctx.machine && !ctx.machine.linux
+  if (wantKind === 'linux' && noLinux)
+    return {
+      changes,
+      error:
+        ctx.machine!.here === 'server'
+          ? L('Aqui não tem Linux isolado: o servidor não tem Docker. O computador daqui é "mac", que roda direto no servidor.', 'There is no isolated Linux here: the server has no Docker. The computer here is "mac", which runs right on the server.')
+          : L('Aqui não tem Linux isolado: falta o Docker. Só dá pra pedir "mac", direto neste computador.', 'There is no isolated Linux here: Docker is missing. Only "mac", right on this computer, can be asked for.')
+    }
   if ((pc === 'nenhum' || pc === 'none') && agent.computer) changes.computer = false
   if (wantKind) {
     if (!agent.computer) changes.computer = true
@@ -304,6 +321,9 @@ function accessFrom(agent: Agent, args: Record<string, unknown>, ctx: ProposalCt
   }
   if (typeof args['navegador'] === 'boolean' && args['navegador'] !== !!agent.browser) changes.browser = args['navegador']
   if (Array.isArray(args['pastas']) && args['pastas'].length) {
+    // Folders are lent to the isolated Linux (they show in /projetos): right on the machine, the agent already reaches them.
+    if (noLinux) return { changes, error: L('Aqui não dá pra emprestar pastas: elas vão pro Linux isolado, e aqui não tem.', "Folders can't be lent here: they go to the isolated Linux, and there is none here.") }
+    if ((wantKind ?? (agent.computerKind === 'mac' ? 'mac' : 'linux')) === 'mac') return { changes, error: L('Pastas são emprestadas pro Linux isolado. Direto no computador, o agente já alcança os arquivos da pessoa: não peça pastas.', "Folders are lent to the isolated Linux. Right on the computer, the agent already reaches the person's files: don't ask for folders.") }
     const hasComputer = changes.computer ?? agent.computer
     if (!hasComputer) return { changes, error: L('Pastas são emprestadas pro computador do agente: peça computador junto (computador: "linux").', 'Folders are lent to the agent\'s computer: ask for one too (computador: "linux").') }
     if (!ctx.folder) return { changes, error: L('Daqui não dá pra pedir pastas.', "Folders can't be asked for from here.") }
