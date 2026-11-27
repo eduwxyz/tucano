@@ -1,4 +1,4 @@
-// The right column of an open document, shown on demand: what is behind it in folded sections,
+// The right column of an open document, open unless the viewer closed it: what is behind it in folded sections,
 // one open at a time: where it came from, its versions, who sees it. (The summary sits under the title.)
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { L } from '../../../../shared/lang'

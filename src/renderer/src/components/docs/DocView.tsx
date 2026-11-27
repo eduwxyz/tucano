@@ -19,13 +19,15 @@ import { kindWords, mayEdit, useActors, type AccessWords } from './useDocs'
 // Files you look at (a PDF, a picture, a page) use the whole width; files you read keep the narrow column.
 const WIDE: ReadonlySet<DocKind> = new Set<DocKind>(['pdf', 'image', 'html', 'csv'])
 
-// Whether the details column is open is remembered per viewer; storage can be blocked, so it is never required.
+// The details column (where it came from, versions, who sees it) starts open, as it always was: who sees
+// a file should be in sight without a click. Closing it is remembered per viewer; storage can be blocked,
+// so it is never required.
 const DETAILS_KEY = 'tucano.docs.details'
-const readDetails = (): boolean => {
+export const readDetails = (): boolean => {
   try {
-    return localStorage.getItem(DETAILS_KEY) === '1'
+    return localStorage.getItem(DETAILS_KEY) !== '0'
   } catch {
-    return false
+    return true
   }
 }
 const saveDetails = (open: boolean): void => {
