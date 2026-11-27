@@ -917,8 +917,10 @@ const chrome =
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const transcriber = new Transcriber()
-// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads.
-const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(dataDir, 'voice') }
+// Dictation's places: the whisper-cli inside the app, and the folder for the models it downloads. That
+// folder is the desktop's, for every workspace, so a new workspace doesn't download hundreds of MB again; a model a
+// workspace downloaded into its own folder before is still found there.
+const voicePlaces = { ...(process.env['TUCANO_WHISPER'] ? { bundled: process.env['TUCANO_WHISPER'] } : {}), models: join(installDir, 'voice'), own: join(dataDir, 'voice') }
 const modelDownload = new ModelDownload(voicePlaces.models, () => emit({ type: 'voice' }), fetch, undefined, () => void dictation().then((s) => warmUp(transcriber, s)))
 const dictation = async () => {
   const s = voiceStatus(settings().voice, await loginEnv(), undefined, voicePlaces)
@@ -2827,7 +2829,10 @@ const api: Handlers = {
     bg(modelDownload.start(model), 'voiceDownload')
   },
   voiceCancelDownload: () => modelDownload.cancel(),
-  voiceRemoveModel: ({ model }) => modelDownload.remove(model),
+  voiceRemoveModel: ({ model }) => {
+    modelDownload.remove(model)
+    if (voicePlaces.own !== voicePlaces.models) rmSync(join(voicePlaces.own, VOICE_MODELS[model].file), { force: true }) // and an older copy of this workspace's
+  },
   cancelTranscribe: ({ id }) => transcriber.cancel(id),
 
   updateSettings: ({ patch: { jevKey: _computed, classifierKeys: _computedKeys, telegram: _phone, accounts: _own, endpoint: _endpoint, ...all } }, ctx) => {
