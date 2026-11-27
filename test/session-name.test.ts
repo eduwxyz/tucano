@@ -27,10 +27,10 @@ function setup(messages: Message[], opts: { answer?: string; settings?: Partial<
     delegation: vi.fn(() => ({ rootId: 'req' })),
     addReceipt: vi.fn()
   } as unknown as Db
-  const runs: { prompt: string; system: string; model: string; signal: AbortSignal }[] = []
+  const runs: { prompt: string; system: string; model: string; effort: string; signal: AbortSignal }[] = []
   const engine = {
-    async *run(turn: { prompt: string; system: string; model: string; signal: AbortSignal }): AsyncGenerator<EngineEvent> {
-      runs.push({ prompt: turn.prompt, system: turn.system, model: turn.model, signal: turn.signal })
+    async *run(turn: { prompt: string; system: string; model: string; effort: string; signal: AbortSignal }): AsyncGenerator<EngineEvent> {
+      runs.push({ prompt: turn.prompt, system: turn.system, model: turn.model, effort: turn.effort, signal: turn.signal })
       if (opts.fail) {
         yield { type: 'error', message: 'sem modelo' } as EngineEvent
         return
@@ -52,7 +52,7 @@ describe('session names', () => {
   it('a reply that starts gets its session named, once, from the request under it', async () => {
     const { titles, db, runs, emit } = setup([opening, reply()])
     expect(await titles.nameSession(reply({ replyTo: 'req' }), 'req')).toBe('Nomes das sessões')
-    expect(runs[0]).toMatchObject({ system: sessionNameSystem(), model: 'sonnet' })
+    expect(runs[0]).toMatchObject({ system: sessionNameSystem(), model: 'sonnet', effort: 'low' })
     expect(runs[0]!.prompt).toContain('Nomes das sessões')
     expect(db.setRunSessionName).toHaveBeenCalledWith('r1', 'Nomes das sessões')
     expect(emit).toHaveBeenCalledWith({ type: 'message', message: expect.objectContaining({ id: 'r1' }) })
@@ -77,13 +77,20 @@ describe('session names', () => {
     expect(db.setRunSessionName).not.toHaveBeenCalled()
   })
 
-  it('with no model picked it uses the memory model, and a long request is capped at 1500 characters', async () => {
+  it('with no model picked it falls back to the memory model, and a long request is capped at 1500 characters', async () => {
     const long = request('x'.repeat(2000))
     const { titles, runs } = setup([long, reply()], { settings: { sessionNameModel: undefined } })
     await titles.nameSession(reply(), 'req')
     expect(runs[0]!.model).toBe('haiku')
+    expect(runs[0]!.effort).toBe('low')
     expect(runs[0]!.prompt).toHaveLength(1500)
     expect(runs[0]!.signal.aborted).toBe(false)
+  })
+
+  it('a chosen naming model keeps its own harness, model and thinking level', async () => {
+    const { titles, runs } = setup([opening, reply()], { settings: { sessionNameModel: 'sonnet', sessionNameEffort: 'xhigh' } })
+    await titles.nameSession(reply(), 'req')
+    expect(runs[0]).toMatchObject({ model: 'sonnet', effort: 'xhigh' })
   })
 
   it('the name is written into the run without touching what the run is doing', () => {

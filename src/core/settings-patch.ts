@@ -1,7 +1,7 @@
 // What a settings change may carry: the settings there are, each of its kind and within a size.
 // Anything else is refused at once: what's saved goes in every snapshot, to everyone.
 import { L } from '../shared/lang'
-import type { Settings } from '../shared/types'
+import { EFFORTS, type Settings } from '../shared/types'
 
 type Kind = 'string' | 'boolean' | 'number' | 'object' | 'array' | readonly string[]
 // key → its kind, the most it takes (characters of its JSON), and whether null clears it.
@@ -12,6 +12,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   routerModel: { kind: 'string', max: 200 },
   memoryModel: { kind: 'string', max: 200 },
   sessionNameModel: { kind: 'string', max: 200, nullable: true },
+  sessionNameEffort: { kind: EFFORTS.map((e) => e.id), max: 10, nullable: true },
   defaultFallbackModel: { kind: 'string', max: 200, nullable: true },
   voice: { kind: 'object', max: 10_000, nullable: true },
   channelLayout: { kind: 'object', max: 500_000, nullable: true },

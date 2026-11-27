@@ -147,6 +147,29 @@ export default async function story() {
     headOff.frame = await shot(off, `06-off-head-${viewport}`, '.msg--agent:last-of-type .msg__head')
     rows.push(headOff)
     await close(off)
+
+    // The chosen model is a trio: harness, model and thinking level all visible in the card.
+    const trioDb = new DatabaseSync(join(boot.data, 'tucano.db'))
+    trioDb.prepare('DELETE FROM messages').run()
+    for (const [key, value] of [['sessionNameModel', '"sonnet"'], ['sessionNameEffort', '"high"']]) {
+      trioDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
+    }
+    trioDb.close()
+    const trio = await open(viewport, boot.data)
+    await models(trio)
+    const trioCard = (await measure(trio.win, '#settings-models-session-names', ['display', 'visibility', 'opacity']))[0]
+    const trioScope = trio.win.locator('#settings-models-session-names')
+    const selects = (await trioScope.locator('.select__trigger__value').allTextContents()).map((s) => s.trim())
+    trioCard.data = {
+      viewport,
+      state: 'chosen trio: harness, model, thinking level',
+      selectValues: selects,
+      effort: (await trioScope.locator('[aria-label="Reasoning effort"] .select__trigger__value').first().textContent())?.trim() ?? '',
+      units: 'px and computed CSS'
+    }
+    trioCard.frame = await shot(trio, `07-models-trio-${viewport}`, '#settings-models-session-names')
+    rows.push(trioCard)
+    await close(trio)
   }
 
   writeFrames(undefined, rows, {
@@ -155,7 +178,7 @@ export default async function story() {
       sizes: SIZES,
       viewportProof: windowProof,
       pageAndConsoleErrors: runErrors(),
-      states: ['reply at work', 'work drawer', 'thread', 'fallback', 'off'],
+      states: ['reply at work', 'work drawer', 'thread', 'fallback', 'off', 'chosen trio'],
       units: 'px, characters, count and computed CSS'
     }
   })

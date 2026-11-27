@@ -4117,9 +4117,9 @@ export function SettingsPage(): ReactNode {
                 <Select
                   value={settings.sessionNameModel === 'off' ? 'off' : settings.sessionNameModel ? 'model' : 'memory'}
                   onChange={(v) => {
-                    if (v === 'off') updateSettings({ sessionNameModel: 'off' })
-                    else if (v === 'memory') updateSettings({ sessionNameModel: null } as unknown as Partial<typeof settings>)
-                    else if (v === 'model') updateSettings({ sessionNameModel: settings.memoryModel })
+                    if (v === 'off') updateSettings({ sessionNameModel: 'off', sessionNameEffort: null } as unknown as Partial<typeof settings>)
+                    else if (v === 'memory') updateSettings({ sessionNameModel: null, sessionNameEffort: null } as unknown as Partial<typeof settings>)
+                    else if (v === 'model') updateSettings({ sessionNameModel: settings.memoryModel, sessionNameEffort: 'low' })
                   }}
                   options={[
                     { value: 'memory', label: L('Modelo da memória', 'Memory model') },
@@ -4130,8 +4130,18 @@ export function SettingsPage(): ReactNode {
                 />
               </Field>
               {settings.sessionNameModel && settings.sessionNameModel !== 'off' && (
-                <Field label={L('Modelo dos nomes', 'Names model')} hint={L('Um nome por resposta, no começo.', 'One name per reply, when it starts.')}>
+                <Field label={L('Modelo dos nomes', 'Names model')} hint={L('Harness, modelo e nível de pensamento, como o da memória.', 'Harness, model and thinking level, just like the memory model.')}>
                   <ModelSelect value={settings.sessionNameModel} onChange={(sessionNameModel) => updateSettings({ sessionNameModel })} />
+                </Field>
+              )}
+              {settings.sessionNameModel && settings.sessionNameModel !== 'off' && (
+                <Field label={L('Nível de pensamento', 'Thinking level')} hint={L('Quanto o modelo pensa antes de dar o nome.', 'How hard the model thinks before naming the session.')}>
+                  <Select
+                    value={settings.sessionNameEffort ?? 'low'}
+                    onChange={(v) => { if (v) updateSettings({ sessionNameEffort: v as typeof settings.sessionNameEffort }) }}
+                    options={EFFORTS.map((e) => ({ value: e.id, label: e.label }))}
+                    aria-label={L('Esforço de raciocínio', 'Reasoning effort')}
+                  />
                 </Field>
               )}
             </Card>
