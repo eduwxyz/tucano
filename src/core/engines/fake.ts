@@ -7,10 +7,8 @@ import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
 import { answerSystem, catalogSystem } from '../docs-brain'
 import { chimeSystem, handoffSystem, routerSystem } from '../router'
+import { DELEGATION_LINE as HANDS } from '../delegations'
 import type { Engine, EngineEvent, Turn } from './types'
-
-// What makes a reply hand work on, continue a request or pass an answer on (see each branch below).
-const HANDS = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?[\w-]+(?: (?:em|in) #[\w-]+)?: [^\n]+|^continue (?:com|with) @?[\w-]+: .+|^repasse: .+/im
 
 // The same hand-off with a room name and silent witnesses, for the agent-comms tests:
 // "delegue a clara na sala auditoria com @bento, @nico: veja o retry".

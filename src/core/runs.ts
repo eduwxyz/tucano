@@ -53,7 +53,7 @@ import { awaitDone, idleSleepSeconds, isStatusTool, pendingOf, pollTool } from '
 import { callError, contentText, errorReason } from './connectors'
 import { commandStep, execSummary, keyArg, maskSecrets, resultSummary } from './step-text'
 import { during, inReplyTool, traceReply, tracing, type ReplyText, type ReplyTrace, type SpanRef } from './telemetry'
-import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, parseWitnesses, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
+import { askMessage, askTask, byCode, wantsDm, inPlace, placeOf, CANCELAR_PEDIDO, channelNamed, codeOf, DELEGATION_LINE, DELEGATION_TOOL_NAMES, DELEGATION_TOOLS, MAX_DELEGATIONS_PER_REPLY, MAX_OPEN_DELEGATIONS, parseAsk, parseWitnesses, PEDIR, RESPONDER_PEDIDO, returnTask, teamMember, teammateNote, teamSection, type AskContext, type Returned } from './delegations'
 import { anyoneOf, askKind, channelsOf, entriesOf, headsOf, MAX_CHAIN, sectorName, sectorOf } from '../shared/org'
 import type { Delegation, DelegationRef } from '../shared/types'
 import type { Requester } from '../shared/doc-access'
@@ -722,9 +722,10 @@ export class Runner {
     const namedAgents = mentioned(typed, reachable).slice(0, MAX_MENTIONS)
     let responders = namedAgents.filter((a) => may.some((m) => m.id === a.id)) // what I wrote: an option's label never calls anyone
     const outsiders = this.inclusionCandidates(conv, writer, typed).filter((a) => !may.some((m) => m.id === a.id)).slice(0, MAX_MENTIONS)
-    // A @ inside a request to open a room is the pedir tool's observadores, not a membership card.
-    const openingRoom = /\b(?:na sala|in (?:the )?room)\b/i.test(typed)
-    if (outsiders.length && !asked && !openingRoom) {
+    // A deliberate delegation to the Tuca is pedir's route, including its room and witness form.
+    // It names the doer with @, but that @ is not a request to add them to this conversation.
+    const delegation = DELEGATION_LINE.test(typed)
+    if (outsiders.length && !asked && !delegation) {
       const deadlineAt = Date.now() + this.deadlineMs(await this.deps.settings())
       this.offerInclusion(conv, replyIn, mine, writer, outsiders, deadlineAt)
       return

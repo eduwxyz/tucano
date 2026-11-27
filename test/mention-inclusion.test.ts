@@ -141,6 +141,17 @@ describe('the @-to-include card', () => {
     expect(by('nina', 'private')).toHaveLength(0)
   })
 
+  it('leaves a deliberate delegation to the Tuca with pedir, not an inclusion card', async () => {
+    db.createConversation({ id: 'tuca-dm', kind: 'dm', name: 'tuca', members: ['tuca'] })
+    const r = runner()
+    await r.send('tuca-dm', 'delegue a @nina: escreva o aviso', [], undefined, db.ownerId())
+    await r.idle()
+    expect(cards()).toHaveLength(0) // a delegation names the doer, it does not ask to add them here
+    const steps = by('tuca', 'tuca-dm').flatMap((m) => m.run?.steps.map((s) => s.label) ?? [])
+    expect(steps.some((s) => /Pediu a Nina|Asked Nina/.test(s))).toBe(true) // pedir went out
+    expect(by('nina', 'tuca-dm')).toEqual([]) // no direct reply from the named agent in the Tuca's DM
+  })
+
   it('keeps a pedir witness silent when a person writes in the room', async () => {
     const r = runner()
     await r.send('dm', 'delegue a clara na sala auditoria com @bento: veja o retry', [], undefined, db.ownerId())

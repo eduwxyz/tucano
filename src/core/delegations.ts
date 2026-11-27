@@ -126,6 +126,11 @@ export function teamMember(team: Agent[], who: unknown): Agent | undefined {
   return byName.length === 1 ? byName[0] : undefined
 }
 
+// The person's short form for pedir, read by the Tuca and the fake engine: "delegue a @duda: …",
+// "delegue a clara na sala auditoria com @bento: …", "continue com @duda: …", "repasse: …".
+// The runner uses the same grammar so a deliberate delegation is never mistaken for an @ call.
+export const DELEGATION_LINE = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?[\w-]+(?: (?:em|in) #[\w-]+| na sala [a-z0-9-]+(?: com @?[\w-]+(?:\s*,\s*@?[\w-]+)*)?)?: [^\n]+|^continue (?:com|with) @?[\w-]+: .+|^repasse: .+/im
+
 // "dm", "DM", "na dm" → the request is for the agent's DM, not a channel.
 export const wantsDm = (name: unknown): boolean => typeof name === 'string' && /^(na |in (the |their )?)?(dm|direct|direta)$/i.test(name.trim())
 
