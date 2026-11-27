@@ -730,10 +730,6 @@ export class Runner {
       this.offerInclusion(conv, replyIn, mine, writer, outsiders, deadlineAt)
       return
     }
-    // A reply calls the agent it answers, ahead of the router: they wrote what is being answered,
-    // so the decision is not left to the router guessing from the text. To a person, it calls no one.
-    const replyAgent = mine.reply?.agentId
-    if (!responders.length && !toPeople && replyAgent) responders = may.filter((a) => a.id === replyAgent)
     const answerers = this.answering(conv, may, responders)
 
     // Answered for the person it was asked (by an admin, whoever covers for them, the requester past
@@ -1312,7 +1308,7 @@ export class Runner {
     const q: Question = { id: card.id, conversationId: conv.id, ...(threadId ? { threadId } : {}), agentId: tuca.id, text: decision.question, askedTo: writer.id, requestedBy: writer.id, state: 'open', deadlineAt, createdAt: card.at }
     db.saveQuestion(q)
     emit({ type: 'inbox' })
-    this.deps.notify?.(L('O Tuca pede uma decisão', 'The Tuca asks for a decision'), decision.question, conv.id, 'question', threadId, [writer.id], card.id)
+    this.deps.notify?.(L('O Tuca pede uma decisão', 'The Tuca asks for a decision'), decision.question, conv.id, 'question', threadId, [writer.id])
   }
 
   // The card is answered here, without a second prompt: Include writes membership with the same
