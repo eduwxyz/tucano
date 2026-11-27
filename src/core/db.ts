@@ -33,6 +33,9 @@ import {
   type Memory,
   type MemoryMode,
   type MemoryState,
+  type MemberMode,
+  type Participant,
+  type TeamUp,
   type Message,
   type Person,
   type PersonAccess,
@@ -720,7 +723,13 @@ const COLUMNS: [string, string, string][] = [
   ['approvals', 'result', 'TEXT'],
   // The picture a connector wears: a small image as a data URL (src/renderer/src/connector-icon.ts).
   // Empty: the store's mark, or the icon of its kind.
-  ['connectors', 'icon', 'TEXT']
+  ['connectors', 'icon', 'TEXT'],
+  // One answer/mention mode per channel member (src/core/runs.ts answering).
+  ['members', 'mode', "TEXT NOT NULL DEFAULT 'answer'"],
+  // A channel opened by an agent through pedir (src/core/team-up.ts).
+  ['conversations', 'team_up', 'TEXT'],
+  // The doer and the silent witnesses of a request (src/shared/types.ts).
+  ['delegations', 'participants', 'TEXT']
 ]
 
 
@@ -738,6 +747,12 @@ function parseAccess(v: unknown): PersonAccess | undefined {
 // countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT, and more of them than input came apart from it.
 const COUNTED = `(CASE WHEN cache_read_tokens > input_tokens THEN input_tokens + cache_read_tokens * ${CACHE_READ_WEIGHT} ELSE input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} END) + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+// A stored JSON field from a build that may not have had it: unreadable means absent.
+const jsonOf = <T,>(v: unknown): T | undefined => {
+  if (typeof v !== 'string' || !v) return undefined
+  try { return JSON.parse(v) as T } catch { return undefined }
+}
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
 
@@ -1100,11 +1115,14 @@ export class Db {
          ORDER BY c.created_at`
       )
       .all(personId) as Row[]
-    const members = this.db.prepare('SELECT conversation_id, agent_id FROM members').all() as { conversation_id: string; agent_id: string }[]
-    return rows.map((r) => this.toConversation(r, members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id)))
+    const members = this.db.prepare('SELECT conversation_id, agent_id, mode FROM members').all() as { conversation_id: string; agent_id: string; mode?: string }[]
+    return rows.map((r) => {
+      const here = members.filter((m) => m.conversation_id === r['id'])
+      return this.toConversation(r, here.map((m) => m.agent_id), here)
+    })
   }
 
-  private toConversation(r: Row, members: string[]): Conversation {
+  private toConversation(r: Row, members: string[], rows?: { agent_id: string; mode?: string }[]): Conversation {
     return {
       id: str(r['id']),
       kind: str(r['kind']) as Conversation['kind'],
@@ -1120,6 +1138,8 @@ export class Db {
       ...(r['created_by'] ? { createdBy: str(r['created_by']) } : {}),
       ...(r['proactive'] === 0 ? { proactive: false } : {}),
       ...(r['title'] ? { title: str(r['title']) } : {}),
+      ...(rows?.length ? { modes: Object.fromEntries(rows.map((m) => [m.agent_id, m.mode === 'mention' ? 'mention' : 'answer'])) } : {}),
+      ...(jsonOf<TeamUp>(r['team_up']) ? { teamUp: jsonOf<TeamUp>(r['team_up']) } : {}),
       createdAt: Number(r['created_at']),
       ...(r['last_at'] ? { lastAt: Number(r['last_at']) } : {}),
       unread: Number(r['unread'])
@@ -1142,8 +1162,8 @@ export class Db {
       )
       .get(personId, id) as Row | undefined
     if (!r) return undefined
-    const members = (this.db.prepare('SELECT agent_id FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as { agent_id: string }[]).map((m) => m.agent_id)
-    return this.toConversation(r, members)
+    const rows = this.db.prepare('SELECT agent_id, mode FROM members WHERE conversation_id = ? ORDER BY rowid').all(id) as { agent_id: string; mode?: string }[]
+    return this.toConversation(r, rows.map((m) => m.agent_id), rows)
   }
 
   // Only whose a conversation is, for checks on every event (no counts, no members).
@@ -1164,8 +1184,8 @@ export class Db {
       const owner = c.kind === 'dm' ? (c.owner ?? this.ownerId()) : null
       // A channel is whoever made it (the owner when the code doesn't say).
       const by = c.kind === 'channel' ? (c.createdBy ?? this.ownerId()) : null
-      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, owner, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, owner, by, Date.now())
-      for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(c.id, m)
+      this.db.prepare('INSERT INTO conversations (id, kind, name, topic, threads, owner, created_by, created_at, team_up) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(c.id, c.kind, c.name, c.topic ?? null, c.threads ? 1 : null, owner, by, Date.now(), c.teamUp ? JSON.stringify(c.teamUp) : null)
+      for (const m of c.members) this.db.prepare('INSERT INTO members (conversation_id, agent_id, mode) VALUES (?, ?, ?)').run(c.id, m, c.modes?.[m] === 'mention' ? 'mention' : 'answer')
     })
   }
 
@@ -1203,12 +1223,45 @@ export class Db {
     this.db.prepare('UPDATE conversations SET topic = ? WHERE id = ?').run(topic ?? null, id)
   }
 
-  // Exactly these agents in the conversation.
-  setMembers(id: string, agentIds: string[]): void {
+  // Exactly these agents in the conversation. A caller that only names members keeps the modes
+  // already stored, so an ordinary membership change never turns a silent member back on.
+  setMembers(id: string, agentIds: string[], modes?: Record<string, MemberMode>): void {
     this.tx(() => {
+      const old = new Map((this.db.prepare('SELECT agent_id, mode FROM members WHERE conversation_id = ?').all(id) as { agent_id: string; mode?: string }[]).map((m) => [m.agent_id, m.mode]))
       this.db.prepare('DELETE FROM members WHERE conversation_id = ?').run(id)
-      for (const a of new Set(agentIds)) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(id, a)
+      for (const a of new Set(agentIds)) {
+        const mode = modes?.[a] ?? (old.get(a) === 'mention' ? 'mention' : 'answer')
+        this.db.prepare('INSERT INTO members (conversation_id, agent_id, mode) VALUES (?, ?, ?)').run(id, a, mode)
+      }
     })
+  }
+
+  // A private audience inherited from a source room, repaired on old rooms at start.
+  setTeamUpPrivacy(id: string, privateTo: string | undefined): void {
+    const up = jsonOf<TeamUp>((this.db.prepare('SELECT team_up FROM conversations WHERE id = ?').get(id) as Row | undefined)?.['team_up'])
+    if (up) this.db.prepare('UPDATE conversations SET team_up = ? WHERE id = ?').run(JSON.stringify({ ...up, privateTo }), id)
+  }
+
+  // A room opened from someone else's private DM must stay theirs, including rooms opened from
+  // rooms. Applied after the column pass, so an older profile is repaired without a migration.
+  protectTeamUpPrivacy(): void {
+    const owner = this.ownerId()
+    const rows = this.db.prepare('SELECT id, team_up FROM conversations WHERE team_up IS NOT NULL').all() as Row[]
+    for (const r of rows) {
+      const up = jsonOf<TeamUp>(r['team_up'])
+      if (!up || up.privateTo) continue
+      let from = up.from
+      let audience: string | undefined
+      for (let depth = 0; depth < 10 && from; depth++) {
+        const source = this.db.prepare('SELECT kind, owner, team_up FROM conversations WHERE id = ?').get(from) as Row | undefined
+        if (!source) break
+        const nested = jsonOf<TeamUp>(source['team_up'])
+        if (nested?.privateTo) { audience = nested.privateTo; break }
+        if (str(source['kind']) === 'dm') { audience = str(source['owner']) || owner; break }
+        from = nested?.from ?? ''
+      }
+      if (audience) this.setTeamUpPrivacy(str(r['id']), audience)
+    }
   }
 
   // Its messages and members go with it (foreign keys).
@@ -2522,6 +2575,12 @@ export class Db {
   purgePerson(personId: string, now = Date.now()): { dms: string[]; routines: { id: string; conversationId: string }[]; artifacts: { id: string; name: string }[] } {
     return this.tx(() => {
       const dms = (this.db.prepare("SELECT id FROM conversations WHERE kind = 'dm' AND owner = ?").all(personId) as Row[]).map((r) => str(r['id']))
+      // Rooms that came out of this person's private DMs go with those DMs, however deep the chain.
+      for (const r of this.db.prepare('SELECT id, team_up FROM conversations WHERE team_up IS NOT NULL').all() as Row[]) {
+        const up = jsonOf<TeamUp>(r['team_up'])
+        const id = str(r['id'])
+        if (up?.privateTo === personId && !dms.includes(id)) dms.push(id)
+      }
       const inDms = `(${dms.map(() => '?').join(', ') || "''"})`
       const artifacts = (this.db.prepare(`SELECT id, name FROM artifacts WHERE conversation_id IN ${inDms}`).all(...dms) as Row[]).map((r) => ({ id: str(r['id']), name: str(r['name']) }))
       const routines = (this.db.prepare(`SELECT id, conversation_id FROM routines WHERE conversation_id IN ${inDms}`).all(...dms) as Row[]).map((r) => ({ id: str(r['id']), conversationId: str(r['conversation_id']) }))
@@ -2634,6 +2693,7 @@ export class Db {
       ...(r['told'] === 1 ? { told: true } : {}),
       ...(r['late_told'] === 1 ? { lateTold: true } : {}),
       ...(r['approval'] ? { approval: str(r['approval']) } : {}),
+      ...(jsonOf<Participant[]>(r['participants']) ? { participants: jsonOf<Participant[]>(r['participants']) } : {}),
       createdAt: Number(r['created_at']),
       ...(r['ended_at'] ? { endedAt: Number(r['ended_at']) } : {})
     }
@@ -2642,11 +2702,11 @@ export class Db {
   saveDelegation(d: Delegation): void {
     this.db
       .prepare(
-        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, thread_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, approval, created_at, ended_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET origin_conversation_id = excluded.origin_conversation_id, origin_thread_id = excluded.origin_thread_id, origin_message_id = excluded.origin_message_id, requested_by = excluded.requested_by, text = excluded.text, done = excluded.done, due_at = excluded.due_at, state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, approval = excluded.approval, created_at = excluded.created_at, ended_at = excluded.ended_at`
+        `INSERT INTO delegations (id, from_agent, to_agent, conversation_id, root_id, thread_id, origin_conversation_id, origin_thread_id, origin_message_id, requested_by, text, done, due_at, state, asking, asking_told, parked_told, nudges, result, told, late_told, approval, participants, created_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET origin_conversation_id = excluded.origin_conversation_id, origin_thread_id = excluded.origin_thread_id, origin_message_id = excluded.origin_message_id, requested_by = excluded.requested_by, text = excluded.text, done = excluded.done, due_at = excluded.due_at, state = excluded.state, asking = excluded.asking, asking_told = excluded.asking_told, parked_told = excluded.parked_told, nudges = excluded.nudges, result = excluded.result, told = excluded.told, late_told = excluded.late_told, approval = excluded.approval, participants = excluded.participants, created_at = excluded.created_at, ended_at = excluded.ended_at`
       )
-      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.threadId ?? null, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.approval ?? null, d.createdAt, d.endedAt ?? null)
+      .run(d.id, d.from, d.to, d.conversationId, d.rootId, d.threadId ?? null, d.originConversationId, d.originThreadId ?? null, d.originMessageId, d.requestedBy, d.text, d.done ?? null, d.dueAt ?? null, d.state, d.asking ?? null, d.asking && d.askingTold ? 1 : 0, d.parkedTold ? 1 : 0, d.nudges ?? 0, d.result ?? null, d.told ? 1 : 0, d.lateTold ? 1 : 0, d.approval ?? null, d.participants ? JSON.stringify(d.participants) : null, d.createdAt, d.endedAt ?? null)
   }
 
   delegation(id: string): Delegation | undefined {

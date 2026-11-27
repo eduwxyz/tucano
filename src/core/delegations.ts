@@ -8,6 +8,7 @@
 import { L, locale } from '../shared/lang'
 import { bossOf, channelsOf, directReports, entriesOf, headsOf, looseColleaguesOf, peersOf, reportsOf, sectorName, sectorOf, type AskKind } from '../shared/org'
 import type { Agent, Connector, Conversation, Delegation } from '../shared/types'
+import { TEAM_UP_WITNESSES } from '../shared/types'
 import type { ToolDef } from './gateway'
 import { describeAgent } from './router'
 
@@ -47,6 +48,18 @@ export const PEDIR: ToolDef = {
             'Opcional. Sem dizer nada: se ele está nesta conversa, o trabalho fica aqui, embaixo da mensagem; se não está, vai numa conversa privada dele com quem pediu (a DM). Diga o nome de um canal dele só quando o assunto é claramente o tema desse canal e o time de lá deve acompanhar.',
             'Optional. With nothing said: if they are in this conversation, the work stays here, under the message; if not, it goes to a private conversation of theirs with whoever asked (the DM). Name one of their channels only when the subject is clearly that channel\'s topic and the team there should follow it.'
           )
+        }
+ ,
+        sala: {
+          type: 'string',
+          maxLength: 60,
+          description: L('Opcional: um nome curto para uma sala de trabalho. Abre (ou reaproveita) um canal comum com o trabalho já feito, quem faz e as testemunhas. Ninguém ganha convite de pessoa nem permissões novas.', 'Optional: a short name for a work room. Opens (or reuses) an ordinary channel with the work already done, the doer and the witnesses. Nobody gets a person invite or new grants.')
+        },
+        observadores: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: TEAM_UP_WITNESSES,
+          description: L(`Até ${TEAM_UP_WITNESSES} testemunhas, pelo @handle: leem o pedido em silêncio, não respondem sozinhas e só falam se mencionadas. Quem não está ao seu alcance não entra.`, `Up to ${TEAM_UP_WITNESSES} witnesses, by @handle: they read the request silently, never answer on their own and speak only if mentioned. Anyone outside your reach is refused.`)
         }
       },
       required: ['para', 'pedido']
@@ -122,6 +135,34 @@ export function channelNamed<C extends Pick<Conversation, 'name'>>(channels: C[]
   return n ? channels.find((c) => c.name.toLowerCase() === n) : undefined
 }
 
+// Witnesses are named in pedir and resolved only among agents the requester reaches. Called twice:
+// when the tool parses them and again when the request and its room are written.
+export function parseWitnesses(
+  args: Record<string, unknown>,
+  reachable: Agent[],
+  from: Agent,
+  to: Agent,
+  chain: Delegation[]
+): { witnesses: Agent[] } | { error: string } {
+  const raw = args['observadores']
+  const names = (Array.isArray(raw) ? raw : raw === undefined ? [] : [raw]).filter((x): x is string => typeof x === 'string' && !!x.trim())
+  if (names.length > TEAM_UP_WITNESSES) return { error: L(`No máximo ${TEAM_UP_WITNESSES} testemunhas por pedido.`, `At most ${TEAM_UP_WITNESSES} witnesses per request.`) }
+  const witnesses: Agent[] = []
+  for (const name of names) {
+    const a = teamMember(reachable, name)
+    if (!a) return { error: L(`Você não alcança "${name}" para testemunhar.`, `You don't reach "${name}" as a witness.`) }
+    const why = a.kind === 'tuca' ? L('O Tucano não é testemunha.', 'The Tuca is not a witness.')
+      : a.archived || a.deleted ? L(`${a.name} não está disponível.`, `${a.name} isn't available.`)
+      : a.id === from.id ? L('Quem pede não pode ser testemunha.', 'The asker cannot be a witness.')
+      : a.id === to.id ? L('Quem faz o pedido não é testemunha.', 'The doer is not a witness.')
+      : chain.some((d) => d.from === a.id) ? L(`${a.name} já está esperando por este trabalho.`, `${a.name} is already waiting on this work.`)
+      : undefined
+    if (why) return { error: why }
+    if (!witnesses.some((w) => w.id === a.id)) witnesses.push(a)
+  }
+  return { witnesses }
+}
+
 // What was asked, read as the tool's arguments: the hours of a deadline within reason, text cut to size.
 export function parseAsk(args: Record<string, unknown>): { text: string; done?: string; dueAt?: number } | { error: string } {
   const text = typeof args['pedido'] === 'string' ? args['pedido'].trim().slice(0, TEXT_MAX) : ''
@@ -167,6 +208,7 @@ export interface AskContext {
   asked?: { by: string; text: string }
   split?: { to: string; text: string; state: Delegation['state']; code: string; mine?: boolean }[]
   delivered?: { to: string; text: string }[]
+  watching?: string[] // silent witnesses named on this request
 }
 const DELIVERED_MAX = 2_000
 
@@ -184,6 +226,7 @@ export function askContext(c: AskContext): string {
     parts.push(`${L('Como o trabalho foi dividido (o resto, além do seu)', 'How the work was split (the rest, besides yours)')}:\n${others.map((x) => `- ${x.to} [${x.code}], ${state(x)}: ${x.text.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n')}\n${L('Não faça a parte de outro. Se a sua depende de uma delas, use o que já foi entregue; se ainda não foi, faça o que der e diga o que espera.', 'Do not do another\'s part. If yours depends on one of them, use what was delivered; if it wasn\'t yet, do what you can and say what you are waiting for.')}`)
   }
   if (c.delivered?.length) parts.push(`${L('Já entregue', 'Already delivered')}:\n${c.delivered.map((x) => `- ${x.to}:\n${quoted(x.text.slice(0, DELIVERED_MAX))}`).join('\n')}`)
+  if (c.watching?.length) parts.push(L(`Testemunhas neste pedido: ${c.watching.join(', ')}. Elas leem esta thread e não respondem sozinhas; só falam se mencionadas.`, `Witnesses on this request: ${c.watching.join(', ')}. They read this thread and do not answer on their own; they speak only if mentioned.`))
   return parts.length ? `\n\n${parts.join('\n\n')}` : ''
 }
 

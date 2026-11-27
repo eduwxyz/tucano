@@ -2688,7 +2688,9 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   const platform = useStore((s) => s.platform)
   const agents = useStore((s) => s.agents)
   const allAgents = useStore((s) => s.agents.filter(isTeam))
-  const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
+  const channel = useStore((s) => s.conversations.find((c) => c.id === conversationId))
+  const isDm = channel?.kind === 'dm'
+  const allSilent = !threadId && channel?.kind === 'channel' && members.length > 0 && members.every((a) => channel.modes?.[a.id] === 'mention')
   const team = useStore(teamMode)
   const people = useStore((s) => s.people)
   const you = useStore((s) => s.you)
@@ -2932,6 +2934,11 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
         </div>
       )}
       {notice}
+      {allSilent && (
+        <p className="composer-silent muted small" role="status">
+          {L('Ninguém responde sozinho aqui: todos estão em “só se mencionado”. Escreva @nome para chamar.', 'No one answers on their own here: everyone is “only if mentioned”. Write @name to call someone.')}
+        </p>
+      )}
       {/* Only where it can take you to the card: the intro's short chats have it in plain sight. */}
       {strip && onJump && <AskStrip asked={strip.q} who={strip.who} inThread={!asked} more={strip.n - 1} onOpen={() => onJump(strip.q.id, strip.q.threadId)} />}
       <div className="composer">

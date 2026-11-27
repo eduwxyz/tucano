@@ -141,11 +141,34 @@ export interface Conversation {
   createdBy?: string // a channel's maker: they (and admins) rename it, change its topic and its agents
   proactive?: boolean // false: no agent is called in here on its own, only who is mentioned or picked; on unless false
   title?: string // a conversation with the Tuca: what it is about, in a few words (the person has several, one per request)
+  // One mode per member, stored in members.mode. Unset: everyone answers. 'mention': reads but only
+  // answers when named. One column, so a later mode needs no second migration.
+  modes?: Record<string, MemberMode>
+  teamUp?: TeamUp // on a normal channel an agent opened through pedir with a room name
   createdAt?: number
   lastAt?: number // when something was last said there, as the core knew when it sent this
 }
 
 // "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
+export type MemberMode = 'answer' | 'mention'
+
+// A channel an agent opened to move work into. It stays an ordinary channel; this is only its record.
+export interface TeamUp {
+  from: string // the conversation the request was asked from
+  title: string // the name the agent chose
+  by: string // the calling agent
+  at: number // when it opened (the reuse window starts here)
+  guests: string[] // caller + doer + witnesses, for the reuse check
+  privateTo?: string // the person whose private source room this came from
+}
+
+export const TEAM_UP_NAME_MAX = 22 // fits the sidebar row beside an unread badge
+export const TEAM_UP_MESSAGES = 24 // newest messages carried into a new room
+export const TEAM_UP_CHARS = 12_000 // ceiling for the carried handoff, in characters
+export const TEAM_UP_REUSE_MS = 6 * 60 * 60_000 // six hours, in milliseconds
+export const TEAM_UP_WITNESSES = 3 // witnesses per request
+export const TEAM_UP_DAYS = 7 // quiet days before a room closes; 0 keeps every room
+
 export const channelName = (s: string): string =>
   s
     .normalize('NFD')
@@ -270,6 +293,11 @@ export interface Run {
 }
 
 // Where a piece of handed work lives, for a message to point at it: the thread `rootId` opened.
+export interface Participant {
+  agentId: string
+  role: 'do' | 'watch'
+}
+
 export interface DelegationRef {
   id: string
   to: string // the agent doing it
@@ -322,6 +350,7 @@ export interface Delegation {
   told?: boolean // whoever asked has heard how it ended
   lateTold?: boolean // whoever asked has heard it's past its deadline
   approval?: string // the approval its work last stopped on, shown with the request where it was asked from
+  participants?: Participant[] // the doer and the silent witnesses named when it was asked
   createdAt: number
   endedAt?: number
 }
@@ -618,6 +647,7 @@ export interface Settings {
   wikiDir?: string // where the wiki's folder is (an Obsidian vault, say); inside the app's data when unset
   defaultLimit: number
   approvalTtlHours: number
+  teamUpDays?: number // quiet days before a team-up room closes; 0 keeps them (default 7)
   questionDeadlineHours?: number // a question to someone else, unanswered this long: the requester is told (default 4)
   actionRules?: ActionRules // for every agent: which actions ask me first, which it does alone, which never (src/shared/actions.ts)
   autonomy?: Autonomy // every agent's level, unless its page sets its own (default normal)

@@ -295,8 +295,10 @@ export class People {
     return Object.fromEntries(Object.entries(patch).filter(([k]) => !isPersonalSetting(k))) as Partial<T>
   }
 
-  canSeeConversation(person: Person, c: (Pick<Conversation, 'kind' | 'owner'> & Partial<Pick<Conversation, 'id' | 'name'>>) | undefined): boolean {
+  canSeeConversation(person: Person, c: (Pick<Conversation, 'kind' | 'owner'> & Partial<Pick<Conversation, 'id' | 'name' | 'teamUp'>>) | undefined): boolean {
     if (!c) return false
+    // A room opened from a private DM stays with that person, through any number of nested rooms.
+    if (c.teamUp?.privateTo && c.teamUp.privateTo !== person.id) return false
     const dm = dmOwner(c, this.db.ownerId())
     return (dm === undefined || dm === person.id) && withinAccess(this.db, person, c)
   }
