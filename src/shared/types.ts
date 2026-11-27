@@ -611,7 +611,8 @@ export interface Settings {
   orgLayout?: Record<string, { x: number; y: number }> // the organogram's cards placed by hand (an agent's id, or 'me'); unset: laid out on its own
   browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
-  sessionNameModel?: string // a model id that names each session when it starts; unset: the memory model, 'off': none
+  sessionNameEnabled?: boolean // the Session Names switch; unset or false: no new sessions are named
+  sessionNameModel?: string // harness and model used to name a session while the switch is on; unset: the memory model
   sessionNameEffort?: Effort // thinking level for that model; unset: low
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   repliesAtOnce?: number // replies running at once in one conversation (1 to 6); a new prompt past it waits its turn. Unset: 6, the most the app runs at once

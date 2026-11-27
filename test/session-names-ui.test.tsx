@@ -24,11 +24,13 @@ Object.assign(globalThis, {
 
 let fake: State
 let live: string | undefined
+const updates: Record<string, unknown>[] = []
 vi.mock('../src/renderer/src/store', async (original) => {
   const real = await original<typeof import('../src/renderer/src/store')>()
   return {
     ...real,
     useStore: <T,>(select: (s: State) => T): T => select(fake),
+    updateSettings: (patch: Record<string, unknown>) => { updates.push(patch); fake.settings = { ...fake.settings, ...patch } as Settings },
     getState: () => fake,
     useLiveText: (m: Message) => live ?? m.text,
     useLiveThoughtState: () => undefined,
@@ -45,6 +47,11 @@ const realStore = await vi.importActual<typeof import('../src/renderer/src/store
 const { createRoot } = await import('react-dom/client')
 const { MessageList } = await import('../src/renderer/src/components/Conversation')
 const { WorkDrawer } = await import('../src/renderer/src/components/WorkDrawer')
+vi.mock('../src/renderer/src/components/Harness', () => ({
+  ModelPicker: ({ value, effort }: { value: string; effort?: string }) => <div className="model-picker" data-model={value} data-effort={effort ?? ''} />,
+  usableEngines: () => ['claude']
+}))
+const { SessionNamesFields } = await import('../src/renderer/src/components/Pages')
 
 const ana = { id: 'ana', name: 'Ana', role: 'owner', about: '' }
 const lia = (): Agent => ({ id: 'a1', name: 'Lia', handle: 'lia', role: 'Engineering', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 0, used: 0, grants: {}, memory: 'auto', computer: false, archived: false })
@@ -137,9 +144,58 @@ describe('the settings card', () => {
     const models = settingsTabStructure('modelos', sections).map((s) => s.id)
     expect(models.indexOf('models-session-names')).toBe(models.indexOf('knowledge-memory') + 1)
     expect(sections.find((s) => s.id === 'models-session-names')?.page).toBe('modelos')
-    expect(sections.find((s) => s.id === 'models-session-names')?.keys).toEqual(['sessionNameModel', 'sessionNameEffort'])
+    expect(sections.find((s) => s.id === 'models-session-names')?.keys).toEqual(['sessionNameEnabled', 'sessionNameModel', 'sessionNameEffort'])
     expect(searchSettings(sections, 'Session names').map((hit) => hit.section.id)).toContain('models-session-names')
-    expect(searchSettings(sections, 'Off').map((hit) => hit.section.id)).toContain('models-session-names')
+    expect(searchSettings(sections, 'Session Names model').map((hit) => hit.section.id)).toContain('models-session-names')
     expect(searchSettings(sections, 'Thinking level').map((hit) => hit.section.id)).toContain('models-session-names')
+  })
+})
+
+describe('the Session Names switch', () => {
+  const sw = (): HTMLElement => document.querySelector('button.toggle[role="switch"]') as HTMLElement
+  const picker = (): HTMLElement | null => document.querySelector('.model-picker') as HTMLElement | null
+  const defaults = () => {
+    fake.settings = { ...fake.settings, sessionNameEnabled: undefined, sessionNameModel: undefined, sessionNameEffort: undefined, memoryModel: 'haiku' } as Settings
+    updates.length = 0
+  }
+
+  it('is off by default and shows no trio', async () => {
+    defaults()
+    await draw(<SessionNamesFields />)
+    expect(sw().getAttribute('aria-checked')).toBe('false')
+    expect(sw().getAttribute('aria-label')).toBe('Session Names')
+    expect(picker()).toBeNull()
+    expect(document.body.textContent).not.toContain('Session Names model')
+  })
+
+  it('shows the trio with the memory model and level once turned on', async () => {
+    defaults()
+    await draw(<SessionNamesFields />)
+    await act(async () => sw().click())
+    await draw(<SessionNamesFields />)
+    expect(sw().getAttribute('aria-checked')).toBe('true')
+    expect(updates).toContainEqual({ sessionNameEnabled: true })
+    expect(picker()?.getAttribute('data-model')).toBe('haiku')
+    expect(document.querySelector('[aria-label="Reasoning effort"]')?.textContent).toContain('Low')
+    expect(document.body.textContent).toContain('Session Names model')
+  })
+
+  it('keeps the chosen trio when switched off and back on', async () => {
+    defaults()
+    fake.settings = { ...fake.settings, sessionNameEnabled: true, sessionNameModel: 'sonnet', sessionNameEffort: 'xhigh' } as Settings
+    await draw(<SessionNamesFields />)
+    expect(picker()?.getAttribute('data-model')).toBe('sonnet')
+    expect(document.querySelector('[aria-label="Reasoning effort"]')?.textContent).toContain('Max')
+    await act(async () => sw().click())
+    await draw(<SessionNamesFields />)
+    expect(sw().getAttribute('aria-checked')).toBe('false')
+    expect(picker()).toBeNull()
+    expect(fake.settings.sessionNameModel).toBe('sonnet')
+    expect(fake.settings.sessionNameEffort).toBe('xhigh')
+    await act(async () => sw().click())
+    await draw(<SessionNamesFields />)
+    expect(sw().getAttribute('aria-checked')).toBe('true')
+    expect(picker()?.getAttribute('data-model')).toBe('sonnet')
+    expect(document.querySelector('[aria-label="Reasoning effort"]')?.textContent).toContain('Max')
   })
 })

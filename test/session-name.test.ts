@@ -39,10 +39,10 @@ function setup(messages: Message[], opts: { answer?: string; settings?: Partial<
       yield { type: 'done', text: answer, usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 } } as EngineEvent
     }
   } as unknown as Engine
-  const settings = { memoryModel: 'haiku', sessionNameModel: 'sonnet', engines: { claude: { installed: true, loggedIn: true } }, ...opts.settings } as unknown as Settings
+  const settings = { memoryModel: 'haiku', sessionNameEnabled: true, sessionNameModel: 'sonnet', engines: { claude: { installed: true, loggedIn: true } }, ...opts.settings } as unknown as Settings
   const emit = vi.fn()
   const titles = new Titles({ db, engines: { claude: engine } as never, settings: async () => settings, emit, workDir: mkdtempSync(join(tmpdir(), 'tucano-names-')) })
-  return { titles, db, runs, emit }
+  return { titles, db, runs, emit, settings }
 }
 
 const asked = 'Nomes das sessões no Tucano, ao lado do nome do agente e no cabeçalho da thread'
@@ -70,11 +70,24 @@ describe('session names', () => {
     expect(runs).toHaveLength(0)
   })
 
-  it('"off" leaves sessions unnamed and calls no model', async () => {
-    const { titles, runs, db } = setup([opening, reply()], { settings: { sessionNameModel: 'off' } })
+  it('an unset switch leaves sessions unnamed and calls no model', async () => {
+    const { titles, runs, db } = setup([opening, reply()], { settings: { sessionNameEnabled: undefined } })
     expect(await titles.nameSession(reply(), 'req')).toBeUndefined()
     expect(runs).toHaveLength(0)
     expect(db.setRunSessionName).not.toHaveBeenCalled()
+  })
+
+  it('a switch turned off costs a name, not the reply, and keeps the trio for later', async () => {
+    const { titles, runs, settings } = setup([opening, reply()], { settings: { sessionNameModel: 'sonnet', sessionNameEffort: 'xhigh' } })
+    expect(await titles.nameSession(reply(), 'req')).toBe('Nomes das sessões')
+    settings.sessionNameEnabled = false
+    expect(await titles.nameSession(reply({}, { id: 'r2' }), 'req')).toBeUndefined()
+    expect(runs).toHaveLength(1)
+    settings.sessionNameEnabled = true
+    await titles.nameSession(reply({}, { id: 'r3' }), 'req')
+    expect(runs.at(-1)).toMatchObject({ model: 'sonnet', effort: 'xhigh' })
+    expect(settings.sessionNameModel).toBe('sonnet')
+    expect(settings.sessionNameEffort).toBe('xhigh')
   })
 
   it('with no model picked it falls back to the memory model, and a long request is capped at 1500 characters', async () => {

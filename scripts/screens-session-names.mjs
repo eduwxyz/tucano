@@ -29,6 +29,7 @@ function seedDm(data) {
   }
   put('conversations', { id: DM, kind: 'dm', name: lia, topic: null, threads: null, owner: me, created_by: null, created_at: Date.now(), team_up: null })
   put('members', { conversation_id: DM, agent_id: lia, mode: 'answer' })
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run('sessionNameEnabled', 'true')
   db.close()
   return lia
 }
@@ -107,12 +108,19 @@ export default async function story() {
     await models(t)
     const anchors = await measure(t.win, '[data-settings-section]', ['display', 'visibility', 'opacity'])
     const allIds = await t.win.locator('[data-settings-section]').evaluateAll((els) => els.map((el) => el.getAttribute('data-settings-section')))
-    const selected = (await t.win.locator('#settings-models-session-names .select__trigger__value').first().textContent())?.trim() ?? ''
+    const onScope = t.win.locator('#settings-models-session-names')
+    const checked = await onScope.locator('button[role="switch"]').getAttribute('aria-checked')
+    const onSwitch = (await measure(t.win, '#settings-models-session-names button[role="switch"]', ['display', 'opacity', 'backgroundColor']))[0]
+    const pairs = (await onScope.locator('.model-picker .select__trigger__value').allTextContents()).map((s) => s.trim())
+    const effort = (await onScope.locator('[aria-label="Reasoning effort"] .select__trigger__value').first().textContent())?.trim() ?? ''
     const card = (await measure(t.win, '#settings-models-session-names', ['display', 'visibility', 'opacity']))[0]
     card.data = {
       viewport,
-      state: 'fallback: no model picked',
-      selected,
+      state: 'on: memory trio',
+      switchChecked: checked,
+      harness: pairs[0] ?? '',
+      model: pairs[1] ?? '',
+      effort,
       sectionOrder: allIds,
       memoryYpx: anchors[allIds.indexOf('knowledge-memory')]?.box.y ?? null,
       sessionNamesYpx: anchors[allIds.indexOf('models-session-names')]?.box.y ?? null,
@@ -120,22 +128,29 @@ export default async function story() {
       units: 'px, DOM order and computed CSS'
     }
     card.frame = await shot(t, `04-models-fallback-${viewport}`, '#settings-models-session-names')
-    rows.push(card, ...anchors.filter((row) => ['knowledge-memory', 'models-session-names', 'connections-phone'].some((id) => row.selector.includes(id))))
+    rows.push(card, onSwitch, ...anchors.filter((row) => ['knowledge-memory', 'models-session-names', 'connections-phone'].some((id) => row.selector.includes(id))))
     await close(t)
 
     // Off: seed that same temporary database, then reopen it. Old messages go too, so this is a
     // fresh reply with no name rather than one named before the setting changed.
     const db = new DatabaseSync(join(boot.data, 'tucano.db'))
     db.prepare('DELETE FROM messages').run()
-    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run('sessionNameModel', '"off"')
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run('sessionNameEnabled', 'false')
     db.close()
     const off = await open(viewport, boot.data)
     await models(off)
     const offCard = (await measure(off.win, '#settings-models-session-names', ['display', 'visibility', 'opacity']))[0]
-    const offSelected = (await off.win.locator('#settings-models-session-names .select__trigger__value').first().textContent())?.trim() ?? ''
-    offCard.data = { viewport, state: 'off', selected: offSelected, units: 'px and computed CSS' }
+    const offSwitch = (await measure(off.win, '#settings-models-session-names button[role="switch"]', ['display', 'opacity', 'backgroundColor']))[0]
+    offCard.data = {
+      viewport,
+      state: 'default off: no trio',
+      switchChecked: await off.win.locator('#settings-models-session-names button[role="switch"]').getAttribute('aria-checked'),
+      pickerCount: await off.win.locator('#settings-models-session-names .model-picker').count(),
+      effortCount: await off.win.locator('#settings-models-session-names [aria-label="Reasoning effort"]').count(),
+      units: 'px, count and computed CSS'
+    }
     offCard.frame = await shot(off, `05-models-off-${viewport}`, '#settings-models-session-names')
-    rows.push(offCard)
+    rows.push(offCard, offSwitch)
 
     await dm(off)
     await off.win.fill('.composer textarea', 'Name this reply with the model off.')
@@ -151,7 +166,7 @@ export default async function story() {
     // The chosen model is a trio: harness, model and thinking level all visible in the card.
     const trioDb = new DatabaseSync(join(boot.data, 'tucano.db'))
     trioDb.prepare('DELETE FROM messages').run()
-    for (const [key, value] of [['sessionNameModel', '"sonnet"'], ['sessionNameEffort', '"high"']]) {
+    for (const [key, value] of [['sessionNameEnabled', 'true'], ['sessionNameModel', '"sonnet"'], ['sessionNameEffort', '"high"']]) {
       trioDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
     }
     trioDb.close()
@@ -178,7 +193,7 @@ export default async function story() {
       sizes: SIZES,
       viewportProof: windowProof,
       pageAndConsoleErrors: runErrors(),
-      states: ['reply at work', 'work drawer', 'thread', 'fallback', 'off', 'chosen trio'],
+      states: ['reply at work', 'work drawer', 'thread', 'on: memory trio', 'default off: no trio', 'chosen trio'],
       units: 'px, characters, count and computed CSS'
     }
   })

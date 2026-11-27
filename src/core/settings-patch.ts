@@ -11,6 +11,7 @@ const RULES: Partial<Record<keyof Settings, { kind: Kind; max: number; nullable?
   context: { kind: 'string', max: 100_000 },
   routerModel: { kind: 'string', max: 200 },
   memoryModel: { kind: 'string', max: 200 },
+  sessionNameEnabled: { kind: 'boolean', max: 10, nullable: true },
   sessionNameModel: { kind: 'string', max: 200, nullable: true },
   sessionNameEffort: { kind: EFFORTS.map((e) => e.id), max: 10, nullable: true },
   defaultFallbackModel: { kind: 'string', max: 200, nullable: true },

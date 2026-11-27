@@ -50,14 +50,14 @@ export class Titles {
 
   // The name of the reply's session, kept on the reply and shown next to the agent's name (and as the
   // thread's name when the reply opens one). Made once, in the background: the reply doesn't wait for
-  // it. `off` in Settings › Models › Session names leaves sessions unnamed.
+  // it. The Session Names switch in Settings › Models leaves sessions unnamed and calls no model.
   async nameSession(m: Message, requestId?: string): Promise<string | undefined> {
     if (!m.run || m.run.sessionName || this.named.has(m.id)) return undefined
     this.named.add(m.id)
     const { db } = this.deps
     const settings = await this.deps.settings()
+    if (settings.sessionNameEnabled !== true) return undefined
     const chosen = (settings.sessionNameModel ?? '').trim()
-    if (chosen === 'off') return undefined
     // What the session is about: the request under it, the task it was given, or what it opened with.
     const request = requestId ? db.message(requestId) : undefined
     const about = (request?.text || m.run.task || m.text || '').trim()
