@@ -4,7 +4,7 @@ import { nodeOf } from '../../../shared/node-link'
 import { hasMonthlyLimit, safeLimit } from '../../../shared/limits'
 import { instructionLengthNote } from '../../../shared/instructions'
 import { skillGroup, skillOrigin } from '../../../shared/skill-groups'
-import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { InHub } from './hub-context'
 import { DocInboxSections } from './docs/DocInbox'
@@ -3440,27 +3440,24 @@ export function ClassifierUsesCard(): ReactNode {
       {list.length === 0 && <p className="muted small">{L('Adicione um classificador acima para escolher o que ele faz.', 'Add a classifier above to choose what it does.')}</p>}
       {list.length > 0 && (
         <>
-          {CLASSIFIER_JOBS.map((job) => (
-            <Field key={job} label={jobLabel(job)} hint={jobAbout(job)}>
-              <Select
-                value={jobs[job] ?? ''}
-                onChange={(v) => assign(job, v)}
-                options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
-              />
-            </Field>
-          ))}
-          {CLASSIFIER_JOBS.filter((j) => jobs[j]).map((job) => {
+          {CLASSIFIER_JOBS.map((job) => {
             const c = list.find((x) => x.id === jobs[job])
-            if (!c) return null
             return (
-              <div key={job}>
-                <ClassifierNotice job={job} classifier={c} work={work} />
-                {!settings.classifierKeys?.[c.id] && (
+              <Fragment key={job}>
+                <Field label={jobLabel(job)} hint={jobAbout(job)}>
+                  <Select
+                    value={jobs[job] ?? ''}
+                    onChange={(v) => assign(job, v)}
+                    options={[{ value: '', label: L('Desligado', 'Off') }, ...list.map((c) => ({ value: c.id, label: classifierLabel(c), hint: providerSpec(c.provider).label }))]}
+                  />
+                </Field>
+                {c && <ClassifierNotice job={job} classifier={c} work={work} />}
+                {c && !settings.classifierKeys?.[c.id] && (
                   <p className="hint hint--warn">
                     {L(`${jobLabel(job)}: falta a chave de ${c.name}. Até ela entrar, nada vai para ${providerSpec(c.provider).label}.`, `${jobLabel(job)}: ${c.name} has no key yet. Until it does, nothing goes to ${providerSpec(c.provider).label}.`)}
                   </p>
                 )}
-              </div>
+              </Fragment>
             )
           })}
         </>
