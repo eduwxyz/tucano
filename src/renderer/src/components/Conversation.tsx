@@ -2199,10 +2199,12 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const decided = approval.state !== 'pending'
   // A command on the agent's computer: what it does, in words.
   const onComputer = approval.connectorId === COMPUTADOR
-  const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
+  // A command on a lent computer goes as one on this computer's: only its kind of action is ever allowed for good.
+  const command = onComputer || approval.tool === 'node_bash'
+  const kinds = command ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
-  const alwaysTitle = onComputer
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!command || kinds.length > 0)
+  const alwaysTitle = command
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `Allow ${agent?.name ?? 'the agent'} to use “${toolWords(approval.tool)}” in ${approval.connectorName} without approval on any call, even after reading external content. Revoke this on its page.`)
   const face = approvalFace(approval)

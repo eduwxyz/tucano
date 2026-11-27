@@ -3241,6 +3241,17 @@ h3 {
   justify-content: flex-end;
   margin-top: 8px;
 }
+/* In the footer it leads the row; on small screens it takes a row of its own. */
+.ask__recommend--foot {
+  flex: none;
+  justify-content: flex-start;
+  margin-top: 0;
+}
+@media (max-width: 760px) {
+  .ask__recommend--foot {
+    flex: 1 1 100%;
+  }
+}
 /* The Next steps mark in a card's head: an accent pill, quiet enough to sit next to the state. */
 .ask-option__pill {
   flex: none;
