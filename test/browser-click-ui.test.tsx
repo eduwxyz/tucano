@@ -175,7 +175,7 @@ describe('the settings page', () => {
   it('keeps Classifier Uses off the same job, so the two surfaces stay one choice', () => {
     expect(pages).toContain('<ClassifierUsesCard />')
     const uses = pages.slice(pages.indexOf('export function ClassifierUsesCard'), pages.indexOf('export function BrowserClickCard'))
-    expect(uses).toContain("CLASSIFIER_JOBS.map((job) => (")
+    expect(uses).toContain("CLASSIFIER_JOBS.map((job) => {")
     expect(uses).toContain('updateSettings({ classifierJobs: next })')
   })
 })
