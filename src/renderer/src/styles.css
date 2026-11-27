@@ -14449,7 +14449,7 @@ button.agent-card__now:hover {
 .bd.flat .bd-wrap { display: flex; flex-direction: column; overflow-x: auto; overflow-y: hidden; padding-bottom: 12px; }
 .bd.flat .bd-cols { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 .bd.flat .bd-ch { position: static; background: none; }
-.bd.flat .bd-col { align-self: stretch; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-bottom: 12px; }
+.bd.flat .bd-col { align-self: stretch; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; }
 
 /* Who's on a task: overlapping faces. */
 .bd-crew { display: inline-flex; flex: none; }
