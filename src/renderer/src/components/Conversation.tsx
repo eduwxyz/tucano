@@ -2920,12 +2920,26 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
             </button>
           ))}
           {outsiders.length > 0 && (
-            <div className="mention-menu__hint">
-              {outsiders.map((a) => a.name).join(', ')} {L(`não ${outsiders.length === 1 ? 'está' : 'estão'} neste canal.`, `${outsiders.length === 1 ? 'isn’t' : 'aren’t'} in this channel.`)}{' '}
-              <button className="link" onMouseDown={(e) => (e.preventDefault(), openDm(outsiders[0]!.id))}>
-                {L('Abrir DM', 'Open DM')}
-              </button>
-            </div>
+            <>
+              <div className={`mention-menu__hint ${options.length > 0 ? 'has-divider' : ''}`}>
+                {isDm
+                  ? L(`Só ${members[0]?.name ?? 'o agente'} responde aqui; mencioná-los não chama ninguém.`, `Only ${members[0]?.name ?? 'the agent'} replies here; mentioning these won’t call them.`)
+                  : L('Fora deste canal', 'Not in this channel')}
+              </div>
+              <div className="mention-menu__outsiders">
+                {outsiders.map((a) => (
+                  <div key={a.id} className="mention-menu__outsider">
+                    <AgentAvatar agent={a} size={20} />
+                    <span className="mention-menu__who">
+                      <strong>{a.name}</strong> <span className="muted">@{a.handle}</span>
+                    </span>
+                    <button className="link" onMouseDown={(e) => e.preventDefault()} onClick={() => void openDm(a.id)}>
+                      {L('Abrir DM', 'Open DM')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
