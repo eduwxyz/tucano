@@ -27,7 +27,22 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 # The harnesses, on the image so an image update updates them. Their own updaters stay off: they
 # couldn't write here anyway, and a container should change only with its image.
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli opencode-ai @earendil-works/pi-coding-agent && npm cache clean --force
+RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli @earendil-works/pi-coding-agent && npm cache clean --force
+# OpenCode 2: npm's opencode-ai is still the 1.x line, so its own release, checked against its SHA-256.
+# 2.x keeps its logins in its database in the home (the volume), next to its other data. A new version
+# takes its two sums from the release's SHA256SUMS.
+RUN ver=2.3.2 \
+  && case "$(dpkg --print-architecture)" in \
+      amd64) arch=x64 sum=563b5d663637226b6e3bb4bb6803281bc39b0d2cd88db06d674b6420aab009b0 ;; \
+      arm64) arch=arm64 sum=9d10185acdb72336e086e699ca363a6065f410fd3c1caed0dc8046e95ac06ccb ;; \
+      *) echo "no OpenCode build for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+  && curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${ver}/opencode-linux-${arch}.tar.gz" \
+  && echo "${sum}  /tmp/opencode.tar.gz" | sha256sum -c - \
+  && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
+  && chmod 755 /usr/local/bin/opencode \
+  && rm /tmp/opencode.tar.gz \
+  && opencode --version
 # Cursor's, Grok's and Antigravity's CLIs come from their own installers, which install into a home: one of
 # the image's (/home/tucano is the volume, and an image update wouldn't reach it), linked onto the PATH.
 RUN HOME=/opt/harnesses bash -c 'curl -fsS https://cursor.com/install | bash && curl -fsSL https://x.ai/cli/install.sh | bash && curl -fsSL https://antigravity.google/cli/install.sh | bash' \
