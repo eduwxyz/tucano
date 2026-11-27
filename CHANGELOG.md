@@ -4,6 +4,10 @@ What changed in each version of Tucano. The format follows [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Changed
+
+- **The Docker image runs OpenCode 2.** npm's `opencode-ai` is still the 1.x line, so the image installed OpenCode 1.19, which answers a model it can't reach (an OpenCode Go model without the Go login, say) with "Unexpected server error. Check server logs for details." The image now takes OpenCode 2.3.2 from its GitHub release, checked against its SHA-256, and Tucano already runs 2.x its own way. The reason now reaches Settings › Models, as in "This OpenCode Go model is hosted outside Europe and the United States". Logins made with 1.x carry over: 2.x reads the old `auth.json` in the volume on its first start.
+
 ### Fixed
 
 - **Settings tabs answer clicks wherever the page is scrolled.** Once the page scrolled, the tabs and subject jumps parked at the very top, under the strip that drags the window, and on a Mac a click there moved the window instead: the tabs only worked back at the top of the page. They now park just below that strip, which takes the page's background on Settings, and a subject jump lands under them as before.
