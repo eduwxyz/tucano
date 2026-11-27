@@ -6428,6 +6428,15 @@ table.csv th {
   background: var(--panel);
   -webkit-app-region: no-drag;
 }
+/* Under the page's drag strip, not beneath it: macOS takes a click there as dragging the window,
+   whatever sits on top, so tabs parked at the very top could only be clicked back at the page's top.
+   The strip gets the page's background, so what scrolls by doesn't show above the tabs. */
+.page:has(> .page__drag) .settings-sticky {
+  top: 28px;
+}
+.page:has(> .page__drag):has(.settings-sticky) > .page__drag {
+  background: var(--panel);
+}
 .settings-groups {
   display: flex;
   justify-content: center;
