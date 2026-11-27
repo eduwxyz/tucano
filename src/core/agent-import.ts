@@ -235,7 +235,7 @@ function openBotAgent(zip: Zip, a: Record<string, unknown>): ForeignAgent | unde
 function openBotModel(provider: string, model: string): { modelId?: string; note?: string } {
   const engines: Record<string, EngineId> = { claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', antigravity: 'antigravity', cursor: 'cursor' }
   const engine = engines[provider]
-  if (engine === 'claude') return { modelId: /opus/i.test(model) ? 'opus' : /haiku/i.test(model) ? 'haiku' : 'sonnet' }
+  if (engine === 'claude') return { modelId: /fable/i.test(model) ? 'fable' : /opus/i.test(model) ? 'opus' : /haiku/i.test(model) ? 'haiku' : 'sonnet' }
   if (engine === 'codex') return model ? { modelId: codexValue(model) } : {}
   if (engine) return model ? { modelId: customModel(engine, model) } : {}
   return { note: L(`o modelo ${model || provider} (${provider} não roda no Tucano: ficou o modelo padrão)`, `the ${model || provider} model (${provider} doesn't run on Tucano: it got the default model)`) }

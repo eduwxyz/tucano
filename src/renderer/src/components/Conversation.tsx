@@ -2,17 +2,16 @@ import { captureThoughtLine, restoreThoughtLine, type ThoughtLine } from '../tho
 import { L, lang, locale } from '../../../shared/lang'
 import { overMonthlyLimit } from '../../../shared/limits'
 import { sectorName } from '../../../shared/org'
-import { withMessage } from '../../../shared/attach'
 import { actionLabel, innerActions, isRunner } from '../../../shared/composio'
 import { neverAllowedForGood, ruleTool, runnerRules } from '../../../shared/classify'
 import { kindLabel, actionVerb, COMPUTADOR, shellActions } from '../../../shared/actions'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Markdown, { type ExtraProps } from 'react-markdown'
 import { safeUrl } from '../links'
 import { remarkLocalPaths } from '../../../shared/path-text'
 import { remarkMentions, splitMentions } from '../../../shared/mention-text'
-import { saidAt } from '../../../shared/types'
-import { CUT, canContinue } from '../../../shared/run-progress'
+import { saidAt, type Run } from '../../../shared/types'
+import { CUT, WORKLESS_LABELS, canContinue } from '../../../shared/run-progress'
 import { localLinkFor } from './LocalLink'
 import remarkGfm from 'remark-gfm'
 import { KeepInWiki, WikiChip, WikiLink, wikiLinks } from './Wiki'
@@ -23,6 +22,7 @@ import { canEditChannel,
   agentById,
   approvalsIn,
   askerIn,
+  threadAsksIn,
   messagesIn,
   attachedTo,
   conversationIndex,
@@ -66,6 +66,7 @@ import { canEditChannel,
   countedTokens,
   sendMessage,
   updateSettings,
+  toast,
   typing,
   setTab,
   stopRun,
@@ -78,15 +79,10 @@ import { canEditChannel,
   type Approval,
   type Artifact,
   type Conversation,
-  type ImageUpload,
   type Author,
   type DelegationRef,
   type Message,
   type Step,
-  IMAGE_MIMES,
-  MAX_IMAGES_PER_MESSAGE,
-  MAX_FILE_BYTES,
-  MAX_FILES_PER_MESSAGE,
   isTeam,
   isMac,
   cancelTranscribe,
@@ -99,10 +95,12 @@ import { canEditChannel,
   confirmQuestion,
   personById,
   teamMode,
-  type Person
+  type Person,
+  type State
 } from '../store'
 import { askWay } from './OrgSectors'
 import { runStep } from '../board'
+import { AttachButton, AttachedList, DropOverlay, pastedFiles, touchScreen, uploadsOf, useAttachments, useFileDrop, type Attached } from './Attachments'
 import { AgentAvatar, Icon, MeAvatar, ago, ownColor, duration, time, tokens, usd, useJustEnded } from './ui'
 import { KeyRequestCard } from './Vault'
 import { historyStatus } from '../approval-history'
@@ -349,9 +347,6 @@ export function ComputerOff({ agent }: { agent: Agent }): ReactNode {
 }
 
 const NO_REPLIES: Message[] = []
-// A phone or a tablet: focusing the message field there raises the keyboard over the
-// conversation, so it only takes the focus when the person taps it.
-const touchScreen = (): boolean => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches
 
 // `replies`: a timeline with threads, where each message can start one (its replies by its id).
 // `older`: there's more before the first message, loaded as the scroll gets near the top.
@@ -539,6 +534,39 @@ const NO_ATTACHED: Artifact[] = []
 // `replies`: in a timeline with threads, the replies to this message (none yet: empty).
 // `ask`: on a routine's run, the message the routine posted: a chip by the name that opens it (`askReplies`: its thread).
 // Memoized because each word an agent streams redraws the list: only the row that changed should pay for it.
+// A step that came back and finished, beyond the row that closes a cut reply: evidence that the words
+// after it are an answer, not narration from a reply stopped while it was still thinking.
+const answered = (run: Run): boolean =>
+  (run.steps ?? []).some((s) => s.status === 'done' && s.kind !== 'steer' && !WORKLESS_LABELS.includes(s.label))
+
+// The glyph is for a finished reply, and for a stopped one whose words came after work came back.
+export const canCopyMarkdown = (message: Message): boolean =>
+  message.author.kind === 'agent' && !!message.text.trim() && (message.run?.status === 'done' || (message.run?.status === 'stopped' && answered(message.run)))
+
+// The reply as it was written, not as the screen drew it: its own Markdown, on the clipboard, for a
+// note, a doc or another window. It sits at the head of a finished reply's footer, before its numbers.
+export function CopyMarkdown({ text }: { text: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true)
+        if (timer.current) window.clearTimeout(timer.current)
+        timer.current = window.setTimeout(() => setCopied(false), 1600)
+      })
+      .catch(() => toast(L('Não deu pra copiar a resposta.', 'Could not copy the reply.')))
+  }
+  const label = L('Copiar como Markdown', 'Copy as Markdown')
+  return (
+    <button type="button" className={`msg__copy${copied ? ' is-copied' : ''}`} title={label} aria-label={label} onPointerDown={(e) => e.preventDefault()} onClick={copy}>
+      <Icon name={copied ? 'check' : 'copy'} size={16} />
+    </button>
+  )
+}
+
 const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, askReplies }: { message: Message; grouped: boolean; replies?: Message[]; ask?: Message; askReplies?: Message[] }): ReactNode {
   const me = useStore((s) => s.me)
   // In the timeline (not as the thread's own heading), lit while its thread is open on the side.
@@ -561,6 +589,13 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
   const [showSaid, setShowSaid] = useState(false)
   const [showAsk, setShowAsk] = useState(false)
   const quiet = message.author.kind === 'agent' && !!message.run?.delegations?.length && message.run.status === 'done' && questionsOf(message.run).length === 0
+  // Each request once: a reply saved before follow-ups stopped being listed again may hold one twice.
+  const handedTo = (message.run?.delegations ?? []).filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i)
+  const copyable = canCopyMarkdown(message)
+  const stoppedAnswer = message.author.kind === 'agent' && message.run?.status === 'stopped' && !!message.text.trim() && answered(message.run)
+  const hasFooter = stoppedAnswer || !!message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)
+  const resumable = !!message.run && (message.run.status === 'paused' || (CUT.includes(message.run.status) && canContinue(message.run)))
+  const retryable = !!message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit))))
 
   // The same object between renders, or every link would start over.
   const agentMarkdown = useMemo(() => ({ pre: CodeBlock, a: localLinkFor(message.id), span: MentionSpan }), [message.id])
@@ -681,7 +716,7 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
         {message.run?.feedbackDraft && <FeedbackDraftCard message={message} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
-        {message.run?.delegations?.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
+        {handedTo.map((d) => <DelegationChip key={d.id} at={d} from={agent?.id} asked />)}
         {message.run?.delegation && message.conversationId !== message.run.delegation.conversationId && <DelegationChip at={message.run.delegation} from={agent?.id} />}
         {message.run?.delegation && message.id === message.run.delegation.rootId && <RequestNote at={message.run.delegation} from={agent?.name} />}
         {message.run?.wikiChanges?.map((cid) => <WikiChip key={cid} id={cid} />)}
@@ -705,38 +740,31 @@ const MessageRow = memo(function MessageRow({ message, grouped, replies, ask, as
           </Details>
         )}
         {message.run?.status === 'paused' && (
-          <>
-            <div className="note">
-              {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
-              <span className="muted">{L('O teto por resposta muda em Configurações › Agentes › Limites; não é o limite mensal do agente.', 'The ceiling per reply is set in Settings › Agents › Limits; it isn’t the agent’s monthly limit.')}</span>
-            </div>
-            <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
-              {L('Continuar', 'Continue')}
-            </button>
-          </>
-        )}
-        {/* Cut with work behind it, the reply goes on instead of starting over: what it read, wrote and ran
-            is in the task the new reply reads, so nothing it already did is done twice (#390). */}
-        {message.run && CUT.includes(message.run.status) && canContinue(message.run) && (
-          <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
-            {L('Continuar', 'Continue')}
-          </button>
-        )}
-        {/* At the limit, trying again only helps once the limit went up: until then, the way out is raising it.
-            With no monthly limit set, nothing is ever over it: the reply is just to be tried again. */}
-        {message.run && (['failed', 'stopped', 'interrupted'].includes(message.run.status) || (message.run.status === 'limit_reached' && (!agent || !overMonthlyLimit(agent.used, agent.limit)))) && (
-          <TryAgain messageId={message.id} />
+          <div className="note">
+            {L(`Pausei: cheguei no teto desta resposta (${tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?`, `Paused: I hit this reply’s ceiling (${tokens(message.run.budget ?? 0)} tokens). Shall I pick up where I left off?`)}{' '}
+            <span className="muted">{L('O teto por resposta muda em Configurações › Agentes › Limites; não é o limite mensal do agente.', 'The ceiling per reply is set in Settings › Agents › Limits; it isn’t the agent’s monthly limit.')}</span>
+          </div>
         )}
         {message.run?.status === 'limit_reached' && agent && overMonthlyLimit(agent.used, agent.limit) && (
-          <button className="btn btn--xs retry" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
+          <button className="steps__ask-pill retry msg__hire" onClick={() => (setTab('agent', 'perfil'), navigate({ kind: 'agent', id: agent.id }))}>
             {L(`Aumentar o limite de ${agent.name}`, `Raise ${agent.name}’s limit`)}
           </button>
         )}
-        {/* A request and what came back from one are posted, not replies: nothing there to keep in the wiki. */}
-        {(message.run?.receipt || (message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && !message.run.delegation)) && (
+        {(hasFooter || resumable || retryable) && (
           <div className="msg__meta">
-            {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
-            {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
+            {resumable && (
+              <button className="steps__ask-pill retry msg__hire" aria-label={L('Continuar', 'Continue')} onClick={() => continueRun(message.id)}>
+                <Icon name="play" size={11} /><span className="steps__ask-pill__word">{L('Continuar', 'Continue')}</span>
+              </button>
+            )}
+            {retryable && <TryAgain messageId={message.id} />}
+            {hasFooter && (
+              <>
+                {copyable && <CopyMarkdown text={message.text} />}
+                {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+                {message.run?.status === 'done' && message.text.trim() && !message.run.wikiChanges?.length && (!message.run.delegation || message.run.receipt) && <KeepInWiki messageId={message.id} />}
+              </>
+            )}
           </div>
         )}
         {message.author.kind === 'person' && !message.threadId && <AskedFromHere message={message} />}
@@ -777,11 +805,11 @@ function TryAgain({ messageId }: { messageId: string }): ReactNode {
   }
   return (
     <>
-      <button className="btn btn--xs retry" onClick={() => retry()}>
-        {L('Tentar de novo', 'Try again')}
+      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar de novo', 'Try again')} onClick={() => retry()}>
+        <Icon name="retry" size={11} /><span className="steps__ask-pill__word">{L('Tentar de novo', 'Try again')}</span>
       </button>
-      <button className="btn btn--xs retry" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        {L('Tentar com instruções', 'Try with instructions')}
+      <button className="steps__ask-pill retry msg__hire" aria-label={L('Tentar com instruções', 'Try with instructions')} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <Icon name="edit" size={11} /><span className="steps__ask-pill__word">{L('Tentar com instruções', 'Try with instructions')}</span>
       </button>
       {open && (
         <div className="retry-note">
@@ -2171,10 +2199,12 @@ function CallApprovalCard({ approval, compact }: { approval: Approval; compact?:
   const decided = approval.state !== 'pending'
   // A command on the agent's computer: what it does, in words.
   const onComputer = approval.connectorId === COMPUTADOR
-  const kinds = onComputer ? shellActions(String(approval.args['command'] ?? '')) : []
+  // A command on a lent computer goes as one on this computer's: only its kind of action is ever allowed for good.
+  const command = onComputer || approval.tool === 'node_bash'
+  const kinds = command ? shellActions(String(approval.args['command'] ?? '')) : []
   // "Sempre permitir": a connector tool for good, or, for a command or a PR, that kind of action on the agent's page.
-  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!onComputer || kinds.length > 0)
-  const alwaysTitle = onComputer
+  const canAlways = approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && approval.connectorId !== 'apps' && !runner && !neverAllowedForGood(approval.tool) && (!command || kinds.length > 0)
+  const alwaysTitle = command
     ? L(`Daqui pra frente ${agent?.name ?? 'o agente'} faz sozinho: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. Dá pra mudar na página dele.`, `From now on ${agent?.name ?? 'the agent'} does it alone: ${kinds.map((k) => kindLabel(k).toLowerCase()).join(', ')}. You can change it on its page.`)
     : L(`Daqui pra frente ${agent?.name ?? 'o agente'} usa “${toolWords(approval.tool)}” no ${approval.connectorName} sem pedir, em qualquer chamada, mesmo depois de ler algo de fora. Dá pra tirar na página dele.`, `Allow ${agent?.name ?? 'the agent'} to use “${toolWords(approval.tool)}” in ${approval.connectorName} without approval on any call, even after reading external content. Revoke this on its page.`)
   const face = approvalFace(approval)
@@ -2378,60 +2408,8 @@ function ApprovalRoute({ approval, agent, requester, decider, you }: { approval:
   )
 }
 
-// Images go to the models as they are when small; big ones are scaled down
-// (longest side MAX_SIDE) and re-encoded, so any screenshot or photo fits.
-const MAX_SIDE = 2000
-const MAX_RAW = 3_700_000 // base64 under the models' 5 MB
-
-// An image (with what shows it) or, in the app, any other file: `url` empty, its text goes to the agents.
-type Attached = ImageUpload & { url: string; size?: number }
-const isFile = (a: Attached): boolean => !a.url
-
-const dataUrlOf = (blob: Blob): Promise<string> =>
-  new Promise((ok, fail) => {
-    const r = new FileReader()
-    r.onload = () => ok(String(r.result))
-    r.onerror = () => fail(r.error)
-    r.readAsDataURL(blob)
-  })
-
-async function prepareFile(file: File): Promise<Attached | string> {
-  if (file.size === 0) return L(`${file.name} está vazio.`, `${file.name} is empty.`)
-  if (file.size > MAX_FILE_BYTES) return L(`${file.name} passa de ${MAX_FILE_BYTES / 1024 / 1024} MB.`, `${file.name} is over ${MAX_FILE_BYTES / 1024 / 1024} MB.`)
-  try {
-    const url = await dataUrlOf(file)
-    return { name: file.name || L('arquivo', 'file'), mime: file.type || 'application/octet-stream', data: url.slice(url.indexOf(',') + 1), url: '', size: file.size }
-  } catch {
-    return L(`Não deu pra abrir ${file.name}.`, `${file.name} couldn't be opened.`)
-  }
-}
-
-async function prepareImage(file: File): Promise<Attached | string> {
-  if (!file.type.startsWith('image/')) return L(`${file.name} não é imagem.`, `${file.name} isn't an image.`)
-  try {
-    const src = await dataUrlOf(file) // the page's CSP takes data: images, not blob:
-    const img = new Image()
-    img.src = src
-    await img.decode()
-    const side = Math.max(img.naturalWidth, img.naturalHeight)
-    let blob: Blob = file
-    if (!IMAGE_MIMES.includes(file.type) || side > MAX_SIDE || file.size > MAX_RAW) {
-      const k = Math.min(1, MAX_SIDE / side)
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(img.naturalWidth * k)
-      canvas.height = Math.round(img.naturalHeight * k)
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      const encode = (type: string, q?: number): Promise<Blob | null> => new Promise((ok) => canvas.toBlob(ok, type, q))
-      blob = (file.type === 'image/png' && (await encode('image/png'))) || file
-      if (blob === file || blob.size > MAX_RAW) blob = (await encode('image/jpeg', 0.88)) ?? file
-    }
-    if (blob.size > MAX_RAW) return L(`${file.name} é grande demais.`, `${file.name} is too big.`)
-    const url = blob === file ? src : await dataUrlOf(blob)
-    return { name: file.name || L('imagem', 'image'), mime: blob.type, data: url.slice(url.indexOf(',') + 1), url }
-  } catch {
-    return L(`Não deu pra abrir ${file.name}. Tente salvar de novo ou mandar outra imagem.`, `${file.name} couldn't be opened. Try saving it again or send another image.`)
-  }
-}
+// The paste rule lives with the attachments now; the composer's tests still reach it from here.
+export { pastedFiles }
 
 // One draft per conversation (and per thread), kept while the app runs: leaving a
 // channel doesn't lose the message you were typing.
@@ -2611,7 +2589,8 @@ export function useDictation(insert: (text: string) => void, setNote: (note: str
   return [state, { press, release, stop, cancel, startedAt: () => startedAt.current }]
 }
 
-export function VoiceButton({ controls, state }: { controls: DictationControls; state: DictationState }): ReactNode {
+// `clock={false}`: where the button sits inside a field, the time goes elsewhere (the decisions card's footer).
+export function VoiceButton({ controls, state, clock = true }: { controls: DictationControls; state: DictationState; clock?: boolean }): ReactNode {
   const platform = useStore((s) => s.platform)
   const hidden = useStore((s) => !!s.settings.voice?.hidden)
   const status = useVoice()
@@ -2666,13 +2645,13 @@ export function VoiceButton({ controls, state }: { controls: DictationControls; 
       >
         <Icon name="mic" size={15} />
       </button>
-      {on && <RecordingClock since={controls.startedAt()} />}
+      {on && clock && <RecordingClock since={controls.startedAt()} />}
     </span>
   )
 }
 
 // While it records: for how long, and how to end it.
-function RecordingClock({ since }: { since: number }): ReactNode {
+export function RecordingClock({ since }: { since: number }): ReactNode {
   const [, tick] = useState(0)
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 500)
@@ -2692,17 +2671,6 @@ function RecordingClock({ since }: { since: number }): ReactNode {
 const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
 const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'word-spacing', 'tab-size', 'text-transform', 'text-indent', 'padding']
 
-// What a paste attaches. Copying text from a spreadsheet, a page or a document often brings a
-// picture of it too: that pastes as the text, not as an image the person never meant to send.
-// A file copied in Finder or Explorer comes with its name as the text, and still attaches.
-export function pastedFiles(files: File[], text: string, server: boolean): File[] {
-  const usable = files.filter((f) => server || f.type.startsWith('image/'))
-  const typed = text.trim()
-  if (!usable.length || !typed) return usable
-  const names = new Set(files.map((f) => f.name))
-  return typed.split(/\r?\n/).every((line) => names.has(line.trim().split('/').pop() ?? '')) ? usable : []
-}
-
 // `threadId`: it answers in the thread that message started, not in the conversation.
 // `tools`: a screen's own control in the bar (the Tuca's model, on his builder screen), in place of the hint.
 // notice: one quiet line tucked above the field (a computer its agent uses is off).
@@ -2711,13 +2679,11 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   // The field starts with the conversation's draft, not empty: StrictMode (in dev) unmounts
   // and mounts again at once, and saving an empty first render would wipe the draft.
   const [text, setText] = useState(() => drafts.get(key)?.text ?? '')
-  const [images, setImages] = useState<Attached[]>(() => drafts.get(key)?.images ?? [])
-  const [note, setNote] = useState('')
-  const [dragging, setDragging] = useState(false)
-  const picker = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null)
   const [active, setActive] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const focusField = useCallback((): void => void (touchScreen() || ref.current?.focus()), [])
+  const { items: images, setItems: setImages, note, setNote, add: addFiles } = useAttachments(focusField, setText, drafts.get(key)?.images)
   const mirror = useRef<HTMLDivElement>(null)
   const platform = useStore((s) => s.platform)
   const agents = useStore((s) => s.agents)
@@ -2734,13 +2700,25 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   const waiting = useStore((s) => approvalsIn(s, conversationId, threadId))
   // With a team, only a question my message would answer (mine, or one I may answer) asks me here.
   // The message itself, not just the name: the strip above the field needs what was asked.
+  const mayAnswer = (s: State, q: Message): boolean => !(teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending'))
   const asked = useStore((s) => {
     const q = askerIn(s, conversationId, threadId)
-    if (q && teamMode(s) && q.run?.askedTo && !s.inbox.questions.some((x) => x.id === q.id && x.confirm !== 'pending')) return undefined
-    return q
+    return q && mayAnswer(s, q) ? q : undefined
   })
   const askerId = asked?.author.kind === 'agent' ? asked.author.id : undefined
   const asker = useStore((s) => (askerId ? agentById(s, askerId)?.name : undefined))
+  // In the channel, a question left in one of its threads (but not in the thread already open beside
+  // it, which shows its own): the oldest one, and how many there are. Only the strip points at it;
+  // what's typed here still goes to the channel.
+  const inThreads = useStore((s) => {
+    if (threadId) return undefined
+    const open = s.panel?.kind === 'thread' ? s.panel.id : undefined
+    const qs = threadAsksIn(s, conversationId).filter((q) => q.threadId !== open && mayAnswer(s, q))
+    const first = qs[0]
+    return first ? { q: first, n: qs.length } : undefined
+  })
+  const threadAsker = useStore((s) => (inThreads?.q.author.kind === 'agent' ? agentById(s, inThreads.q.author.id)?.name : undefined))
+  const strip = asked ? { q: asked, who: asker, n: 1 } : inThreads && { q: inThreads.q, who: threadAsker, n: inThreads.n }
 
   // What's typed but not sent, per conversation, so leaving a channel and coming
   // back keeps it (like a draft). In memory: closing the app drops the drafts.
@@ -2766,78 +2744,13 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
     }
   }, [key])
 
-  const addFiles = async (all: File[]): Promise<void> => {
-    if (!all.length) return
-    // On a server too, a file goes with the message, and its text to the agents. Only one too big for
-    // that (or for what a browser's request holds) goes up to the server (~/Enviados) and the message
-    // says where: an agent with a computer opens it there, and the link brings it back down.
-    const upload = window.tucano.upload
-    const held = live.current.images.filter(isFile).reduce((n, a) => n + (a.size ?? 0), 0)
-    const goes = upload ? withMessage(all, held) : all.map(() => true)
-    const files = all.filter((_, i) => goes[i])
-    const others = all.filter((_, i) => !goes[i])
-    if (others.length && upload) {
-      setNote(L(`Enviando ${others.length === 1 ? others[0]!.name : `${others.length} arquivos`}…`, `Sending ${others.length === 1 ? others[0]!.name : `${others.length} files`}…`))
-      const sent = await Promise.allSettled(others.map((f) => upload(f, 'message')))
-      const paths = sent.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
-      if (paths.length) setText((t) => `${t.trim() ? `${t.trimEnd()}\n` : ''}${paths.map((p) => L(`Arquivo enviado: \`${p}\``, `File sent: \`${p}\``)).join('\n')}`)
-      const failed = sent.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-      setNote(failed ? String(failed.reason instanceof Error ? failed.reason.message : failed.reason) : '')
-      if (!files.length) return void (touchScreen() || ref.current?.focus())
-    }
-    if (!files.length) return
-    // In the app, a file that isn't an image goes with the message, and its text to the agents.
-    const done = await Promise.all(files.map((f) => (f.type.startsWith('image/') ? prepareImage(f) : prepareFile(f))))
-    const ok = done.filter((d): d is Attached => typeof d !== 'string')
-    const errors = done.filter((d): d is string => typeof d === 'string')
-    let over = ''
-    setImages((cur) => {
-      const all = [...cur, ...ok]
-      const pics = all.filter((a) => !isFile(a))
-      const docs = all.filter(isFile)
-      over = pics.length > MAX_IMAGES_PER_MESSAGE ? L(`Até ${MAX_IMAGES_PER_MESSAGE} imagens por mensagem.`, `Up to ${MAX_IMAGES_PER_MESSAGE} images per message.`) : docs.length > MAX_FILES_PER_MESSAGE ? L(`Até ${MAX_FILES_PER_MESSAGE} arquivos por mensagem.`, `Up to ${MAX_FILES_PER_MESSAGE} files per message.`) : ''
-      return [...pics.slice(0, MAX_IMAGES_PER_MESSAGE), ...docs.slice(0, MAX_FILES_PER_MESSAGE)]
-    })
-    setNote([...errors, over].filter(Boolean).join(' '))
-    if (!touchScreen()) ref.current?.focus()
-  }
-
   // A file dropped anywhere in the window comes here (and never opens in place of the app).
   // With a thread open there are two fields: a drop on the thread goes to its own.
   const inThread = !!threadId
-  useEffect(() => {
-    let depth = 0
-    const files = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
-    const mine = (e: DragEvent): boolean => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread
-    const enter = (e: DragEvent): void => {
-      if (!files(e)) return
-      depth++
-      setDragging(true)
-    }
-    const over = (e: DragEvent): void => {
-      if (files(e)) e.preventDefault()
-    }
-    const leave = (e: DragEvent): void => {
-      if (files(e) && --depth <= 0) (depth = 0), setDragging(false)
-    }
-    const drop = (e: DragEvent): void => {
-      if (!files(e)) return
-      e.preventDefault()
-      depth = 0
-      setDragging(false)
-      if (mine(e)) void addFiles([...(e.dataTransfer?.files ?? [])])
-    }
-    window.addEventListener('dragenter', enter)
-    window.addEventListener('dragover', over)
-    window.addEventListener('dragleave', leave)
-    window.addEventListener('drop', drop)
-    return () => {
-      window.removeEventListener('dragenter', enter)
-      window.removeEventListener('dragover', over)
-      window.removeEventListener('dragleave', leave)
-      window.removeEventListener('drop', drop)
-    }
-  }, [inThread])
+  const dragging = useFileDrop(
+    (e) => !!(e.target instanceof Element && e.target.closest('.side-panel--thread')) === inThread,
+    (files) => void addFiles(files)
+  )
 
   // The field grows with its text, up to a point. With CSS field-sizing (Electron has it) that takes no
   // measuring on each key; elsewhere (a browser, on a server) the height is set from the text.
@@ -2943,13 +2856,8 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
   // past them it waits its turn (see `send` in src/core/runs.ts). A running reply is steered from its own pill.
   const submit = (): void => {
     if (!text.trim() && images.length === 0) return
-    sendMessage(
-      conversationId,
-      text,
-      images.filter((a) => !isFile(a)).map(({ name, mime, data }) => ({ name, mime, data })),
-      threadId,
-      images.filter(isFile).map(({ name, data }) => ({ name, data }))
-    )
+    const { images: pics, files } = uploadsOf(images)
+    sendMessage(conversationId, text, pics, threadId, files)
     drafts.delete(key)
     live.current = { text: '', images: [] } // gone with the message, even if the field goes before it draws again
     setText('')
@@ -2995,15 +2903,7 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
           </button>
         </div>
       )}
-      {dragging && !inThread && (
-        <div className="drop-overlay">
-          <div className="drop-overlay__card">
-            <Icon name="image" size={28} />
-            <strong>{L('Solte pra anexar', 'Drop to attach')}</strong>
-            <span className="muted">{L('Os agentes veem o conteúdo junto com a mensagem.', 'Agents see the content along with the message.')}</span>
-          </div>
-        </div>
-      )}
+      {dragging && !inThread && <DropOverlay who={L('Os agentes veem o conteúdo junto com a mensagem.', 'Agents see the content along with the message.')} />}
       {mention && (options.length > 0 || outsiders.length > 0) && (
         <div className="mention-menu" role="listbox">
           {options.map((o, i) => (
@@ -3033,30 +2933,9 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
       )}
       {notice}
       {/* Only where it can take you to the card: the intro's short chats have it in plain sight. */}
-      {asked && onJump && <AskStrip asked={asked} who={asker} onOpen={() => onJump(asked.id, asked.threadId)} />}
+      {strip && onJump && <AskStrip asked={strip.q} who={strip.who} inThread={!asked} more={strip.n - 1} onOpen={() => onJump(strip.q.id, strip.q.threadId)} />}
       <div className="composer">
-        {images.length > 0 && (
-          <div className="composer__images">
-            {images.map((img, i) =>
-              isFile(img) ? (
-                <div key={i} className="composer__file" title={img.name}>
-                  <Icon name="clip" size={13} />
-                  <span className="composer__file-name">{img.name}</span>
-                  <button className="composer__file-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
-                    <Icon name="x" size={11} />
-                  </button>
-                </div>
-              ) : (
-              <div key={i} className="composer__image" title={img.name}>
-                <img src={img.url} alt={img.name} />
-                <button className="composer__image-x" title={L('Tirar', 'Remove')} onClick={() => setImages(images.filter((_, j) => j !== i))}>
-                  <Icon name="x" size={11} />
-                </button>
-              </div>
-              )
-            )}
-          </div>
-        )}
+        <AttachedList items={images} onRemove={(i) => setImages(images.filter((_, j) => j !== i))} />
         <div className="composer__field">
           <div ref={mirror} className="composer__mirror" aria-hidden>
             {painted}
@@ -3101,22 +2980,10 @@ export function Composer({ conversationId, threadId, members, placeholder, tools
         </div>
         <div className="composer__bar">
           <VoiceButton controls={voiceControls} state={voice} />
-          <button className="icon-btn" title={L('Anexar arquivo ou imagem (ou arraste e solte, ou cole)', 'Attach a file or an image (or drag and drop, or paste)')} onClick={() => picker.current?.click()}>
-            <Icon name="clip" size={15} />
-          </button>
-          <input
-            ref={picker}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              void addFiles([...(e.target.files ?? [])])
-              e.target.value = ''
-            }}
-          />
+          <AttachButton add={(files) => void addFiles(files)} />
           {tools}
           <span className={`composer__hint ${note ? 'composer__hint--warn' : ''}`}>
-            {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('Nada é criado sem você', 'Nothing is created without you') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
+            {note || (tools ? '' : members[0]?.kind === 'tuca' ? L('O Tuca passa pra quem do time faz', 'Tuca passes it to whoever on the team does it') : threadId ? L('Fica nesta thread · @ chama alguém', 'Stays in this thread · @ calls someone') : isDm ? L(`${members[0]?.name ?? 'O agente'} sempre responde aqui`, `${members[0]?.name ?? 'The agent'} always replies here`) : L('Quem estiver no canal responde · pra chamar alguém, use @', 'Whoever is in the channel replies · to call on someone, use @'))}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((id) => stopRun(id))}>

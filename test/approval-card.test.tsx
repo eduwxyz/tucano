@@ -118,6 +118,13 @@ describe('the approval card', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b))
   })
 
+  it('a bare command on a lent computer offers no "always allow": only a kind of action can be allowed for good', () => {
+    const lent = (command: string): Approval => approval({ connectorId: 'node-mac', connectorName: 'Mac da Ana', tool: 'node_bash', args: { command } })
+    expect(card(lent('ls -la'))).not.toContain('approval__allow')
+    // A command with a kind keeps it, as on this computer: the kind turns to "does it alone".
+    expect(card(lent('git push'))).toContain('approval__allow')
+  })
+
   it('refused keeps who refused it and the reason', () => {
     const html = card(approval({ state: 'refused', decidedBy: 'ana', decidedAt: 2_000, reason: 'not now', outcome: 'Nada foi executado.' }))
     expect(html).toContain('Recusado')

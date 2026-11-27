@@ -40,6 +40,7 @@ import {
   type Settings
 } from '../store'
 import { Icon } from './ui'
+import { primaryAccountOf } from '../../../shared/primary-login'
 import { EngineProblem } from './EngineProblem'
 import { Select } from './Select'
 
@@ -205,6 +206,13 @@ const ROUTE = (): Record<NonNullable<EngineStatus['route']>, { label: string; to
 export function HarnessList(): ReactNode {
   const engines = useStore((s) => s.settings.engines)
   const chosen = useStore((s) => s.settings.harnesses)
+  // A saved pick whose check says it is not installed has no active checkbox to turn it off. Before
+  // the check finishes, installed:false means unknown, so keep every pick until the statuses settle.
+  useEffect(() => {
+    if (!chosen || ENGINE_IDS.some((e) => engines[e].checking)) return
+    const keep = chosen.filter((e) => engines[e].installed)
+    if (keep.length !== chosen.length) updateSettings({ harnesses: keep })
+  }, [chosen, engines])
   // Unpicked: the ones ready to run. Picking one off keeps the rest as they are.
   const picked = (e: EngineId): boolean => (chosen ? chosen.includes(e) : startsPicked(engines[e]))
   const toggle = (e: EngineId): void => {
@@ -565,7 +573,15 @@ export function HarnessMcps({ onAdded }: { onAdded: (id: string) => void }): Rea
 export function AccountsCard(): ReactNode {
   const accounts = useStore((s) => s.settings.accounts ?? [])
   const engines = useStore((s) => s.settings.engines)
+  const settings = useStore((s) => s.settings)
   const os = useStore((s) => s.platform)
+  // The primary login of a harness: its replies go there first, and the other logins follow in order when it runs out.
+  const setPrimary = (engine: AccountEngine, id: string): void => {
+    const next: Partial<Record<AccountEngine, string>> = { ...(settings.primaryAccounts ?? {}) }
+    if (id) next[engine] = id
+    else delete next[engine]
+    updateSettings({ primaryAccounts: next })
+  }
   const [engine, setEngine] = useState<AccountEngine>('claude')
   const [name, setName] = useState('')
   const [manual, setManual] = useState<Record<string, string>>({})
@@ -596,6 +612,18 @@ export function AccountsCard(): ReactNode {
           {!a.loggedIn && (
             <button className="btn btn--sm btn--primary" onClick={() => void loginAccount(a.id).then((r) => setManual((m) => ({ ...m, [a.id]: r.opened ? '' : r.command })))}>
               {L('Entrar', 'Sign in')}
+            </button>
+          )}
+          {primaryAccountOf(settings, a.engine) === a.id ? (
+            <>
+              <span className="muted small">{L('Principal', 'Primary')}</span>
+              <button className="btn btn--ghost btn--sm" onClick={() => setPrimary(a.engine, '')}>
+                {L('Tirar da principal', 'Unset as primary')}
+              </button>
+            </>
+          ) : (
+            <button className="btn btn--ghost btn--sm" disabled={!a.loggedIn} onClick={() => setPrimary(a.engine, a.id)}>
+              {L('Definir como principal', 'Set as primary')}
             </button>
           )}
           {removing === a.id ? (

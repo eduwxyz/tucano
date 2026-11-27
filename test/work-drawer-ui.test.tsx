@@ -108,8 +108,11 @@ describe('the work drawer', () => {
 
   it('stops one reply and jumps to another, without touching the rest', async () => {
     await render(nextConv(), [said('m1', 'primeiro pedido', 1), said('m2', 'segundo pedido', 3), reply('r1', 'm1'), reply('r2', 'm2')])
-    await act(async () => button('Parar esta resposta').click())
-    expect(stopped).toEqual(['r1']) // the first stop glyph, for the first reply
+    const stop = button('Parar esta resposta')
+    await act(async () => stop.click())
+    expect(stopped).toEqual([]) // first click arms it
+    await act(async () => stop.click())
+    expect(stopped).toEqual(['r1']) // second click confirms
     await act(async () => button('Ir para esta resposta').click())
     expect(stopped).toEqual(['r1', 'jump:r1'])
   })
@@ -120,6 +123,20 @@ describe('the work drawer', () => {
     const stop = button('Parar esta resposta')
     expect(stop.querySelector('svg rect')).toBeNull() // the old square
     expect(stop.querySelector('svg path')?.getAttribute('d')).toBe('M6 6l12 12M18 6 6 18')
+  })
+
+  it('an X button arms on the first click, then confirms on the second', async () => {
+    const conv = nextConv()
+    await render(conv, [said('m1', 'primeiro pedido', 1), reply('r1', 'm1')])
+    await act(async () => button('1 respondendo').click())
+    const stop = button('Parar esta resposta')
+    expect(stop.classList.contains('is-armed')).toBe(false)
+    await act(async () => stop.click())
+    expect(stop.classList.contains('is-armed')).toBe(true)
+    expect(stopped).toEqual([])
+    await act(async () => stop.click())
+    expect(stop.classList.contains('is-armed')).toBe(false)
+    expect(stopped).toEqual(['r1'])
   })
 
   it('keeps a reply that ended as a finished row, which still jumps to it', async () => {
@@ -152,6 +169,9 @@ describe('the work drawer', () => {
     await act(async () => button('1 terminada').click())
     const trash = button('Tirar da lista')
     expect(trash.querySelector('svg path')?.getAttribute('d')).toContain('M4 7h16')
+    await act(async () => trash.click())
+    expect(text()).toContain('corrige o login') // first click arms it
+    expect(document.querySelector('.work-drawer')).not.toBeNull()
     await act(async () => trash.click())
     expect(text()).toBe('')
     expect(document.querySelector('.work-drawer')).toBeNull()
@@ -229,7 +249,9 @@ describe('the work drawer', () => {
     await render(conv, [said('t1', 'a thread do orçamento', 1), inThread(reply('r2', 't1'), 't1')])
     expect(text()).toContain('1 respondendo')
     await act(async () => button('1 respondendo').click())
-    await act(async () => button('Parar esta resposta').click())
+    const stop = button('Parar esta resposta')
+    await act(async () => stop.click())
+    await act(async () => stop.click())
     expect(stopped).toEqual(['r2'])
   })
 

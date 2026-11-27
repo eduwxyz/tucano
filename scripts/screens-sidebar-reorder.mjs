@@ -44,6 +44,10 @@ const carry = async (from, to, frame) => {
   await win.waitForTimeout(450)
   await win.mouse.move(to.x, to.y, { steps: 6 })
   await win.waitForTimeout(150)
+  // A place that only takes a drop is zero-height until the row is lifted, so the last look has to be
+  // taken once that has been drawn: on a busy machine the first arrival can land before it is there.
+  await win.mouse.move(to.x + (to.x > a.x ? -1 : 1), to.y)
+  await win.waitForTimeout(80)
   if (frame) await shot(frame)
   await win.mouse.up()
   await win.waitForTimeout(400)
@@ -52,6 +56,23 @@ const row = (selector, text) => win.locator(selector).filter({ hasText: text }).
 
 await shot('01-rest')
 const opened = await active()
+
+// The menu's two reorder commands say which way they move with an arrow, like every other command in
+// it. A label alone reads as two dead rows, and that is how upstream shipped it from 0.2.45 on.
+await row('.channel-row', 'dados').click({ button: 'right' })
+await win.waitForTimeout(300)
+const reorder = await win.locator('.menu__item').evaluateAll((els) =>
+  els
+    .filter((el) => /^Mover para (cima|baixo)$/.test(el.textContent.trim()))
+    .map((el) => ({ label: el.textContent.trim(), glyphs: el.querySelectorAll('svg').length }))
+)
+assert.deepEqual(reorder, [
+  { label: 'Mover para cima', glyphs: 1 },
+  { label: 'Mover para baixo', glyphs: 1 }
+])
+await win.locator('.menu').screenshot({ path: join(out, '01b-channel-menu.png') })
+await win.keyboard.press('Escape')
+await win.waitForTimeout(200)
 
 // A channel: held, it dims, and an orange line shows where it lands.
 assert.deepEqual(await channels(), ['engenharia', 'dados', 'conteudo'])
@@ -154,6 +175,27 @@ await win.keyboard.press('Alt+ArrowDown') // last in its sector: stays
 await win.waitForTimeout(300)
 assert.deepEqual(await agents(), ['Nina', 'Lia', 'Theo'])
 await shot('11-sectors-sorted')
+
+// A mouse that starts dragging at once, without waiting the hold out first: the row lifts on the same
+// hold and lands where it is let go. From 0.2.45 a press that moved cancelled the hold, so dragging a
+// row did nothing at all and the sidebar read as something that cannot be sorted by hand.
+const dragAtOnce = async (from, to) => {
+  const a = await center(from)
+  await win.mouse.move(a.x, a.y)
+  await win.mouse.down()
+  for (let i = 1; i <= 8; i += 1) {
+    await win.mouse.move(a.x + ((to.x - a.x) * i) / 8, a.y + ((to.y - a.y) * i) / 8)
+    await win.waitForTimeout(60)
+  }
+  await win.mouse.up()
+  await win.waitForTimeout(400)
+}
+assert.deepEqual(await channels(), ['engenharia', 'conteudo', 'dados'])
+await dragAtOnce(row('.channel-row', 'dados'), await center(row('.channel-row', 'engenharia')))
+assert.deepEqual(await channels(), ['dados', 'engenharia', 'conteudo'])
+await dragAtOnce(row('.agent-row', 'Theo'), await center(row('.agent-row', 'Lia')))
+assert.deepEqual(await agents(), ['Nina', 'Theo', 'Lia'])
+await shot('12-dragged-at-once')
 
 assert.deepEqual(errors, [])
 await app.close()

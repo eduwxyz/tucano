@@ -18,14 +18,14 @@ import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep }
 import { pathToFileURL } from 'node:url'
 import { serveArtifact } from './artifact-http'
 import { Forwarder, isPrivate } from './forward'
-import { attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
+import { ARTIFACT_CSP, attachment, BASE_HEADERS, body, clientIp, decodedPath, Doors, doorOf, PAGE_HEADERS, PERSON_KEY, sameOrigin, signIn } from './guard'
 import { codeMinutes, PairCodes } from './pair-codes'
 import { htmlPage, pairLinkPage, pairPost, type PairDoor } from './pair-http'
 import { NodeLinkHttp } from './node-link-http'
 import { Preview } from './preview'
 import { vault } from './vault'
 import { applyRestore } from '../core/restore'
-import { verifyLocal } from '../core/local-paths'
+import { openSigned, signedFor, verifyLocal } from '../core/local-paths'
 import { pairingLink } from '../shared/servers'
 import { ACCESS_SHIM, INSECURE_CONTEXT_SHIM } from './web-shim'
 import { Grants, invitePage, joinFields, NO_ACCESS_PAGE, notifyNote, personNotice, Signins, Streams, UNAUTHORIZED_TEXT, Viewers, type Stream, type Who } from './people'
@@ -137,6 +137,7 @@ function fromCore(msg: CoreRequest): void {
   }
   if (msg.type === 'auth-result') return waits.get(id ?? '')?.(msg.person ?? (msg.removed ? { removed: true } : undefined))
   if (msg.type === 'join-result' || msg.type === 'invite-info-result' || msg.type === 'device-key-result' || msg.type === 'mcp-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
+  if (msg.type === 'doc-file-result') return waits.get(id ?? '')?.((msg as unknown as { data: unknown }).data)
   if (msg.type === 'access-result') return waits.get(id ?? '')?.((msg as unknown as { ok: boolean }).ok)
   // Removed, or their role changed: what the server remembered of them goes (see personNotice).
   // A person removed, or one of their keys (or their role) changed: their computers' lines end at once. Each
@@ -227,7 +228,13 @@ function sawComputers(list: Computer[]): void {
 // address> (preview.ts): only the ports the agents' computers say they serve, never this server's.
 const publicHost = publicUrl.startsWith('https://') ? new URL(publicUrl).host : ''
 const preview = publicHost
-  ? new Preview(Buffer.from(kept('preview.key', () => randomBytes(32).toString('base64')), 'base64'), publicHost, (p) => p !== port && [...servicePorts.values()].some((l) => l.includes(p)))
+  ? new Preview(
+      Buffer.from(kept('preview.key', () => randomBytes(32).toString('base64')), 'base64'),
+      publicHost,
+      (p) => p !== port && [...servicePorts.values()].some((l) => l.includes(p)),
+      // Asked again on every request: the cache is short, and forgets a person removed or changed (personNotice).
+      (person, p) => grants.may(person, { port: p })
+    )
   : undefined
 
 // The server's own connection to the core, to follow the services.
@@ -540,8 +547,9 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
     const p = Number(pv[1])
     if (p === port || ![...servicePorts.values()].some((l) => l.includes(p))) return void res.writeHead(404, BASE_HEADERS).end()
     // A page started by a reply in someone's DM is theirs alone.
-    void grants.may(who.person ?? ownerId, { port: p }).then((ok) =>
-      ok ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
+    const person = who.person ?? ownerId
+    void grants.may(person, { port: p }).then((ok) =>
+      ok && person ? res.writeHead(302, { ...BASE_HEADERS, location: preview.grantUrl(p, person, `${pv[2] ?? '/'}${url.search}`), 'cache-control': 'no-store' }).end() : res.writeHead(404, BASE_HEADERS).end()
     )
     return
   }
@@ -569,26 +577,38 @@ function signedIn(req: IncomingMessage, res: ServerResponse, url: URL, who: Who)
   if (url.pathname.startsWith('/local/')) {
     // Signed for one person: anyone else (a link passed on) gets nothing.
     const signed = verifyLocal(localKey, new URL(url.pathname.replace(/^\/local/, ''), 'tucano://local'))
-    const path = signed && (signed.person ? signed.person === (who.person ?? ownerId) : who.owner) ? signed.path : null
-    let size = -1
-    try {
-      size = path && statSync(path).isFile() ? statSync(path).size : -1
-    } catch {}
-    if (!path || size < 0) return void res.writeHead(404, BASE_HEADERS).end()
+    // Opened once and served from that descriptor: only the file the core checked, never a link put in its place.
+    const opened = signed && signedFor(signed, who.person ?? ownerId, !!who.owner) ? openSigned(signed) : null
+    if (!signed || !opened) return void res.writeHead(404, BASE_HEADERS).end()
     const saving = url.searchParams.has('download')
     res.writeHead(200, {
       ...BASE_HEADERS,
-      'content-type': saving ? 'application/octet-stream' : (TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'),
-      'content-length': String(size),
+      'content-type': saving ? 'application/octet-stream' : (TYPES[extname(signed.path).toLowerCase()] ?? 'application/octet-stream'),
+      'content-length': String(opened.size),
       'content-security-policy': 'sandbox',
-      ...(saving ? { 'content-disposition': attachment(basename(path)) } : {})
+      ...(saving ? { 'content-disposition': attachment(basename(signed.path)) } : {})
     })
-    return void createReadStream(path).on('error', () => res.destroy()).pipe(res)
+    const stream = createReadStream('', { fd: opened.fd }).on('error', () => res.destroy())
+    res.on('close', () => stream.destroy()) // a request dropped halfway doesn't keep the descriptor open
+    return void stream.pipe(res)
   }
 
   // What the agents showed in the chat, sandboxed as on the desktop, or saved (?download).
   // Only who sees the conversation it was shown in (someone else's DM: not found).
   if (serveArtifact(res, url, { dataDir, may: (id) => grants.may(who.person ?? ownerId, { artifact: id }), type: (path) => TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream' })) return
+
+  // A document (Documentos): the core says where its file is when this person may see it (`v`: an older version).
+  // A refusal and a missing file answer the same, so nothing says a document is there.
+  const docMatch = /^\/doc\/([0-9a-f-]{36})\/([^/]+)$/.exec(url.pathname)
+  if (docMatch) {
+    const v = Number(url.searchParams.get('v')) || undefined
+    void ask<{ path: string; kind: string } | null>({ type: 'doc-file', person: who.person ?? ownerId ?? '', doc: docMatch[1]!, ...(v ? { v } : {}) }).then((found) => {
+      if (!found || !normalize(found.path).startsWith(resolve(join(dataDir, 'documents')) + sep)) return void res.writeHead(404, BASE_HEADERS).end()
+      // A document is its readers' alone: nothing between the server and the browser keeps a copy of it.
+      file(res, found.path, { 'content-security-policy': ARTIFACT_CSP, 'cache-control': 'private, no-store', ...(found.kind === 'html' ? { 'content-type': 'text/html; charset=utf-8' } : {}) })
+    })
+    return
+  }
 
   if (url.pathname === '/tucano-web.js') return void res.writeHead(200, { ...BASE_HEADERS, 'content-type': TYPES['.js']! }).end(WEB)
   if (url.pathname === '/' || url.pathname === '/index.html') return void res.writeHead(200, { ...PAGE_HEADERS, 'content-type': TYPES['.html']!, 'cache-control': 'no-cache' }).end(index())

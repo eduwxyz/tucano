@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { L } from '../../shared/lang'
-import { getState, navigate, openDialog, setNav, useStore } from './store'
+import { getState, goBack, goForward, navigate, openDialog, setNav, useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { SidebarResize } from './components/SidebarResize'
 import { ConversationView } from './components/Conversation'
@@ -19,6 +19,7 @@ import { Onboarding } from './components/Onboarding'
 import { GuestWelcome, guestWelcome, Intro } from './components/Intro'
 import { MissionsPage } from './components/Missions'
 import { Hub, hubTab } from './components/Hubs'
+import { DocumentsView } from './components/docs/Documents'
 import { CoachLayer } from './components/Coach'
 import { Dialogs } from './components/Dialogs'
 import { AgentCardLayer } from './components/AgentCard'
@@ -51,7 +52,7 @@ export function App(): ReactNode {
     else document.documentElement.dataset['theme'] = theme
   }, [theme])
 
-  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings (Ctrl off a Mac)
+  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings · ⌘[ back · ⌘] forward (Ctrl off a Mac)
   useEffect(() => {
     const keys = (e: KeyboardEvent): void => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
@@ -61,6 +62,8 @@ export function App(): ReactNode {
       if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
       else if (e.key === 'n' && !e.shiftKey) openDialog({ kind: 'new-channel' })
       else if (e.key === ',') navigate({ kind: 'settings' })
+      else if (e.key === '[') goBack()
+      else if (e.key === ']') goForward()
       else if (/^[1-9]$/.test(e.key) && channels[Number(e.key) - 1]) navigate({ kind: 'conversation', id: channels[Number(e.key) - 1]!.id })
       else return
       e.preventDefault()
@@ -89,7 +92,7 @@ export function App(): ReactNode {
   if (view.kind === 'tuca')
     return (
       <>
-        <Onboarding build from={view.from} />
+        <Onboarding key={view.making ? 'making' : 'tuca'} build from={view.from} making={view.making} />
         <Dialogs />
         <Toasts />
         <CoreDown />
@@ -118,6 +121,7 @@ export function App(): ReactNode {
             {tab === 'memory' && <MemoryPage />}
             {tab === 'wiki' && <WikiView />}
             {tab === 'skills' && <SkillsPage />}
+            {tab === 'documents' && <DocumentsView />}
             {tab === 'routines' && <RoutinesPage />}
             {tab === 'report' && <ReportPage />}
             {tab === 'usage' && <UsagePage />}

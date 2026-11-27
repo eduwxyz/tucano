@@ -5,8 +5,12 @@ import { memorySystem } from '../memory'
 import { titleSystem } from '../titles'
 import { shortTitle } from '../../shared/titles'
 import { curatorSystem } from '../wiki-curator'
+import { answerSystem, catalogSystem } from '../docs-brain'
 import { chimeSystem, handoffSystem, routerSystem } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
+
+// What makes a reply hand work on, continue a request or pass an answer on (see each branch below).
+const HANDS = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?[\w-]+(?: (?:em|in) #[\w-]+)?: [^\n]+|^continue (?:com|with) @?[\w-]+: .+|^repasse: .+/im
 
 // Deterministic engine for tests and screenshots. Never spawns anything, but
 // behaves like the real ones where it matters: it routes when given the
@@ -39,6 +43,12 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         yield { type: 'error', message: "You've hit your limit · resets 5pm" }
         return
       }
+      // "quebre de vez", in work handed to it: the reply fails on something that doesn't pass by itself, to
+      // see what whoever asked does with a part that did not get done.
+      if (handed && /quebre de vez|break for good/i.test(handed)) {
+        yield { type: 'error', message: L('quebrou', 'it broke') }
+        return
+      }
       let reply: string
       let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === routerSystem()) {
@@ -58,12 +68,44 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = shortTitle(turn.prompt.split('\n').filter((l) => !/^(?:demore|pergunte|delegue|me ajuda a decidir)/i.test(l.trim())).join('\n'), 40)
       } else if (turn.system === curatorSystem()) {
         reply = JSON.stringify(fakeCuration(turn.prompt))
+      } else if (turn.system === catalogSystem()) {
+        reply = JSON.stringify(fakeCatalog(turn.prompt))
+      } else if (turn.system === answerSystem()) {
+        reply = JSON.stringify(fakeAnswer(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
-      } else if (turn.mcpUrl && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
+      } else if (turn.mcpUrl && !back && !HANDS.test(last) && (`${turn.system}\n${turn.prompt}`.includes('## Pra montar agentes') || `${turn.system}\n${turn.prompt}`.includes('## For building agents'))) {
         // The Tuca: asks once, then proposes a support agent. A migration: everything at once, in one
         // reply (a new agent, a change to each of the seed's, a routine and a channel that need the new one).
-        if (/(?:mande|send) (?:um |a )?feedback: (.+)/i.test(last)) {
+        // What he hands to the team, and what comes back from it, goes as any agent's does, further down.
+        // What the person answered on the card where he asked leave to do something himself: told to him
+        // as this reply's task, at the very end of the prompt.
+        const after = turn.prompt.slice(Math.max(0, turn.prompt.lastIndexOf(last)))
+        const let_ = /(?:deixou você fazer isto você mesmo|let you do this yourself)[^:]*: "([^"]+)"/.exec(after)
+        const rather = /(?:prefere um colega pra isso|would rather have a colleague for this)[^"]*"([^"]+)"/.exec(after)
+        const waits = /(?:prefere esperar|would rather wait for) ([^.]+)\./.exec(after)
+        if (waits) {
+          reply = L(`Combinado, fica com ${waits[1]}. É só me pedir de novo quando estiver resolvido.`, `Agreed, it stays with ${waits[1]}. Just ask me again once it is sorted out.`)
+        } else if (let_) {
+          // With leave: he does it, and suggests a colleague when told the kind of thing keeps coming back.
+          const again = /next_steps[^"]*"([^"]+)"/.exec(after)
+          if (again) await callTool(turn.mcpUrl, 'next_steps', { steps: [{ label: again[1]! }] })
+          reply = L(`Pronto, fiz eu mesmo: ${let_[1]}`, `Done, I did it myself: ${let_[1]}`)
+        } else if (rather) {
+          const r = await callTool(turn.mcpUrl, 'propor_agente', { nome: 'Caio', funcao: L('Pesquisa', 'Research'), cor: 'green', instrucoes: L(`Você cuida disto: ${rather[1]}\nEntrega curto, com as fontes.\nPergunta só o que impede de seguir.`, `You take care of this: ${rather[1]}\nDeliver short, with sources.\nAsk only what keeps you from going on.`), esforco: 'low', web: true })
+          reply = textOf(r).includes('card') || /Anotado|Noted/.test(textOf(r)) ? L('Montei o Caio pra isso. Criado, eu passo o pedido a ele.', 'I put Caio together for this. Once made, I pass the request to them.') : textOf(r)
+        } else if (/^fa[çc]a voc[êe](?: \(([^)]*)\))?: (.+)/im.test(last)) {
+          // "faça você (pesquisa de preços, web, +Linear): pesquisar os preços": he asks leave to do it himself,
+          // naming the kind of thing, the web and the connectors (with a +) he would use. "no lugar de Theo":
+          // in the place of a colleague, which only holds for one who did not finish.
+          const [, how = '', what] = /^fa[çc]a voc[êe](?: \(([^)]*)\))?: (.+)/im.exec(last)!
+          const parts = how.split(',').map((x) => x.trim()).filter(Boolean)
+          const place = parts.find((x) => /^(?:no lugar de|in place of) /i.test(x))
+          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { ...(place ? { no_lugar_de: place.replace(/^(?:no lugar de|in place of) /i, '') } : {}), o_que: what!, tipo: parts.find((x) => x !== 'web' && !x.startsWith('+') && x !== place) ?? what!.slice(0, 40), web: parts.includes('web'), conectores: parts.filter((x) => x.startsWith('+')).map((x) => ({ conector: x.slice(1).replace(/!$/, ''), ...(x.endsWith('!') ? { nivel: 'escrita' } : {}) })) }))
+          const again = /next_steps[^"]*"([^"]+)"/.exec(told)
+          if (again) await callTool(turn.mcpUrl, 'next_steps', { steps: [{ label: again[1]! }] })
+          reply = /^(?:Liberado|Allowed)/.test(told) ? L(`Pronto, fiz eu mesmo: ${what}`, `Done, I did it myself: ${what}`) : /^(?:Pergunta enviada|Question sent)/.test(told) ? L('Ninguém do time faz isso ainda.', 'No one on the team does this yet.') : told
+        } else if (/(?:mande|send) (?:um |a )?feedback: (.+)/i.test(last)) {
           // "mande um feedback: …": he writes it as a card for the person to review and send.
           const texto = /(?:mande|send) (?:um |a )?feedback: (.+)/i.exec(last)![1]!.trim()
           const r = await callTool(turn.mcpUrl, 'propor_feedback', { tipo: /bug|erro|quebr/i.test(texto) ? 'bug' : 'idea', texto })
@@ -78,6 +120,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
           // A change with a part inside the app (effort) and a part that spends money (the month's limit).
           await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'nina', esforco: 'high', limite: 500_000, motivo: L('Tarefas mais difíceis.', 'Harder tasks.') })
           reply = L('Subi o esforço da Nina; o limite novo espera você confirmar.', "I raised Nina's effort; the new limit waits for you to confirm.")
+        } else if (/precisa de navegador/i.test(last)) {
+          // Access asked for on a card: it never goes in by itself.
+          const r = await callTool(turn.mcpUrl, 'propor_ajuste', { agente: 'nina', navegador: true, motivo: L('Pra abrir as páginas dos clientes.', "To open the clients' pages.") })
+          reply = textOf(r).includes('card') ? L('Pedi o navegador da Nina no card: é só aprovar.', "I asked for Nina's browser on the card: just approve it.") : textOf(r)
         } else if (/resumo di[aá]rio/i.test(last)) {
           await callTool(turn.mcpUrl, 'propor_rotina', { agente: 'nina', nome: L('Resumo diário', 'Daily summary'), pedido: L('Resuma o dia.', 'Sum up the day.'), dias: [1, 2, 3, 4, 5], hora: '18:00' })
           reply = L('Criei a rotina.', 'I made the routine.')
@@ -140,14 +186,34 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         } else if (waiting) {
           await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
           reply = 'Ele precisa de uma decisão sua.'
+        } else if (/: não terminou|did not finish/.test(back) && /se n[ãa]o sair, fa[çc]a voc[êe] \(([^)]*)\): ([^\n"]+)/i.test(turn.prompt)) {
+          // "…; se não sair, faça você (contas): calcular a mediana": a part that didn't get done is not his to
+          // take. He asks leave for it, as for anything no one on the team does.
+          const [, kind, what] = /se n[ãa]o sair, fa[çc]a voc[êe] \(([^)]*)\): ([^\n"]+)/i.exec(turn.prompt)!
+          // In whose place: the colleague the notice names. The card then asks this once, or wait for them.
+          const who = /\] ([^,\n]+),[^\n]*?: (?:não terminou|did not finish)/.exec(back)?.[1]?.trim()
+          const told = textOf(await callTool(turn.mcpUrl, 'fazer_eu_mesmo', { o_que: what!.trim(), tipo: kind!.trim(), web: false, ...(who ? { no_lugar_de: who } : {}) }))
+          reply = /^(?:Pergunta enviada|Question sent)/.test(told) ? L(`${who ?? 'O colega'} não terminou: deu erro.`, `${who ?? 'The colleague'} did not finish: it hit an error.`) : told
         } else reply = /passou do prazo|past its deadline/.test(back) ? 'Passou do prazo e ainda não terminou.' : /: não terminou|did not finish/.test(back) ? 'Não deu certo: o pedido não terminou.' : 'Pronto: o time terminou o que pedi.'
       } else if (turn.mcpUrl && /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/i.test(last)) {
         // "delegue a clara: responda o Fulano" (several lines: several requests), "delegue a clara em #vendas: …".
         const out: string[] = []
         for (const m of last.matchAll(/(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)(?: (?:em|in) #([\w-]+))?: ([^\n]+)/gi)) out.push(textOf(await callTool(turn.mcpUrl, 'pedir', { para: m[1]!, pedido: m[3]!, ...(m[2] ? { canal: m[2] } : {}), ...(/prazo de (\d+) ?h/i.test(m[3]!) ? { prazo_horas: Number(/prazo de (\d+) ?h/i.exec(m[3]!)![1]) } : {}) })))
-        // Asked: it ends with no text, as told (the person sees whom it asked under their message). What
+        // Asked: it ends with no text of its own (the person sees whom it asked under their message). What
         // didn't go out is said.
         reply = out.filter((t) => !/^(?:Pedido|Request) \[/.test(t)).join('\n')
+        // "(e confirme)": a model that doesn't stop after asking. It saves a memory and then goes on with
+        // the request it has just made, in the same reply.
+        const made = /\[([0-9a-f]{8})\]/.exec(out[0] ?? '')?.[1]
+        if (made && /\((?:e confirme|and confirm)\)/i.test(last)) {
+          const who = /(?:delegue|hand) (?:a|à|ao|pr[ao]|to) @?([\w-]+)/i.exec(last)![1]!
+          const saved = textOf(await callTool(turn.mcpUrl, 'lembrar', { texto: L('Avisos pros clientes vão pra quem escreve.', 'Notices to customers go to whoever writes.'), sobre: 'usuario' }))
+          await callTool(turn.mcpUrl, 'pedir', { para: who, pedido: L('Só confirmando: siga o pedido anterior.', 'Just confirming: follow the request above.'), continuar: made })
+          // ...and once more, and then asks the person "Ok" for something to end on: what each was told is its text.
+          const again = textOf(await callTool(turn.mcpUrl, 'pedir', { para: who, pedido: L('Ignore a confirmação, foi redundante.', 'Ignore the confirmation, it was redundant.'), continuar: made }))
+          const ok = textOf(await callTool(turn.mcpUrl, 'ask_user', { question: 'Ok' }))
+          reply = [saved, again, ok].join('\n')
+        }
       } else if (turn.mcpUrl && /^continue (?:com|with) @?([\w-]+): (.+)/i.test(last)) {
         // "continue com clara: e mande também pro Beltrano": the request that came back from her, in its thread.
         const [, who, what] = /^continue (?:com|with) @?([\w-]+): (.+)/i.exec(last)!
@@ -166,6 +232,15 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       } else if (/agrade[çc]a (?:a|ao|à) (\w+)/i.test(last)) {
         // A thank-you that mentions someone: the hand-off screening lets no one answer it.
         reply = `Valeu, @${/agrade[çc]a (?:a|ao|à) (\w+)/i.exec(last)![1]!.toLowerCase()}! Ficou ótimo.`
+      } else if (turn.mcpUrl && /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.test(last)) {
+        // Documentos: "guarde em Empresa: ata.md = texto" saves a file; the two below list and read.
+        const [, pasta, nome, texto] = /^guarde em ([^:]+): ([^\n]+\.\w+) = ([\s\S]+)/i.exec(last)!
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_guardar', { pasta: pasta!.trim(), nome: nome!.trim(), texto: texto!, resumo: texto!.split(/(?<=\.)\s/)[0]!.slice(0, 140) }))
+      } else if (turn.mcpUrl && /^liste os documentos(?: de (.+))?/i.test(last)) {
+        const pasta = /^liste os documentos(?: de (.+))?/i.exec(last)![1]?.trim()
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_listar', pasta ? { pasta } : {}))
+      } else if (turn.mcpUrl && /^leia o documento (.+)/i.test(last)) {
+        reply = textOf(await callTool(turn.mcpUrl, 'docs_ler', { documento: /^leia o documento (.+)/i.exec(last)![1]!.trim() }))
       } else if (turn.mcpUrl && /^rode no computador: (.+)/i.test(last)) {
         // A command on a computer lent to this server (core/node-link.ts), for trying the line end to end.
         const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'node_bash'), { command: /^rode no computador: (.+)/i.exec(last)![1]! })
@@ -424,6 +499,39 @@ export async function callTool(url: string, name: string, args: Record<string, u
   } finally {
     await client.close()
   }
+}
+
+// The cataloguer (core/docs-brain.ts): a summary from the file's first line, the dates after "vence"/"prazo"/"renova", and the first folder named in the file.
+function fakeCatalog(prompt: string): { resumo: string; datas: { data: string; o_que: string }[]; pasta: number | null; nome: null } {
+  const file = /<<<ARQUIVO\n([\s\S]*?)\nARQUIVO>>>/.exec(prompt)?.[1] ?? ''
+  const name = /^(?:Nome do arquivo|File name): (.*)$/m.exec(prompt)?.[1] ?? ''
+  const datas: { data: string; o_que: string }[] = []
+  for (const m of file.matchAll(/(?:venc\w*|prazo|renova\w*)\D{0,20}?(?:(\d{2})\/(\d{2})\/(\d{4})|(\d{4})-(\d{2})-(\d{2}))/gi)) datas.push({ data: m[4] ? `${m[4]}-${m[5]}-${m[6]}` : `${m[3]}-${m[2]}-${m[1]}`, o_que: 'vencimento' })
+  let pasta: number | null = null
+  const list = /(?:Pastas possíveis|Possible folders):\n([\s\S]*)$/.exec(prompt)?.[1]
+  if (list) {
+    const hay = `${name}\n${file}`.toLowerCase()
+    for (const line of list.split('\n')) {
+      const row = /^(\d+)\. (.*?) — /.exec(line)
+      const last = row?.[2]?.split('/').pop()?.toLowerCase()
+      if (row && last && hay.includes(last)) {
+        pasta = Number(row[1])
+        break
+      }
+    }
+  }
+  // The first line that says something, without what Markdown or a table puts around it.
+  const line = file.split('\n').map((l) => l.replace(/^#+\s*/, '').replace(/[|*_`>]+/g, ' ').replace(/\s+/g, ' ').trim()).find((l) => /\p{L}/u.test(l)) ?? ''
+  return { resumo: line.slice(0, 120), datas, pasta, nome: null }
+}
+
+// A question about the documents: an answer when there is at least one excerpt.
+function fakeAnswer(prompt: string): { achou: boolean; resposta?: string } {
+  // The sentence of the first stretch that has a number in it (a date, a value), else its first one: enough to see an answer with its source.
+  const first = /^\[1\] .*\n<<<TRECHO\n([\s\S]*?)\nTRECHO>>>/m.exec(prompt)?.[1]
+  if (first === undefined) return { achou: false }
+  const said = first.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/).map((x) => x.trim()).filter(Boolean)
+  return { achou: true, resposta: `${(said.find((x) => /\d/.test(x)) ?? said[0] ?? '').slice(0, 200)} [1]` }
 }
 
 // The wiki's curator, for trying it without an engine: a page the stretch names gets a line

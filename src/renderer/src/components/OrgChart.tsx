@@ -8,8 +8,9 @@ import { L } from '../../../shared/lang'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { bossOf, channelsOf, depthBelow, directReports, entriesOf, headsOf, orgTree, possibleBosses, reportsOf, sectorName } from '../../../shared/org'
 import { above, BOARD, boundsOf, curve, fitView, MAX_K, ME, MIN_K, pathBetween, spotsOf, tidyLayout, toBoard, under, zoomAt, type Point, type Spots, type View } from '../../../shared/org-layout'
-import { amAdmin, askAgent, isTeam, navigate, openDm, openThread, openTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
+import { amAdmin, isTeam, navigate, openDm, openThread, makeWithTuca, saveAgent, setTab, updateSettings, useStore, workingOn, type Agent, type Conversation, type Delegation, type Message } from '../store'
 import { askWay, SectorPanel, SectorZones, sectorLink } from './OrgSectors'
+import { OrgAsk } from './OrgAsk'
 import { Sheet } from './Pages'
 import { Select } from './Select'
 import { ago, AgentAvatar, Icon, MeAvatar, ownColor } from './ui'
@@ -104,7 +105,6 @@ export function OrgPage(): ReactNode {
   const [sector, setSector] = useState<string | null>(null) // the head of the sector picked, instead of a card
   const [edge, setEdge] = useState<string | null>(null) // the one below, of the line picked
   const [error, setError] = useState<string | null>(null)
-  const [text, setText] = useState('')
   // The last change to who answers to whom: what it was, in words, and how each one stood before it.
   const [undo, setUndo] = useState<{ text: string; was: [string, string | null][] } | null>(null)
   const view = live.current ?? stored ?? NO_VIEW
@@ -162,7 +162,7 @@ export function OrgPage(): ReactNode {
     const el = board.current
     if (!el) return
     const onWheel = (e: WheelEvent): void => {
-      if ((e.target as Element).closest?.('.org-side, .org-ask, .org-coach')) return
+      if ((e.target as Element).closest?.('.org-side, .org-ask-wrap, .org-coach')) return
       e.preventDefault()
       mine.current = true
       const r = el.getBoundingClientRect()
@@ -263,7 +263,7 @@ export function OrgPage(): ReactNode {
   }
   const press = (e: ReactPointerEvent): boolean => (e.button ?? 0) === 0
   const onBoard = (e: ReactPointerEvent): void => {
-    if (!press(e) || (e.target as Element).closest('.org-card, .org-side, .org-ask, .org-coach, .org-tools, .org-edge-x, .orgb__hit, .org-zone__tag')) return
+    if (!press(e) || (e.target as Element).closest('.org-card, .org-side, .org-ask-wrap, .org-coach, .org-tools, .org-edge-x, .orgb__hit, .org-zone__tag')) return
     setPicked(null)
     setSector(null)
     setEdge(null)
@@ -351,15 +351,6 @@ export function OrgPage(): ReactNode {
   const sectorHead = sector ? heads.find((h) => h.id === sector) : undefined
   // Whoever the box at the bottom talks to: the card picked, or else whoever is at the top.
   const asked = chosen ?? entry ?? roots[0]?.agent
-  const send = (): void => {
-    const what = text.trim()
-    if (!asked || !what) return
-    setText('')
-    askAgent(asked.id, what).then(
-      () => setSent(asked.name),
-      (e: unknown) => (setText(what), setError(e instanceof Error ? e.message : String(e)))
-    )
-  }
   const zoom = (f: number): void => ((mine.current = true), show(zoomAt(current(), { x: room.w / 2, y: room.h / 2 }, current().k * f)))
   const size = { width: BOARD.w, height: BOARD.h }
   const cut = lines.find((l) => l.to === edge && l.from !== ME)
@@ -377,7 +368,7 @@ export function OrgPage(): ReactNode {
                 {L('Organizar', 'Tidy up')}
               </button>
             )}
-            <button className="btn btn--primary btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={openTuca}>
+            <button className="btn btn--primary btn--sm" title={L('Novo agente: abre o Tuca', 'New agent: opens Tuca')} onClick={makeWithTuca}>
               <Icon name="plus" size={14} /> {L('Novo agente', 'New agent')}
             </button>
           </>
@@ -544,15 +535,7 @@ export function OrgPage(): ReactNode {
           </div>
         )}
 
-        {asked && (
-          <form className="org-ask" onSubmit={(e) => (e.preventDefault(), send())}>
-            <AgentAvatar agent={asked} size={24} busy={on.has(asked.id)} />
-            <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={sent === asked.name ? L(`Enviado a ${sent}. Acompanhe pelas linhas.`, `Sent to ${sent}. Track progress along the lines.`) : L(`Pedir algo a ${asked.name}…`, `Ask ${asked.name} something…`)} aria-label={L(`Pedir algo a ${asked.name}`, `Ask ${asked.name} something`)} />
-            <button className="btn btn--primary btn--sm" disabled={!text.trim()} title={L('Enviar na DM dele (Enter)', 'Send in their DM (Enter)')}>
-              <Icon name="send" size={14} />
-            </button>
-          </form>
-        )}
+        {asked && <OrgAsk agent={asked} busy={on.has(asked.id)} sent={sent} onSent={setSent} onError={setError} />}
 
         {sectorHead && <SectorPanel key={sectorHead.id} head={sectorHead} agents={agents} admin={admin} asks={sectorAsks.filter((d) => d.to === sectorHead.id)} onClose={() => setSector(null)} />}
         {chosen && !sectorHead && (
@@ -828,7 +811,7 @@ function Coach({ agents, admin, onPick }: { agents: Agent[]; admin: boolean; onP
         <p className="muted small">{L('Só um admin monta o organograma.', 'Only an admin sets up the organogram.')}</p>
       ) : agents.length < 2 ? (
         <div className="wk-empty__actions">
-          <button className="btn btn--primary" onClick={openTuca}>
+          <button className="btn btn--primary" onClick={makeWithTuca}>
             <Icon name="plus" size={14} /> {L('Criar agentes com o Tuca', 'Create agents with Tuca')}
           </button>
         </div>

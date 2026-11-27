@@ -168,6 +168,23 @@ describe('C. a change to an agent: the part inside the app applies, the limit is
   })
 })
 
+// Access asked for on a card (here a browser; a computer and folders go the same way): it
+// never applies by itself, and the person's click turns it on.
+describe('C2. a browser asked on a card waits for the click, and the click turns it on', () => {
+  it('stays a card, then applies, then Desfazer turns it off again', async () => {
+    m2 = await reply(ana, tuca.conversationId, 'a nina precisa de navegador')
+    const ps = proposalsOf(m2.run)
+    expect(ps.map((p) => [p.kind, p.state ?? null])).toEqual([['agent', null]])
+    expect(ps[0]).toMatchObject({ changes: { browser: true } })
+    expect((await snap()).agents.find((a) => a.handle === 'nina')?.browser).toBeFalsy()
+    await ana.call('applyProposal', { messageId: m2.id, index: 0 })
+    expect((await snap()).agents.find((a) => a.handle === 'nina')?.browser).toBe(true)
+    await ana.call('undoProposal', { messageId: m2.id, index: 0 })
+    expect((await snap()).agents.find((a) => a.handle === 'nina')?.browser).toBeFalsy()
+  })
+})
+let m2: Message
+
 describe('D. a team with a connector: the team is made, the connector waits; "Desfazer tudo" takes it all back', () => {
   let m: Message
   let planilha: string
