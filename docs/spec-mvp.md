@@ -146,7 +146,7 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 ### 10. Agentes
 
 - Criar e editar: nome, @handle (2–32 caracteres `[a-z0-9_-]`, único), cor, instruções, motor, modelo, esforço, limite de uso, canais, grants.
-- Modelos por motor: Claude Code (`opus`, `sonnet`, `haiku`) e Codex (`gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol`). A lista vem de um JSON local editável.
+- Modelos por motor: Claude Code (`opus`, `fable`, `sonnet`, `haiku`) e Codex (`gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol`). A lista vem de um JSON local editável.
 - Arquivar: o agente sai dos canais e da lista. Histórico e recibos ficam.
 
 ### 11. Configurações
